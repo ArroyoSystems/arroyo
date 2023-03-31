@@ -403,11 +403,11 @@ impl Column {
             name: column.name.clone(),
         }
     }
-    pub fn convert_expr(expr: &datafusion_expr::Expr) -> Self {
+    pub fn convert_expr(expr: &datafusion_expr::Expr) -> Result<Self> {
         if let datafusion_expr::Expr::Column(column) = expr {
-            Self::convert(column)
+            Ok(Self::convert(column))
         } else {
-            todo!()
+            bail!("only support converting column expressions to columns.")
         }
     }
 }
