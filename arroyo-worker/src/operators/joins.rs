@@ -139,7 +139,7 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
                 .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start_time)
                 .await;
 
-            let mut right_state = ctx.state.get_key_time_multi_map('l').await;
+            let mut right_state = ctx.state.get_key_time_multi_map('r').await;
             let right: Vec<T2> = {
                 let right: Vec<&T2> = right_state
                     .get_time_range(&mut key, window.start_time, window.end_time)
