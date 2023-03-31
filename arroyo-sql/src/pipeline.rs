@@ -463,33 +463,39 @@ impl SqlPipelineBuilder {
             LogicalPlan::Sort(_) => bail!("sorting is not currently supported"),
             LogicalPlan::Join(join) => self.insert_join(join),
             LogicalPlan::CrossJoin(_) => bail!("cross joins are not currently supported"),
-            LogicalPlan::Repartition(_) => todo!(),
-            LogicalPlan::Union(_) => todo!(),
+            LogicalPlan::Repartition(_) => bail!("repartitions are not currently supported"),
+            LogicalPlan::Union(_) => bail!("unions are not currently supported"),
             LogicalPlan::TableScan(table_scan) => self.insert_table_scan(table_scan),
-            LogicalPlan::EmptyRelation(_) => todo!(),
+            LogicalPlan::EmptyRelation(_) => bail!("empty relations not currently supported"),
             LogicalPlan::Subquery(subquery) => self.insert_sql_plan(&subquery.subquery),
             LogicalPlan::SubqueryAlias(subquery_alias) => {
                 self.insert_subquery_alias(subquery_alias)
             }
             LogicalPlan::Limit(_) => bail!("limit not currently supported"),
-            LogicalPlan::CreateExternalTable(_) => todo!(),
-            LogicalPlan::CreateMemoryTable(_) => todo!(),
-            LogicalPlan::CreateView(_) => todo!(),
-            LogicalPlan::CreateCatalogSchema(_) => todo!(),
-            LogicalPlan::CreateCatalog(_) => todo!(),
-            LogicalPlan::DropTable(_) => todo!(),
-            LogicalPlan::DropView(_) => todo!(),
-            LogicalPlan::Values(_) => todo!(),
-            LogicalPlan::Explain(_) => todo!(),
-            LogicalPlan::Analyze(_) => todo!(),
-            LogicalPlan::Extension(_) => todo!(),
-            LogicalPlan::Distinct(_) => todo!(),
+            LogicalPlan::CreateExternalTable(_) => {
+                bail!("creating external tables is not currently supported")
+            }
+            LogicalPlan::CreateMemoryTable(_) => {
+                bail!("creating memory tables is not currently supported")
+            }
+            LogicalPlan::CreateView(_) => bail!("creating views is not currently supported"),
+            LogicalPlan::CreateCatalogSchema(_) => {
+                bail!("creating catalog schemas is not currently supported")
+            }
+            LogicalPlan::CreateCatalog(_) => bail!("creating catalogs is not currently supported"),
+            LogicalPlan::DropTable(_) => bail!("dropping tables is not currently supported"),
+            LogicalPlan::DropView(_) => bail!("dropping views is not currently supported"),
+            LogicalPlan::Values(_) => bail!("values are not currently supported"),
+            LogicalPlan::Explain(_) => bail!("explain is not currently supported"),
+            LogicalPlan::Analyze(_) => bail!("analyze is not currently supported"),
+            LogicalPlan::Extension(_) => bail!("extensions are not currently supported"),
+            LogicalPlan::Distinct(_) => bail!("distinct is not currently supported"),
             LogicalPlan::Window(window) => self.insert_window(window),
-            LogicalPlan::SetVariable(_) => todo!(),
-            LogicalPlan::Prepare(_) => todo!(),
-            LogicalPlan::Dml(_) => todo!(),
-            LogicalPlan::DescribeTable(_) => todo!(),
-            LogicalPlan::Unnest(_) => todo!(),
+            LogicalPlan::SetVariable(_) => bail!("setting variables is not currently supported"),
+            LogicalPlan::Prepare(_) => bail!("prepare commands are not currently supported"),
+            LogicalPlan::Dml(_) => bail!("DML statements not currently supported"),
+            LogicalPlan::DescribeTable(_) => bail!("describe table not currently supported"),
+            LogicalPlan::Unnest(_) => bail!("unnest not currently supported"),
         }
     }
 
@@ -539,7 +545,16 @@ impl SqlPipelineBuilder {
                         sql_window_operator.with_max_value(max_value),
                     );
                 }
-                todo!()
+                return Ok(SqlOperator::RecordTransform(
+                    Box::new(SqlOperator::Window(
+                        Box::new(SqlOperator::RecordTransform(
+                            map_input,
+                            RecordTransform::ValueProjection(projection),
+                        )),
+                        sql_window_operator,
+                    )),
+                    RecordTransform::Filter(predicate),
+                ));
             }
 
             Ok(SqlOperator::RecordTransform(
@@ -772,12 +787,12 @@ impl SqlPipelineBuilder {
         {
             columns.push((*left, *right));
         } else if join.filter.is_some() {
-            todo!("non-join filters on joins");
+            bail!("non-join filters on joins. This doesn't seem to actually happen in practice");
         }
         let join_projection_field_names: Vec<_> = columns
             .iter()
             .map(|(left, _right)| Column::convert_expr(left))
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         let left_key = Projection {
             field_names: join_projection_field_names.clone(),
@@ -919,12 +934,12 @@ impl SqlPipelineBuilder {
                     ));
                 }
                 _ => {
-                    panic!("non window expression for window: {:?}", expr);
+                    bail!("non window expression for window: {:?}", expr);
                 }
             }
         }
 
-        panic!("no expression for window");
+        bail!("no expression for window");
     }
 
     fn insert_subquery_alias(
