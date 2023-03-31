@@ -4,9 +4,9 @@ Arroyo
 
 <img src="docs/images/arroyo_logo.png" width="400px">
 
-Arroyo is a distributed stream processing engine written in Rust, designed to efficiently perform stateful
-computations on streams of data. Unlike traditional batch processing, streaming engines can operate on both bounded
-and unbounded sources, emitting results as soon as they are available.
+[Arroyo](https://arroyo.dev) is a distributed stream processing engine written in Rust, designed to efficiently
+perform stateful computations on streams of data. Unlike traditional batch processing, streaming engines can operate
+on both bounded and unbounded sources, emitting results as soon as they are available.
 
 In short: Arroyo lets you ask complex questions of high-volume real-time data with subsecond results.
 
@@ -55,7 +55,7 @@ you need to get a test Arroyo system up and running.
 $ docker run -p 8000:8000 -p 8001:8001 ghcr.io/arroyosystems/arroyo:single
 ```
 
-This will run all of the core arroyo services and a temporary Postgres database. The web UI will be expoed at
+This will run all of the core arroyo services and a temporary Postgres database. The web UI will be exposed at
 http://localhost:8000.
 
 Note that this mode should not be used for production, as it does not persist configuration state and does not support
