@@ -1,0 +1,773 @@
+syntax = "proto3";
+
+package arroyo_api;
+
+// Job management
+
+enum BuiltinSink {
+  Null = 0;
+  Web = 1;
+  Log = 2;
+}
+
+message CreateSqlJob {
+  string query = 1;
+  uint64 parallelism = 2;
+  oneof sink {
+    BuiltinSink builtin = 3;
+    string user = 4;
+  };
+}
+
+message CreatePipelineReq {
+  string name = 1;
+  oneof config {
+    bytes program = 2;
+    CreateSqlJob sql = 3;
+  }
+}
+
+message CreatePipelineResp {
+  string pipeline_id = 1;
+}
+
+message SqlError {
+  string message = 1;
+}
+
+message SqlErrors {
+  repeated SqlError errors = 1;
+}
+
+message PipelineGraphReq {
+  string query = 1;
+}
+
+message PipelineGraphResp {
+  oneof result {
+    JobGraph job_graph = 1;
+    SqlErrors errors = 2;
+  }
+}
+
+message GetPipelineReq {
+  string pipeline_id = 1;
+}
+
+message PipelineDef {
+  string pipeline_id = 1;
+  string name = 2;
+  string type = 3;
+  optional string definition = 4;
+  JobGraph job_graph = 5;
+}
+
+message CreateJobReq {
+  string pipeline_id = 1;
+  uint64 checkpoint_interval_micros = 2;
+  bool preview = 3;
+}
+
+message CreateJobResp {
+  string job_id = 1;
+}
+
+message DeleteJobReq {
+  string job_id = 1;
+}
+
+message DeleteJobResp {
+
+}
+
+// job Control
+
+enum StopType {
+  None = 0;
+  Checkpoint = 1;
+  Graceful = 2;
+  Immediate = 3;
+  Force = 4;
+}
+
+message UpdateJobReq {
+  string job_id = 1;
+  optional uint64 checkpoint_interval_micros = 2;
+  optional StopType stop = 3;
+  optional uint32 parallelism = 4;
+}
+
+message UpdateJobResp {
+}
+
+//
+message PipelineProgram {
+  repeated string types = 1;
+  repeated string other_defs = 2;
+  repeated ProgramNode nodes = 3;
+  repeated ProgramEdge edges = 4;
+
+}
+
+message ProgramNode {
+  int32 node_index = 1;
+  string node_id = 2;
+  int32 parallelism = 3;
+  Operator operator = 4;
+}
+
+message ProgramEdge {
+  int32 upstream_node = 1;
+  int32 downstream_node = 2;
+  string key_type = 3;
+  string value_type = 4;
+  EdgeType edge_type = 5;
+}
+
+message Operator {
+  oneof operator {
+    FileSource file_source = 1;
+    ImpulseSource impulse_source = 2;
+    KafkaSource kafka_source = 3;
+    WasmUdfs wasm_udfs = 4;
+    WindowOperator window = 5;
+    Aggregator aggregator = 6;
+    PeriodicWatermark periodic_watermark = 7;
+    BuiltinSink builtin_sink = 8;
+    FileSink file_sink = 9;
+    Window window_join = 10;
+    KafkaSink kafka_sink = 11;
+    NexmarkSource nexmark_source = 12;
+    ExpressionOperator expression_operator = 13;
+    Flatten flatten = 14;
+    FlattenExpressionOperator flatten_expression_operator = 15;
+    SlidingWindowAggregator sliding_window_aggregator = 17;
+    TumblingWindowAggregator tumbling_window_aggregator = 18;
+    TumblingTopN tumbling_top_n = 19;
+    SlidingAggregatingTopN sliding_aggregating_top_n = 20;
+  }
+}
+
+message FileSource {
+  string dir = 1;
+  uint64 micros_delay = 2;
+}
+
+message ImpulseSource {
+  uint64 micros_start = 1;
+  optional uint64 total_events = 2;
+  oneof spec {
+    uint64 micros_delay = 3;
+    float event_qps = 4;
+  }
+}
+
+message KafkaSource {
+  string topic = 1;
+  repeated string bootstrap_servers = 2;
+  OffsetMode offset_mode = 3;
+  bool schema_registry = 4;
+  uint32 messages_per_second = 5;
+}
+
+message WasmUdfs {
+  string name = 1;
+  repeated WasmFunction wasm_functions = 2;
+}
+
+message WasmFunction{
+  WasmBehavior behavior = 1;
+  string name = 2;
+  string key_arg = 3;
+  string key_arg_type = 4;
+  string value_arg = 5;
+  string value_arg_type = 6;
+  string return_type = 7;
+  string body = 8;
+}
+
+enum WasmBehavior {
+  MAP = 0;
+  OPT_MAP = 1;
+  FILTER = 2;
+  TIMESTAMP = 3;
+  KEY_BY = 4;
+}
+
+message WindowOperator {
+  optional Aggregator aggregator = 1;
+  optional ExpressionAggregator expression_aggregator = 3;
+  bool flatten = 4;
+  Window window = 2;
+}
+
+message Window {
+  oneof window {
+    SlidingWindow sliding_window = 2;
+    TumblingWindow tumbling_window = 3;
+    InstantWindow instant_window = 4;
+  }
+}
+
+message SlidingWindow {
+  uint64 size_micros = 1;
+  uint64 slide_micros = 2;
+
+}
+message TumblingWindow {
+  uint64 size_micros = 1;
+}
+message InstantWindow {}
+
+enum Aggregator {
+  NONE = 0;
+  COUNT_AGGREGATE = 1;
+  MAX_AGGREGATE = 2;
+  MIN_AGGREGATE = 3;
+  SUM_AGGREGATE = 4;
+}
+
+message ExpressionAggregator {
+  string name = 1;
+  string expression = 2;
+}
+
+message PeriodicWatermark {
+  uint64 period_micros = 1;
+  uint64 max_lateness_micros = 2;
+}
+
+message KafkaSink {
+  string topic = 1;
+  repeated string bootstrap_servers = 2;
+}
+
+message FileSink {
+  string file_path = 1;
+}
+
+message NexmarkSource {
+  uint64 first_event_rate = 1;
+  optional uint64 total_events = 2;
+}
+
+message ExpressionOperator {
+  string name = 1;
+  string expression= 2;
+  ExpressionReturnType return_type = 3;
+}
+
+message Flatten {
+  string name = 1;
+}
+
+message FlattenExpressionOperator {
+  string name = 1;
+  string expression= 2;
+  ExpressionReturnType return_type = 3;
+}
+
+message SlidingWindowAggregator {
+  uint64 width_micros = 1;
+  uint64 slide_micros = 2;
+  string aggregator = 3;
+  string bin_merger = 4;
+  string in_memory_add = 5;
+  string in_memory_remove = 6;
+  string bin_type = 7;
+  string mem_type = 8;
+}
+
+message TumblingWindowAggregator {
+  uint64 width_micros = 1;
+  string aggregator = 3;
+  string bin_merger = 4;
+  string bin_type = 7;
+}
+
+message TumblingTopN {
+  uint64 width_micros = 1;
+  uint64 max_elements = 2;
+  string extractor = 3;
+  string partition_key_type = 4;
+  string converter = 5;
+}
+
+message SlidingAggregatingTopN {
+  uint64 width_micros = 1;
+  uint64 slide_micros = 2;
+  string bin_merger = 3;
+  string in_memory_add = 4;
+  string in_memory_remove = 5;
+  string partitioning_func = 6;
+  string extractor = 7;
+  string aggregator = 8;
+  string bin_type = 9;
+  string mem_type = 10;
+  string sort_key_type = 11;
+  uint64 max_elements = 12;
+}
+enum ExpressionReturnType {
+  UNUSED_ERT = 0;
+  PREDICATE = 1;
+  RECORD = 2;
+  OPTIONAL_RECORD = 3;
+}
+
+enum OffsetMode {
+  EARLIEST = 0;
+  LATEST = 1;
+}
+
+enum EdgeType {
+  UNUSED = 0;
+  FORWARD = 1;
+  SHUFFLE = 2;
+  LEFT_JOIN = 3;
+  RIGHT_JOIN = 4;
+}
+
+// job status
+
+message GetJobsReq {
+}
+
+message GetJobsResp {
+  repeated JobStatus jobs = 1;
+}
+
+message JobStatusReq {
+  string job_id = 1;
+}
+
+message JobDetailsResp {
+  JobStatus job_status = 1;
+  JobGraph job_graph = 2;
+
+  // these fields determine the behavior and appearance of the button that controls the pipeline
+  optional StopType action = 11; // the value that should be set against stop_mode if one is available
+  string action_text = 12; // the text of the button to take the action
+  bool in_progress = 13; // whether the button should be represented as a loading
+}
+
+message JobStatus {
+  string job_id = 1;
+  string pipeline_name = 2;
+  bool running_desired = 8;
+  string state = 3;
+  uint64 run_id = 11;
+  string definition_id = 9;
+  optional uint64 start_time = 4;
+  optional uint64 finish_time = 5;
+  optional uint64 tasks = 6;
+  optional string definition = 7;
+  optional string failure_message = 10;
+}
+
+message JobStatusResp {
+  JobStatus job_status = 1;
+}
+
+message JobDetailsReq {
+  string job_id = 1;
+}
+
+
+message JobNode {
+  string node_id = 1;
+  string operator = 2;
+  uint32 parallelism = 3;
+}
+
+message JobEdge {
+  string src_id = 1;
+  string dest_id = 2;
+  string key_type = 3;
+  string value_type = 4;
+  string edge_type = 5;
+}
+
+message JobGraph {
+  repeated JobNode nodes = 1;
+  repeated JobEdge edges = 2;
+}
+
+// checkpoints
+
+enum TaskCheckpointEventType {
+  ALIGNMENT_STARTED = 0;
+  CHECKPOINT_STARTED = 1;
+  CHECKPOINT_OPERATOR_FINISHED = 2;
+  CHECKPOINT_SYNC_FINISHED = 3;
+}
+
+message TaskCheckpointEvent {
+  uint64 time = 1;
+  TaskCheckpointEventType event_type = 2;
+}
+
+message TaskCheckpointDetail {
+  uint32 subtask_index = 1;
+  uint64 start_time = 2;
+  optional uint64 finish_time = 3;
+  optional uint64 bytes = 4;
+  repeated TaskCheckpointEvent events = 5;
+}
+
+message OperatorCheckpointDetail {
+  string operator_id = 1;
+  uint64 start_time = 2;
+  optional uint64 finish_time = 3;
+  bool has_state = 4;
+  map<uint32, TaskCheckpointDetail> tasks = 5;
+}
+
+message CheckpointOverview {
+  uint32 epoch = 1;
+  string backend = 2;
+  uint64 start_time = 3;
+  optional uint64 finish_time = 4;
+}
+
+message JobCheckpointsReq {
+  string job_id = 1;
+}
+
+message JobCheckpointsResp {
+  repeated CheckpointOverview checkpoints = 1;
+}
+
+message CheckpointDetailsReq {
+  string job_id = 1;
+  uint32 epoch = 2;
+}
+
+message CheckpointDetailsResp {
+  CheckpointOverview overview = 1;
+  map<string, OperatorCheckpointDetail> operators = 2;
+}
+
+// metrics
+
+message Metric {
+  uint64 time = 1;
+  double value = 2;
+}
+
+message SubtaskMetrics {
+  repeated Metric bytes_recv = 1;
+  repeated Metric bytes_sent = 2;
+  repeated Metric messages_recv = 3;
+  repeated Metric messages_sent = 4;
+}
+
+message JobMetricsReq {
+  string job_id = 1;
+}
+
+message JobMetricsResp {
+  message OperatorMetrics {
+    map<uint32, SubtaskMetrics> subtasks = 1;
+  }
+
+  string job_id = 1;
+  uint64 start_time = 2;
+  uint64 end_time = 3;
+  map<string, OperatorMetrics> metrics = 4;;
+}
+
+// connections
+message KafkaConnection {
+  string bootstrap_servers = 1;
+}
+
+message KinesisConnection {
+
+}
+
+message Connection {
+  string name = 1;
+  oneof connection_type {
+    KafkaConnection kafka = 2;
+    KinesisConnection kinesis = 3;
+  }
+
+  int32 sources = 4;
+  int32 sinks = 5;
+}
+
+message CreateConnectionReq {
+  string name = 1;
+  oneof connection_type {
+    KafkaConnection kafka = 2;
+    KinesisConnection kinesis = 3;
+  }
+}
+
+message CreateConnectionResp {
+}
+
+message GetConnectionsReq {
+}
+
+message GetConnectionsResp {
+  repeated Connection connections = 1;
+}
+
+message DeleteConnectionReq {
+  string name = 1;
+}
+
+message DeleteConnectionResp {
+}
+
+// Sources
+
+message JsonSchemaDef {
+  string json_schema = 1;
+}
+
+message JsonFieldDef {
+  repeated SourceField fields = 1;
+}
+
+message ProtobufSchemaDef {
+  string protobuf_schema = 1;
+}
+
+enum PrimitiveType {
+  Int32 = 0;
+  Int64 = 1;
+  UInt32 = 2;
+  UInt64 = 3;
+  F32 = 4;
+  F64 = 5;
+  Bool = 6;
+  String = 7;
+  Bytes = 8;
+  UnixMillis = 9;
+}
+
+message StructType {
+  repeated SourceField fields = 1;
+}
+
+message SourceFieldType {
+  oneof type {
+    PrimitiveType primitive = 1;
+    StructType struct = 2;
+  }
+}
+
+message SourceField {
+  string field_name = 1;
+  SourceFieldType field_type = 2;
+  bool nullable = 3;
+}
+
+message SourceSchema {
+  oneof schema {
+    string builtin = 2;
+    JsonSchemaDef json_schema = 3;
+    JsonFieldDef json_fields = 4;
+    ProtobufSchemaDef protobuf = 5;
+ }
+
+ bool kafka_schema_registry = 7;
+}
+
+enum KafkaOffsetMode {
+  Earliest = 0;
+  Latest = 1;
+}
+
+message KafkaSourceConfig {
+  string topic = 1;
+  string connection = 2;
+}
+
+message ImpulseSourceConfig {
+  optional uint32 interval_micros = 1;
+  float events_per_second = 2;
+  optional uint32 total_messages = 3;
+}
+
+message FileSourceConfig {
+  string directory = 1;
+  uint32 interval_ms = 2;
+}
+
+message NexmarkSourceConfig {
+  uint32 events_per_second = 1;
+  optional uint64 runtime_micros = 2;
+}
+
+message CreateSourceReq {
+  string name = 1;
+
+  SourceSchema schema = 2;
+
+  oneof type_oneof {
+    KafkaSourceConfig kafka = 3;
+    ImpulseSourceConfig impulse = 4;
+    FileSourceConfig file = 5;
+    NexmarkSourceConfig nexmark = 6;
+  }
+}
+
+message CreateSourceResp {
+}
+
+message KafkaSourceDef {
+  string connection_name = 1;
+  KafkaConnection connection = 2;
+  string topic = 3;
+}
+
+message SourceDef {
+  int64 id = 9;
+  string name = 1;
+  SourceSchema schema = 2;
+  optional string connection = 8;
+  int32 consumers = 10;
+
+  oneof source_type {
+    KafkaSourceDef kafka = 3;
+    ImpulseSourceConfig impulse = 4;
+    FileSourceConfig file = 5;
+    NexmarkSourceConfig nexmark = 6;
+  }
+
+  repeated SourceField sql_fields = 7;
+}
+
+message GetSourcesReq {}
+message GetSourcesResp {
+  repeated SourceDef sources = 1;
+}
+
+message DeleteSourceReq {
+  string name = 1;
+}
+message DeleteSourceResp {
+}
+
+message TestSchemaResp {
+  bool valid = 1;
+  repeated string errors = 2;
+}
+
+message TestSourceMessage {
+  bool error = 1;
+  bool done = 2;
+  string message = 3;
+}
+
+message SourceMetadataResp {
+  uint32 partitions = 1;
+}
+
+
+message ConfluentSchemaReq {
+  string endpoint = 1;
+  string topic = 2;
+}
+
+message ConfluentSchemaResp {
+  string schema = 1;
+}
+
+// sinks
+
+message KafkaSinkConfig {
+  string topic = 1;
+  string connection = 2;
+}
+
+message CreateSinkReq {
+  string name = 1;
+
+  oneof sink_type {
+    KafkaSinkConfig kafka = 2;
+  }
+}
+
+message CreateSinkResp {
+}
+
+message GetSinksReq {
+}
+
+message Sink {
+  int64 id = 1;
+  string name = 2;
+  oneof sink_type {
+    KafkaSinkConfig kafka = 3;
+  }
+  int32 producers = 4;
+}
+
+message GetSinksResp {
+  repeated Sink sinks = 1;
+}
+
+message DeleteSinkReq {
+  string name = 1;
+}
+
+message DeleteSinkResp {
+
+}
+
+// outputs
+
+message GrpcOutputSubscription {
+  string job_id = 1;
+}
+
+message OutputData {
+  string operator_id = 1;
+  uint64 timestamp = 2;
+  string key = 3;
+  string value = 4;
+}
+
+service ApiGrpc {
+  rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp);
+  rpc TestConnection(CreateConnectionReq) returns (TestSourceMessage);
+  rpc GetConnections(GetConnectionsReq) returns (GetConnectionsResp);
+  rpc DeleteConnection(DeleteConnectionReq) returns (DeleteConnectionResp);
+
+  rpc CreateSource(CreateSourceReq) returns (CreateSourceResp);
+  rpc GetSources(GetSourcesReq) returns (GetSourcesResp);
+  rpc DeleteSource(DeleteSourceReq) returns (DeleteSourceResp);
+
+  rpc CreateSink(CreateSinkReq) returns (CreateSinkResp);
+  rpc GetSinks(GetSinksReq) returns (GetSinksResp);
+  rpc DeleteSink(DeleteSinkReq) returns (DeleteSinkResp);
+
+  rpc GetConfluentSchema(ConfluentSchemaReq) returns (ConfluentSchemaResp);
+  rpc GetSourceMetadata(CreateSourceReq) returns (SourceMetadataResp);
+  rpc TestSchema(CreateSourceReq) returns (TestSchemaResp);
+  rpc TestSource(CreateSourceReq) returns (stream TestSourceMessage);
+
+  rpc CreatePipeline(CreatePipelineReq) returns (CreatePipelineResp);
+  rpc GraphForPipeline(PipelineGraphReq) returns (PipelineGraphResp);
+  rpc GetPipeline(GetPipelineReq) returns (PipelineDef);
+
+  rpc CreateJob(CreateJobReq) returns (CreateJobResp);
+  rpc DeleteJob(DeleteJobReq) returns (DeleteJobResp);
+  rpc StartPipeline(CreatePipelineReq) returns (CreateJobResp);
+  rpc PreviewPipeline(CreatePipelineReq) returns (CreateJobResp);
+
+  rpc GetJobs(GetJobsReq) returns (GetJobsResp);
+  rpc GetJobDetails(JobDetailsReq) returns (JobDetailsResp);
+  rpc GetCheckpoints(JobCheckpointsReq) returns (JobCheckpointsResp);
+  rpc GetCheckpointDetail(CheckpointDetailsReq) returns (CheckpointDetailsResp);
+
+  rpc GetJobMetrics(JobMetricsReq) returns (JobMetricsResp);
+
+  rpc UpdateJob(UpdateJobReq) returns (UpdateJobResp);
+
+  rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
+}

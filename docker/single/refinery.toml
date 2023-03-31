@@ -1,0 +1,8 @@
+[main]
+db_type = "Postgres"
+db_host = "localhost"
+db_port = "5432"
+db_user = "arroyo"
+db_pass = "arroyo"
+db_name = "arroyo"
+trust_cert = false

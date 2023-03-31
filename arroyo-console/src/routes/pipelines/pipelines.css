@@ -1,0 +1,102 @@
+.pipelinesTable tbody tr:hover {
+  background-color: #333;
+}
+
+.pipelineGraph {
+  height: 100%;
+  width: 100%;
+}
+
+.pipelineGraph .pipelineGraphNode {
+  padding: 10px;
+  border-radius: 3px;
+  width: 150px;
+  font-size: 12px;
+  color: #222;
+  text-align: center;
+  border-width: 1px;
+  border-style: solid;
+  border-color: #1a192b;
+  background-color: white;
+}
+
+.pipelineGraph .pipelineGraphNode.active {
+  background-color: rgb(149, 243, 220);
+}
+
+.pipelineInfo {
+  padding: 20px;
+}
+
+.pipelineInfo .field {
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+
+.pipelineInfo .fieldName,
+.pipelineInfo .fieldValue {
+  display: inline-block;
+}
+
+.pipelineInfo .fieldName {
+  width: 90px;
+  font-weight: bold;
+  text-transform: lowercase;
+}
+
+.operatorDetail .chart .timeseriesGraph .mg-graph text {
+  fill: white !important;
+}
+
+.editor {
+  border: 2px solid rgb(100, 100, 100);
+  width: 100%;
+  height: 400px;
+}
+
+@keyframes scale-up-center {
+  0% {
+    transform: scale(0.99);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.operator-checkpoint .in-progress {
+  background-color: var(--chakra-colors-orange-600);
+  animation: scale-up-center 0.4s cubic-bezier(0.645, 0.045, 0.355, 1) infinite alternate-reverse
+    both;
+}
+
+.operator-checkpoint .finished {
+  background-color: var(--chakra-colors-green-600);
+}
+
+ul.checkpoint-menu {
+  display: block;
+  margin-left: -10px;
+  margin-right: 30px;
+  list-style: none;
+  border-top: 1px var(--chakra-colors-gray-700) solid;
+}
+
+ul.checkpoint-menu li a {
+  display: block;
+  background-color: var(--chakra-colors-gray-800);
+  margin: 0;
+  border-bottom: 1px var(--chakra-colors-gray-700) solid;
+  padding: 5px;
+  text-align: center;
+  user-select: none;
+}
+
+ul.checkpoint-menu li:hover a {
+  background-color: var(--chakra-colors-gray-700);
+  text-decoration: none;
+}
+
+ul.checkpoint-menu li.selected a {
+  background-color: var(--chakra-colors-gray-600);
+  text-decoration: none;
+}

@@ -1,0 +1,24 @@
+[package]
+name = "arroyo-datastream"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+arroyo-types = { path = "../arroyo-types" }
+arroyo-macro = { path = "../arroyo-macro" }
+arroyo-rpc = { path = "../arroyo-rpc" }
+dyn-clone = "1.0.5"
+petgraph = {version = "0.6", features = ["serde-1"]}
+serde = {version = "1", features = ["derive"]}
+syn = {version = "1", features = ["full"]}
+quote = "1"
+proc-macro2 = "1"
+bincode = { version = "2.0.0-rc.1", features = ["serde"]}
+rand = "0"
+toml = "0.4"
+
+tokio = "1"
+tonic = "0.8"
+anyhow = "1.0.66"
+prost = "0.11"

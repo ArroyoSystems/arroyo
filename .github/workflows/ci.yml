@@ -1,0 +1,85 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build-rust:
+    runs-on: ubuntu-latest-16-cores
+    env:
+      DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
+      DATABASE_USER: arroyo
+      DATABASE_PASSWORD: arroyo
+      DATABASE_HOST: localhost
+      DATABASE_NAME: arroyo
+      S3_BUCKET: local
+    steps:
+      - name: Check out
+        uses: actions/checkout@v3
+      - uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Setup Postgres
+        run: |
+          sudo apt-get update
+          sudo apt-get install postgresql
+          sudo systemctl start postgresql
+          sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
+          sudo -u postgres createdb arroyo
+          pushd /tmp
+            wget https://github.com/rust-db/refinery/releases/download/0.8.7/refinery-0.8.7-x86_64-unknown-linux-musl.tar.gz
+            tar xvfz refinery*.tar.gz
+            mv /tmp/refinery*-musl/refinery /tmp
+          popd
+          /tmp/refinery migrate -e DATABASE_URL -p arroyo-api/migrations
+      - name: Set up cache
+        uses: actions/cache@v3
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: Install dependencies
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+          sudo apt-get install -y cmake clang ruby unzip postgresql
+          wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-x86_64.zip
+          unzip protoc*.zip
+          sudo mv bin/protoc /usr/local/bin
+      - name: Install Kafka
+        run: |
+          wget --progress=dot --show-progress https://downloads.apache.org/kafka/3.2.3/kafka_2.12-3.2.3.tgz
+          tar xvfz kafka*.tgz
+          mkdir /tmp/kraft-combined-logs
+          kafka_*/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/kraft/server.properties
+          kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/kraft/server.properties
+      - name: Build
+        run: cargo build --release
+      - name: Test
+        run: cargo nextest run --release
+  build-console:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v3
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2.2.4
+        with:
+          version: 7.13.5
+          run_install: |
+            - recursive: true
+              args: [--frozen-lockfile, --strict-peer-dependencies]
+      - name: Build console
+        run: |
+          cd arroyo-console
+          pnpm build

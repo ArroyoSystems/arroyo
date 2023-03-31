@@ -1,0 +1,18 @@
+[package]
+name = "arroyo-rpc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+arroyo-types = { path = "../arroyo-types" }
+
+tonic = "0.8"
+prost = "0.11"
+tokio = { version = "1", features = ["full"] }
+bincode = "2.0.0-rc.1"
+serde = {version = "1.0", features = ["derive"]}
+
+[build-dependencies]
+tonic-build = "0.8"

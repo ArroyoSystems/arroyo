@@ -1,0 +1,53 @@
+{
+  "name": "arroyo-console",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "generate": "PATH=$PATH:$(pwd)/node_modules/.bin protoc -I $(pwd)/../arroyo-rpc/proto --es_out src/gen --es_opt target=ts --connect-web_out src/gen  --connect-web_opt target=ts api.proto"
+  },
+  "dependencies": {
+    "@babel/core": "^7.20.5",
+    "@bufbuild/connect-web": "^0.2.1",
+    "@bufbuild/protobuf": "^0.1.1",
+    "@bufbuild/protoc-gen-connect-web": "^0.2.1",
+    "@bufbuild/protoc-gen-es": "^0.1.1",
+    "@chakra-ui/pro-theme": "^0.0.57",
+    "@chakra-ui/react": "^2.4.3",
+    "@chakra-ui/styled-system": "^2.4.0",
+    "@clerk/clerk-react": "^4.7.1",
+    "@clerk/themes": "^1.2.37",
+    "@emotion/react": "^11.10.5",
+    "@emotion/styled": "^11.10.5",
+    "@fontsource/inter": "^4.5.14",
+    "@monaco-editor/react": "^4.4.6",
+    "@types/d3": "^7.4.0",
+    "@types/dagre": "^0.7.48",
+    "d3": "^7.7.0",
+    "dagre": "^0.8.5",
+    "framer-motion": "^6.5.1",
+    "metrics-graphics": "3.0.0-beta1",
+    "monaco-editor": "^0.34.1",
+    "monaco-sql-languages": "^0.9.5",
+    "prop-types": "^15.8.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-icons": "^4.7.1",
+    "react-router-dom": "^6.4.5",
+    "react-test-renderer": "^18.2.0",
+    "reactflow": "^11.3.3"
+  },
+  "devDependencies": {
+    "@chakra-ui/cli": "^2.2.0",
+    "@types/node": "^18.11.15",
+    "@types/react": "^18.0.26",
+    "@types/react-dom": "^18.0.9",
+    "@vitejs/plugin-react": "^3.0.1",
+    "prettier": "^2.8.1",
+    "typescript": "^4.9.4",
+    "vite": "^4.0.4"
+  }
+}
