@@ -1,0 +1,6 @@
+Projection: COUNT(UInt8(1)) AS count, SUM(price) AS price_sum, AVG(price) AS avg_price, MIN(price) AS min_price, MAX(price) AS max_price, SUM(price / price) AS has_price, SUM(price * auction), MIN(price - auction), MAX(price % auction), AVG(price >> auction)
+  Aggregate: groupBy=[[hop(IntervalDayTime("2000"), IntervalDayTime("10000"))]], aggr=[[COUNT(UInt8(1)), SUM(price), AVG(price), MIN(price), MAX(price), SUM(price / price), SUM(price * auction), MIN(price - auction), MAX(price % auction), AVG(price >> auction)]]
+    Projection: auction, price
+      Projection: (nexmark_thousand.bid)[auction] AS auction, (nexmark_thousand.bid)[price] AS price
+        TableScan: nexmark_thousand
+

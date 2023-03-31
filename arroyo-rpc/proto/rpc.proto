@@ -1,0 +1,387 @@
+syntax = "proto3";
+
+package arroyo_rpc;
+
+// Controller
+
+message WorkerResources {
+  uint64 slots = 1;
+}
+
+message RegisterWorkerReq {
+  uint64 worker_id = 1;
+  uint64 node_id = 2;
+  string job_id = 3;
+  string rpc_address = 4;
+  string data_address = 5;
+  WorkerResources resources = 6;
+  string job_hash = 7;
+  uint64 slots = 8;
+}
+
+message RegisterWorkerResp {
+}
+
+message HeartbeatReq {
+  string job_id = 1;
+  uint64 worker_id = 2;
+  uint64 time = 3;
+}
+
+message HeartbeatResp {
+}
+
+enum TaskCheckpointEventType {
+  // got first barrier, waiting for alignment
+  STARTED_ALIGNMENT = 0;
+  // started checkpointing
+  STARTED_CHECKPOINTING = 1;
+  // operator finished setup
+  FINISHED_OPERATOR_SETUP = 2;
+  // finished the synchronous part of checkpointing
+  FINISHED_SYNC = 3;
+}
+
+message TaskCheckpointEventReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint32 subtask_index = 5;
+  uint32 epoch = 6;
+  TaskCheckpointEventType event_type = 7;
+}
+
+message TaskCheckpointEventResp {
+}
+
+message TaskCheckpointCompletedReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint32 epoch = 5;
+  SubtaskCheckpointMetadata metadata = 6;
+}
+
+message TaskCheckpointCompletedResp {
+}
+
+message TaskFinishedReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint64 operator_subtask = 5;
+}
+
+message TaskFinishedResp {
+}
+
+message TaskFailedReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint64 operator_subtask = 5;
+  string error = 6;
+}
+
+message TaskFailedResp {
+}
+
+
+message TaskStartedReq {
+  uint64 worker_id = 1;
+  uint64 time = 2;
+  string job_id = 3;
+  string operator_id = 4;
+  uint64 operator_subtask = 5;
+}
+
+message TaskStartedResp {
+}
+
+message RegisterNodeReq {
+  uint64 node_id = 1;
+  uint64 task_slots = 2;
+  string addr = 3;
+}
+
+message RegisterNodeResp {
+}
+
+message HeartbeatNodeReq {
+  uint64 node_id = 1;
+  uint64 time = 2;
+}
+
+message HeartbeatNodeResp {
+}
+
+message SinkDataReq {
+  string job_id = 1;
+  string operator_id = 2;
+  uint32 subtask_index = 3;
+  uint64 timestamp = 4;
+  string key = 5;
+  string value = 6;
+  bool done = 7;
+}
+
+message SinkDataResp {
+}
+
+message WorkerFinishedReq {
+  uint64 node_id = 1;
+  uint64 worker_id = 2;
+  uint64 slots = 3;
+  string job_id = 4;
+}
+
+message WorkerFinishedResp {
+}
+
+message GrpcOutputSubscription {
+  string job_id = 1;
+}
+
+message OutputData {
+  string operator_id = 1;
+  uint64 timestamp = 2;
+  string key = 3;
+  string value = 4;
+  bool done = 5;
+}
+
+
+service ControllerGrpc {
+  rpc RegisterNode(RegisterNodeReq) returns (RegisterNodeResp);
+  rpc HeartbeatNode(HeartbeatNodeReq) returns (HeartbeatNodeResp);
+  rpc RegisterWorker(RegisterWorkerReq) returns (RegisterWorkerResp);
+  rpc Heartbeat(HeartbeatReq) returns (HeartbeatResp);
+  rpc TaskStarted(TaskStartedReq) returns (TaskStartedResp);
+  rpc TaskCheckpointEvent(TaskCheckpointEventReq) returns (TaskCheckpointEventResp);
+  rpc TaskCheckpointCompleted(TaskCheckpointCompletedReq) returns (TaskCheckpointCompletedResp);
+  rpc TaskFinished(TaskFinishedReq) returns (TaskFinishedResp);
+  rpc TaskFailed(TaskFailedReq) returns (TaskFailedResp);
+  rpc SendSinkData(SinkDataReq) returns (SinkDataResp);
+  // sent from the node to the controller when a worker process exits
+  rpc WorkerFinished(WorkerFinishedReq) returns (WorkerFinishedResp);
+
+  rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
+}
+
+message ParquetStoreData {
+  uint32 epoch = 1;
+  string file = 2;
+  string table = 3;
+  uint64 min_routing_key = 4;
+  uint64 max_routing_key = 5;
+  uint64 max_timestamp_micros = 6;
+}
+
+
+// Checkpoint metadata
+message CheckpointMetadata {
+  string job_id = 1;
+  uint32 epoch = 2;
+  uint32 min_epoch = 3;
+  uint64 start_time = 4;
+  uint64 finish_time = 5;
+
+  repeated string operator_ids = 6;
+}
+
+message SubtaskCheckpointMetadata {
+  uint32 subtask_index = 1;
+  uint64 start_time = 2;
+  uint64 finish_time = 3;
+  optional uint64 watermark = 4;
+  bool has_state = 5;
+  repeated TableDescriptor tables = 6;
+  uint64 bytes = 7;
+
+  repeated BackendData backend_data = 8;
+}
+
+message BackendData {
+  oneof backend_data {
+    ParquetStoreData parquet_store = 3;
+  }
+}
+
+message OperatorCheckpointMetadata {
+  string job_id = 1;
+  string operator_id = 2;
+  uint32 epoch = 3;
+  uint64 start_time = 4;
+  uint64 finish_time = 5;
+  optional uint64 min_watermark = 6;
+  optional uint64 max_watermark = 7;
+  bool has_state = 8;
+
+  repeated TableDescriptor tables = 9;
+
+  repeated BackendData backend_data = 10;
+  uint64 bytes = 11;
+}
+
+enum TableType {
+  // Data is shared between all subtasks; basic key-value map
+  Global = 0;
+  // Memory key structure: [timestamp][dataflow_key]-> value
+  // byte key structure: [dataflow_key][timestamp] -> value
+  TimeKeyMap = 1;
+  // Memory key structure: [dataflow_key][timestamp] -> value+
+  // byte key structure: [dataflow_key][timestamp][incrementing_long] -> value
+  KeyTimeMultiMap = 2;
+}
+
+enum TableDeleteBehavior {
+  None = 0;
+
+  // For a timestamped table, guarantees that we do not read
+  // data before our watermark (which can then be cleaned up in compaction)
+  NoReadsBeforeWatermark = 1;
+}
+
+enum TableWriteBehavior {
+  DefaultWrites = 0;
+
+  NoWritesBeforeWatermark = 1;
+}
+
+message TableDescriptor {
+  // must be a single byte
+  string name = 1;
+  string description = 2;
+  TableType table_type = 3;
+  TableDeleteBehavior delete_behavior = 4;
+  uint64 retention_micros = 5;
+  TableWriteBehavior write_behavior = 6;
+}
+
+// Worker
+
+message KeyRange {
+  uint64 start = 1;
+  uint64 end = 2;
+}
+
+message TaskAssignment {
+  string operator_id = 1;
+  uint64 operator_subtask = 2;
+  KeyRange key_range = 3;
+  uint64 worker_id = 4;
+  string worker_addr = 5;
+}
+
+message StartExecutionReq {
+  optional uint32 restore_epoch = 2;
+  repeated TaskAssignment tasks = 3;
+}
+
+message StartExecutionResp {
+}
+
+message CheckpointReq {
+  uint32 epoch = 1;
+  uint32 min_epoch = 2;
+  uint64 timestamp = 3;
+  // if set, tasks will finish after completing the checkpoint
+  bool then_stop = 4;
+}
+
+message CheckpointResp {
+}
+
+enum StopMode {
+  // The stop message flows through the dataflow like a checkpoint, causing every node to stop at a consistent point
+  GRACEFUL = 0;
+  // All tasks will stop immediately
+  IMMEDIATE = 1;
+}
+
+message StopExecutionReq {
+  StopMode stop_mode = 1;
+}
+
+message StopExecutionResp {
+}
+
+message JobFinishedReq {
+}
+
+message JobFinishedResp {
+}
+
+service WorkerGrpc {
+  rpc StartExecution(StartExecutionReq) returns (StartExecutionResp);
+  rpc Checkpoint(CheckpointReq) returns (CheckpointResp);
+  rpc StopExecution(StopExecutionReq) returns (StopExecutionResp);
+  rpc JobFinished(JobFinishedReq) returns (JobFinishedResp);
+}
+
+// Node
+
+message StartWorkerReq {
+  string name = 1;
+  bytes binary = 2;
+  bytes wasm = 3;
+  string job_id = 4;
+  string job_hash = 5;
+  uint64 slots = 6;
+  uint64 node_id = 7;
+  uint64 run_id = 8;
+}
+
+message StartWorkerResp {
+  uint64 worker_id = 1;
+}
+
+message GetWorkersReq {}
+
+
+message WorkerStatus {
+  string name = 1;
+  string hash = 2;
+  uint64 slots = 3;
+  bool running = 4;
+}
+message GetWorkersResp {
+  repeated WorkerStatus statuses = 1;
+}
+
+message StopWorkerReq {
+  string job_id = 3;
+  uint64 worker_id = 1;
+  bool force = 2;
+}
+
+message StopWorkerResp {
+  bool stopped = 1;
+}
+
+service NodeGrpc {
+  rpc StartWorker(StartWorkerReq) returns (StartWorkerResp);
+  rpc GetWorkers(GetWorkersReq) returns (GetWorkersResp);
+  rpc StopWorker(StopWorkerReq) returns (StopWorkerResp);
+}
+
+
+message CompileQueryReq {
+  string job_id = 1;
+  string types = 2;
+  string pipeline = 3;
+  string wasm_fns = 4;
+}
+
+message CompileQueryResp {
+  string pipeline_path = 1;
+  string wasm_fns_path = 2;
+}
+
+service CompilerGrpc {
+  rpc CompileQuery(CompileQueryReq) returns (CompileQueryResp);
+}

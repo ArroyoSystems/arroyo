@@ -1,0 +1,27 @@
+[package]
+name = "arroyo-server-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arroyo-types = { path = "../arroyo-types" }
+
+# logging
+tracing = "0.1"
+tracing-logfmt = "0.2.0"
+tracing-subscriber = {version = "0.3", features = [ "env-filter" ]}
+tracing-appender = "0.2"
+
+# middleware
+tower = "0.4"
+tower-http = {version = "0.3", features = ["trace", "fs"]}
+tonic = "0.8"
+tonic-reflection = "0.5"
+hyper = "0.14"
+tokio = { version = "1", features = ["full"] }
+prometheus = {version = "0.13.2", features = ["push", "process"] }
+axum = "0.6.0"
+lazy_static = "1.4.0"
+pyroscope = "0.5"
+pyroscope_pprofrs = "0.2"
+futures = { version = "0.3" }

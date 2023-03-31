@@ -1,0 +1,7 @@
+#root {
+  height: 100%;
+}
+
+.settings .cl-navbar {
+  display: none !important;
+}
