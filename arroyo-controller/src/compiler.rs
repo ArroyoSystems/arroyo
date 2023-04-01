@@ -211,6 +211,8 @@ arroyo-types = {{ path = "{}/arroyo-types" }}
 wee_alloc = "0.4.5"
 wasm-bindgen = "0.2"
 serde_json = "1.0"
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
 "#,
             arroyo_dir.to_string_lossy()
         );
