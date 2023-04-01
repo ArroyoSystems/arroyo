@@ -10,6 +10,8 @@ on both bounded and unbounded sources, emitting results as soon as they are avai
 
 In short: Arroyo lets you ask complex questions of high-volume real-time data with subsecond results.
 
+![running job](docs/images/header_image.png)
+
 ## Features
 
 * SQL and Rust pipelines
@@ -114,7 +116,8 @@ to compile, although subsequent queries should be much faster.
 Once the query runs, you should start to see outputs in the Results tab. Since we did a simple pass-through query,
 each input event will result in a single output line.
 
-Many streaming pipelines involve working with time in some way. Arroyo supports a few different ways of expressing computations over the time characteristic of our data. Let's add a sliding window (called `hop` in SQL) to perform
+Many streaming pipelines involve working with time in some way. Arroyo supports a few different ways of expressing
+computations over the time characteristic of our data. Let's add a sliding window (called `hop` in SQL) to perform
 a time-oriented aggregation:
 
 ```sql
@@ -178,8 +181,7 @@ $ curl -fsSL https://get.pnpm.io/install.sh | sh -
 
 #### MacOS
 
-TODO
-
+Coming soon
 
 ### Postgres
 
