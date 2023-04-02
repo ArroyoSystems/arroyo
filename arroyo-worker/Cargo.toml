@@ -39,8 +39,6 @@ prost = "0.11"
 
 #logging
 tracing = "0.1"
-pyroscope = "0.5.3"
-pyroscope_pprofrs = "0.2"
 governor = "0.5.1"
 
 [dev-dependencies]

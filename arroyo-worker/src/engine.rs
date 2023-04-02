@@ -11,7 +11,6 @@ use std::{mem, thread};
 use std::time::{Duration, SystemTime};
 
 use arroyo_metrics::{counter_for_task, gauge_for_task};
-use arroyo_server_common::try_profile_start;
 use arroyo_state::tables::TimeKeyMap;
 use bincode::{config, Decode, Encode};
 
@@ -827,7 +826,8 @@ impl Engine {
         let job_id = self.job_id.clone();
 
         thread::spawn(move || {
-            let _agent = try_profile_start("node", [("job_id", job_id.as_str())].to_vec());
+            #[cfg(linux)]
+            let _agent = arroyo_server_common::try_profile_start("node", [("job_id", job_id.as_str())].to_vec());
             // push to metrics gateway
             loop {
                 let metrics = prometheus::gather();
