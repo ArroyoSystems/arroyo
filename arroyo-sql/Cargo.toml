@@ -20,4 +20,4 @@ arrow = { version = "34.0.0", default-features = false }
 anyhow = {version = "1.0.66", features = ["backtrace"]}
 
 proc-macro2 = "1"
-syn = {version = "1", features = ["full"]}
+syn = {version = "1", features = ["full", "parsing"]}
