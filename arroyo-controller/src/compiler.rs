@@ -162,8 +162,8 @@ version = "1.0.0"
 edition = "2021"
 
 [dependencies]
-bincode = "=2.0.0-rc.2"
-bincode_derive = "=2.0.0-rc.2"
+bincode = "=2.0.0-rc.3"
+bincode_derive = "=2.0.0-rc.3"
 arroyo-types = {{ path = "{}/arroyo-types" }}
 "#,
             arroyo_dir.to_string_lossy()
@@ -180,8 +180,8 @@ edition = "2021"
 [dependencies]
 types = {{ path = "../types" }}
 petgraph = "0.6"
-bincode = "=2.0.0-rc.2"
-bincode_derive = "=2.0.0-rc.2"
+bincode = "=2.0.0-rc.3"
+bincode_derive = "=2.0.0-rc.3"
 serde = "1.0"
 serde_json = "1.0"
 arroyo-types = {{ path = "{}/arroyo-types" }}
@@ -205,8 +205,8 @@ crate-type = ["cdylib"]
 [dependencies]
 types = {{ path = "../types" }}
 
-bincode = "=2.0.0-rc.2"
-bincode_derive = "=2.0.0-rc.2"
+bincode = "=2.0.0-rc.3"
+bincode_derive = "=2.0.0-rc.3"
 arroyo-types = {{ path = "{}/arroyo-types" }}
 wee_alloc = "0.4.5"
 wasm-bindgen = "0.2"
