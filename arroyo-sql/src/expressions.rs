@@ -15,7 +15,7 @@ use datafusion_expr::{
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_str, Ident};
+use syn::{parse_quote, parse_str, Ident};
 
 #[derive(Debug, Clone)]
 pub struct BinaryOperator(datafusion_expr::Operator);
@@ -919,47 +919,78 @@ pub struct CastExpression {
 impl CastExpression {
     fn new(input: Box<Expression>, data_type: &DataType) -> Result<Expression> {
         if let TypeDef::DataType(input_type, _) = input.return_type() {
-            if Self::is_numeric(&input_type) && Self::is_numeric(data_type) {
-                return Ok(Expression::CastExpression(Self {
+            if Self::allowed_input_type(&input_type) && Self::allowed_output_type(data_type) {
+                Ok(Expression::CastExpression(Self {
                     input,
                     data_type: data_type.clone(),
-                }));
+                }))
             } else {
-                bail!("casting from {:?} to {:?} is currently unsupported, only numeric types are supported", input_type, data_type);
+                bail!(
+                    "casting from {:?} to {:?} is currently unsupported",
+                    input_type,
+                    data_type
+                );
             }
         } else {
             bail!("casting structs is currently unsupported")
         }
     }
 
+    fn allowed_input_type(data_type: &DataType) -> bool {
+        Self::is_numeric(data_type) || Self::is_string(data_type)
+    }
+    fn allowed_output_type(data_type: &DataType) -> bool {
+        Self::is_numeric(data_type) || Self::is_string(data_type)
+    }
+
     fn is_numeric(data_type: &DataType) -> bool {
-        match data_type {
+        matches!(
+            data_type,
             DataType::Int8
-            | DataType::Int16
-            | DataType::Int32
-            | DataType::Int64
-            | DataType::UInt8
-            | DataType::UInt16
-            | DataType::UInt32
-            | DataType::UInt64
-            | DataType::Float16
-            | DataType::Float32
-            | DataType::Float64 => true,
-            _ => false,
-        }
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::UInt8
+                | DataType::UInt16
+                | DataType::UInt32
+                | DataType::UInt64
+                | DataType::Float16
+                | DataType::Float32
+                | DataType::Float64
+        )
+    }
+    fn is_string(data_type: &DataType) -> bool {
+        matches!(data_type, DataType::Utf8 | DataType::LargeUtf8)
+    }
+    fn cast_expr(input_type: &DataType, output_type: &DataType, sub_expr: syn::Expr) -> syn::Expr {
+        let result: syn::Expr = if Self::is_numeric(input_type) && Self::is_numeric(output_type) {
+            let cast_type: syn::Type = parse_str(StructField::data_type_name(output_type)).unwrap();
+            parse_quote!(#sub_expr as #cast_type)
+        } else if Self::is_numeric(input_type) && Self::is_string(output_type) {
+            parse_quote!(#sub_expr.to_string())
+        } else if Self::is_string(input_type) && Self::is_numeric(output_type) {
+            let cast_type: syn::Type = parse_str(StructField::data_type_name(output_type)).unwrap();
+            parse_quote!(#sub_expr.parse::<#cast_type>().unwrap())
+        } else {
+            unreachable!()
+        };
+        result
     }
 }
 
 impl ExpressionGenerator for CastExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let sub_expr = self.input.to_syn_expression();
-        let cast_type = TypeDef::DataType(self.data_type.clone(), false).return_type();
-        let tokens = if self.nullable() {
-            quote!(#sub_expr.map(|x| x as #cast_type) )
-        } else {
-            quote!(#sub_expr as #cast_type)
+        let TypeDef::DataType(input_type, nullable) = self.input.return_type() else {
+            unreachable!()
         };
-        parse_expression(quote!(#tokens))
+        if nullable {
+            let cast_expr = Self::cast_expr(&input_type, &self.data_type, parse_quote!(x));
+            parse_quote!(#sub_expr.map(|x| #cast_expr))
+        } else {
+            let cast_expr = Self::cast_expr(&input_type, &self.data_type, sub_expr);
+            parse_quote!(#cast_expr)
+        }
     }
 
     fn return_type(&self) -> TypeDef {
