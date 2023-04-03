@@ -105,7 +105,7 @@ async fn handle_worker_connect<'a>(
                 },
             );
 
-            let connects = worker_connects.clone();
+            let connects = worker_connects;
 
             let job_id = ctx.config.id.clone();
 

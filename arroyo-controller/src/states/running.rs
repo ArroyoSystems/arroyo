@@ -87,7 +87,7 @@ impl State for Running {
 
                             let job_controller = ctx.job_controller.as_ref().unwrap();
                             for (op, p) in &c.parallelism_overrides {
-                                if let Some(actual) = job_controller.operator_parallelism(&op){
+                                if let Some(actual) = job_controller.operator_parallelism(op){
                                     if actual != *p {
                                         return Ok(Transition::next(
                                             *self,

@@ -156,7 +156,7 @@ impl SourceConfig {
             },
             SourceType::Nexmark(nexmark) => SourceConfig::NexmarkSource {
                 event_rate: nexmark.events_per_second.into(),
-                runtime: nexmark.runtime_micros.map(|r| Duration::from_micros(r)),
+                runtime: nexmark.runtime_micros.map(Duration::from_micros),
             },
         }
     }
@@ -482,7 +482,7 @@ impl Source {
                     // TODO: allow this to be configured via SQL
                     offset_mode: OffsetMode::Latest,
                     schema_registry: self.schema.kafka_schema,
-                    messages_per_second: auth.org_metadata.kafka_qps as u32,
+                    messages_per_second: auth.org_metadata.kafka_qps,
                 };
 
                 provider.add_source_with_type(self.id, &self.name, fields, node, name);
@@ -551,9 +551,9 @@ impl Source {
 }
 
 fn rate_limit_error(source: &str, limit: usize) -> Result<(), Status> {
-    return Err(Status::failed_precondition(format!(
+    Err(Status::failed_precondition(format!(
         "Under your plan, {} source rates must be less than {}; contact us at support@arroyo.systems for to increase limits",
-        source, limit)));
+        source, limit)))
 }
 
 pub(crate) async fn create_source(

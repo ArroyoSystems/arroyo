@@ -235,12 +235,8 @@ pub struct Context<'a> {
 
 impl<'a> Context<'a> {
     pub fn handle(&mut self, msg: JobMessage) -> Result<(), StateError> {
-        match msg {
-            _ => {
-                warn!("unhandled job message {:?}", msg);
-                Ok(())
-            }
-        }
+        warn!("unhandled job message {:?}", msg);
+        Ok(())
     }
 
     pub fn retryable(
@@ -254,7 +250,7 @@ impl<'a> Context<'a> {
             state,
             message: message.into(),
             source,
-            retries: retries.checked_sub(self.retries_attempted).unwrap_or(0),
+            retries: retries.saturating_sub(self.retries_attempted),
         }
     }
 }

@@ -29,7 +29,7 @@ impl State for Stopping {
             .job_controller
             .as_mut()
             .unwrap()
-            .wait_for_finish(&mut ctx.rx)
+            .wait_for_finish(ctx.rx)
             .await
         {
             return Err(ctx.retryable(self, "failed while waiting for job to stop", e, 10));

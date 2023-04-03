@@ -405,7 +405,7 @@ wasm-opt = false
                             expression,
                             ..
                         }) => {
-                            let expr: syn::Expr = parse_str(&expression).unwrap();
+                            let expr: syn::Expr = parse_str(expression).unwrap();
                             let operation = if *flatten {
                                 format_ident!("Flatten")
                             } else {

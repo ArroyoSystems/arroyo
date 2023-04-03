@@ -231,28 +231,21 @@ impl BackingStore for ParquetBackend {
         let storage_client = StorageClient::new()?;
 
         // wait for all of the futures to complete
-        loop {
-            match futures.next().await {
-                Some(result) => {
-                    let operator_id = result?;
-                    for deletepoch in old_min_epoch..min_epoch {
-                        let path =
-                            operator_metadata_path(&metadata.job_id, &operator_id, deletepoch);
-                        debug!("deleting {}", path);
-                        storage_client.remove(path).await;
-                    }
-                    debug!(
-                        message = "Finished compacting operator",
-                        job_id = metadata.job_id,
-                        operator_id,
-                        min_epoch
-                    );
-                }
-                None => {
-                    break;
-                }
+        while let Some(result) = futures.next().await {
+            let operator_id = result?;
+            for deletepoch in old_min_epoch..min_epoch {
+                let path = operator_metadata_path(&metadata.job_id, &operator_id, deletepoch);
+                debug!("deleting {}", path);
+                storage_client.remove(path).await;
             }
+            debug!(
+                message = "Finished compacting operator",
+                job_id = metadata.job_id,
+                operator_id,
+                min_epoch
+            );
         }
+
         for deletepoch in old_min_epoch..min_epoch {
             StorageClient::new()?
                 .remove(checkpoint_metadata_path(&metadata.job_id, deletepoch))
@@ -296,7 +289,9 @@ impl BackingStore for ParquetBackend {
                         .storage_client
                         .get_bytes(file.file.clone())
                         .await
-                        .expect(&format!("unable to find file {} in checkpoint", file.file));
+                        .unwrap_or_else(|| {
+                            panic!("unable to find file {} in checkpoint", file.file)
+                        });
                     result.append(
                         &mut self.triples_from_parquet_bytes(bytes, &self.task_info.key_range),
                     );
@@ -341,7 +336,7 @@ impl BackingStore for ParquetBackend {
                 .storage_client
                 .get_bytes(file.file.clone())
                 .await
-                .expect(&format!("unable to find file {} in checkpoint", file.file));
+                .unwrap_or_else(|| panic!("unable to find file {} in checkpoint", file.file));
             for (_timestamp, key, value) in self.triples_from_parquet_bytes(bytes, &(0..=u64::MAX))
             {
                 state_map.insert(key, value);
@@ -429,13 +424,12 @@ impl ParquetBackend {
                 //TODO: filter timestamp
                 let timestamp = from_micros(time_array.value(index) as u64);
 
-                let key: K = bincode::decode_from_slice(&key_array.value(index), BINCODE_CONFIG)
+                let key: K = bincode::decode_from_slice(key_array.value(index), BINCODE_CONFIG)
                     .unwrap()
                     .0;
-                let value: V =
-                    bincode::decode_from_slice(&value_array.value(index), BINCODE_CONFIG)
-                        .unwrap()
-                        .0;
+                let value: V = bincode::decode_from_slice(value_array.value(index), BINCODE_CONFIG)
+                    .unwrap()
+                    .0;
                 result.push((timestamp, key, value));
             }
         }
@@ -463,7 +457,7 @@ impl ParquetWriter {
             storage_client,
             control_tx,
             finish_tx: Some(finish_tx),
-            task_info: task_info,
+            task_info,
             table_descriptors: tables
                 .iter()
                 .map(|table| (table.name.chars().next().unwrap(), table.clone()))

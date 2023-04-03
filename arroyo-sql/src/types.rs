@@ -111,12 +111,7 @@ impl StructDef {
     }
     // this is a hack
     pub fn truncated_return_type(&self, terms: usize) -> StructDef {
-        let fields = self
-            .fields
-            .iter()
-            .take(terms)
-            .map(|field| field.clone())
-            .collect();
+        let fields = self.fields.iter().take(terms).cloned().collect();
         StructDef { name: None, fields }
     }
 }

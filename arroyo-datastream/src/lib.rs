@@ -1777,13 +1777,16 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     }
 
                     Operator::Window {
-                        typ: window.window.ok_or(anyhow!("missing window type"))?.into(),
+                        typ: window
+                            .window
+                            .ok_or_else(|| anyhow!("missing window type"))?
+                            .into(),
                         agg,
                         flatten: window.flatten,
                     }
                 }
                 GrpcOperator::Aggregator(agg) => {
-                    match Aggregator::from_i32(agg).ok_or(anyhow!("unable to map enum"))? {
+                    match Aggregator::from_i32(agg).ok_or_else(|| anyhow!("unable to map enum"))? {
                         Aggregator::None => panic!(),
                         Aggregator::CountAggregate => Operator::Count,
                         Aggregator::MaxAggregate => Operator::Aggregate(AggregateBehavior::Max),
@@ -1798,7 +1801,9 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     })
                 }
                 GrpcOperator::BuiltinSink(sink) => {
-                    match BuiltinSink::from_i32(sink).ok_or(anyhow!("unable to map enum"))? {
+                    match BuiltinSink::from_i32(sink)
+                        .ok_or_else(|| anyhow!("unable to map enum"))?
+                    {
                         BuiltinSink::Null => Operator::NullSink,
                         BuiltinSink::Web => Operator::GrpcSink,
                         BuiltinSink::Log => Operator::ConsoleSink,
