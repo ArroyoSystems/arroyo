@@ -291,13 +291,13 @@ impl TryInto<PipelineDef> for DbPipeline {
             .try_into()
             .map_err(log_and_map)?;
 
-        return Ok(PipelineDef {
+        Ok(PipelineDef {
             pipeline_id: format!("{}", self.id),
             name: self.name,
             r#type: format!("{:?}", self.r#type),
             definition: self.textual_repr,
             job_graph: Some(program.as_job_graph()),
-        });
+        })
     }
 }
 

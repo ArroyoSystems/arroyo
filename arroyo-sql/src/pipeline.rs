@@ -581,7 +581,7 @@ impl SqlPipelineBuilder {
         let functions = projection
             .expr
             .iter()
-            .map(|expr| Ok(to_expression_generator(expr, &input.return_type())?))
+            .map(|expr| to_expression_generator(expr, &input.return_type()))
             .collect::<Result<Vec<_>>>()?;
 
         let names = projection
@@ -660,7 +660,7 @@ impl SqlPipelineBuilder {
             .iter()
             .enumerate()
             .map(|(i, expr)| {
-                if self.is_window(expr) {
+                if Self::is_window(expr) {
                     Ok(None)
                 } else {
                     let field = to_expression_generator(expr, input_struct)?;
@@ -674,7 +674,7 @@ impl SqlPipelineBuilder {
                 }
             })
             .collect::<Result<Vec<_>>>()?;
-        let field_pairs: Vec<_> = field_pairs.into_iter().filter_map(|val| val).collect();
+        let field_pairs: Vec<_> = field_pairs.into_iter().flatten().collect();
         let projection = Projection {
             field_names: field_pairs
                 .iter()
@@ -692,7 +692,7 @@ impl SqlPipelineBuilder {
     fn window(&mut self, group_expressions: &[Expr]) -> Result<WindowType> {
         let mut windows: Vec<_> = Vec::new();
         for expression in group_expressions {
-            if let Some(window) = self.find_window(expression)? {
+            if let Some(window) = Self::find_window(expression)? {
                 windows.push(window);
             }
         }
@@ -709,7 +709,7 @@ impl SqlPipelineBuilder {
         fields: &[DFField],
     ) -> Result<GroupByKind> {
         for (i, expr) in group_expressions.iter().enumerate() {
-            if let Some(window) = self.find_window(expr)? {
+            if let Some(window) = Self::find_window(expr)? {
                 if let WindowType::Instant = window {
                     bail!("don't support instant window in return type yet");
                 }
@@ -726,15 +726,15 @@ impl SqlPipelineBuilder {
         Ok(GroupByKind::Basic)
     }
 
-    fn is_window(&mut self, expression: &Expr) -> bool {
+    fn is_window(expression: &Expr) -> bool {
         match expression {
             Expr::ScalarUDF { fun, args: _ } => matches!(fun.name.as_str(), "hop" | "tumble"),
-            Expr::Alias(exp, _) => self.is_window(exp),
+            Expr::Alias(exp, _) => Self::is_window(exp),
             _ => false,
         }
     }
 
-    fn find_window(&mut self, expression: &Expr) -> Result<Option<WindowType>> {
+    fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
         match expression {
             Expr::ScalarUDF { fun, args } => match fun.name.as_str() {
                 "hop" => {
@@ -754,7 +754,7 @@ impl SqlPipelineBuilder {
                 }
                 _ => Ok(None),
             },
-            Expr::Alias(expr, _alias) => self.find_window(expr),
+            Expr::Alias(expr, _alias) => Self::find_window(expr),
             _ => Ok(None),
         }
     }
@@ -846,7 +846,7 @@ impl SqlPipelineBuilder {
 
             let field_computations = fields
                 .iter()
-                .map(|t| Expression::ColumnExpression(ColumnExpression::new(t.clone())))
+                .map(|t| Expression::Column(ColumnExpression::new(t.clone())))
                 .collect();
 
             return Ok(SqlOperator::RecordTransform(
@@ -898,7 +898,7 @@ impl SqlPipelineBuilder {
                     let field_names = w
                         .partition_by
                         .iter()
-                        .filter(|expr| !self.is_window(expr))
+                        .filter(|expr| Self::is_window(expr))
                         .enumerate()
                         .map(|(i, _t)| Column {
                             relation: None,
@@ -909,7 +909,7 @@ impl SqlPipelineBuilder {
                     let field_computations = w
                         .partition_by
                         .iter()
-                        .filter(|expr| !self.is_window(expr))
+                        .filter(|expr| Self::is_window(expr))
                         .map(|expression| to_expression_generator(expression, &input_struct))
                         .collect::<Result<Vec<_>>>()?;
 
@@ -952,7 +952,7 @@ impl SqlPipelineBuilder {
         let field_computations = input_type
             .fields
             .iter()
-            .map(|field| Expression::ColumnExpression(ColumnExpression::new(field.clone())))
+            .map(|field| Expression::Column(ColumnExpression::new(field.clone())))
             .collect();
 
         let field_names = subquery_alias
@@ -1458,7 +1458,7 @@ impl GraphCompiler {
         let operator = if let (Some(max_elements), Some(width)) = (
             window.max_value,
             match &window.window {
-                WindowType::Tumbling { width } => Some(width.clone()),
+                WindowType::Tumbling { width } => Some(*width),
                 WindowType::Sliding { .. } => None,
                 WindowType::Instant => Some(Duration::ZERO),
             },
@@ -1488,7 +1488,7 @@ impl GraphCompiler {
                 converter,
             })
         } else {
-            let sort = if sort_tokens.len() > 0 {
+            let sort = if !sort_tokens.is_empty() {
                 Some(quote!(arg.sort_by_key(|arg| #(#sort_tokens,)*);))
             } else {
                 None
@@ -1813,7 +1813,7 @@ impl GraphCompiler {
         let bin_merger = two_phase_aggregation.combine_bin_syn_expr();
 
         let local_tumble_aggregate = Operator::TumblingWindowAggregator(TumblingWindowAggregator {
-            width: slide.clone(),
+            width: slide,
             aggregator: quote!(|arg| { arg.clone() }).to_string(),
             bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
             bin_type: quote!(#bin_type).to_string(),

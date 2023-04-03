@@ -63,7 +63,7 @@ impl<'a, K: Key, V: Data + PartialEq, S: BackingStore> TimeKeyMap<'a, K, V, S> {
             (Some(buffered_map), Some(persisted_map)) => persisted_map
                 .iter()
                 .filter(|(k, _v)| !buffered_map.contains_key(k))
-                .chain(buffered_map.into_iter())
+                .chain(buffered_map.iter())
                 .collect(),
         }
     }
@@ -79,7 +79,7 @@ impl<'a, K: Key, V: Data + PartialEq, S: BackingStore> TimeKeyMap<'a, K, V, S> {
             .flat_map(|(timestamp, map)| {
                 let tuples: Vec<_> = map
                     .iter()
-                    .map(|(key, value)| (timestamp.clone(), key, value))
+                    .map(|(key, value)| (*timestamp, key, value))
                     .collect();
                 tuples
             })
@@ -91,10 +91,8 @@ impl<'a, K: Key, V: Data + PartialEq, S: BackingStore> TimeKeyMap<'a, K, V, S> {
         let buffered_time = self.cache.buffered_values.keys().min();
         match (persisted_time, buffered_time) {
             (None, None) => None,
-            (None, Some(time)) | (Some(time), None) => Some(time.clone()),
-            (Some(persisted_time), Some(buffered_time)) => {
-                Some(persisted_time.min(buffered_time).clone())
-            }
+            (None, Some(time)) | (Some(time), None) => Some(*time),
+            (Some(persisted_time), Some(buffered_time)) => Some(*persisted_time.min(buffered_time)),
         }
     }
 
@@ -269,9 +267,7 @@ impl<'a, K: Key, V: Data, S: BackingStore> KeyTimeMultiMap<'a, K, V, S> {
     pub async fn clear_time_range(&mut self, key: &mut K, start: SystemTime, end: SystemTime) {
         if let Some(key_map) = self.cache.values.get_mut(key) {
             let times_to_remove = key_map.range(start..end);
-            let times: Vec<_> = times_to_remove
-                .map(|(time, _values)| time.clone())
-                .collect();
+            let times: Vec<_> = times_to_remove.map(|(time, _values)| *time).collect();
             for time in times {
                 key_map.remove(&time);
             }

@@ -60,7 +60,7 @@ pub trait Scheduler: Send + Sync {
     async fn workers_for_job(&self, job_id: &str) -> anyhow::Result<Vec<WorkerId>>;
 
     async fn clean_cluster(&self, job_id: &str) -> anyhow::Result<()> {
-        for worker in self.workers_for_job(&job_id).await? {
+        for worker in self.workers_for_job(job_id).await? {
             self.stop_worker(StopWorkerReq {
                 job_id: job_id.to_string(),
                 worker_id: worker.0,

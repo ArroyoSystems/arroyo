@@ -56,10 +56,7 @@ impl KafkaTester {
     }
 
     pub async fn topic_metadata(&self) -> Result<TopicMetadata, Status> {
-        let client = self
-            .connect()
-            .await
-            .map_err(|s| Status::failed_precondition(s))?;
+        let client = self.connect().await.map_err(Status::failed_precondition)?;
         let metadata = client
             .fetch_metadata(
                 Some(
@@ -76,7 +73,7 @@ impl KafkaTester {
                 ))
             })?;
 
-        let topic_metadata = metadata.topics().into_iter().next().ok_or_else(|| {
+        let topic_metadata = metadata.topics().iter().next().ok_or_else(|| {
             Status::failed_precondition("Metadata response from broker did not include topic")
         })?;
 

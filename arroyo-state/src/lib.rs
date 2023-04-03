@@ -177,7 +177,7 @@ impl<S: BackingStore> StateStore<S> {
         watermark: Option<SystemTime>,
     ) -> TimeKeyMap<K, V, S> {
         // this is done because populating it is async, so can't use or_insert().
-        if !self.caches.contains_key(&table) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
             let cache: Box<dyn Any + Send> = match &self.restore_from {
                 Some(_restore_from) => {
                     let cache = TimeKeyMapCache::<K, V>::from_checkpoint(
@@ -190,9 +190,9 @@ impl<S: BackingStore> StateStore<S> {
                     .await;
                     Box::new(cache)
                 }
-                None => Box::new(TimeKeyMapCache::<K, V>::default()),
+                None => Box::<tables::TimeKeyMapCache<K, V>>::default(),
             };
-            self.caches.insert(table.clone(), cache);
+            e.insert(cache);
         }
 
         let cache = self.caches.get_mut(&table).unwrap();
@@ -212,22 +212,22 @@ impl<S: BackingStore> StateStore<S> {
         table: char,
     ) -> KeyTimeMultiMap<K, V, S> {
         // this is done because populating it is async, so can't use or_insert().
-        if !self.caches.contains_key(&table) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
             let cache: Box<dyn Any + Send> = match &self.restore_from {
                 Some(restore_from) => {
                     let cache = KeyTimeMultiMapCache::<K, V>::from_checkpoint(
                         &self.backend,
                         &self.task_info,
                         table,
-                        &self.table_descriptors.get(&table).unwrap(),
+                        self.table_descriptors.get(&table).unwrap(),
                         restore_from,
                     )
                     .await;
                     Box::new(cache)
                 }
-                None => Box::new(KeyTimeMultiMapCache::<K, V>::default()),
+                None => Box::<tables::KeyTimeMultiMapCache<K, V>>::default(),
             };
-            self.caches.insert(table.clone(), cache);
+            e.insert(cache);
         }
 
         let cache = self.caches.get_mut(&table).unwrap();
@@ -247,16 +247,16 @@ impl<S: BackingStore> StateStore<S> {
         table: char,
     ) -> GlobalKeyedState<K, V, S> {
         // this is done because populating it is async, so can't use or_insert().
-        if !self.caches.contains_key(&table) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
             let cache: Box<dyn Any + Send> = match &self.restore_from {
                 Some(_restore_from) => {
                     let cache =
                         GlobalKeyedStateCache::<K, V>::from_checkpoint(&self.backend, table).await;
                     Box::new(cache)
                 }
-                None => Box::new(GlobalKeyedStateCache::<K, V>::default()),
+                None => Box::<tables::GlobalKeyedStateCache<K, V>>::default(),
             };
-            self.caches.insert(table.clone(), cache);
+            e.insert(cache);
         }
 
         let cache = self.caches.get_mut(&table).unwrap();

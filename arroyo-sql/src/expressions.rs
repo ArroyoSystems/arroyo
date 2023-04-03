@@ -35,66 +35,56 @@ pub fn parse_expression(expr: impl ToString) -> syn::Expr {
 
 #[derive(Debug)]
 pub enum Expression {
-    ColumnExpression(ColumnExpression),
-    UnaryBooleanExpression(UnaryBooleanExpression),
-    LiteralExpression(LiteralExpression),
-    BinaryComparisonExpression(BinaryComparisonExpression),
-    BinaryMathExpression(BinaryMathExpression),
-    StructFieldExpression(StructFieldExpression),
-    AggregationExpression(AggregationExpression),
-    CastExpression(CastExpression),
-    NumericExpression(NumericExpression),
+    Column(ColumnExpression),
+    UnaryBoolean(UnaryBooleanExpression),
+    Literal(LiteralExpression),
+    BinaryComparison(BinaryComparisonExpression),
+    BinaryMath(BinaryMathExpression),
+    StructField(StructFieldExpression),
+    Aggregation(AggregationExpression),
+    Cast(CastExpression),
+    Numeric(NumericExpression),
 }
 
 impl Expression {
     pub fn to_syn_expression(&self) -> syn::Expr {
         match self {
-            Expression::ColumnExpression(column_expression) => {
-                column_expression.to_syn_expression()
-            }
-            Expression::UnaryBooleanExpression(unary_boolean_expression) => {
+            Expression::Column(column_expression) => column_expression.to_syn_expression(),
+            Expression::UnaryBoolean(unary_boolean_expression) => {
                 unary_boolean_expression.to_syn_expression()
             }
-            Expression::LiteralExpression(literal_expression) => {
-                literal_expression.to_syn_expression()
-            }
-            Expression::BinaryComparisonExpression(comparison_expression) => {
+            Expression::Literal(literal_expression) => literal_expression.to_syn_expression(),
+            Expression::BinaryComparison(comparison_expression) => {
                 comparison_expression.to_syn_expression()
             }
-            Expression::BinaryMathExpression(math_expression) => {
-                math_expression.to_syn_expression()
-            }
-            Expression::StructFieldExpression(struct_field_expression) => {
+            Expression::BinaryMath(math_expression) => math_expression.to_syn_expression(),
+            Expression::StructField(struct_field_expression) => {
                 struct_field_expression.to_syn_expression()
             }
-            Expression::AggregationExpression(aggregation_expression) => {
+            Expression::Aggregation(aggregation_expression) => {
                 aggregation_expression.to_syn_expression()
             }
-            Expression::CastExpression(cast_expression) => cast_expression.to_syn_expression(),
-            Expression::NumericExpression(numeric_expression) => {
-                numeric_expression.to_syn_expression()
-            }
+            Expression::Cast(cast_expression) => cast_expression.to_syn_expression(),
+            Expression::Numeric(numeric_expression) => numeric_expression.to_syn_expression(),
         }
     }
     pub fn return_type(&self) -> TypeDef {
         match self {
-            Expression::ColumnExpression(column_expression) => column_expression.return_type(),
-            Expression::UnaryBooleanExpression(unary_boolean_expression) => {
+            Expression::Column(column_expression) => column_expression.return_type(),
+            Expression::UnaryBoolean(unary_boolean_expression) => {
                 unary_boolean_expression.return_type()
             }
-            Expression::LiteralExpression(literal_expression) => literal_expression.return_type(),
-            Expression::BinaryComparisonExpression(comparison_expression) => {
+            Expression::Literal(literal_expression) => literal_expression.return_type(),
+            Expression::BinaryComparison(comparison_expression) => {
                 comparison_expression.return_type()
             }
-            Expression::BinaryMathExpression(math_expression) => math_expression.return_type(),
-            Expression::StructFieldExpression(struct_field_expression) => {
+            Expression::BinaryMath(math_expression) => math_expression.return_type(),
+            Expression::StructField(struct_field_expression) => {
                 struct_field_expression.return_type()
             }
-            Expression::AggregationExpression(aggregation_expression) => {
-                aggregation_expression.return_type()
-            }
-            Expression::CastExpression(cast_expression) => cast_expression.return_type(),
-            Expression::NumericExpression(numeric_expression) => numeric_expression.return_type(),
+            Expression::Aggregation(aggregation_expression) => aggregation_expression.return_type(),
+            Expression::Cast(cast_expression) => cast_expression.return_type(),
+            Expression::Numeric(numeric_expression) => numeric_expression.return_type(),
         }
     }
     pub fn nullable(&self) -> bool {
@@ -103,11 +93,7 @@ impl Expression {
 
     pub(crate) fn has_max_value(&self, field: &StructField) -> Option<i64> {
         match self {
-            Expression::BinaryComparisonExpression(BinaryComparisonExpression {
-                left,
-                op,
-                right,
-            }) => {
+            Expression::BinaryComparison(BinaryComparisonExpression { left, op, right }) => {
                 if let BinaryComparison::And = op {
                     match (left.has_max_value(field), right.has_max_value(field)) {
                         (None, None) => {}
@@ -116,15 +102,16 @@ impl Expression {
                     }
                 }
                 if let BinaryComparison::Or = op {
-                    match (left.has_max_value(field), right.has_max_value(field)) {
-                        (Some(left), Some(right)) => return Some(left.max(right)),
-                        _ => {}
+                    if let (Some(left), Some(right)) =
+                        (left.has_max_value(field), right.has_max_value(field))
+                    {
+                        return Some(left.max(right));
                     }
                 }
                 match (left.as_ref(), right.as_ref()) {
                     (
-                        Expression::ColumnExpression(ColumnExpression { column_field }),
-                        Expression::LiteralExpression(LiteralExpression { literal }),
+                        Expression::Column(ColumnExpression { column_field }),
+                        Expression::Literal(LiteralExpression { literal }),
                     ) => {
                         if field == column_field {
                             match (op, literal) {
@@ -142,8 +129,8 @@ impl Expression {
                         }
                     }
                     (
-                        Expression::LiteralExpression(LiteralExpression { literal }),
-                        Expression::ColumnExpression(ColumnExpression { column_field }),
+                        Expression::Literal(LiteralExpression { literal }),
+                        Expression::Column(ColumnExpression { column_field }),
                     ) => {
                         if field == column_field {
                             match (op, literal) {
@@ -171,7 +158,7 @@ impl Expression {
 pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> Result<Expression> {
     match expression {
         Expr::Alias(expr, _alias) => to_expression_generator(expr, input_struct),
-        Expr::Column(column) => Ok(Expression::ColumnExpression(ColumnExpression::from_column(
+        Expr::Column(column) => Ok(Expression::Column(ColumnExpression::from_column(
             column,
             input_struct,
         )?)),
@@ -503,7 +490,7 @@ impl ExpressionGenerator for UnaryBooleanExpression {
 
 impl UnaryBooleanExpression {
     fn new(operator: UnaryOperator, input: Box<Expression>) -> Expression {
-        Expression::UnaryBooleanExpression(UnaryBooleanExpression { operator, input })
+        Expression::UnaryBoolean(UnaryBooleanExpression { operator, input })
     }
 }
 
@@ -524,7 +511,7 @@ impl ExpressionGenerator for LiteralExpression {
 
 impl LiteralExpression {
     fn new(literal: ScalarValue) -> Expression {
-        Expression::LiteralExpression(Self { literal })
+        Expression::Literal(Self { literal })
     }
 }
 
@@ -577,11 +564,7 @@ impl BinaryComparisonExpression {
         right: Box<Expression>,
     ) -> Result<Expression> {
         let op = op.try_into()?;
-        Ok(Expression::BinaryComparisonExpression(Self {
-            left,
-            op,
-            right,
-        }))
+        Ok(Expression::BinaryComparison(Self { left, op, right }))
     }
 }
 
@@ -688,7 +671,7 @@ impl BinaryMathExpression {
         right: Box<Expression>,
     ) -> Result<Expression> {
         let op = op.try_into()?;
-        Ok(Expression::BinaryMathExpression(Self { left, op, right }))
+        Ok(Expression::BinaryMath(Self { left, op, right }))
     }
 }
 
@@ -735,7 +718,7 @@ impl StructFieldExpression {
             match key {
                 ScalarValue::Utf8(Some(column)) => {
                     let struct_field = struct_type.get_field(None, column)?;
-                    Ok(Expression::StructFieldExpression(Self {
+                    Ok(Expression::StructField(Self {
                         struct_expression,
                         struct_field,
                     }))
@@ -834,7 +817,7 @@ impl AggregationExpression {
         distinct: bool,
     ) -> Result<Expression> {
         let aggregator = Aggregator::from_datafusion(aggregator, distinct)?;
-        Ok(Expression::AggregationExpression(Self {
+        Ok(Expression::Aggregation(Self {
             producing_expression,
             aggregator,
         }))
@@ -920,7 +903,7 @@ impl CastExpression {
     fn new(input: Box<Expression>, data_type: &DataType) -> Result<Expression> {
         if let TypeDef::DataType(input_type, _) = input.return_type() {
             if Self::allowed_input_type(&input_type) && Self::allowed_output_type(data_type) {
-                Ok(Expression::CastExpression(Self {
+                Ok(Expression::Cast(Self {
                     input,
                     data_type: data_type.clone(),
                 }))
@@ -1083,10 +1066,7 @@ pub struct NumericExpression {
 impl NumericExpression {
     fn new(function: BuiltinScalarFunction, input: Box<Expression>) -> Result<Expression> {
         let function = function.try_into()?;
-        Ok(Expression::NumericExpression(NumericExpression {
-            function,
-            input,
-        }))
+        Ok(Expression::Numeric(NumericExpression { function, input }))
     }
 }
 

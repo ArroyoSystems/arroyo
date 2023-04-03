@@ -193,7 +193,7 @@ impl<K: Key, T: Data, SK: Ord + Send + 'static, OutT: Data> TumblingTopNWindowFu
         let mut state: TimeKeyMap<(K, u64), (SystemTime, T), _> =
             ctx.state.get_time_key_map('w', ctx.watermark()).await;
         for (_bin_time, (key, _rank), (timestamp, value)) in state.get_all().await {
-            self.insert(key.clone(), timestamp.clone(), value.clone(), watermark);
+            self.insert(key.clone(), *timestamp, value.clone(), watermark);
         }
     }
 
@@ -229,11 +229,7 @@ impl<K: Key, T: Data, SK: Ord + Send + 'static, OutT: Data> TumblingTopNWindowFu
                     .collect();
                 let mut rank: u64 = 0;
                 for (timestamp, value) in values {
-                    state.insert(
-                        bucket_timestamp.clone(),
-                        (key.clone(), rank),
-                        (timestamp, value),
-                    );
+                    state.insert(*bucket_timestamp, (key.clone(), rank), (timestamp, value));
                     rank += 1;
                 }
             }

@@ -199,7 +199,7 @@ impl RunningJobModel {
         }
 
         if self.state == JobState::Running && self.all_tasks_finished() {
-            for (_, w) in &mut self.workers {
+            for w in &mut self.workers.values_mut() {
                 if let Err(e) = w.connect.job_finished(JobFinishedReq {}).await {
                     warn!(
                         message = "Failed to connect to work to send job finish",
@@ -246,11 +246,11 @@ impl RunningJobModel {
         self.checkpoint_state = Some(
             CheckpointState::start(
                 self.job_id.clone(),
-                &organization_id,
+                organization_id,
                 self.epoch,
                 self.min_epoch,
                 &self.program,
-                &pool,
+                pool,
             )
             .await?,
         );
@@ -337,7 +337,7 @@ pub struct JobController {
     compacting_task: Option<JoinHandle<anyhow::Result<u32>>>,
 }
 
-impl<'a> std::fmt::Debug for JobController {
+impl std::fmt::Debug for JobController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JobController")
             .field("config", &self.config)
@@ -534,11 +534,11 @@ impl JobController {
     }
 
     pub fn get_workers(&self) -> Vec<WorkerId> {
-        self.model.workers.keys().map(|k| *k).collect()
+        self.model.workers.keys().copied().collect()
     }
 
     pub fn operator_parallelism(&self, op: &str) -> Option<usize> {
-        self.model.operator_parallelism.get(op).map(|p| *p)
+        self.model.operator_parallelism.get(op).cloned()
     }
 
     fn start_compaction(&self, new_min: u32) -> JoinHandle<anyhow::Result<u32>> {

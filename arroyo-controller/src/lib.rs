@@ -66,10 +66,10 @@ pub async fn get_from_object_store(path: &str) -> anyhow::Result<Vec<u8>> {
         .unwrap();
     }
 
-    if let Some(m) = PATH_REGEX.captures(&path) {
+    if let Some(m) = PATH_REGEX.captures(path) {
         return Ok(tokio::fs::read(&m.name("path").unwrap().as_str()).await?);
     }
-    if let Some(m) = S3_REGEX.captures(&path) {
+    if let Some(m) = S3_REGEX.captures(path) {
         let store = AmazonS3Builder::new()
             .with_bucket_name(m.name("bucket").unwrap().as_str())
             .with_region(m.name("region").unwrap().as_str())

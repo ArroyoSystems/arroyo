@@ -25,11 +25,12 @@ impl Recovering {
         let start = Instant::now();
         match job_controller.stop_job(StopMode::Immediate).await {
             Ok(_) => {
-                if let Ok(_) = timeout(
+                if (timeout(
                     Duration::from_secs(5),
-                    job_controller.wait_for_finish(&mut ctx.rx),
+                    job_controller.wait_for_finish(ctx.rx),
                 )
-                .await
+                .await)
+                    .is_ok()
                 {
                     info!(
                         message = "job stopped",

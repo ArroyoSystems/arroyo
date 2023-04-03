@@ -11,13 +11,13 @@ datafusion-common = "20.0"
 arroyo-datastream = { path = "../arroyo-datastream" }
 arrow-schema = {version = "34.0", features = ["serde"]}
 serde = {version = "1", features = ["derive"]}
-bincode = { version = "2.0.0-rc.1", features = ["serde"]}
+bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = "0.6"
-tokio = "1.0"
+tokio = "1.27"
 quote = "1.0"
 regex = "1"
 arrow = { version = "34.0.0", default-features = false }
-anyhow = {version = "1.0.66", features = ["backtrace"]}
+anyhow = {version = "1.0.70", features = ["backtrace"]}
 
 proc-macro2 = "1"
 syn = {version = "1", features = ["full", "parsing"]}

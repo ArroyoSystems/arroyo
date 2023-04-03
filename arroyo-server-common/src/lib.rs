@@ -118,7 +118,7 @@ async fn handle_error(_err: io::Error) -> impl IntoResponse {
 
 pub fn start_admin_server(name: String, default_port: u16, mut shutdown: Receiver<i32>) {
     let port = std::env::var(ADMIN_PORT_ENV)
-        .map(|t| u16::from_str(&t).expect(&format!("ADMIN_PORT={} is not valid", t)))
+        .map(|t| u16::from_str(&t).unwrap_or_else(|_| panic!("ADMIN_PORT={} is not valid", t)))
         .unwrap_or(default_port);
 
     info!("Starting {} admin server on 0.0.0.0:{}", name, port);

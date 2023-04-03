@@ -158,10 +158,7 @@ pub enum Message<K: Key, T: Data> {
 
 impl<K: Key, T: Data> Message<K, T> {
     pub fn is_end(&self) -> bool {
-        match self {
-            Message::Stop | Message::EndOfData => true,
-            _ => false,
-        }
+        matches!(self, Message::Stop | Message::EndOfData)
     }
 }
 

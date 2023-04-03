@@ -236,9 +236,9 @@ pub async fn parse_and_get_program(
         let sql_to_rel = SqlToRel::new(&schema_provider);
 
         let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
-        let mut optimizer_config = OptimizerContext::default();
+        let optimizer_config = OptimizerContext::default();
         let optimizer = Optimizer::new();
-        let optimized_plan = optimizer.optimize(&plan, &mut optimizer_config, |_plan, _rule| {})?;
+        let optimized_plan = optimizer.optimize(&plan, &optimizer_config, |_plan, _rule| {})?;
         get_program_from_plan(config, schema_provider, &optimized_plan)
     })
     .await
