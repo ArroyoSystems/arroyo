@@ -601,6 +601,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-sql-macro"
+version = "0.1.0"
+dependencies = [
+ "arroyo-sql",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "arroyo-sql-testing"
+version = "0.1.0"
+dependencies = [
+ "arroyo-sql",
+ "arroyo-sql-macro",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "arroyo-state"
 version = "0.1.0"
 dependencies = [
