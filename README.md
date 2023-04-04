@@ -13,13 +13,13 @@
 </h4>
 
 <h4 align="center">
-  <a href="https://github.com/ArroyoSystems/arroyo/blob/main/LICENSE-APACHE">
-    <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-orange" alt="Infisical is released under the MIT license." />
+  <a href="https://github.com/ArroyoSystems/arroyo/blob/master/LICENSE-APACHE">
+    <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-orange" alt="Arroyo is dual-licensed under Apache 2 and MIT licenses." />
   </a>
-  <a href="https://github.com/ArroyoSystems/arroyo/blob/main/CONTRIBUTING.md">
+  <a href="https://github.com/ArroyoSystems/arroyo/blob/master/CONTRIBUTING.md">
     <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen" alt="PRs welcome!" />
   </a>
-  <a href="https://github.com/Infisical/infisical/issues">
+  <a href="https://github.com/ArroyoSystems/arroyo/commits">
     <img src="https://img.shields.io/github/commit-activity/m/ArroyoSystems/arroyo" alt="git commit activity" />
   </a>
   <img alt="CI" src="https://github.com/ArroyoSystems/arroyo/actions/workflows/ci.yml/badge.svg">
