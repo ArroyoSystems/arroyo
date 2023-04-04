@@ -73,6 +73,7 @@ Arroyo is currently alpha. It is missing features and has known bugs. At this st
 interest to the Rust data processing community and contributors.
 
 ## Getting Started
+
 You can get started with a single node Arroyo cluster by running the following docker command:
 
 ```
