@@ -13,8 +13,8 @@
 </h4>
 
 <h4 align="center">
-  <a href="https://github.com/ArroyoSystems/arroyo/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="Infisical is released under the MIT license." />
+  <a href="https://github.com/ArroyoSystems/arroyo/blob/main/LICENSE-APACHE">
+    <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-orange" alt="Infisical is released under the MIT license." />
   </a>
   <a href="https://github.com/ArroyoSystems/arroyo/blob/main/CONTRIBUTING.md">
     <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen" alt="PRs welcome!" />
