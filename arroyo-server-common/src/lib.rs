@@ -10,7 +10,7 @@ use hyper::Body;
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter, IntCounter, TextEncoder};
 #[cfg(linux)]
-use pyroscope::{PyroscopeAgent, pyroscope::PyroscopeAgentRunning};
+use pyroscope::{pyroscope::PyroscopeAgentRunning, PyroscopeAgent};
 #[cfg(linux)]
 use pyroscope_pprofrs::{pprof_backend, PprofConfig};
 use std::str::FromStr;
@@ -28,7 +28,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultOnFailure, TraceLayer};
 
 use tracing::metadata::LevelFilter;
-use tracing::{info, span, warn, Level};
+use tracing::{info, span, Level};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;

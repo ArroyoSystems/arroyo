@@ -28,11 +28,6 @@ pub trait ExpressionGenerator: Debug {
     }
 }
 
-pub fn parse_expression(expr: impl ToString) -> syn::Expr {
-    let s = expr.to_string();
-    parse_str(&format!("({})", s)).expect(&s)
-}
-
 #[derive(Debug)]
 pub enum Expression {
     Column(ColumnExpression),
@@ -420,7 +415,7 @@ impl ColumnExpression {
 impl ExpressionGenerator for ColumnExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let field_ident = self.column_field.field_ident();
-        parse_expression(quote!(arg.#field_ident.clone()))
+        parse_quote!(arg.#field_ident.clone())
     }
 
     fn return_type(&self) -> TypeDef {
@@ -450,27 +445,26 @@ pub struct UnaryBooleanExpression {
 impl ExpressionGenerator for UnaryBooleanExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let argument_expr = self.input.to_syn_expression();
-        let tokens = match (self.input.return_type().is_optional(), &self.operator) {
-            (true, UnaryOperator::IsNotNull) => quote!(#argument_expr.is_some()),
-            (true, UnaryOperator::IsNull) => quote!(#argument_expr.is_none()),
-            (true, UnaryOperator::IsTrue) => quote!(#argument_expr.unwrap_or(false)),
-            (true, UnaryOperator::IsFalse) => quote!(!#argument_expr.unwrap_or(true)),
-            (true, UnaryOperator::IsUnknown) => quote!(#argument_expr.is_none()),
-            (true, UnaryOperator::IsNotTrue) => quote!(!#argument_expr.unwrap_or(false)),
-            (true, UnaryOperator::IsNotFalse) => quote!(#argument_expr.unwrap_or(true)),
-            (true, UnaryOperator::IsNotUnknown) => quote!(#argument_expr.is_some()),
-            (true, UnaryOperator::Negative) => quote!(#argument_expr.map(|x| -1 * x)),
-            (false, UnaryOperator::IsNotNull) => quote!(true),
-            (false, UnaryOperator::IsNull) => quote!(false),
-            (false, UnaryOperator::IsTrue) => quote!(#argument_expr),
-            (false, UnaryOperator::IsFalse) => quote!(!#argument_expr),
-            (false, UnaryOperator::IsUnknown) => quote!(false),
-            (false, UnaryOperator::IsNotTrue) => quote!(!#argument_expr),
-            (false, UnaryOperator::IsNotFalse) => quote!(#argument_expr),
-            (false, UnaryOperator::IsNotUnknown) => quote!(true),
-            (false, UnaryOperator::Negative) => quote!((-1 * #argument_expr)),
-        };
-        parse_expression(quote!(#tokens))
+        match (self.input.return_type().is_optional(), &self.operator) {
+            (true, UnaryOperator::IsNotNull) => parse_quote!(#argument_expr.is_some()),
+            (true, UnaryOperator::IsNull) => parse_quote!(#argument_expr.is_none()),
+            (true, UnaryOperator::IsTrue) => parse_quote!(#argument_expr.unwrap_or(false)),
+            (true, UnaryOperator::IsFalse) => parse_quote!(!#argument_expr.unwrap_or(true)),
+            (true, UnaryOperator::IsUnknown) => parse_quote!(#argument_expr.is_none()),
+            (true, UnaryOperator::IsNotTrue) => parse_quote!((!#argument_expr.unwrap_or(false))),
+            (true, UnaryOperator::IsNotFalse) => parse_quote!(#argument_expr.unwrap_or(true)),
+            (true, UnaryOperator::IsNotUnknown) => parse_quote!(#argument_expr.is_some()),
+            (true, UnaryOperator::Negative) => parse_quote!(#argument_expr.map(|x| -1 * x)),
+            (false, UnaryOperator::IsNotNull) => parse_quote!(true),
+            (false, UnaryOperator::IsNull) => parse_quote!(false),
+            (false, UnaryOperator::IsTrue) => parse_quote!(#argument_expr),
+            (false, UnaryOperator::IsFalse) => parse_quote!((!#argument_expr)),
+            (false, UnaryOperator::IsUnknown) => parse_quote!(false),
+            (false, UnaryOperator::IsNotTrue) => parse_quote!((!#argument_expr)),
+            (false, UnaryOperator::IsNotFalse) => parse_quote!(#argument_expr),
+            (false, UnaryOperator::IsNotUnknown) => parse_quote!(true),
+            (false, UnaryOperator::Negative) => parse_quote!((-1 * #argument_expr)),
+        }
     }
 
     fn return_type(&self) -> TypeDef {
@@ -580,20 +574,16 @@ impl ExpressionGenerator for BinaryComparisonExpression {
             BinaryComparison::LtEq => quote!(<=),
             BinaryComparison::Gt => quote!(>),
             BinaryComparison::GtEq => quote!(>=),
-            BinaryComparison::IsNotDistinctFrom => {
-                return parse_str(&quote!((#left_expr == #right_expr)).to_string()).unwrap()
-            }
-            BinaryComparison::IsDistinctFrom => {
-                return parse_str(&quote!((#left_expr != #right_expr)).to_string()).unwrap()
-            }
+            BinaryComparison::IsNotDistinctFrom => return parse_quote!((#left_expr == #right_expr)),
+            BinaryComparison::IsDistinctFrom => return parse_quote!((#left_expr != #right_expr)),
             BinaryComparison::And => quote!(&&),
             BinaryComparison::Or => quote!(||),
         };
-        let expr = match (
+        match (
             self.left.return_type().is_optional(),
             self.right.return_type().is_optional(),
         ) {
-            (true, true) => quote!({
+            (true, true) => parse_quote!({
                 let left = #left_expr;
                 let right = #right_expr;
                 match (left, right) {
@@ -602,14 +592,13 @@ impl ExpressionGenerator for BinaryComparisonExpression {
                 }
             }),
             (true, false) => {
-                quote!(#left_expr.map(|left| left #op #right_expr))
+                parse_quote!(#left_expr.map(|left| left #op #right_expr))
             }
             (false, true) => {
-                quote!(#right_expr.map(|right| #left_expr #op right))
+                parse_quote!(#right_expr.map(|right| #left_expr #op right))
             }
-            (false, false) => quote!(#left_expr #op #right_expr),
-        };
-        parse_expression(quote!(#expr))
+            (false, false) => parse_quote!((#left_expr #op #right_expr)),
+        }
     }
 
     fn return_type(&self) -> TypeDef {
@@ -680,8 +669,8 @@ impl ExpressionGenerator for BinaryMathExpression {
         let left_expr = self.left.to_syn_expression();
         let right_expr = self.right.to_syn_expression();
         let op = self.op.as_tokens();
-        let expr = match (self.left.nullable(), self.right.nullable()) {
-            (true, true) => quote!({
+        match (self.left.nullable(), self.right.nullable()) {
+            (true, true) => parse_quote!({
                 let left = #left_expr;
                 let right = #right_expr;
                 match (left, right) {
@@ -690,14 +679,13 @@ impl ExpressionGenerator for BinaryMathExpression {
                 }
             }),
             (true, false) => {
-                quote!(#left_expr.map(|left| left #op #right_expr))
+                parse_quote!(#left_expr.map(|left| left #op #right_expr))
             }
             (false, true) => {
-                quote!(#right_expr.map(|right| #left_expr #op right))
+                parse_quote!(#right_expr.map(|right| #left_expr #op right))
             }
-            (false, false) => quote!(#left_expr #op #right_expr),
-        };
-        parse_expression(quote!(#expr))
+            (false, false) => parse_quote!((#left_expr #op #right_expr)),
+        }
     }
 
     fn return_type(&self) -> TypeDef {
@@ -735,18 +723,17 @@ impl ExpressionGenerator for StructFieldExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let struct_expression = self.struct_expression.to_syn_expression();
         let field_ident = self.struct_field.field_ident();
-        let tokens = match (
+        match (
             self.struct_expression.nullable(),
             self.struct_field.nullable(),
         ) {
             (true, true) => {
-                quote!(#struct_expression.map(|arg| arg.#field_ident.clone()).flatten())
+                parse_quote!(#struct_expression.map(|arg| arg.#field_ident.clone()).flatten())
             }
-            (true, false) => quote!(#struct_expression.map(|arg| arg.#field_ident.clone())),
-            (false, true) => quote!(#struct_expression.#field_ident.clone()),
-            (false, false) => quote!(#struct_expression.#field_ident.clone()),
-        };
-        parse_expression(quote!(#tokens))
+            (true, false) => parse_quote!(#struct_expression.map(|arg| arg.#field_ident.clone())),
+            (false, true) => parse_quote!(#struct_expression.#field_ident.clone()),
+            (false, false) => parse_quote!(#struct_expression.#field_ident.clone()),
+        }
     }
 
     fn return_type(&self) -> TypeDef {
@@ -832,52 +819,51 @@ impl ExpressionGenerator for AggregationExpression {
         } else {
             (format_ident!("map"), Some(quote!(.unwrap())))
         };
-        let tokens = match self.aggregator {
+        match self.aggregator {
             Aggregator::Count => {
                 if self.producing_expression.nullable() {
-                    quote!(
+                    parse_quote!({
                         arg.iter()
                             .filter_map(|arg| #sub_expr)
                             .count() as i64
-                    )
+                    })
                 } else {
-                    quote!(arg.len() as i64)
+                    parse_quote!((arg.len() as i64))
                 }
             }
-            Aggregator::Sum => quote!(
+            Aggregator::Sum => parse_quote!({
                 arg.iter()
                     .#map_type(|arg| #sub_expr)
                     .reduce(|left, right| left + right)
                     #unwrap
-            ),
-            Aggregator::Min => quote!(
+            }),
+            Aggregator::Min => parse_quote!({
                 arg.iter()
                     .#map_type(|arg| #sub_expr)
                     .reduce( |left, right| left.min(right))
                     #unwrap
-            ),
-            Aggregator::Max => quote!(
+            }),
+            Aggregator::Max => parse_quote!({
                 arg.iter()
                     .map(|arg| #sub_expr)
                     .reduce(|left, right| left.max(right))
                     .unwrap()
-            ),
-            Aggregator::Avg => quote!(
+            }),
+            Aggregator::Avg => parse_quote!({
                 arg.iter()
                     .#map_type(|arg| #sub_expr)
                     .map(|val| (1, val))
                     .reduce(|left, right| (left.0 + right.0, left.1+right.1))
                     .map(|result| (result.1 as f64)/(result.0 as f64))
                     #unwrap
-            ),
-            Aggregator::CountDistinct => quote! {
+            }),
+            Aggregator::CountDistinct => parse_quote! ({
                 arg.iter()
                     .#map_type(|arg| #sub_expr)
                     .collect::<std::collections::HashSet<_>>()
                     .len() as i64
-            },
-        };
-        parse_expression(quote!(#tokens))
+            }),
+        }
     }
 
     fn return_type(&self) -> TypeDef {
@@ -1074,12 +1060,11 @@ impl ExpressionGenerator for NumericExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let function_name = self.function.function_name();
         let argument_expression = self.input.to_syn_expression();
-        let tokens = if self.input.return_type().is_optional() {
-            quote!(#argument_expression.map(|val| (val as f64).#function_name()))
+        if self.input.return_type().is_optional() {
+            parse_quote!(#argument_expression.map(|val| (val as f64).#function_name()))
         } else {
-            quote!((#argument_expression as f64).#function_name())
-        };
-        parse_str(&quote!(#tokens).to_string()).unwrap()
+            parse_quote!((#argument_expression as f64).#function_name())
+        }
     }
 
     fn return_type(&self) -> TypeDef {
@@ -1111,36 +1096,36 @@ impl SortExpression {
     }
     pub fn tuple_type(&self) -> syn::Type {
         let value_type = self.value.return_type().return_type();
-        let tokens = match (self.value.nullable(), &self.direction, self.nulls_first) {
+        match (self.value.nullable(), &self.direction, self.nulls_first) {
             (false, SortDirection::Asc, _) | (true, SortDirection::Asc, true) => {
-                quote!(#value_type)
+                parse_quote!(#value_type)
             }
             (false, SortDirection::Desc, _) | (true, SortDirection::Desc, true) => {
-                quote!(std::cmp::Reverse<#value_type>)
+                parse_quote!(std::cmp::Reverse<#value_type>)
             }
-            (true, SortDirection::Asc, false) => quote!((bool, #value_type)),
-            (true, SortDirection::Desc, false) => quote!(std::cmp::Reverse<(bool, #value_type)>),
-        };
-        parse_str(&tokens.to_string()).unwrap()
+            (true, SortDirection::Asc, false) => parse_quote!((bool, #value_type)),
+            (true, SortDirection::Desc, false) => {
+                parse_quote!(std::cmp::Reverse<(bool, #value_type)>)
+            }
+        }
     }
     pub fn to_syn_expr(&self) -> syn::Expr {
         let value_expr = self.value.to_syn_expression();
-        let tokens = match (self.value.nullable(), &self.direction, self.nulls_first) {
+        match (self.value.nullable(), &self.direction, self.nulls_first) {
             (false, SortDirection::Asc, _) | (true, SortDirection::Asc, true) => {
-                quote!(#value_expr)
+                parse_quote!(#value_expr)
             }
             (false, SortDirection::Desc, _) | (true, SortDirection::Desc, true) => {
-                quote!(std::cmp::Reverse(#value_expr))
+                parse_quote!(std::cmp::Reverse(#value_expr))
             }
-            (true, SortDirection::Asc, false) => quote!({
+            (true, SortDirection::Asc, false) => parse_quote!({
                     let option = #value_expr;
                     (option.is_none(), option)
             }),
-            (true, SortDirection::Desc, false) => quote!({
+            (true, SortDirection::Desc, false) => parse_quote!({
                 let option = #value_expr;
                 std::cmp::Reverse((option.is_none(), option))
             }),
-        };
-        parse_expression(tokens)
+        }
     }
 }
