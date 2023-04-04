@@ -1,0 +1,12 @@
+
+[package]
+name = "types"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+bincode = "=2.0.0-rc.3"
+bincode_derive = "=2.0.0-rc.3"
+arroyo-types = { path = "/opt/arroyo/src/arroyo-types" }
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

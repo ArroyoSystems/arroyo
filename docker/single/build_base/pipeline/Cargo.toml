@@ -1,0 +1,17 @@
+
+[package]
+name = "pipeline"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+types = { path = "../types" }
+petgraph = "0.6"
+bincode = "=2.0.0-rc.3"
+bincode_derive = "=2.0.0-rc.3"
+serde = "1.0"
+serde_json = "1.0"
+arroyo-types = { path = "/opt/arroyo/src/arroyo-types" }
+arroyo-worker = { path = "/opt/arroyo/src/arroyo-worker" }
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

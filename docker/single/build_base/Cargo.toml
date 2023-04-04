@@ -1,0 +1,10 @@
+
+[workspace]
+members = [
+  "pipeline",
+  "types",
+]
+
+exclude = [
+  "wasm-fns",
+]
