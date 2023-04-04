@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "arroyo-api",
+    "arroyo-compiler-service",
     "arroyo-controller",
     "arroyo-datastream",
     "arroyo-macro",

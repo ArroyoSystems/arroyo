@@ -54,9 +54,8 @@ The easiest way to get started running Arroyo is with the single-node Docker ima
 you need to get a test Arroyo system up and running.
 
 ```bash
-$ docker run -p 8000:8000 -p 8001:8001 ghcr.io/arroyosystems/arroyo:single
+$ docker run -p 8000:8000 -p 8001:8001 ghcr.io/arroyosystems/arroyo-single:multi-arch
 ```
-If you're on an arm64 machine, instead use ghcr.io/arroyosystems/arroyo:single-arm64.
 This will run all of the core arroyo services and a temporary Postgres database. The web UI will be exposed at
 http://localhost:8000.
 

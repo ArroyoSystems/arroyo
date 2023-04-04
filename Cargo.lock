@@ -437,6 +437,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-compiler-service"
+version = "0.1.0"
+dependencies = [
+ "arroyo-rpc",
+ "arroyo-server-common",
+ "arroyo-types",
+ "object_store",
+ "prost",
+ "tokio",
+ "tonic",
+ "tonic-reflection",
+ "tracing",
+]
+
+[[package]]
 name = "arroyo-controller"
 version = "0.1.0"
 dependencies = [

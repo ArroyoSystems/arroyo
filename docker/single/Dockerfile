@@ -37,21 +37,48 @@ RUN  curl -fsSL https://deb.nodesource.com/setup_19.x | sudo -E bash - && \
     sudo apt-get install -y nodejs && \
     curl -fsSL https://get.pnpm.io/install.sh | SHELL=$(which bash) bash -
 
-COPY . .
+COPY arroyo-types arroyo-types
+COPY arroyo-worker arroyo-worker
+COPY arroyo-rpc arroyo-rpc
+COPY arroyo-macro arroyo-macro
+COPY arroyo-server-common arroyo-server-common
+COPY arroyo-state arroyo-state
+COPY arroyo-metrics arroyo-metrics
+COPY arroyo-compiler-service arroyo-compiler-service
+
+COPY arroyo-api arroyo-api
+COPY arroyo-datastream arroyo-datastream
+COPY arroyo-node arroyo-node
+COPY arroyo-sql arroyo-sql
+COPY arroyo-sql-macro arroyo-sql-macro
+COPY arroyo-sql-testing arroyo-sql-testing
+COPY arroyo-controller arroyo-controller
+COPY arroyo-console arroyo-console
+COPY docker/single/refinery.toml refinery.toml
+
+COPY Cargo.toml Cargo.toml
+COPY Cargo.lock Cargo.lock
 
 RUN service postgresql start && \
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \
-    refinery migrate -c docker/single/refinery.toml -p arroyo-api/migrations
+    refinery migrate -c refinery.toml -p arroyo-api/migrations
 
 # Build Arroyo
 RUN service postgresql start && \
-    cargo build --release --bin arroyo-controller && cargo build --release --bin arroyo-api && \
-    mv target/release/arroyo-api /usr/local/bin/arroyo-api && \
-    mv target/release/arroyo-controller /usr/local/bin/arroyo-controller && \
-    cargo clean
+    cargo build --release -p arroyo-compiler-service -p arroyo-controller -p arroyo-api && \
+    mv target/release/arroyo-* /usr/bin && \
+    rm -rf target/release && \
+    service postgresql stop
+
 RUN bash -c "cd arroyo-console && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm build"
 
-EXPOSE 8000 8001
+WORKDIR /opt/arroyo/build
 
+COPY docker/single/build_base pipeline/
+RUN cd pipeline && cargo build --release && cargo build --release
+RUN cd pipeline/wasm-fns && wasm-pack build
+COPY docker/single/supervisord.conf /opt/arroyo/src/docker/single/supervisord.conf
+EXPOSE 8000 8001 9000 9190 9191
+RUN mkdir -p /tmp/arroyo/build
 CMD ["/usr/bin/supervisord", "-c", "/opt/arroyo/src/docker/single/supervisord.conf"]
