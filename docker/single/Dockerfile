@@ -4,6 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /opt/arroyo/src
 ARG MOLD_ARCH
 ARG PROTO_ARCH
+ARG PROM_ARCH
 
 RUN apt-get update
 RUN apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
@@ -18,6 +19,16 @@ RUN wget https://github.com/rui314/mold/releases/download/v1.11.0/mold-1.11.0-${
 RUN wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-${PROTO_ARCH}.zip && \
     unzip protoc*.zip && \
     mv bin/protoc /usr/local/bin
+
+# Install prometheus and pushgateway
+RUN wget https://github.com/prometheus/prometheus/releases/download/v2.43.0/prometheus-2.43.0.linux-${PROM_ARCH}.tar.gz && \
+    tar xvfz prometheus*.tar.gz && \
+    mv prometheus*/prometheus /usr/local/bin && \
+    wget https://github.com/prometheus/pushgateway/releases/download/v1.5.1/pushgateway-1.5.1.linux-${PROM_ARCH}.tar.gz && \
+    tar xvfz pushgateway*.tar.gz && \
+    mv pushgateway*/pushgateway /usr/local/bin && \
+    rm -rf prometheus* pushgateway*
+COPY docker/single/prometheus.yml /etc/prometheus/prometheus.yml
 
 # Install Rust
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
