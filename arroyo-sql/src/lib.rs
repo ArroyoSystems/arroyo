@@ -2,7 +2,8 @@
 use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
-use arroyo_datastream::{Operator, Program};
+use arrow_schema::TimeUnit;
+use arroyo_datastream::{NexmarkSource, Operator, Program, Source};
 
 use datafusion::optimizer::optimizer::Optimizer;
 use datafusion::optimizer::OptimizerContext;
@@ -24,12 +25,14 @@ use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
 use datafusion_expr::{
-    AccumulatorFunctionImplementation, ReturnTypeFunction, Signature, StateTypeFunction,
-    TypeSignature, Volatility,
+    AccumulatorFunctionImplementation, LogicalPlan, ReturnTypeFunction, Signature,
+    StateTypeFunction, TypeSignature, Volatility,
 };
+use expressions::{to_expression_generator, Expression};
 use pipeline::get_program_from_plan;
 use schemas::window_arrow_struct;
-use types::{StructDef, StructField};
+use syn::{parse_quote, parse_str};
+use types::{StructDef, StructField, TypeDef};
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -243,4 +246,154 @@ pub async fn parse_and_get_program(
     })
     .await
     .map_err(|_| anyhow!("Something went wrong"))?
+}
+
+#[derive(Clone, Default)]
+pub struct TestStruct {
+    pub non_nullable_i32: i32,
+    pub nullable_i32: Option<i32>,
+    pub non_nullable_bool: bool,
+    pub nullable_bool: Option<bool>,
+    pub non_nullable_f64: f64,
+    pub nullable_f64: Option<f64>,
+    pub non_nullable_i64: i64,
+    pub nullable_i64: Option<i64>,
+    pub non_nullable_string: String,
+    pub nullable_string: Option<String>,
+    // TODO: implement default properly
+    //  pub non_nullable_timestamp: SystemTime,
+    //  pub nullable_timestamp: Option<SystemTime>,
+}
+
+fn test_struct_def() -> StructDef {
+    StructDef {
+        name: Some("TestStruct".to_string()),
+        fields: vec![
+            StructField {
+                name: "non_nullable_i32".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Int32, false),
+            },
+            StructField {
+                name: "nullable_i32".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Int32, true),
+            },
+            StructField {
+                name: "non_nullable_bool".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Boolean, false),
+            },
+            StructField {
+                name: "nullable_bool".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Boolean, true),
+            },
+            StructField {
+                name: "non_nullable_f64".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Float64, false),
+            },
+            StructField {
+                name: "nullable_f64".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Float64, true),
+            },
+            StructField {
+                name: "non_nullable_i64".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Int64, false),
+            },
+            StructField {
+                name: "nullable_i64".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Int64, true),
+            },
+            StructField {
+                name: "non_nullable_string".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Utf8, false),
+            },
+            StructField {
+                name: "nullable_string".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Utf8, true),
+            },
+            StructField {
+                name: "non_nullable_timestamp".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(
+                    DataType::Timestamp(TimeUnit::Microsecond, None),
+                    false,
+                ),
+            },
+            StructField {
+                name: "nullable_timestamp".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(
+                    DataType::Timestamp(TimeUnit::Microsecond, None),
+                    true,
+                ),
+            },
+        ],
+    }
+}
+
+pub fn generate_test_code(
+    function_suffix: &str,
+    generating_expression: &Expression,
+    struct_tokens: &syn::Expr,
+    result_expression: &syn::Expr,
+) -> syn::ItemFn {
+    let syn_expr = generating_expression.to_syn_expression();
+    let function_name: syn::Ident =
+        parse_str(&format!("generated_test_{}", function_suffix)).unwrap();
+    parse_quote!(
+                fn #function_name() {
+                    assert_eq!({let arg = #struct_tokens;#syn_expr}, #result_expression);
+    })
+}
+
+pub fn get_test_expression(
+    test_name: &str,
+    calculation_string: &str,
+    input_value: &syn::Expr,
+    expected_result: &syn::Expr,
+) -> syn::ItemFn {
+    let struct_def = test_struct_def();
+
+    let mut schema_provider = ArroyoSchemaProvider::new();
+    schema_provider.add_source_with_type(
+        1,
+        "test_source".to_string(),
+        struct_def.fields.clone(),
+        NexmarkSource {
+            first_event_rate: 10,
+            num_events: Some(100),
+        }
+        .as_operator(),
+        struct_def.name.clone(),
+    );
+    let dialect = PostgreSqlDialect {};
+    let ast = Parser::parse_sql(
+        &dialect,
+        &format!("SELECT {} FROM test_source", calculation_string),
+    )
+    .unwrap();
+    let statement = &ast[0];
+    let sql_to_rel = SqlToRel::new(&schema_provider);
+    let plan = sql_to_rel.sql_statement_to_plan(statement.clone()).unwrap();
+    let mut optimizer_config = OptimizerContext::default();
+    let optimizer = Optimizer::new();
+    let plan = optimizer
+        .optimize(&plan, &mut optimizer_config, |_plan, _rule| {})
+        .unwrap();
+    let LogicalPlan::Projection(projection) = plan else {panic!("expect projection")};
+    let generating_expression = to_expression_generator(&projection.expr[0], &struct_def).unwrap();
+    generate_test_code(
+        test_name,
+        &generating_expression,
+        input_value,
+        expected_result,
+    )
 }
