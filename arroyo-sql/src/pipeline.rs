@@ -20,12 +20,12 @@ use datafusion_expr::{
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{format_ident, quote};
-use syn::{parse_str, Type};
+use syn::{parse_quote, parse_str, Type};
 
 use crate::{
     expressions::{
-        parse_expression, to_expression_generator, Column, ColumnExpression, Expression,
-        ExpressionGenerator, SortExpression,
+        to_expression_generator, Column, ColumnExpression, Expression, ExpressionGenerator,
+        SortExpression,
     },
     operators::{
         AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection,
@@ -278,13 +278,12 @@ impl JoinOperator {
 
         let return_struct = self.output_struct(left_struct, right_struct);
         let return_type = return_struct.get_type();
-        let tokens = quote!(
+        parse_quote!(
                 #return_type {
                     #(#assignments)
                     ,*
                 }
-        );
-        parse_expression(tokens)
+        )
     }
 }
 
