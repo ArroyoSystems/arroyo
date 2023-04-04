@@ -9,8 +9,9 @@ use axum::Router;
 use hyper::Body;
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter, IntCounter, TextEncoder};
-use pyroscope::pyroscope::PyroscopeAgentRunning;
-use pyroscope::PyroscopeAgent;
+#[cfg(linux)]
+use pyroscope::{PyroscopeAgent, pyroscope::PyroscopeAgentRunning};
+#[cfg(linux)]
 use pyroscope_pprofrs::{pprof_backend, PprofConfig};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -35,6 +36,7 @@ use tracing_subscriber::Registry;
 
 use tracing_appender::non_blocking::WorkerGuard;
 
+#[cfg(linux)]
 const PYROSCOPE_SERVER_ADDRESS_ENV: &str = "PYROSCOPE_SERVER_ADDRESS";
 
 pub fn init_logging(name: &str) -> Option<WorkerGuard> {
@@ -151,6 +153,7 @@ pub fn start_admin_server(name: String, default_port: u16, mut shutdown: Receive
     });
 }
 
+#[cfg(linux)]
 pub fn try_profile_start(
     application_name: impl ToString,
     tags: Vec<(&str, &str)>,
