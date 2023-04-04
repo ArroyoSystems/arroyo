@@ -1,10 +1,7 @@
 use std::time::Duration;
 
 use crate::{
-    expressions::{
-        parse_expression, to_expression_generator, Aggregator, Column, Expression,
-        ExpressionGenerator,
-    },
+    expressions::{to_expression_generator, Aggregator, Column, Expression, ExpressionGenerator},
     schemas::window_type_def,
     types::{StructDef, StructField, TypeDef},
 };
@@ -19,7 +16,7 @@ use datafusion_expr::{
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_str, Ident, LitInt};
+use syn::{parse_quote, parse_str, Ident, LitInt};
 
 #[derive(Debug)]
 pub struct Projection {
@@ -87,13 +84,12 @@ impl Projection {
             })
             .collect();
         let output_type = self.truncated_return_type(terms).get_type();
-        let tokens = quote!(
+        parse_quote!(
                 #output_type {
                     #(#assignments)
                     ,*
                 }
-        );
-        parse_expression(tokens)
+        )
     }
 
     pub fn truncated_return_type(&self, terms: usize) -> StructDef {
@@ -138,13 +134,12 @@ impl ExpressionGenerator for Projection {
             })
             .collect();
         let output_type = self.return_type().return_type();
-        let tokens = quote!(
+        parse_quote!(
                 #output_type {
                     #(#assignments)
                     ,*
                 }
-        );
-        parse_expression(tokens)
+        )
     }
 
     fn return_type(&self) -> TypeDef {
@@ -198,15 +193,14 @@ impl ExpressionGenerator for AggregateProjection {
             })
             .collect();
         let output_type = self.return_type().return_type();
-        let tokens = quote!(
+        parse_quote!(
             {
                 #output_type {
                     #(#assignments)
                     ,*
                 }
             }
-        );
-        parse_expression(tokens)
+        )
     }
 
     fn return_type(&self) -> TypeDef {
@@ -309,13 +303,12 @@ impl GroupByKind {
                         end_time: arg.timestamp + std::time::Duration::from_nanos(1)}));
         }
         let return_type = return_struct.get_type();
-        let tokens = quote!(
+        parse_quote!(
             #return_type {
                     #(#assignments)
                     ,*
                 }
-        );
-        parse_expression(tokens)
+        )
     }
 }
 
@@ -327,60 +320,58 @@ pub struct TwoPhaseAggregateProjection {
 
 impl TwoPhaseAggregateProjection {
     pub fn combine_bin_syn_expr(&self) -> syn::Expr {
-        let some_assignments: Vec<_> = self
+        let some_assignments: Vec<syn::Expr> = self
             .field_computations
             .iter()
             .enumerate()
             .map(|(i, field_computation)| {
                 let expr = field_computation.combine_bin_syn_expr();
                 let i: syn::Index = parse_str(&i.to_string()).unwrap();
-                quote!({let current_bin = current_bin.#i;
+                parse_quote!({let current_bin = current_bin.#i;
                     let new_bin = arg.#i.clone();  #expr})
             })
             .collect();
         let trailing_comma = self.trailing_comma();
-        let tokens = quote!(
+        parse_quote!(
             match current_bin {
                 Some(current_bin) => {
                     (#(#some_assignments),*#trailing_comma)
                 }
                 None => arg.clone()
             }
-        );
-        parse_expression(tokens)
+        )
     }
 
     pub fn bin_merger_syn_expression(&self) -> syn::Expr {
-        let some_assignments: Vec<_> = self
+        let some_assignments: Vec<syn::Expr> = self
             .field_computations
             .iter()
             .enumerate()
             .map(|(i, field_computation)| {
                 let expr = field_computation.bin_syn_expr();
                 let i: syn::Index = parse_str(&i.to_string()).unwrap();
-                quote!({let current_bin = Some(current_bin.#i); #expr})
+                parse_quote!({let current_bin = Some(current_bin.#i); #expr})
             })
             .collect();
-        let none_assignments: Vec<_> = self
+        let none_assignments: Vec<syn::Expr> = self
             .field_computations
             .iter()
             .map(|field_computation| {
                 let expr = field_computation.bin_syn_expr();
                 let bin_type = field_computation.bin_type();
-                quote!({let current_bin:Option<#bin_type> = None; #expr})
+                parse_quote!({let current_bin:Option<#bin_type> = None; #expr})
             })
             .collect();
 
         let trailing_comma = self.trailing_comma();
-        let tokens = quote!(
+        parse_quote!(
             match current_bin {
                 Some(current_bin) => {
                     (#(#some_assignments),*#trailing_comma)},
                 None => {
                     (#(#none_assignments),*#trailing_comma)}
             }
-        );
-        parse_expression(tokens)
+        )
     }
 
     pub fn tumbling_aggregation_syn_expression(&self) -> syn::Expr {
@@ -405,15 +396,14 @@ impl TwoPhaseAggregateProjection {
             })
             .collect();
         let output_type = self.output_struct().get_type();
-        let tokens = quote!(
+        parse_quote!(
             {
                 #output_type {
                     #(#assignments)
                     ,*
                 }
             }
-        );
-        parse_expression(tokens)
+        )
     }
     pub fn sliding_aggregation_syn_expression(&self) -> syn::Expr {
         let assignments: Vec<_> = self
@@ -437,15 +427,14 @@ impl TwoPhaseAggregateProjection {
             })
             .collect();
         let output_type = self.output_struct().get_type();
-        let tokens = quote!(
+        parse_quote!(
             {
                 #output_type {
                     #(#assignments)
                     ,*
                 }
             }
-        );
-        parse_expression(tokens)
+        )
     }
 
     pub fn output_struct(&self) -> StructDef {
@@ -476,64 +465,62 @@ impl TwoPhaseAggregateProjection {
 
     pub(crate) fn memory_add_syn_expression(&self) -> syn::Expr {
         let trailing_comma = self.trailing_comma();
-        let some_assignments: Vec<_> = self
+        let some_assignments: Vec<syn::Expr> = self
             .field_computations
             .iter()
             .enumerate()
             .map(|(i, field_computation)| {
                 let expr = field_computation.memory_add_syn_expr();
                 let i: syn::Index = parse_str(&i.to_string()).unwrap();
-                quote!({let current = Some(current.#i);
+                parse_quote!({let current = Some(current.#i);
                     let bin_value = bin_value.#i;
                      #expr})
             })
             .collect();
-        let none_assignments: Vec<_> = self
+        let none_assignments: Vec<syn::Expr> = self
             .field_computations
             .iter()
             .enumerate()
             .map(|(i, field_computation)| {
                 let expr = field_computation.memory_add_syn_expr();
                 let i: syn::Index = parse_str(&i.to_string()).unwrap();
-                quote!({let current = None;
+                parse_quote!({let current = None;
                 let bin_value = bin_value.#i;
                  #expr})
             })
             .collect();
-        let tokens = quote!(
+        parse_quote!(
             match current {
                 Some((i, current)) => {
                     (i +1, (#(#some_assignments),*#trailing_comma))},
                 None => {
                     (1, (#(#none_assignments),*#trailing_comma))}
             }
-        );
-        parse_expression(tokens)
+        )
     }
 
     pub(crate) fn memory_remove_syn_expression(&self) -> syn::Expr {
-        let removals: Vec<_> = self
+        let removals: Vec<syn::Expr> = self
             .field_computations
             .iter()
             .enumerate()
             .map(|(i, field_computation)| {
                 let expr = field_computation.memory_remove_syn_expr();
                 let i: syn::Index = parse_str(&i.to_string()).unwrap();
-                quote!({let current = current.1.#i;
+                parse_quote!({let current = current.1.#i;
                     let bin_value = bin_value.#i;
                      #expr.unwrap()})
             })
             .collect();
 
         let trailing_comma = self.trailing_comma();
-        let tokens = quote!(
+        parse_quote!(
             if current.0 == 1 {
                 None
             } else {
                 Some((current.0 - 1, (#(#removals),*#trailing_comma)))
             }
-        );
-        parse_expression(tokens)
+        )
     }
 
     pub(crate) fn bin_type(&self) -> syn::Type {
@@ -543,8 +530,7 @@ impl TwoPhaseAggregateProjection {
             .iter()
             .map(|computation| computation.bin_type())
             .collect();
-        let tokens = quote!((#(#bin_types),*#trailing_comma));
-        parse_str(&tokens.to_string()).unwrap()
+        parse_quote!((#(#bin_types),*#trailing_comma))
     }
 
     pub(crate) fn memory_type(&self) -> syn::Type {
@@ -554,8 +540,7 @@ impl TwoPhaseAggregateProjection {
             .iter()
             .map(|computation| computation.mem_type())
             .collect();
-        let tokens = quote!((usize,(#(#mem_types),*#trailing_comma)));
-        parse_str(&tokens.to_string()).unwrap()
+        parse_quote!((usize,(#(#mem_types),*#trailing_comma)))
     }
 }
 
@@ -612,26 +597,25 @@ impl TwoPhaseAggregation {
     fn bin_type(&self) -> syn::Type {
         let input_nullable = self.incoming_expression.nullable();
         let aggregate_type = self.aggregate_type();
-        let tokens = match (&self.aggregator, input_nullable) {
-            (Aggregator::Count, _) => quote!(i64),
+        match (&self.aggregator, input_nullable) {
+            (Aggregator::Count, _) => parse_quote!(i64),
             (Aggregator::Sum, true) | (Aggregator::Min, true) | (Aggregator::Max, true) => {
-                quote!(Option<#aggregate_type>)
+                parse_quote!(Option<#aggregate_type>)
             }
             (Aggregator::Sum, false) | (Aggregator::Min, false) | (Aggregator::Max, false) => {
-                quote!( #aggregate_type)
+                parse_quote!( #aggregate_type)
             }
-            (Aggregator::Avg, true) => quote!(Option<(i64, #aggregate_type)>),
-            (Aggregator::Avg, false) => quote!((i64, #aggregate_type)),
+            (Aggregator::Avg, true) => parse_quote!(Option<(i64, #aggregate_type)>),
+            (Aggregator::Avg, false) => parse_quote!((i64, #aggregate_type)),
             (Aggregator::CountDistinct, _) => unimplemented!(),
-        };
-        parse_str(&quote!(#tokens).to_string()).unwrap()
+        }
     }
 
     fn combine_bin_syn_expr(&self) -> syn::Expr {
         let input_nullable = self.incoming_expression.nullable();
-        let tokens = match (&self.aggregator, input_nullable) {
-            (Aggregator::Count, _) => quote!({ current_bin + new_bin }),
-            (Aggregator::Sum, true) => quote!({
+        match (&self.aggregator, input_nullable) {
+            (Aggregator::Count, _) => parse_quote!({ current_bin + new_bin }),
+            (Aggregator::Sum, true) => parse_quote!({
                 match (current_bin, new_bin) {
                     (Some(value), Some(addition)) => Some(value + addition),
                     (Some(value), None) => Some(value),
@@ -639,8 +623,8 @@ impl TwoPhaseAggregation {
                     (None, None) => None,
                 }
             }),
-            (Aggregator::Sum, false) => quote!({ current_bin + new_bin }),
-            (Aggregator::Min, true) => quote!({
+            (Aggregator::Sum, false) => parse_quote!({ current_bin + new_bin }),
+            (Aggregator::Min, true) => parse_quote!({
                 match (current_bin, new_bin) {
                     (Some(value), Some(new_value)) => Some(value.min(new_value)),
                     (Some(value), None) => Some(value),
@@ -648,8 +632,8 @@ impl TwoPhaseAggregation {
                     (None, None) => None,
                 }
             }),
-            (Aggregator::Min, false) => quote!({ current_bin.min(new_bin) }),
-            (Aggregator::Max, true) => quote!({
+            (Aggregator::Min, false) => parse_quote!({ current_bin.min(new_bin) }),
+            (Aggregator::Max, true) => parse_quote!({
                 match (current_bin, new_bin) {
                     (Some(value), Some(new_value)) => Some(value.max(new_value)),
                     (Some(value), None) => Some(value),
@@ -657,8 +641,8 @@ impl TwoPhaseAggregation {
                     (None, None) => None,
                 }
             }),
-            (Aggregator::Max, false) => quote!({ current_bin.max(new_bin) }),
-            (Aggregator::Avg, true) => quote!({
+            (Aggregator::Max, false) => parse_quote!({ current_bin.max(new_bin) }),
+            (Aggregator::Avg, true) => parse_quote!({
                 match (current_bin, new_bin) {
                     (Some((current_count, current_sum)), Some((new_count, new_sum))) => {
                         Some((current_count + new_count, current_sum + new_sum))
@@ -669,25 +653,24 @@ impl TwoPhaseAggregation {
                 }
             }),
             (Aggregator::Avg, false) => {
-                quote!({ (current_bin.0 + new_bin.0, current_bin.1 + new_bin.1) })
+                parse_quote!({ (current_bin.0 + new_bin.0, current_bin.1 + new_bin.1) })
             }
             (Aggregator::CountDistinct, _) => unreachable!("no two phase for count distinct"),
-        };
-        parse_expression(tokens)
+        }
     }
 
     fn bin_syn_expr(&self) -> syn::Expr {
         let expr = self.incoming_expression.to_syn_expression();
         let aggregate_type = self.aggregate_type();
         let input_nullable = self.incoming_expression.nullable();
-        let tokens = match (&self.aggregator, input_nullable) {
-            (Aggregator::Count, true) => quote!({
+        match (&self.aggregator, input_nullable) {
+            (Aggregator::Count, true) => parse_quote!({
                 let  count = current_bin.unwrap_or(0);
                 let addition = if #expr.is_some() {1} else {0};
                 count + addition
             }),
-            (Aggregator::Count, false) => quote!({ current_bin.unwrap_or(0) + 1 }),
-            (Aggregator::Sum, true) => quote!({
+            (Aggregator::Count, false) => parse_quote!({ current_bin.unwrap_or(0) + 1 }),
+            (Aggregator::Sum, true) => parse_quote!({
                 match (current_bin.flatten(), #expr) {
                     (Some(value), Some(addition)) => Some(value + (addition as #aggregate_type)),
                     (Some(value), None) => Some(value),
@@ -695,13 +678,13 @@ impl TwoPhaseAggregation {
                     (None, None) => None,
                 }
             }),
-            (Aggregator::Sum, false) => quote!({
+            (Aggregator::Sum, false) => parse_quote!({
                 match current_bin {
                     Some(value) => value + (#expr as #aggregate_type),
                     None => (#expr as #aggregate_type),
                 }
             }),
-            (Aggregator::Min, true) => quote!({
+            (Aggregator::Min, true) => parse_quote!({
                 match (current_bin.flatten(), #expr) {
                     (Some(value), Some(new_value)) => Some(value.min(new_value)),
                     (Some(value), None) => Some(value),
@@ -709,13 +692,13 @@ impl TwoPhaseAggregation {
                     (None, None) => None,
                 }
             }),
-            (Aggregator::Min, false) => quote!({
+            (Aggregator::Min, false) => parse_quote!({
                 match current_bin {
                     Some(value) => value.min(#expr),
                     None => #expr
                 }
             }),
-            (Aggregator::Max, true) => quote!({
+            (Aggregator::Max, true) => parse_quote!({
                 match (current_bin.flatten(), #expr) {
                     (Some(value), Some(new_value)) => Some(value.max(new_value)),
                     (Some(value), None) => Some(value),
@@ -723,13 +706,13 @@ impl TwoPhaseAggregation {
                     (None, None) => None,
                 }
             }),
-            (Aggregator::Max, false) => quote!({
+            (Aggregator::Max, false) => parse_quote!({
                 match current_bin {
                     Some(value) => value.max(#expr),
                     None => #expr
                 }
             }),
-            (Aggregator::Avg, true) => quote!({
+            (Aggregator::Avg, true) => parse_quote!({
                 match (current_bin.flatten(), #expr) {
                     (Some((count, sum)), Some(value)) => Some((count + 1, sum + (value as #aggregate_type))),
                     (Some((count, sum)), None) => Some((count, sum)),
@@ -737,111 +720,107 @@ impl TwoPhaseAggregation {
                     (None, None) => None,
                 }
             }),
-            (Aggregator::Avg, false) => quote!({
+            (Aggregator::Avg, false) => parse_quote!({
                 match current_bin {
                     Some((count, sum)) => (count + 1, sum + (#expr as #aggregate_type)),
                     None => (1, #expr as #aggregate_type)
                 }
             }),
             (Aggregator::CountDistinct, _) => unreachable!("no two phase for count distinct"),
-        };
-        parse_expression(tokens)
+        }
     }
 
     fn mem_type(&self) -> syn::Type {
         let input_nullable = self.incoming_expression.nullable();
         let expr_type = self.aggregate_type();
-        let tokens = match (&self.aggregator, input_nullable) {
-            (Aggregator::Count, _) => quote!((i64, i64)),
-            (Aggregator::Sum, true) => quote!((i64, i64, Option<#expr_type>)),
+        match (&self.aggregator, input_nullable) {
+            (Aggregator::Count, _) => parse_quote!((i64, i64)),
+            (Aggregator::Sum, true) => parse_quote!((i64, i64, Option<#expr_type>)),
             (Aggregator::Min, true) | (Aggregator::Max, true) => {
-                quote!((i64, std::collections::BTreeMap<#expr_type, usize>))
+                parse_quote!((i64, std::collections::BTreeMap<#expr_type, usize>))
             }
-            (Aggregator::Sum, false) => quote!((i64, #expr_type)),
+            (Aggregator::Sum, false) => parse_quote!((i64, #expr_type)),
             (Aggregator::Min, false) | (Aggregator::Max, false) => {
-                quote!(std::collections::BTreeMap<#expr_type, usize>)
+                parse_quote!(std::collections::BTreeMap<#expr_type, usize>)
             }
-            (Aggregator::Avg, true) => quote!((i64, i64, Option<(i64, #expr_type)>)),
-            (Aggregator::Avg, false) => quote!((i64, #expr_type)),
+            (Aggregator::Avg, true) => parse_quote!((i64, i64, Option<(i64, #expr_type)>)),
+            (Aggregator::Avg, false) => parse_quote!((i64, #expr_type)),
             (Aggregator::CountDistinct, _) => unimplemented!(),
-        };
-        parse_str(&quote!(#tokens).to_string()).unwrap()
+        }
     }
 
     fn memory_add_syn_expr(&self) -> syn::Expr {
         let input_nullable = self.incoming_expression.nullable();
         let expr_type = self.aggregate_type();
-        let tokens = match (&self.aggregator, input_nullable) {
-            (Aggregator::Count, _) => quote!({
+        match (&self.aggregator, input_nullable) {
+            (Aggregator::Count, _) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::count_add(current, bin_value)
             }),
-            (Aggregator::Sum, true) => quote!({
+            (Aggregator::Sum, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_sum_add::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Sum, false) => quote!({
+            (Aggregator::Sum, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_sum_add::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Min, true) => quote!({
+            (Aggregator::Min, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_heap_add::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Min, false) => quote!({
+            (Aggregator::Min, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_heap_add::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Max, true) => quote!({
+            (Aggregator::Max, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_heap_add::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Max, false) => quote!({
+            (Aggregator::Max, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_heap_add::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Avg, true) => quote!({
+            (Aggregator::Avg, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_average_add::<#expr_type>(
                     current, bin_value,
                 )
             }),
-            (Aggregator::Avg, false) => quote!({
+            (Aggregator::Avg, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_average_add::<#expr_type>(
                     current, bin_value,
                 )
             }),
             (Aggregator::CountDistinct, true) => todo!(),
             (Aggregator::CountDistinct, false) => todo!(),
-        };
-        parse_expression(tokens)
+        }
     }
 
     fn memory_remove_syn_expr(&self) -> syn::Expr {
         let input_nullable = self.incoming_expression.nullable();
         let expr_type = self.aggregate_type();
-        let tokens = match (&self.aggregator, input_nullable) {
-            (Aggregator::Count, true) | (Aggregator::Count, false) => quote!({
+        match (&self.aggregator, input_nullable) {
+            (Aggregator::Count, true) | (Aggregator::Count, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::count_remove(current, bin_value)
             }),
-            (Aggregator::Sum, true) => quote!({
+            (Aggregator::Sum, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_sum_remove::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Sum, false) => quote!({
+            (Aggregator::Sum, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_sum_remove::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Min, true) | (Aggregator::Max, true) => quote!({
+            (Aggregator::Min, true) | (Aggregator::Max, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_heap_remove::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Min, false) | (Aggregator::Max, false) => quote!({
+            (Aggregator::Min, false) | (Aggregator::Max, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_heap_remove::<#expr_type>(current, bin_value)
             }),
-            (Aggregator::Avg, true) => quote!({
+            (Aggregator::Avg, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_average_remove::<#expr_type>(
                     current, bin_value,
                 )
             }),
-            (Aggregator::Avg, false) => quote!({
+            (Aggregator::Avg, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_average_remove::<#expr_type>(
                     current, bin_value,
                 )
             }),
             (Aggregator::CountDistinct, true) => todo!(),
             (Aggregator::CountDistinct, false) => todo!(),
-        };
-        parse_expression(tokens)
+        }
     }
 
     fn return_type(&self) -> TypeDef {
@@ -865,57 +844,55 @@ impl TwoPhaseAggregation {
 
     fn bin_aggregating_expression(&self) -> syn::Expr {
         let input_nullable = self.incoming_expression.nullable();
-        let tokens = match (&self.aggregator, input_nullable) {
+        match (&self.aggregator, input_nullable) {
             (Aggregator::Count, _)
             | (Aggregator::Sum, _)
             | (Aggregator::Min, _)
-            | (Aggregator::Max, _) => quote!(arg.clone()),
-            (Aggregator::Avg, true) => quote!(match arg {
+            | (Aggregator::Max, _) => parse_quote!(arg.clone()),
+            (Aggregator::Avg, true) => parse_quote!(match arg {
                 Some((count, sum)) => Some((*sum as f64) / (*count as f64)),
                 None => None,
             }),
-            (Aggregator::Avg, false) => quote!({ (arg.1 as f64) / (arg.0 as f64) }),
+            (Aggregator::Avg, false) => parse_quote!({ (arg.1 as f64) / (arg.0 as f64) }),
             (Aggregator::CountDistinct, true) => todo!(),
             (Aggregator::CountDistinct, false) => todo!(),
-        };
-        parse_expression(tokens)
+        }
     }
 
     fn to_aggregating_syn_expression(&self) -> syn::Expr {
         let input_nullable = self.incoming_expression.nullable();
         let expr_type = self.aggregate_type();
-        let tokens = match (&self.aggregator, input_nullable) {
+        match (&self.aggregator, input_nullable) {
             (Aggregator::Count, _) => {
-                quote!({ arroyo_worker::operators::aggregating_window::count_aggregate(arg) })
+                parse_quote!({ arroyo_worker::operators::aggregating_window::count_aggregate(arg) })
             }
-            (Aggregator::Sum, true) => quote!({
+            (Aggregator::Sum, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_sum_aggregate::<#expr_type>(arg)
             }),
-            (Aggregator::Sum, false) => quote!({
+            (Aggregator::Sum, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_sum_aggregate::<#expr_type>(arg)
             }),
-            (Aggregator::Min, true) => quote!({
+            (Aggregator::Min, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_min_heap_aggregate::<#expr_type>(arg)
             }),
-            (Aggregator::Min, false) => quote!({
+            (Aggregator::Min, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_max_heap_aggregate::<#expr_type>(arg)
             }),
-            (Aggregator::Max, true) => quote!({
+            (Aggregator::Max, true) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::nullable_max_heap_aggregate::<#expr_type>(arg)
             }),
-            (Aggregator::Max, false) => quote!({
+            (Aggregator::Max, false) => parse_quote!({
                 arroyo_worker::operators::aggregating_window::non_nullable_max_heap_aggregate::<#expr_type>(arg)
             }),
-            (Aggregator::Avg, true) => quote!({
+            (Aggregator::Avg, true) => parse_quote!({
                 match &arg.2 {
                     Some((count, sum)) => Some((*sum as f64) / (*count as f64)),
                     None => None,
                 }
             }),
-            (Aggregator::Avg, false) => quote!({ (arg.1 as f64) / (arg.0 as f64) }),
+            (Aggregator::Avg, false) => parse_quote!({ (arg.1 as f64) / (arg.0 as f64) }),
             (Aggregator::CountDistinct, true) => unimplemented!(),
             (Aggregator::CountDistinct, false) => unimplemented!(),
-        };
-        parse_expression(tokens)
+        }
     }
 }
