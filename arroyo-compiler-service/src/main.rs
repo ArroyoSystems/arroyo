@@ -206,7 +206,6 @@ impl CompilerGrpc for CompileService {
         &self,
         request: Request<CompileQueryReq>,
     ) -> Result<Response<CompileQueryResp>, Status> {
-
         self.last_used
             .store(to_millis(SystemTime::now()), Ordering::Relaxed);
 

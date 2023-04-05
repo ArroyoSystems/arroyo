@@ -264,15 +264,9 @@ message TableDescriptor {
 
 // Worker
 
-message KeyRange {
-  uint64 start = 1;
-  uint64 end = 2;
-}
-
 message TaskAssignment {
   string operator_id = 1;
   uint64 operator_subtask = 2;
-  KeyRange key_range = 3;
   uint64 worker_id = 4;
   string worker_addr = 5;
 }

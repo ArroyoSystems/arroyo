@@ -1,14 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
-    ops::Range,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use arroyo_datastream::Program;
-use arroyo_rpc::grpc::{
-    worker_grpc_client::WorkerGrpcClient, KeyRange, StartExecutionReq, TaskAssignment,
-};
+use arroyo_rpc::grpc::{worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment};
 use arroyo_types::WorkerId;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
@@ -43,13 +40,6 @@ fn slots_for_job(job: &Program) -> usize {
         .unwrap_or(0)
 }
 
-fn range_for_substask(i: usize, n: usize) -> Range<u64> {
-    let x = i as f64 / n as f64;
-    let y = (i + 1) as f64 / n as f64;
-    // TODO: should probably check this math
-    ((x * u64::MAX as f64) as u64)..((y * u64::MAX as f64) as u64)
-}
-
 fn compute_assignments(workers: Vec<&WorkerStatus>, program: &Program) -> Vec<TaskAssignment> {
     let mut assignments = vec![];
     for node in program.graph.node_weights() {
@@ -57,15 +47,9 @@ fn compute_assignments(workers: Vec<&WorkerStatus>, program: &Program) -> Vec<Ta
         let mut current_count = 0;
 
         for i in 0..node.parallelism {
-            let range = range_for_substask(i, node.parallelism);
-
             assignments.push(TaskAssignment {
                 operator_id: node.operator_id.clone(),
                 operator_subtask: i as u64,
-                key_range: Some(KeyRange {
-                    start: range.start,
-                    end: range.end,
-                }),
                 worker_id: workers[worker_idx].id.0,
                 worker_addr: workers[worker_idx].data_address.clone(),
             });
