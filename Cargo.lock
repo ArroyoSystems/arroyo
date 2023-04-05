@@ -602,6 +602,7 @@ dependencies = [
  "arrow",
  "arrow-schema 34.0.0",
  "arroyo-datastream",
+ "arroyo-types",
  "bincode 2.0.0-rc.3",
  "datafusion",
  "datafusion-common",
@@ -630,6 +631,7 @@ version = "0.1.0"
 dependencies = [
  "arroyo-sql",
  "arroyo-sql-macro",
+ "arroyo-types",
  "quote",
  "syn 1.0.109",
 ]

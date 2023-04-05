@@ -309,6 +309,7 @@ mod tests {
         true
     );
 
+    // Is not false
     single_test_codegen!(
         "nullable_bool_is_not_false",
         "nullable_bool IS NOT FALSE",
@@ -317,5 +318,283 @@ mod tests {
             ..Default::default()
         },
         true
+    );
+
+    // Math functions
+
+    // Sqrt
+    single_test_codegen!(
+        "sqrt_of_four",
+        "sqrt(non_nullable_i64) < 3.01",
+        arroyo_sql::TestStruct {
+            non_nullable_i64: 8,
+            non_nullable_f64: 2.0,
+            ..Default::default()
+        },
+        true
+    );
+
+    // String functions
+
+    single_test_codegen!(
+        "ascii",
+        "ascii(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "test".into(),
+            ..Default::default()
+        },
+        't' as i32
+    );
+    single_test_codegen!(
+        "ascii_empty_string",
+        "ascii(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "".into(),
+            ..Default::default()
+        },
+        0
+    );
+
+    single_test_codegen!(
+        "ascii_on_null",
+        "ascii(nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
+    );
+    // BitLength
+    single_test_codegen!(
+        "bit_length_null",
+        "bit_length(nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "bit_length_empty_string",
+        "bit_length(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "".into(),
+            ..Default::default()
+        },
+        0
+    );
+
+    // Btrim
+    single_test_codegen!(
+        "btrim_null",
+        "btrim(nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "btrim_empty_string",
+        "btrim(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "".into(),
+            ..Default::default()
+        },
+        "".to_string()
+    );
+
+    // CharacterLength
+    single_test_codegen!(
+        "character_length_null",
+        "character_length(nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "character_length_empty_string",
+        "character_length(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "".into(),
+            ..Default::default()
+        },
+        0
+    );
+
+    // Chr
+    single_test_codegen!(
+        "chr_null",
+        "chr(nullable_i32)",
+        arroyo_sql::TestStruct {
+            nullable_i32: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "chr_corner_case",
+        "chr(non_nullable_i32)",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 65,
+            ..Default::default()
+        },
+        "A".to_string()
+    );
+    // Concat
+    single_test_codegen!(
+        "concat_strings",
+        "concat(non_nullable_string, ', ', nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello".into(),
+            nullable_string: Some("World".into()),
+            ..Default::default()
+        },
+        "Hello, World"
+    );
+
+    single_test_codegen!(
+        "concat_string_and_null",
+        "concat(non_nullable_string, nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello".into(),
+            nullable_string: None,
+            ..Default::default()
+        },
+        "Hello"
+    );
+
+    single_test_codegen!(
+        "concat_null_and_string",
+        "concat(nullable_string, non_nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            non_nullable_string: "World".into(),
+            ..Default::default()
+        },
+        "World"
+    );
+
+    single_test_codegen!(
+        "concat_empty_strings",
+        "concat(non_nullable_string, nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "".into(),
+            nullable_string: Some("".into()),
+            ..Default::default()
+        },
+        ""
+    );
+
+    single_test_codegen!(
+        "concat_null_and_null",
+        "concat(nullable_string, nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        ""
+    );
+
+    // ConcatWithSeparator
+    single_test_codegen!(
+        "concat_with_separator",
+        "concat_ws(', ', non_nullable_string, nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello".into(),
+            nullable_string: Some("World".into()),
+            ..Default::default()
+        },
+        "Hello, World".to_string()
+    );
+
+    single_test_codegen!(
+        "concat_with_separator_null",
+        "concat_ws(', ', non_nullable_string, nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello".into(),
+            nullable_string: None,
+            ..Default::default()
+        },
+        "Hello".to_string()
+    );
+
+    // InitCap
+    single_test_codegen!(
+        "init_cap",
+        "initcap(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "hello world".into(),
+            ..Default::default()
+        },
+        "Hello World".to_string()
+    );
+
+    single_test_codegen!(
+        "init_cap_null",
+        "initcap(nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    // SplitPart
+    single_test_codegen!(
+        "split_part",
+        "split_part(non_nullable_string, ', ', 2)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello, World, Test".into(),
+            ..Default::default()
+        },
+        "World".to_string()
+    );
+
+    single_test_codegen!(
+        "split_part_null",
+        "split_part(nullable_string, ', ', 2)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    // StartsWith
+    single_test_codegen!(
+        "starts_with",
+        "starts_with(non_nullable_string, 'Hel')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello, World".into(),
+            ..Default::default()
+        },
+        true
+    );
+
+    single_test_codegen!(
+        "starts_with_false",
+        "starts_with(non_nullable_string, 'Wor')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello, World".into(),
+            ..Default::default()
+        },
+        false
+    );
+
+    single_test_codegen!(
+        "starts_with_null",
+        "starts_with(nullable_string, 'Hel')",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
     );
 }

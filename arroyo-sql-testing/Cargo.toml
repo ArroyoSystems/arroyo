@@ -8,4 +8,5 @@ edition = "2021"
 syn = "1.0"
 quote = "1.0"
 arroyo-sql = { path = "../arroyo-sql" }
+arroyo-types = { path = "../arroyo-types" }
 arroyo-sql-macro = { path = "../arroyo-sql-macro" }
