@@ -45,6 +45,10 @@ impl KafkaTester {
             .set("enable.auto.commit", "false")
             .set("auto.offset.reset", "earliest")
             .set("group.id", "arroyo-kafka-source-tester")
+            .set("security.protocol", "SASL_SSL")
+            .set("sasl.mechanism", "SCRAM-SHA-512")
+            .set("sasl.username", "arroyo-customer")
+            .set("sasl.password", "customer-password")
             .create()
             .map_err(|e| format!("Failed to connect: {:?}", e))?;
 

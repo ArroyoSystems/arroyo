@@ -55,7 +55,7 @@ syn = {version = "1", features = ["full"]}
 quote = "1"
 proc-macro2 = "1"
 # source testing
-rdkafka = { version = "0.28", features = ["cmake-build"] }
+rdkafka = { version = "0.28", features = ["cmake-build",  "ssl-vendored", "sasl"] }
 
 # postgres
 refinery = { version = "0.8", features = [ "postgres" ]}

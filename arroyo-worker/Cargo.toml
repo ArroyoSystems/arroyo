@@ -18,7 +18,7 @@ wasmtime = "1.0"
 lazy_static = "1.4.0"
 petgraph = "0.6"
 chrono = "0.4"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
+rdkafka = { version = "0.28", features = ["cmake-build",  "ssl-vendored", "sasl"] }
 rdkafka-sys = "=4.2.0"
 prometheus = {version = "0.13", features = ["process"] }
 futures = "0.3"

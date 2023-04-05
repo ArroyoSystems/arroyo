@@ -100,6 +100,10 @@ where
 
         let consumer: StreamConsumer = ClientConfig::new()
             .set("bootstrap.servers", &self.bootstrap_servers)
+            .set("security.protocol", "SASL_SSL")
+            .set("sasl.mechanism", "SCRAM-SHA-512")
+            .set("sasl.username", "arroyo-customer")
+            .set("sasl.password", "customer-password")
             .set("enable.auto.commit", "false")
             .set(
                 "group.id",

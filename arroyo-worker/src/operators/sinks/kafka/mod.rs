@@ -51,6 +51,10 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
 
         let producer = ClientConfig::new()
             .set("bootstrap.servers", &self.bootstrap_servers)
+            .set("security.protocol", "SASL_SSL")
+            .set("sasl.mechanism", "SCRAM-SHA-512")
+            .set("sasl.username", "arroyo-customer")
+            .set("sasl.password", "customer-password")
             .create()
             .expect("Producer creation failed");
         producer
