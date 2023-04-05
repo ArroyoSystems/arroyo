@@ -19,7 +19,7 @@ use tracing::{debug, error, info, warn};
 pub use arroyo_macro::StreamNode;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{
-    CheckpointMetadata, HeartbeatReq, KeyRange, TableDeleteBehavior, TableDescriptor, TableType,
+    CheckpointMetadata, HeartbeatReq, TableDeleteBehavior, TableDescriptor, TableType,
     TableWriteBehavior, TaskAssignment, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
     TaskFailedReq, TaskFinishedReq, TaskStartedReq,
 };
@@ -784,10 +784,6 @@ impl Engine {
                     TaskAssignment {
                         operator_id: n.id().to_string(),
                         operator_subtask: n.subtask_idx() as u64,
-                        key_range: Some(KeyRange {
-                            start: 0,
-                            end: u64::MAX,
-                        }),
                         worker_id: worker_id.0,
                         worker_addr: "locahost:0".to_string(),
                     },
