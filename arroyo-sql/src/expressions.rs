@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use crate::{
     pipeline::SortDirection,
     types::{StructDef, StructField, TypeDef},
+    TestStruct,
 };
 use anyhow::{bail, Result};
 use arrow::datatypes::DataType;
@@ -39,6 +40,7 @@ pub enum Expression {
     Aggregation(AggregationExpression),
     Cast(CastExpression),
     Numeric(NumericExpression),
+    String(StringFunction),
 }
 
 impl Expression {
@@ -61,6 +63,7 @@ impl Expression {
             }
             Expression::Cast(cast_expression) => cast_expression.to_syn_expression(),
             Expression::Numeric(numeric_expression) => numeric_expression.to_syn_expression(),
+            Expression::String(string_function) => string_function.to_syn_expression(),
         }
     }
     pub fn return_type(&self) -> TypeDef {
@@ -80,6 +83,7 @@ impl Expression {
             Expression::Aggregation(aggregation_expression) => aggregation_expression.return_type(),
             Expression::Cast(cast_expression) => cast_expression.return_type(),
             Expression::Numeric(numeric_expression) => numeric_expression.return_type(),
+            Expression::String(string_function) => string_function.return_type(),
         }
     }
     pub fn nullable(&self) -> bool {
@@ -271,10 +275,11 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
             )
         }
         Expr::ScalarFunction { fun, args } => {
-            if args.len() != 1 {
-                bail!("multiple scalar function arguments are not yet supported");
-            }
-            let arg_expression = Box::new(to_expression_generator(&args[0], input_struct)?);
+            let mut arg_expressions: Vec<_> = args
+                .iter()
+                .map(|arg| to_expression_generator(arg, input_struct))
+                .collect::<Result<Vec<_>>>()?;
+            //let arg_expression = Box::new(to_expression_generator(&args[0], input_struct)?);
             match fun {
                 BuiltinScalarFunction::Abs
                 | BuiltinScalarFunction::Acos
@@ -293,9 +298,10 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
                 | BuiltinScalarFunction::Signum
                 | BuiltinScalarFunction::Trunc
                 | BuiltinScalarFunction::Log2
-                | BuiltinScalarFunction::Exp => {
-                    Ok(NumericExpression::new(fun.clone(), arg_expression)?)
-                }
+                | BuiltinScalarFunction::Exp => Ok(NumericExpression::new(
+                    fun.clone(),
+                    Box::new(arg_expressions.remove(0)),
+                )?),
                 BuiltinScalarFunction::Power | BuiltinScalarFunction::Atan2 => bail!(
                     "multiple argument numeric function {:?} not implemented",
                     fun
@@ -320,15 +326,18 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
                 | BuiltinScalarFunction::Translate
                 | BuiltinScalarFunction::OctetLength
                 | BuiltinScalarFunction::Upper
-                | BuiltinScalarFunction::RegexpMatch
-                | BuiltinScalarFunction::RegexpReplace
                 | BuiltinScalarFunction::Repeat
                 | BuiltinScalarFunction::Replace
                 | BuiltinScalarFunction::Reverse
                 | BuiltinScalarFunction::Right
                 | BuiltinScalarFunction::Rpad
                 | BuiltinScalarFunction::Rtrim => {
-                    bail!("string function {:?} not implemented", fun)
+                    let string_function: StringFunction =
+                        (fun.clone(), arg_expressions).try_into()?;
+                    Ok(Expression::String(string_function))
+                }
+                BuiltinScalarFunction::RegexpMatch | BuiltinScalarFunction::RegexpReplace => {
+                    bail!("regex function {:?} not yet implemented", fun)
                 }
                 BuiltinScalarFunction::Coalesce
                 | BuiltinScalarFunction::NullIf
@@ -1068,7 +1077,7 @@ impl ExpressionGenerator for NumericExpression {
     }
 
     fn return_type(&self) -> TypeDef {
-        TypeDef::DataType(DataType::Int64, self.input.return_type().is_optional())
+        TypeDef::DataType(DataType::Float64, self.input.return_type().is_optional())
     }
 }
 
@@ -1126,6 +1135,542 @@ impl SortExpression {
                 let option = #value_expr;
                 std::cmp::Reverse((option.is_none(), option))
             }),
+        }
+    }
+}
+#[derive(Debug)]
+pub enum StringFunction {
+    Ascii(Box<Expression>),
+    BitLength(Box<Expression>),
+    Btrim(Box<Expression>, Option<Box<Expression>>),
+    CharacterLength(Box<Expression>),
+    Chr(Box<Expression>),
+    Concat(Vec<Expression>),
+    ConcatWithSeparator(Box<Expression>, Vec<Expression>),
+    InitCap(Box<Expression>),
+    SplitPart(Box<Expression>, Box<Expression>, Box<Expression>),
+    StartsWith(Box<Expression>, Box<Expression>),
+    Strpos(Box<Expression>, Box<Expression>),
+    Substr(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
+    Left(Box<Expression>, Box<Expression>),
+    Lpad(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
+    Lower(Box<Expression>),
+    Ltrim(Box<Expression>, Option<Box<Expression>>),
+    Trim(Box<Expression>, Option<Box<Expression>>),
+    Translate(Box<Expression>, Box<Expression>, Box<Expression>),
+    OctetLength(Box<Expression>),
+    Upper(Box<Expression>),
+    RegexpMatch(Box<Expression>, Box<Expression>),
+    RegexpReplace(
+        Box<Expression>,
+        Box<Expression>,
+        Box<Expression>,
+        Option<Box<Expression>>,
+        Option<Box<Expression>>,
+    ),
+    Repeat(Box<Expression>, Box<Expression>),
+    Replace(Box<Expression>, Box<Expression>, Box<Expression>),
+    Reverse(Box<Expression>),
+    Right(Box<Expression>, Box<Expression>),
+    Rpad(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
+    Rtrim(Box<Expression>, Option<Box<Expression>>),
+}
+
+impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
+    type Error = anyhow::Error;
+
+    fn try_from(value: (BuiltinScalarFunction, Vec<Expression>)) -> Result<Self> {
+        let func = value.0;
+        let mut args = value.1;
+        // handle two vector cases
+        if func == BuiltinScalarFunction::Concat {
+            return Ok(StringFunction::Concat(args));
+        }
+        if func == BuiltinScalarFunction::ConcatWithSeparator {
+            let separator = Box::new(args.remove(0));
+            return Ok(StringFunction::ConcatWithSeparator(separator, args));
+        }
+        match (args.len(), func) {
+            (1, BuiltinScalarFunction::Ascii) => Ok(StringFunction::Ascii(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::BitLength) => Ok(StringFunction::BitLength(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::CharacterLength) => {
+                Ok(StringFunction::CharacterLength(Box::new(args.remove(0))))
+            }
+            (1, BuiltinScalarFunction::Chr) => Ok(StringFunction::Chr(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::InitCap) => Ok(StringFunction::InitCap(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::Lower) => Ok(StringFunction::Lower(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::OctetLength) => {
+                Ok(StringFunction::OctetLength(Box::new(args.remove(0))))
+            }
+            (1, BuiltinScalarFunction::Reverse) => Ok(StringFunction::Reverse(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::Btrim) => {
+                Ok(StringFunction::Btrim(Box::new(args.remove(0)), None))
+            }
+            (1, BuiltinScalarFunction::Ltrim) => {
+                Ok(StringFunction::Ltrim(Box::new(args.remove(0)), None))
+            }
+            (1, BuiltinScalarFunction::Rtrim) => {
+                Ok(StringFunction::Rtrim(Box::new(args.remove(0)), None))
+            }
+            (1, BuiltinScalarFunction::Trim) => {
+                Ok(StringFunction::Trim(Box::new(args.remove(0)), None))
+            }
+            (1, BuiltinScalarFunction::Upper) => Ok(StringFunction::Upper(Box::new(args.remove(0)))),
+            (2, BuiltinScalarFunction::Btrim) => Ok(StringFunction::Btrim(
+                Box::new(args.remove(0)),
+                Some(Box::new(args.remove(0))),
+            )),
+            (2, BuiltinScalarFunction::Left) => Ok(StringFunction::Left(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+            )),
+            (2, BuiltinScalarFunction::Lpad) => Ok(StringFunction::Lpad(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+                None,
+            )),
+            (2, BuiltinScalarFunction::Ltrim) => Ok(StringFunction::Ltrim(
+                Box::new(args.remove(0)),
+                Some(Box::new(args.remove(0))),
+            )),
+            (2, BuiltinScalarFunction::Repeat) => Ok(StringFunction::Repeat(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+            )),
+            (2, BuiltinScalarFunction::Right) => Ok(StringFunction::Right(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+            )),
+            (2, BuiltinScalarFunction::Rpad) => Ok(StringFunction::Rpad(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+                None,
+            )),
+            (2, BuiltinScalarFunction::Rtrim) => Ok(StringFunction::Rtrim(
+                Box::new(args.remove(0)),
+                Some(Box::new(args.remove(0))),
+            )),
+            (2, BuiltinScalarFunction::StartsWith) => Ok(StringFunction::StartsWith(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+            )),
+            (2, BuiltinScalarFunction::Strpos) => Ok(StringFunction::Strpos(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+            )),
+            (2, BuiltinScalarFunction::Substr) => Ok(StringFunction::Substr(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+                None,
+            )),
+            (2, BuiltinScalarFunction::Trim) => Ok(StringFunction::Trim(
+                Box::new(args.remove(0)),
+                Some(Box::new(args.remove(0))),
+            )),
+            (3, BuiltinScalarFunction::Substr) => Ok(StringFunction::Substr(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+                Some(Box::new(args.remove(0))),
+            )),
+            (3, BuiltinScalarFunction::Translate) => Ok(StringFunction::Translate(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+            )),
+            (3, BuiltinScalarFunction::Lpad) => Ok(StringFunction::Lpad(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+                Some(Box::new(args.remove(0))),
+            )),
+            (3, BuiltinScalarFunction::Rpad) => Ok(StringFunction::Rpad(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+                Some(Box::new(args.remove(0))),
+            )),
+            (3, BuiltinScalarFunction::Replace) => Ok(StringFunction::Replace(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+            )),
+            (3, BuiltinScalarFunction::SplitPart) => Ok(StringFunction::SplitPart(
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+                Box::new(args.remove(0)),
+            )),
+            (_, BuiltinScalarFunction::Concat) => {
+                Ok(StringFunction::Concat(args))
+            }
+            (1..=usize::MAX, func) if func == BuiltinScalarFunction::Concat => {
+                let separator = Box::new(args.remove(0));
+                Ok(StringFunction::ConcatWithSeparator(separator, args))
+            }
+            (_, func) => bail!("function {} with args {:?} not supported", func, args),
+        }
+    }
+}
+
+impl StringFunction {
+    fn return_type(&self) -> TypeDef {
+        match self {
+            StringFunction::Ascii(expr)
+            | StringFunction::BitLength(expr)
+            | StringFunction::CharacterLength(expr)
+            | StringFunction::OctetLength(expr)
+            | StringFunction::Reverse(expr) => TypeDef::DataType(DataType::Int32, expr.nullable()),
+            StringFunction::StartsWith(expr1, expr2) => {
+                TypeDef::DataType(DataType::Boolean, expr1.nullable() || expr2.nullable())
+            }
+            StringFunction::Left(expr1, expr2)
+            | StringFunction::Repeat(expr1, expr2)
+            | StringFunction::Right(expr1, expr2)
+            | StringFunction::Btrim(expr1, Some(expr2))
+            | StringFunction::Trim(expr1, Some(expr2))
+            | StringFunction::Ltrim(expr1, Some(expr2))
+            | StringFunction::Rtrim(expr1, Some(expr2))
+            | StringFunction::Substr(expr1, expr2, None)
+            | StringFunction::Lpad(expr1, expr2, None)
+            | StringFunction::Rpad(expr1, expr2, None) => {
+                TypeDef::DataType(DataType::Utf8, expr1.nullable() || expr2.nullable())
+            }
+            StringFunction::Btrim(expr, None)
+            | StringFunction::Lower(expr)
+            | StringFunction::Upper(expr)
+            | StringFunction::Chr(expr)
+            | StringFunction::InitCap(expr)
+            | StringFunction::Ltrim(expr, None)
+            | StringFunction::Rtrim(expr, None)
+            | StringFunction::Trim(expr, None) => {
+                TypeDef::DataType(DataType::Utf8, expr.nullable())
+            }
+            StringFunction::Substr(expr1, expr2, Some(expr3))
+            | StringFunction::Translate(expr1, expr2, expr3)
+            | StringFunction::Lpad(expr1, expr2, Some(expr3))
+            | StringFunction::Rpad(expr1, expr2, Some(expr3))
+            | StringFunction::Replace(expr1, expr2, expr3)
+            | StringFunction::SplitPart(expr1, expr2, expr3) => TypeDef::DataType(
+                DataType::Utf8,
+                expr1.nullable() || expr2.nullable() || expr3.nullable(),
+            ),
+            StringFunction::Concat(_exprs) => TypeDef::DataType(DataType::Utf8, false),
+            StringFunction::ConcatWithSeparator(expr, _exprs) => {
+                TypeDef::DataType(DataType::Utf8, expr.nullable())
+            }
+            StringFunction::RegexpReplace(..) | StringFunction::RegexpMatch(..) => {
+                todo!();
+            }
+            StringFunction::Strpos(expr1, expr2) => {
+                TypeDef::DataType(DataType::Int32, expr1.nullable() || expr2.nullable())
+            }
+        }
+    }
+    fn non_null_function_invocation(&self) -> syn::Expr {
+        match self {
+            StringFunction::Ascii(_) => parse_quote!(arroyo_types::functions::strings::ascii(arg)),
+            StringFunction::BitLength(_) => {
+                parse_quote!(arroyo_types::functions::strings::bit_length(arg))
+            }
+            StringFunction::CharacterLength(_) => parse_quote!((arg.chars().count() as i32)),
+            StringFunction::Chr(_) => parse_quote!((arroyo_types::functions::strings::chr(arg))),
+            StringFunction::InitCap(_) => {
+                parse_quote!(arroyo_types::functions::strings::initcap(arg))
+            }
+            StringFunction::OctetLength(_) => {
+                parse_quote!(arroyo_types::functions::strings::strpos(arg))
+            }
+            StringFunction::Lower(_) => parse_quote!(arg.to_lowercase()),
+            StringFunction::Upper(_) => parse_quote!(arg.to_uppercase()),
+            StringFunction::Reverse(_) => parse_quote!(arg.chars().rev().collect()),
+            StringFunction::Btrim(_, None) | StringFunction::Trim(_, None) => {
+                parse_quote!(arroyo_types::functions::strings::trim(arg, " ".to_string()))
+            }
+            StringFunction::Ltrim(_, None) => {
+                parse_quote!(arroyo_types::functions::strings::ltrim(
+                    arg,
+                    " ".to_string()
+                ))
+            }
+            StringFunction::Rtrim(_, None) => {
+                parse_quote!(arroyo_types::functions::strings::rtrim(
+                    arg,
+                    " ".to_string()
+                ))
+            }
+            StringFunction::Btrim(_, Some(_)) | StringFunction::Trim(_, Some(_)) => {
+                parse_quote!(arroyo_types::functions::strings::trim(arg1, arg2))
+            }
+            StringFunction::Substr(_, _, None) => {
+                parse_quote!(arroyo_types::functions::strings::substr(arg1, arg2, None))
+            }
+            StringFunction::StartsWith(_, _) => {
+                parse_quote!(arroyo_types::functions::strings::starts_with(arg1, arg2))
+            }
+            StringFunction::Strpos(_, _) => {
+                parse_quote!(arroyo_types::functions::strings::strpos(arg1, arg2))
+            }
+            StringFunction::Left(_, _) => {
+                parse_quote!(arroyo_types::functions::strings::left(arg1, arg2))
+            }
+            StringFunction::Lpad(_, _, None) => parse_quote!(
+                arroyo_types::functions::strings::lpad(arg1, arg2, " ".to_string())
+            ),
+            StringFunction::Ltrim(_, Some(_)) => {
+                parse_quote!(arroyo_types::functions::strings::ltrim(arg1, arg2))
+            }
+            StringFunction::RegexpMatch(_, _) => todo!(),
+            StringFunction::RegexpReplace(_, _, _, _, _) => todo!(),
+            StringFunction::Repeat(_, _) => parse_quote!(arg1.repeat(arg2 as usize)),
+            StringFunction::Right(_, _) => {
+                parse_quote!(arroyo_types::functions::strings::right(arg1, arg2))
+            }
+            StringFunction::Rpad(_, _, None) => parse_quote!(
+                arroyo_types::functions::strings::rpad(arg1, arg2, " ".to_string())
+            ),
+            StringFunction::Rtrim(_, Some(_)) => {
+                parse_quote!(arroyo_types::functions::strings::rtrim(arg1, arg2))
+            }
+            StringFunction::Replace(_, _, _) => parse_quote!(arg1.replace(&arg2, &arg3)),
+            StringFunction::Substr(_, _, Some(_)) => parse_quote!(
+                arroyo_types::functions::strings::substr(arg1, arg2, Some(arg3))
+            ),
+            StringFunction::Translate(_, _, _) => parse_quote!(
+                arroyo_types::functions::strings::translate(arg1, arg2, arg3)
+            ),
+            StringFunction::Lpad(_, _, Some(_)) => {
+                parse_quote!(arroyo_types::functions::strings::lpad(arg1, arg2, arg3))
+            }
+            StringFunction::Rpad(_, _, Some(_)) => {
+                parse_quote!(arroyo_types::functions::strings::rpad(arg1, arg2, arg3))
+            }
+            StringFunction::SplitPart(_, _, _) => parse_quote!(
+                arroyo_types::functions::strings::split_part(arg1, arg2, arg3)
+            ),
+            StringFunction::Concat(_) => parse_quote!(args.join("")),
+            StringFunction::ConcatWithSeparator(_, _) => parse_quote!(args.join(arg)),
+        }
+    }
+
+    pub fn to_syn_expression(&self) -> syn::Expr {
+        let function = self.non_null_function_invocation();
+        let function = if self.return_type().is_optional() {
+            parse_quote!(Some(#function))
+        } else {
+            function
+        };
+        match self {
+            // Single argument: arg
+            StringFunction::Ascii(arg)
+            | StringFunction::BitLength(arg)
+            | StringFunction::CharacterLength(arg)
+            | StringFunction::Chr(arg)
+            | StringFunction::InitCap(arg)
+            | StringFunction::Lower(arg)
+            | StringFunction::Upper(arg)
+            | StringFunction::Reverse(arg)
+            | StringFunction::OctetLength(arg)
+            | StringFunction::Btrim(arg, None)
+            | StringFunction::Trim(arg, None)
+            | StringFunction::Ltrim(arg, None)
+            | StringFunction::Rtrim(arg, None) => {
+                let expr = arg.to_syn_expression();
+                match arg.nullable() {
+                    true => parse_quote!({
+                        if let Some(arg) = #expr {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    false => parse_quote!({
+                        let arg = #expr;
+                        #function
+                    }),
+                }
+            }
+            // Two arguments: arg1 and arg2
+            StringFunction::StartsWith(arg1, arg2)
+            | StringFunction::Strpos(arg1, arg2)
+            | StringFunction::Left(arg1, arg2)
+            | StringFunction::Repeat(arg1, arg2)
+            | StringFunction::Right(arg1, arg2)
+            | StringFunction::Btrim(arg1, Some(arg2))
+            | StringFunction::Trim(arg1, Some(arg2))
+            | StringFunction::Ltrim(arg1, Some(arg2))
+            | StringFunction::Rtrim(arg1, Some(arg2))
+            | StringFunction::Substr(arg1, arg2, None)
+            | StringFunction::Lpad(arg1, arg2, None)
+            | StringFunction::Rpad(arg1, arg2, None) => {
+                let expr1 = arg1.to_syn_expression();
+                let expr2 = arg2.to_syn_expression();
+                match (arg1.nullable(), arg2.nullable()) {
+                    (true, true) => parse_quote!({
+                        if let (Some(arg1), Some(arg2)) = (#expr1, #expr2) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (true, false) => parse_quote!({
+                        let arg2 = #expr2;
+                        if let Some(arg1) = #expr1 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, true) => parse_quote!({
+                        let arg1 = #expr1;
+                        if let Some(arg2) = #expr2 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, false) => parse_quote!({
+                        let arg1 = #expr1;
+                        let arg2 = #expr2;
+                        #function
+                    }),
+                }
+            }
+            StringFunction::Substr(arg1, arg2, Some(arg3))
+            | StringFunction::Translate(arg1, arg2, arg3)
+            | StringFunction::Lpad(arg1, arg2, Some(arg3))
+            | StringFunction::Rpad(arg1, arg2, Some(arg3))
+            | StringFunction::Replace(arg1, arg2, arg3)
+            | StringFunction::SplitPart(arg1, arg2, arg3) => {
+                let expr1 = arg1.to_syn_expression();
+                let expr2 = arg2.to_syn_expression();
+                let expr3 = arg3.to_syn_expression();
+
+                match (arg1.nullable(), arg2.nullable(), arg3.nullable()) {
+                    (true, true, true) => parse_quote!({
+                        if let (Some(arg1), Some(arg2), Some(arg3)) = (#expr1, #expr2, #expr3) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (true, true, false) => parse_quote!({
+                        let arg3 = #expr3;
+                        if let (Some(arg1), Some(arg2)) = (#expr1, #expr2) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (true, false, true) => parse_quote!({
+                        let arg2 = #expr2;
+                        if let (Some(arg1), Some(arg3)) = (#expr1, #expr3) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (true, false, false) => parse_quote!({
+                        let arg2 = #expr2;
+                        let arg3 = #expr3;
+                        if let Some(arg1) = #expr1 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, true, true) => parse_quote!({
+                        let arg1 = #expr1;
+                        if let (Some(arg2), Some(arg3)) = (#expr2, #expr3) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, true, false) => parse_quote!({
+                        let arg1 = #expr1;
+                        let arg3 = #expr3;
+                        if let Some(arg2) = #expr2 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, false, true) => parse_quote!({
+                        let arg1 = #expr1;
+                        let arg2 = #expr2;
+                        if let Some(arg3) = #expr3 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, false, false) => parse_quote!({
+                        let arg1 = #expr1;
+                        let arg2 = #expr2;
+                        let arg3 = #expr3;
+                        #function
+                    }),
+                }
+            }
+            StringFunction::Concat(args) => {
+                let pushes: Vec<syn::Expr> = args
+                    .iter()
+                    .map(|arg| {
+                        let expr = arg.to_syn_expression();
+                        if arg.nullable() {
+                            parse_quote!(if let Some(to_append) = #expr {
+                                result.push_str(&to_append);
+                            })
+                        } else {
+                            parse_quote!(result.push_str(&#expr))
+                        }
+                    })
+                    .collect();
+                parse_quote!({
+                    let mut result = String::new();
+                    #(#pushes;)*
+                    result
+                })
+            }
+            StringFunction::ConcatWithSeparator(arg, args) => {
+                let separator_expr = arg.to_syn_expression();
+                let pushes: Vec<syn::Expr> = args
+                    .iter()
+                    .map(|arg| {
+                        let expr = arg.to_syn_expression();
+                        if arg.nullable() {
+                            parse_quote!(if let Some(to_append) = #expr {
+                                if !result.is_empty() {
+                                    result.push_str(&separator);
+                                }
+                                result.push_str(&to_append);
+                            })
+                        } else {
+                            parse_quote!({if !result.is_empty() {
+                                result.push_str(&separator);
+                            };result.push_str(&#expr)})
+                        }
+                    })
+                    .collect();
+                let non_null_computation: syn::Expr = parse_quote!({
+                    let mut result = String::new();
+                    #(#pushes;)*
+                    result
+                });
+                if arg.nullable() {
+                    parse_quote!({
+                        if let Some(separator) = #separator_expr {
+                            Some(#non_null_computation)
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    parse_quote!({
+                        let separator = #separator_expr;
+                        #non_null_computation
+                    })
+                }
+            }
+            StringFunction::RegexpMatch(_, _) => todo!(),
+            StringFunction::RegexpReplace(_, _, _, _, _) => todo!(),
         }
     }
 }

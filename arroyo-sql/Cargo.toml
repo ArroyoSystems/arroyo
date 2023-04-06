@@ -9,6 +9,7 @@ datafusion = "20.0"
 datafusion-expr = "20.0"
 datafusion-common = "20.0"
 arroyo-datastream = { path = "../arroyo-datastream" }
+arroyo-types = { path = "../arroyo-types" }
 arrow-schema = {version = "34.0", features = ["serde"]}
 serde = {version = "1", features = ["derive"]}
 bincode = { version = "2.0.0-rc.3", features = ["serde"]}
