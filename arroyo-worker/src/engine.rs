@@ -822,7 +822,7 @@ impl Engine {
         let job_id = self.job_id.clone();
 
         thread::spawn(move || {
-            #[cfg(linux)]
+            #[cfg(not(target_os = "freebsd"))]
             let _agent = arroyo_server_common::try_profile_start(
                 "node",
                 [("job_id", job_id.as_str())].to_vec(),

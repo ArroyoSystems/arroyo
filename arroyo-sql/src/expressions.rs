@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use crate::{
     pipeline::SortDirection,
     types::{StructDef, StructField, TypeDef},
-    TestStruct,
 };
 use anyhow::{bail, Result};
 use arrow::datatypes::DataType;

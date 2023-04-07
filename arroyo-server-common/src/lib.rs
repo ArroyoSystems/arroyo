@@ -9,9 +9,9 @@ use axum::Router;
 use hyper::Body;
 use lazy_static::lazy_static;
 use prometheus::{register_int_counter, IntCounter, TextEncoder};
-#[cfg(linux)]
+#[cfg(not(target_os = "freebsd"))]
 use pyroscope::{pyroscope::PyroscopeAgentRunning, PyroscopeAgent};
-#[cfg(linux)]
+#[cfg(not(target_os = "freebsd"))]
 use pyroscope_pprofrs::{pprof_backend, PprofConfig};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultOnFailure, TraceLayer};
 
 use tracing::metadata::LevelFilter;
-use tracing::{info, span, Level};
+use tracing::{info, warn, span, Level};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
@@ -36,7 +36,7 @@ use tracing_subscriber::Registry;
 
 use tracing_appender::non_blocking::WorkerGuard;
 
-#[cfg(linux)]
+#[cfg(not(target_os = "freebsd"))]
 const PYROSCOPE_SERVER_ADDRESS_ENV: &str = "PYROSCOPE_SERVER_ADDRESS";
 
 pub fn init_logging(name: &str) -> Option<WorkerGuard> {
@@ -153,7 +153,7 @@ pub fn start_admin_server(name: String, default_port: u16, mut shutdown: Receive
     });
 }
 
-#[cfg(linux)]
+#[cfg(not(target_os = "freebsd"))]
 pub fn try_profile_start(
     application_name: impl ToString,
     tags: Vec<(&str, &str)>,
