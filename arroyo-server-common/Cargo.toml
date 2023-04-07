@@ -24,6 +24,6 @@ axum = "0.6.12"
 lazy_static = "1.4.0"
 futures = { version = "0.3" }
 
-[target.'cfg(linux)'.dependencies]
+[target.'cfg(not(target_os="freebsd"))'.dependencies]
 pyroscope = "0.5"
 pyroscope_pprofrs = "0.2"
