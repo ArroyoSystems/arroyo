@@ -51,6 +51,7 @@ where
     bootstrap_servers: String,
     offset_mode: OffsetMode,
     serialization_mode: SerializationMode,
+    client_configs: HashMap<String, String>,
     messages_per_second: NonZeroU32,
     _t: PhantomData<T>,
 }
@@ -76,12 +77,17 @@ where
         offset_mode: OffsetMode,
         serialization_mode: SerializationMode,
         messages_per_second: u32,
+        client_configs: Vec<(&str, &str)>,
     ) -> Self {
         Self {
             topic: topic.to_string(),
             bootstrap_servers: servers.to_string(),
             offset_mode,
             serialization_mode,
+            client_configs: client_configs
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
             messages_per_second: NonZeroU32::new(messages_per_second).unwrap(),
             _t: PhantomData,
         }
@@ -97,8 +103,12 @@ where
 
     async fn get_consumer(&mut self, ctx: &mut Context<(), T>) -> Result<StreamConsumer, ()> {
         info!("Creating kafka consumer for {}", self.bootstrap_servers);
+        let mut client_config = ClientConfig::new();
 
-        let consumer: StreamConsumer = ClientConfig::new()
+        for (key, value) in &self.client_configs {
+            client_config.set(key, value);
+        }
+        let consumer: StreamConsumer = client_config
             .set("bootstrap.servers", &self.bootstrap_servers)
             .set("enable.auto.commit", "false")
             .set(

@@ -24,6 +24,7 @@ import {
   Icon,
   Input,
   Link,
+  Select,
   Spinner,
   Stack,
   Text,
@@ -35,8 +36,11 @@ import { SiApachekafka } from "react-icons/si";
 import { ApiGrpc } from "../../gen/api_connectweb";
 import {
   CreateConnectionReq,
+  KafkaAuthConfig,
   KafkaConnection,
   KinesisConnection,
+  NoAuth,
+  SaslAuth,
   TestSchemaResp,
   TestSourceMessage,
 } from "../../gen/api_pb";
@@ -65,6 +69,8 @@ function onChangeString(
   };
 }
 
+
+
 function ConfigureKafka({
   state,
   setState,
@@ -80,6 +86,74 @@ function ConfigureKafka({
     onChangeString(state, setState, "bootstrapServers", config)(e);
     setReady(e.target.value != "");
   };
+  const onChangeAuthType = (e: ChangeEvent<HTMLSelectElement>) => {
+    let authConfig;
+
+    switch (e.target.value) {
+      case "noAuth":
+        authConfig = new KafkaAuthConfig({ authType: { case: "noAuth", value: new NoAuth({}) } });
+        break;
+      case "saslAuth":
+        authConfig = new KafkaAuthConfig({ authType: { case: "saslAuth", value: new SaslAuth({}) } });
+        break;
+    }
+
+    config.authConfig = authConfig;
+    setState(
+      new CreateConnectionReq({
+        ...state,
+        connectionType: { case: state.connectionType.case as "kafka" | "kinesis", value: config },
+      })
+    );
+  };
+
+  const onChangeSaslProtocol = (e: ChangeEvent<HTMLInputElement>) => {
+    const updatedValue = { ...config.authConfig?.authType.value, protocol: e.target.value };
+    config.authConfig = new KafkaAuthConfig({ authType: { case: "saslAuth", value: updatedValue } });
+    setState(
+      new CreateConnectionReq({
+        ...state,
+        connectionType: { case: state.connectionType.case as "kafka" | "kinesis", value: config },
+      })
+    );
+  };
+
+  const onChangeSaslField = (e: ChangeEvent<HTMLInputElement>) => {
+  }
+
+  const onChangeSaslMechanism = (e: ChangeEvent<HTMLInputElement>) => {
+    const updatedValue = { ...config.authConfig?.authType.value, mechanism: e.target.value };
+    config.authConfig = new KafkaAuthConfig({ authType: { case: "saslAuth", value: updatedValue } });
+    setState(
+      new CreateConnectionReq({
+        ...state,
+        connectionType: { case: state.connectionType.case as "kafka" | "kinesis", value: config },
+      })
+    );
+  };
+
+  const onChangeSaslUsername = (e: ChangeEvent<HTMLInputElement>) => {
+    const updatedValue = { ...config.authConfig?.authType.value, username: e.target.value };
+    config.authConfig = new KafkaAuthConfig({ authType: { case: "saslAuth", value: updatedValue } });
+    setState(
+      new CreateConnectionReq({
+        ...state,
+        connectionType: { case: state.connectionType.case as "kafka" | "kinesis", value: config },
+      })
+    );
+  };
+
+  const onChangeSaslPassword = (e: ChangeEvent<HTMLInputElement>) => {
+    const updatedValue = { ...config.authConfig?.authType.value, password: e.target.value };
+    config.authConfig = new KafkaAuthConfig({ authType: { case: "saslAuth", value: updatedValue } });
+    setState(
+      new CreateConnectionReq({
+        ...state,
+        connectionType: { case: state.connectionType.case as "kafka" | "kinesis", value: config },
+      })
+    );
+  };
+
 
   return (
     <Stack spacing={5}>
@@ -88,6 +162,56 @@ function ConfigureKafka({
         <Input type="text" value={config.bootstrapServers} onChange={onChange} />
         <FormHelperText>Comma-separated list of kafka brokers to connect to</FormHelperText>
       </FormControl>
+      <FormControl isRequired>
+        <FormLabel>Authentication Type</FormLabel>
+        <Select placeholder="Select authentication type" value={config.authConfig?.authType.case || ""} onChange={onChangeAuthType}>
+          <option value="noAuth">No Auth</option>
+          <option value="saslAuth">SASL Auth</option>
+        </Select>
+      </FormControl>
+        {config.authConfig?.authType.case === "saslAuth" && (
+          <Stack spacing={5}>
+            <FormControl isRequired>
+              <FormLabel>Protocol</FormLabel>
+              <Input
+                type="text"
+                value={config.authConfig.authType.value.protocol || ""}
+                onChange={onChangeSaslProtocol}
+              />
+              <FormHelperText>
+                The SASL protocol used. SASL_PLAINTEXT, SASL_SSL, etc.
+              </FormHelperText>
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Mechanism</FormLabel>
+              <Input
+                type="text"
+                value={config.authConfig.authType.value.mechanism || ""}
+                onChange={onChangeSaslMechanism}
+              />
+              <FormHelperText>
+                The SASL mechanism used for authentication (e.g., SCRAM-SHA-256, SCRAM-SHA-512 etc.)
+              </FormHelperText>
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Username</FormLabel>
+              <Input
+                type="text"
+                value={config.authConfig.authType.value.username || ""}
+                onChange={onChangeSaslUsername}
+              />
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Password</FormLabel>
+              <Input
+                type="password"
+                value={config.authConfig.authType.value.password || ""}
+                onChange={onChangeSaslPassword}
+              />
+            </FormControl>
+          </Stack>
+        )}
+
     </Stack>
   );
 }

@@ -3,7 +3,7 @@
 /* eslint-disable */
 /* @ts-nocheck */
 
-import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq, DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSinksReq, GetSinksResp, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, ReadStateReq, ReadStateResp, SourceMetadataResp, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
+import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq, DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSinksReq, GetSinksResp, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, SourceMetadataResp, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
 import {MethodKind} from "@bufbuild/protobuf";
 
 /**
@@ -263,15 +263,6 @@ export const ApiGrpc = {
       I: GrpcOutputSubscription,
       O: OutputData,
       kind: MethodKind.ServerStreaming,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.ReadState
-     */
-    readState: {
-      name: "ReadState",
-      I: ReadStateReq,
-      O: ReadStateResp,
-      kind: MethodKind.Unary,
     },
   }
 } as const;

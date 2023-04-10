@@ -40,7 +40,6 @@ import {
   CreateSinkReq,
   GetConnectionsReq,
   KafkaSinkConfig,
-  StateSinkConfig,
   TestSchemaResp,
   TestSourceMessage,
 } from "../../gen/api_pb";
@@ -121,61 +120,6 @@ function ConfigureKafka({
           onChange={updateReady(onChangeString(state, setState, "topic", config))}
         />
         <FormHelperText>Kafka Topic that data will be written to</FormHelperText>
-      </FormControl>
-    </Stack>
-  );
-}
-
-function ConfigureState({
-  state,
-  setState,
-  setReady,
-}: {
-  state: CreateSinkReq;
-  setState: Dispatch<CreateSinkReq>;
-  setReady: Dispatch<boolean>;
-}) {
-  const config = state.sinkType.value as StateSinkConfig;
-
-  const onChange = (e: ChangeEvent<HTMLInputElement>) => {
-    // @ts-ignore
-    config.ttlMicros = e.target.value == "" ? undefined : BigInt(e.target.value) * BigInt(1_000_000);
-    setState(new CreateSinkReq({
-      ...state,
-      sinkType: { case: 'state', value: config }
-    }));
-
-    setReady(config.toJsonString != null);
-  };
-
-  return (
-    <Stack spacing={5}>
-      <FormControl isRequired>
-        <FormLabel>Retention</FormLabel>
-        <Input
-          type="number"
-          value={config.ttlMicros ? Number(config.ttlMicros / BigInt(1_000_000)) : undefined}
-          onChange={onChange}
-        />
-        <FormHelperText>Time in seconds to retain data stored in the state</FormHelperText>
-      </FormControl>
-
-      <FormControl>
-        <FormLabel>Key</FormLabel>
-        <Input
-          type="string"
-          value={config.key}
-          onChange={e => {
-              config.key = e.target.value == "" ? undefined : e.target.value;
-              setState(
-                new CreateSinkReq({
-                  ...state,
-                  sinkType: { case: "state", value: config },
-                })
-              );
-          }}
-        />
-        <FormHelperText>Optional field to key state by (this key must appear in a select for your query)</FormHelperText>
       </FormControl>
     </Stack>
   );

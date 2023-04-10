@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt::{Display, Formatter},
     path::PathBuf,
     str::FromStr,
@@ -16,8 +17,8 @@ use arroyo_rpc::grpc::api::{
     source_def::SourceType,
     source_schema::{self, Schema},
     ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
-    JsonSchemaDef, KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField, SourceMetadataResp,
-    TestSourceMessage,
+    JsonSchemaDef, KafkaAuthConfig, KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField,
+    SourceMetadataResp, TestSourceMessage,
 };
 use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
@@ -120,6 +121,7 @@ enum SourceConfig {
     Kafka {
         bootstrap_servers: String,
         topic: String,
+        client_configs: HashMap<String, String>,
     },
     Impulse {
         interval: Option<Duration>,
@@ -136,13 +138,31 @@ enum SourceConfig {
     },
 }
 
+pub fn auth_config_to_hashmap(config: Option<KafkaAuthConfig>) -> HashMap<String, String> {
+    match config.map(|config| config.auth_type).flatten() {
+        None | Some(api::kafka_auth_config::AuthType::NoAuth(_)) => HashMap::default(),
+        Some(api::kafka_auth_config::AuthType::SaslAuth(sasl_auth)) => vec![
+            ("security.protocol".to_owned(), sasl_auth.protocol),
+            ("sasl.mechanism".to_owned(), sasl_auth.mechanism),
+            ("sasl.username".to_owned(), sasl_auth.username),
+            ("sasl.password".to_owned(), sasl_auth.password),
+        ]
+        .into_iter()
+        .collect(),
+    }
+}
+
 impl SourceConfig {
     fn from_source_type(t: SourceType) -> SourceConfig {
         match t {
-            SourceType::Kafka(kafka) => SourceConfig::Kafka {
-                bootstrap_servers: kafka.connection.unwrap().bootstrap_servers,
-                topic: kafka.topic,
-            },
+            SourceType::Kafka(kafka) => {
+                let Some(connection) = kafka.connection else {panic!("require a connection on a KafkaSourceDef")};
+                SourceConfig::Kafka {
+                    bootstrap_servers: connection.bootstrap_servers,
+                    topic: kafka.topic,
+                    client_configs: auth_config_to_hashmap(connection.auth_config),
+                }
+            }
             SourceType::Impulse(impulse) => SourceConfig::Impulse {
                 interval: impulse
                     .interval_micros
@@ -472,6 +492,7 @@ impl Source {
             SourceConfig::Kafka {
                 bootstrap_servers,
                 topic,
+                client_configs,
             } => {
                 let node = Operator::KafkaSource {
                     topic: topic.to_string(),
@@ -483,6 +504,7 @@ impl Source {
                     offset_mode: OffsetMode::Latest,
                     schema_registry: self.schema.kafka_schema,
                     messages_per_second: auth.org_metadata.kafka_qps,
+                    client_configs: client_configs.clone(),
                 };
 
                 provider.add_source_with_type(self.id, &self.name, fields, node, name);

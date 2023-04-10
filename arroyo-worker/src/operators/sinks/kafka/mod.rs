@@ -1,6 +1,7 @@
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_types::*;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use tracing::info;
@@ -25,16 +26,21 @@ pub struct KafkaSinkFunc<K: Key + Serialize, T: Data + Serialize> {
     bootstrap_servers: String,
     producer: Option<FutureProducer>,
     last_write: Option<DeliveryFuture>,
+    client_config: HashMap<String, String>,
     _t: PhantomData<(K, T)>,
 }
 
 impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
-    pub fn new(servers: &str, topic: &str) -> Self {
+    pub fn new(servers: &str, topic: &str, client_config: Vec<(&str, &str)>) -> Self {
         KafkaSinkFunc {
             topic: topic.to_string(),
             bootstrap_servers: servers.to_string(),
             producer: None,
             last_write: None,
+            client_config: client_config
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
             _t: PhantomData,
         }
     }
@@ -48,12 +54,14 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
 
     fn get_producer(&mut self) -> FutureProducer {
         info!("Creating kafka producer for {}", self.bootstrap_servers);
+        let mut client_config = ClientConfig::new();
 
-        let producer = ClientConfig::new()
-            .set("bootstrap.servers", &self.bootstrap_servers)
-            .create()
-            .expect("Producer creation failed");
-        producer
+        client_config.set("bootstrap.servers", &self.bootstrap_servers);
+
+        for (key, value) in &self.client_config {
+            client_config.set(key, value);
+        }
+        client_config.create().expect("Producer creation failed")
     }
 
     async fn on_start(&mut self, _ctx: &mut Context<(), ()>) {

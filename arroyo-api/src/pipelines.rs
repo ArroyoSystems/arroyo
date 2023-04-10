@@ -20,6 +20,7 @@ use tracing::warn;
 
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbPipeline;
+use crate::sources::auth_config_to_hashmap;
 use crate::types::public::PipelineType;
 use crate::{
     connections, handle_db_error, log_and_map, optimizations, required_field, sinks,
@@ -73,6 +74,7 @@ where
                             .split(',')
                             .map(|t| t.to_string())
                             .collect(),
+                        client_configs: auth_config_to_hashmap(kafka.auth_config),
                     }
                 }
             }

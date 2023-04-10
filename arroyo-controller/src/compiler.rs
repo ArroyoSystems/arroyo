@@ -358,7 +358,7 @@ wasm-opt = false
                         ))
                     }
                 }
-                Operator::KafkaSource { topic, bootstrap_servers, offset_mode, schema_registry, messages_per_second } => {
+                Operator::KafkaSource { topic, bootstrap_servers, offset_mode, schema_registry, messages_per_second, client_configs } => {
                     let offset_mode = format!("{:?}", offset_mode);
                     let offset_mode = format_ident!("{}", offset_mode);
                     let out_t = parse_type(&output.unwrap().weight().value);
@@ -368,6 +368,7 @@ wasm-opt = false
                     } else {
                         format_ident!("Json")
                     };
+                    let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
 
                     quote! {
                         Box::new(sources::kafka::KafkaSourceFunc::<#out_t>::new(
@@ -375,8 +376,8 @@ wasm-opt = false
                             #topic,
                             sources::kafka::OffsetMode::#offset_mode,
                             sources::kafka::SerializationMode::#serialization_mode,
-                            #messages_per_second
-                            ))
+                            #messages_per_second,
+                            vec![#(#client_configs),*]))
                     }
                 }
                 Operator::FusedWasmUDFs { name, udfs: _ } => {
@@ -536,15 +537,17 @@ wasm-opt = false
                         }
                     }
                 }
-                Operator::KafkaSink { topic, bootstrap_servers } => {
+                Operator::KafkaSink { topic, bootstrap_servers, client_configs } => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
 
                     let bootstrap_servers = bootstrap_servers.join(",");
+                    let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
                     quote! {
                         Box::new(sinks::kafka::KafkaSinkFunc::<#in_k, #in_t>::new(
                             #bootstrap_servers,
-                            #topic))
+                            #topic,
+                        vec![#(#client_configs ),*]))
                     }
                 }
                 Operator::NexmarkSource{first_event_rate, num_events}  => {
