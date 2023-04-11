@@ -294,7 +294,8 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
             &task_info.operator_id,
             checkpoint_metadata.epoch,
         )
-        .await;
+        .await
+        .expect("expect metadata for restoring from checkpoint");
         let min_valid_time = operator_metadata
             .min_watermark
             .map_or(SystemTime::UNIX_EPOCH, |min_watermark| {

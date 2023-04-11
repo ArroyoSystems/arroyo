@@ -5,14 +5,16 @@ use std::{
 };
 
 use arroyo_datastream::Program;
-use arroyo_rpc::grpc::{worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment};
+use arroyo_rpc::grpc::{
+    worker_grpc_client::WorkerGrpcClient, StartExecutionReq, StartPipelineReq, TaskAssignment,
+};
 use arroyo_types::WorkerId;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
 use anyhow::anyhow;
-use arroyo_state::{BackingStore, StateBackend};
+use arroyo_state::{parquet::StorageClient, BackingStore, StateBackend};
 
 use crate::states::{fatal, StateError};
 use crate::{job_controller::JobController, queries::controller_queries};
@@ -164,15 +166,16 @@ impl State for Scheduling {
         loop {
             match ctx
                 .scheduler
-                .start_workers(
-                    ctx.status.pipeline_path.as_ref().unwrap(),
-                    ctx.status.wasm_path.as_ref().unwrap(),
-                    ctx.config.id.clone(),
-                    ctx.status.run_id,
-                    ctx.config.pipeline_name.clone(),
-                    ctx.program.get_hash(),
-                    slots_needed,
-                )
+                .start_workers(StartPipelineReq {
+                    pipeline_path: ctx.status.pipeline_path.clone().unwrap(),
+                    wasm_path: ctx.status.wasm_path.clone().unwrap(),
+                    job_id: ctx.config.id.clone(),
+                    run_id: ctx.status.run_id,
+                    name: ctx.config.pipeline_name.clone(),
+                    hash: ctx.program.get_hash(),
+                    slots: slots_needed as u64,
+                    environment_variables: StorageClient::get_storage_environment_variables(),
+                })
                 .await
             {
                 Ok(_) => break,
@@ -267,13 +270,15 @@ impl State for Scheduling {
         }
 
         // clear all of the epochs after the one we're loading so that we don't read in-progress data
-        if let Some((epoch, _)) = restore_epoch {
-            let metadata = StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch)
+        if let Some((epoch, min_epoch)) = restore_epoch {
+            let mut metadata = StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch)
                 .await
                 .unwrap_or_else(|| panic!("epoch {} not found for job {}", epoch, ctx.config.id));
             if let Err(e) = StateBackend::prepare_checkpoint(&metadata).await {
                 return Err(ctx.retryable(self, "failed to prepare checkpoint for loading", e, 10));
             }
+            metadata.min_epoch = min_epoch;
+            StateBackend::complete_checkpoint(metadata).await;
         }
 
         let assignments = compute_assignments(workers.values().collect(), ctx.program);

@@ -1,7 +1,8 @@
 use anyhow::bail;
 use arroyo_rpc::grpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::{
-    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, WorkerFinishedReq,
+    HeartbeatNodeReq, RegisterNodeReq, StartPipelineReq, StartWorkerReq, StopWorkerReq,
+    WorkerFinishedReq,
 };
 use arroyo_types::{
     NodeId, WorkerId, CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV, NOMAD_DC_ENV,
@@ -44,13 +45,7 @@ lazy_static! {
 pub trait Scheduler: Send + Sync {
     async fn start_workers(
         &self,
-        pipeline_path: &str,
-        wasm_path: &str,
-        job_id: String,
-        run_id: i64,
-        name: String,
-        hash: String,
-        slots: usize,
+        start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError>;
 
     async fn register_node(&self, req: RegisterNodeReq);
@@ -103,21 +98,23 @@ const CPU_PER_SLOT_MHZ: usize = 3400;
 impl Scheduler for ProcessScheduler {
     async fn start_workers(
         &self,
-        pipeline_path: &str,
-        wasm_path: &str,
-        job_id: String,
-        run_id: i64,
-        _: String,
-        _: String,
-        slots: usize,
+        start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError> {
-        let workers = (slots as f32 / SLOTS_PER_NODE as f32).ceil() as usize;
+        let workers = (start_pipeline_req.slots as f32 / SLOTS_PER_NODE as f32).ceil() as usize;
 
         let mut slots_scheduled = 0;
 
-        let pipeline = get_from_object_store(pipeline_path).await.unwrap();
-        let wasm = get_from_object_store(wasm_path).await.unwrap();
-        let base_path = PathBuf::from_str(&format!("/tmp/arroyo-process/{}", job_id)).unwrap();
+        let pipeline = get_from_object_store(&start_pipeline_req.pipeline_path)
+            .await
+            .unwrap();
+        let wasm = get_from_object_store(&start_pipeline_req.wasm_path)
+            .await
+            .unwrap();
+        let base_path = PathBuf::from_str(&format!(
+            "/tmp/arroyo-process/{}",
+            start_pipeline_req.job_id
+        ))
+        .unwrap();
         tokio::fs::create_dir_all(&base_path).await.unwrap();
 
         let pipeline_path = base_path.join("pipeline");
@@ -138,7 +135,8 @@ impl Scheduler for ProcessScheduler {
         for _ in 0..workers {
             let path = base_path.clone();
 
-            let slots_here = (slots - slots_scheduled).min(SLOTS_PER_NODE);
+            let slots_here =
+                (start_pipeline_req.slots as usize - slots_scheduled).min(SLOTS_PER_NODE);
 
             let worker_id = self.worker_counter.fetch_add(1, Ordering::SeqCst);
 
@@ -149,25 +147,30 @@ impl Scheduler for ProcessScheduler {
                 workers.insert(
                     WorkerId(worker_id),
                     ProcessWorker {
-                        job_id: job_id.clone(),
+                        job_id: start_pipeline_req.job_id.clone(),
                         shutdown_tx: tx,
                     },
                 );
             }
 
             slots_scheduled += slots_here;
-            let job_id = job_id.clone();
+            let job_id = start_pipeline_req.job_id.clone();
             println!("Starting in path {:?}", path);
             let workers = self.workers.clone();
+            let env_map = start_pipeline_req.environment_variables.clone();
             tokio::spawn(async move {
-                let mut child = Command::new("./pipeline")
+                let mut command = Command::new("./pipeline");
+                for (env, value) in env_map {
+                    command.env(env, value);
+                }
+                let mut child = command
                     .current_dir(&path)
                     .env("RUST_LOG", "info")
                     .env(TASK_SLOTS_ENV, format!("{}", slots_here))
                     .env(WORKER_ID_ENV, format!("{}", worker_id)) // start at 100 to make same length
                     .env(JOB_ID_ENV, &job_id)
                     .env(NODE_ID_ENV, format!("{}", 1))
-                    .env(RUN_ID_ENV, format!("{}", run_id))
+                    .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
                     .kill_on_drop(true)
                     .spawn()
                     .unwrap();
@@ -388,16 +391,14 @@ impl Scheduler for NodeScheduler {
 
     async fn start_workers(
         &self,
-        pipeline_path: &str,
-        wasm_path: &str,
-        job_id: String,
-        run_id: i64,
-        name: String,
-        hash: String,
-        slots: usize,
+        start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError> {
-        let binary = get_from_object_store(pipeline_path).await.unwrap();
-        let wasm = get_from_object_store(wasm_path).await.unwrap();
+        let binary = get_from_object_store(&start_pipeline_req.pipeline_path)
+            .await
+            .unwrap();
+        let wasm = get_from_object_store(&start_pipeline_req.wasm_path)
+            .await
+            .unwrap();
 
         // TODO: make this locking more fine-grained
         let mut state = self.state.lock().await;
@@ -405,6 +406,7 @@ impl Scheduler for NodeScheduler {
         state.expire_nodes(Instant::now() - Duration::from_secs(30));
 
         let free_slots = state.nodes.values().map(|n| n.free_slots).sum::<usize>();
+        let slots = start_pipeline_req.slots as usize;
         if slots > free_slots {
             return Err(SchedulerError::NotEnoughSlots {
                 slots_needed: slots - free_slots,
@@ -459,14 +461,15 @@ impl Scheduler for NodeScheduler {
 
             let res = client
                 .start_worker(Request::new(StartWorkerReq {
-                    name: name.clone(),
-                    job_id: job_id.clone(),
+                    name: start_pipeline_req.name.clone(),
+                    job_id: start_pipeline_req.job_id.clone(),
                     binary: binary.clone(),
                     wasm: wasm.clone(),
-                    job_hash: hash.clone(),
+                    job_hash: start_pipeline_req.hash.clone(),
                     slots: slots_for_this_one as u64,
                     node_id: node.id.0,
-                    run_id: run_id as u64,
+                    run_id: start_pipeline_req.run_id as u64,
+                    environment_variables: start_pipeline_req.environment_variables.clone(),
                 }))
                 .await
                 .map_err(|e| {
@@ -496,7 +499,7 @@ impl Scheduler for NodeScheduler {
             state.workers.insert(
                 WorkerId(res.worker_id),
                 NodeWorker {
-                    job_id: job_id.clone(),
+                    job_id: start_pipeline_req.job_id.clone(),
                     node_id: node.id,
                 },
             );
@@ -569,14 +572,9 @@ impl NomadScheduler {
 impl Scheduler for NomadScheduler {
     async fn start_workers(
         &self,
-        pipeline_path: &str,
-        _wasm_path: &str,
-        job_id: String,
-        run_id: i64,
-        name: String,
-        hash: String,
-        slots: usize,
+        start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError> {
+        let slots = start_pipeline_req.slots as usize;
         let workers = (slots as f32 / SLOTS_PER_NOMAD_NODE as f32).ceil() as usize;
         let mut slots_scheduled = 0;
 
@@ -587,16 +585,16 @@ impl Scheduler for NomadScheduler {
 
             slots_scheduled += slots_here;
 
-            let job = json!({
+            let mut job = json!({
                 "Job": {
-                    "ID": format!("{}-{}", job_id, worker_id),
+                    "ID": format!("{}-{}", start_pipeline_req.job_id, worker_id),
                     "Type": "batch",
                     "Datacenters": [&self.datacenter],
                     "Meta": {
-                        "job_id": job_id,
+                        "job_id": start_pipeline_req.job_id,
                         "worker_id": worker_id.to_string(),
-                        "job_name": name,
-                        "job_hash": hash,
+                        "job_name": start_pipeline_req.name,
+                        "job_hash": start_pipeline_req.hash,
                     },
 
                     // disable restarting and rescheduling as the controller takes care of handling failures
@@ -620,16 +618,16 @@ impl Scheduler for NomadScheduler {
                                         "command": "pipeline"
                                     },
                                     "Artifacts": [{
-                                        "GetterSource": pipeline_path,
+                                        "GetterSource": start_pipeline_req.pipeline_path,
                                     }],
                                     "Env": {
                                         "RUST_LOG": "info",
                                         "PROD": "true",
                                         TASK_SLOTS_ENV: format!("{}", slots_here),
                                         WORKER_ID_ENV: format!("{}", worker_id),
-                                        JOB_ID_ENV: job_id,
+                                        JOB_ID_ENV: start_pipeline_req.job_id,
                                         NODE_ID_ENV: "1",
-                                        RUN_ID_ENV: format!("{}", run_id),
+                                        RUN_ID_ENV: format!("{}", start_pipeline_req.run_id),
                                         CONTROLLER_ADDR_ENV: std::env::var(CONTROLLER_ADDR_ENV)
                                             .unwrap_or_else(|_| "".to_string()),
                                     },
@@ -643,6 +641,14 @@ impl Scheduler for NomadScheduler {
                     ]
                 }
             });
+            if let Some(env) = job["Job"]["TaskGroups"][0]["Tasks"][0]["Env"].as_object_mut() {
+                for (key, value) in start_pipeline_req.environment_variables.iter() {
+                    env.insert(
+                        key.to_string(),
+                        serde_json::Value::String(value.to_string()),
+                    );
+                }
+            }
 
             let resp = self
                 .client

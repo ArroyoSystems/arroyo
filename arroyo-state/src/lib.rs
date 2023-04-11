@@ -63,7 +63,7 @@ pub trait BackingStore {
         job_id: &str,
         operator_id: &str,
         epoch: u32,
-    ) -> OperatorCheckpointMetadata;
+    ) -> Option<OperatorCheckpointMetadata>;
 
     async fn new(
         task_info: &TaskInfo,

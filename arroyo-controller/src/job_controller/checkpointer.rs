@@ -258,18 +258,11 @@ impl CheckpointState {
 
             // the sort here is load-bearing
             let backend_data: BTreeMap<(u32, String), BackendData> = subtasks
-                .iter()
-                .map(|(epoch, s)| (*epoch, s.metadata.as_ref().unwrap()))
-                .filter(|(_epoch, metadata)| metadata.has_state)
-                .flat_map(|(epoch, metadata)| {
-                    metadata
-                        .backend_data
-                        .iter()
-                        .map(move |backend_data| (epoch, backend_data.clone()))
-                })
-                .filter_map(|(epoch, backend_data)| {
-                    Self::backend_data_to_map_pair(epoch, backend_data)
-                })
+                .values()
+                .map(|s| (s.metadata.as_ref().unwrap()))
+                .filter(|metadata| metadata.has_state)
+                .flat_map(|metadata| metadata.backend_data.clone())
+                .filter_map(|backend_data| Self::backend_data_to_key(backend_data))
                 .collect();
 
             let size = subtasks
@@ -299,16 +292,13 @@ impl CheckpointState {
         }
     }
 
-    fn backend_data_to_map_pair(
-        epoch: u32,
-        backend_data: BackendData,
-    ) -> Option<((u32, String), BackendData)> {
+    fn backend_data_to_key(backend_data: BackendData) -> Option<((u32, String), BackendData)> {
         let Some(internal_data) = &backend_data.backend_data else {
             return None
         };
         match &internal_data {
             backend_data::BackendData::ParquetStore(data) => {
-                Some(((epoch, data.file.clone()), backend_data))
+                Some(((data.epoch, data.file.clone()), backend_data))
             }
         }
     }

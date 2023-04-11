@@ -24,7 +24,7 @@ use self::checkpointer::CheckpointState;
 
 mod checkpointer;
 
-const CHECKPOINTS_TO_KEEP: u32 = 2;
+const CHECKPOINTS_TO_KEEP: u32 = 4;
 const COMPACT_EVERY: u32 = 2;
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -455,15 +455,14 @@ impl JobController {
             }
         }
 
-        if let Some(new_epoch) = self.model.compaction_needed() {
-            if self.compacting_task.is_none() && self.model.checkpoint_state.is_none() {
-                self.compacting_task = Some(self.start_compaction(new_epoch));
-            }
-        }
-
         // check on checkpointing
         if self.model.checkpoint_state.is_some() {
             self.model.finish_checkpoint_if_done(&self.pool).await?;
+            if let Some(new_epoch) = self.model.compaction_needed() {
+                if self.compacting_task.is_none() && self.model.checkpoint_state.is_none() {
+                    self.compacting_task = Some(self.start_compaction(new_epoch));
+                }
+            }
         } else if self.model.last_checkpoint.elapsed() > self.config.checkpoint_interval
             && self.compacting_task.is_none()
         {
@@ -573,7 +572,7 @@ impl JobController {
                 job_id,
                 min_epoch,
                 new_min,
-                duration = start.elapsed().as_secs()
+                duration = start.elapsed().as_secs_f32()
             );
 
             Ok(new_min)

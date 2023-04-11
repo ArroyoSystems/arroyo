@@ -317,6 +317,18 @@ service WorkerGrpc {
   rpc JobFinished(JobFinishedReq) returns (JobFinishedResp);
 }
 
+// Scheduler
+
+message StartPipelineReq {
+  string name = 1;
+  string pipeline_path = 2;
+  string wasm_path = 3;
+  string job_id = 4;
+  string hash = 5;
+  int64 run_id = 6;
+  uint64 slots = 7;
+  map<string, string> environment_variables = 8;
+}
 // Node
 
 message StartWorkerReq {
@@ -328,6 +340,7 @@ message StartWorkerReq {
   uint64 slots = 6;
   uint64 node_id = 7;
   uint64 run_id = 8;
+  map<string, string> environment_variables = 9;
 }
 
 message StartWorkerResp {
