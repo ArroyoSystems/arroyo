@@ -285,7 +285,7 @@ export function ConfigureSource({
       <Heading size="xs">Configure {state.typeOneof.case} source</Heading>
       {forms.get(state.typeOneof.case!)}
 
-      <Button variant="primary" onClick={onClick} disabled={!ready}>
+      <Button variant="primary" onClick={onClick} isDisabled={!ready}>
         Continue
       </Button>
     </Stack>

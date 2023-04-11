@@ -277,7 +277,7 @@ export function SinkEditor({
                     {selectedType.editor}
                     <Button
                       variant="primary"
-                      disabled={!ready || state.name == ""}
+                      isDisabled={!ready || state.name == ""}
                       spinner={<Spinner />}
                       onClick={onSubmit}
                     >

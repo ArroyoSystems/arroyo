@@ -287,7 +287,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
         <Spacer />
         <Box p={5}>
           <Button
-            disabled={state.pipeline?.action == undefined}
+            isDisabled={state.pipeline?.action == undefined}
             isLoading={state.pipeline?.inProgress}
             loadingText={state.pipeline?.actionText}
             onClick={() => updateJobState(state.pipeline?.action!)}

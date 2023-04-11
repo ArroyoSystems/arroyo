@@ -490,7 +490,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
             <Button
               variant="primary"
               onClick={start}
-              disabled={options.name == "" || options.parallelism == null || options.sink == null}
+              isDisabled={options.name == "" || options.parallelism == null || options.sink == null}
             >
               Start
             </Button>
