@@ -185,10 +185,13 @@ bincode_derive = "=2.0.0-rc.3"
 serde = "1.0"
 serde_json = "1.0"
 arroyo-types = {{ path = "{}/arroyo-types" }}
-arroyo-worker = {{ path = "{}/arroyo-worker" }}
+arroyo-worker = {{ path = "{}/arroyo-worker"{}}}
 "#,
             arroyo_dir.to_string_lossy(),
-            arroyo_dir.to_string_lossy()
+            arroyo_dir.to_string_lossy(), 
+            if cfg!(feature = "kafka-sasl") {
+                ", features = [\"kafka-sasl\"]"
+            } else {""}
         );
         Self::create_subproject(&dir, "pipeline", &pipeline_toml, "main.rs", main).await?;
 
