@@ -3,6 +3,10 @@ name = "arroyo-api"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
+
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = { path = "../arroyo-rpc" }

@@ -1256,12 +1256,6 @@ export class Operator extends Message<Operator> {
     case: "kafkaSink";
   } | {
     /**
-     * @generated from field: arroyo_api.StateSink state_sink = 16;
-     */
-    value: StateSink;
-    case: "stateSink";
-  } | {
-    /**
      * @generated from field: arroyo_api.NexmarkSource nexmark_source = 12;
      */
     value: NexmarkSource;
@@ -1284,6 +1278,30 @@ export class Operator extends Message<Operator> {
      */
     value: FlattenExpressionOperator;
     case: "flattenExpressionOperator";
+  } | {
+    /**
+     * @generated from field: arroyo_api.SlidingWindowAggregator sliding_window_aggregator = 17;
+     */
+    value: SlidingWindowAggregator;
+    case: "slidingWindowAggregator";
+  } | {
+    /**
+     * @generated from field: arroyo_api.TumblingWindowAggregator tumbling_window_aggregator = 18;
+     */
+    value: TumblingWindowAggregator;
+    case: "tumblingWindowAggregator";
+  } | {
+    /**
+     * @generated from field: arroyo_api.TumblingTopN tumbling_top_n = 19;
+     */
+    value: TumblingTopN;
+    case: "tumblingTopN";
+  } | {
+    /**
+     * @generated from field: arroyo_api.SlidingAggregatingTopN sliding_aggregating_top_n = 20;
+     */
+    value: SlidingAggregatingTopN;
+    case: "slidingAggregatingTopN";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<Operator>) {
@@ -1305,11 +1323,14 @@ export class Operator extends Message<Operator> {
     { no: 9, name: "file_sink", kind: "message", T: FileSink, oneof: "operator" },
     { no: 10, name: "window_join", kind: "message", T: Window, oneof: "operator" },
     { no: 11, name: "kafka_sink", kind: "message", T: KafkaSink, oneof: "operator" },
-    { no: 16, name: "state_sink", kind: "message", T: StateSink, oneof: "operator" },
     { no: 12, name: "nexmark_source", kind: "message", T: NexmarkSource, oneof: "operator" },
     { no: 13, name: "expression_operator", kind: "message", T: ExpressionOperator, oneof: "operator" },
     { no: 14, name: "flatten", kind: "message", T: Flatten, oneof: "operator" },
     { no: 15, name: "flatten_expression_operator", kind: "message", T: FlattenExpressionOperator, oneof: "operator" },
+    { no: 17, name: "sliding_window_aggregator", kind: "message", T: SlidingWindowAggregator, oneof: "operator" },
+    { no: 18, name: "tumbling_window_aggregator", kind: "message", T: TumblingWindowAggregator, oneof: "operator" },
+    { no: 19, name: "tumbling_top_n", kind: "message", T: TumblingTopN, oneof: "operator" },
+    { no: 20, name: "sliding_aggregating_top_n", kind: "message", T: SlidingAggregatingTopN, oneof: "operator" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Operator {
@@ -1463,6 +1484,11 @@ export class KafkaSource extends Message<KafkaSource> {
    */
   messagesPerSecond = 0;
 
+  /**
+   * @generated from field: map<string, string> client_configs = 6;
+   */
+  clientConfigs: { [key: string]: string } = {};
+
   constructor(data?: PartialMessage<KafkaSource>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1476,6 +1502,7 @@ export class KafkaSource extends Message<KafkaSource> {
     { no: 3, name: "offset_mode", kind: "enum", T: proto3.getEnumType(OffsetMode) },
     { no: 4, name: "schema_registry", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "messages_per_second", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 6, name: "client_configs", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): KafkaSource {
@@ -1940,6 +1967,11 @@ export class KafkaSink extends Message<KafkaSink> {
    */
   bootstrapServers: string[] = [];
 
+  /**
+   * @generated from field: map<string, string> client_configs = 3;
+   */
+  clientConfigs: { [key: string]: string } = {};
+
   constructor(data?: PartialMessage<KafkaSink>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1950,6 +1982,7 @@ export class KafkaSink extends Message<KafkaSink> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "topic", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "bootstrap_servers", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 3, name: "client_configs", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): KafkaSink {
@@ -1966,130 +1999,6 @@ export class KafkaSink extends Message<KafkaSink> {
 
   static equals(a: KafkaSink | PlainMessage<KafkaSink> | undefined, b: KafkaSink | PlainMessage<KafkaSink> | undefined): boolean {
     return proto3.util.equals(KafkaSink, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.TimeStateSink
- */
-export class TimeStateSink extends Message<TimeStateSink> {
-  constructor(data?: PartialMessage<TimeStateSink>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.TimeStateSink";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TimeStateSink {
-    return new TimeStateSink().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TimeStateSink {
-    return new TimeStateSink().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TimeStateSink {
-    return new TimeStateSink().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: TimeStateSink | PlainMessage<TimeStateSink> | undefined, b: TimeStateSink | PlainMessage<TimeStateSink> | undefined): boolean {
-    return proto3.util.equals(TimeStateSink, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.KeyedStateSink
- */
-export class KeyedStateSink extends Message<KeyedStateSink> {
-  /**
-   * @generated from field: string key_field = 1;
-   */
-  keyField = "";
-
-  constructor(data?: PartialMessage<KeyedStateSink>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.KeyedStateSink";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "key_field", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): KeyedStateSink {
-    return new KeyedStateSink().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): KeyedStateSink {
-    return new KeyedStateSink().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): KeyedStateSink {
-    return new KeyedStateSink().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: KeyedStateSink | PlainMessage<KeyedStateSink> | undefined, b: KeyedStateSink | PlainMessage<KeyedStateSink> | undefined): boolean {
-    return proto3.util.equals(KeyedStateSink, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.StateSink
- */
-export class StateSink extends Message<StateSink> {
-  /**
-   * @generated from field: uint64 ttl_micros = 1;
-   */
-  ttlMicros = protoInt64.zero;
-
-  /**
-   * @generated from oneof arroyo_api.StateSink.state_type
-   */
-  stateType: {
-    /**
-     * @generated from field: arroyo_api.TimeStateSink time = 2;
-     */
-    value: TimeStateSink;
-    case: "time";
-  } | {
-    /**
-     * @generated from field: arroyo_api.KeyedStateSink keyed = 3;
-     */
-    value: KeyedStateSink;
-    case: "keyed";
-  } | { case: undefined; value?: undefined } = { case: undefined };
-
-  constructor(data?: PartialMessage<StateSink>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.StateSink";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "ttl_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 2, name: "time", kind: "message", T: TimeStateSink, oneof: "state_type" },
-    { no: 3, name: "keyed", kind: "message", T: KeyedStateSink, oneof: "state_type" },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StateSink {
-    return new StateSink().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): StateSink {
-    return new StateSink().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): StateSink {
-    return new StateSink().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: StateSink | PlainMessage<StateSink> | undefined, b: StateSink | PlainMessage<StateSink> | undefined): boolean {
-    return proto3.util.equals(StateSink, a, b);
   }
 }
 
@@ -2309,6 +2218,304 @@ export class FlattenExpressionOperator extends Message<FlattenExpressionOperator
 }
 
 /**
+ * @generated from message arroyo_api.SlidingWindowAggregator
+ */
+export class SlidingWindowAggregator extends Message<SlidingWindowAggregator> {
+  /**
+   * @generated from field: uint64 width_micros = 1;
+   */
+  widthMicros = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 slide_micros = 2;
+   */
+  slideMicros = protoInt64.zero;
+
+  /**
+   * @generated from field: string aggregator = 3;
+   */
+  aggregator = "";
+
+  /**
+   * @generated from field: string bin_merger = 4;
+   */
+  binMerger = "";
+
+  /**
+   * @generated from field: string in_memory_add = 5;
+   */
+  inMemoryAdd = "";
+
+  /**
+   * @generated from field: string in_memory_remove = 6;
+   */
+  inMemoryRemove = "";
+
+  /**
+   * @generated from field: string bin_type = 7;
+   */
+  binType = "";
+
+  /**
+   * @generated from field: string mem_type = 8;
+   */
+  memType = "";
+
+  constructor(data?: PartialMessage<SlidingWindowAggregator>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.SlidingWindowAggregator";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "width_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "slide_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "aggregator", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "bin_merger", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "in_memory_add", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "in_memory_remove", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "bin_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "mem_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SlidingWindowAggregator {
+    return new SlidingWindowAggregator().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SlidingWindowAggregator {
+    return new SlidingWindowAggregator().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SlidingWindowAggregator {
+    return new SlidingWindowAggregator().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SlidingWindowAggregator | PlainMessage<SlidingWindowAggregator> | undefined, b: SlidingWindowAggregator | PlainMessage<SlidingWindowAggregator> | undefined): boolean {
+    return proto3.util.equals(SlidingWindowAggregator, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.TumblingWindowAggregator
+ */
+export class TumblingWindowAggregator extends Message<TumblingWindowAggregator> {
+  /**
+   * @generated from field: uint64 width_micros = 1;
+   */
+  widthMicros = protoInt64.zero;
+
+  /**
+   * @generated from field: string aggregator = 3;
+   */
+  aggregator = "";
+
+  /**
+   * @generated from field: string bin_merger = 4;
+   */
+  binMerger = "";
+
+  /**
+   * @generated from field: string bin_type = 7;
+   */
+  binType = "";
+
+  constructor(data?: PartialMessage<TumblingWindowAggregator>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.TumblingWindowAggregator";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "width_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "aggregator", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "bin_merger", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "bin_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TumblingWindowAggregator {
+    return new TumblingWindowAggregator().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TumblingWindowAggregator {
+    return new TumblingWindowAggregator().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TumblingWindowAggregator {
+    return new TumblingWindowAggregator().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TumblingWindowAggregator | PlainMessage<TumblingWindowAggregator> | undefined, b: TumblingWindowAggregator | PlainMessage<TumblingWindowAggregator> | undefined): boolean {
+    return proto3.util.equals(TumblingWindowAggregator, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.TumblingTopN
+ */
+export class TumblingTopN extends Message<TumblingTopN> {
+  /**
+   * @generated from field: uint64 width_micros = 1;
+   */
+  widthMicros = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 max_elements = 2;
+   */
+  maxElements = protoInt64.zero;
+
+  /**
+   * @generated from field: string extractor = 3;
+   */
+  extractor = "";
+
+  /**
+   * @generated from field: string partition_key_type = 4;
+   */
+  partitionKeyType = "";
+
+  /**
+   * @generated from field: string converter = 5;
+   */
+  converter = "";
+
+  constructor(data?: PartialMessage<TumblingTopN>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.TumblingTopN";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "width_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "max_elements", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "extractor", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "partition_key_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "converter", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TumblingTopN {
+    return new TumblingTopN().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TumblingTopN {
+    return new TumblingTopN().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TumblingTopN {
+    return new TumblingTopN().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TumblingTopN | PlainMessage<TumblingTopN> | undefined, b: TumblingTopN | PlainMessage<TumblingTopN> | undefined): boolean {
+    return proto3.util.equals(TumblingTopN, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.SlidingAggregatingTopN
+ */
+export class SlidingAggregatingTopN extends Message<SlidingAggregatingTopN> {
+  /**
+   * @generated from field: uint64 width_micros = 1;
+   */
+  widthMicros = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 slide_micros = 2;
+   */
+  slideMicros = protoInt64.zero;
+
+  /**
+   * @generated from field: string bin_merger = 3;
+   */
+  binMerger = "";
+
+  /**
+   * @generated from field: string in_memory_add = 4;
+   */
+  inMemoryAdd = "";
+
+  /**
+   * @generated from field: string in_memory_remove = 5;
+   */
+  inMemoryRemove = "";
+
+  /**
+   * @generated from field: string partitioning_func = 6;
+   */
+  partitioningFunc = "";
+
+  /**
+   * @generated from field: string extractor = 7;
+   */
+  extractor = "";
+
+  /**
+   * @generated from field: string aggregator = 8;
+   */
+  aggregator = "";
+
+  /**
+   * @generated from field: string bin_type = 9;
+   */
+  binType = "";
+
+  /**
+   * @generated from field: string mem_type = 10;
+   */
+  memType = "";
+
+  /**
+   * @generated from field: string sort_key_type = 11;
+   */
+  sortKeyType = "";
+
+  /**
+   * @generated from field: uint64 max_elements = 12;
+   */
+  maxElements = protoInt64.zero;
+
+  constructor(data?: PartialMessage<SlidingAggregatingTopN>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.SlidingAggregatingTopN";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "width_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "slide_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "bin_merger", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "in_memory_add", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "in_memory_remove", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "partitioning_func", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "extractor", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "aggregator", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "bin_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 10, name: "mem_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 11, name: "sort_key_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 12, name: "max_elements", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SlidingAggregatingTopN {
+    return new SlidingAggregatingTopN().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SlidingAggregatingTopN {
+    return new SlidingAggregatingTopN().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SlidingAggregatingTopN {
+    return new SlidingAggregatingTopN().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SlidingAggregatingTopN | PlainMessage<SlidingAggregatingTopN> | undefined, b: SlidingAggregatingTopN | PlainMessage<SlidingAggregatingTopN> | undefined): boolean {
+    return proto3.util.equals(SlidingAggregatingTopN, a, b);
+  }
+}
+
+/**
  * @generated from message arroyo_api.GetJobsReq
  */
 export class GetJobsReq extends Message<GetJobsReq> {
@@ -2507,6 +2714,11 @@ export class JobStatus extends Message<JobStatus> {
   state = "";
 
   /**
+   * @generated from field: uint64 run_id = 11;
+   */
+  runId = protoInt64.zero;
+
+  /**
    * @generated from field: string definition_id = 9;
    */
   definitionId = "";
@@ -2548,6 +2760,7 @@ export class JobStatus extends Message<JobStatus> {
     { no: 2, name: "pipeline_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "running_desired", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "state", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 11, name: "run_id", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 9, name: "definition_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "start_time", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
     { no: 5, name: "finish_time", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
@@ -3418,6 +3631,11 @@ export class KafkaConnection extends Message<KafkaConnection> {
    */
   bootstrapServers = "";
 
+  /**
+   * @generated from field: arroyo_api.KafkaAuthConfig auth_config = 2;
+   */
+  authConfig?: KafkaAuthConfig;
+
   constructor(data?: PartialMessage<KafkaConnection>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3427,6 +3645,7 @@ export class KafkaConnection extends Message<KafkaConnection> {
   static readonly typeName = "arroyo_api.KafkaConnection";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "bootstrap_servers", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "auth_config", kind: "message", T: KafkaAuthConfig },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): KafkaConnection {
@@ -3443,6 +3662,142 @@ export class KafkaConnection extends Message<KafkaConnection> {
 
   static equals(a: KafkaConnection | PlainMessage<KafkaConnection> | undefined, b: KafkaConnection | PlainMessage<KafkaConnection> | undefined): boolean {
     return proto3.util.equals(KafkaConnection, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.KafkaAuthConfig
+ */
+export class KafkaAuthConfig extends Message<KafkaAuthConfig> {
+  /**
+   * @generated from oneof arroyo_api.KafkaAuthConfig.auth_type
+   */
+  authType: {
+    /**
+     * @generated from field: arroyo_api.NoAuth no_auth = 1;
+     */
+    value: NoAuth;
+    case: "noAuth";
+  } | {
+    /**
+     * @generated from field: arroyo_api.SaslAuth sasl_auth = 2;
+     */
+    value: SaslAuth;
+    case: "saslAuth";
+  } | { case: undefined; value?: undefined } = { case: undefined };
+
+  constructor(data?: PartialMessage<KafkaAuthConfig>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.KafkaAuthConfig";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "no_auth", kind: "message", T: NoAuth, oneof: "auth_type" },
+    { no: 2, name: "sasl_auth", kind: "message", T: SaslAuth, oneof: "auth_type" },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): KafkaAuthConfig {
+    return new KafkaAuthConfig().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): KafkaAuthConfig {
+    return new KafkaAuthConfig().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): KafkaAuthConfig {
+    return new KafkaAuthConfig().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: KafkaAuthConfig | PlainMessage<KafkaAuthConfig> | undefined, b: KafkaAuthConfig | PlainMessage<KafkaAuthConfig> | undefined): boolean {
+    return proto3.util.equals(KafkaAuthConfig, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.NoAuth
+ */
+export class NoAuth extends Message<NoAuth> {
+  constructor(data?: PartialMessage<NoAuth>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.NoAuth";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NoAuth {
+    return new NoAuth().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): NoAuth {
+    return new NoAuth().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): NoAuth {
+    return new NoAuth().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: NoAuth | PlainMessage<NoAuth> | undefined, b: NoAuth | PlainMessage<NoAuth> | undefined): boolean {
+    return proto3.util.equals(NoAuth, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.SaslAuth
+ */
+export class SaslAuth extends Message<SaslAuth> {
+  /**
+   * @generated from field: string protocol = 1;
+   */
+  protocol = "";
+
+  /**
+   * @generated from field: string mechanism = 2;
+   */
+  mechanism = "";
+
+  /**
+   * @generated from field: string username = 3;
+   */
+  username = "";
+
+  /**
+   * @generated from field: string password = 4;
+   */
+  password = "";
+
+  constructor(data?: PartialMessage<SaslAuth>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.SaslAuth";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "protocol", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "mechanism", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "password", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SaslAuth {
+    return new SaslAuth().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SaslAuth {
+    return new SaslAuth().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SaslAuth {
+    return new SaslAuth().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SaslAuth | PlainMessage<SaslAuth> | undefined, b: SaslAuth | PlainMessage<SaslAuth> | undefined): boolean {
+    return proto3.util.equals(SaslAuth, a, b);
   }
 }
 
@@ -4908,49 +5263,6 @@ export class KafkaSinkConfig extends Message<KafkaSinkConfig> {
 }
 
 /**
- * @generated from message arroyo_api.StateSinkConfig
- */
-export class StateSinkConfig extends Message<StateSinkConfig> {
-  /**
-   * @generated from field: int64 ttl_micros = 1;
-   */
-  ttlMicros = protoInt64.zero;
-
-  /**
-   * @generated from field: optional string key = 2;
-   */
-  key?: string;
-
-  constructor(data?: PartialMessage<StateSinkConfig>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.StateSinkConfig";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "ttl_micros", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 2, name: "key", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StateSinkConfig {
-    return new StateSinkConfig().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): StateSinkConfig {
-    return new StateSinkConfig().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): StateSinkConfig {
-    return new StateSinkConfig().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: StateSinkConfig | PlainMessage<StateSinkConfig> | undefined, b: StateSinkConfig | PlainMessage<StateSinkConfig> | undefined): boolean {
-    return proto3.util.equals(StateSinkConfig, a, b);
-  }
-}
-
-/**
  * @generated from message arroyo_api.CreateSinkReq
  */
 export class CreateSinkReq extends Message<CreateSinkReq> {
@@ -4968,12 +5280,6 @@ export class CreateSinkReq extends Message<CreateSinkReq> {
      */
     value: KafkaSinkConfig;
     case: "kafka";
-  } | {
-    /**
-     * @generated from field: arroyo_api.StateSinkConfig state = 3;
-     */
-    value: StateSinkConfig;
-    case: "state";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<CreateSinkReq>) {
@@ -4986,7 +5292,6 @@ export class CreateSinkReq extends Message<CreateSinkReq> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "kafka", kind: "message", T: KafkaSinkConfig, oneof: "sink_type" },
-    { no: 3, name: "state", kind: "message", T: StateSinkConfig, oneof: "sink_type" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateSinkReq {
@@ -5091,12 +5396,6 @@ export class Sink extends Message<Sink> {
      */
     value: KafkaSinkConfig;
     case: "kafka";
-  } | {
-    /**
-     * @generated from field: arroyo_api.StateSinkConfig state = 5;
-     */
-    value: StateSinkConfig;
-    case: "state";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   /**
@@ -5115,7 +5414,6 @@ export class Sink extends Message<Sink> {
     { no: 1, name: "id", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "kafka", kind: "message", T: KafkaSinkConfig, oneof: "sink_type" },
-    { no: 5, name: "state", kind: "message", T: StateSinkConfig, oneof: "sink_type" },
     { no: 4, name: "producers", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
@@ -5330,135 +5628,6 @@ export class OutputData extends Message<OutputData> {
 
   static equals(a: OutputData | PlainMessage<OutputData> | undefined, b: OutputData | PlainMessage<OutputData> | undefined): boolean {
     return proto3.util.equals(OutputData, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.ReadStateReq
- */
-export class ReadStateReq extends Message<ReadStateReq> {
-  /**
-   * @generated from field: string job_id = 1;
-   */
-  jobId = "";
-
-  /**
-   * @generated from field: uint64 start_time = 2;
-   */
-  startTime = protoInt64.zero;
-
-  /**
-   * @generated from field: uint64 end_time = 3;
-   */
-  endTime = protoInt64.zero;
-
-  constructor(data?: PartialMessage<ReadStateReq>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.ReadStateReq";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "start_time", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 3, name: "end_time", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReadStateReq {
-    return new ReadStateReq().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReadStateReq {
-    return new ReadStateReq().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReadStateReq {
-    return new ReadStateReq().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ReadStateReq | PlainMessage<ReadStateReq> | undefined, b: ReadStateReq | PlainMessage<ReadStateReq> | undefined): boolean {
-    return proto3.util.equals(ReadStateReq, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.ReadStateValue
- */
-export class ReadStateValue extends Message<ReadStateValue> {
-  /**
-   * @generated from field: uint64 time = 1;
-   */
-  time = protoInt64.zero;
-
-  /**
-   * @generated from field: string value = 2;
-   */
-  value = "";
-
-  constructor(data?: PartialMessage<ReadStateValue>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.ReadStateValue";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "time", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 2, name: "value", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReadStateValue {
-    return new ReadStateValue().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReadStateValue {
-    return new ReadStateValue().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReadStateValue {
-    return new ReadStateValue().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ReadStateValue | PlainMessage<ReadStateValue> | undefined, b: ReadStateValue | PlainMessage<ReadStateValue> | undefined): boolean {
-    return proto3.util.equals(ReadStateValue, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.ReadStateResp
- */
-export class ReadStateResp extends Message<ReadStateResp> {
-  /**
-   * @generated from field: repeated arroyo_api.ReadStateValue values = 1;
-   */
-  values: ReadStateValue[] = [];
-
-  constructor(data?: PartialMessage<ReadStateResp>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.ReadStateResp";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "values", kind: "message", T: ReadStateValue, repeated: true },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReadStateResp {
-    return new ReadStateResp().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReadStateResp {
-    return new ReadStateResp().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReadStateResp {
-    return new ReadStateResp().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ReadStateResp | PlainMessage<ReadStateResp> | undefined, b: ReadStateResp | PlainMessage<ReadStateResp> | undefined): boolean {
-    return proto3.util.equals(ReadStateResp, a, b);
   }
 }
 

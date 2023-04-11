@@ -44,7 +44,7 @@ impl KafkaTopicTester {
     }
 
     async fn get_sink_with_writes(&self) -> KafkaSinkWithWrites {
-        let mut kafka = KafkaSinkFunc::new(&self.server, &self.topic);
+        let mut kafka = KafkaSinkFunc::new(&self.server, &self.topic, vec![]);
         let (_, control_rx) = channel(128);
         let (command_tx, _) = channel(128);
         let (data_tx, _recv) = channel(128);

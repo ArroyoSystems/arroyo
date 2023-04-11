@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use arrow_schema::{DataType, TimeUnit};
 use arroyo_datastream::{NexmarkSource, Source};
 

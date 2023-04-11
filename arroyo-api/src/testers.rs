@@ -10,7 +10,7 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
 
-use crate::required_field;
+use crate::{required_field, sources::auth_config_to_hashmap};
 
 pub struct KafkaTester {
     connection: KafkaConnection,
@@ -40,11 +40,16 @@ impl KafkaTester {
     }
 
     async fn connect(&self) -> Result<BaseConsumer, String> {
-        let client: BaseConsumer = ClientConfig::new()
+        let mut client_config = ClientConfig::new();
+        client_config
             .set("bootstrap.servers", &self.connection.bootstrap_servers)
             .set("enable.auto.commit", "false")
             .set("auto.offset.reset", "earliest")
-            .set("group.id", "arroyo-kafka-source-tester")
+            .set("group.id", "arroyo-kafka-source-tester");
+        for (key, value) in &auth_config_to_hashmap(self.connection.auth_config.clone()) {
+            client_config.set(key, value);
+        }
+        let client: BaseConsumer = client_config
             .create()
             .map_err(|e| format!("Failed to connect: {:?}", e))?;
 

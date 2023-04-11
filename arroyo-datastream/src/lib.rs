@@ -250,6 +250,7 @@ pub enum Operator {
         offset_mode: OffsetMode,
         schema_registry: bool,
         messages_per_second: u32,
+        client_configs: HashMap<String, String>,
     },
     FusedWasmUDFs {
         name: String,
@@ -276,6 +277,7 @@ pub enum Operator {
     KafkaSink {
         topic: String,
         bootstrap_servers: Vec<String>,
+        client_configs: HashMap<String, String>,
     },
     NexmarkSource {
         first_event_rate: u64,
@@ -592,6 +594,7 @@ impl Source<Vec<u8>> for KafkaSource {
             offset_mode: self.offset_mode,
             schema_registry: false,
             messages_per_second: self.messages_per_second,
+            client_configs: HashMap::default(),
         }
     }
 }
@@ -914,6 +917,7 @@ impl KeyedSink<Vec<u8>, Vec<u8>> for KeyedKafkaSink {
         Operator::KafkaSink {
             topic: self.topic.clone(),
             bootstrap_servers: self.bootstrap_servers.clone(),
+            client_configs: HashMap::default(),
         }
     }
 }
@@ -1438,6 +1442,7 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 offset_mode,
                 schema_registry,
                 messages_per_second,
+                client_configs,
             } => GrpcOperator::KafkaSource(GrpcApi::KafkaSource {
                 topic,
                 bootstrap_servers,
@@ -1447,6 +1452,7 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 },
                 schema_registry,
                 messages_per_second,
+                client_configs,
             }),
             FusedWasmUDFs { name, udfs } => GrpcOperator::WasmUdfs(GrpcApi::WasmUdfs {
                 name,
@@ -1504,9 +1510,11 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::KafkaSink {
                 topic,
                 bootstrap_servers,
+                client_configs,
             } => GrpcOperator::KafkaSink(GrpcApi::KafkaSink {
                 topic,
                 bootstrap_servers,
+                client_configs,
             }),
             Operator::NexmarkSource {
                 first_event_rate,
@@ -1751,6 +1759,7 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         offset_mode,
                         schema_registry: kafka_source.schema_registry,
                         messages_per_second: kafka_source.messages_per_second,
+                        client_configs: kafka_source.client_configs,
                     }
                 }
                 GrpcOperator::WasmUdfs(wasm_udfs) => Operator::FusedWasmUDFs {
@@ -1818,6 +1827,7 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                 GrpcOperator::KafkaSink(kafka_sink) => Operator::KafkaSink {
                     topic: kafka_sink.topic,
                     bootstrap_servers: kafka_sink.bootstrap_servers,
+                    client_configs: kafka_sink.client_configs,
                 },
                 GrpcOperator::NexmarkSource(nexmark_source) => Operator::NexmarkSource {
                     first_event_rate: nexmark_source.first_event_rate,

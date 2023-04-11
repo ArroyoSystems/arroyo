@@ -1,5 +1,6 @@
 use arroyo_state::{BackingStore, StateBackend};
 use rand::Rng;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 
 use crate::engine::{Context, OutQueue, QueueItem};
@@ -64,6 +65,7 @@ impl KafkaTopicTester {
             OffsetMode::Earliest,
             kafka::SerializationMode::Json,
             100,
+            vec![],
         );
         let (to_control_tx, control_rx) = channel(128);
         let (command_tx, from_control_rx) = channel(128);

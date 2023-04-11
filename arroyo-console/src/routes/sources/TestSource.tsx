@@ -140,7 +140,7 @@ export function TestSource({
       </Card>
 
       {!done ? (
-        <Button variant="primary" disabled={testing} onClick={onClickTest}>
+        <Button variant="primary" isDisabled={testing} onClick={onClickTest}>
           Test Source
         </Button>
       ) : (

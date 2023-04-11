@@ -3,6 +3,10 @@ name = "arroyo-worker"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
+
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-macro = { path = "../arroyo-macro" }

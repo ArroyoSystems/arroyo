@@ -2,6 +2,10 @@
 name = "arroyo-controller"
 version = "0.1.0"
 edition = "2021"
+[features]
+default = []
+kafka-sasl = []
+
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }

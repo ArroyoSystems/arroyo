@@ -386,7 +386,7 @@ function CreateTypeStep({
           </RadioCardGroup>
           <Button
             variant="primary"
-            disabled={state.typeOneof.case == undefined}
+            isDisabled={state.typeOneof.case == undefined}
             onClick={() => next()}
           >
             Continue

@@ -278,7 +278,7 @@ function ConfluentSchema({
 
       <Button
         variant="primary"
-        disabled={host == "" || schema != null}
+        isDisabled={host == "" || schema != null}
         isLoading={loading}
         onClick={fetchSchema}
       >

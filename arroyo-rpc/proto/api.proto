@@ -168,6 +168,7 @@ message KafkaSource {
   OffsetMode offset_mode = 3;
   bool schema_registry = 4;
   uint32 messages_per_second = 5;
+  map<string, string> client_configs = 6;
 }
 
 message WasmUdfs {
@@ -240,6 +241,7 @@ message PeriodicWatermark {
 message KafkaSink {
   string topic = 1;
   repeated string bootstrap_servers = 2;
+  map<string, string> client_configs = 3;
 }
 
 message FileSink {
@@ -479,8 +481,24 @@ message JobMetricsResp {
 // connections
 message KafkaConnection {
   string bootstrap_servers = 1;
+  KafkaAuthConfig auth_config = 2;
 }
 
+message KafkaAuthConfig {
+  oneof auth_type {
+    NoAuth no_auth = 1;
+    SaslAuth sasl_auth =2;
+  }
+}
+
+message NoAuth {}
+
+message SaslAuth {
+  string protocol = 1;
+  string mechanism = 2;
+  string username = 3;
+  string password = 4;
+}
 message KinesisConnection {
 
 }

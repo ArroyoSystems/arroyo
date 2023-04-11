@@ -24,6 +24,7 @@ import {
   Icon,
   Input,
   Link,
+  Select,
   Spinner,
   Stack,
   Text,
@@ -35,13 +36,26 @@ import { SiApachekafka } from "react-icons/si";
 import { ApiGrpc } from "../../gen/api_connectweb";
 import {
   CreateConnectionReq,
+  KafkaAuthConfig,
   KafkaConnection,
   KinesisConnection,
+  NoAuth,
+  SaslAuth,
   TestSchemaResp,
   TestSourceMessage,
 } from "../../gen/api_pb";
 import { RadioCardGroup, RadioCard } from "../../lib/RadioGroup";
 import { ApiClient } from "../../main";
+
+// set the value of the field in config at the dot delimited path given by field
+function setField(field: string, config: any, value: any) {
+  const parts = field.split(".");
+  let current = config;
+  for (let i = 0; i < parts.length - 1; i++) {
+    current = current[parts[i]];
+  }
+  current[parts[parts.length - 1]] = value;
+}
 
 function onChangeString(
   state: CreateConnectionReq,
@@ -52,9 +66,9 @@ function onChangeString(
 ) {
   return (v: ChangeEvent<HTMLInputElement>) => {
     if (nullable && v.target == null) {
-      config[field] = null;
+      setField(field, config, null);
     } else {
-      config[field] = v.target.value;
+      setField(field, config, v.target.value);
     }
     setState(
       new CreateConnectionReq({
@@ -64,6 +78,19 @@ function onChangeString(
     );
   };
 }
+
+const KafkaAuthTypes = [
+  {
+    name: "None",
+    case: "noAuth",
+    value: new NoAuth({}),
+  },
+  {
+    name: "SASL",
+    case: "saslAuth",
+    value: new SaslAuth({}),
+  }
+];
 
 function ConfigureKafka({
   state,
@@ -76,18 +103,92 @@ function ConfigureKafka({
 }) {
   const config = state.connectionType.value as KafkaConnection;
 
-  const onChange = (e: ChangeEvent<HTMLInputElement>) => {
-    onChangeString(state, setState, "bootstrapServers", config)(e);
-    setReady(e.target.value != "");
+  const onChange = (field: string) => {
+    return (e: ChangeEvent<HTMLInputElement>) => {
+      onChangeString(state, setState, field, config)(e);
+      setReady(config.bootstrapServers != "" &&
+        (config.authConfig!.authType.case == "noAuth" ||
+          (config.authConfig?.authType.value?.mechanism != "" &&
+          config.authConfig?.authType.value?.username != "" &&
+          config.authConfig?.authType.value?.password != "" &&
+          config.authConfig?.authType.value?.protocol != "")));
+    };
+  };
+
+  const onChangeAuthType = (e: ChangeEvent<HTMLSelectElement>) => {
+    /* @ts-ignore */
+    config.authConfig.authType = { case: e.target.value, value: KafkaAuthTypes.find(t => t.case == e.target.value)?.value };
+    setState(
+      new CreateConnectionReq({
+        ...state,
+        connectionType: { case: state.connectionType.case!, value: config },
+      })
+    );
   };
 
   return (
     <Stack spacing={5}>
       <FormControl isRequired>
         <FormLabel>Bootstrap Servers</FormLabel>
-        <Input type="text" value={config.bootstrapServers} onChange={onChange} />
+        <Input
+          type="text"
+          value={config.bootstrapServers}
+          onChange={onChange("bootstrapServers")}
+        />
         <FormHelperText>Comma-separated list of kafka brokers to connect to</FormHelperText>
       </FormControl>
+
+      <FormControl isRequired>
+        <FormLabel>Authentication Type</FormLabel>
+        <Select value={config.authConfig?.authType.case} onChange={onChangeAuthType}>
+          {KafkaAuthTypes.map(t => (
+            <option key={t.case} value={t.case}>
+              {t.name}
+            </option>
+          ))}
+        </Select>
+      </FormControl>
+
+      {config.authConfig?.authType.case === "saslAuth" && (
+        <Stack spacing={5}>
+          <FormControl isRequired>
+            <FormLabel>Protocol</FormLabel>
+            <Input
+              type="text"
+              value={config.authConfig.authType.value.protocol || ""}
+              onChange={onChange("authConfig.authType.value.protocol")}
+            />
+            <FormHelperText>The SASL protocol used. SASL_PLAINTEXT, SASL_SSL, etc.</FormHelperText>
+          </FormControl>
+          <FormControl isRequired>
+            <FormLabel>Mechanism</FormLabel>
+            <Input
+              type="text"
+              value={config.authConfig.authType.value.mechanism || ""}
+              onChange={onChange("authConfig.authType.value.mechanism")}
+            />
+            <FormHelperText>
+              The SASL mechanism used for authentication (e.g., SCRAM-SHA-256, SCRAM-SHA-512 etc.)
+            </FormHelperText>
+          </FormControl>
+          <FormControl isRequired>
+            <FormLabel>Username</FormLabel>
+            <Input
+              type="text"
+              value={config.authConfig.authType.value.username || ""}
+              onChange={onChange("authConfig.authType.value.username")}
+            />
+          </FormControl>
+          <FormControl isRequired>
+            <FormLabel>Password</FormLabel>
+            <Input
+              type="password"
+              value={config.authConfig.authType.value.password || ""}
+              onChange={onChange("authConfig.authType.value.password")}
+            />
+          </FormControl>
+        </Stack>
+      )}
     </Stack>
   );
 }
@@ -112,7 +213,11 @@ export function ConnectionEditor({
       name: "kafka",
       icon: SiApachekafka,
       description: "Confluent Cloud, Amazon MSK, or self-hosted",
-      initialState: new KafkaConnection({}),
+      initialState: new KafkaConnection({
+        authConfig: new KafkaAuthConfig({
+          authType: { case: "noAuth", value: new NoAuth({}) },
+        })
+      }),
       editor: <ConfigureKafka state={state} setState={setState} setReady={setReady} />,
       disabled: false
     },
@@ -243,7 +348,7 @@ export function ConnectionEditor({
                     {selectedType.editor}
                     <Button
                       variant="primary"
-                      disabled={!ready || state.name == "" || testing}
+                      isDisabled={!ready || state.name == "" || testing}
                       isLoading={testing}
                       spinner={<Spinner />}
                       onClick={onTest}
