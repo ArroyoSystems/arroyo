@@ -36,7 +36,7 @@ RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV CARGO_HOME=/root/.cargo
 ENV PATH=$CARGO_HOME/bin:$PATH
 
-COPY docker/single/Cargo.toml $CARGO_HOME/config
+COPY docker/config.toml $CARGO_HOME/config
 
 RUN cargo install wasm-pack
 
@@ -65,7 +65,7 @@ COPY arroyo-sql-macro arroyo-sql-macro
 COPY arroyo-sql-testing arroyo-sql-testing
 COPY arroyo-controller arroyo-controller
 COPY arroyo-console arroyo-console
-COPY docker/single/refinery.toml refinery.toml
+COPY docker/refinery.toml refinery.toml
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock

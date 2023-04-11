@@ -46,6 +46,7 @@ pub const NOMAD_DC_ENV: &str = "NOMAD_DC";
 
 pub const DATABASE_NAME_ENV: &str = "DATABASE_NAME";
 pub const DATABASE_HOST_ENV: &str = "DATABASE_HOST";
+pub const DATABASE_PORT_ENV: &str = "DATABASE_PORT";
 pub const DATABASE_USER_ENV: &str = "DATABASE_USER";
 pub const DATABASE_PASSWORD_ENV: &str = "DATABASE_PASSWORD";
 
@@ -58,6 +59,7 @@ pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
 pub struct DatabaseConfig {
     pub name: String,
     pub host: String,
+    pub port: u16,
     pub user: String,
     pub password: String,
 }
@@ -67,6 +69,8 @@ impl DatabaseConfig {
         DatabaseConfig {
             name: env::var(DATABASE_NAME_ENV).unwrap_or_else(|_| "arroyo".to_string()),
             host: env::var(DATABASE_HOST_ENV).unwrap_or_else(|_| "localhost".to_string()),
+            port: u16::from_str(&env::var(DATABASE_PORT_ENV).unwrap_or_else(|_| "5432".to_string()))
+                .unwrap_or_else(|_| 5432),
             user: env::var(DATABASE_USER_ENV).unwrap_or_else(|_| "arroyo".to_string()),
             password: env::var(DATABASE_PASSWORD_ENV).unwrap_or_else(|_| "arroyo".to_string()),
         }

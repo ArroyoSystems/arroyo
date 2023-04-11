@@ -116,6 +116,7 @@ pub async fn main() {
     let mut cfg = deadpool_postgres::Config::new();
     cfg.dbname = Some(config.name);
     cfg.host = Some(config.host);
+    cfg.port = Some(config.port);
     cfg.user = Some(config.user);
     cfg.password = Some(config.password);
     cfg.manager = Some(ManagerConfig {
