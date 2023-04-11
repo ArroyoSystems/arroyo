@@ -897,7 +897,7 @@ impl SqlPipelineBuilder {
                     let field_names = w
                         .partition_by
                         .iter()
-                        .filter(|expr| Self::is_window(expr))
+                        .filter(|expr| !Self::is_window(expr))
                         .enumerate()
                         .map(|(i, _t)| Column {
                             relation: None,
@@ -908,7 +908,7 @@ impl SqlPipelineBuilder {
                     let field_computations = w
                         .partition_by
                         .iter()
-                        .filter(|expr| Self::is_window(expr))
+                        .filter(|expr| !Self::is_window(expr))
                         .map(|expression| to_expression_generator(expression, &input_struct))
                         .collect::<Result<Vec<_>>>()?;
 
