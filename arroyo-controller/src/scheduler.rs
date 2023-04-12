@@ -1,8 +1,7 @@
 use anyhow::bail;
 use arroyo_rpc::grpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::{
-    HeartbeatNodeReq, RegisterNodeReq, StartPipelineReq, StartWorkerReq, StopWorkerReq,
-    WorkerFinishedReq,
+    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, WorkerFinishedReq,
 };
 use arroyo_types::{
     NodeId, WorkerId, CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV, NOMAD_DC_ENV,
@@ -94,6 +93,17 @@ const SLOTS_PER_NOMAD_NODE: usize = 15;
 const MEMORY_PER_SLOT_MB: usize = 60_000 / SLOTS_PER_NOMAD_NODE;
 const CPU_PER_SLOT_MHZ: usize = 3400;
 
+pub struct StartPipelineReq {
+    pub name: String,
+    pub pipeline_path: String,
+    pub wasm_path: String,
+    pub job_id: String,
+    pub hash: String,
+    pub run_id: i64,
+    pub slots: usize,
+    pub env_vars: HashMap<String, String>,
+}
+
 #[async_trait::async_trait]
 impl Scheduler for ProcessScheduler {
     async fn start_workers(
@@ -157,7 +167,7 @@ impl Scheduler for ProcessScheduler {
             let job_id = start_pipeline_req.job_id.clone();
             println!("Starting in path {:?}", path);
             let workers = self.workers.clone();
-            let env_map = start_pipeline_req.environment_variables.clone();
+            let env_map = start_pipeline_req.env_vars.clone();
             tokio::spawn(async move {
                 let mut command = Command::new("./pipeline");
                 for (env, value) in env_map {
@@ -469,7 +479,7 @@ impl Scheduler for NodeScheduler {
                     slots: slots_for_this_one as u64,
                     node_id: node.id.0,
                     run_id: start_pipeline_req.run_id as u64,
-                    environment_variables: start_pipeline_req.environment_variables.clone(),
+                    env_vars: start_pipeline_req.env_vars.clone(),
                 }))
                 .await
                 .map_err(|e| {
@@ -585,7 +595,25 @@ impl Scheduler for NomadScheduler {
 
             slots_scheduled += slots_here;
 
-            let mut job = json!({
+            let mut env_vars = HashMap::new();
+            env_vars.insert("RUST_LOG".to_string(), "info".to_string());
+            env_vars.insert("PROD".to_string(), "true".to_string());
+            env_vars.insert(TASK_SLOTS_ENV.to_string(), slots_here.to_string());
+            env_vars.insert(WORKER_ID_ENV.to_string(), worker_id.to_string());
+            env_vars.insert(NODE_ID_ENV.to_string(), "1".to_string());
+            env_vars.insert(
+                RUN_ID_ENV.to_string(),
+                format!("{}", start_pipeline_req.run_id),
+            );
+            env_vars.insert(
+                CONTROLLER_ADDR_ENV.to_string(),
+                std::env::var(CONTROLLER_ADDR_ENV).unwrap_or_else(|_| "".to_string()),
+            );
+            for (key, value) in start_pipeline_req.env_vars.iter() {
+                env_vars.insert(key.to_string(), value.to_string());
+            }
+
+            let job = json!({
                 "Job": {
                     "ID": format!("{}-{}", start_pipeline_req.job_id, worker_id),
                     "Type": "batch",
@@ -620,17 +648,7 @@ impl Scheduler for NomadScheduler {
                                     "Artifacts": [{
                                         "GetterSource": start_pipeline_req.pipeline_path,
                                     }],
-                                    "Env": {
-                                        "RUST_LOG": "info",
-                                        "PROD": "true",
-                                        TASK_SLOTS_ENV: format!("{}", slots_here),
-                                        WORKER_ID_ENV: format!("{}", worker_id),
-                                        JOB_ID_ENV: start_pipeline_req.job_id,
-                                        NODE_ID_ENV: "1",
-                                        RUN_ID_ENV: format!("{}", start_pipeline_req.run_id),
-                                        CONTROLLER_ADDR_ENV: std::env::var(CONTROLLER_ADDR_ENV)
-                                            .unwrap_or_else(|_| "".to_string()),
-                                    },
+                                    "Env": env_vars,
                                     "Resources": {
                                         "CPU": CPU_PER_SLOT_MHZ * slots_here,
                                         "MemoryMB": MEMORY_PER_SLOT_MB * slots_here,
@@ -641,14 +659,6 @@ impl Scheduler for NomadScheduler {
                     ]
                 }
             });
-            if let Some(env) = job["Job"]["TaskGroups"][0]["Tasks"][0]["Env"].as_object_mut() {
-                for (key, value) in start_pipeline_req.environment_variables.iter() {
-                    env.insert(
-                        key.to_string(),
-                        serde_json::Value::String(value.to_string()),
-                    );
-                }
-            }
 
             let resp = self
                 .client

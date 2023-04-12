@@ -129,7 +129,7 @@ impl NodeGrpc for NodeServer {
         let mut workers = self.workers.lock().unwrap();
 
         let mut command = Command::new("./pipeline");
-        for (env, value) in req.environment_variables {
+        for (env, value) in req.env_vars {
             command.env(env, value);
         }
         let mut child = command

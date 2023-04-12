@@ -5,9 +5,7 @@ use std::{
 };
 
 use arroyo_datastream::Program;
-use arroyo_rpc::grpc::{
-    worker_grpc_client::WorkerGrpcClient, StartExecutionReq, StartPipelineReq, TaskAssignment,
-};
+use arroyo_rpc::grpc::{worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment};
 use arroyo_types::WorkerId;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
@@ -16,9 +14,12 @@ use tracing::{error, info, warn};
 use anyhow::anyhow;
 use arroyo_state::{parquet::StorageClient, BackingStore, StateBackend};
 
-use crate::states::{fatal, StateError};
 use crate::{job_controller::JobController, queries::controller_queries};
 use crate::{scheduler::SchedulerError, JobMessage};
+use crate::{
+    scheduler::StartPipelineReq,
+    states::{fatal, StateError},
+};
 
 use super::{running::Running, Context, State, Transition};
 
@@ -173,8 +174,8 @@ impl State for Scheduling {
                     run_id: ctx.status.run_id,
                     name: ctx.config.pipeline_name.clone(),
                     hash: ctx.program.get_hash(),
-                    slots: slots_needed as u64,
-                    environment_variables: StorageClient::get_storage_environment_variables(),
+                    slots: slots_needed,
+                    env_vars: StorageClient::get_storage_environment_variables(),
                 })
                 .await
             {

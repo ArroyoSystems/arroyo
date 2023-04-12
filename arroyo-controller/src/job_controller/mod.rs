@@ -455,14 +455,15 @@ impl JobController {
             }
         }
 
+        if let Some(new_epoch) = self.model.compaction_needed() {
+            if self.compacting_task.is_none() && self.model.checkpoint_state.is_none() {
+                self.compacting_task = Some(self.start_compaction(new_epoch));
+            }
+        }
+
         // check on checkpointing
         if self.model.checkpoint_state.is_some() {
             self.model.finish_checkpoint_if_done(&self.pool).await?;
-            if let Some(new_epoch) = self.model.compaction_needed() {
-                if self.compacting_task.is_none() && self.model.checkpoint_state.is_none() {
-                    self.compacting_task = Some(self.start_compaction(new_epoch));
-                }
-            }
         } else if self.model.last_checkpoint.elapsed() > self.config.checkpoint_interval
             && self.compacting_task.is_none()
         {

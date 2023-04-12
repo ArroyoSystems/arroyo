@@ -33,7 +33,7 @@ use tokio::sync::oneshot;
 use tracing::warn;
 use tracing::{debug, info};
 
-pub const S3_STORAGE_ENGINE_ENV: &str = "S3_STORAGE_BUCKET";
+pub const S3_STORAGE_ENGINE_ENV: &str = "S3_BUCKET";
 pub const S3_REGION_ENV: &str = "S3_STORAGE_REGION";
 
 pub struct ParquetBackend {
