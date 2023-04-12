@@ -1,5 +1,5 @@
 FROM rust:1-bookworm AS builder
-WORKDIR app
+WORKDIR /app
 ARG PROTO_ARCH
 
 RUN apt-get update && \
@@ -44,7 +44,7 @@ RUN service postgresql start && \
     bash -c "cd arroyo-console && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm build"
 
 FROM debian:bookworm-slim AS runner
-WORKDIR app
+WORKDIR /app
 RUN apt-get update && \
     apt-get -y install libssl-dev openssl supervisor
 COPY --from=builder /app/target/release/arroyo-api /app/target/release/arroyo-controller /app/arroyo-console/dist ./

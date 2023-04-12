@@ -86,7 +86,7 @@ RUN bash -c "cd arroyo-console && source ~/.bashrc && /root/.local/share/pnpm/pn
 
 WORKDIR /opt/arroyo/build
 
-COPY docker/single/build_base pipeline/
+COPY docker/build_base pipeline/
 RUN cd pipeline && cargo build --release && cargo build --release
 RUN cd pipeline/wasm-fns && wasm-pack build
 COPY docker/single/supervisord.conf /opt/arroyo/src/docker/single/supervisord.conf
