@@ -28,7 +28,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultOnFailure, TraceLayer};
 
 use tracing::metadata::LevelFilter;
-use tracing::{info, warn, span, Level};
+use tracing::{info, span, warn, Level};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;

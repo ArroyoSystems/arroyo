@@ -369,6 +369,7 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
                 }
                 BuiltinScalarFunction::ToHex => bail!("hex not implemented"),
                 BuiltinScalarFunction::Uuid => bail!("UUID unimplemented"),
+                BuiltinScalarFunction::Cbrt => bail!("cube root unimplemented"),
             }
         }
         expression => {
@@ -389,7 +390,7 @@ pub struct Column {
 impl Column {
     pub fn convert(column: &datafusion_common::Column) -> Self {
         Column {
-            relation: column.relation.clone(),
+            relation: column.relation.to_owned().map(|s| s.to_string()),
             name: column.name.clone(),
         }
     }
@@ -415,7 +416,10 @@ impl ColumnExpression {
         column: &datafusion_common::Column,
         input_struct: &StructDef,
     ) -> Result<Self> {
-        let column_field = input_struct.get_field(column.relation.as_ref(), &column.name)?;
+        let column_field = input_struct.get_field(
+            column.relation.as_ref().map(|table| table.to_string()),
+            &column.name,
+        )?;
         Ok(ColumnExpression { column_field })
     }
 }
@@ -1190,18 +1194,28 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
             return Ok(StringFunction::ConcatWithSeparator(separator, args));
         }
         match (args.len(), func) {
-            (1, BuiltinScalarFunction::Ascii) => Ok(StringFunction::Ascii(Box::new(args.remove(0)))),
-            (1, BuiltinScalarFunction::BitLength) => Ok(StringFunction::BitLength(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::Ascii) => {
+                Ok(StringFunction::Ascii(Box::new(args.remove(0))))
+            }
+            (1, BuiltinScalarFunction::BitLength) => {
+                Ok(StringFunction::BitLength(Box::new(args.remove(0))))
+            }
             (1, BuiltinScalarFunction::CharacterLength) => {
                 Ok(StringFunction::CharacterLength(Box::new(args.remove(0))))
             }
             (1, BuiltinScalarFunction::Chr) => Ok(StringFunction::Chr(Box::new(args.remove(0)))),
-            (1, BuiltinScalarFunction::InitCap) => Ok(StringFunction::InitCap(Box::new(args.remove(0)))),
-            (1, BuiltinScalarFunction::Lower) => Ok(StringFunction::Lower(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::InitCap) => {
+                Ok(StringFunction::InitCap(Box::new(args.remove(0))))
+            }
+            (1, BuiltinScalarFunction::Lower) => {
+                Ok(StringFunction::Lower(Box::new(args.remove(0))))
+            }
             (1, BuiltinScalarFunction::OctetLength) => {
                 Ok(StringFunction::OctetLength(Box::new(args.remove(0))))
             }
-            (1, BuiltinScalarFunction::Reverse) => Ok(StringFunction::Reverse(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::Reverse) => {
+                Ok(StringFunction::Reverse(Box::new(args.remove(0))))
+            }
             (1, BuiltinScalarFunction::Btrim) => {
                 Ok(StringFunction::Btrim(Box::new(args.remove(0)), None))
             }
@@ -1214,7 +1228,9 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
             (1, BuiltinScalarFunction::Trim) => {
                 Ok(StringFunction::Trim(Box::new(args.remove(0)), None))
             }
-            (1, BuiltinScalarFunction::Upper) => Ok(StringFunction::Upper(Box::new(args.remove(0)))),
+            (1, BuiltinScalarFunction::Upper) => {
+                Ok(StringFunction::Upper(Box::new(args.remove(0))))
+            }
             (2, BuiltinScalarFunction::Btrim) => Ok(StringFunction::Btrim(
                 Box::new(args.remove(0)),
                 Some(Box::new(args.remove(0))),
@@ -1296,9 +1312,7 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
                 Box::new(args.remove(0)),
                 Box::new(args.remove(0)),
             )),
-            (_, BuiltinScalarFunction::Concat) => {
-                Ok(StringFunction::Concat(args))
-            }
+            (_, BuiltinScalarFunction::Concat) => Ok(StringFunction::Concat(args)),
             (1..=usize::MAX, func) if func == BuiltinScalarFunction::Concat => {
                 let separator = Box::new(args.remove(0));
                 Ok(StringFunction::ConcatWithSeparator(separator, args))

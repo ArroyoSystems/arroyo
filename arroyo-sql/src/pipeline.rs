@@ -31,7 +31,7 @@ use crate::{
         AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection,
         TwoPhaseAggregation,
     },
-    types::{StructDef, StructField, TypeDef},
+    types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider, SqlConfig, SqlSource,
 };
 
@@ -490,11 +490,11 @@ impl SqlPipelineBuilder {
             LogicalPlan::Extension(_) => bail!("extensions are not currently supported"),
             LogicalPlan::Distinct(_) => bail!("distinct is not currently supported"),
             LogicalPlan::Window(window) => self.insert_window(window),
-            LogicalPlan::SetVariable(_) => bail!("setting variables is not currently supported"),
             LogicalPlan::Prepare(_) => bail!("prepare commands are not currently supported"),
             LogicalPlan::Dml(_) => bail!("DML statements not currently supported"),
             LogicalPlan::DescribeTable(_) => bail!("describe table not currently supported"),
             LogicalPlan::Unnest(_) => bail!("unnest not currently supported"),
+            LogicalPlan::Statement(_) => bail!("statements not currently supported"),
         }
     }
 
@@ -587,10 +587,7 @@ impl SqlPipelineBuilder {
             .schema
             .fields()
             .iter()
-            .map(|field| Column {
-                relation: field.qualifier().cloned(),
-                name: field.field().name().to_string(),
-            })
+            .map(|field| Column::convert(&field.qualified_column()))
             .collect();
 
         let projection = Projection {
@@ -664,10 +661,7 @@ impl SqlPipelineBuilder {
                 } else {
                     let field = to_expression_generator(expr, input_struct)?;
                     Ok(Some((
-                        Column {
-                            relation: fields[i].qualifier().cloned(),
-                            name: fields[i].name().clone(),
-                        },
+                        Column::convert(&fields[i].qualified_column()),
                         field,
                     )))
                 }
@@ -714,10 +708,7 @@ impl SqlPipelineBuilder {
                 }
                 return Ok(GroupByKind::WindowOutput {
                     index: i,
-                    column: Column {
-                        relation: fields[i].qualifier().cloned(),
-                        name: fields[i].name().clone(),
-                    },
+                    column: Column::convert(&fields[i].qualified_column()),
                     window_type: window,
                 });
             }
@@ -761,6 +752,9 @@ impl SqlPipelineBuilder {
         match expression {
             Expr::Literal(ScalarValue::IntervalDayTime(Some(val))) => {
                 Ok(Duration::from_millis(*val as u64))
+            }
+            Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(val))) => {
+                Ok(interval_month_day_nanos_to_duration(*val))
             }
             _ => bail!(
                 "unsupported Duration expression, expect duration literal, not {}",
@@ -824,10 +818,11 @@ impl SqlPipelineBuilder {
     ) -> Result<SqlOperator> {
         let source = self
             .sources
-            .get(&table_scan.table_name)
+            .get(&table_scan.table_name.to_string())
             .ok_or_else(|| anyhow!("Source {} does not exist", table_scan.table_name))?;
 
-        let source_operator = SqlOperator::Source(table_scan.table_name.clone(), source.clone());
+        let source_operator =
+            SqlOperator::Source(table_scan.table_name.to_string(), source.clone());
 
         if let Some(projection) = table_scan.projection.as_ref() {
             let fields: Vec<StructField> = projection
@@ -958,10 +953,7 @@ impl SqlPipelineBuilder {
             .schema
             .fields()
             .iter()
-            .map(|field| Column {
-                relation: field.qualifier().cloned(),
-                name: field.name().clone(),
-            })
+            .map(|field| Column::convert(&field.qualified_column()))
             .collect();
 
         let projection = Projection {
@@ -983,10 +975,7 @@ impl SqlPipelineBuilder {
     ) -> Result<AggregatingStrategy> {
         let field_names = aggregate_fields
             .iter()
-            .map(|field| Column {
-                relation: field.qualifier().cloned(),
-                name: field.name().clone(),
-            })
+            .map(|field| Column::convert(&field.qualified_column()))
             .collect();
         let two_phase_field_computations = aggr_expr
             .iter()
