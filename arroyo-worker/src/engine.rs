@@ -262,7 +262,10 @@ impl<K: Key, T: Data> Context<K, T> {
                     metadata.epoch,
                 )
                 .await;
-                metadata.min_watermark.map(from_micros)
+                metadata
+                    .expect("require metadata")
+                    .min_watermark
+                    .map(from_micros)
             };
             let state = StateStore::<StateBackend>::from_checkpoint(
                 &task_info,

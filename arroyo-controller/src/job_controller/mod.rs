@@ -24,7 +24,7 @@ use self::checkpointer::CheckpointState;
 
 mod checkpointer;
 
-const CHECKPOINTS_TO_KEEP: u32 = 2;
+const CHECKPOINTS_TO_KEEP: u32 = 4;
 const COMPACT_EVERY: u32 = 2;
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -573,7 +573,7 @@ impl JobController {
                 job_id,
                 min_epoch,
                 new_min,
-                duration = start.elapsed().as_secs()
+                duration = start.elapsed().as_secs_f32()
             );
 
             Ok(new_min)
