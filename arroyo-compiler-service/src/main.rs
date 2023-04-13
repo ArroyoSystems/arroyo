@@ -38,7 +38,7 @@ pub async fn main() {
 
     let last_used = Arc::new(AtomicU64::new(to_millis(SystemTime::now())));
 
-    let s3_bucket = std::env::var("S3_BUCKET").ok();
+    let s3_bucket = std::env::var("S3_COMPILER_BUCKET").ok();
     let s3_region = std::env::var("S3_REGION").ok();
     let output_dir = std::env::var("OUTPUT_DIR").ok();
 
