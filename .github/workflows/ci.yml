@@ -11,7 +11,6 @@ jobs:
       DATABASE_PASSWORD: arroyo
       DATABASE_HOST: localhost
       DATABASE_NAME: arroyo
-      S3_BUCKET: local
     steps:
       - name: Check out
         uses: actions/checkout@v3

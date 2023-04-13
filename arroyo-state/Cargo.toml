@@ -11,6 +11,7 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-metrics = { path = "../arroyo-metrics" }
 
 anyhow = "1.0"
+backoff = "0.4.0"
 tracing = "0.1"
 rand = "0.8"
 bincode = "2.0.0-rc.3"

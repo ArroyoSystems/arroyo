@@ -30,11 +30,11 @@ use tokio::fs::{remove_file, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
-use tracing::log::warn;
+use tracing::warn;
 use tracing::{debug, info};
 
 pub const S3_STORAGE_ENGINE_ENV: &str = "S3_BUCKET";
-pub const S3_REGION_ENV: &str = "S3_REGION";
+pub const S3_REGION_ENV: &str = "S3_STORAGE_REGION";
 
 pub struct ParquetBackend {
     epoch: u32,
@@ -49,7 +49,7 @@ pub struct ParquetBackend {
 
 fn table_checkpoint_path(task_info: &TaskInfo, table: char, epoch: u32) -> String {
     format!(
-        "job-id-{}/checkpoint-{:0>7}/data/operator-id-{}/table-{}/subtask-{}",
+        "job-id-{}/checkpoint-{:0>7}/data/operator-id-{}/table-{}/subtask-{:0>3}",
         task_info.job_id, epoch, task_info.operator_id, table, task_info.task_index,
     )
 }
@@ -80,7 +80,7 @@ impl BackingStore for ParquetBackend {
 
     // TODO: should this be a Result, rather than an option?
     async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Option<CheckpointMetadata> {
-        let storage_client = StorageClient::new().ok()?;
+        let storage_client = StorageClient::new();
         let data = storage_client
             .get_bytes(checkpoint_metadata_path(job_id, epoch))
             .await?;
@@ -92,24 +92,23 @@ impl BackingStore for ParquetBackend {
         job_id: &str,
         operator_id: &str,
         epoch: u32,
-    ) -> OperatorCheckpointMetadata {
-        let storage_client = StorageClient::new().unwrap();
+    ) -> Option<OperatorCheckpointMetadata> {
+        let storage_client = StorageClient::new();
         let data = storage_client
             .get_bytes(operator_metadata_path(job_id, operator_id, epoch))
-            .await
-            .unwrap();
-        OperatorCheckpointMetadata::decode(&data[..]).unwrap()
+            .await?;
+        Some(OperatorCheckpointMetadata::decode(&data[..]).unwrap())
     }
 
     async fn complete_operator_checkpoint(metadata: OperatorCheckpointMetadata) {
-        let storage_client = StorageClient::new().unwrap();
+        let storage_client = StorageClient::new();
         let path = operator_metadata_path(&metadata.job_id, &metadata.operator_id, metadata.epoch);
         storage_client.write(path, metadata.encode_to_vec()).await;
     }
 
     async fn complete_checkpoint(metadata: CheckpointMetadata) {
         debug!("writing checkpoint {:?}", metadata);
-        let storage_client = StorageClient::new().unwrap();
+        let storage_client = StorageClient::new();
         let path = checkpoint_metadata_path(&metadata.job_id, metadata.epoch);
         storage_client.write(path, metadata.encode_to_vec()).await;
     }
@@ -127,14 +126,15 @@ impl BackingStore for ParquetBackend {
                 task_info.clone(),
                 tx,
                 tables.clone(),
-                StorageClient::new().unwrap(),
+                StorageClient::new(),
+                HashMap::new(),
             ),
             task_info: task_info.clone(),
             tables: tables
                 .into_iter()
                 .map(|table| (table.name.clone().chars().next().unwrap(), table))
                 .collect(),
-            storage_client: StorageClient::new().unwrap(),
+            storage_client: StorageClient::new(),
         }
     }
 
@@ -146,7 +146,11 @@ impl BackingStore for ParquetBackend {
     ) -> Self {
         let operator_metadata =
             Self::load_operator_metadata(&task_info.job_id, &task_info.operator_id, metadata.epoch)
-                .await;
+                .await
+                .expect(&format!(
+                    "missing metadata for operator {}, epoch {}",
+                    task_info.operator_id, metadata.epoch
+                ));
         let mut current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> = HashMap::new();
         let tables: HashMap<char, TableDescriptor> = tables
             .into_iter()
@@ -160,23 +164,11 @@ impl BackingStore for ParquetBackend {
                 .get(&parquet_data.table.chars().next().unwrap())
                 .unwrap();
             if table_descriptor.table_type() != TableType::Global {
-                // check if the file has relevant data.
+                // check if the file has data in the task's key range.
                 if parquet_data.max_routing_key < *task_info.key_range.start()
                     || *task_info.key_range.end() < parquet_data.min_routing_key
                 {
                     continue;
-                }
-                // don't process files older than min_epoch
-            } else if parquet_data.epoch < metadata.min_epoch {
-                continue;
-            }
-            if table_descriptor.delete_behavior() == TableDeleteBehavior::NoReadsBeforeWatermark {
-                if let Some(watermark_micros) = operator_metadata.min_watermark {
-                    if parquet_data.max_timestamp_micros
-                        < watermark_micros - table_descriptor.retention_micros
-                    {
-                        continue;
-                    }
                 }
             }
 
@@ -188,6 +180,8 @@ impl BackingStore for ParquetBackend {
             files.push(parquet_data);
         }
 
+        let writer_current_files = current_files.clone();
+
         Self {
             epoch: metadata.epoch + 1,
             min_epoch: metadata.min_epoch,
@@ -196,11 +190,12 @@ impl BackingStore for ParquetBackend {
                 task_info.clone(),
                 control_tx,
                 tables.values().cloned().collect(),
-                StorageClient::new().unwrap(),
+                StorageClient::new(),
+                writer_current_files,
             ),
             task_info: task_info.clone(),
             tables,
-            storage_client: StorageClient::new().unwrap(),
+            storage_client: StorageClient::new(),
         }
     }
 
@@ -222,19 +217,20 @@ impl BackingStore for ParquetBackend {
                 Self::compact_operator(
                     metadata.job_id.clone(),
                     operator.clone(),
-                    metadata.epoch,
+                    old_min_epoch,
                     min_epoch,
                 )
             })
             .collect();
 
-        let storage_client = StorageClient::new()?;
+        let storage_client = StorageClient::new();
 
         // wait for all of the futures to complete
         while let Some(result) = futures.next().await {
             let operator_id = result?;
-            for deletepoch in old_min_epoch..min_epoch {
-                let path = operator_metadata_path(&metadata.job_id, &operator_id, deletepoch);
+
+            for epoch_to_remove in old_min_epoch..min_epoch {
+                let path = operator_metadata_path(&metadata.job_id, &operator_id, epoch_to_remove);
                 debug!("deleting {}", path);
                 storage_client.remove(path).await;
             }
@@ -246,9 +242,9 @@ impl BackingStore for ParquetBackend {
             );
         }
 
-        for deletepoch in old_min_epoch..min_epoch {
-            StorageClient::new()?
-                .remove(checkpoint_metadata_path(&metadata.job_id, deletepoch))
+        for epoch_to_remove in old_min_epoch..min_epoch {
+            StorageClient::new()
+                .remove(checkpoint_metadata_path(&metadata.job_id, epoch_to_remove))
                 .await;
         }
         metadata.min_epoch = min_epoch;
@@ -263,13 +259,7 @@ impl BackingStore for ParquetBackend {
     ) -> u32 {
         assert_eq!(barrier.epoch, self.epoch);
         self.writer
-            .checkpoint(
-                self.epoch,
-                barrier.min_epoch,
-                barrier.timestamp,
-                watermark,
-                barrier.then_stop,
-            )
+            .checkpoint(self.epoch, barrier.timestamp, watermark, barrier.then_stop)
             .await;
         self.epoch += 1;
         self.min_epoch = barrier.min_epoch;
@@ -350,34 +340,41 @@ impl ParquetBackend {
     async fn compact_operator(
         job_id: String,
         operator: String,
-        epoch: u32,
-        min_epoch: u32,
+        old_min_epoch: u32,
+        new_min_epoch: u32,
     ) -> anyhow::Result<String> {
-        let operator_metadata = Self::load_operator_metadata(&job_id, &operator, epoch).await;
-        let global_tables: HashSet<_> = operator_metadata
-            .tables
-            .iter()
-            .filter_map(|descriptor| {
-                if descriptor.table_type() == TableType::Global {
-                    Some(descriptor.name.clone())
-                } else {
-                    None
+        let paths_to_keep: HashSet<String> =
+            Self::load_operator_metadata(&job_id, &operator, new_min_epoch)
+                .await
+                .expect("expect new_min_epoch metadata to still be present")
+                .backend_data
+                .iter()
+                .map(|backend_data| {
+                    let Some(BackendData::ParquetStore(parquet_store)) =
+                  &backend_data.backend_data else {unreachable!("expect parquet backends")};
+                    parquet_store.file.clone()
+                })
+                .collect();
+
+        let mut deleted_paths = HashSet::new();
+        let storage_client = StorageClient::new();
+
+        for epoch_to_remove in old_min_epoch..new_min_epoch {
+            let Some(metadata) = Self::load_operator_metadata(&job_id, &operator, epoch_to_remove)
+            .await else {
+                continue;
+            };
+            for backend_data in metadata.backend_data {
+                let Some(BackendData::ParquetStore(parquet_store)) =  &backend_data.backend_data
+                else {unreachable!("expect parquet backends")};
+                let file = parquet_store.file.clone();
+                if !paths_to_keep.contains(&file) {
+                    if !deleted_paths.contains(&file) {
+                        deleted_paths.insert(file.clone());
+                        storage_client.remove(file).await;
+                    }
                 }
-            })
-            .collect();
-        let storage_client = StorageClient::new()?;
-        for backend_data in operator_metadata.backend_data {
-            let BackendData::ParquetStore(parquet_data) = backend_data.backend_data.unwrap();
-            if global_tables.contains(&parquet_data.table) && parquet_data.epoch < min_epoch {
-                storage_client.remove(parquet_data.file).await;
             }
-            storage_client
-                .remove(operator_metadata_path(
-                    &job_id,
-                    &operator,
-                    parquet_data.epoch,
-                ))
-                .await;
         }
         Ok(operator)
     }
@@ -421,7 +418,6 @@ impl ParquetBackend {
                     continue;
                 }
 
-                //TODO: filter timestamp
                 let timestamp = from_micros(time_array.value(index) as u64);
 
                 let key: K = bincode::decode_from_slice(key_array.value(index), BINCODE_CONFIG)
@@ -448,6 +444,7 @@ impl ParquetWriter {
         control_tx: Sender<ControlResp>,
         tables: Vec<TableDescriptor>,
         storage_client: StorageClient,
+        current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(1024 * 1024);
         let (finish_tx, finish_rx) = oneshot::channel();
@@ -463,8 +460,7 @@ impl ParquetWriter {
                 .map(|table| (table.name.chars().next().unwrap(), table.clone()))
                 .collect(),
             builders: HashMap::new(),
-            last_checkpoint_watermark: None,
-            current_files: HashMap::new(),
+            current_files,
         })
         .start();
 
@@ -497,7 +493,6 @@ impl ParquetWriter {
     async fn checkpoint(
         &mut self,
         epoch: u32,
-        min_epoch: u32,
         time: SystemTime,
         watermark: Option<SystemTime>,
         then_stop: bool,
@@ -505,7 +500,6 @@ impl ParquetWriter {
         self.sender
             .send(ParquetQueueItem::Checkpoint(ParquetCheckpoint {
                 epoch,
-                min_epoch,
                 time,
                 watermark,
                 then_stop,
@@ -539,7 +533,6 @@ struct ParquetWrite {
 #[derive(Debug)]
 struct ParquetCheckpoint {
     epoch: u32,
-    min_epoch: u32,
     time: SystemTime,
     watermark: Option<SystemTime>,
     then_stop: bool,
@@ -649,72 +642,52 @@ struct ParquetFlusher {
     task_info: TaskInfo,
     table_descriptors: HashMap<char, TableDescriptor>,
     builders: HashMap<char, RecordBatchBuilder>,
-    last_checkpoint_watermark: Option<SystemTime>,
     current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>,
 }
 
-#[derive(Eq, PartialEq, Clone, Debug)]
-pub enum StorageClientConfig {
-    LocalDirectory(String),
-    S3 { region: String, bucket: String },
-}
-
-impl StorageClientConfig {
-    pub fn bucket_var(&self) -> String {
-        match self {
-            StorageClientConfig::LocalDirectory(_) => "local".to_owned(),
-            StorageClientConfig::S3 { region: _, bucket } => bucket.clone(),
-        }
-    }
-    pub fn region_var(&self) -> String {
-        match self {
-            StorageClientConfig::LocalDirectory(_) => "local".to_owned(),
-            StorageClientConfig::S3 { region, bucket: _ } => region.clone(),
-        }
-    }
-}
-
-impl Default for StorageClientConfig {
-    fn default() -> Self {
-        let bucket = std::env::var(S3_STORAGE_ENGINE_ENV).unwrap();
-        match bucket.as_str() {
-            "local" => Self::LocalDirectory("/tmp/arroyo-data".to_owned()),
-            bucket => {
-                let region = std::env::var(S3_REGION_ENV).unwrap();
-                Region::from_str(&region).unwrap();
-                Self::S3 {
-                    region,
-                    bucket: bucket.to_string(),
-                }
-            }
-        }
-    }
-}
-
 #[derive(Clone)]
-enum StorageClient {
+pub enum StorageClient {
     LocalDirectory(String),
-    S3 { client: S3Client, bucket: String },
+    S3 {
+        client: S3Client,
+        region: String,
+        bucket: String,
+    },
 }
 
 // TODO: Better way to configure this.
 impl StorageClient {
-    fn new() -> Result<Self> {
-        let bucket = std::env::var(S3_STORAGE_ENGINE_ENV);
-        match bucket {
-            Ok(bucket) => match bucket.as_str() {
-                "local" => Ok(Self::LocalDirectory("/tmp/arroyo-data".to_owned())),
+    pub fn new() -> Self {
+        let bucket = std::env::var(S3_STORAGE_ENGINE_ENV).ok();
+        let region = std::env::var(S3_REGION_ENV).ok();
+        match (bucket, region) {
+            (Some(bucket), Some(region)) => match bucket.as_str() {
+                "local" => Self::LocalDirectory("/tmp/arroyo-data".to_owned()),
                 bucket => {
-                    let region = std::env::var(S3_REGION_ENV)?;
-                    let region = Region::from_str(&region)?;
-                    let client = S3Client::new(region);
-                    Ok(Self::S3 {
+                    let client = S3Client::new(Region::from_str(&region).unwrap());
+                    Self::S3 {
                         client,
+                        region,
                         bucket: bucket.to_owned(),
-                    })
+                    }
                 }
             },
-            Err(_) => Ok(Self::LocalDirectory("/tmp/arroyo-data".to_owned())),
+            _ => Self::LocalDirectory("/tmp/arroyo-data".to_owned()),
+        }
+    }
+    pub fn get_storage_environment_variables() -> HashMap<String, String> {
+        let (Ok(region), Ok(bucket)) = (std::env::var(S3_REGION_ENV),
+        std::env::var(S3_STORAGE_ENGINE_ENV)) else {
+            return HashMap::new();
+        };
+        match bucket.as_str() {
+            "local" => HashMap::new(),
+            bucket => vec![
+                (S3_STORAGE_ENGINE_ENV.to_string(), bucket.to_string()),
+                (S3_REGION_ENV.to_string(), region.to_string()),
+            ]
+            .into_iter()
+            .collect(),
         }
     }
 
@@ -729,7 +702,11 @@ impl StorageClient {
                 let mut file = File::create(file_path).await.unwrap();
                 file.write_all(&parquet_bytes).await.unwrap();
             }
-            StorageClient::S3 { client, bucket } => {
+            StorageClient::S3 {
+                client,
+                region: _,
+                bucket,
+            } => {
                 let request = PutObjectRequest {
                     bucket: bucket.into(),
                     key,
@@ -751,13 +728,28 @@ impl StorageClient {
                     }
                 }
             }
-            StorageClient::S3 { client, bucket } => {
+            StorageClient::S3 {
+                client,
+                region: _,
+                bucket,
+            } => {
                 let delete_object_request = DeleteObjectRequest {
                     bucket: bucket.into(),
-                    key,
+                    key: key.clone(),
                     ..Default::default()
                 };
-                client.delete_object(delete_object_request).await.unwrap();
+                if let Err(error) = client.delete_object(delete_object_request).await {
+                    warn!("failed to delete object, trying again. error: {}", error);
+                    let delete_object_request = DeleteObjectRequest {
+                        bucket: bucket.into(),
+                        key,
+                        ..Default::default()
+                    };
+                    client
+                        .delete_object(delete_object_request)
+                        .await
+                        .expect("second try failed");
+                }
             }
         }
     }
@@ -774,7 +766,11 @@ impl StorageClient {
                     },
                 }
             }
-            StorageClient::S3 { client, bucket } => {
+            StorageClient::S3 {
+                client,
+                region: _,
+                bucket,
+            } => {
                 let request = GetObjectRequest {
                     bucket: bucket.into(),
                     key: key.clone(),
@@ -796,19 +792,6 @@ impl StorageClient {
                     .await
                     .unwrap();
                 Some(buffer)
-            }
-        }
-    }
-}
-
-impl From<StorageClientConfig> for StorageClient {
-    fn from(value: StorageClientConfig) -> Self {
-        match value {
-            StorageClientConfig::LocalDirectory(directory) => Self::LocalDirectory(directory),
-            StorageClientConfig::S3 { region, bucket } => {
-                let region = Region::from_str(&region).unwrap();
-                let client = S3Client::new(region);
-                Self::S3 { client, bucket }
             }
         }
     }
@@ -893,45 +876,24 @@ impl ParquetFlusher {
                         max_timestamp_micros: to_micros(stats.max_timestamp),
                     });
             }
-            let mut files_to_delete = vec![];
             let mut new_file_map: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> =
                 HashMap::new();
             for (table, epoch_files) in self.current_files.drain() {
                 let table_descriptor = self.table_descriptors.get(&table).unwrap();
                 for (epoch, files) in epoch_files {
-                    if table_descriptor.table_type() == TableType::Global && epoch < cp.min_epoch {
-                        for file in files {
-                            files_to_delete.push(file.file);
-                        }
+                    if table_descriptor.table_type() == TableType::Global && epoch < cp.epoch {
                         continue;
                     }
                     for file in files {
                         if table_descriptor.delete_behavior()
                             == TableDeleteBehavior::NoReadsBeforeWatermark
                         {
-                            if let Some(last_checkpoint_watermark) = self.last_checkpoint_watermark
-                            {
-                                // this file wasn't in the prior checkpoint, fine to delete it.
-                                if file.max_timestamp_micros
-                                    < to_micros(last_checkpoint_watermark)
-                                        - table_descriptor.retention_micros
-                                {
-                                    files_to_delete.push(file.file);
-                                    continue;
-                                }
-                            }
                             if let Some(checkpoint_watermark) = cp.watermark {
-                                // this file is not needed by the new checkpoint. Don't delete it as we that checkpoint hasn't finished.
+                                // this file is not needed by the new checkpoint.
                                 if file.max_timestamp_micros
                                     < to_micros(checkpoint_watermark)
                                         - table_descriptor.retention_micros
                                 {
-                                    new_file_map
-                                        .entry(table)
-                                        .or_default()
-                                        .entry(cp.epoch)
-                                        .or_default()
-                                        .push(file);
                                     continue;
                                 }
                             }
@@ -962,9 +924,6 @@ impl ParquetFlusher {
                 backend_data,
                 bytes: bytes as u64,
             };
-            for file in files_to_delete {
-                self.storage_client.remove(file).await;
-            }
             self.control_tx
                 .send(ControlResp::CheckpointCompleted(CheckpointCompleted {
                     checkpoint_epoch: cp.epoch,
@@ -973,7 +932,6 @@ impl ParquetFlusher {
                 }))
                 .await
                 .unwrap();
-            self.last_checkpoint_watermark = cp.watermark;
             if cp.then_stop {
                 self.finish_tx.take().unwrap().send(()).unwrap();
                 return false;

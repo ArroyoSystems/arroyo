@@ -39,29 +39,32 @@ pub async fn main() {
     let last_used = Arc::new(AtomicU64::new(to_millis(SystemTime::now())));
 
     let s3_bucket = std::env::var("S3_BUCKET").ok();
+    let s3_region = std::env::var("S3_REGION").ok();
     let output_dir = std::env::var("OUTPUT_DIR").ok();
 
-    let (object_store, base_path): (Arc<Box<dyn ObjectStore>>, _) = match (s3_bucket, output_dir) {
-        (Some(s3_bucket), _) => (
-            Arc::new(Box::new(
-                AmazonS3Builder::new()
-                    .with_bucket_name(&s3_bucket)
-                    .with_region("us-east-1")
-                    .build()
-                    .unwrap(),
-            )),
-            format!("s3://{}.s3-us-east-1.amazonaws.com", s3_bucket),
-        ),
-        (None, Some(output_dir)) => (
-            Arc::new(Box::new(
-                LocalFileSystem::new_with_prefix(PathBuf::from_str(&output_dir).unwrap()).unwrap(),
-            )),
-            format!("file:///{}", output_dir),
-        ),
-        _ => {
-            panic!("One of S3_BUCKET or OUTPUT_DIR must be set")
-        }
-    };
+    let (object_store, base_path): (Arc<Box<dyn ObjectStore>>, _) =
+        match (s3_bucket, s3_region, output_dir) {
+            (Some(s3_bucket), Some(s3_region), _) => (
+                Arc::new(Box::new(
+                    AmazonS3Builder::new()
+                        .with_bucket_name(&s3_bucket)
+                        .with_region(&s3_region)
+                        .build()
+                        .unwrap(),
+                )),
+                format!("s3://{}.s3-{}.amazonaws.com", s3_bucket, s3_region),
+            ),
+            (None, _, Some(output_dir)) => (
+                Arc::new(Box::new(
+                    LocalFileSystem::new_with_prefix(PathBuf::from_str(&output_dir).unwrap())
+                        .unwrap(),
+                )),
+                format!("file:///{}", output_dir),
+            ),
+            _ => {
+                panic!("One of S3_BUCKET or OUTPUT_DIR must be set")
+            }
+        };
 
     let service = CompileService {
         build_dir: PathBuf::from_str(&build_dir).unwrap(),

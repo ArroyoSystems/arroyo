@@ -128,7 +128,11 @@ impl NodeGrpc for NodeServer {
 
         let mut workers = self.workers.lock().unwrap();
 
-        let mut child = Command::new(&bin)
+        let mut command = Command::new("./pipeline");
+        for (env, value) in req.env_vars {
+            command.env(env, value);
+        }
+        let mut child = command
             .env("RUST_LOG", "info")
             .env(WORKER_ID_ENV, format!("{}", worker_id.0))
             .env(NODE_ID_ENV, format!("{}", node_id.0))
