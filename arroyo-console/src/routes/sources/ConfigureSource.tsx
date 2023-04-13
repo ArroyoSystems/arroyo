@@ -132,7 +132,7 @@ function ConfigureNexmark({
           onChange={onChangeNumber(state, setState, "eventsPerSecond", config)}
         />
         <FormHelperText>
-          The number of messages the Impulse source will emit per second
+          The number of messages the Nexmark source will emit per second
         </FormHelperText>
       </FormControl>
 
