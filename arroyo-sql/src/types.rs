@@ -1,11 +1,12 @@
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
+    time::Duration,
 };
 
 use anyhow::anyhow;
 use anyhow::Result;
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, IntervalMonthDayNanoType};
 use arrow::{
     array::Decimal128Array,
     datatypes::{Field, IntervalDayTimeType},
@@ -15,7 +16,7 @@ use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
-use syn::{parse_str, Type};
+use syn::{parse_quote, parse_str, Type};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StructDef {
@@ -94,11 +95,11 @@ impl StructDef {
         parse_str(&self.struct_name()).unwrap()
     }
 
-    pub fn get_field(&self, alias: Option<&String>, name: &String) -> Result<StructField> {
+    pub fn get_field(&self, alias: Option<String>, name: &String) -> Result<StructField> {
         let field = self
             .fields
             .iter()
-            .find(|field| field.name().eq(name) && field.alias.as_ref().eq(&alias));
+            .find(|field| field.name().eq(name) && field.alias.eq(&alias));
         match field {
             Some(field) => Ok(field.clone()),
             None => self
@@ -121,6 +122,17 @@ pub struct StructField {
     pub name: String,
     pub alias: Option<String>,
     pub data_type: TypeDef,
+}
+
+/* this returns a duration with the same length as the postgres interval. */
+pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration {
+    let (month, day, nanos) = IntervalMonthDayNanoType::to_parts(serialized_value);
+    let years = month / 12;
+    let extra_month = month % 12;
+    let year_hours = 1461 * years * 24 / 4;
+    let days_to_seconds = ((year_hours + 24 * (day + 30 * extra_month)) as u64) * 60 * 60;
+    let nanos = nanos as u64;
+    std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
 }
 
 impl From<StructField> for Field {
@@ -218,7 +230,12 @@ impl TypeDef {
                 .unwrap()
             }
             ScalarValue::IntervalDayTime(None) => todo!(),
-            ScalarValue::IntervalMonthDayNano(_) => todo!(),
+            ScalarValue::IntervalMonthDayNano(Some(val)) => {
+                let duration = interval_month_day_nanos_to_duration(*val);
+                let seconds  = duration.as_secs();
+                let nanos = duration.subsec_nanos() as u64;
+                parse_quote!((std::time::Duration::from_secs(#seconds) + std::time::Duration::from_nanos(#nanos)))
+            }
             ScalarValue::Struct(_, _) => todo!(),
             ScalarValue::Dictionary(_, _) => todo!(),
             _ => todo!(),

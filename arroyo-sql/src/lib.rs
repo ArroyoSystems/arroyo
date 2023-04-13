@@ -59,9 +59,12 @@ impl ArroyoSchemaProvider {
             "hop".to_string(),
             Arc::new(create_udf(
                 "hop",
-                vec![],
+                vec![
+                    DataType::Interval(datatypes::IntervalUnit::MonthDayNano),
+                    DataType::Interval(datatypes::IntervalUnit::MonthDayNano),
+                ],
                 window_return_type.clone(),
-                Volatility::Stable,
+                Volatility::Volatile,
                 make_scalar_function(fn_impl),
             )),
         );
@@ -69,9 +72,9 @@ impl ArroyoSchemaProvider {
             "tumble".to_string(),
             Arc::new(create_udf(
                 "tumble",
-                vec![],
+                vec![DataType::Interval(datatypes::IntervalUnit::MonthDayNano)],
                 window_return_type,
-                Volatility::Stable,
+                Volatility::Volatile,
                 make_scalar_function(fn_impl),
             )),
         );
