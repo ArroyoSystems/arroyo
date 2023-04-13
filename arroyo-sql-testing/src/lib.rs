@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use arroyo_sql_macro::single_test_codegen;
+    use chrono;
 
     // Casts
     single_test_codegen!(
@@ -41,6 +42,19 @@ mod tests {
             ..Default::default()
         },
         Some("1.25".to_string())
+    );
+
+    single_test_codegen!(
+        "cast_timestamp_to_string",
+        "CAST(non_nullable_timestamp as STRING)",
+        arroyo_sql::TestStruct::default(),
+        "1970-01-01T00:00:00+00:00".to_string()
+    );
+    single_test_codegen!(
+        "cast_null_timestamp_to_string",
+        "CAST(nullable_timestamp as STRING)",
+        arroyo_sql::TestStruct::default(),
+        None
     );
     // Category: Math - Addition
 

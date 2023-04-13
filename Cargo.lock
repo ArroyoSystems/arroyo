@@ -625,6 +625,7 @@ dependencies = [
  "arroyo-sql",
  "arroyo-sql-macro",
  "arroyo-types",
+ "chrono",
  "quote",
  "syn 1.0.109",
 ]

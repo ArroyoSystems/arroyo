@@ -900,7 +900,7 @@ pub struct CastExpression {
 impl CastExpression {
     fn new(input: Box<Expression>, data_type: &DataType) -> Result<Expression> {
         if let TypeDef::DataType(input_type, _) = input.return_type() {
-            if Self::allowed_input_type(&input_type) && Self::allowed_output_type(data_type) {
+            if Self::allowed_types(&input_type, data_type) {
                 Ok(Expression::Cast(Self {
                     input,
                     data_type: data_type.clone(),
@@ -917,11 +917,19 @@ impl CastExpression {
         }
     }
 
-    fn allowed_input_type(data_type: &DataType) -> bool {
-        Self::is_numeric(data_type) || Self::is_string(data_type)
-    }
-    fn allowed_output_type(data_type: &DataType) -> bool {
-        Self::is_numeric(data_type) || Self::is_string(data_type)
+    fn allowed_types(input_data_type: &DataType, output_data_type: &DataType) -> bool {
+        // handle casts between strings and numerics.
+        if Self::is_numeric(input_data_type)
+            || Self::is_string(input_data_type) && Self::is_numeric(output_data_type)
+            || Self::is_string(output_data_type)
+        {
+            true
+        // handle date to string casts.
+        } else if Self::is_date(input_data_type) || Self::is_string(output_data_type) {
+            true
+        } else {
+            false
+        }
     }
 
     fn is_numeric(data_type: &DataType) -> bool {
@@ -940,11 +948,16 @@ impl CastExpression {
                 | DataType::Float64
         )
     }
+
+    fn is_date(data_type: &DataType) -> bool {
+        matches!(data_type, DataType::Timestamp(_, None))
+    }
+
     fn is_string(data_type: &DataType) -> bool {
         matches!(data_type, DataType::Utf8 | DataType::LargeUtf8)
     }
     fn cast_expr(input_type: &DataType, output_type: &DataType, sub_expr: syn::Expr) -> syn::Expr {
-        let result: syn::Expr = if Self::is_numeric(input_type) && Self::is_numeric(output_type) {
+        if Self::is_numeric(input_type) && Self::is_numeric(output_type) {
             let cast_type: syn::Type = parse_str(StructField::data_type_name(output_type)).unwrap();
             parse_quote!(#sub_expr as #cast_type)
         } else if Self::is_numeric(input_type) && Self::is_string(output_type) {
@@ -952,10 +965,14 @@ impl CastExpression {
         } else if Self::is_string(input_type) && Self::is_numeric(output_type) {
             let cast_type: syn::Type = parse_str(StructField::data_type_name(output_type)).unwrap();
             parse_quote!(#sub_expr.parse::<#cast_type>().unwrap())
+        } else if Self::is_date(input_type) && Self::is_string(output_type) {
+            parse_quote!({
+                let datetime: chrono::DateTime<chrono::Utc> = #sub_expr.into();
+                datetime.to_rfc3339()
+            })
         } else {
             unreachable!()
-        };
-        result
+        }
     }
 }
 
