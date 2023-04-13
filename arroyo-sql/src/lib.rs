@@ -34,6 +34,7 @@ use schemas::window_arrow_struct;
 use syn::{parse_quote, parse_str};
 use types::{StructDef, StructField, TypeDef};
 
+use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
 
 #[cfg(test)]
@@ -251,7 +252,7 @@ pub async fn parse_and_get_program(
     .map_err(|_| anyhow!("Something went wrong"))?
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct TestStruct {
     pub non_nullable_i32: i32,
     pub nullable_i32: Option<i32>,
@@ -263,9 +264,27 @@ pub struct TestStruct {
     pub nullable_i64: Option<i64>,
     pub non_nullable_string: String,
     pub nullable_string: Option<String>,
-    // TODO: implement default properly
-    //  pub non_nullable_timestamp: SystemTime,
-    //  pub nullable_timestamp: Option<SystemTime>,
+    pub non_nullable_timestamp: SystemTime,
+    pub nullable_timestamp: Option<SystemTime>,
+}
+
+impl Default for TestStruct {
+    fn default() -> Self {
+        Self {
+            non_nullable_i32: Default::default(),
+            nullable_i32: Default::default(),
+            non_nullable_bool: Default::default(),
+            nullable_bool: Default::default(),
+            non_nullable_f64: Default::default(),
+            nullable_f64: Default::default(),
+            non_nullable_i64: Default::default(),
+            nullable_i64: Default::default(),
+            non_nullable_string: Default::default(),
+            nullable_string: Default::default(),
+            non_nullable_timestamp: SystemTime::UNIX_EPOCH,
+            nullable_timestamp: None,
+        }
+    }
 }
 
 fn test_struct_def() -> StructDef {

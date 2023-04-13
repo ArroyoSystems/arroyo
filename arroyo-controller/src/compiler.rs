@@ -180,6 +180,7 @@ edition = "2021"
 [dependencies]
 types = {{ path = "../types" }}
 petgraph = "0.6"
+chrono = "0.4"
 bincode = "=2.0.0-rc.3"
 bincode_derive = "=2.0.0-rc.3"
 serde = "1.0"
@@ -315,6 +316,7 @@ wasm-opt = false
             use arroyo_worker::engine::{Program, SubtaskNode};
             use arroyo_worker::{LogicalEdge, LogicalNode};
             use types::*;
+            use chrono;
             use std::time::SystemTime;
             use std::str::FromStr;
             use serde::{Deserialize, Serialize};
