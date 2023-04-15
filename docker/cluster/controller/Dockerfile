@@ -41,13 +41,23 @@ RUN service postgresql start && \
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p arroyo-api/migrations && \
     CARGO_PROFILE_RELEASE_DEBUG=false cargo build --release --bin arroyo-api --bin arroyo-controller && \
-    bash -c "cd arroyo-console && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm build"
+    bash -c "cd arroyo-console && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm build" && \
+    cp "$(which refinery)" /refinery
 
 FROM debian:bookworm-slim AS runner
 WORKDIR /app
 RUN apt-get update && \
     apt-get -y install libssl-dev openssl supervisor
-COPY --from=builder /app/target/release/arroyo-api /app/target/release/arroyo-controller /app/arroyo-console/dist ./
-COPY docker/cluster/controller/supervisord.conf /supervisord.conf
+COPY --from=builder /app/target/release/arroyo-api /app/target/release/arroyo-controller ./
+COPY --from=builder /app/arroyo-console/dist ./dist
+COPY --from=builder /app/arroyo-api/migrations /migrations
+COPY --from=builder /refinery /usr/local/bin/refinery
 
-ENTRYPOINT [ "/usr/bin/supervisord", "-c", "/supervisord.conf" ]
+COPY docker/cluster/controller/supervisord.conf /supervisord.conf
+COPY docker/cluster/controller/entrypoint.sh /entrypoint.sh
+
+ENV PRODUCTION=true \
+    ASSET_DIR="/app/dist"
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT [ "/entrypoint.sh" ]

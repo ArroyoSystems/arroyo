@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arroyo Console</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Rubik" />
+    <script>
+      window.__API_ENDPOINT = "%VITE_API_ENDPOINT%";
+      if (window.__API_ENDPOINT === "" || window.__API_ENDPOINT === "%" + "VITE_API_ENDPOINT%") {
+        window.__API_ENDPOINT = window.location.protocol + "//" + window.location.host.split(":")[0] + ":8001";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

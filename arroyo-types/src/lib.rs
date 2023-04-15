@@ -54,6 +54,8 @@ pub const ADMIN_PORT_ENV: &str = "ADMIN_PORT";
 pub const GRPC_PORT_ENV: &str = "GRPC_PORT";
 
 pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
+// Endpoint that the frontend should query for the API
+pub const API_ENDPOINT_ENV: &str = "API_ENDPOINT";
 
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {

@@ -1,3 +1,5 @@
+use axum::body::Body;
+use once_cell::sync::Lazy;
 use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
     DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq,
@@ -20,16 +22,19 @@ use arroyo_rpc::grpc::{
     controller_grpc_client::ControllerGrpcClient,
 };
 use arroyo_server_common::start_admin_server;
-use arroyo_types::{grpc_port, ports, DatabaseConfig, ASSET_DIR_ENV, CONTROLLER_ADDR_ENV};
-use axum::{response::IntoResponse, routing::get_service, Json, Router};
+use arroyo_types::{grpc_port, ports, DatabaseConfig, ASSET_DIR_ENV, CONTROLLER_ADDR_ENV, API_ENDPOINT_ENV};
+use axum::{response::IntoResponse, Json, Router};
 use cornucopia_async::GenericClient;
 use deadpool_postgres::{ManagerConfig, Object, Pool, RecyclingMethod};
 use http::StatusCode;
 use prost::Message;
 use serde::{Deserialize, Serialize};
+use tower::service_fn;
 use std::collections::HashMap;
 use std::env;
-use std::{io, time::Duration};
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::{time::Duration};
 use tokio::{select, sync::broadcast};
 use tokio_postgres::error::SqlState;
 use tokio_postgres::NoTls;
@@ -37,7 +42,7 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status};
 use tower_http::{
     cors::{self, CorsLayer},
-    services::{ServeDir, ServeFile},
+    services::{ServeDir},
 };
 use tracing::{error, info, warn};
 
@@ -124,7 +129,7 @@ pub async fn main() {
     });
     let pool = cfg
         .create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls)
-        .expect("Unable t connect to database");
+        .expect("Unable to connect to database");
 
     server(pool).await;
 }
@@ -133,18 +138,29 @@ fn to_micros(dt: OffsetDateTime) -> u64 {
     (dt.unix_timestamp_nanos() / 1_000) as u64
 }
 
-async fn handle_error(_err: io::Error) -> impl IntoResponse {
-    (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong...")
-}
-
 async fn server(pool: Pool) {
     let _guard = arroyo_server_common::init_logging("api");
 
     let asset_dir = env::var(ASSET_DIR_ENV).unwrap_or_else(|_| "arroyo-console/dist".to_string());
 
+    static INDEX_HTML: Lazy<String> = Lazy::new(|| {
+        let asset_dir = env::var(ASSET_DIR_ENV).unwrap_or_else(|_| "arroyo-console/dist".to_string());
+
+        let endpoint = env::var(API_ENDPOINT_ENV).unwrap_or_else(|_| String::new());
+
+        std::fs::read_to_string(PathBuf::from_str(&asset_dir).unwrap()
+            .join("index.html"))
+            .expect("Could not find index.html in asset dir (you may need to build the console sources)")
+            .replace("{{API_ENDPOINT}}", &endpoint)});
+
+    let fallback = service_fn(|_: http::Request<_>| async move {
+                let body = Body::from(INDEX_HTML.as_str());
+                let res = http::Response::new(body);
+                Ok::<_, _>(res)
+    });
+
     let serve_dir = ServeDir::new(&asset_dir)
-        .not_found_service(ServeFile::new(format!("{}/index.html", asset_dir)));
-    let serve_dir = get_service(serve_dir).handle_error(handle_error);
+        .not_found_service(fallback.clone());
 
     // TODO: enable in development only!!!
     let cors = CorsLayer::new()
@@ -152,7 +168,7 @@ async fn server(pool: Pool) {
         .allow_origin(cors::Any);
 
     let app = Router::new()
-        .nest_service("/", serve_dir.clone())
+        .route_service("/", fallback)
         .fallback_service(serve_dir)
         .layer(cors);
 
