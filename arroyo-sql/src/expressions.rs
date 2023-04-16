@@ -40,6 +40,7 @@ pub enum Expression {
     Cast(CastExpression),
     Numeric(NumericExpression),
     String(StringFunction),
+    Hash(HashExpression),
 }
 
 impl Expression {
@@ -63,6 +64,7 @@ impl Expression {
             Expression::Cast(cast_expression) => cast_expression.to_syn_expression(),
             Expression::Numeric(numeric_expression) => numeric_expression.to_syn_expression(),
             Expression::String(string_function) => string_function.to_syn_expression(),
+            Expression::Hash(hash_expression) => hash_expression.to_syn_expression(),
         }
     }
     pub fn return_type(&self) -> TypeDef {
@@ -83,6 +85,7 @@ impl Expression {
             Expression::Cast(cast_expression) => cast_expression.return_type(),
             Expression::Numeric(numeric_expression) => numeric_expression.return_type(),
             Expression::String(string_function) => string_function.return_type(),
+            Expression::Hash(hash_expression) => hash_expression.return_type(),
         }
     }
     pub fn nullable(&self) -> bool {
@@ -364,9 +367,10 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
                 | BuiltinScalarFunction::SHA224
                 | BuiltinScalarFunction::SHA256
                 | BuiltinScalarFunction::SHA384
-                | BuiltinScalarFunction::SHA512 => {
-                    bail!("hashing function {:?} not implemented", fun)
-                }
+                | BuiltinScalarFunction::SHA512 => Ok(HashExpression::new(
+                    fun.clone(),
+                    Box::new(arg_expressions.remove(0)),
+                )?),
                 BuiltinScalarFunction::ToHex => bail!("hex not implemented"),
                 BuiltinScalarFunction::Uuid => bail!("UUID unimplemented"),
                 BuiltinScalarFunction::Cbrt => bail!("cube root unimplemented"),
@@ -1123,6 +1127,7 @@ impl SortExpression {
             nulls_first,
         })
     }
+
     pub fn tuple_type(&self) -> syn::Type {
         let value_type = self.value.return_type().return_type();
         match (self.value.nullable(), &self.direction, self.nulls_first) {
@@ -1138,6 +1143,7 @@ impl SortExpression {
             }
         }
     }
+
     pub fn to_syn_expr(&self) -> syn::Expr {
         let value_expr = self.value.to_syn_expression();
         match (self.value.nullable(), &self.direction, self.nulls_first) {
@@ -1158,6 +1164,7 @@ impl SortExpression {
         }
     }
 }
+
 #[derive(Debug)]
 pub enum StringFunction {
     Ascii(Box<Expression>),
@@ -1195,7 +1202,77 @@ pub enum StringFunction {
     Rpad(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
     Rtrim(Box<Expression>, Option<Box<Expression>>),
 }
+// postgres has to be active for build for some reason?
 
+#[derive(Debug)]
+pub enum HashFunction {
+    MD5,
+    SHA224,
+    SHA256,
+    SHA384,
+    SHA512,
+}
+
+impl ToString for HashFunction {
+    fn to_string(&self) -> String {
+        match self {
+            Self::MD5 => "md5".to_string(),
+            Self::SHA224 => "sha224".to_string(),
+            Self::SHA256 => "sha256".to_string(),
+            Self::SHA384 => "sha384".to_string(),
+            Self::SHA512 => "sha512".to_string(),
+        }
+    }
+}
+
+impl TryFrom<BuiltinScalarFunction> for HashFunction {
+    type Error = anyhow::Error;
+
+    fn try_from(value: BuiltinScalarFunction) -> Result<Self> {
+        match value {
+            BuiltinScalarFunction::MD5 => Ok(Self::MD5),
+            BuiltinScalarFunction::SHA224 => Ok(Self::SHA224),
+            BuiltinScalarFunction::SHA256 => Ok(Self::SHA256),
+            BuiltinScalarFunction::SHA384 => Ok(Self::SHA384),
+            BuiltinScalarFunction::SHA512 => Ok(Self::SHA512),
+            _ => bail!("function {} is not a hash function", value),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct HashExpression {
+    function: HashFunction,
+    input: Box<Expression>,
+}
+
+impl HashExpression {
+    pub fn new(function: BuiltinScalarFunction, input: Box<Expression>) -> Result<Expression> {
+        Ok(Expression::Hash(HashExpression {
+            function: function.try_into()?,
+            input,
+        }))
+    }
+}
+
+impl ExpressionGenerator for HashExpression {
+    fn to_syn_expression(&self) -> syn::Expr {
+        let input = self.input.to_syn_expression();
+        let hash_fn = format_ident!("{}", self.function.to_string());
+        parse_quote!({
+            match #input {
+                Some(unwrapped) => Some(arroyo_types::functions::hash::#hash_fn(unwrapped)),
+                None => None,
+            }
+        })
+    }
+
+    fn return_type(&self) -> TypeDef {
+        // this *can* be null because in SQL - MD5(NULL) = NULL
+        TypeDef::DataType(DataType::Utf8, self.input.nullable())
+    }
+}
+// I'm going to start adding comments as I go
 impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
     type Error = anyhow::Error;
 

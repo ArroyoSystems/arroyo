@@ -664,8 +664,11 @@ dependencies = [
 name = "arroyo-types"
 version = "0.1.0"
 dependencies = [
+ "base64 0.21.0",
  "bincode 2.0.0-rc.3",
+ "md-5 0.10.5",
  "serde",
+ "sha2 0.10.6",
 ]
 
 [[package]]
