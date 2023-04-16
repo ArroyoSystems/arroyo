@@ -52,6 +52,7 @@ pub const DATABASE_PASSWORD_ENV: &str = "DATABASE_PASSWORD";
 
 pub const ADMIN_PORT_ENV: &str = "ADMIN_PORT";
 pub const GRPC_PORT_ENV: &str = "GRPC_PORT";
+pub const HTTP_PORT_ENV: &str = "HTTP_PORT";
 
 pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
 // Endpoint that the frontend should query for the API
@@ -90,12 +91,24 @@ pub mod ports {
     pub const API_HTTP: u16 = 8000;
     pub const API_GRPC: u16 = 8001;
     pub const API_ADMIN: u16 = 8002;
+
+    pub const COMPILER_GRPC: u16 = 9000;
+    pub const COMPILER_ADMIN: u16 = 9001;
 }
 
-pub fn grpc_port(default: u16) -> u16 {
-    env::var(GRPC_PORT_ENV)
+pub fn grpc_port(service: &str, default: u16) -> u16 {
+    service_port(service, default, GRPC_PORT_ENV)
+}
+
+pub fn admin_port(service: &str, default: u16) -> u16 {
+    service_port(service, default, ADMIN_PORT_ENV)
+}
+
+pub fn service_port(service: &str, default: u16, env_var: &str) -> u16 {
+    env::var(&format!("{}_{}", service.to_uppercase(), env_var)).ok()
+        .or(env::var(env_var).ok())
         .map(|s| {
-            u16::from_str(&s).unwrap_or_else(|_| panic!("Invalid setting for {}", GRPC_PORT_ENV))
+            u16::from_str(&s).unwrap_or_else(|_| panic!("Invalid setting for {}", env_var))
         })
         .unwrap_or(default)
 }

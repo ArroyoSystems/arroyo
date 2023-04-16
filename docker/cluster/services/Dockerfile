@@ -53,8 +53,8 @@ COPY --from=builder /app/arroyo-console/dist ./dist
 COPY --from=builder /app/arroyo-api/migrations /migrations
 COPY --from=builder /refinery /usr/local/bin/refinery
 
-COPY docker/cluster/controller/supervisord.conf /supervisord.conf
-COPY docker/cluster/controller/entrypoint.sh /entrypoint.sh
+COPY docker/cluster/services/supervisord.conf /supervisord.conf
+COPY docker/cluster/services/entrypoint.sh /entrypoint.sh
 
 ENV PRODUCTION=true \
     ASSET_DIR="/app/dist"

@@ -22,7 +22,7 @@ use arroyo_rpc::grpc::{
     controller_grpc_client::ControllerGrpcClient,
 };
 use arroyo_server_common::start_admin_server;
-use arroyo_types::{grpc_port, ports, DatabaseConfig, ASSET_DIR_ENV, CONTROLLER_ADDR_ENV, API_ENDPOINT_ENV};
+use arroyo_types::{grpc_port, ports, DatabaseConfig, ASSET_DIR_ENV, CONTROLLER_ADDR_ENV, API_ENDPOINT_ENV, service_port, HTTP_PORT_ENV};
 use axum::{response::IntoResponse, Json, Router};
 use cornucopia_async::GenericClient;
 use deadpool_postgres::{ManagerConfig, Object, Pool, RecyclingMethod};
@@ -175,12 +175,13 @@ async fn server(pool: Pool) {
     let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
 
     start_admin_server(
-        "arroyo-api".to_string(),
+        "api",
         ports::API_ADMIN,
         shutdown_rx.resubscribe(),
     );
 
-    let addr = format!("0.0.0.0:{}", ports::API_HTTP).parse().unwrap();
+    let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
+    let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
     info!("Starting http server on {:?}", addr);
 
     tokio::spawn(async move {
@@ -208,7 +209,7 @@ async fn server(pool: Pool) {
         controller_addr,
     };
 
-    let addr = format!("0.0.0.0:{}", grpc_port(ports::API_GRPC))
+    let addr = format!("0.0.0.0:{}", grpc_port("api", ports::API_GRPC))
         .parse()
         .unwrap();
     info!("Starting gRPC server on {:?}", addr);

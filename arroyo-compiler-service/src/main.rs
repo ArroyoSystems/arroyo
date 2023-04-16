@@ -14,10 +14,13 @@ use arroyo_rpc::grpc::{
     CompileQueryReq, CompileQueryResp,
 };
 
+use arroyo_server_common::start_admin_server;
+use arroyo_types::{ports, grpc_port};
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::ObjectStore;
 use prost::Message;
+use tokio::sync::broadcast;
 use tokio::{process::Command, sync::Mutex};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::error;
@@ -106,9 +109,19 @@ pub async fn main() {
 }
 
 pub async fn start_service(service: CompileService) {
-    let addr = "0.0.0.0:9000".parse().unwrap();
+    let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
-    info!("Starting compiler service at 0.0.0.0:9000");
+    start_admin_server(
+        "compiler",
+        ports::COMPILER_ADMIN,
+        shutdown_rx.resubscribe(),
+    );
+
+    let grpc = grpc_port("compiler", ports::COMPILER_GRPC);
+
+    let addr = format!("0.0.0.0:{}", grpc).parse().unwrap();
+
+    info!("Starting compiler service at {}", addr);
 
     let last_used = service.last_used.clone();
 
@@ -137,6 +150,8 @@ pub async fn start_service(service: CompileService) {
         .serve(addr)
         .await
         .unwrap();
+
+    shutdown_tx.send(0).unwrap();
 }
 
 async fn rustfmt(file: &Path) -> io::Result<()> {

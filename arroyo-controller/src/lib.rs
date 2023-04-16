@@ -559,7 +559,7 @@ impl ControllerServer {
         let (shutdown_tx, shutdown_rx) = broadcast::channel(16);
 
         arroyo_server_common::start_admin_server(
-            "arroyo-controller".to_string(),
+            "controller",
             ports::CONTROLLER_ADMIN,
             shutdown_rx,
         );

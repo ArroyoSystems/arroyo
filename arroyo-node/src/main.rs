@@ -257,7 +257,7 @@ pub async fn main() {
         .map(|s| usize::from_str(&s).unwrap())
         .unwrap_or(16);
 
-    let grpc = grpc_port(ports::NODE_GRPC);
+    let grpc = grpc_port("node", ports::NODE_GRPC);
 
     let node_id = NodeId(rand::thread_rng().gen());
 
@@ -291,7 +291,7 @@ pub async fn main() {
     });
 
     arroyo_server_common::start_admin_server(
-        "arroyo-node".to_string(),
+        "node",
         ports::NODE_ADMIN,
         stop_rx.resubscribe(),
     );
