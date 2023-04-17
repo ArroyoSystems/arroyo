@@ -1202,7 +1202,6 @@ pub enum StringFunction {
     Rpad(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
     Rtrim(Box<Expression>, Option<Box<Expression>>),
 }
-// postgres has to be active for build for some reason?
 
 #[derive(Debug)]
 pub enum HashFunction {
@@ -1272,7 +1271,7 @@ impl ExpressionGenerator for HashExpression {
         TypeDef::DataType(DataType::Utf8, self.input.nullable())
     }
 }
-// I'm going to start adding comments as I go
+
 impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
     type Error = anyhow::Error;
 
