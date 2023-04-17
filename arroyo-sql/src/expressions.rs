@@ -43,8 +43,8 @@ pub enum Expression {
     Hash(HashExpression),
 }
 
-impl Expression {
-    pub fn to_syn_expression(&self) -> syn::Expr {
+impl ExpressionGenerator for Expression {
+    fn to_syn_expression(&self) -> syn::Expr {
         match self {
             Expression::Column(column_expression) => column_expression.to_syn_expression(),
             Expression::UnaryBoolean(unary_boolean_expression) => {
@@ -67,7 +67,8 @@ impl Expression {
             Expression::Hash(hash_expression) => hash_expression.to_syn_expression(),
         }
     }
-    pub fn return_type(&self) -> TypeDef {
+
+    fn return_type(&self) -> TypeDef {
         match self {
             Expression::Column(column_expression) => column_expression.return_type(),
             Expression::UnaryBoolean(unary_boolean_expression) => {
@@ -88,10 +89,9 @@ impl Expression {
             Expression::Hash(hash_expression) => hash_expression.return_type(),
         }
     }
-    pub fn nullable(&self) -> bool {
-        self.return_type().is_optional()
-    }
+}
 
+impl Expression {
     pub(crate) fn has_max_value(&self, field: &StructField) -> Option<i64> {
         match self {
             Expression::BinaryComparison(BinaryComparisonExpression { left, op, right }) => {
