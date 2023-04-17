@@ -185,6 +185,12 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
                 *op,
                 Box::new(to_expression_generator(right, input_struct)?),
             ),
+            datafusion_expr::Operator::StringConcat => {
+                Ok(Expression::String(StringFunction::Concat(vec![
+                    to_expression_generator(left, input_struct)?,
+                    to_expression_generator(right, input_struct)?,
+                ])))
+            }
             datafusion_expr::Operator::RegexMatch
             | datafusion_expr::Operator::RegexIMatch
             | datafusion_expr::Operator::RegexNotMatch
@@ -193,8 +199,7 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
             | datafusion_expr::Operator::BitwiseOr
             | datafusion_expr::Operator::BitwiseXor
             | datafusion_expr::Operator::BitwiseShiftRight
-            | datafusion_expr::Operator::BitwiseShiftLeft
-            | datafusion_expr::Operator::StringConcat => bail!("{:?} is unimplemented", op),
+            | datafusion_expr::Operator::BitwiseShiftLeft => bail!("{:?} is unimplemented", op),
         },
         Expr::Not(_) => bail!("NOT is unimplemented"),
         Expr::IsNotNull(expr) => Ok(UnaryBooleanExpression::new(
