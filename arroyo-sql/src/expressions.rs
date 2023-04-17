@@ -1258,12 +1258,16 @@ impl ExpressionGenerator for HashExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let input = self.input.to_syn_expression();
         let hash_fn = format_ident!("{}", self.function.to_string());
-        parse_quote!({
-            match #input {
-                Some(unwrapped) => Some(arroyo_types::functions::hash::#hash_fn(unwrapped)),
-                None => None,
-            }
-        })
+
+        match self.input.nullable() {
+            true => parse_quote!({
+                match #input {
+                    Some(unwrapped) => Some(arroyo_types::functions::hash::#hash_fn(unwrapped)),
+                    None => None,
+                }
+            }),
+            false => parse_quote!(arroyo_types::functions::hash::#hash_fn(#input)),
+        }
     }
 
     fn return_type(&self) -> TypeDef {
