@@ -611,4 +611,27 @@ mod tests {
         },
         None
     );
+    single_test_codegen!(
+        "md5",
+        "md5(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "test".into(),
+            ..Default::default()
+        },
+        "098f6bcd4621d373cade4e832627b4f6".to_string()
+    );
+
+    single_test_codegen!(
+        "sha256",
+        "sha256(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "test".into(),
+            ..Default::default()
+        },
+        vec![
+            0x9f, 0x86, 0xd0, 0x81, 0x88, 0x4c, 0x7d, 0x65, 0x9a, 0x2f, 0xea, 0xa0, 0xc5, 0x5a,
+            0xd0, 0x15, 0xa3, 0xbf, 0x4f, 0x1b, 0x2b, 0x0b, 0x82, 0x2c, 0xd1, 0x5d, 0x6c, 0x15,
+            0xb0, 0xf0, 0x0a, 0x08
+        ]
+    );
 }
