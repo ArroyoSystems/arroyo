@@ -7,7 +7,9 @@ use arroyo_rpc::grpc::{
     SubtaskCheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType,
 };
 use arroyo_rpc::{CheckpointCompleted, ControlResp};
-use arroyo_types::{from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo};
+use arroyo_types::{
+    from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, S3_BUCKET_ENV, S3_REGION_ENV,
+};
 use bincode::config;
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
@@ -33,9 +35,6 @@ use tokio::sync::oneshot;
 use tracing::warn;
 use tracing::{debug, info};
 
-pub const S3_STORAGE_ENGINE_ENV: &str = "S3_BUCKET";
-pub const S3_REGION_ENV: &str = "S3_STORAGE_REGION";
-
 pub struct ParquetBackend {
     epoch: u32,
     min_epoch: u32,
@@ -49,21 +48,21 @@ pub struct ParquetBackend {
 
 fn table_checkpoint_path(task_info: &TaskInfo, table: char, epoch: u32) -> String {
     format!(
-        "job-id-{}/checkpoint-{:0>7}/data/operator-id-{}/table-{}/subtask-{:0>3}",
+        "{}/checkpoints/checkpoint-{:0>7}/data/operator-id-{}/table-{}/subtask-{:0>3}",
         task_info.job_id, epoch, task_info.operator_id, table, task_info.task_index,
     )
 }
 
 fn operator_metadata_path(job_id: &str, operator_id: &str, epoch: u32) -> String {
     format!(
-        "job-id-{}/checkpoint-{:0>7}/metadata/operators/operator-id-{}",
+        "{}/checkpoints/checkpoint-{:0>7}/metadata/operators/operator-id-{}",
         job_id, epoch, operator_id
     )
 }
 
 fn checkpoint_metadata_path(job_id: &str, epoch: u32) -> String {
     format!(
-        "job-id-{}/checkpoint-{:0>7}/metadata/checkpoint-overall",
+        "{}/checkpoints/checkpoint-{:0>7}/metadata/checkpoint-overall",
         job_id, epoch
     )
 }
@@ -658,7 +657,7 @@ pub enum StorageClient {
 // TODO: Better way to configure this.
 impl StorageClient {
     pub fn new() -> Self {
-        let bucket = std::env::var(S3_STORAGE_ENGINE_ENV).ok();
+        let bucket = std::env::var(S3_BUCKET_ENV).ok();
         let region = std::env::var(S3_REGION_ENV).ok();
         match (bucket, region) {
             (Some(bucket), Some(region)) => match bucket.as_str() {
@@ -676,14 +675,13 @@ impl StorageClient {
         }
     }
     pub fn get_storage_environment_variables() -> HashMap<String, String> {
-        let (Ok(region), Ok(bucket)) = (std::env::var(S3_REGION_ENV),
-        std::env::var(S3_STORAGE_ENGINE_ENV)) else {
+        let (Ok(region), Ok(bucket)) = (std::env::var(S3_REGION_ENV), std::env::var(S3_BUCKET_ENV)) else {
             return HashMap::new();
         };
         match bucket.as_str() {
             "local" => HashMap::new(),
             bucket => vec![
-                (S3_STORAGE_ENGINE_ENV.to_string(), bucket.to_string()),
+                (S3_BUCKET_ENV.to_string(), bucket.to_string()),
                 (S3_REGION_ENV.to_string(), region.to_string()),
             ]
             .into_iter()

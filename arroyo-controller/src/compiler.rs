@@ -73,8 +73,10 @@ impl ProgramCompiler {
 
     pub async fn compile(&self) -> Result<CompiledProgram> {
         if let Ok(endpoint) = std::env::var(REMOTE_COMPILER_ENDPOINT_ENV) {
+            info!("Compiling remotely on {}", endpoint);
             self.compile_remote(endpoint).await
         } else {
+            info!("Compiling locally");
             self.compile_local().await
         }
     }

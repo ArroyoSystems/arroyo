@@ -17,6 +17,7 @@ fn main() -> Result<(), Error> {
     let mut client = Client::configure()
         .dbname(&config.name)
         .host(&config.host)
+        .port(config.port)
         .user(&config.user)
         .password(&config.password)
         .connect(NoTls)
