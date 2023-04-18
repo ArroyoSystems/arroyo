@@ -58,6 +58,9 @@ pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
 // Endpoint that the frontend should query for the API
 pub const API_ENDPOINT_ENV: &str = "API_ENDPOINT";
 
+pub const S3_REGION_ENV: &str = "S3_REGION";
+pub const S3_BUCKET_ENV: &str = "S3_BUCKET";
+
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     pub name: String,

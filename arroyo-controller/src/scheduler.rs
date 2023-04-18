@@ -601,6 +601,7 @@ impl Scheduler for NomadScheduler {
             env_vars.insert(TASK_SLOTS_ENV.to_string(), slots_here.to_string());
             env_vars.insert(WORKER_ID_ENV.to_string(), worker_id.to_string());
             env_vars.insert(NODE_ID_ENV.to_string(), "1".to_string());
+            env_vars.insert(JOB_ID_ENV.to_string(), start_pipeline_req.job_id.clone());
             env_vars.insert(
                 RUN_ID_ENV.to_string(),
                 format!("{}", start_pipeline_req.run_id),
@@ -612,6 +613,7 @@ impl Scheduler for NomadScheduler {
             for (key, value) in start_pipeline_req.env_vars.iter() {
                 env_vars.insert(key.to_string(), value.to_string());
             }
+
 
             let job = json!({
                 "Job": {

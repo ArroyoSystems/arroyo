@@ -15,7 +15,7 @@ use arroyo_rpc::grpc::{
 };
 
 use arroyo_server_common::start_admin_server;
-use arroyo_types::{ports, grpc_port};
+use arroyo_types::{ports, grpc_port, S3_BUCKET_ENV, S3_REGION_ENV};
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::ObjectStore;
@@ -40,8 +40,8 @@ pub async fn main() {
 
     let build_dir = std::env::var("BUILD_DIR").expect("BUILD_DIR is not set");
 
-    let s3_bucket = std::env::var("S3_BUCKET").ok();
-    let s3_region = std::env::var("S3_REGION").ok();
+    let s3_bucket = std::env::var(S3_BUCKET_ENV).ok();
+    let s3_region = std::env::var(S3_REGION_ENV).ok();
     let output_dir = std::env::var("OUTPUT_DIR").ok();
 
     let (object_store, base_path): (Arc<Box<dyn ObjectStore>>, _) =
@@ -64,7 +64,7 @@ pub async fn main() {
                 format!("file:///{}", output_dir),
             ),
             _ => {
-                panic!("One of S3_BUCKET or OUTPUT_DIR must be set")
+                panic!("One of {} or OUTPUT_DIR must be set", S3_BUCKET_ENV)
             }
         };
 
@@ -226,7 +226,7 @@ impl CompileService {
         // TODO: replace this with the SHA of the worker code once that's available
         let id = (to_millis(SystemTime::now()) / 1000).to_string();
 
-        let base: object_store::path::Path = format!("{}/{}", &req.job_id, id).try_into().unwrap();
+        let base: object_store::path::Path = format!("artifacts/{}/{}", &req.job_id, id).try_into().unwrap();
 
         {
             let pipeline = tokio::fs::read(&build_dir.join("target/release/pipeline")).await?;
