@@ -611,4 +611,105 @@ mod tests {
         },
         None
     );
+
+    // Hash
+    single_test_codegen!(
+        "md5_non_null",
+        "md5(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello, World".into(),
+            ..Default::default()
+        },
+        "82bb413746aee42f89dea2b59614f9ef".to_string()
+    );
+
+    single_test_codegen!(
+        "md5_null",
+        "md5(nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "sha224_non_null",
+        "sha224(non_nullable_bytes)",
+        arroyo_sql::TestStruct {
+            non_nullable_bytes: "asdf".as_bytes().to_vec(),
+            ..Default::default()
+        },
+        hex::decode("7872a74bcbf298a1e77d507cd95d4f8d96131cbbd4cdfc571e776c8a").unwrap()
+    );
+
+    single_test_codegen!(
+        "sha224_null",
+        "sha224(nullable_bytes)",
+        arroyo_sql::TestStruct {
+            nullable_bytes: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "sha256_non_null",
+        "sha256(non_nullable_bytes)",
+        arroyo_sql::TestStruct {
+            non_nullable_bytes: "asdf".as_bytes().to_vec(),
+            ..Default::default()
+        },
+        hex::decode("f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b").unwrap()
+    );
+
+    single_test_codegen!(
+        "sha256_null",
+        "sha256(nullable_bytes)",
+        arroyo_sql::TestStruct {
+            nullable_bytes: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "sha384_non_null",
+        "sha384(non_nullable_bytes)",
+        arroyo_sql::TestStruct {
+            non_nullable_bytes: "asdf".as_bytes().to_vec(),
+            ..Default::default()
+        },
+        hex::decode("a69e7df30b24c042ec540ccbbdbfb1562c85787038c885749c1e408e2d62fa36642cd0075fa351e822e2b8a59139cd9d").unwrap()
+    );
+
+    single_test_codegen!(
+        "sha384_null",
+        "sha384(nullable_bytes)",
+        arroyo_sql::TestStruct {
+            nullable_bytes: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "sha512_non_null",
+        "sha512(non_nullable_bytes)",
+        arroyo_sql::TestStruct {
+            non_nullable_bytes: "asdf".as_bytes().to_vec(),
+            ..Default::default()
+        },
+        hex::decode("401b09eab3c013d4ca54922bb802bec8fd5318192b0a75f201d8b3727429080fb337591abd3e44453b954555b7a0812e1081c39b740293f765eae731f5a65ed1").unwrap()
+    );
+
+    single_test_codegen!(
+        "sha512_null",
+        "sha512(nullable_bytes)",
+        arroyo_sql::TestStruct {
+            nullable_bytes: None,
+            ..Default::default()
+        },
+        None
+    );
 }
