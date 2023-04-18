@@ -15,7 +15,7 @@ use arroyo_rpc::grpc::{
 };
 
 use arroyo_server_common::start_admin_server;
-use arroyo_types::{ports, grpc_port, S3_BUCKET_ENV, S3_REGION_ENV};
+use arroyo_types::{grpc_port, ports, S3_BUCKET_ENV, S3_REGION_ENV};
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::ObjectStore;
@@ -84,23 +84,29 @@ pub async fn main() {
             start_service(service).await;
         }
         Some(arg) if arg == "compile" => {
-            let path: object_store::path::Path = args.get(2)
+            let path: object_store::path::Path = args
+                .get(2)
                 .expect("Usage: ./compiler_service compile <query-req-path>")
                 .to_string()
-                .try_into().unwrap();
+                .try_into()
+                .unwrap();
 
-            let query = service.object_store.get(&path).await
+            let query = service
+                .object_store
+                .get(&path)
+                .await
                 .expect("Failed to read file from object store")
-                .bytes().await
+                .bytes()
+                .await
                 .expect("Failed to read file from object store");
 
-            let query = CompileQueryReq::decode(&*query)
-                .expect("Failed to decode query request");
-
+            let query = CompileQueryReq::decode(&*query).expect("Failed to decode query request");
 
             let resp = service.compile(query).await.unwrap();
-            println!("{{\"pipeline_path\": \"{}\", \"wasm_fns_path\": \"{}\"}}",
-                resp.pipeline_path, resp.wasm_fns_path);
+            println!(
+                "{{\"pipeline_path\": \"{}\", \"wasm_fns_path\": \"{}\"}}",
+                resp.pipeline_path, resp.wasm_fns_path
+            );
         }
         _ => {
             println!("Usage: {} start|compile", args.get(0).unwrap());
@@ -111,11 +117,7 @@ pub async fn main() {
 pub async fn start_service(service: CompileService) {
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
-    start_admin_server(
-        "compiler",
-        ports::COMPILER_ADMIN,
-        shutdown_rx.resubscribe(),
-    );
+    start_admin_server("compiler", ports::COMPILER_ADMIN, shutdown_rx.resubscribe());
 
     let grpc = grpc_port("compiler", ports::COMPILER_GRPC);
 
@@ -168,10 +170,7 @@ pub struct CompileService {
 }
 
 impl CompileService {
-    async fn compile(
-        &self,
-        req: CompileQueryReq,
-    ) -> io::Result<CompileQueryResp> {
+    async fn compile(&self, req: CompileQueryReq) -> io::Result<CompileQueryResp> {
         info!("Starting compilation for {}", req.job_id);
         let start = Instant::now();
         let build_dir = &self.build_dir;
@@ -226,7 +225,9 @@ impl CompileService {
         // TODO: replace this with the SHA of the worker code once that's available
         let id = (to_millis(SystemTime::now()) / 1000).to_string();
 
-        let base: object_store::path::Path = format!("artifacts/{}/{}", &req.job_id, id).try_into().unwrap();
+        let base: object_store::path::Path = format!("artifacts/{}/{}", &req.job_id, id)
+            .try_into()
+            .unwrap();
 
         {
             let pipeline = tokio::fs::read(&build_dir.join("target/release/pipeline")).await?;

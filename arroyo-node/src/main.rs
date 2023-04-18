@@ -290,11 +290,7 @@ pub async fn main() {
         }
     });
 
-    arroyo_server_common::start_admin_server(
-        "node",
-        ports::NODE_ADMIN,
-        stop_rx.resubscribe(),
-    );
+    arroyo_server_common::start_admin_server("node", ports::NODE_ADMIN, stop_rx.resubscribe());
 
     let req_addr = format!("{}:{}", local_ip_address::local_ip().unwrap(), grpc);
 

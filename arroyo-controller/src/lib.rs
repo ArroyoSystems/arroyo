@@ -450,11 +450,14 @@ impl ControllerServer {
 
         // test that the DB connection is valid
         let _ = pool.get().await.unwrap_or_else(|e| {
-            panic!("Failed to connect to database {} at {}@{}:{} {:?}",
+            panic!(
+                "Failed to connect to database {} at {}@{}:{} {:?}",
                 cfg.dbname.unwrap(),
                 cfg.user.unwrap(),
                 cfg.host.unwrap(),
-                cfg.port.unwrap(), e);
+                cfg.port.unwrap(),
+                e
+            );
         });
 
         Self {

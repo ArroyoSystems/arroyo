@@ -1,5 +1,5 @@
 #![allow(clippy::type_complexity)]
-use arroyo_types::{admin_port};
+use arroyo_types::admin_port;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -126,7 +126,9 @@ pub fn start_admin_server(service: &str, default_port: u16, mut shutdown: Receiv
         .not_found_service(ServeFile::new("arroyo-console/dist/index.html"));
     let serve_dir = get_service(serve_dir).handle_error(handle_error);
 
-    let state = Arc::new(AdminState { name: format!("arroyo-{}", service) });
+    let state = Arc::new(AdminState {
+        name: format!("arroyo-{}", service),
+    });
     let app = Router::new()
         .route("/status", get(status))
         .route("/name", get(root))

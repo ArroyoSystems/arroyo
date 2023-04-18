@@ -614,7 +614,6 @@ impl Scheduler for NomadScheduler {
                 env_vars.insert(key.to_string(), value.to_string());
             }
 
-
             let job = json!({
                 "Job": {
                     "ID": format!("{}-{}", start_pipeline_req.job_id, worker_id),

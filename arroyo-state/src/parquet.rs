@@ -7,7 +7,9 @@ use arroyo_rpc::grpc::{
     SubtaskCheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType,
 };
 use arroyo_rpc::{CheckpointCompleted, ControlResp};
-use arroyo_types::{from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, S3_BUCKET_ENV, S3_REGION_ENV};
+use arroyo_types::{
+    from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, S3_BUCKET_ENV, S3_REGION_ENV,
+};
 use bincode::config;
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
@@ -656,7 +658,7 @@ pub enum StorageClient {
 impl StorageClient {
     pub fn new() -> Self {
         let bucket = std::env::var(S3_BUCKET_ENV).ok();
-        let region = std::env::var(S3_REGION_ENV ).ok();
+        let region = std::env::var(S3_REGION_ENV).ok();
         match (bucket, region) {
             (Some(bucket), Some(region)) => match bucket.as_str() {
                 "local" => Self::LocalDirectory("/tmp/arroyo-data".to_owned()),
