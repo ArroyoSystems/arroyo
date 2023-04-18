@@ -1,9 +1,9 @@
 use hex;
 use md5::{Digest, Md5};
 
-pub fn md5(argument: String) -> String {
+pub fn md5(argument: Vec<u8>) -> String {
     let mut hasher = Md5::new();
-    hasher.update(argument.as_bytes());
+    hasher.update(argument);
     let res = hasher.finalize();
     hex::encode(&res)
 }

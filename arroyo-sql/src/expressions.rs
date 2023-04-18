@@ -1259,14 +1259,21 @@ impl ExpressionGenerator for HashExpression {
         let input = self.input.to_syn_expression();
         let hash_fn = format_ident!("{}", self.function.to_string());
 
+        let coerce = match self.input.return_type() {
+            TypeDef::StructDef(_, _) => unreachable!(),
+            TypeDef::DataType(DataType::Utf8, _) => quote!(.as_bytes().to_vec()),
+            TypeDef::DataType(DataType::Binary, _) => quote!(),
+            TypeDef::DataType(_, _) => unreachable!(),
+        };
+
         match self.input.nullable() {
             true => parse_quote!({
                 match #input {
-                    Some(unwrapped) => Some(arroyo_types::functions::hash::#hash_fn(unwrapped)),
+                    Some(unwrapped) => Some(arroyo_types::functions::hash::#hash_fn(unwrapped #coerce)),
                     None => None,
                 }
             }),
-            false => parse_quote!(arroyo_types::functions::hash::#hash_fn(#input)),
+            false => parse_quote!(arroyo_types::functions::hash::#hash_fn(#input #coerce)),
         }
     }
 
