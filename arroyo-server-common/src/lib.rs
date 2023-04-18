@@ -1,5 +1,5 @@
 #![allow(clippy::type_complexity)]
-use arroyo_types::ADMIN_PORT_ENV;
+use arroyo_types::admin_port;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -13,7 +13,6 @@ use prometheus::{register_int_counter, IntCounter, TextEncoder};
 use pyroscope::{pyroscope::PyroscopeAgentRunning, PyroscopeAgent};
 #[cfg(not(target_os = "freebsd"))]
 use pyroscope_pprofrs::{pprof_backend, PprofConfig};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{fs, io};
@@ -118,18 +117,18 @@ async fn handle_error(_err: io::Error) -> impl IntoResponse {
     (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong...")
 }
 
-pub fn start_admin_server(name: String, default_port: u16, mut shutdown: Receiver<i32>) {
-    let port = std::env::var(ADMIN_PORT_ENV)
-        .map(|t| u16::from_str(&t).unwrap_or_else(|_| panic!("ADMIN_PORT={} is not valid", t)))
-        .unwrap_or(default_port);
+pub fn start_admin_server(service: &str, default_port: u16, mut shutdown: Receiver<i32>) {
+    let port = admin_port(service, default_port);
 
-    info!("Starting {} admin server on 0.0.0.0:{}", name, port);
+    info!("Starting {} admin server on 0.0.0.0:{}", service, port);
 
     let serve_dir = ServeDir::new("arroyo-console/dist")
         .not_found_service(ServeFile::new("arroyo-console/dist/index.html"));
     let serve_dir = get_service(serve_dir).handle_error(handle_error);
 
-    let state = Arc::new(AdminState { name });
+    let state = Arc::new(AdminState {
+        name: format!("arroyo-{}", service),
+    });
     let app = Router::new()
         .route("/status", get(status))
         .route("/name", get(root))

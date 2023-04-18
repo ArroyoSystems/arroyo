@@ -14,13 +14,17 @@ use arroyo_rpc::grpc::{
     CompileQueryReq, CompileQueryResp,
 };
 
+use arroyo_server_common::start_admin_server;
+use arroyo_types::{grpc_port, ports, S3_BUCKET_ENV, S3_REGION_ENV};
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::ObjectStore;
+use prost::Message;
+use tokio::sync::broadcast;
 use tokio::{process::Command, sync::Mutex};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::error;
-use tracing::log::info;
+use tracing::info;
 
 pub fn to_millis(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -36,10 +40,8 @@ pub async fn main() {
 
     let build_dir = std::env::var("BUILD_DIR").expect("BUILD_DIR is not set");
 
-    let last_used = Arc::new(AtomicU64::new(to_millis(SystemTime::now())));
-
-    let s3_bucket = std::env::var("S3_BUCKET").ok();
-    let s3_region = std::env::var("S3_REGION").ok();
+    let s3_bucket = std::env::var(S3_BUCKET_ENV).ok();
+    let s3_region = std::env::var(S3_REGION_ENV).ok();
     let output_dir = std::env::var("OUTPUT_DIR").ok();
 
     let (object_store, base_path): (Arc<Box<dyn ObjectStore>>, _) =
@@ -62,9 +64,11 @@ pub async fn main() {
                 format!("file:///{}", output_dir),
             ),
             _ => {
-                panic!("One of S3_BUCKET or OUTPUT_DIR must be set")
+                panic!("One of {} or OUTPUT_DIR must be set", S3_BUCKET_ENV)
             }
         };
+
+    let last_used = Arc::new(AtomicU64::new(to_millis(SystemTime::now())));
 
     let service = CompileService {
         build_dir: PathBuf::from_str(&build_dir).unwrap(),
@@ -74,9 +78,54 @@ pub async fn main() {
         base_path,
     };
 
-    let addr = "0.0.0.0:9000".parse().unwrap();
+    let args = std::env::args().collect::<Vec<_>>();
+    match args.get(1) {
+        Some(arg) if arg == "start" => {
+            start_service(service).await;
+        }
+        Some(arg) if arg == "compile" => {
+            let path: object_store::path::Path = args
+                .get(2)
+                .expect("Usage: ./compiler_service compile <query-req-path>")
+                .to_string()
+                .try_into()
+                .unwrap();
 
-    println!("Starting compiler service at 0.0.0.0:9000");
+            let query = service
+                .object_store
+                .get(&path)
+                .await
+                .expect("Failed to read file from object store")
+                .bytes()
+                .await
+                .expect("Failed to read file from object store");
+
+            let query = CompileQueryReq::decode(&*query).expect("Failed to decode query request");
+
+            let resp = service.compile(query).await.unwrap();
+            println!(
+                "{{\"pipeline_path\": \"{}\", \"wasm_fns_path\": \"{}\"}}",
+                resp.pipeline_path, resp.wasm_fns_path
+            );
+        }
+        _ => {
+            println!("Usage: {} start|compile", args.get(0).unwrap());
+        }
+    }
+}
+
+pub async fn start_service(service: CompileService) {
+    let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+    start_admin_server("compiler", ports::COMPILER_ADMIN, shutdown_rx.resubscribe());
+
+    let grpc = grpc_port("compiler", ports::COMPILER_GRPC);
+
+    let addr = format!("0.0.0.0:{}", grpc).parse().unwrap();
+
+    info!("Starting compiler service at {}", addr);
+
+    let last_used = service.last_used.clone();
 
     if let Some(idle_time) = std::env::var("IDLE_SHUTDOWN_MS")
         .map(|t| Duration::from_millis(u64::from_str(&t).unwrap()))
@@ -103,6 +152,8 @@ pub async fn main() {
         .serve(addr)
         .await
         .unwrap();
+
+    shutdown_tx.send(0).unwrap();
 }
 
 async fn rustfmt(file: &Path) -> io::Result<()> {
@@ -119,13 +170,10 @@ pub struct CompileService {
 }
 
 impl CompileService {
-    async fn compile(
-        &self,
-        build_dir: &Path,
-        req: CompileQueryReq,
-    ) -> io::Result<CompileQueryResp> {
-        info!("Starting compilation");
+    async fn compile(&self, req: CompileQueryReq) -> io::Result<CompileQueryResp> {
+        info!("Starting compilation for {}", req.job_id);
         let start = Instant::now();
+        let build_dir = &self.build_dir;
         tokio::fs::write(build_dir.join("pipeline/src/main.rs"), &req.pipeline).await?;
         rustfmt(&build_dir.join("pipeline/src/main.rs")).await?;
 
@@ -177,7 +225,9 @@ impl CompileService {
         // TODO: replace this with the SHA of the worker code once that's available
         let id = (to_millis(SystemTime::now()) / 1000).to_string();
 
-        let base: object_store::path::Path = format!("{}/{}", &req.job_id, id).try_into().unwrap();
+        let base: object_store::path::Path = format!("artifacts/{}/{}", &req.job_id, id)
+            .try_into()
+            .unwrap();
 
         {
             let pipeline = tokio::fs::read(&build_dir.join("target/release/pipeline")).await?;
@@ -217,7 +267,7 @@ impl CompilerGrpc for CompileService {
 
         let req = request.into_inner();
 
-        self.compile(&self.build_dir, req)
+        self.compile(req)
             .await
             .map(|r| Response::new(r))
             .map_err(|e| {
