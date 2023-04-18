@@ -268,6 +268,8 @@ pub struct TestStruct {
     pub nullable_string: Option<String>,
     pub non_nullable_timestamp: SystemTime,
     pub nullable_timestamp: Option<SystemTime>,
+    pub non_nullable_bytes: Vec<u8>,
+    pub nullable_bytes: Option<Vec<u8>>,
 }
 
 impl Default for TestStruct {
@@ -285,6 +287,8 @@ impl Default for TestStruct {
             nullable_string: Default::default(),
             non_nullable_timestamp: SystemTime::UNIX_EPOCH,
             nullable_timestamp: None,
+            non_nullable_bytes: Default::default(),
+            nullable_bytes: Default::default(),
         }
     }
 }
@@ -358,6 +362,16 @@ fn test_struct_def() -> StructDef {
                     DataType::Timestamp(TimeUnit::Microsecond, None),
                     true,
                 ),
+            },
+            StructField {
+                name: "non_nullable_bytes".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Binary, false),
+            },
+            StructField {
+                name: "nullable_bytes".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Binary, true),
             },
         ],
     }
