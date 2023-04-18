@@ -653,7 +653,6 @@ mod tests {
         None
     );
 
-    // sha256
     single_test_codegen!(
         "sha256_non_null",
         "sha256(non_nullable_bytes)",
@@ -673,8 +672,6 @@ mod tests {
         },
         None
     );
-
-    // sha384
 
     single_test_codegen!(
         "sha384_non_null",
@@ -696,7 +693,6 @@ mod tests {
         None
     );
 
-    // sha512
     single_test_codegen!(
         "sha512_non_null",
         "sha512(non_nullable_bytes)",
