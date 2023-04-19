@@ -135,6 +135,14 @@ pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration 
     std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
 }
 
+// quote a duration as a syn::Expr
+pub fn duration_to_syn_expr(duration: Duration) -> syn::Expr {
+    let secs = duration.as_secs();
+    let nanos = duration.subsec_nanos();
+
+    parse_quote!(std::time::Duration::new(#secs, #nanos))
+}
+
 impl From<StructField> for Field {
     fn from(struct_field: StructField) -> Self {
         let (dt, nullable) = match struct_field.data_type {

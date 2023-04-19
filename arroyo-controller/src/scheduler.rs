@@ -1,7 +1,8 @@
 use anyhow::bail;
 use arroyo_rpc::grpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::{
-    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, WorkerFinishedReq,
+    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
+    WorkerFinishedReq,
 };
 use arroyo_types::{
     NodeId, WorkerId, CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV, NOMAD_DC_ENV,
@@ -523,6 +524,7 @@ impl Scheduler for NodeScheduler {
 
     async fn stop_worker(&self, req: StopWorkerReq) -> anyhow::Result<()> {
         let state = self.state.lock().await;
+        let force = req.force;
 
         let Some(worker) = state.workers.get(&WorkerId(req.worker_id)) else {
             // assume it's already finished
@@ -544,16 +546,20 @@ impl Scheduler for NodeScheduler {
 
         let mut client = NodeGrpcClient::connect(format!("http://{}", node.addr)).await?;
 
-        if !client
-            .stop_worker(Request::new(req))
-            .await?
-            .get_ref()
-            .stopped
-        {
-            bail!("failed to stop worker");
+        match (
+            client
+                .stop_worker(Request::new(req))
+                .await?
+                .get_ref()
+                .status(),
+            force,
+        ) {
+            (StopWorkerStatus::NotFound, false) => {
+                bail!("couldn't find worker, will only continue if force")
+            }
+            (StopWorkerStatus::StopFailed, _) => bail!("tried to kill and couldn't"),
+            _ => Ok(()),
         }
-
-        Ok(())
     }
 }
 

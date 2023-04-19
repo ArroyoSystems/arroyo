@@ -2,7 +2,7 @@
 use crate::{BackingStore, StateBackend};
 use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor, TableType};
 use arroyo_types::{from_micros, Data, Key, TaskInfo};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 use tracing::warn;
 
@@ -239,14 +239,7 @@ impl<'a, K: Key, V: Data, S: BackingStore> KeyTimeMultiMap<'a, K, V, S> {
                 &mut value,
             )
             .await;
-
-        self.cache
-            .values
-            .entry(key)
-            .or_default()
-            .entry(timestamp)
-            .or_default()
-            .push(value);
+        self.cache.insert(timestamp, key, value);
     }
 
     pub async fn get_time_range(
@@ -273,10 +266,19 @@ impl<'a, K: Key, V: Data, S: BackingStore> KeyTimeMultiMap<'a, K, V, S> {
             }
         };
     }
+
+    pub fn expire_entries_before(&mut self, expiration_time: SystemTime) {
+        self.cache.expire_entries_before(expiration_time);
+    }
+
+    pub async fn get_all_values_with_timestamps(&mut self, key: &mut K) -> Vec<(SystemTime, &V)> {
+        self.cache.get_all_values_with_timestamps(key)
+    }
 }
 
 pub struct KeyTimeMultiMapCache<K: Key, V: Data> {
     values: HashMap<K, BTreeMap<SystemTime, Vec<V>>>,
+    expirations: BTreeMap<SystemTime, HashSet<K>>,
 }
 impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
     pub async fn from_checkpoint<S: BackingStore>(
@@ -313,7 +315,77 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
                 .or_default()
                 .push(value);
         }
-        Self { values }
+        let mut expirations: BTreeMap<SystemTime, HashSet<K>> = BTreeMap::new();
+        for (time, key) in values.iter().map(|(key, map)| {
+            let time = map.keys().next().unwrap();
+            (*time, key.clone())
+        }) {
+            expirations.entry(time).or_default().insert(key);
+        }
+        Self {
+            values,
+            expirations,
+        }
+    }
+
+    fn get_all_values_with_timestamps(&mut self, key: &mut K) -> Vec<(SystemTime, &V)> {
+        if let Some(key_map) = self.values.get_mut(key) {
+            key_map
+                .iter()
+                .flat_map(|(time, values)| values.iter().map(move |value| (*time, value)))
+                .collect()
+        } else {
+            vec![]
+        }
+    }
+
+    fn expire_entries_before(&mut self, time: SystemTime) {
+        let times_to_remove = self.expirations.range(..time);
+        let keys_to_remove: HashSet<_> = times_to_remove
+            .flat_map(|(_time, keys)| keys.clone())
+            .collect();
+        for key in keys_to_remove {
+            let key_data = self.values.get_mut(&key).unwrap();
+            if *key_data.last_key_value().unwrap().0 <= time {
+                self.values.remove(&key);
+            } else {
+                let retained_data = key_data.split_off(&time);
+                let earliest_key = retained_data.first_key_value().unwrap().0;
+                self.expirations
+                    .entry(*earliest_key)
+                    .or_default()
+                    .insert(key);
+                *key_data = retained_data;
+            }
+        }
+    }
+
+    // Insert a new value for a key at a given timestamp.
+    // This potentially updates the earliest timestamp for the key.
+    fn insert(&mut self, timestamp: SystemTime, key: K, value: V) {
+        let current_entries = self.values.entry(key.clone()).or_default();
+        // If there are no entries for this key, insert the new value.
+        // the expiration is the timestamp of the new value.
+        if current_entries.is_empty() {
+            current_entries.insert(timestamp, vec![value]);
+            self.expirations.entry(timestamp).or_default().insert(key);
+        } else {
+            // If there are entries for this key, check if the new value is earlier than the earliest value.
+            let current_earliest = current_entries.first_key_value().unwrap().0.clone();
+            if timestamp < current_earliest {
+                // there definitely aren't any values at the new timestamp.
+                current_entries.insert(timestamp, vec![value]);
+                // remove the key from the previous earliest timestamp. If that map is empty also drop it.
+                let current_earliest_keys = self.expirations.entry(current_earliest).or_default();
+                current_earliest_keys.remove(&key);
+                if current_earliest_keys.is_empty() {
+                    self.expirations.remove(&current_earliest);
+                }
+                self.expirations.entry(timestamp).or_default().insert(key);
+            } else {
+                current_entries.entry(timestamp).or_default().push(value);
+            }
+        }
     }
 }
 
@@ -321,6 +393,7 @@ impl<K: Key, V: Data> Default for KeyTimeMultiMapCache<K, V> {
     fn default() -> Self {
         Self {
             values: Default::default(),
+            expirations: Default::default(),
         }
     }
 }

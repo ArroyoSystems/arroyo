@@ -150,6 +150,7 @@ pub struct SqlWindowOperator {
     max_value: Option<i64>,
     window: WindowType,
 }
+
 impl SqlWindowOperator {
     fn with_max_value(mut self, max_value: i64) -> SqlWindowOperator {
         self.max_value = Some(max_value);
@@ -164,7 +165,7 @@ pub struct JoinOperator {
     join_type: JoinType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JoinType {
     /// Inner Join
     Inner,
@@ -440,6 +441,17 @@ impl SqlOperator {
                     ),
                 },
             ],
+        }
+    }
+
+    fn has_window(&self) -> bool {
+        match self {
+            SqlOperator::Source(_, _) => false,
+            SqlOperator::Aggregator(_, _) => true,
+            SqlOperator::JoinOperator(left, right, _) => left.has_window() || right.has_window(),
+            SqlOperator::Window(_, _) => true,
+            SqlOperator::WindowAggregateTopN(_, _, _, _) => true,
+            SqlOperator::RecordTransform(input, _) => input.has_window(),
         }
     }
 }
@@ -771,6 +783,19 @@ impl SqlPipelineBuilder {
             JoinConstraint::Using => bail!("don't support 'using' in joins"),
         };
         let join_type = join.join_type.try_into()?;
+        // check supported join types
+        match (left_input.has_window(), right_input.has_window()) {
+            (true, false) | (false, true) => {
+                bail!("windowing join mismatch. both sides must either have or not have windows")
+            }
+            (false, false) => {
+                if join_type != JoinType::Inner {
+                    bail!("non-inner join over windows not supported")
+                }
+            }
+            _ => {}
+        }
+
         let mut columns = join.on.clone();
         if let Some(Expr::BinaryExpr(BinaryExpr {
             left,
@@ -1067,6 +1092,29 @@ impl MethodCompiler {
             return_type: arroyo_datastream::ExpressionReturnType::Record,
         }
     }
+    pub fn merge_pair_operator(
+        name: impl ToString,
+        merge_struct_name: Type,
+        merge_expr: syn::Expr,
+    ) -> Result<Operator> {
+        let expression: syn::Expr = parse_quote!({
+            let arg = #merge_struct_name {
+                left: record.value.0.clone(),
+                right: record.value.1.clone()
+            };
+            arroyo_types::Record {
+                timestamp: record.timestamp.clone(),
+                key: None,
+                value: #merge_expr
+            }
+        }
+        );
+        Ok(Operator::ExpressionOperator {
+            name: name.to_string(),
+            expression: quote!(#expression).to_string(),
+            return_type: arroyo_datastream::ExpressionReturnType::Record,
+        })
+    }
 
     pub fn join_merge_operator(
         name: impl ToString,
@@ -1331,7 +1379,7 @@ impl GraphCompiler {
         let watermark_operator =
             arroyo_datastream::Operator::Watermark(arroyo_datastream::WatermarkType::Periodic {
                 period: Duration::from_secs(1),
-                max_lateness: Duration::from_secs(0),
+                max_lateness: Duration::from_secs(1),
             });
         let watermark_index = self.add_node("watermark", watermark_operator);
         let watermark_edge = StreamEdge::unkeyed_edge(source.struct_def.struct_name(), Forward);
@@ -1691,9 +1739,24 @@ impl GraphCompiler {
         self.graph
             .add_edge(right_index, right_key_index, right_key_edge);
 
-        let window_operator = Operator::WindowJoin {
-            window: WindowType::Instant,
+        // TODO: factor this out into separate structures, rather than switching on the two join modes.
+        let is_windowed_join = left_input.has_window();
+
+        let window_operator = if is_windowed_join {
+            // windowed joins are currently implemented as windowed operators and then a downstream instant join.
+            Operator::WindowJoin {
+                window: WindowType::Instant,
+            }
+        } else {
+            assert!(!right_input.has_window());
+            assert_eq!(JoinType::Inner, join_operator.join_type);
+            // TODO: make the durations configurable
+            Operator::JoinWithExpiration {
+                left_expiration: Duration::from_secs(24 * 60 * 60),
+                right_expiration: Duration::from_secs(24 * 60 * 60),
+            }
         };
+
         let window_index = self.add_node("join_window", window_operator);
 
         let left_window_edge = StreamEdge::keyed_edge(
@@ -1714,42 +1777,61 @@ impl GraphCompiler {
 
         let merge_struct = join_operator.join_struct_type(&left_struct, &right_struct);
         let merge = join_operator.merge_syn_expression(&left_struct, &right_struct);
-        let merge_operator = MethodCompiler::join_merge_operator(
-            "join_merge",
-            join_operator.join_type.clone(),
-            merge_struct.get_type(),
-            merge,
-        )?;
+        let merge_operator = if is_windowed_join {
+            MethodCompiler::join_merge_operator(
+                "join_merge",
+                join_operator.join_type.clone(),
+                merge_struct.get_type(),
+                merge,
+            )?
+        } else {
+            MethodCompiler::merge_pair_operator("pair_merge", merge_struct.get_type(), merge)?
+        };
         let merge_index = self.add_node("join_merge", merge_operator);
-        let merge_edge = StreamEdge::keyed_edge(
-            key_type.struct_name(),
-            format!(
-                "(Vec<{}>,Vec<{}>)",
-                left_struct.struct_name(),
-                right_struct.struct_name()
-            ),
-            Forward,
-        );
-        self.graph.add_edge(window_index, merge_index, merge_edge);
 
-        let flatten_index = self.add_node(
-            "join_flatten",
-            Operator::FlattenOperator {
-                name: "join_flatten".to_string(),
-            },
-        );
-        let flatten_edge = StreamEdge::unkeyed_edge(
-            format!(
-                "Vec<{}>",
-                join_operator
-                    .output_struct(&left_struct, &right_struct)
-                    .struct_name()
-            ),
-            Forward,
-        );
-        self.graph
-            .add_edge(merge_index, flatten_index, flatten_edge);
-        Ok(flatten_index)
+        if is_windowed_join {
+            let merge_edge = StreamEdge::keyed_edge(
+                key_type.struct_name(),
+                format!(
+                    "(Vec<{}>,Vec<{}>)",
+                    left_struct.struct_name(),
+                    right_struct.struct_name()
+                ),
+                Forward,
+            );
+            self.graph.add_edge(window_index, merge_index, merge_edge);
+
+            let flatten_index = self.add_node(
+                "join_flatten",
+                Operator::FlattenOperator {
+                    name: "join_flatten".to_string(),
+                },
+            );
+            let flatten_edge = StreamEdge::unkeyed_edge(
+                format!(
+                    "Vec<{}>",
+                    join_operator
+                        .output_struct(&left_struct, &right_struct)
+                        .struct_name()
+                ),
+                Forward,
+            );
+            self.graph
+                .add_edge(merge_index, flatten_index, flatten_edge);
+            Ok(flatten_index)
+        } else {
+            let merge_edge = StreamEdge::keyed_edge(
+                key_type.struct_name(),
+                format!(
+                    "({},{})",
+                    left_struct.struct_name(),
+                    right_struct.struct_name()
+                ),
+                Forward,
+            );
+            self.graph.add_edge(window_index, merge_index, merge_edge);
+            Ok(merge_index)
+        }
     }
 
     fn add_window_aggregate_top_n(

@@ -247,7 +247,7 @@ impl NexmarkConfig {
             num_active_people: 1000,
             occasional_delay_seconds: 3,
             prob_delayed_event: 0.1,
-            out_of_order_group_size: 1,
+            out_of_order_group_size: 50,
         }
     }
 
