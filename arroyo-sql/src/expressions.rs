@@ -675,13 +675,41 @@ pub struct BinaryMathExpression {
 }
 
 impl BinaryMathExpression {
+    /// Coerces the operands to the same type.
+    /// 
+    /// This is needed because Rust doesn't allow math between float and integer types.
+    /// Meant to make math possible between float and integer types, however there is no validation
+    /// in this function to ensure that the operands are actually compatible, so that we don't 
+    /// convolute any error messages that would come anyway, with invalid operands.
+    fn homogenize_operands(mut self) -> Result<Self> {
+        match self.left.return_type() {
+            TypeDef::DataType(DataType::Float32, _) | TypeDef::DataType(DataType::Float64, _) => {
+                if let TypeDef::DataType(dt, _) = self.left.return_type() {
+                    self.right = Box::new(CastExpression::new(self.right, &dt)?);
+                }
+            }
+            _ => match self.right.return_type() {
+                TypeDef::DataType(DataType::Float32, _)
+                | TypeDef::DataType(DataType::Float64, _) => {
+                    if let TypeDef::DataType(dt, _) = self.right.return_type() {
+                        self.left = Box::new(CastExpression::new(self.left, &dt)?);
+                    }
+                }
+                _ => {}
+            },
+        };
+        Ok(self)
+    }
+
     fn new(
         left: Box<Expression>,
         op: datafusion_expr::Operator,
         right: Box<Expression>,
     ) -> Result<Expression> {
         let op = op.try_into()?;
-        Ok(Expression::BinaryMath(Self { left, op, right }))
+        Ok(Expression::BinaryMath(
+            Self { left, op, right }.homogenize_operands()?,
+        ))
     }
 }
 
