@@ -14,6 +14,27 @@ pub struct JoinWithExpiration<K: Key, T1: Data, T2: Data> {
     _t: PhantomData<(K, T1, T2)>,
 }
 
+enum Side {
+    Left,
+    Right,
+}
+
+impl Side {
+    fn get_primary_side_char(&self) -> char {
+        match self {
+            Side::Left => 'l',
+            Side::Right => 'r',
+        }
+    }
+
+    fn get_secondary_side_char(&self) -> char {
+        match self {
+            Side::Left => 'r',
+            Side::Right => 'l',
+        }
+    }
+}
+
 #[co_process_fn(in_k1=K, in_t1=T1, in_k2=K, in_t2=T2, out_k=K, out_t=(T1,T2))]
 impl<K: Key, T1: Data, T2: Data> JoinWithExpiration<K, T1, T2> {
     fn name(&self) -> String {
@@ -60,14 +81,15 @@ impl<K: Key, T1: Data, T2: Data> JoinWithExpiration<K, T1, T2> {
         let mut key = record.key.clone().unwrap();
         let value = record.value.clone();
         let records = {
-            let right_rows = right_state.get_all_values_with_timestamps(&mut key).await;
             let mut records = vec![];
-            for (timestamp, right_value) in right_rows {
-                records.push(Record {
-                    timestamp: record.timestamp.max(timestamp),
-                    key: Some(key.clone()),
-                    value: (value.clone(), right_value.clone()),
-                });
+            if let Some(right_rows) = right_state.get_all_values_with_timestamps(&mut key).await {
+                for (timestamp, right_value) in right_rows {
+                    records.push(Record {
+                        timestamp: record.timestamp.max(timestamp),
+                        key: Some(key.clone()),
+                        value: (value.clone(), right_value.clone()),
+                    });
+                }
             }
             records
         };
@@ -89,14 +111,15 @@ impl<K: Key, T1: Data, T2: Data> JoinWithExpiration<K, T1, T2> {
         let mut key = record.key.clone().unwrap();
         let value = record.value.clone();
         let records = {
-            let left_rows = left_state.get_all_values_with_timestamps(&mut key).await;
             let mut records = vec![];
-            for (timestamp, left_value) in left_rows {
-                records.push(Record {
-                    timestamp: record.timestamp.max(timestamp),
-                    key: Some(key.clone()),
-                    value: (left_value.clone(), value.clone()),
-                });
+            if let Some(left_rows) = left_state.get_all_values_with_timestamps(&mut key).await {
+                for (timestamp, left_value) in left_rows {
+                    records.push(Record {
+                        timestamp: record.timestamp.max(timestamp),
+                        key: Some(key.clone()),
+                        value: (left_value.clone(), value.clone()),
+                    });
+                }
             }
             records
         };

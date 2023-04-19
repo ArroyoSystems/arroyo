@@ -271,7 +271,10 @@ impl<'a, K: Key, V: Data, S: BackingStore> KeyTimeMultiMap<'a, K, V, S> {
         self.cache.expire_entries_before(expiration_time);
     }
 
-    pub async fn get_all_values_with_timestamps(&mut self, key: &mut K) -> Vec<(SystemTime, &V)> {
+    pub async fn get_all_values_with_timestamps(
+        &mut self,
+        key: &mut K,
+    ) -> Option<impl Iterator<Item = (SystemTime, &V)>> {
         self.cache.get_all_values_with_timestamps(key)
     }
 }
@@ -328,14 +331,17 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
         }
     }
 
-    fn get_all_values_with_timestamps(&mut self, key: &mut K) -> Vec<(SystemTime, &V)> {
-        if let Some(key_map) = self.values.get_mut(key) {
-            key_map
+    fn get_all_values_with_timestamps(
+        &mut self,
+        key: &mut K,
+    ) -> Option<impl Iterator<Item = (SystemTime, &V)>> {
+        if let Some(key_map) = self.values.get(key) {
+            let result = key_map
                 .iter()
-                .flat_map(|(time, values)| values.iter().map(move |value| (*time, value)))
-                .collect()
+                .flat_map(|(time, values)| values.iter().map(move |value| (*time, value)));
+            Some(result)
         } else {
-            vec![]
+            None
         }
     }
 
