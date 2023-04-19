@@ -438,6 +438,7 @@ impl ControllerServer {
         let mut cfg = deadpool_postgres::Config::new();
         cfg.dbname = Some(config.name);
         cfg.host = Some(config.host);
+        cfg.port = Some(config.port);
         cfg.user = Some(config.user);
         cfg.password = Some(config.password);
         cfg.manager = Some(ManagerConfig {
@@ -446,6 +447,18 @@ impl ControllerServer {
         let pool = cfg
             .create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls)
             .unwrap();
+
+        // test that the DB connection is valid
+        let _ = pool.get().await.unwrap_or_else(|e| {
+            panic!(
+                "Failed to connect to database {} at {}@{}:{} {:?}",
+                cfg.dbname.unwrap(),
+                cfg.user.unwrap(),
+                cfg.host.unwrap(),
+                cfg.port.unwrap(),
+                e
+            );
+        });
 
         Self {
             scheduler,
@@ -549,7 +562,7 @@ impl ControllerServer {
         let (shutdown_tx, shutdown_rx) = broadcast::channel(16);
 
         arroyo_server_common::start_admin_server(
-            "arroyo-controller".to_string(),
+            "controller",
             ports::CONTROLLER_ADMIN,
             shutdown_rx,
         );

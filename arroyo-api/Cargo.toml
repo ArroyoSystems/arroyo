@@ -21,6 +21,7 @@ prost = "0.11"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
 tonic-web = "0.4.0"
+tower = "0.4"
 rand = "0.8"
 rand_chacha = "0.3"
 async-trait = "0.1"
@@ -33,7 +34,7 @@ bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = {version = "0.6", features = ["serde-1"]}
 
 http = "0.2"
-tower-http = {version = "0.3", features = ["trace", "fs", "cors"]}
+tower-http = {version = "0.4", features = ["trace", "fs", "cors"]}
 axum = "0.6.12"
 
 serde = { version = "1", features = ["derive"] }

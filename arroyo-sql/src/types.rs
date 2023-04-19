@@ -232,7 +232,7 @@ impl TypeDef {
             ScalarValue::IntervalDayTime(None) => todo!(),
             ScalarValue::IntervalMonthDayNano(Some(val)) => {
                 let duration = interval_month_day_nanos_to_duration(*val);
-                let seconds  = duration.as_secs();
+                let seconds = duration.as_secs();
                 let nanos = duration.subsec_nanos() as u64;
                 parse_quote!((std::time::Duration::from_secs(#seconds) + std::time::Duration::from_nanos(#nanos)))
             }
