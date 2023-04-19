@@ -60,7 +60,8 @@ pub fn length(s: String) -> i32 {
     s.chars().count() as i32
 }
 
-pub fn lpad(s: String, length: usize, fill: String) -> String {
+pub fn lpad(s: String, length: i64, fill: String) -> String {
+    let length = length as usize;
     let s_len = s.chars().count();
     if s_len == length {
         return s;
@@ -87,7 +88,7 @@ pub fn ltrim(string: String, trimming_characters: String) -> String {
     string.trim_start_matches(char_slice).to_string()
 }
 
-pub fn split_part(s: String, delimiter: String, n: isize) -> String {
+pub fn split_part(s: String, delimiter: String, n: i64) -> String {
     let parts: Vec<&str> = s.split(&delimiter).collect();
 
     if n > 0 {
@@ -109,14 +110,14 @@ pub fn starts_with(s: String, prefix: String) -> bool {
     s.starts_with(&prefix)
 }
 
-pub fn strpos(s: String, substring: String) -> usize {
-    s.find(&substring).map_or(0, |index| index + 1)
+pub fn strpos(s: String, substring: String) -> i32 {
+    s.find(&substring).map_or(0, |index| index as i32 + 1)
 }
 
-pub fn substr(s: String, start: usize, count: Option<usize>) -> String {
-    let start_index = start.saturating_sub(1);
+pub fn substr(s: String, start: i64, count: Option<i64>) -> String {
+    let start_index = (start as usize).saturating_sub(1);
     match count {
-        Some(count) => s.chars().skip(start_index).take(count).collect(),
+        Some(count) => s.chars().skip(start_index).take(count as usize).collect(),
         None => s.chars().skip(start_index).collect(),
     }
 }
@@ -146,11 +147,11 @@ pub fn translate(s: String, from: String, to: String) -> String {
         .collect()
 }
 
-pub fn octet_length(s: String) -> usize {
-    s.as_bytes().len()
+pub fn octet_length(s: String) -> i32 {
+    s.as_bytes().len() as i32
 }
 
-pub fn right(s: String, n: isize) -> String {
+pub fn right(s: String, n: i64) -> String {
     if n < 0 {
         s.chars().skip(n.abs() as usize).collect()
     } else {
@@ -164,7 +165,8 @@ pub fn right(s: String, n: isize) -> String {
     }
 }
 
-pub fn rpad(s: String, length: usize, fill: String) -> String {
+pub fn rpad(s: String, length: i64, fill: String) -> String {
+    let length = length as usize;
     let s_len = s.chars().count();
     if s_len == length {
         return s;
