@@ -178,13 +178,13 @@ impl TypeDef {
 
     pub fn get_literal(scalar: &ScalarValue) -> syn::Expr {
         if scalar.is_null() {
-            return parse_str("None").unwrap();
+            return parse_quote!("None");
         }
         match scalar {
-            ScalarValue::Null => parse_str("None").unwrap(),
-            ScalarValue::Boolean(Some(value)) => parse_str(&format!("{}", value)).unwrap(),
-            ScalarValue::Float32(Some(value)) => parse_str(&format!("{}", value)).unwrap(),
-            ScalarValue::Float64(Some(value)) => parse_str(&format!("{}", value)).unwrap(),
+            ScalarValue::Null => parse_quote!("None"),
+            ScalarValue::Boolean(Some(value)) => parse_quote!(#value),
+            ScalarValue::Float32(Some(value)) => parse_quote!(#value),
+            ScalarValue::Float64(Some(value)) => parse_quote!(#value),
             ScalarValue::Decimal128(Some(value), precision, scale) => parse_str(
                 &Decimal128Array::from_value(*value, 1)
                     .with_precision_and_scale(*precision, *scale)
@@ -192,16 +192,16 @@ impl TypeDef {
                     .value_as_string(0),
             )
             .unwrap(),
-            ScalarValue::Int8(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::Int16(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::Int32(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::Int64(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::UInt8(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::UInt16(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::UInt32(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::UInt64(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::Utf8(Some(val)) | ScalarValue::LargeUtf8(Some(val)) => {
-                parse_str(&quote!(#val.to_string()).to_string()).unwrap()
+            ScalarValue::Int8(Some(value)) => parse_quote!(#value),
+            ScalarValue::Int16(Some(value)) => parse_quote!(#value),
+            ScalarValue::Int32(Some(value)) => parse_quote!(#value),
+            ScalarValue::Int64(Some(value)) => parse_quote!(#value),
+            ScalarValue::UInt8(Some(value)) => parse_quote!(#value),
+            ScalarValue::UInt16(Some(value)) => parse_quote!(#value),
+            ScalarValue::UInt32(Some(value)) => parse_quote!(#value),
+            ScalarValue::UInt64(Some(value)) => parse_quote!(#value),
+            ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
+                parse_quote!(#value.to_string())
             }
             ScalarValue::Binary(Some(bin)) => parse_str(&format!("{:?}", bin)).unwrap(),
             ScalarValue::LargeBinary(_) => todo!(),

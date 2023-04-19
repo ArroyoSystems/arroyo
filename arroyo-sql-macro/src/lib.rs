@@ -6,23 +6,23 @@ use syn::{parse_macro_input, Expr, LitStr, Token};
 
 /// This macro is used to generate a test function for a single test case.
 /// Used in the `arroyo-sql-testing` crate.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `test_name` - The name of the test.
 /// * `calculation_string` - The calculation string to be tested.
 /// * `input_value` - The input value to be used in the calculation.
 /// * `expected_result` - The expected result of the calculation.
-/// 
+///
 /// # Returns
-/// 
+///
 /// A test function that can be used to test a single test case.
-/// 
+///
 /// # Example
-/// 
+///
 /// ```
 /// use arroyo_sql_testing::single_test_codegen;
-/// 
+///
 /// single_test_codegen!(
 ///    "test_name",
 ///   "calculation_string",

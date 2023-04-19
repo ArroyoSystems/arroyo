@@ -1497,7 +1497,7 @@ impl StringFunction {
                 parse_quote!(arroyo_types::functions::strings::initcap(arg))
             }
             StringFunction::OctetLength(_) => {
-                parse_quote!(arroyo_types::functions::strings::strpos(arg))
+                parse_quote!(arroyo_types::functions::strings::octet_length(arg))
             }
             StringFunction::Lower(_) => parse_quote!(arg.to_lowercase()),
             StringFunction::Upper(_) => parse_quote!(arg.to_uppercase()),
