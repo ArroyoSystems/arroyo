@@ -300,6 +300,10 @@ pub enum Operator {
     TumblingWindowAggregator(TumblingWindowAggregator),
     TumblingTopN(TumblingTopN),
     SlidingAggregatingTopN(SlidingAggregatingTopN),
+    JoinWithExpiration {
+        left_expiration: Duration,
+        right_expiration: Duration,
+    },
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -424,6 +428,14 @@ impl Debug for Operator {
                     }
                 )
             }
+            Operator::JoinWithExpiration {
+                left_expiration,
+                right_expiration,
+            } => write!(
+                f,
+                "JoinWithExpiration<left_expire: {:?}, right_expire: {:?}>",
+                left_expiration, right_expiration
+            ),
         }
     }
 }
@@ -1612,6 +1624,13 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 sort_key_type,
                 max_elements: max_elements as u64,
             }),
+            Operator::JoinWithExpiration {
+                left_expiration,
+                right_expiration,
+            } => GrpcOperator::JoinWithExpiration(GrpcApi::JoinWithExpiration {
+                left_expiration_micros: left_expiration.as_micros() as u64,
+                right_expiration_micros: right_expiration.as_micros() as u64,
+            }),
         }
     }
 }
@@ -1920,6 +1939,13 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     sort_key_type,
                     max_elements: max_elements as usize,
                 }),
+                GrpcOperator::JoinWithExpiration(GrpcApi::JoinWithExpiration {
+                    left_expiration_micros,
+                    right_expiration_micros,
+                }) => Operator::JoinWithExpiration {
+                    left_expiration: Duration::from_micros(left_expiration_micros),
+                    right_expiration: Duration::from_micros(right_expiration_micros),
+                },
             },
             None => bail!("unset on operator {:?}", operator),
         };

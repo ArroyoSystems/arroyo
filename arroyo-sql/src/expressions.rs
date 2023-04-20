@@ -407,7 +407,10 @@ impl Column {
         if let datafusion_expr::Expr::Column(column) = expr {
             Ok(Self::convert(column))
         } else {
-            bail!("only support converting column expressions to columns.")
+            bail!(
+                "only support converting column expressions to columns, not {}",
+                expr
+            )
         }
     }
 }

@@ -10,7 +10,7 @@ use arroyo_rpc::grpc::{
     controller_grpc_client::ControllerGrpcClient, node_grpc_server::NodeGrpc,
     node_grpc_server::NodeGrpcServer, GetWorkersReq, GetWorkersResp, HeartbeatNodeReq,
     RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq, StopWorkerResp,
-    WorkerFinishedReq,
+    StopWorkerStatus, WorkerFinishedReq,
 };
 use arroyo_types::{
     grpc_port, ports, to_millis, NodeId, WorkerId, CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV,
@@ -199,14 +199,14 @@ impl NodeGrpc for NodeServer {
         let (running, pid, job_id) = {
             let workers = self.workers.lock().unwrap();
 
-            let worker = workers.get(&WorkerId(req.worker_id)).ok_or_else(|| {
-                Status::failed_precondition(format!("No worker with id {}", req.worker_id))
-            })?;
+            let Some(worker) = workers.get(&WorkerId(req.worker_id)) else {
+                return Ok(Response::new(StopWorkerResp { status: StopWorkerStatus::NotFound.into()}));
+            };
 
             (worker.running, worker.pid, worker.job_id.clone())
         };
 
-        let stopped = if running {
+        let status = if running {
             info!(
                 message = "stopping worker",
                 worker_id = req.worker_id,
@@ -224,8 +224,15 @@ impl NodeGrpc for NodeServer {
             );
             true
         };
+        let status = if status {
+            StopWorkerStatus::Stopped
+        } else {
+            StopWorkerStatus::StopFailed
+        };
 
-        Ok(Response::new(StopWorkerResp { stopped }))
+        Ok(Response::new(StopWorkerResp {
+            status: status.into(),
+        }))
     }
 
     async fn get_workers(
