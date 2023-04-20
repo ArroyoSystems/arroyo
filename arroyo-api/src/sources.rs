@@ -13,12 +13,15 @@ use arroyo_datastream::{
 use arroyo_rpc::grpc::api::{
     self,
     connection::ConnectionType,
+    create_pipeline_req,
     create_source_req::{self},
+    create_sql_job::Sink,
     source_def::SourceType,
     source_schema::{self, Schema},
-    ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
-    JsonSchemaDef, KafkaAuthConfig, KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField,
-    SourceMetadataResp, TestSourceMessage,
+    BuiltinSink, ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreatePipelineReq,
+    CreateSourceReq, CreateSqlJob, DeleteSourceReq, JsonSchemaDef, KafkaAuthConfig,
+    KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField, SourceMetadataResp,
+    TestSourceMessage,
 };
 use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
@@ -31,18 +34,19 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tonic::Status;
 use tracing::warn;
 
-use crate::types::public::SchemaType;
 use crate::{
     connections::get_connections,
     handle_db_error,
     json_schema::{self, convert_json_schema},
     log_and_map,
+    pipelines::start_or_preview,
     queries::api_queries,
     required_field,
     testers::KafkaTester,
     AuthData,
 };
 use crate::{handle_delete, types::public};
+use crate::{jobs::create_job, types::public::SchemaType};
 
 pub fn impulse_schema() -> SourceSchema {
     SourceSchema {
@@ -709,7 +713,7 @@ pub(crate) async fn create_source(
             }
         };
 
-    api_queries::create_source()
+    let source_id = api_queries::create_source()
         .bind(
             &transaction,
             &auth.organization_id,
@@ -720,10 +724,34 @@ pub(crate) async fn create_source(
             &schema_id,
             &connection_id,
         )
+        .one()
         .await
         .map_err(|err| handle_db_error("source", err))?;
 
+    // create the raw preview pipeline with a request to the pipeline api
+    let job_id = start_or_preview(
+        CreatePipelineReq {
+            name: format!("raw-pipeline-{}", req.name),
+            config: Some(create_pipeline_req::Config::Sql(CreateSqlJob {
+                query: format!("SELECT * FROM {};", req.name),
+                parallelism: 1,
+                sink: Some(Sink::Builtin(BuiltinSink::Web as i32)),
+            })),
+        },
+        false,
+        auth,
+        &transaction,
+    )
+    .await?;
+
+    // add the id for the raw pipeline to the source table
+    let raw_pipeline_id = api_queries::get_pipeline_for_job()
+        .bind(&transaction, &job_id.get_ref().job_id, &source_id)
+        .await
+        .map_err(|err| handle_db_error("pipeline", err))?;
+
     transaction.commit().await.map_err(log_and_map)?;
+
     Ok(())
 }
 
