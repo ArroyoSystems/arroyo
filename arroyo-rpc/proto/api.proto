@@ -751,7 +751,7 @@ message RefreshSampleReq {
 }
 
 message RefreshSampleResp {
-  repeated uint64 rando = 1;
+  repeated OutputData rando = 1;
 }
 
 message GrpcOutputSubscription {

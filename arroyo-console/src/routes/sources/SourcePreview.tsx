@@ -39,9 +39,11 @@ export function SourcePreview({ client }: { client: ApiClient }) {
     const refreshSample = async () => {
         setLoading(true);
         // start the pipeline
-        await (await client()).refreshSample(new RefreshSampleReq({
+        let resp = await (await client()).refreshSample(new RefreshSampleReq({
             sourceId: BigInt(24),
         }));
+        setLoading(false);
+        setOutputs(resp.rando.map((r, i) => ({ id: i, data: r })));
     }
 
     // return a PipelineOutput with output from the source raw pipeline

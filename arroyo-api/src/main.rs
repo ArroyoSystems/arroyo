@@ -799,7 +799,8 @@ impl ApiGrpc for ApiServer {
             .await
             .map_err(log_and_map)?
             .into_inner();
-        // collect 20 lines
+
+        // collect 20 lines from the started pipeline output
         let mut captured = Vec::<Result<OutputData, Status>>::new();
         while let Some(d) = stream.next().await {
             // convert the data to output data and add to captured
@@ -821,7 +822,9 @@ impl ApiGrpc for ApiServer {
                 break;
             }
         }
+        // print and debug
         info!("captured sample: {:?}", captured);
+        // stop the pipeline once the sample is collected
         let resp = self
             .update_job(Request::new(UpdateJobReq {
                 job_id: job_id.clone(),
@@ -830,9 +833,14 @@ impl ApiGrpc for ApiServer {
                 parallelism: None,
             }))
             .await?;
-        info!("{:?}", resp);
-        // return a list of random numbers just to test
-        todo!();
+
+        // return a bunch of random numbers to test
+        Ok(Response::new(RefreshSampleResp {
+            rando: captured
+                .iter()
+                .map(|record| record.clone().unwrap())
+                .collect(),
+        }))
     }
 
     type SubscribeToOutputStream = ReceiverStream<Result<OutputData, Status>>;
