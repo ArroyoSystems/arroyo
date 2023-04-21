@@ -1,8 +1,8 @@
-import { Th, Td, Tr, Table, Thead, Tbody } from "@chakra-ui/react";
+import { Th, Td, Tr, Table, Thead, Tbody, TableContainer, Box, Container } from "@chakra-ui/react";
 import { ReactElement } from "react";
 import { OutputData } from "../../gen/api_pb";
 
-export function PipelineOutputs({ outputs }: { outputs: Array<{id: number, data: OutputData}> }) {
+export function PipelineOutputs({ outputs }: { outputs: Array<{ id: number, data: OutputData }> }) {
   let headers: Array<ReactElement> = [];
   const data = outputs
     .map(row => {
@@ -36,15 +36,15 @@ export function PipelineOutputs({ outputs }: { outputs: Array<{id: number, data:
     .reverse();
 
   return (
-    <Table maxWidth="500px">
-        <Thead>
-            <Tr>
-              <Th>Row</Th>
-              <Th>Time</Th>
-              {headers}
-            </Tr>
-        </Thead>
-        <Tbody>{data}</Tbody>
+    <Table overflowX="scroll" w="calc(100vw - 250px)" display="block" m={5}>
+      <Thead>
+        <Tr>
+          <Th>Row</Th>
+          <Th>Time</Th>
+          {headers}
+        </Tr>
+      </Thead>
+      <Tbody>{data}</Tbody>
     </Table>
   );
 }

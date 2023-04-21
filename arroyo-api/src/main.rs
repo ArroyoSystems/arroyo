@@ -825,14 +825,13 @@ impl ApiGrpc for ApiServer {
         // print and debug
         info!("captured sample: {:?}", captured);
         // stop the pipeline once the sample is collected
-        let resp = self
-            .update_job(Request::new(UpdateJobReq {
-                job_id: job_id.clone(),
-                stop: Some(StopType::Immediate.into()),
-                checkpoint_interval_micros: None,
-                parallelism: None,
-            }))
-            .await?;
+        self.update_job(Request::new(UpdateJobReq {
+            job_id: job_id.clone(),
+            stop: Some(StopType::Immediate.into()),
+            checkpoint_interval_micros: None,
+            parallelism: None,
+        }))
+        .await?;
 
         // return a bunch of random numbers to test
         Ok(Response::new(RefreshSampleResp {
