@@ -173,7 +173,7 @@ function SourceTable({ client }: { client: ApiClient }) {
                         icon={<FiEye fontSize="1.25rem" />}
                         variant="ghost"
                         aria-label="Edit source"
-                        onClick={() => navigate(`/sources/inspect/${source.rawPipelineJobId}`)}
+                        onClick={() => navigate(`/sources/inspect/${source.id}`)}
                       />)
                     : null
                 }

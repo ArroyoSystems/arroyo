@@ -9,13 +9,13 @@ export function SourcePreview({ client }: { client: ApiClient }) {
     const [loading, setLoading] = useState(false);
     const [outputs, setOutputs] = useState<Array<{ id: number, data: OutputData }>>([]);
 
-    let { jobId } = useParams();
+    let { sourceId } = useParams();
 
     const refreshSample = async () => {
         setLoading(true);
         // start the pipeline
         let resp = await (await client()).refreshSample(new RefreshSampleReq({
-            sourceId: BigInt(24),
+            sourceId: BigInt(parseInt(sourceId!)),  // TODO: possible to be null?
         }));
         setLoading(false);
         setOutputs(resp.rando.map((r, i) => ({ id: i, data: r })));

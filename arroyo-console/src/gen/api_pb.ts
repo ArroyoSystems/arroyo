@@ -5596,6 +5596,80 @@ export class DeleteSinkResp extends Message<DeleteSinkResp> {
 }
 
 /**
+ * @generated from message arroyo_api.RefreshSampleReq
+ */
+export class RefreshSampleReq extends Message<RefreshSampleReq> {
+  /**
+   * @generated from field: uint64 source_id = 1;
+   */
+  sourceId = protoInt64.zero;
+
+  constructor(data?: PartialMessage<RefreshSampleReq>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.RefreshSampleReq";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "source_id", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RefreshSampleReq {
+    return new RefreshSampleReq().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RefreshSampleReq {
+    return new RefreshSampleReq().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RefreshSampleReq {
+    return new RefreshSampleReq().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RefreshSampleReq | PlainMessage<RefreshSampleReq> | undefined, b: RefreshSampleReq | PlainMessage<RefreshSampleReq> | undefined): boolean {
+    return proto3.util.equals(RefreshSampleReq, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.RefreshSampleResp
+ */
+export class RefreshSampleResp extends Message<RefreshSampleResp> {
+  /**
+   * @generated from field: repeated arroyo_api.OutputData rando = 1;
+   */
+  rando: OutputData[] = [];
+
+  constructor(data?: PartialMessage<RefreshSampleResp>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.RefreshSampleResp";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "rando", kind: "message", T: OutputData, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RefreshSampleResp {
+    return new RefreshSampleResp().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RefreshSampleResp {
+    return new RefreshSampleResp().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RefreshSampleResp {
+    return new RefreshSampleResp().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RefreshSampleResp | PlainMessage<RefreshSampleResp> | undefined, b: RefreshSampleResp | PlainMessage<RefreshSampleResp> | undefined): boolean {
+    return proto3.util.equals(RefreshSampleResp, a, b);
+  }
+}
+
+/**
  * @generated from message arroyo_api.GrpcOutputSubscription
  */
 export class GrpcOutputSubscription extends Message<GrpcOutputSubscription> {

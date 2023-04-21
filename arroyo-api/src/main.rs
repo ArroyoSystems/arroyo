@@ -753,7 +753,7 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<RefreshSampleResp>, Status> {
         let (request, auth) = self.authenticate(request).await?;
         // start the pipeline associated with the source
-        let job_id = api_queries::get_source_pipeline()
+        let job_id = api_queries::get_source_pipeline() // TODO: when it's possible to have two jobs for one pipeline, how does this look?
             .bind(
                 &self.client().await?,
                 &(request.into_inner().source_id as i64),

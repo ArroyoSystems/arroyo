@@ -56,7 +56,7 @@ export function Router(): JSX.Element {
       element: <CreateSource client={client} />,
     },
     {
-      path: "sources/inspect/:jobId",
+      path: "sources/inspect/:sourceId",
       element: <SourcePreview client={client} />,
     },
     {
