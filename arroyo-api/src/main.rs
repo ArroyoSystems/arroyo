@@ -695,26 +695,25 @@ impl ApiGrpc for ApiServer {
             }
         }
 
-        let parallelism_overrides: Option<serde_json::Value> =
-            if let Some(parallelism) = req.parallelism {
-                let res = api_queries::get_job_details()
-                    .bind(&self.client().await?, &auth.organization_id, &req.job_id)
-                    .opt()
-                    .await
-                    .map_err(log_and_map)?
-                    .ok_or_else(|| Status::not_found(format!("No job with id '{}'", req.job_id)))?;
+        let parallelism_overrides = if let Some(parallelism) = req.parallelism {
+            let res = api_queries::get_job_details()
+                .bind(&self.client().await?, &auth.organization_id, &req.job_id)
+                .opt()
+                .await
+                .map_err(log_and_map)?
+                .ok_or_else(|| Status::not_found(format!("No job with id '{}'", req.job_id)))?;
 
-                let program = PipelineProgram::decode(&res.program[..]).map_err(log_and_map)?;
-                let map: HashMap<String, u32> = program
-                    .nodes
-                    .into_iter()
-                    .map(|node| (node.node_id, parallelism))
-                    .collect();
+            let program = PipelineProgram::decode(&res.program[..]).map_err(log_and_map)?;
+            let map: HashMap<String, u32> = program
+                .nodes
+                .into_iter()
+                .map(|node| (node.node_id, parallelism))
+                .collect();
 
-                Some(serde_json::to_value(map).map_err(log_and_map)?)
-            } else {
-                None
-            };
+            Some(serde_json::to_value(map).map_err(log_and_map)?)
+        } else {
+            None
+        };
 
         let res = api_queries::update_job()
             .bind(

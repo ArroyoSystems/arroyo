@@ -750,7 +750,7 @@ pub(crate) async fn create_source(
     .await?;
 
     // add the id for the raw pipeline to the source table
-    let raw_pipeline_id = api_queries::get_pipeline_for_job()
+    let raw_pipeline_id = api_queries::add_raw_pipeline_to_source()
         .bind(&transaction, &job_resp.get_ref().job_id, &source_id)
         .await
         .map_err(|err| handle_db_error("pipeline", err))?;

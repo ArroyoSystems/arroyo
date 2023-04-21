@@ -129,8 +129,7 @@ VALUES (:pipeline_id, :sink_id);
 DELETE FROM pipelines
 WHERE id = :pipeline_id AND organization_id = :organization_id;
 
---! get_pipeline_for_job
--- insert into sources the raw_pipeline_id from the query
+--! add_raw_pipeline_to_source
 UPDATE sources
 SET raw_pipeline_job_id = :job_id
 WHERE sources.id = :source_id;
