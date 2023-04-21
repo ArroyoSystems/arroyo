@@ -729,7 +729,7 @@ pub(crate) async fn create_source(
         .map_err(|err| handle_db_error("source", err))?;
 
     // create the raw preview pipeline with a request to the pipeline api
-    let job_id = start_or_preview(
+    let job_resp = start_or_preview(
         CreatePipelineReq {
             name: format!("raw-pipeline-{}", req.name),
             config: Some(create_pipeline_req::Config::Sql(CreateSqlJob {
@@ -746,7 +746,7 @@ pub(crate) async fn create_source(
 
     // add the id for the raw pipeline to the source table
     let raw_pipeline_id = api_queries::get_pipeline_for_job()
-        .bind(&transaction, &job_id.get_ref().job_id, &source_id)
+        .bind(&transaction, &job_resp.get_ref().job_id, &source_id)
         .await
         .map_err(|err| handle_db_error("pipeline", err))?;
 
@@ -767,7 +767,7 @@ pub(crate) async fn get_sources<E: GenericClient>(
 
     let defs = res
         .into_iter()
-        .map(|rec| {
+        .map(|rec: api_queries::GetSources| {
             let schema = match rec.schema_type {
                 SchemaType::builtin => {
                     Schema::Builtin(serde_json::from_value(rec.schema_config.unwrap()).unwrap())
@@ -824,6 +824,7 @@ pub(crate) async fn get_sources<E: GenericClient>(
                     .map(|f| f.try_into().unwrap())
                     .collect(),
                 source_type: Some(source_type),
+                raw_pipeline_job_id: rec.raw_pipeline_job_id,
             }
         })
         .collect();

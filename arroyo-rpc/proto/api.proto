@@ -654,6 +654,7 @@ message SourceDef {
   SourceSchema schema = 2;
   optional string connection = 8;
   int32 consumers = 10;
+  optional string raw_pipeline_job_id = 11;
 
   oneof source_type {
     KafkaSourceDef kafka = 3;

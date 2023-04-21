@@ -45,7 +45,7 @@ INSERT INTO sources
 VALUES (:organization_id, :created_by, :name, :type, :config, :schema_id, :connection_id)
 RETURNING id;
 
---! get_sources: (schema_config?, connection_name?, connection_type?, connection_config?, source_config?)
+--! get_sources: (schema_config?, connection_name?, connection_type?, connection_config?, source_config?, raw_pipeline_job_id?)
 SELECT
     schemas.id as schema_id,
     schemas.type as schema_type,
@@ -55,6 +55,7 @@ SELECT
     sd.name as source_name,
     sd.type as source_type,
     sd.config as source_config,
+    sd.raw_pipeline_job_id as raw_pipeline_job_id,
     connections.name as connection_name,
     connections.type as connection_type,
     connections.config as connection_config,
@@ -70,11 +71,6 @@ WHERE sd.organization_id = :organization_id;
 --! delete_source
 DELETE FROM sources
 WHERE organization_id = :organization_id AND name = :name;
-
---! update_source_raw_pipeline_id
-UPDATE sources
-SET raw_pipeline_id = :raw_pipeline_id
-WHERE id = :source_id;
 
 ----------- sinks ----------------------
 
@@ -130,15 +126,7 @@ WHERE id = :pipeline_id AND organization_id = :organization_id;
 --! get_pipeline_for_job
 -- insert into sources the raw_pipeline_id from the query
 UPDATE sources
-SET raw_pipeline_id = ( 
-    SELECT pipelines.id as raw_pipeline_id
-    FROM pipelines
-    JOIN pipeline_definitions
-        ON pipelines.id = pipeline_definitions.pipeline_id
-    JOIN job_configs
-        ON pipeline_definitions.id = job_configs.pipeline_definition
-    WHERE job_configs.id = :job_id
-)
+SET raw_pipeline_job_id = :job_id
 WHERE sources.id = :source_id;
 
 

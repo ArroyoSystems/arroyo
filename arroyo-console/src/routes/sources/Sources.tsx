@@ -33,8 +33,8 @@ import {
   useDisclosure,
 } from "@chakra-ui/react";
 import { useEffect, useState } from "react";
-import { FiEdit2, FiInfo, FiXCircle } from "react-icons/fi";
-import { useLinkClickHandler } from "react-router-dom";
+import { FiEdit2, FiEye, FiInfo, FiXCircle } from "react-icons/fi";
+import { useLinkClickHandler, useNavigate } from "react-router-dom";
 import { ApiGrpc } from "../../gen/api_connectweb";
 import { DeleteSourceReq, GetSourcesReq, SourceDef } from "../../gen/api_pb";
 import { ApiClient } from "../../main";
@@ -77,6 +77,7 @@ function SourceTable({ client }: { client: ApiClient }) {
   const [selected, setSelected] = useState<SourceDef | null>(null);
 
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -133,7 +134,7 @@ function SourceTable({ client }: { client: ApiClient }) {
           <ModalCloseButton />
           <ModalBody>
             <Code colorScheme="black" width="100%" p={4}>
-              { /* toJson -> parse -> stringify to get around the inabilityof JSON.stringify to handle BigInt */ }
+              { /* toJson -> parse -> stringify to get around the inabilityof JSON.stringify to handle BigInt */}
               <pre>{JSON.stringify(JSON.parse(selected?.sourceType.value?.toJsonString() || "{}"), null, 2)}</pre>
             </Code>
           </ModalBody>
@@ -164,6 +165,20 @@ function SourceTable({ client }: { client: ApiClient }) {
               ))}
 
               <Td textAlign="right">
+                {/* IconButton that navigates to the source preview view with a preview icon */}
+                {
+                  source.rawPipelineJobId != null
+                    ? (
+                      <IconButton
+                        icon={<FiEye fontSize="1.25rem" />}
+                        variant="ghost"
+                        aria-label="Edit source"
+                        onClick={() => navigate(`/sources/inspect/${source.rawPipelineJobId}`)}
+                      />)
+                    : null
+                }
+
+
                 <IconButton
                   icon={<FiInfo fontSize="1.25rem" />}
                   variant="ghost"
