@@ -45,6 +45,12 @@ INSERT INTO sources
 VALUES (:organization_id, :created_by, :name, :type, :config, :schema_id, :connection_id)
 RETURNING id;
 
+--! get_source_pipeline
+SELECT raw_pipeline_job_id
+FROM sources
+WHERE id = :id;
+
+
 --! get_sources: (schema_config?, connection_name?, connection_type?, connection_config?, source_config?, raw_pipeline_job_id?)
 SELECT
     schemas.id as schema_id,
