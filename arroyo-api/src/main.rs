@@ -14,8 +14,9 @@ use arroyo_rpc::grpc::{
         GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq,
         GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq,
         JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp,
-        OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, StopType, TestSchemaResp,
-        TestSourceMessage, UpdateJobReq, UpdateJobResp,
+        OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, RefreshSampleReq,
+        RefreshSampleResp, StopType, TestSchemaResp, TestSourceMessage, UpdateJobReq,
+        UpdateJobResp,
     },
     controller_grpc_client::ControllerGrpcClient,
 };
@@ -694,25 +695,26 @@ impl ApiGrpc for ApiServer {
             }
         }
 
-        let parallelism_overrides = if let Some(parallelism) = req.parallelism {
-            let res = api_queries::get_job_details()
-                .bind(&self.client().await?, &auth.organization_id, &req.job_id)
-                .opt()
-                .await
-                .map_err(log_and_map)?
-                .ok_or_else(|| Status::not_found(format!("No job with id '{}'", req.job_id)))?;
+        let parallelism_overrides: Option<serde_json::Value> =
+            if let Some(parallelism) = req.parallelism {
+                let res = api_queries::get_job_details()
+                    .bind(&self.client().await?, &auth.organization_id, &req.job_id)
+                    .opt()
+                    .await
+                    .map_err(log_and_map)?
+                    .ok_or_else(|| Status::not_found(format!("No job with id '{}'", req.job_id)))?;
 
-            let program = PipelineProgram::decode(&res.program[..]).map_err(log_and_map)?;
-            let map: HashMap<String, u32> = program
-                .nodes
-                .into_iter()
-                .map(|node| (node.node_id, parallelism))
-                .collect();
+                let program = PipelineProgram::decode(&res.program[..]).map_err(log_and_map)?;
+                let map: HashMap<String, u32> = program
+                    .nodes
+                    .into_iter()
+                    .map(|node| (node.node_id, parallelism))
+                    .collect();
 
-            Some(serde_json::to_value(map).map_err(log_and_map)?)
-        } else {
-            None
-        };
+                Some(serde_json::to_value(map).map_err(log_and_map)?)
+            } else {
+                None
+            };
 
         let res = api_queries::update_job()
             .bind(
@@ -743,6 +745,94 @@ impl ApiGrpc for ApiServer {
 
         jobs::delete_job(&request.into_inner().job_id, auth, &self.pool).await?;
         Ok(Response::new(DeleteJobResp {}))
+    }
+
+    async fn refresh_sample(
+        &self,
+        request: Request<RefreshSampleReq>,
+    ) -> Result<Response<RefreshSampleResp>, Status> {
+        let (request, auth) = self.authenticate(request).await?;
+        // start the pipeline associated with the source
+        let job_id = api_queries::get_source_pipeline()
+            .bind(
+                &self.client().await?,
+                &(request.into_inner().source_id as i64),
+            )
+            .one()
+            .await
+            .map_err(log_and_map)?;
+
+        self.update_job(Request::new(UpdateJobReq {
+            job_id: job_id.clone(),
+            stop: Some(StopType::None.into()),
+            checkpoint_interval_micros: None,
+            parallelism: None,
+        }))
+        .await?;
+
+        // subscribe to the output
+        let details = get_job_details(&job_id, &auth, &self.client().await?).await?;
+        if !details
+            .job_graph
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|n| n.operator.contains("GrpcSink"))
+        {
+            // TODO: make this check more robust
+            return Err(Status::invalid_argument(format!(
+                "Job {} does not have a web sink",
+                job_id
+            )));
+        }
+
+        let mut controller = ControllerGrpcClient::connect(self.controller_addr.clone())
+            .await
+            .map_err(log_and_map)?;
+
+        info!("connected to controller");
+
+        let mut stream = controller
+            .subscribe_to_output(Request::new(grpc::GrpcOutputSubscription {
+                job_id: job_id.clone(),
+            }))
+            .await
+            .map_err(log_and_map)?
+            .into_inner();
+        // collect 20 lines
+        let mut captured = Vec::<Result<OutputData, Status>>::new();
+        while let Some(d) = stream.next().await {
+            // convert the data to output data and add to captured
+            if d.as_ref().map(|t| t.done).unwrap_or(false) {
+                info!("Stream done for {}", job_id);
+                break;
+            }
+
+            let v = d.map(|d| OutputData {
+                operator_id: d.operator_id,
+                timestamp: d.timestamp,
+                key: d.key,
+                value: d.value,
+            });
+
+            captured.push(v);
+
+            if captured.len() == 20 {
+                break;
+            }
+        }
+        info!("captured sample: {:?}", captured);
+        let resp = self
+            .update_job(Request::new(UpdateJobReq {
+                job_id: job_id.clone(),
+                stop: Some(StopType::Immediate.into()),
+                checkpoint_interval_micros: None,
+                parallelism: None,
+            }))
+            .await?;
+        info!("{:?}", resp);
+        // return a list of random numbers just to test
+        todo!();
     }
 
     type SubscribeToOutputStream = ReceiverStream<Result<OutputData, Status>>;
@@ -785,6 +875,30 @@ impl ApiGrpc for ApiServer {
             .await
             .map_err(log_and_map)?
             .into_inner();
+
+        let mut captured = Vec::<Result<OutputData, Status>>::new();
+        while let Some(d) = stream.next().await {
+            // convert the data to output data and add to captured
+            if d.as_ref().map(|t| t.done).unwrap_or(false) {
+                info!("Stream done for {}", job_id);
+                break;
+            }
+
+            let v = d.map(|d| OutputData {
+                operator_id: d.operator_id,
+                timestamp: d.timestamp,
+                key: d.key,
+                value: d.value,
+            });
+
+            captured.push(v);
+
+            if captured.len() == 20 {
+                break;
+            }
+        }
+
+        info!("captured data: {:?}", captured);
 
         info!("subscribed to output");
         tokio::spawn(async move {

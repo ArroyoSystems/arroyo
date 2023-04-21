@@ -10,26 +10,31 @@ use arrow::datatypes::TimeUnit;
 use arroyo_datastream::{
     FileSource, ImpulseSpec, NexmarkSource, OffsetMode, Operator, Source as ApiSource,
 };
-use arroyo_rpc::grpc::api::{
-    self,
-    connection::ConnectionType,
-    create_pipeline_req,
-    create_source_req::{self},
-    create_sql_job::Sink,
-    source_def::SourceType,
-    source_schema::{self, Schema},
-    BuiltinSink, ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreatePipelineReq,
-    CreateSourceReq, CreateSqlJob, DeleteSourceReq, JsonSchemaDef, KafkaAuthConfig,
-    KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField, SourceMetadataResp,
-    TestSourceMessage,
+use arroyo_rpc::grpc::{
+    api::{
+        self,
+        connection::ConnectionType,
+        create_pipeline_req,
+        create_source_req::{self},
+        create_sql_job::Sink,
+        source_def::SourceType,
+        source_schema::{self, Schema},
+        BuiltinSink, ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreatePipelineReq,
+        CreateSourceReq, CreateSqlJob, DeleteSourceReq, JsonSchemaDef, KafkaAuthConfig,
+        KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField, SourceMetadataResp, StopType,
+        TestSourceMessage,
+    },
+    StopMode,
 };
 use arroyo_sql::{
-    types::{StructDef, StructField, TypeDef},
+    types::{self, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
+use chrono::Utc;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Pool;
 use http::StatusCode;
+use time::OffsetDateTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tonic::Status;
 use tracing::warn;
@@ -747,6 +752,20 @@ pub(crate) async fn create_source(
     // add the id for the raw pipeline to the source table
     let raw_pipeline_id = api_queries::get_pipeline_for_job()
         .bind(&transaction, &job_resp.get_ref().job_id, &source_id)
+        .await
+        .map_err(|err| handle_db_error("pipeline", err))?;
+
+    api_queries::update_job()
+        .bind(
+            &transaction,
+            &OffsetDateTime::now_utc(),
+            &"alex",
+            &Some(public::StopMode::immediate),
+            &None,
+            &<Option<serde_json::Value>>::None,
+            &job_resp.get_ref().job_id,
+            &"org",
+        )
         .await
         .map_err(|err| handle_db_error("pipeline", err))?;
 

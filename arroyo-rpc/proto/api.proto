@@ -746,6 +746,14 @@ message DeleteSinkResp {
 
 // outputs
 
+message RefreshSampleReq {
+  uint64 source_id = 1;
+}
+
+message RefreshSampleResp {
+  repeated uint64 rando = 1;
+}
+
 message GrpcOutputSubscription {
   string job_id = 1;
 }
@@ -794,5 +802,6 @@ service ApiGrpc {
 
   rpc UpdateJob(UpdateJobReq) returns (UpdateJobResp);
 
+  rpc RefreshSample(RefreshSampleReq) returns (RefreshSampleResp);
   rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
 }

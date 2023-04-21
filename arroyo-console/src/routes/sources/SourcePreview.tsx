@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
-import { OutputData, GrpcOutputSubscription } from "../../gen/api_pb";
+import { OutputData, GrpcOutputSubscription, RefreshSampleReq } from "../../gen/api_pb";
 import { ApiClient } from "../../main";
 import { PipelineOutputs } from "../pipelines/JobOutputs";
 import { useParams } from "react-router-dom";
-import { Button } from "@chakra-ui/react";
+import { Box, Button, IconButton } from "@chakra-ui/react";
 
 export function SourcePreview({ client }: { client: ApiClient }) {
     const [subscribed, setSubscribed] = useState(false);
+    // loading
+    const [loading, setLoading] = useState(false);
     const [outputs, setOutputs] = useState<Array<{ id: number, data: OutputData }>>([]);
 
     let { jobId } = useParams();
 
     const subscribe = async () => {
-        if (subscribed) {
+        if (subscribed || loading) {
             return;
         }
 
@@ -34,8 +36,26 @@ export function SourcePreview({ client }: { client: ApiClient }) {
         }
     }
 
+    const refreshSample = async () => {
+        setLoading(true);
+        // start the pipeline
+        await (await client()).refreshSample(new RefreshSampleReq({
+            sourceId: BigInt(24),
+        }));
+    }
+
     // return a PipelineOutput with output from the source raw pipeline
-    return outputs.length > 0 ?
-        (<PipelineOutputs outputs={outputs} />)
-        : (<Button onClick={subscribe}>Subscribe</Button>)
+    return (
+        <Box>
+            {/* icon button with the refresh icon */}
+            {/* <IconButton
+                aria-label="Refresh"
+                icon={<RefreshIcon />}
+                onClick={ }
+            /> */}
+            {outputs.length > 0 ?
+                (<PipelineOutputs outputs={outputs} />)
+                : (<Button onClick={refreshSample}>Refresh</Button>)}
+        </Box>
+    )
 }
