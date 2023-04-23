@@ -1,24 +1,19 @@
 use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
+    api_grpc_server::{ApiGrpc, ApiGrpcServer},
+    CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp,
+    CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq,
+    CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp,
+    GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSourcesReq,
+    GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq,
+    JobDetailsResp, JobMetricsReq, JobMetricsResp, OutputData, PipelineDef, PipelineGraphReq,
+    PipelineGraphResp, RefreshSampleReq, RefreshSampleResp, StopType, TestSchemaResp,
+    TestSourceMessage, UpdateJobReq, UpdateJobResp,
+};
+use arroyo_rpc::grpc::api::{
     DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq,
     DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetSinksReq, GetSinksResp, PipelineProgram,
     SourceMetadataResp,
-};
-use arroyo_rpc::grpc::{
-    self,
-    api::{
-        api_grpc_server::{ApiGrpc, ApiGrpcServer},
-        CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp,
-        CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq,
-        CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp,
-        GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq,
-        GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq,
-        JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp,
-        OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, RefreshSampleReq,
-        RefreshSampleResp, StopType, TestSchemaResp, TestSourceMessage, UpdateJobReq,
-        UpdateJobResp,
-    },
-    controller_grpc_client::ControllerGrpcClient,
 };
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
@@ -41,7 +36,7 @@ use std::time::Duration;
 use tokio::{select, sync::broadcast};
 use tokio_postgres::error::SqlState;
 use tokio_postgres::NoTls;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tower::service_fn;
 use tower_http::{
@@ -50,7 +45,7 @@ use tower_http::{
 };
 use tracing::{error, info, warn};
 
-use crate::{jobs::get_job_details, pipelines::start_or_preview};
+use crate::pipelines::start_or_preview;
 use queries::api_queries;
 
 mod cloud;
@@ -751,7 +746,6 @@ impl ApiGrpc for ApiServer {
         request: Request<RefreshSampleReq>,
     ) -> Result<Response<RefreshSampleResp>, Status> {
         let (request, auth) = self.authenticate(request).await?;
-        // start the pipeline associated with the source
         let job_id = api_queries::get_source_pipeline() // TODO: when it's possible to have two jobs for one pipeline, how does this look?
             .bind(
                 &self.client().await?,

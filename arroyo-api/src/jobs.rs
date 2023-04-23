@@ -13,9 +13,8 @@ use prost::Message;
 use rand::{distributions::Alphanumeric, Rng};
 use serde_json::from_str;
 use std::{collections::HashMap, time::Duration};
-use tokio::sync::mpsc::Receiver;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tonic::{transport::Channel, Request, Status, Streaming};
+use tonic::{Request, Status, Streaming};
 use tracing::info;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
@@ -34,7 +33,7 @@ fn gen_id() -> String {
 pub(crate) async fn create_job<'a>(
     request: CreateJobReq,
     auth: AuthData,
-    client: &Transaction<'a>,
+    client: &impl GenericClient,
 ) -> Result<String, Status> {
     let pipeline = pipelines::get_pipeline(&request.pipeline_id, &auth, client).await?;
 

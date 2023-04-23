@@ -10,27 +10,23 @@ use arrow::datatypes::TimeUnit;
 use arroyo_datastream::{
     FileSource, ImpulseSpec, NexmarkSource, OffsetMode, Operator, Source as ApiSource,
 };
-use arroyo_rpc::grpc::{
-    api::{
-        self,
-        connection::ConnectionType,
-        create_pipeline_req,
-        create_source_req::{self},
-        create_sql_job::Sink,
-        source_def::SourceType,
-        source_schema::{self, Schema},
-        BuiltinSink, ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreatePipelineReq,
-        CreateSourceReq, CreateSqlJob, DeleteSourceReq, JsonSchemaDef, KafkaAuthConfig,
-        KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField, SourceMetadataResp, StopType,
-        TestSourceMessage,
-    },
-    StopMode,
+use arroyo_rpc::grpc::api::{
+    self,
+    connection::ConnectionType,
+    create_pipeline_req,
+    create_source_req::{self},
+    create_sql_job::Sink,
+    source_def::SourceType,
+    source_schema::Schema,
+    BuiltinSink, ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreatePipelineReq,
+    CreateSourceReq, CreateSqlJob, DeleteSourceReq, JsonSchemaDef, KafkaAuthConfig,
+    KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField, SourceMetadataResp,
+    TestSourceMessage,
 };
 use arroyo_sql::{
-    types::{self, StructDef, StructField, TypeDef},
+    types::{StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
-use chrono::Utc;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Pool;
 use http::StatusCode;
@@ -39,6 +35,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tonic::Status;
 use tracing::warn;
 
+use crate::types::public::SchemaType;
 use crate::{
     connections::get_connections,
     handle_db_error,
@@ -51,7 +48,6 @@ use crate::{
     AuthData,
 };
 use crate::{handle_delete, types::public};
-use crate::{jobs::create_job, types::public::SchemaType};
 
 pub fn impulse_schema() -> SourceSchema {
     SourceSchema {
@@ -611,13 +607,14 @@ pub(crate) async fn create_source(
     // insert schema
     let schema = req
         .schema
+        .clone()
         .or_else(|| {
             match req.type_oneof {
                 Some(create_source_req::TypeOneof::Impulse { .. }) => {
-                    Some(source_schema::Schema::Builtin("impulse".to_string()))
+                    Some(api::source_schema::Schema::Builtin("impulse".to_string()))
                 }
                 Some(create_source_req::TypeOneof::Nexmark { .. }) => {
-                    Some(source_schema::Schema::Builtin("nexmark".to_string()))
+                    Some(api::source_schema::Schema::Builtin("nexmark".to_string()))
                 }
                 _ => None,
             }
@@ -632,22 +629,22 @@ pub(crate) async fn create_source(
         .schema
         .ok_or_else(|| required_field("schema.schema"))?
     {
-        source_schema::Schema::Builtin(name) => {
+        api::source_schema::Schema::Builtin(name) => {
             builtin_for_name(&name).map_err(Status::invalid_argument)?;
             (SchemaType::builtin, serde_json::to_value(&name).unwrap())
         }
-        source_schema::Schema::JsonSchema(js) => {
+        api::source_schema::Schema::JsonSchema(js) => {
             // try to convert the schema to ensure it's valid
             convert_json_schema(&req.name, &js.json_schema).map_err(Status::invalid_argument)?;
 
             // parse the schema into a value
             (SchemaType::json_schema, serde_json::to_value(&js).unwrap())
         }
-        source_schema::Schema::JsonFields(fields) => (
+        api::source_schema::Schema::JsonFields(fields) => (
             SchemaType::json_fields,
             serde_json::to_value(fields).unwrap(),
         ),
-        source_schema::Schema::Protobuf(_) => todo!(),
+        api::source_schema::Schema::Protobuf(_) => todo!(),
     };
 
     let schema_id = api_queries::create_schema()
@@ -665,58 +662,61 @@ pub(crate) async fn create_source(
         .map_err(|err| handle_db_error("schema", err))?;
 
     // insert source
-    let (source_type, config, connection_id) =
-        match req.type_oneof.ok_or_else(|| required_field("type"))? {
-            create_source_req::TypeOneof::Kafka(kafka) => {
-                let connection = connections
-                    .iter()
-                    .find(|c| c.name == kafka.connection)
-                    .ok_or_else(|| {
-                        Status::failed_precondition(format!(
-                            "Could not find connection with name '{}'",
-                            kafka.connection
-                        ))
-                    })?;
-
-                if connection.r#type != public::ConnectionType::kafka {
-                    return Err(Status::invalid_argument(format!(
-                        "Connection '{}' is not a kafka cluster",
+    let (source_type, config, connection_id) = match req
+        .type_oneof
+        .as_ref()
+        .ok_or_else(|| required_field("type"))?
+    {
+        create_source_req::TypeOneof::Kafka(kafka) => {
+            let connection = connections
+                .iter()
+                .find(|c| c.name == kafka.connection)
+                .ok_or_else(|| {
+                    Status::failed_precondition(format!(
+                        "Could not find connection with name '{}'",
                         kafka.connection
-                    )));
-                }
+                    ))
+                })?;
 
-                (
-                    public::SourceType::kafka,
-                    serde_json::to_value(&kafka).unwrap(),
-                    Some(connection.id),
-                )
+            if connection.r#type != public::ConnectionType::kafka {
+                return Err(Status::invalid_argument(format!(
+                    "Connection '{}' is not a kafka cluster",
+                    kafka.connection
+                )));
             }
-            create_source_req::TypeOneof::Impulse(impulse) => {
-                if impulse.events_per_second > auth.org_metadata.max_impulse_qps as f32 {
-                    return rate_limit_error("impulse", auth.org_metadata.max_impulse_qps as usize);
-                }
 
-                (
-                    public::SourceType::impulse,
-                    serde_json::to_value(impulse).unwrap(),
-                    None,
-                )
+            (
+                public::SourceType::kafka,
+                serde_json::to_value(&kafka).unwrap(),
+                Some(connection.id),
+            )
+        }
+        create_source_req::TypeOneof::Impulse(impulse) => {
+            if impulse.events_per_second > auth.org_metadata.max_impulse_qps as f32 {
+                return rate_limit_error("impulse", auth.org_metadata.max_impulse_qps as usize);
             }
-            create_source_req::TypeOneof::File(_) => {
-                return Err(Status::failed_precondition("This source is not supported"));
-            }
-            create_source_req::TypeOneof::Nexmark(nexmark) => {
-                if nexmark.events_per_second > auth.org_metadata.max_nexmark_qps as u32 {
-                    return rate_limit_error("impulse", auth.org_metadata.max_impulse_qps as usize);
-                }
 
-                (
-                    public::SourceType::nexmark,
-                    serde_json::to_value(nexmark).unwrap(),
-                    None,
-                )
+            (
+                public::SourceType::impulse,
+                serde_json::to_value(impulse).unwrap(),
+                None,
+            )
+        }
+        create_source_req::TypeOneof::File(_) => {
+            return Err(Status::failed_precondition("This source is not supported"));
+        }
+        create_source_req::TypeOneof::Nexmark(nexmark) => {
+            if nexmark.events_per_second > auth.org_metadata.max_nexmark_qps as u32 {
+                return rate_limit_error("impulse", auth.org_metadata.max_impulse_qps as usize);
             }
-        };
+
+            (
+                public::SourceType::nexmark,
+                serde_json::to_value(nexmark).unwrap(),
+                None,
+            )
+        }
+    };
 
     let source_id = api_queries::create_source()
         .bind(
@@ -733,31 +733,45 @@ pub(crate) async fn create_source(
         .await
         .map_err(|err| handle_db_error("source", err))?;
 
+    create_raw_pipeline(req, source_id, auth, &transaction).await?;
+
+    transaction.commit().await.map_err(log_and_map)?;
+
+    Ok(())
+}
+
+async fn create_raw_pipeline(
+    request: CreateSourceReq,
+    source_id: i64,
+    auth: AuthData,
+    tx: &impl GenericClient,
+) -> Result<(), Status> {
+    let source_name = request.name;
     // create the raw preview pipeline with a request to the pipeline api
     let job_resp = start_or_preview(
         CreatePipelineReq {
-            name: format!("raw-pipeline-{}", req.name),
+            name: format!("passthrough_source_{}_{}", source_id, source_name),
             config: Some(create_pipeline_req::Config::Sql(CreateSqlJob {
-                query: format!("SELECT * FROM {};", req.name),
+                query: format!("SELECT * FROM {};", source_name),
                 parallelism: 1,
                 sink: Some(Sink::Builtin(BuiltinSink::Web as i32)),
             })),
         },
         false,
         auth,
-        &transaction,
+        tx,
     )
     .await?;
 
     // add the id for the raw pipeline to the source table
-    let raw_pipeline_id = api_queries::add_raw_pipeline_to_source()
-        .bind(&transaction, &job_resp.get_ref().job_id, &source_id)
+    api_queries::add_raw_pipeline_to_source()
+        .bind(tx, &job_resp.get_ref().job_id, &source_id)
         .await
         .map_err(|err| handle_db_error("pipeline", err))?;
 
     api_queries::update_job()
         .bind(
-            &transaction,
+            tx,
             &OffsetDateTime::now_utc(),
             &"alex",
             &Some(public::StopMode::immediate),
@@ -768,8 +782,6 @@ pub(crate) async fn create_source(
         )
         .await
         .map_err(|err| handle_db_error("pipeline", err))?;
-
-    transaction.commit().await.map_err(log_and_map)?;
 
     Ok(())
 }

@@ -163,7 +163,7 @@ async fn set_default_parallelism(_auth: &AuthData, program: &mut Program) -> Res
 pub(crate) async fn create_pipeline<'a>(
     req: CreatePipelineReq,
     auth: AuthData,
-    tx: &Transaction<'a>,
+    tx: &impl GenericClient,
 ) -> Result<i64, Status> {
     let pipeline_type;
     let mut program: Program;
@@ -309,7 +309,7 @@ pub(crate) async fn start_or_preview<'a>(
     req: CreatePipelineReq,
     preview: bool,
     auth: AuthData,
-    tx: &Transaction<'a>,
+    tx: &impl GenericClient,
 ) -> Result<crate::Response<CreateJobResp>, Status> {
     let pipeline_id = create_pipeline(req, auth.clone(), tx).await?;
     let create_job = CreateJobReq {
