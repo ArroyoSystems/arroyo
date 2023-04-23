@@ -769,61 +769,17 @@ impl ApiGrpc for ApiServer {
         }))
         .await?;
 
-        // subscribe to the output
-        let details = get_job_details(&job_id, &auth, &self.client().await?).await?;
-        if !details
-            .job_graph
-            .unwrap()
-            .nodes
-            .iter()
-            .any(|n| n.operator.contains("GrpcSink"))
-        {
-            // TODO: make this check more robust
-            return Err(Status::invalid_argument(format!(
-                "Job {} does not have a web sink",
-                job_id
-            )));
-        }
-
-        let mut controller = ControllerGrpcClient::connect(self.controller_addr.clone())
+        // get the job stream
+        let controller = ControllerGrpcClient::connect(self.controller_addr.clone())
             .await
             .map_err(log_and_map)?;
 
-        info!("connected to controller");
+        let output_lines = jobs::get_lines_from_job_output(
+            jobs::get_job_stream(job_id.clone(), controller, auth, &self.client().await?).await?,
+            20,
+        )
+        .await;
 
-        let mut stream = controller
-            .subscribe_to_output(Request::new(grpc::GrpcOutputSubscription {
-                job_id: job_id.clone(),
-            }))
-            .await
-            .map_err(log_and_map)?
-            .into_inner();
-
-        // collect 20 lines from the started pipeline output
-        let mut captured = Vec::<Result<OutputData, Status>>::new();
-        while let Some(d) = stream.next().await {
-            // convert the data to output data and add to captured
-            if d.as_ref().map(|t| t.done).unwrap_or(false) {
-                info!("Stream done for {}", job_id);
-                break;
-            }
-
-            let v = d.map(|d| OutputData {
-                operator_id: d.operator_id,
-                timestamp: d.timestamp,
-                key: d.key,
-                value: d.value,
-            });
-
-            captured.push(v);
-
-            if captured.len() == 20 {
-                break;
-            }
-        }
-        // print and debug
-        info!("captured sample: {:?}", captured);
-        // stop the pipeline once the sample is collected
         self.update_job(Request::new(UpdateJobReq {
             job_id: job_id.clone(),
             stop: Some(StopType::Immediate.into()),
@@ -832,9 +788,8 @@ impl ApiGrpc for ApiServer {
         }))
         .await?;
 
-        // return a bunch of random numbers to test
         Ok(Response::new(RefreshSampleResp {
-            rando: captured
+            rando: output_lines
                 .iter()
                 .map(|record| record.clone().unwrap())
                 .collect(),
@@ -849,87 +804,20 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<Self::SubscribeToOutputStream>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 
-        let job_id = request.into_inner().job_id;
-        // validate that the job exists, the user has access, and the graph has a GrpcSink
-        let details = get_job_details(&job_id, &auth, &self.client().await?).await?;
-        if !details
-            .job_graph
-            .unwrap()
-            .nodes
-            .iter()
-            .any(|n| n.operator.contains("GrpcSink"))
-        {
-            // TODO: make this check more robust
-            return Err(Status::invalid_argument(format!(
-                "Job {} does not have a web sink",
-                job_id
-            )));
-        }
-
-        let (tx, rx) = tokio::sync::mpsc::channel(32);
-
-        let mut controller = ControllerGrpcClient::connect(self.controller_addr.clone())
+        let controller = ControllerGrpcClient::connect(self.controller_addr.clone())
             .await
             .map_err(log_and_map)?;
 
-        info!("connected to controller");
+        let stream = jobs::get_job_stream(
+            request.into_inner().job_id,
+            controller,
+            auth,
+            &self.client().await?,
+        )
+        .await?;
 
-        let mut stream = controller
-            .subscribe_to_output(Request::new(grpc::GrpcOutputSubscription {
-                job_id: job_id.clone(),
-            }))
-            .await
-            .map_err(log_and_map)?
-            .into_inner();
-
-        let mut captured = Vec::<Result<OutputData, Status>>::new();
-        while let Some(d) = stream.next().await {
-            // convert the data to output data and add to captured
-            if d.as_ref().map(|t| t.done).unwrap_or(false) {
-                info!("Stream done for {}", job_id);
-                break;
-            }
-
-            let v = d.map(|d| OutputData {
-                operator_id: d.operator_id,
-                timestamp: d.timestamp,
-                key: d.key,
-                value: d.value,
-            });
-
-            captured.push(v);
-
-            if captured.len() == 20 {
-                break;
-            }
-        }
-
-        info!("captured data: {:?}", captured);
-
-        info!("subscribed to output");
-        tokio::spawn(async move {
-            let _controller = controller;
-            while let Some(d) = stream.next().await {
-                if d.as_ref().map(|t| t.done).unwrap_or(false) {
-                    info!("Stream done for {}", job_id);
-                    break;
-                }
-
-                let v = d.map(|d| OutputData {
-                    operator_id: d.operator_id,
-                    timestamp: d.timestamp,
-                    key: d.key,
-                    value: d.value,
-                });
-
-                if tx.send(v).await.is_err() {
-                    break;
-                }
-            }
-
-            info!("Closing watch stream for {}", job_id);
-        });
-
-        Ok(Response::new(ReceiverStream::new(rx)))
+        Ok(Response::new(
+            jobs::get_stream_from_job_output(stream).await,
+        ))
     }
 }

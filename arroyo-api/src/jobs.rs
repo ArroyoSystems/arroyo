@@ -1,7 +1,11 @@
 use arroyo_datastream::Program;
-use arroyo_rpc::grpc::api::{
-    CheckpointDetailsResp, CheckpointOverview, CreateJobReq, JobDetailsResp, JobStatus,
-    PipelineProgram, StopType,
+use arroyo_rpc::grpc::{
+    self,
+    api::{
+        CheckpointDetailsResp, CheckpointOverview, CreateJobReq, JobDetailsResp, JobStatus,
+        OutputData, PipelineProgram, StopType,
+    },
+    controller_grpc_client::ControllerGrpcClient,
 };
 use cornucopia_async::GenericClient;
 use deadpool_postgres::{Pool, Transaction};
@@ -9,7 +13,10 @@ use prost::Message;
 use rand::{distributions::Alphanumeric, Rng};
 use serde_json::from_str;
 use std::{collections::HashMap, time::Duration};
-use tonic::Status;
+use tokio::sync::mpsc::Receiver;
+use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tonic::{transport::Channel, Request, Status, Streaming};
+use tracing::info;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
 
@@ -296,4 +303,106 @@ pub(crate) async fn delete_job(job_id: &str, auth: AuthData, pool: &Pool) -> Res
     transaction.commit().await.map_err(log_and_map)?;
 
     Ok(())
+}
+
+pub struct JobStream {
+    job_id: String,
+    stream: Streaming<arroyo_rpc::grpc::OutputData>,
+}
+
+impl JobStream {
+    fn new(job_id: String, stream: Streaming<arroyo_rpc::grpc::OutputData>) -> Self {
+        Self { job_id, stream }
+    }
+}
+
+pub(crate) async fn get_job_stream(
+    job_id: String,
+    mut controller: ControllerGrpcClient<Channel>,
+    auth: AuthData,
+    tx: &impl GenericClient,
+) -> Result<JobStream, Status> {
+    // subscribe to the output
+    let details = get_job_details(&job_id, &auth, tx).await?;
+    if !details
+        .job_graph
+        .unwrap()
+        .nodes
+        .iter()
+        .any(|n| n.operator.contains("GrpcSink"))
+    {
+        // TODO: make this check more robust
+        return Err(Status::invalid_argument(format!(
+            "Job {} does not have a web sink",
+            job_id
+        )));
+    }
+
+    info!("connected to controller");
+
+    let stream = controller
+        .subscribe_to_output(Request::new(grpc::GrpcOutputSubscription {
+            job_id: job_id.clone(),
+        }))
+        .await
+        .map_err(log_and_map)?
+        .into_inner();
+
+    Ok(JobStream::new(job_id, stream))
+}
+
+pub(crate) async fn get_lines_from_job_output(
+    mut stream: JobStream,
+    num_lines: usize,
+) -> Vec<Result<OutputData, Status>> {
+    let mut captured = Vec::<Result<OutputData, Status>>::new();
+    while let Some(d) = stream.stream.next().await {
+        if d.as_ref().map(|t| t.done).unwrap_or(false) {
+            info!("Stream done for {}", stream.job_id);
+            break;
+        }
+
+        let v = d.map(|d| OutputData {
+            operator_id: d.operator_id,
+            timestamp: d.timestamp,
+            key: d.key,
+            value: d.value,
+        });
+
+        captured.push(v);
+
+        if captured.len() >= num_lines {
+            break;
+        }
+    }
+    captured
+}
+
+pub(crate) async fn get_stream_from_job_output(
+    stream: JobStream,
+) -> ReceiverStream<Result<OutputData, Status>> {
+    let (tx, rx) = tokio::sync::mpsc::channel(32);
+    tokio::spawn(async move {
+        let mut _stream = stream.stream;
+        while let Some(d) = _stream.next().await {
+            if d.as_ref().map(|t| t.done).unwrap_or(false) {
+                info!("Stream done for {}", stream.job_id);
+                break;
+            }
+
+            let v = d.map(|d| OutputData {
+                operator_id: d.operator_id,
+                timestamp: d.timestamp,
+                key: d.key,
+                value: d.value,
+            });
+
+            if tx.send(v).await.is_err() {
+                break;
+            }
+        }
+
+        info!("Closing watch stream for {}", stream.job_id);
+    });
+    ReceiverStream::new(rx)
 }
