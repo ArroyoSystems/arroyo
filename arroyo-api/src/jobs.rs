@@ -8,7 +8,7 @@ use arroyo_rpc::grpc::{
     controller_grpc_client::ControllerGrpcClient,
 };
 use cornucopia_async::GenericClient;
-use deadpool_postgres::{Pool, Transaction};
+use deadpool_postgres::Pool;
 use prost::Message;
 use rand::{distributions::Alphanumeric, Rng};
 use serde_json::from_str;

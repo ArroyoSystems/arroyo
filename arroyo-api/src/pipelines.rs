@@ -10,7 +10,6 @@ use arroyo_rpc::grpc::api::{
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
 use cornucopia_async::GenericClient;
-use deadpool_postgres::Transaction;
 use petgraph::Direction;
 use prost::Message;
 use tracing::log::info;
@@ -166,7 +165,7 @@ pub(crate) async fn create_pipeline<'a>(
     tx: &impl GenericClient,
 ) -> Result<i64, Status> {
     let pipeline_type;
-    let mut program: Program;
+    let mut program;
     let sources;
     let sinks;
     let text;
@@ -305,7 +304,23 @@ impl TryInto<PipelineDef> for DbPipeline {
     }
 }
 
-pub(crate) async fn start_or_preview<'a>(
+pub(crate) async fn start_pipeline(
+    req: CreatePipelineReq,
+    auth: AuthData,
+    tx: &impl GenericClient,
+) -> Result<crate::Response<CreateJobResp>, Status> {
+    start_or_preview(req, false, auth, tx).await
+}
+
+pub(crate) async fn preview_pipeline(
+    req: CreatePipelineReq,
+    auth: AuthData,
+    tx: &impl GenericClient,
+) -> Result<crate::Response<CreateJobResp>, Status> {
+    start_or_preview(req, true, auth, tx).await
+}
+
+async fn start_or_preview<'a>(
     req: CreatePipelineReq,
     preview: bool,
     auth: AuthData,

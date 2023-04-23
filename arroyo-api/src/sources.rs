@@ -41,7 +41,6 @@ use crate::{
     handle_db_error,
     json_schema::{self, convert_json_schema},
     log_and_map,
-    pipelines::start_or_preview,
     queries::api_queries,
     required_field,
     testers::KafkaTester,
@@ -748,7 +747,7 @@ async fn create_raw_pipeline(
 ) -> Result<(), Status> {
     let source_name = request.name;
     // create the raw preview pipeline with a request to the pipeline api
-    let job_resp = start_or_preview(
+    let job_resp = crate::pipelines::start_pipeline(
         CreatePipelineReq {
             name: format!("passthrough_source_{}_{}", source_id, source_name),
             config: Some(create_pipeline_req::Config::Sql(CreateSqlJob {
@@ -757,7 +756,6 @@ async fn create_raw_pipeline(
                 sink: Some(Sink::Builtin(BuiltinSink::Web as i32)),
             })),
         },
-        false,
         auth,
         tx,
     )

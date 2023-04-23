@@ -27,6 +27,7 @@ use deadpool_postgres::{ManagerConfig, Object, Pool, RecyclingMethod};
 use http::StatusCode;
 use once_cell::sync::Lazy;
 use prost::Message;
+use queries::api_queries;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -44,9 +45,6 @@ use tower_http::{
     services::ServeDir,
 };
 use tracing::{error, info, warn};
-
-use crate::pipelines::start_or_preview;
-use queries::api_queries;
 
 mod cloud;
 mod connections;
@@ -580,7 +578,7 @@ impl ApiGrpc for ApiServer {
             .await
             .map_err(log_and_map)?;
 
-        let resp = start_or_preview(request.into_inner(), false, auth, &transaction).await;
+        let resp = pipelines::start_pipeline(request.into_inner(), auth, &transaction).await;
 
         transaction.commit().await.map_err(log_and_map)?;
 
@@ -600,7 +598,7 @@ impl ApiGrpc for ApiServer {
             .await
             .map_err(log_and_map)?;
 
-        let resp = start_or_preview(request.into_inner(), true, auth, &transaction).await;
+        let resp = pipelines::preview_pipeline(request.into_inner(), auth, &transaction).await;
 
         transaction.commit().await.map_err(log_and_map)?;
 
