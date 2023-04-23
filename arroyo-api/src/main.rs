@@ -769,15 +769,14 @@ impl ApiGrpc for ApiServer {
         }))
         .await?;
 
-        // get the job stream
-        let controller = ControllerGrpcClient::connect(self.controller_addr.clone())
-            .await
-            .map_err(log_and_map)?;
-
-        let output_lines = jobs::get_lines_from_job_output(
-            jobs::get_job_stream(job_id.clone(), controller, auth, &self.client().await?).await?,
-            20,
+        let output_lines = jobs::JobOutputStream::new(
+            job_id.clone(),
+            auth,
+            String::from(&self.controller_addr),
+            &self.client().await?,
         )
+        .await?
+        .take_records(20)
         .await;
 
         self.update_job(Request::new(UpdateJobReq {
@@ -804,20 +803,16 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<Self::SubscribeToOutputStream>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 
-        let controller = ControllerGrpcClient::connect(self.controller_addr.clone())
-            .await
-            .map_err(log_and_map)?;
-
-        let stream = jobs::get_job_stream(
-            request.into_inner().job_id,
-            controller,
-            auth,
-            &self.client().await?,
-        )
-        .await?;
-
         Ok(Response::new(
-            jobs::get_stream_from_job_output(stream).await,
+            jobs::JobOutputStream::new(
+                request.into_inner().job_id,
+                auth,
+                String::from(&self.controller_addr),
+                &self.client().await?,
+            )
+            .await?
+            .take_stream()
+            .await,
         ))
     }
 }
