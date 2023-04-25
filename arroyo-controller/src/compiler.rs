@@ -233,7 +233,13 @@ wasm-opt = false
             .arg("build")
             .arg("--release")
             .output()
-            .await?;
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to run `cargo`; is rust and cargo installed? {:?}",
+                    e
+                )
+            })?;
 
         if !result.status.success() {
             return Err(fatal("Compilation failed for this query. We have been notified and are looking into the problem.",
@@ -244,7 +250,9 @@ wasm-opt = false
             .arg("build")
             .current_dir(&dir.join("wasm-fns"))
             .output()
-            .await?;
+            .await
+            .map_err(|e| anyhow!(
+                "Failed to run `wasm-pack`; you may need to run `$cargo install wasm-pack`: {:?}", e))?;
 
         if !result.status.success() {
             return Err(fatal("Compilation failed for this query. We have been notified and are looking into the problem.",
@@ -1058,7 +1066,11 @@ wasm-opt = false
     }
 
     async fn rustfmt(file: &Path) {
-        Command::new("rustfmt").arg(file).output().await.unwrap();
+        Command::new("rustfmt")
+            .arg(file)
+            .output()
+            .await
+            .expect("Could not call the `rustfmt` binary. Is it installed?");
     }
 }
 
