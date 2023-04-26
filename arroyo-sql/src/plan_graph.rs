@@ -50,14 +50,15 @@ pub enum PlanOperator {
         slide: Duration,
         projection: TwoPhaseAggregateProjection,
     },
-    InstantJoin(JoinType),
+    InstantJoin,
     JoinWithExpiration {
         left_expiration: Duration,
         right_expiration: Duration,
         join_type: JoinType,
     },
-    JoinListFlatten(JoinType, StructPair),
-    JoinPairFlatten(JoinType, StructPair),
+    JoinListMerge(JoinType, StructPair),
+    JoinPairMerge(JoinType, StructPair),
+    Flatten,
     // TODO: figure out naming of various things called 'window'
     WindowFunction(WindowFunctionOperator),
     TumblingLocalAggregator {
@@ -262,10 +263,11 @@ impl PlanNode {
             PlanOperator::SlidingWindowTwoPhaseAggregator { .. } => {
                 "sliding_window_two_phase_aggregator".to_string()
             }
-            PlanOperator::InstantJoin(_) => "instant_join".to_string(),
+            PlanOperator::InstantJoin => "instant_join".to_string(),
             PlanOperator::JoinWithExpiration { .. } => "join_with_expiration".to_string(),
-            PlanOperator::JoinListFlatten(_, _) => "join_list_flatten".to_string(),
-            PlanOperator::JoinPairFlatten(_, _) => "join_pair_flatten".to_string(),
+            PlanOperator::JoinListMerge(_, _) => "join_list_merge".to_string(),
+            PlanOperator::JoinPairMerge(_, _) => "join_pair_merge".to_string(),
+            PlanOperator::Flatten => "flatten".to_string(),
             PlanOperator::WindowFunction { .. } => "window_function".to_string(),
             PlanOperator::StreamOperator(name, _) => name.to_string(),
             PlanOperator::TumblingLocalAggregator { .. } => "tumbling_local_aggregator".to_string(),
@@ -355,12 +357,9 @@ impl PlanNode {
                     mem_type: quote!(#mem_type).to_string(),
                 })
             }
-            PlanOperator::InstantJoin(join_type) => {
-                assert_eq!(JoinType::Inner, *join_type);
-                Operator::WindowJoin {
-                    window: WindowType::Instant,
-                }
-            }
+            PlanOperator::InstantJoin => Operator::WindowJoin {
+                window: WindowType::Instant,
+            },
             PlanOperator::JoinWithExpiration {
                 left_expiration,
                 right_expiration,
@@ -369,7 +368,7 @@ impl PlanNode {
                 left_expiration: *left_expiration,
                 right_expiration: *right_expiration,
             },
-            PlanOperator::JoinListFlatten(join_type, struct_pair) => {
+            PlanOperator::JoinListMerge(join_type, struct_pair) => {
                 let merge_struct =
                     join_type.join_struct_type(&struct_pair.left, &struct_pair.right);
                 let merge_expr =
@@ -382,7 +381,7 @@ impl PlanNode {
                 )
                 .unwrap()
             }
-            PlanOperator::JoinPairFlatten(join_type, struct_pair) => {
+            PlanOperator::JoinPairMerge(join_type, struct_pair) => {
                 let merge_struct =
                     join_type.join_struct_type(&struct_pair.left, &struct_pair.right);
                 let merge_expr =
@@ -617,6 +616,9 @@ impl PlanNode {
                     converter,
                 })
             }
+            PlanOperator::Flatten => arroyo_datastream::Operator::FlattenOperator {
+                name: "flatten".into(),
+            },
         }
     }
 
@@ -633,8 +635,8 @@ impl PlanNode {
                 let merge_struct_type = SqlOperator::merge_struct_type(key_struct, value_struct);
                 output_types.insert(merge_struct_type);
             }
-            PlanOperator::JoinPairFlatten(join_type, StructPair { left, right })
-            | PlanOperator::JoinListFlatten(join_type, StructPair { left, right }) => {
+            PlanOperator::JoinPairMerge(join_type, StructPair { left, right })
+            | PlanOperator::JoinListMerge(join_type, StructPair { left, right }) => {
                 output_types.insert(join_type.join_struct_type(left, right));
             }
             PlanOperator::FusedRecordTransform(fused_record_transform) => {
@@ -725,6 +727,10 @@ impl PlanEdge {
             PlanType::KeyedLiteralTypeValue { key, value } => {
                 StreamEdge::keyed_edge(key.struct_name(), value.clone(), self.edge_type.clone())
             }
+            PlanType::UnkeyedList(value_struct) => StreamEdge::unkeyed_edge(
+                format!("Vec<{}>", value_struct.struct_name()),
+                self.edge_type.clone(),
+            ),
         }
     }
 }
@@ -732,6 +738,7 @@ impl PlanEdge {
 #[derive(Debug, Clone)]
 pub enum PlanType {
     Unkeyed(StructDef),
+    UnkeyedList(StructDef),
     Keyed {
         key: StructDef,
         value: StructDef,
@@ -774,12 +781,16 @@ impl PlanType {
                 parse_quote!((Vec<#left_type>,Vec<#right_type>))
             }
             PlanType::KeyedLiteralTypeValue { key: _, value } => parse_str(value).unwrap(),
+            PlanType::UnkeyedList(value) => {
+                let value_type = value.get_type();
+                parse_quote!(Vec<#value_type>)
+            }
         }
     }
 
     fn key_type(&self) -> syn::Type {
         match self {
-            PlanType::Unkeyed(_) => parse_quote!(()),
+            PlanType::Unkeyed(_) | PlanType::UnkeyedList(_) => parse_quote!(()),
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
             | PlanType::KeyedLiteralTypeValue { key, .. }
@@ -795,7 +806,7 @@ impl PlanType {
 
     fn get_key_struct_names(&self) -> Vec<String> {
         match self {
-            PlanType::Unkeyed(_) => vec![],
+            PlanType::Unkeyed(_) | PlanType::UnkeyedList(_) => vec![],
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
             | PlanType::KeyedLiteralTypeValue { key, .. }
@@ -805,7 +816,9 @@ impl PlanType {
 
     fn get_all_types(&self) -> HashSet<StructDef> {
         match self {
-            PlanType::Unkeyed(value) => value.all_structs().into_iter().collect(),
+            PlanType::Unkeyed(value) | PlanType::UnkeyedList(value) => {
+                value.all_structs().into_iter().collect()
+            }
             PlanType::Keyed { key, value } => {
                 let mut result = key.all_structs();
                 result.extend(value.all_structs());
@@ -858,7 +871,7 @@ impl PlanGraph {
             .unwrap()
             .output_type
             .clone();
-    
+
         let sink_index = plan_graph.insert_operator(
             PlanOperator::StreamOperator("sink".into(), plan_graph.sql_config.sink.clone()),
             edge_type.clone(),
@@ -873,7 +886,7 @@ impl PlanGraph {
 
         plan_graph
     }
-    
+
     pub fn add_sql_operator(&mut self, operator: SqlOperator) -> NodeIndex {
         match operator {
             SqlOperator::Source(name, sql_source) => self.add_sql_source(name, sql_source),
@@ -1009,6 +1022,7 @@ impl PlanGraph {
         let join_type = join_operator.join_type;
         let left_index = self.add_sql_operator(*left);
         let right_index = self.add_sql_operator(*right);
+
         let key_struct = join_operator.left_key.output_struct();
 
         let left_key_operator =
@@ -1044,77 +1058,152 @@ impl PlanGraph {
             .add_edge(left_index, left_key_index, left_key_edge);
         self.graph
             .add_edge(right_index, right_key_index, right_key_edge);
-
-        let (join_node, join_output_type, post_join_node) = if has_window {
-            (
-                PlanOperator::InstantJoin(join_type.clone()),
-                PlanType::KeyedListPair {
-                    key: key_struct.clone(),
-                    left_value: left_type.clone(),
-                    right_value: right_type.clone(),
-                },
-                PlanOperator::JoinListFlatten(
-                    join_type.clone(),
-                    StructPair {
-                        left: left_type.clone(),
-                        right: right_type.clone(),
-                    },
-                ),
-            )
+        if has_window {
+            return self.add_post_window_join(
+                left_key_index,
+                right_key_index,
+                key_struct,
+                left_type,
+                right_type,
+                join_type,
+            );
         } else {
-            (
-                PlanOperator::JoinWithExpiration {
-                    left_expiration: Duration::from_secs(24 * 60 * 60),
-                    right_expiration: Duration::from_secs(24 * 60 * 60),
-                    join_type: join_type.clone(),
-                },
-                PlanType::KeyedPair {
-                    key: key_struct.clone(),
-                    left_value: left_type.clone(),
-                    right_value: right_type.clone(),
-                },
-                PlanOperator::JoinPairFlatten(
-                    join_type.clone(),
-                    StructPair {
-                        left: left_type.clone(),
-                        right: right_type.clone(),
-                    },
-                ),
-            )
+            return self.add_join_with_expiration(
+                left_key_index,
+                right_key_index,
+                key_struct,
+                left_type,
+                right_type,
+                join_type,
+            );
+        }
+    }
+
+    fn add_post_window_join(
+        &mut self,
+        left_index: NodeIndex,
+        right_index: NodeIndex,
+        key_struct: StructDef,
+        left_struct: StructDef,
+        right_struct: StructDef,
+        join_type: JoinType,
+    ) -> NodeIndex {
+        let join_node = PlanOperator::InstantJoin;
+        let join_node_output_type = PlanType::KeyedListPair {
+            key: key_struct.clone(),
+            left_value: left_struct.clone(),
+            right_value: right_struct.clone(),
         };
-        let join_index = self.insert_operator(join_node, join_output_type.clone());
+        let join_node_index = self.insert_operator(join_node, join_node_output_type.clone());
 
         let left_join_edge = PlanEdge {
             edge_data_type: PlanType::Keyed {
                 key: key_struct.clone(),
-                value: left_type.clone(),
+                value: left_struct.clone(),
             },
             edge_type: EdgeType::ShuffleJoin(0),
         };
         let right_join_edge = PlanEdge {
             edge_data_type: PlanType::Keyed {
                 key: key_struct,
-                value: right_type.clone(),
+                value: right_struct.clone(),
             },
             edge_type: EdgeType::ShuffleJoin(1),
         };
+        self.graph
+            .add_edge(left_index, join_node_index, left_join_edge);
+        self.graph
+            .add_edge(right_index, join_node_index, right_join_edge);
+
+        let merge_type = join_type.output_struct(&left_struct, &right_struct);
+        let merge_operator = PlanOperator::JoinListMerge(
+            join_type,
+            StructPair {
+                left: left_struct,
+                right: right_struct,
+            },
+        );
+        let merge_index =
+            self.insert_operator(merge_operator, PlanType::UnkeyedList(merge_type.clone()));
+
+        let merge_edge = PlanEdge {
+            edge_data_type: join_node_output_type,
+            edge_type: EdgeType::Forward,
+        };
 
         self.graph
-            .add_edge(left_key_index, join_index, left_join_edge);
-        self.graph
-            .add_edge(right_key_index, join_index, right_join_edge);
+            .add_edge(join_node_index, merge_index, merge_edge);
 
-        let post_join_type = join_type.output_struct(&left_type, &right_type);
-
-        let post_join_index =
-            self.insert_operator(post_join_node, PlanType::Unkeyed(post_join_type));
-        let post_join_edge = PlanEdge {
-            edge_data_type: join_output_type,
+        let flatten_operator = PlanOperator::Flatten;
+        let flatten_index =
+            self.insert_operator(flatten_operator, PlanType::Unkeyed(merge_type.clone()));
+        let flatten_edge = PlanEdge {
+            edge_data_type: PlanType::UnkeyedList(merge_type),
             edge_type: EdgeType::Forward,
         };
         self.graph
-            .add_edge(join_index, post_join_index, post_join_edge);
-        post_join_index
+            .add_edge(merge_index, flatten_index, flatten_edge);
+
+        flatten_index
+    }
+    fn add_join_with_expiration(
+        &mut self,
+        left_index: NodeIndex,
+        right_index: NodeIndex,
+        key_struct: StructDef,
+        left_struct: StructDef,
+        right_struct: StructDef,
+        join_type: JoinType,
+    ) -> NodeIndex {
+        let join_node = PlanOperator::JoinWithExpiration {
+            left_expiration: Duration::from_secs(24 * 60 * 60),
+            right_expiration: Duration::from_secs(24 * 60 * 60),
+            join_type: JoinType::Inner,
+        };
+        let join_node_output_type = PlanType::KeyedPair {
+            key: key_struct.clone(),
+            left_value: left_struct.clone(),
+            right_value: right_struct.clone(),
+        };
+        let join_node_index = self.insert_operator(join_node, join_node_output_type.clone());
+
+        let left_join_edge = PlanEdge {
+            edge_data_type: PlanType::Keyed {
+                key: key_struct.clone(),
+                value: left_struct.clone(),
+            },
+            edge_type: EdgeType::ShuffleJoin(0),
+        };
+        let right_join_edge = PlanEdge {
+            edge_data_type: PlanType::Keyed {
+                key: key_struct,
+                value: right_struct.clone(),
+            },
+            edge_type: EdgeType::ShuffleJoin(1),
+        };
+        self.graph
+            .add_edge(left_index, join_node_index, left_join_edge);
+        self.graph
+            .add_edge(right_index, join_node_index, right_join_edge);
+
+        let merge_type = join_type.output_struct(&left_struct, &right_struct);
+        let merge_operator = PlanOperator::JoinPairMerge(
+            join_type,
+            StructPair {
+                left: left_struct,
+                right: right_struct,
+            },
+        );
+        let merge_index = self.insert_operator(merge_operator, PlanType::Unkeyed(merge_type));
+
+        let merge_edge = PlanEdge {
+            edge_data_type: join_node_output_type,
+            edge_type: EdgeType::Forward,
+        };
+
+        self.graph
+            .add_edge(join_node_index, merge_index, merge_edge);
+        merge_index
     }
 
     fn add_window(
@@ -1224,7 +1313,9 @@ impl PlanGraph {
 impl From<PlanGraph> for DiGraph<StreamNode, StreamEdge> {
     fn from(val: PlanGraph) -> Self {
         val.graph.map(
-            |index: NodeIndex, node| node.into_stream_node(index.index(), val.sql_config.default_parallelism),
+            |index: NodeIndex, node| {
+                node.into_stream_node(index.index(), val.sql_config.default_parallelism)
+            },
             |_index, edge| edge.into_stream_edge(),
         )
     }

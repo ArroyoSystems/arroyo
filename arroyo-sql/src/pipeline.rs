@@ -1,8 +1,5 @@
 #![allow(clippy::comparison_chain)]
-use std::{
-    collections::{HashMap},
-    time::Duration,
-};
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::Result;
 use anyhow::{anyhow, bail};
