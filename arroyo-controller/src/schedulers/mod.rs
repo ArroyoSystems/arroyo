@@ -5,13 +5,10 @@ use arroyo_rpc::grpc::{
     WorkerFinishedReq,
 };
 use arroyo_types::{
-    NodeId, WorkerId, CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV, NOMAD_DC_ENV,
-    NOMAD_ENDPOINT_ENV, RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV,
+    NodeId, WorkerId, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV,
 };
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
-use rand::Rng;
-use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::PathBuf;
@@ -25,6 +22,11 @@ use tonic::{Request, Status};
 use tracing::{info, warn};
 
 use crate::get_from_object_store;
+
+#[cfg(feature = "k8s")]
+pub mod kubernetes;
+
+pub mod nomad;
 
 lazy_static! {
     static ref FREE_SLOTS: Gauge =
@@ -51,25 +53,22 @@ pub trait Scheduler: Send + Sync {
     async fn register_node(&self, req: RegisterNodeReq);
     async fn heartbeat_node(&self, req: HeartbeatNodeReq) -> Result<(), Status>;
     async fn worker_finished(&self, req: WorkerFinishedReq);
-    async fn stop_worker(&self, req: StopWorkerReq) -> anyhow::Result<()>;
-    async fn workers_for_job(&self, job_id: &str) -> anyhow::Result<Vec<WorkerId>>;
-
-    async fn clean_cluster(&self, job_id: &str) -> anyhow::Result<()> {
-        for worker in self.workers_for_job(job_id).await? {
-            self.stop_worker(StopWorkerReq {
-                job_id: job_id.to_string(),
-                worker_id: worker.0,
-                force: true,
-            })
-            .await?;
-        }
-
-        Ok(())
-    }
+    async fn stop_workers(
+        &self,
+        job_id: &str,
+        run_id: Option<i64>,
+        force: bool,
+    ) -> anyhow::Result<()>;
+    async fn workers_for_job(
+        &self,
+        job_id: &str,
+        run_id: Option<i64>,
+    ) -> anyhow::Result<Vec<WorkerId>>;
 }
 
 pub struct ProcessWorker {
     job_id: String,
+    run_id: i64,
     shutdown_tx: oneshot::Sender<()>,
 }
 
@@ -89,10 +88,6 @@ impl ProcessScheduler {
 }
 
 const SLOTS_PER_NODE: usize = 16;
-
-const SLOTS_PER_NOMAD_NODE: usize = 15;
-const MEMORY_PER_SLOT_MB: usize = 60_000 / SLOTS_PER_NOMAD_NODE;
-const CPU_PER_SLOT_MHZ: usize = 3400;
 
 pub struct StartPipelineReq {
     pub name: String,
@@ -159,6 +154,7 @@ impl Scheduler for ProcessScheduler {
                     WorkerId(worker_id),
                     ProcessWorker {
                         job_id: start_pipeline_req.job_id.clone(),
+                        run_id: start_pipeline_req.run_id,
                         shutdown_tx: tx,
                     },
                 );
@@ -210,27 +206,40 @@ impl Scheduler for ProcessScheduler {
     }
     async fn worker_finished(&self, _: WorkerFinishedReq) {}
 
-    async fn workers_for_job(&self, job_id: &str) -> anyhow::Result<Vec<WorkerId>> {
+    async fn workers_for_job(
+        &self,
+        job_id: &str,
+        run_id: Option<i64>,
+    ) -> anyhow::Result<Vec<WorkerId>> {
         Ok(self
             .workers
             .lock()
             .await
             .iter()
-            .filter(|(_, w)| w.job_id == job_id)
+            .filter(|(_, w)| {
+                w.job_id == job_id && (run_id.is_none() || w.run_id == run_id.unwrap())
+            })
             .map(|(k, _)| *k)
             .collect())
     }
 
-    async fn stop_worker(&self, req: StopWorkerReq) -> anyhow::Result<()> {
-        let worker = {
-            let mut state = self.workers.lock().await;
-            let Some(worker) = state.remove(&WorkerId(req.worker_id)) else {
-                return Ok(());
+    async fn stop_workers(
+        &self,
+        job_id: &str,
+        run_id: Option<i64>,
+        _force: bool,
+    ) -> anyhow::Result<()> {
+        for worker_id in self.workers_for_job(job_id, run_id).await? {
+            let worker = {
+                let mut state = self.workers.lock().await;
+                let Some(worker) = state.remove(&worker_id) else {
+                    return Ok(());
+                };
+                worker
             };
-            worker
-        };
 
-        let _ = worker.shutdown_tx.send(());
+            let _ = worker.shutdown_tx.send(());
+        }
 
         Ok(())
     }
@@ -293,6 +302,7 @@ impl NodeStatus {
 struct NodeWorker {
     job_id: String,
     node_id: NodeId,
+    run_id: i64,
 }
 
 #[derive(Default)]
@@ -334,6 +344,54 @@ impl NodeScheduler {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(NodeSchedulerState::default())),
+        }
+    }
+
+    async fn stop_worker(
+        &self,
+        job_id: &str,
+        worker_id: WorkerId,
+        force: bool,
+    ) -> anyhow::Result<()> {
+        let state = self.state.lock().await;
+
+        let Some(worker) = state.workers.get(&worker_id) else {
+            // assume it's already finished
+            return Ok(());
+        };
+
+        let Some(node) = state.nodes.get(&worker.node_id) else {
+            warn!(message = "node not found for stop worker", node_id = worker.node_id.0);
+            return Ok(());
+        };
+
+        info!(
+            message = "stopping worker",
+            job_id = worker.job_id,
+            node_id = worker.node_id.0,
+            node_addr = node.addr,
+            worker_id = worker_id.0
+        );
+
+        let mut client = NodeGrpcClient::connect(format!("http://{}", node.addr)).await?;
+
+        match (
+            client
+                .stop_worker(Request::new(StopWorkerReq {
+                    job_id: job_id.to_string(),
+                    worker_id: worker_id.0,
+                    force,
+                }))
+                .await?
+                .get_ref()
+                .status(),
+            force,
+        ) {
+            (StopWorkerStatus::NotFound, false) => {
+                bail!("couldn't find worker, will only continue if force")
+            }
+            (StopWorkerStatus::StopFailed, _) => bail!("tried to kill and couldn't"),
+            _ => Ok(()),
         }
     }
 }
@@ -390,12 +448,18 @@ impl Scheduler for NodeScheduler {
         }
     }
 
-    async fn workers_for_job(&self, job_id: &str) -> anyhow::Result<Vec<WorkerId>> {
+    async fn workers_for_job(
+        &self,
+        job_id: &str,
+        run_id: Option<i64>,
+    ) -> anyhow::Result<Vec<WorkerId>> {
         let state = self.state.lock().await;
         Ok(state
             .workers
             .iter()
-            .filter(|(_, v)| v.job_id == job_id)
+            .filter(|(_, v)| {
+                v.job_id == job_id && (run_id.is_none() || v.run_id == run_id.unwrap())
+            })
             .map(|(w, _)| *w)
             .collect())
     }
@@ -511,6 +575,7 @@ impl Scheduler for NodeScheduler {
                 WorkerId(res.worker_id),
                 NodeWorker {
                     job_id: start_pipeline_req.job_id.clone(),
+                    run_id: start_pipeline_req.run_id,
                     node_id: node.id,
                 },
             );
@@ -522,251 +587,21 @@ impl Scheduler for NodeScheduler {
         Ok(())
     }
 
-    async fn stop_worker(&self, req: StopWorkerReq) -> anyhow::Result<()> {
-        let state = self.state.lock().await;
-        let force = req.force;
-
-        let Some(worker) = state.workers.get(&WorkerId(req.worker_id)) else {
-            // assume it's already finished
-            return Ok(());
-        };
-
-        let Some(node) = state.nodes.get(&worker.node_id) else {
-            warn!(message = "node not found for stop worker", node_id = worker.node_id.0);
-            return Ok(());
-        };
-
-        info!(
-            message = "stopping worker",
-            job_id = worker.job_id,
-            node_id = worker.node_id.0,
-            node_addr = node.addr,
-            worker_id = req.worker_id
-        );
-
-        let mut client = NodeGrpcClient::connect(format!("http://{}", node.addr)).await?;
-
-        match (
-            client
-                .stop_worker(Request::new(req))
-                .await?
-                .get_ref()
-                .status(),
-            force,
-        ) {
-            (StopWorkerStatus::NotFound, false) => {
-                bail!("couldn't find worker, will only continue if force")
-            }
-            (StopWorkerStatus::StopFailed, _) => bail!("tried to kill and couldn't"),
-            _ => Ok(()),
-        }
-    }
-}
-
-pub struct NomadScheduler {
-    client: reqwest::Client,
-    base: String,
-    datacenter: String,
-}
-
-impl NomadScheduler {
-    pub fn new() -> Self {
-        let endpoint = std::env::var(NOMAD_ENDPOINT_ENV)
-            .unwrap_or_else(|_| "http://localhost:4646".to_string());
-
-        let datacenter = std::env::var(NOMAD_DC_ENV).unwrap_or_else(|_| "dc1".to_string());
-
-        Self {
-            client: reqwest::Client::new(),
-            base: endpoint,
-            datacenter,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl Scheduler for NomadScheduler {
-    async fn start_workers(
+    async fn stop_workers(
         &self,
-        start_pipeline_req: StartPipelineReq,
-    ) -> Result<(), SchedulerError> {
-        let slots = start_pipeline_req.slots as usize;
-        let workers = (slots as f32 / SLOTS_PER_NOMAD_NODE as f32).ceil() as usize;
-        let mut slots_scheduled = 0;
-
-        for _ in 0..workers {
-            let slots_here = (slots - slots_scheduled).min(SLOTS_PER_NOMAD_NODE);
-
-            let worker_id: u32 = rand::thread_rng().gen();
-
-            slots_scheduled += slots_here;
-
-            let mut env_vars = HashMap::new();
-            env_vars.insert("RUST_LOG".to_string(), "info".to_string());
-            env_vars.insert("PROD".to_string(), "true".to_string());
-            env_vars.insert(TASK_SLOTS_ENV.to_string(), slots_here.to_string());
-            env_vars.insert(WORKER_ID_ENV.to_string(), worker_id.to_string());
-            env_vars.insert(NODE_ID_ENV.to_string(), "1".to_string());
-            env_vars.insert(JOB_ID_ENV.to_string(), start_pipeline_req.job_id.clone());
-            env_vars.insert(
-                RUN_ID_ENV.to_string(),
-                format!("{}", start_pipeline_req.run_id),
-            );
-            env_vars.insert(
-                CONTROLLER_ADDR_ENV.to_string(),
-                std::env::var(CONTROLLER_ADDR_ENV).unwrap_or_else(|_| "".to_string()),
-            );
-            for (key, value) in start_pipeline_req.env_vars.iter() {
-                env_vars.insert(key.to_string(), value.to_string());
-            }
-
-            let job = json!({
-                "Job": {
-                    "ID": format!("{}-{}", start_pipeline_req.job_id, worker_id),
-                    "Type": "batch",
-                    "Datacenters": [&self.datacenter],
-                    "Meta": {
-                        "job_id": start_pipeline_req.job_id,
-                        "worker_id": worker_id.to_string(),
-                        "job_name": start_pipeline_req.name,
-                        "job_hash": start_pipeline_req.hash,
-                    },
-
-                    // disable restarting and rescheduling as the controller takes care of handling failures
-                    "Restart":  {
-                        "Attempts": 0,
-                        "Mode": "fail"
-                    },
-                    "Reschedule": {
-                        "Attempts": 0
-                    },
-
-                    "TaskGroups": [
-                        {
-                            "Name": "worker",
-                            "Count": 1,
-                            "Tasks": [
-                                {
-                                    "Name": "worker",
-                                    "Driver": "exec",
-                                    "Config": {
-                                        "command": "pipeline"
-                                    },
-                                    "Artifacts": [{
-                                        "GetterSource": start_pipeline_req.pipeline_path,
-                                    }],
-                                    "Env": env_vars,
-                                    "Resources": {
-                                        "CPU": CPU_PER_SLOT_MHZ * slots_here,
-                                        "MemoryMB": MEMORY_PER_SLOT_MB * slots_here,
-                                    }
-                                }
-                            ],
-                        }
-                    ]
-                }
-            });
-
-            let resp = self
-                .client
-                .post(format!("{}/v1/jobs", self.base))
-                .json(&job)
-                .send()
-                .await
-                .map_err(|e| SchedulerError::Other(format!("{:?}", e)))?;
-
-            if !resp.status().is_success() {
-                return match resp.bytes().await {
-                    Ok(bytes) => Err(SchedulerError::Other(format!(
-                        "Error scheduling: {:?}",
-                        String::from_utf8_lossy(&bytes)
-                    ))),
-                    Err(e) => Err(SchedulerError::Other(format!("Error scheduling: {:?}", e))),
-                };
-            }
+        job_id: &str,
+        run_id: Option<i64>,
+        force: bool,
+    ) -> anyhow::Result<()> {
+        // iterate through all of the workers from workers_for_job and stop them in parallel
+        let workers = self.workers_for_job(job_id, run_id).await?;
+        let mut futures = vec![];
+        for worker_id in workers {
+            futures.push(self.stop_worker(job_id, worker_id, force));
         }
 
-        Ok(())
-    }
-
-    async fn workers_for_job(&self, job_id: &str) -> anyhow::Result<Vec<WorkerId>> {
-        let resp: Value = self
-            .client
-            // TODO: use the filter API instead
-            .get(format!(
-                "{}/v1/jobs?meta=true&prefix={}-",
-                self.base, job_id
-            ))
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        let jobs = resp
-            .as_array()
-            .ok_or(anyhow::anyhow!("invalid response from nomad api"))?;
-
-        let mut workers = vec![];
-
-        for job in jobs {
-            let worker_id = job
-                .pointer("/Meta/worker_id")
-                .ok_or(anyhow::anyhow!("missing worker id"))?;
-
-            if job
-                .get("Status")
-                .ok_or(anyhow::anyhow!("missing status"))?
-                .as_str()
-                == Some("dead")
-            {
-                continue;
-            }
-
-            workers.push(WorkerId(u64::from_str(
-                worker_id
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("worker id is not a string"))?,
-            )?));
-        }
-
-        Ok(workers)
-    }
-
-    async fn register_node(&self, _req: RegisterNodeReq) {
-        // ignore
-    }
-
-    async fn heartbeat_node(&self, _req: HeartbeatNodeReq) -> Result<(), Status> {
-        // ignore
-        Ok(())
-    }
-
-    async fn worker_finished(&self, _req: WorkerFinishedReq) {
-        // ignore
-    }
-
-    async fn stop_worker(&self, req: StopWorkerReq) -> anyhow::Result<()> {
-        info!(
-            message = "stopping worker",
-            job_id = req.job_id,
-            worker_id = req.worker_id
-        );
-        let resp = self
-            .client
-            .delete(format!(
-                "{}/v1/job/{}-{}",
-                self.base, req.job_id, req.worker_id
-            ))
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            warn!(
-                message = "failed to stop worker",
-                job_id = req.job_id,
-                worker_id = req.worker_id,
-                status = resp.status().as_u16()
-            );
+        for f in futures {
+            f.await?;
         }
 
         Ok(())

@@ -48,7 +48,7 @@ pub async fn main() {
         match (s3_bucket, s3_region, output_dir) {
             (Some(s3_bucket), Some(s3_region), _) => (
                 Arc::new(Box::new(
-                    AmazonS3Builder::new()
+                    AmazonS3Builder::from_env()
                         .with_bucket_name(&s3_bucket)
                         .with_region(&s3_region)
                         .build()
@@ -225,7 +225,7 @@ impl CompileService {
         // TODO: replace this with the SHA of the worker code once that's available
         let id = (to_millis(SystemTime::now()) / 1000).to_string();
 
-        let base: object_store::path::Path = format!("artifacts/{}/{}", &req.job_id, id)
+        let base: object_store::path::Path = format!("{}/artifacts/{}", &req.job_id, id)
             .try_into()
             .unwrap();
 

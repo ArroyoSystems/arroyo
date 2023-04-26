@@ -14,27 +14,6 @@ pub struct JoinWithExpiration<K: Key, T1: Data, T2: Data> {
     _t: PhantomData<(K, T1, T2)>,
 }
 
-enum Side {
-    Left,
-    Right,
-}
-
-impl Side {
-    fn get_primary_side_char(&self) -> char {
-        match self {
-            Side::Left => 'l',
-            Side::Right => 'r',
-        }
-    }
-
-    fn get_secondary_side_char(&self) -> char {
-        match self {
-            Side::Left => 'r',
-            Side::Right => 'l',
-        }
-    }
-}
-
 #[co_process_fn(in_k1=K, in_t1=T1, in_k2=K, in_t2=T2, out_k=K, out_t=(T1,T2))]
 impl<K: Key, T1: Data, T2: Data> JoinWithExpiration<K, T1, T2> {
     fn name(&self) -> String {

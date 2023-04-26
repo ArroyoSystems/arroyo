@@ -13,4 +13,4 @@ tonic-reflection = "0.5"
 prost = "0.11"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
-object_store = {version = "0.5.0", features = ["aws"]}
+object_store = {version = "0.5.0", features = ["aws", "aws_profile"]}

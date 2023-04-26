@@ -13,12 +13,14 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::ControlMessage;
 use arroyo_types::{
-    from_millis, ports, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, ports, CheckpointBarrier, NodeId, WorkerId, GRPC_PORT_ENV, JOB_ID_ENV, RUN_ID_ENV,
 };
 use engine::RunningEngine;
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
+use rand::Rng;
+use std::env;
 use std::fmt::{Debug, Display, Formatter};
 use std::process::exit;
 use std::str::FromStr;
@@ -148,7 +150,7 @@ impl WorkerServer {
         let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
             .unwrap_or_else(|_| LOCAL_CONTROLLER_ADDR.clone());
 
-        let id = WorkerId::from_env();
+        let id = WorkerId::from_env().unwrap_or_else(|| WorkerId(rand::thread_rng().gen()));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", JOB_ID_ENV));
 
@@ -178,7 +180,12 @@ impl WorkerServer {
 
         let node_id = NodeId::from_env();
 
-        let listener = TcpListener::bind("0.0.0.0:0").await?;
+        let grpc_port = env::var(GRPC_PORT_ENV)
+            .ok()
+            .map(|t| t.parse().unwrap())
+            .unwrap_or(0);
+
+        let listener = TcpListener::bind(format!("0.0.0.0:{}", grpc_port)).await?;
         let local_addr = listener.local_addr()?;
 
         info!("Started worker-rpc for {} on {}", self.name, local_addr);

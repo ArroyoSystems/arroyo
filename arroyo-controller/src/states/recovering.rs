@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
-use arroyo_rpc::grpc::{StopMode, StopWorkerReq};
+use arroyo_rpc::grpc::StopMode;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
@@ -53,7 +53,7 @@ impl Recovering {
         for i in 0..10 {
             if ctx
                 .scheduler
-                .workers_for_job(&ctx.config.id)
+                .workers_for_job(&ctx.config.id, Some(ctx.status.run_id))
                 .await?
                 .is_empty()
             {
@@ -64,23 +64,17 @@ impl Recovering {
                 message = "sending SIGKILL to workers",
                 job_id = ctx.config.id
             );
-            for worker in job_controller.get_workers() {
-                if let Err(err) = ctx
-                    .scheduler
-                    .stop_worker(StopWorkerReq {
-                        job_id: ctx.config.id.clone(),
-                        worker_id: worker.0,
-                        force: true,
-                    })
-                    .await
-                {
-                    warn!(
-                        message = "error while stopping worker",
-                        error = format!("{:?}", err),
-                        worker_id = worker.0,
-                        job_id = ctx.config.id
-                    );
-                }
+
+            if let Err(e) = ctx
+                .scheduler
+                .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+                .await
+            {
+                warn!(
+                    message = "error while stopping workers",
+                    error = format!("{:?}", e),
+                    job_id = ctx.config.id
+                );
             }
 
             tokio::time::sleep(Duration::from_millis(i * 50)).await;

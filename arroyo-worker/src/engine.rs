@@ -808,8 +808,14 @@ impl Engine {
     pub async fn start(mut self, config: StreamConfig) -> RunningEngine {
         //console_subscriber::init();
         let checkpoint_metadata = if let Some(epoch) = config.restore_epoch {
-            info!("Restoring checkpoint for job {}", self.job_id);
-            StateBackend::load_checkpoint_metadata(&self.job_id, epoch).await
+            info!("Restoring checkpoint {} for job {}", epoch, self.job_id);
+            Some(
+                StateBackend::load_checkpoint_metadata(&self.job_id, epoch)
+                    .await
+                    .unwrap_or_else(|| {
+                        panic!("failed to load checkpoint metadata for epoch {}", epoch)
+                    }),
+            )
         } else {
             None
         };
