@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use arroyo_sql_macro::single_test_codegen;
-    use chrono;
 
     // Casts
     single_test_codegen!(

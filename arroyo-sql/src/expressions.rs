@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 
 use crate::{
+    operators::TwoPhaseAggregation,
     pipeline::SortDirection,
     types::{StructDef, StructField, TypeDef},
 };
@@ -28,7 +29,7 @@ pub trait ExpressionGenerator: Debug {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expression {
     Column(ColumnExpression),
     UnaryBoolean(UnaryBooleanExpression),
@@ -92,7 +93,7 @@ impl ExpressionGenerator for Expression {
 }
 
 impl Expression {
-    pub(crate) fn has_max_value(&self, field: &StructField) -> Option<i64> {
+    pub(crate) fn has_max_value(&self, field: &StructField) -> Option<u64> {
         match self {
             Expression::BinaryComparison(BinaryComparisonExpression { left, op, right }) => {
                 if let BinaryComparison::And = op {
@@ -116,13 +117,15 @@ impl Expression {
                     ) => {
                         if field == column_field {
                             match (op, literal) {
-                                (BinaryComparison::Lt, ScalarValue::Int64(Some(max))) => {
+                                (BinaryComparison::Lt, ScalarValue::UInt64(Some(max))) => {
                                     Some(*max - 1)
                                 }
-                                (BinaryComparison::LtEq, ScalarValue::Int64(Some(max))) => {
+                                (BinaryComparison::LtEq, ScalarValue::UInt64(Some(max))) => {
                                     Some(*max)
                                 }
-                                (BinaryComparison::Eq, ScalarValue::Int64(Some(max))) => Some(*max),
+                                (BinaryComparison::Eq, ScalarValue::UInt64(Some(max))) => {
+                                    Some(*max)
+                                }
                                 _ => None,
                             }
                         } else {
@@ -135,13 +138,15 @@ impl Expression {
                     ) => {
                         if field == column_field {
                             match (op, literal) {
-                                (BinaryComparison::Gt, ScalarValue::Int64(Some(max))) => {
+                                (BinaryComparison::Gt, ScalarValue::UInt64(Some(max))) => {
                                     Some(*max + 1)
                                 }
-                                (BinaryComparison::GtEq, ScalarValue::Int64(Some(max))) => {
+                                (BinaryComparison::GtEq, ScalarValue::UInt64(Some(max))) => {
                                     Some(*max)
                                 }
-                                (BinaryComparison::Eq, ScalarValue::Int64(Some(max))) => Some(*max),
+                                (BinaryComparison::Eq, ScalarValue::UInt64(Some(max))) => {
+                                    Some(*max)
+                                }
                                 _ => None,
                             }
                         } else {
@@ -415,7 +420,7 @@ impl Column {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ColumnExpression {
     column_field: StructField,
 }
@@ -460,7 +465,7 @@ pub enum UnaryOperator {
     Negative,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnaryBooleanExpression {
     operator: UnaryOperator,
     input: Box<Expression>,
@@ -512,7 +517,7 @@ impl UnaryBooleanExpression {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LiteralExpression {
     literal: ScalarValue,
 }
@@ -533,7 +538,7 @@ impl LiteralExpression {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinaryComparison {
     Eq,
     NotEq,
@@ -568,7 +573,7 @@ impl TryFrom<datafusion_expr::Operator> for BinaryComparison {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinaryComparisonExpression {
     pub left: Box<Expression>,
     pub op: BinaryComparison,
@@ -633,7 +638,7 @@ impl ExpressionGenerator for BinaryComparisonExpression {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinaryMathOperator {
     Plus,
     Minus,
@@ -670,7 +675,7 @@ impl TryFrom<datafusion_expr::Operator> for BinaryMathOperator {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinaryMathExpression {
     left: Box<Expression>,
     op: BinaryMathOperator,
@@ -718,7 +723,7 @@ impl ExpressionGenerator for BinaryMathExpression {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructFieldExpression {
     struct_expression: Box<Expression>,
     struct_field: StructField,
@@ -815,10 +820,28 @@ impl Aggregator {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AggregationExpression {
-    producing_expression: Box<Expression>,
-    aggregator: Aggregator,
+    pub producing_expression: Box<Expression>,
+    pub aggregator: Aggregator,
+}
+
+impl TryFrom<AggregationExpression> for TwoPhaseAggregation {
+    type Error = anyhow::Error;
+
+    fn try_from(aggregation_expression: AggregationExpression) -> Result<Self> {
+        if aggregation_expression.allows_two_phase() {
+            Ok(TwoPhaseAggregation {
+                incoming_expression: *aggregation_expression.producing_expression,
+                aggregator: aggregation_expression.aggregator,
+            })
+        } else {
+            bail!(
+                "{:?} does not support two phase aggregation",
+                aggregation_expression.aggregator
+            );
+        }
+    }
 }
 
 impl AggregationExpression {
@@ -832,6 +855,40 @@ impl AggregationExpression {
             producing_expression,
             aggregator,
         }))
+    }
+
+    pub(crate) fn allows_two_phase(&self) -> bool {
+        match self.aggregator {
+            Aggregator::Count
+            | Aggregator::Sum
+            | Aggregator::Min
+            | Aggregator::Avg
+            | Aggregator::Max => true,
+            Aggregator::CountDistinct => false,
+        }
+    }
+
+    pub fn try_from_expression(expr: &Expr, input_struct: &StructDef) -> Result<Self> {
+        match expr {
+            Expr::AggregateFunction(datafusion_expr::expr::AggregateFunction {
+                fun,
+                args,
+                distinct,
+                filter: None,
+            }) => {
+                if args.len() != 1 {
+                    bail!("unexpected arg length");
+                }
+                let producing_expression =
+                    Box::new(to_expression_generator(&args[0], input_struct)?);
+                let aggregator = Aggregator::from_datafusion(fun.clone(), *distinct)?;
+                Ok(AggregationExpression {
+                    producing_expression,
+                    aggregator,
+                })
+            }
+            _ => bail!("expected aggregate function, not {}", expr),
+        }
     }
 }
 
@@ -903,7 +960,7 @@ impl ExpressionGenerator for AggregationExpression {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CastExpression {
     input: Box<Expression>,
     data_type: DataType,
@@ -937,10 +994,8 @@ impl CastExpression {
         {
             true
         // handle date to string casts.
-        } else if Self::is_date(input_data_type) || Self::is_string(output_data_type) {
-            true
         } else {
-            false
+            Self::is_date(input_data_type) || Self::is_string(output_data_type)
         }
     }
 
@@ -1084,7 +1139,7 @@ impl TryFrom<BuiltinScalarFunction> for NumericFunction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NumericExpression {
     function: NumericFunction,
     input: Box<Expression>,
@@ -1113,7 +1168,7 @@ impl ExpressionGenerator for NumericExpression {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SortExpression {
     value: Expression,
     direction: SortDirection,
@@ -1173,7 +1228,7 @@ impl SortExpression {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StringFunction {
     Ascii(Box<Expression>),
     BitLength(Box<Expression>),
@@ -1211,7 +1266,7 @@ pub enum StringFunction {
     Rtrim(Box<Expression>, Option<Box<Expression>>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum HashFunction {
     MD5,
     SHA224,
@@ -1247,7 +1302,7 @@ impl TryFrom<BuiltinScalarFunction> for HashFunction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HashExpression {
     function: HashFunction,
     input: Box<Expression>,

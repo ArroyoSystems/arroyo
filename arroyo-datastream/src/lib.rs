@@ -120,7 +120,7 @@ impl Debug for WindowType {
     }
 }
 
-#[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub enum WatermarkType {
     Periodic {
         period: Duration,
