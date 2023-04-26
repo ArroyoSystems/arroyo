@@ -1,5 +1,6 @@
+use std::fs;
 use std::io::ErrorKind;
-use std::process::exit;
+use std::process::{exit, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{
@@ -38,7 +39,8 @@ pub fn from_millis(ts: u64) -> SystemTime {
 pub async fn main() {
     let _guard = arroyo_server_common::init_logging("compiler-service");
 
-    let build_dir = std::env::var("BUILD_DIR").expect("BUILD_DIR is not set");
+    let build_dir = std::env::var("BUILD_DIR").unwrap_or("build_dir".to_string());
+    let debug = std::env::var("DEBUG").is_ok();
 
     let s3_bucket = std::env::var(S3_BUCKET_ENV).ok();
     let s3_region = std::env::var(S3_REGION_ENV).ok();
@@ -56,13 +58,15 @@ pub async fn main() {
                 )),
                 format!("s3://{}.s3-{}.amazonaws.com", s3_bucket, s3_region),
             ),
-            (None, _, Some(output_dir)) => (
+            (None, _, Some(output_dir)) => {
+                let output_dir = fs::canonicalize(output_dir).expect("Failed to canonicalize output_dir");
+                (
                 Arc::new(Box::new(
-                    LocalFileSystem::new_with_prefix(PathBuf::from_str(&output_dir).unwrap())
+                    LocalFileSystem::new_with_prefix(output_dir.clone())
                         .unwrap(),
                 )),
-                format!("file:///{}", output_dir),
-            ),
+                format!("file:///{}", output_dir.to_string_lossy()),
+            )},
             _ => {
                 panic!("One of {} or OUTPUT_DIR must be set", S3_BUCKET_ENV)
             }
@@ -76,6 +80,7 @@ pub async fn main() {
         last_used: last_used.clone(),
         object_store,
         base_path,
+        debug,
     };
 
     let args = std::env::args().collect::<Vec<_>>();
@@ -167,9 +172,36 @@ pub struct CompileService {
     last_used: Arc<AtomicU64>,
     object_store: Arc<Box<dyn ObjectStore>>,
     base_path: String,
+    debug: bool,
 }
 
 impl CompileService {
+    async fn get_output(&self) -> io::Result<Output> {
+        if self.debug {
+            Command::new("cargo")
+                .current_dir(&self.build_dir)
+                .arg("build")
+                .arg("--verbose")
+                .output()
+                .await
+        } else {
+            Command::new("cargo")
+                .current_dir(&self.build_dir)
+                .arg("build")
+                .arg("--release")
+                .output()
+                .await
+        }
+    }
+
+    fn pipeline_path(&self) -> &str {
+        if self.debug {
+            "target/debug/pipeline"
+        } else {
+            "target/release/pipeline"
+        }
+    }
+
     async fn compile(&self, req: CompileQueryReq) -> io::Result<CompileQueryResp> {
         info!("Starting compilation for {}", req.job_id);
         let start = Instant::now();
@@ -181,12 +213,7 @@ impl CompileService {
 
         tokio::fs::write(build_dir.join("wasm-fns/src/lib.rs"), &req.wasm_fns).await?;
 
-        let result = Command::new("cargo")
-            .current_dir(&build_dir)
-            .arg("build")
-            .arg("--release")
-            .output()
-            .await?;
+        let result = self.get_output().await?;
 
         if !result.status.success() {
             return Err(io::Error::new(
@@ -196,6 +223,11 @@ impl CompileService {
                     String::from_utf8_lossy(&result.stderr)
                 ),
             ));
+        } else if self.debug {
+            info!(
+                "cargo build stderr: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
         }
 
         if !req.wasm_fns.is_empty() {
@@ -230,7 +262,7 @@ impl CompileService {
             .unwrap();
 
         {
-            let pipeline = tokio::fs::read(&build_dir.join("target/release/pipeline")).await?;
+            let pipeline = tokio::fs::read(&build_dir.join(self.pipeline_path())).await?;
             self.object_store
                 .put(&base.child("pipeline"), pipeline.into())
                 .await?;
