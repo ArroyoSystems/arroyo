@@ -2,22 +2,27 @@ use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
 use arroyo_rpc::grpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_types::{
-    WorkerId, CONTROLLER_ADDR_ENV, GRPC_PORT_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV,
-    TASK_SLOTS_ENV,
+    WorkerId, CONTROLLER_ADDR_ENV, GRPC_PORT_ENV, JOB_ID_ENV, K8S_IMAGE_ENV, K8S_POD_CPU_ENV,
+    K8S_POD_MEM_MB_ENV, K8S_POD_SLOTS_ENV, NODE_ID_ENV, OUTPUT_DIR_ENV, RUN_ID_ENV, TASK_SLOTS_ENV,
 };
 use async_trait::async_trait;
 use k8s_openapi::api::apps::v1::ReplicaSet;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{DeleteParams, ListParams};
 use kube::{Api, Client};
-use regex::internal::Input;
 use serde_json::json;
+use std::env;
+use std::str::FromStr;
 use std::time::Duration;
 use tonic::Status;
 
 const JOB_ID_LABEL: &'static str = "arroyo.dev/job-id";
 const RUN_ID_LABEL: &'static str = "arroyo.dev/run-id";
 const JOB_NAME_LABEL: &'static str = "arroyo.dev/job-name";
+
+const DEFAULT_CPU: u32 = 800;
+const DEFAULT_MEM_MB: u32 = 400;
+const DEFAULT_SLOTS: u32 = 4;
 
 pub struct KubernetesScheduler {
     client: Client,
@@ -36,6 +41,46 @@ impl Scheduler for KubernetesScheduler {
     async fn start_workers(&self, req: StartPipelineReq) -> Result<(), SchedulerError> {
         let api: Api<ReplicaSet> = Api::default_namespaced(self.client.clone());
 
+        let image = env::var(K8S_IMAGE_ENV)
+            .unwrap_or_else(|_| "ghcr.io/arroyosystems/arroyo-worker:amd64".to_string());
+
+        let cpu = env::var(K8S_POD_CPU_ENV)
+            .map(|t| u32::from_str(&t).unwrap_or(DEFAULT_CPU))
+            .unwrap_or(DEFAULT_CPU);
+
+        let mem = env::var(K8S_POD_MEM_MB_ENV)
+            .map(|t| u32::from_str(&t).unwrap_or(DEFAULT_MEM_MB))
+            .unwrap_or(DEFAULT_MEM_MB);
+
+        let slots_per_pod = env::var(K8S_POD_SLOTS_ENV)
+            .map(|t| u32::from_str(&t).unwrap_or(DEFAULT_SLOTS))
+            .unwrap_or(DEFAULT_SLOTS);
+
+        let slots = req.slots as usize;
+        let replicas = (slots as f32 / slots_per_pod as f32).ceil() as usize;
+
+        let mut volumes = vec![];
+        let mut volume_mounts = vec![];
+
+        if let Ok(output_dir) = env::var(OUTPUT_DIR_ENV) {
+            volumes.push(json!(
+                {
+                    "name": "checkpoints",
+                    "hostPath": {
+                        "path": &output_dir,
+                        "type": "Directory",
+                    }
+                }
+            ));
+
+            volume_mounts.push(json!(
+                {
+                    "name": "checkpoints",
+                    "mountPath": output_dir,
+                }
+            ));
+        }
+
         let labels = json!({
             JOB_ID_LABEL: req.job_id,
             RUN_ID_LABEL: format!("{}", req.run_id),
@@ -47,7 +92,7 @@ impl Scheduler for KubernetesScheduler {
                 "name": "PROD", "value": "true",
             },
             {
-                "name": TASK_SLOTS_ENV, "value": "16",
+                "name": TASK_SLOTS_ENV, "value": format!("{}", slots_per_pod),
             },
             {
                 "name": NODE_ID_ENV, "value": "1",
@@ -93,7 +138,7 @@ impl Scheduler for KubernetesScheduler {
                 "labels": labels,
             },
             "spec": {
-                "replicas": 1,
+                "replicas": replicas,
                 "selector": {
                     "matchLabels": {
                         JOB_ID_LABEL: req.job_id,
@@ -105,24 +150,16 @@ impl Scheduler for KubernetesScheduler {
                         "labels": labels
                     },
                     "spec": {
-                        "volumes": [
-                            {
-                                "name": "checkpoints",
-                                "hostPath": {
-                                    "path": "/tmp/arroyo-test",
-                                    "type": "Directory",
-                                }
-                            }
-                        ],
+                        "volumes": volumes,
                         "containers": [
                             {
                                 "name": "worker",
-                                "image": "localhost:32000/arroyo-worker:amd64",
+                                "image": image,
                                 "imagePullPolicy": "Always",
                                 "resources": {
                                     "requests": {
-                                        "cpu": "1000m",
-                                        "memory": "200Mi",
+                                        "cpu": format!("{}m", cpu),
+                                        "memory": format!("{}Mi", mem),
                                     }
                                 },
                                 "ports": [
@@ -132,12 +169,7 @@ impl Scheduler for KubernetesScheduler {
                                     }
                                 ],
                                 "env": env,
-                                "volumeMounts": [
-                                    {
-                                        "name": "checkpoints",
-                                        "mountPath": "/tmp/arroyo-test",
-                                    }
-                                ]
+                                "volumeMounts": volume_mounts
                             }
                         ]
                     }
@@ -179,17 +211,25 @@ impl Scheduler for KubernetesScheduler {
             labels.push_str(&format!(",{}={}", RUN_ID_LABEL, run_id));
         }
 
-        let mut delete_params = DeleteParams::default();
-        if force {
-            delete_params = delete_params.grace_period(0);
-        }
+        let delete_params = if force {
+            DeleteParams::default().grace_period(0)
+        } else {
+            DeleteParams::default()
+        };
 
-        api.delete_collection(&delete_params, &ListParams::default().labels(&labels))
+        let result = api
+            .delete_collection(&delete_params, &ListParams::default().labels(&labels))
             .await?;
 
+        if let Some(status) = result.right() {
+            if status.is_failure() {
+                bail!("Failed to clean cluster: {:?}", status);
+            }
+        }
+
         // wait for workers to stop
-        for _ in 0..20 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+        for i in 0..20 {
+            tokio::time::sleep(Duration::from_millis(i * 10)).await;
 
             if self.workers_for_job(&job_id, run_id).await?.len() == 0 {
                 return Ok(());
@@ -217,7 +257,8 @@ impl Scheduler for KubernetesScheduler {
         api.list(&ListParams::default().labels(&selector))
             .await?
             .iter()
-            .map(|pod| {
+            .filter(|pod| pod.metadata.deletion_timestamp.is_none())
+            .map(|_: &Pod| {
                 // TODO: figure out how to evolve this API in such a way that makes sense given that
                 //   we don't have static access to worker ids
                 Ok(WorkerId(1))

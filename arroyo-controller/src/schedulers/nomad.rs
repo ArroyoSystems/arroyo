@@ -39,7 +39,7 @@ impl NomadScheduler {
         &self,
         job_id: &str,
         worker_id: WorkerId,
-        force: bool,
+        _force: bool,
     ) -> anyhow::Result<()> {
         let resp = self
             .client

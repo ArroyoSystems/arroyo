@@ -16,8 +16,7 @@ async fn get_object(path: &str) -> Vec<u8> {
         return tokio::fs::read(&m.name("path").unwrap().as_str()).await.unwrap();
     }
     if let Some(m) = s3_regex.captures(path) {
-        let store = AmazonS3Builder::new()
-            .with_profile("default")
+        let store = AmazonS3Builder::from_env()
             .with_bucket_name(m.name("bucket").unwrap().as_str())
             .with_region(m.name("region").unwrap().as_str())
             .build()

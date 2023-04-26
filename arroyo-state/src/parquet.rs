@@ -27,12 +27,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::io::ErrorKind;
 use std::ops::RangeInclusive;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
-use tokio::fs::{remove_file, DirBuilder, File};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::fs::{remove_file, DirBuilder};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tracing::warn;
@@ -743,6 +742,10 @@ impl StorageClient {
         match self {
             StorageClient::LocalDirectory(directory) => {
                 let file_path = Path::new(directory).join(Path::new(&key));
+                DirBuilder::new()
+                    .recursive(true)
+                    .create(file_path.parent().unwrap())
+                    .await?;
                 tokio::fs::write(&file_path, &parquet_bytes).await?;
             }
             StorageClient::S3 {

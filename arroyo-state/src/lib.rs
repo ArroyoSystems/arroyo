@@ -415,6 +415,7 @@ mod test {
     #[tokio::test]
     async fn test_time_key_map(p: (StateStore<impl BackingStore>, Receiver<ControlResp>)) {
         let (mut ss, mut rx) = p;
+
         let mut ks: TimeKeyMap<usize, i32, _> = ss.get_time_key_map('t', None).await;
 
         let t1 = SystemTime::now();

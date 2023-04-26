@@ -1,7 +1,8 @@
 use anyhow::bail;
 use arroyo_rpc::grpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::{
-    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, WorkerFinishedReq, StopWorkerStatus,
+    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
+    WorkerFinishedReq,
 };
 use arroyo_types::{
     NodeId, WorkerId, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV,
@@ -224,7 +225,7 @@ impl Scheduler for ProcessScheduler {
         &self,
         job_id: &str,
         run_id: Option<i64>,
-        force: bool,
+        _force: bool,
     ) -> anyhow::Result<()> {
         for worker_id in self.workers_for_job(job_id, run_id).await? {
             let worker = {
@@ -344,7 +345,12 @@ impl NodeScheduler {
         }
     }
 
-    async fn stop_worker(&self, job_id: &str, worker_id: WorkerId, force: bool) -> anyhow::Result<()> {
+    async fn stop_worker(
+        &self,
+        job_id: &str,
+        worker_id: WorkerId,
+        force: bool,
+    ) -> anyhow::Result<()> {
         let state = self.state.lock().await;
 
         let Some(worker) = state.workers.get(&worker_id) else {

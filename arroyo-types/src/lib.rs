@@ -62,7 +62,12 @@ pub const S3_REGION_ENV: &str = "S3_REGION";
 pub const S3_BUCKET_ENV: &str = "S3_BUCKET";
 pub const OUTPUT_DIR_ENV: &str = "OUTPUT_DIR";
 
+// kubernetes scheduler configuration
 pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
+pub const K8S_IMAGE_ENV: &str = "K8S_IMAGE";
+pub const K8S_POD_CPU_ENV: &str = "K8S_POD_CPU";
+pub const K8S_POD_MEM_MB_ENV: &str = "K8S_POD_MEM_MB";
+pub const K8S_POD_SLOTS_ENV: &str = "K8S_POD_SLOTS";
 
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
