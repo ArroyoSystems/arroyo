@@ -4,7 +4,7 @@ ARG PROTO_ARCH
 
 RUN apt-get update && \
     apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
-    cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash && \
+    cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash libsasl2-dev && \
     cargo install refinery_cli && \
     cargo install wasm-pack && \
     wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-${PROTO_ARCH}.zip && \
@@ -40,7 +40,7 @@ RUN service postgresql start && \
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p arroyo-api/migrations && \
-    CARGO_PROFILE_RELEASE_DEBUG=false cargo build --release --bin arroyo-api --bin arroyo-controller && \
+    CARGO_PROFILE_RELEASE_DEBUG=false cargo build --release --bin arroyo-api --bin arroyo-controller --all-features && \
     bash -c "cd arroyo-console && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm build" && \
     cp "$(which refinery)" /refinery
 

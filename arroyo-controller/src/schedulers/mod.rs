@@ -23,7 +23,9 @@ use tracing::{info, warn};
 
 use crate::get_from_object_store;
 
+#[cfg(feature = "k8s")]
 pub mod kubernetes;
+
 pub mod nomad;
 
 lazy_static! {

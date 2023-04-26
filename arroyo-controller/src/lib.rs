@@ -43,7 +43,6 @@ mod states;
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
-use crate::schedulers::kubernetes::KubernetesScheduler;
 use crate::schedulers::{nomad::NomadScheduler, NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::StopMode;
 
@@ -429,8 +428,13 @@ impl ControllerServer {
                 Arc::new(NomadScheduler::new())
             }
             Some("kubernetes") | Some("k8s") => {
-                info!("Using kubernetes scheduler");
-                Arc::new(KubernetesScheduler::new().await)
+                #[cfg(feature = "k8s")]
+                {
+                    info!("Using kubernetes scheduler");
+                    Arc::new(crate::schedulers::kubernetes::KubernetesScheduler::new().await)
+                }
+                #[cfg(not(feature = "k8s"))]
+                panic!("Kubernetes not enabled -- compile with `--features k8s` to enable")
             }
             _ => {
                 info!("Using process scheduler");
