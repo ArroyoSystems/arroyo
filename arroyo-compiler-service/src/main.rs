@@ -225,7 +225,7 @@ impl CompileService {
         // TODO: replace this with the SHA of the worker code once that's available
         let id = (to_millis(SystemTime::now()) / 1000).to_string();
 
-        let base: object_store::path::Path = format!("artifacts/{}/{}", &req.job_id, id)
+        let base: object_store::path::Path = format!("{}/artifacts/{}", &req.job_id, id)
             .try_into()
             .unwrap();
 

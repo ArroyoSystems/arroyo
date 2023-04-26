@@ -17,7 +17,7 @@ use anyhow::Result;
 use crate::job_controller::JobController;
 use crate::queries::controller_queries;
 use crate::types::public::StopMode;
-use crate::{scheduler::Scheduler, JobConfig, JobMessage, JobStatus};
+use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus};
 use prost::Message;
 
 use self::checkpoint_stopping::CheckpointStopping;
@@ -89,7 +89,11 @@ impl State for Failed {
     }
 
     async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
-        if let Err(e) = ctx.scheduler.clean_cluster(&ctx.config.id).await {
+        if let Err(e) = ctx
+            .scheduler
+            .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+            .await
+        {
             warn!(
                 message = "Failed to clean up cluster",
                 error = format!("{:?}", e),
@@ -133,7 +137,11 @@ impl State for Stopped {
     }
 
     async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
-        if let Err(e) = ctx.scheduler.clean_cluster(&ctx.config.id).await {
+        if let Err(e) = ctx
+            .scheduler
+            .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+            .await
+        {
             return Err(ctx.retryable(self, "failed to clean cluster", e, 20));
         }
 

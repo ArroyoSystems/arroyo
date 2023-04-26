@@ -73,6 +73,17 @@ impl CheckpointState {
         program: &Program,
         pool: &Pool,
     ) -> anyhow::Result<Self> {
+        StateBackend::initialize_checkpoint(
+            &job_id,
+            epoch,
+            &program
+                .graph
+                .node_weights()
+                .map(|t| t.operator_id.as_str())
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+
         let tasks_per_operator: HashMap<String, usize> = program
             .graph
             .node_weights()

@@ -60,6 +60,9 @@ pub const API_ENDPOINT_ENV: &str = "API_ENDPOINT";
 
 pub const S3_REGION_ENV: &str = "S3_REGION";
 pub const S3_BUCKET_ENV: &str = "S3_BUCKET";
+pub const OUTPUT_DIR_ENV: &str = "OUTPUT_DIR";
+
+pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
 
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
@@ -121,12 +124,11 @@ pub fn service_port(service: &str, default: u16, env_var: &str) -> u16 {
 pub struct WorkerId(pub u64);
 
 impl WorkerId {
-    pub fn from_env() -> WorkerId {
-        WorkerId(
-            std::env::var(WORKER_ID_ENV)
-                .map(|s| u64::from_str(&s).unwrap())
-                .unwrap_or_else(|_| panic!("{} not set", WORKER_ID_ENV)),
-        )
+    pub fn from_env() -> Option<WorkerId> {
+        std::env::var(WORKER_ID_ENV)
+            .map(|s| u64::from_str(&s).unwrap())
+            .ok()
+            .map(|i| WorkerId(i))
     }
 }
 

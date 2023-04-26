@@ -1,7 +1,6 @@
 #![allow(clippy::new_without_default)]
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
-use crate::scheduler::{NomadScheduler, ProcessScheduler, Scheduler};
 
 use anyhow::bail;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
@@ -22,7 +21,6 @@ use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
 use prometheus::{register_gauge, Gauge};
 use regex::Regex;
-use scheduler::NodeScheduler;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -40,11 +38,13 @@ use tracing::{debug, info, warn};
 
 mod compiler;
 mod job_controller;
-pub mod scheduler;
+pub mod schedulers;
 mod states;
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
+use crate::schedulers::kubernetes::KubernetesScheduler;
+use crate::schedulers::{nomad::NomadScheduler, NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::StopMode;
 
 pub const CHECKPOINTS_TO_KEEP: u32 = 5;
@@ -427,6 +427,10 @@ impl ControllerServer {
             Some("nomad") => {
                 info!("Using nomad scheduler");
                 Arc::new(NomadScheduler::new())
+            }
+            Some("kubernetes") | Some("k8s") => {
+                info!("Using kubernetes scheduler");
+                Arc::new(KubernetesScheduler::new().await)
             }
             _ => {
                 info!("Using process scheduler");

@@ -55,6 +55,9 @@ pub fn timestamp_table(
 
 #[async_trait]
 pub trait BackingStore {
+    // prepares a checkpoint to be loaded, e.g., by deleting future data
+    async fn prepare_checkpoint_load(metadata: &CheckpointMetadata) -> Result<()>;
+
     async fn load_latest_checkpoint_metadata(job_id: &str) -> Option<CheckpointMetadata>;
 
     async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Option<CheckpointMetadata>;
@@ -79,8 +82,11 @@ pub trait BackingStore {
 
     fn name() -> &'static str;
 
-    // prepares a checkpoint to be loaded, e.g., by deleting future data
-    async fn prepare_checkpoint(metadata: &CheckpointMetadata) -> Result<()>;
+    // parepares a checkpoint to be written
+    #[allow(unused_variables)]
+    async fn initialize_checkpoint(job_id: &str, epoch: u32, operators: &[&str]) -> Result<()> {
+        Ok(())
+    }
 
     async fn complete_operator_checkpoint(metadata: OperatorCheckpointMetadata);
 
