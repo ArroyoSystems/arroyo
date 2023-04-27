@@ -1,0 +1,17 @@
+[workspace]
+
+[package]
+name = "copy_artifacts"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+object_store = {version = "0.5.6", features = ["aws", "aws-config", "aws_profile"]}
+regex = "1.7.3"
+tokio = {version = "1.27.0", features = ["fs", "rt", "net"]}
+
+[profile.release]
+# optimize for small binary size
+strip = true
+opt-level = "z"
+lto = true
