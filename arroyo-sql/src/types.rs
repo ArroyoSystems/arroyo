@@ -23,6 +23,11 @@ pub struct StructDef {
     pub name: Option<String>,
     pub fields: Vec<StructField>,
 }
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StructPair {
+    pub left: StructDef,
+    pub right: StructDef,
+}
 
 impl StructDef {
     pub fn struct_name(&self) -> String {

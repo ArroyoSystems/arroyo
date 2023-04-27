@@ -11,7 +11,9 @@ use datafusion::physical_plan::functions::make_scalar_function;
 
 mod expressions;
 mod operators;
+mod optimizations;
 mod pipeline;
+mod plan_graph;
 pub mod schemas;
 pub mod types;
 
@@ -435,10 +437,10 @@ pub fn get_test_expression(
     let statement = &ast[0];
     let sql_to_rel = SqlToRel::new(&schema_provider);
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone()).unwrap();
-    let mut optimizer_config = OptimizerContext::default();
+    let optimizer_config = OptimizerContext::default();
     let optimizer = Optimizer::new();
     let plan = optimizer
-        .optimize(&plan, &mut optimizer_config, |_plan, _rule| {})
+        .optimize(&plan, &optimizer_config, |_plan, _rule| {})
         .unwrap();
     let LogicalPlan::Projection(projection) = plan else {panic!("expect projection")};
     let generating_expression = to_expression_generator(&projection.expr[0], &struct_def).unwrap();
