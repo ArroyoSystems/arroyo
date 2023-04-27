@@ -19,7 +19,7 @@ function CatalogField({ field, nesting }: { field: SourceField; nesting: number 
             {field.fieldName}
           </Box>
           <Box flex="1" textAlign="right">
-            {PrimitiveType[field.fieldType!.type.value]}
+            {field.fieldType?.sqlName}
           </Box>
         </Flex>
       );

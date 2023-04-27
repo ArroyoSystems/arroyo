@@ -610,6 +610,9 @@ message SourceFieldType {
     PrimitiveType primitive = 1;
     StructType struct = 2;
   }
+
+  // include a sql name if the type is PrimitiveType
+  optional string sql_name = 3;
 }
 
 message SourceField {
