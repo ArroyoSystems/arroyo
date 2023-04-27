@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arroyo-api
+  labels:
+    app: arroyo-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: arroyo-api
+  template:
+    metadata:
+      labels:
+        app: arroyo-api
+    spec:
+      containers:
+      - name: arroyo-api
+        image: localhost:32000/arroyo-services:amd64
+        args: ["api"]
+        env:
+        - name: DATABASE_HOST
+          value: "10.0.1.1"
+        - name: DATABASE_PORT
+          value: "5432"
+        - name: DATABASE_NAME
+          value: "arroyo"
+        - name: DATABASE_USER
+          value: "arroyo"
+        - name: DATABASE_PASSWORD
+          value: "arroyo"
+        - name: API_ENDPOINT
+        
+
+        ports:
+        - containerPort: 8000
+          name: http
+        - containerPort: 8001
+          name: grpc
+        - containerPort: 8002
+          name: admin
