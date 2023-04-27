@@ -83,6 +83,40 @@ impl ArroyoSchemaProvider {
                 make_scalar_function(fn_impl),
             )),
         );
+        functions.insert(
+            "get_first_json_object".to_string(),
+            Arc::new(create_udf(
+                "get_first_json_object",
+                vec![DataType::Utf8, DataType::Utf8],
+                Arc::new(DataType::Utf8),
+                Volatility::Volatile,
+                make_scalar_function(fn_impl),
+            )),
+        );
+        functions.insert(
+            "get_json_objects".to_string(),
+            Arc::new(create_udf(
+                "get_json_objects",
+                vec![DataType::Utf8, DataType::Utf8],
+                Arc::new(DataType::List(Box::new(Field::new(
+                    "item",
+                    DataType::Utf8,
+                    false,
+                )))),
+                Volatility::Volatile,
+                make_scalar_function(fn_impl),
+            )),
+        );
+        functions.insert(
+            "extract_json_string".to_string(),
+            Arc::new(create_udf(
+                "extract_json_string",
+                vec![DataType::Utf8, DataType::Utf8],
+                Arc::new(DataType::Utf8),
+                Volatility::Volatile,
+                make_scalar_function(fn_impl),
+            )),
+        );
         Self {
             tables,
             functions,
