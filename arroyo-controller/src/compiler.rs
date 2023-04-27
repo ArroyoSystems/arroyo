@@ -317,6 +317,7 @@ wasm-opt = false
 
     fn compile_pipeline_main(&self, name: &str, hash: &str) -> TokenStream {
         let imports = quote! {
+            #![allow(warnings)]
             use petgraph::graph::DiGraph;
             use arroyo_worker::operators::*;
             use arroyo_worker::operators::sources::*;

@@ -17,5 +17,9 @@ members = [
     "arroyo-worker",
 ]
 
+exclude = [
+    "build_dir",
+]
+
 [profile.release]
 debug = 1
