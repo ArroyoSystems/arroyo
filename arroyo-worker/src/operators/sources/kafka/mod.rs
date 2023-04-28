@@ -40,6 +40,7 @@ pub enum SerializationMode {
     Json,
     // https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#wire-format
     JsonSchemaRegistry,
+    Raw,
 }
 
 #[derive(StreamNode, Clone)]
@@ -173,6 +174,11 @@ where
                                         SerializationMode::Json => serde_json::from_slice(v)
                                             .unwrap_or_else(|_| panic!("Failed to deserialize message: {}", String::from_utf8_lossy(v))),
                                         SerializationMode::JsonSchemaRegistry => serde_json::from_slice(&v[5..]).unwrap(),
+                                        SerializationMode::Raw => {
+                                            let object = String::from_utf8_lossy(v).to_string();
+                                            let json_map = serde_json::Map::from_iter(vec![(String::from("value"), serde_json::Value::String(object))]);
+                                            serde_json::from_value(serde_json::Value::Object(json_map)).unwrap()
+                                        },
                                     }
                                 }).await;
                                 offsets.insert(msg.partition(), msg.offset());

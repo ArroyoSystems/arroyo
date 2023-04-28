@@ -30,6 +30,7 @@ import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
 import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
 import { ApiGrpc } from "../../gen/api_connectweb";
 import { ApiClient } from "../../main";
+import { steps } from "./CreateSource";
 
 export function ChooseSchemaType({
   state,
@@ -41,11 +42,29 @@ export function ChooseSchemaType({
   next: (step?: number) => void;
 }) {
   const handleChange = (v: string) => {
+    if (v == "rawKafka") {
+      state.typeOneof.case = "rawKafka";
+
+    }
     setState({
       ...state,
       /* @ts-ignore */
       schema: { schema: { case: v, value: {} } },
     });
+  };
+  const onClick = async () => {
+    if (state.typeOneof.case == "rawKafka") {
+      state.schema = undefined;
+      setState(
+        new CreateSourceReq({
+          ...state,
+          /* @ts-ignore */
+        })
+      );
+      next(steps.length - 1);
+    } else {
+      next();
+    }
   };
 
   return (
@@ -59,11 +78,12 @@ export function ChooseSchemaType({
         <RadioCard value="avro" isDisabled>
           Avro (coming soon)
         </RadioCard>
-        {state.typeOneof.case == "kafka" ? (
+        {state.typeOneof.case == "kafka" || state.typeOneof.case == "rawKafka" ? (
           <RadioCard value="confluentSchema">Confluent Schema Registry</RadioCard>
         ) : null}
+        <RadioCard value="rawKafka">Raw Schema</RadioCard>
       </RadioCardGroup>
-      <Button variant="primary" onClick={() => next()}>
+      <Button variant="primary" onClick={onClick}>
         Continue
       </Button>
     </Stack>

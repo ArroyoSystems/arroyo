@@ -370,15 +370,15 @@ wasm-opt = false
                         ))
                     }
                 }
-                Operator::KafkaSource { topic, bootstrap_servers, offset_mode, schema_registry, messages_per_second, client_configs } => {
+                Operator::KafkaSource { topic, bootstrap_servers, offset_mode, kafka_input_format, messages_per_second, client_configs } => {
                     let offset_mode = format!("{:?}", offset_mode);
                     let offset_mode = format_ident!("{}", offset_mode);
                     let out_t = parse_type(&output.unwrap().weight().value);
                     let bootstrap_servers = bootstrap_servers.join(",");
-                    let serialization_mode = if *schema_registry {
-                        format_ident!("JsonSchemaRegistry")
-                    } else {
-                        format_ident!("Json")
+                    let serialization_mode = match kafka_input_format {
+                        arroyo_datastream::KafkaSerializationMode::Json => quote!(Json),
+                        arroyo_datastream::KafkaSerializationMode::JsonSchemaRegistry => quote!(JsonSchemaRegistry),
+                        arroyo_datastream::KafkaSerializationMode::Raw => quote!(Raw),
                     };
                     let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
 

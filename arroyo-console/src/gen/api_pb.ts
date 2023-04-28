@@ -1302,6 +1302,12 @@ export class Operator extends Message<Operator> {
      */
     value: SlidingAggregatingTopN;
     case: "slidingAggregatingTopN";
+  } | {
+    /**
+     * @generated from field: arroyo_api.JoinWithExpiration join_with_expiration = 21;
+     */
+    value: JoinWithExpiration;
+    case: "joinWithExpiration";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<Operator>) {
@@ -1331,6 +1337,7 @@ export class Operator extends Message<Operator> {
     { no: 18, name: "tumbling_window_aggregator", kind: "message", T: TumblingWindowAggregator, oneof: "operator" },
     { no: 19, name: "tumbling_top_n", kind: "message", T: TumblingTopN, oneof: "operator" },
     { no: 20, name: "sliding_aggregating_top_n", kind: "message", T: SlidingAggregatingTopN, oneof: "operator" },
+    { no: 21, name: "join_with_expiration", kind: "message", T: JoinWithExpiration, oneof: "operator" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Operator {
@@ -2512,6 +2519,49 @@ export class SlidingAggregatingTopN extends Message<SlidingAggregatingTopN> {
 
   static equals(a: SlidingAggregatingTopN | PlainMessage<SlidingAggregatingTopN> | undefined, b: SlidingAggregatingTopN | PlainMessage<SlidingAggregatingTopN> | undefined): boolean {
     return proto3.util.equals(SlidingAggregatingTopN, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.JoinWithExpiration
+ */
+export class JoinWithExpiration extends Message<JoinWithExpiration> {
+  /**
+   * @generated from field: uint64 left_expiration_micros = 1;
+   */
+  leftExpirationMicros = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 right_expiration_micros = 2;
+   */
+  rightExpirationMicros = protoInt64.zero;
+
+  constructor(data?: PartialMessage<JoinWithExpiration>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.JoinWithExpiration";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "left_expiration_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "right_expiration_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JoinWithExpiration {
+    return new JoinWithExpiration().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): JoinWithExpiration {
+    return new JoinWithExpiration().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): JoinWithExpiration {
+    return new JoinWithExpiration().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: JoinWithExpiration | PlainMessage<JoinWithExpiration> | undefined, b: JoinWithExpiration | PlainMessage<JoinWithExpiration> | undefined): boolean {
+    return proto3.util.equals(JoinWithExpiration, a, b);
   }
 }
 
@@ -4659,6 +4709,12 @@ export class CreateSourceReq extends Message<CreateSourceReq> {
      */
     value: NexmarkSourceConfig;
     case: "nexmark";
+  } | {
+    /**
+     * @generated from field: arroyo_api.KafkaSourceConfig raw_kafka = 7;
+     */
+    value: KafkaSourceConfig;
+    case: "rawKafka";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<CreateSourceReq>) {
@@ -4675,6 +4731,7 @@ export class CreateSourceReq extends Message<CreateSourceReq> {
     { no: 4, name: "impulse", kind: "message", T: ImpulseSourceConfig, oneof: "type_oneof" },
     { no: 5, name: "file", kind: "message", T: FileSourceConfig, oneof: "type_oneof" },
     { no: 6, name: "nexmark", kind: "message", T: NexmarkSourceConfig, oneof: "type_oneof" },
+    { no: 7, name: "raw_kafka", kind: "message", T: KafkaSourceConfig, oneof: "type_oneof" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateSourceReq {

@@ -297,6 +297,11 @@ pub struct ImpulseEvent {
     pub subtask_index: u64,
 }
 
+#[derive(Encode, Decode, Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RawKafkaEvent {
+    pub value: String,
+}
+
 pub mod nexmark {
     use bincode::{Decode, Encode};
 
