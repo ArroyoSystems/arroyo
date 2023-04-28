@@ -3,12 +3,7 @@ use std::io::ErrorKind;
 use std::process::{exit, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{
-    io,
-    path::{Path, PathBuf},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{io, path::PathBuf, str::FromStr, sync::Arc};
 
 use arroyo_rpc::grpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
@@ -59,14 +54,15 @@ pub async fn main() {
                 format!("s3://{}.s3-{}.amazonaws.com", s3_bucket, s3_region),
             ),
             (None, _, Some(output_dir)) => {
-                let output_dir = fs::canonicalize(output_dir).expect("Failed to canonicalize output_dir");
+                let output_dir =
+                    fs::canonicalize(output_dir).expect("Failed to canonicalize output_dir");
                 (
-                Arc::new(Box::new(
-                    LocalFileSystem::new_with_prefix(output_dir.clone())
-                        .unwrap(),
-                )),
-                format!("file:///{}", output_dir.to_string_lossy()),
-            )},
+                    Arc::new(Box::new(
+                        LocalFileSystem::new_with_prefix(output_dir.clone()).unwrap(),
+                    )),
+                    format!("file:///{}", output_dir.to_string_lossy()),
+                )
+            }
             _ => {
                 panic!("One of {} or OUTPUT_DIR must be set", S3_BUCKET_ENV)
             }
@@ -161,11 +157,6 @@ pub async fn start_service(service: CompileService) {
     shutdown_tx.send(0).unwrap();
 }
 
-async fn rustfmt(file: &Path) -> io::Result<()> {
-    Command::new("rustfmt").arg(file).output().await?;
-    Ok(())
-}
-
 pub struct CompileService {
     build_dir: PathBuf,
     lock: Arc<Mutex<()>>,
@@ -207,7 +198,6 @@ impl CompileService {
         let start = Instant::now();
         let build_dir = &self.build_dir;
         tokio::fs::write(build_dir.join("pipeline/src/main.rs"), &req.pipeline).await?;
-        rustfmt(&build_dir.join("pipeline/src/main.rs")).await?;
 
         tokio::fs::write(build_dir.join("types/src/lib.rs"), &req.types).await?;
 
