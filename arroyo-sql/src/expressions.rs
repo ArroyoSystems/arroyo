@@ -21,14 +21,6 @@ use syn::{parse_quote, parse_str, Ident};
 #[derive(Debug, Clone)]
 pub struct BinaryOperator(datafusion_expr::Operator);
 
-pub trait ExpressionGenerator: Debug {
-    fn to_syn_expression(&self) -> syn::Expr;
-    fn return_type(&self) -> TypeDef;
-    fn nullable(&self) -> bool {
-        self.return_type().is_optional()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Expression {
     Column(ColumnExpression),
@@ -44,8 +36,8 @@ pub enum Expression {
     Hash(HashExpression),
 }
 
-impl ExpressionGenerator for Expression {
-    fn to_syn_expression(&self) -> syn::Expr {
+impl Expression {
+    pub fn to_syn_expression(&self) -> syn::Expr {
         match self {
             Expression::Column(column_expression) => column_expression.to_syn_expression(),
             Expression::UnaryBoolean(unary_boolean_expression) => {
@@ -69,7 +61,7 @@ impl ExpressionGenerator for Expression {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
+    pub fn return_type(&self) -> TypeDef {
         match self {
             Expression::Column(column_expression) => column_expression.return_type(),
             Expression::UnaryBoolean(unary_boolean_expression) => {
@@ -90,9 +82,11 @@ impl ExpressionGenerator for Expression {
             Expression::Hash(hash_expression) => hash_expression.return_type(),
         }
     }
-}
 
-impl Expression {
+    pub fn nullable(&self) -> bool {
+        self.return_type().is_optional()
+    }
+
     pub(crate) fn has_max_value(&self, field: &StructField) -> Option<u64> {
         match self {
             Expression::BinaryComparison(BinaryComparisonExpression { left, op, right }) => {
@@ -439,9 +433,7 @@ impl ColumnExpression {
         )?;
         Ok(ColumnExpression { column_field })
     }
-}
 
-impl ExpressionGenerator for ColumnExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let field_ident = self.column_field.field_ident();
         parse_quote!(arg.#field_ident.clone())
@@ -471,7 +463,7 @@ pub struct UnaryBooleanExpression {
     input: Box<Expression>,
 }
 
-impl ExpressionGenerator for UnaryBooleanExpression {
+impl UnaryBooleanExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let argument_expr = self.input.to_syn_expression();
         match (self.input.return_type().is_optional(), &self.operator) {
@@ -509,9 +501,6 @@ impl ExpressionGenerator for UnaryBooleanExpression {
             UnaryOperator::Negative => self.input.return_type(),
         }
     }
-}
-
-impl UnaryBooleanExpression {
     fn new(operator: UnaryOperator, input: Box<Expression>) -> Expression {
         Expression::UnaryBoolean(UnaryBooleanExpression { operator, input })
     }
@@ -522,7 +511,7 @@ pub struct LiteralExpression {
     literal: ScalarValue,
 }
 
-impl ExpressionGenerator for LiteralExpression {
+impl LiteralExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         TypeDef::get_literal(&self.literal)
     }
@@ -530,9 +519,7 @@ impl ExpressionGenerator for LiteralExpression {
     fn return_type(&self) -> TypeDef {
         TypeDef::DataType(self.literal.get_datatype(), self.literal.is_null())
     }
-}
 
-impl LiteralExpression {
     fn new(literal: ScalarValue) -> Expression {
         Expression::Literal(Self { literal })
     }
@@ -591,7 +578,7 @@ impl BinaryComparisonExpression {
     }
 }
 
-impl ExpressionGenerator for BinaryComparisonExpression {
+impl BinaryComparisonExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let left_expr = self.left.to_syn_expression();
         let right_expr = self.right.to_syn_expression();
@@ -693,7 +680,7 @@ impl BinaryMathExpression {
     }
 }
 
-impl ExpressionGenerator for BinaryMathExpression {
+impl BinaryMathExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let left_expr = self.left.to_syn_expression();
         let right_expr = self.right.to_syn_expression();
@@ -748,7 +735,7 @@ impl StructFieldExpression {
     }
 }
 
-impl ExpressionGenerator for StructFieldExpression {
+impl StructFieldExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let struct_expression = self.struct_expression.to_syn_expression();
         let field_ident = self.struct_field.field_ident();
@@ -890,10 +877,8 @@ impl AggregationExpression {
             _ => bail!("expected aggregate function, not {}", expr),
         }
     }
-}
 
-impl ExpressionGenerator for AggregationExpression {
-    fn to_syn_expression(&self) -> syn::Expr {
+    pub fn to_syn_expression(&self) -> syn::Expr {
         let sub_expr = self.producing_expression.to_syn_expression();
         let (map_type, unwrap) = if self.producing_expression.nullable() {
             (format_ident!("filter_map"), None)
@@ -947,7 +932,7 @@ impl ExpressionGenerator for AggregationExpression {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
+    pub fn return_type(&self) -> TypeDef {
         match &self.aggregator {
             Aggregator::Count | Aggregator::CountDistinct => {
                 TypeDef::DataType(DataType::Int64, false)
@@ -1041,9 +1026,7 @@ impl CastExpression {
             unreachable!()
         }
     }
-}
 
-impl ExpressionGenerator for CastExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let sub_expr = self.input.to_syn_expression();
         let TypeDef::DataType(input_type, nullable) = self.input.return_type() else {
@@ -1150,9 +1133,6 @@ impl NumericExpression {
         let function = function.try_into()?;
         Ok(Expression::Numeric(NumericExpression { function, input }))
     }
-}
-
-impl ExpressionGenerator for NumericExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let function_name = self.function.function_name();
         let argument_expression = self.input.to_syn_expression();
@@ -1315,9 +1295,7 @@ impl HashExpression {
             input,
         }))
     }
-}
 
-impl ExpressionGenerator for HashExpression {
     fn to_syn_expression(&self) -> syn::Expr {
         let input = self.input.to_syn_expression();
         let hash_fn = format_ident!("{}", self.function.to_string());

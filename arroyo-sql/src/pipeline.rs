@@ -17,7 +17,7 @@ use syn::{parse_quote, Type};
 use crate::{
     expressions::{
         to_expression_generator, AggregationExpression, Column, ColumnExpression, Expression,
-        ExpressionGenerator, SortExpression,
+        SortExpression,
     },
     operators::{
         AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection,

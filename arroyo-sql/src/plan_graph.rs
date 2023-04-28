@@ -14,7 +14,7 @@ use quote::quote;
 use syn::{parse_quote, parse_str};
 
 use crate::{
-    expressions::{ExpressionGenerator, SortExpression},
+    expressions::SortExpression,
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
     pipeline::{
