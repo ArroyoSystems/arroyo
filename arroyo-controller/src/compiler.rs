@@ -16,7 +16,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, io};
-use syn::{parse_str, GenericArgument, PathArguments, Type, TypePath};
+use syn::{parse_quote, parse_str, GenericArgument, PathArguments, Type, TypePath};
 use tokio::process::Command;
 use tonic::{Code, Request};
 use tracing::info;
@@ -86,9 +86,7 @@ impl ProgramCompiler {
         let req = CompileQueryReq {
             job_id: self.job_id.clone(),
             types: self.compile_types().to_string(),
-            pipeline: self
-                .compile_pipeline_main(&self.name, &self.program.get_hash())
-                .to_string(),
+            pipeline: self.compile_pipeline_main(&self.name, &self.program.get_hash()),
             wasm_fns: self.compile_wasm_lib().to_string(),
         };
 
@@ -136,9 +134,7 @@ impl ProgramCompiler {
         fs::create_dir_all(&dir)?;
 
         let types = self.compile_types().to_string();
-        let main = self
-            .compile_pipeline_main(&self.name, &self.program.get_hash())
-            .to_string();
+        let main = self.compile_pipeline_main(&self.name, &self.program.get_hash());
         let wasm = self.compile_wasm_lib().to_string();
 
         let workspace_toml = r#"
@@ -288,9 +284,6 @@ wasm-opt = false
         fs::create_dir_all(&src)?;
         let src_file_path = src.join(src_file);
         fs::write(&src_file_path, body)?;
-
-        Self::rustfmt(&src_file_path).await;
-
         Ok(())
     }
 
@@ -315,7 +308,7 @@ wasm-opt = false
         }
     }
 
-    fn compile_pipeline_main(&self, name: &str, hash: &str) -> TokenStream {
+    fn compile_pipeline_main(&self, name: &str, hash: &str) -> String {
         let imports = quote! {
             #![allow(warnings)]
             use petgraph::graph::DiGraph;
@@ -890,7 +883,7 @@ wasm-opt = false
             .map(|t| parse_str(t).unwrap())
             .collect();
 
-        quote! {
+        prettyplease::unparse(&parse_quote! {
             #imports
 
             pub fn make_graph() -> DiGraph<LogicalNode, LogicalEdge> {
@@ -909,7 +902,7 @@ wasm-opt = false
             }
 
             #(#other_defs )*
-        }
+        })
     }
 
     fn compile_wasm_lib(&self) -> TokenStream {
@@ -1040,7 +1033,7 @@ wasm-opt = false
             })
             .collect();
 
-        quote! {
+        parse_quote! {
             use types::*;
             use std::time::SystemTime;
 
@@ -1065,14 +1058,6 @@ wasm-opt = false
             #(#wasm_fns )*
         }
     }
-
-    async fn rustfmt(file: &Path) {
-        Command::new("rustfmt")
-            .arg(file)
-            .output()
-            .await
-            .expect("Could not call the `rustfmt` binary. Is it installed?");
-    }
 }
 
 #[cfg(test)]
@@ -1089,10 +1074,7 @@ mod tests {
 
         let v = extract_container_type("Vec", &parse_str("Vec<String>").unwrap()).unwrap();
         assert_eq!("String", quote! { #v }.to_string());
-
-        assert_eq!(
-            None,
-            extract_container_type("Vec", &parse_str("HashMap<String, u8>").unwrap())
-        );
+        let t = extract_container_type("Vec", &parse_str("HashMap<String, u8>").unwrap());
+        assert!(t.is_none())
     }
 }

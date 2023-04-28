@@ -473,6 +473,7 @@ dependencies = [
  "petgraph",
  "postgres",
  "postgres-types",
+ "prettyplease 0.2.4",
  "proc-macro2",
  "prometheus",
  "prost",
@@ -483,7 +484,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "syn 1.0.109",
+ "syn 2.0.13",
  "thiserror",
  "time 0.3.20",
  "tokio",
@@ -4379,6 +4380,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prettyplease"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ceca8aaf45b5c46ec7ed39fff75f57290368c1846d33d24a122ca81416ab058"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.13",
+]
+
+[[package]]
 name = "primeorder"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4503,7 +4514,7 @@ dependencies = [
  "log",
  "multimap",
  "petgraph",
- "prettyplease",
+ "prettyplease 0.1.25",
  "prost",
  "prost-types",
  "regex",
@@ -6084,7 +6095,7 @@ version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5bf5e9b9c0f7e0a7c027dcfaba7b2c60816c7049171f679d99ee2ff65d0de8c4"
 dependencies = [
- "prettyplease",
+ "prettyplease 0.1.25",
  "proc-macro2",
  "prost-build",
  "quote",
