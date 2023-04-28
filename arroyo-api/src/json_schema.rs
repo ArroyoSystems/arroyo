@@ -64,7 +64,7 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
     Ok(format!(
         "mod {} {{\nuse crate::*;\n{}\n}}",
         source_name,
-        type_space.to_string()
+        type_space.to_stream().to_string()
     ))
 }
 

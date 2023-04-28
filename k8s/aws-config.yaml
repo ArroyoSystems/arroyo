@@ -1,0 +1,9 @@
+externalDatabase:
+  host: db.prod.iad.arroyo.cluster
+  name: arroyo_test
+  user: arroyodb
+  password: arroyodb
+
+s3:
+  bucket: "arroyo-testing"
+  region: "us-east-1"

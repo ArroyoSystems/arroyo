@@ -6,7 +6,7 @@ edition = "2021"
 [features]
 default = []
 kafka-sasl = []
-k8s = ["kube", "k8s-openapi"]
+k8s = ["kube", "k8s-openapi", "serde_yaml"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
@@ -46,7 +46,7 @@ anyhow = "1.0.70"
 # Kubernetes
 kube = { version = "0.82.1", features = ["runtime", "derive"], optional = true }
 k8s-openapi = { version = "0.18.0", features = ["v1_26"], optional = true }
-
+serde_yaml = {version = "0.9", optional = true}
 
 # json-schema support
 typify = "0.0.10"

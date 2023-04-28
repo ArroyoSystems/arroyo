@@ -1,0 +1,111 @@
+# Default values for arroyo.
+
+# Number of replicas for the api server
+api:
+  replicaCount: 1
+  resources:
+    limits: {}
+    requests:
+      memory: 256Mi
+      cpu: 300m
+
+# Number of replicas for the compiler
+compiler:
+  replicaCount: 1
+  resources:
+    limits: {}
+    requests:
+      memory: 2048Mi
+      cpu: 1000m
+
+worker:
+  resources:
+    limits: {}
+    requests:
+      memory: 200Mi
+      cpu: 400m
+  slots: 4
+
+
+
+# Image for the arroyo control plane services
+serviceImage:
+  repository: ghcr.io/arroyosystems/arroyo-services
+  pullPolicy: IfNotPresent
+  tag: "amd64"
+
+# Image for the arroyo compiler (this also determines the version of the worker code used)
+compilerImage:
+  repository: ghcr.io/arroyosystems/arroyo-compiler
+  pullPolicy: IfNotPresent
+  tag: "amd64"
+
+# Image for the arroyo workers
+workerImage:
+  repository: ghcr.io/arroyosystems/arroyo-worker
+  pullPolicy: IfNotPresent
+  tag: "amd64"
+
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+externalPrometheusEndpoint: "http://localhost:8081"
+
+externalDatabase:
+  host: localhost
+  port: 5432
+  name: arroyo
+  user: arroyo
+  password: arroyo
+
+s3:
+  region: ""
+  bucket: ""
+
+outputDir: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+role:
+  # Specified whether the role should be created
+  create: true
+
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 80
+
+apiResources: {}
+controllerResources: {}
+compilerResources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+volumes: []
+volumeMounts: []

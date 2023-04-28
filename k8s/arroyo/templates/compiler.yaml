@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "arroyo.fullname" . }}-compiler
+  labels:
+    {{- include "arroyo.labels" . | nindent 4 }}
+    app: {{ include "arroyo.fullname" . }}-compiler
+spec:
+  replicas: {{ .Values.compiler.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "arroyo.fullname" . }}-compiler
+  template:
+    metadata:
+      labels:
+        {{- include "arroyo.labels" . | nindent 8 }}
+        app: {{ include "arroyo.fullname" . }}-compiler
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      volumes:
+        {{- if .Values.volumes }}
+        {{- include "tplvalues.render" (dict "value" .Values.volumes "context" $) | nindent 8 }}
+        {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "arroyo.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: arroyo-compiler
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 10 }}
+        image: "{{ .Values.compilerImage.repository }}:{{ .Values.compilerImage.tag }}"
+        imagePullPolicy: {{ .Values.compilerImage.pullPolicy }}
+        env:
+          {{- include "arroyo.storageEnvVars" . | nindent 10 }}
+        ports:
+        - containerPort: 9000
+          name: grpc
+        - containerPort: 9001
+          name: admin
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: admin
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: admin
+        {{- if .Values.compiler.resources }}
+        resources: {{- toYaml .Values.compiler.resources | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        {{- if .Values.volumeMounts }}
+        {{- include "tplvalues.render" (dict "value" .Values.volumeMounts "context" $) | nindent 10 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "arroyo.fullname" . }}-compiler
+spec:
+  selector:
+    app: {{ include "arroyo.fullname" . }}-compiler
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 9000
+      targetPort: 9000
+    - name: http
+      protocol: TCP
+      port: 9001
+      targetPort: 9001

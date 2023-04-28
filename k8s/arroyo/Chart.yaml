@@ -1,0 +1,13 @@
+apiVersion: v2
+name: arroyo
+description: Helm chart for the Arroyo stream processing engine
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords:
+  - stream processing
+  - data
+  - real-time
+

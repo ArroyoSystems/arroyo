@@ -47,7 +47,7 @@ RUN service postgresql start && \
 FROM debian:bookworm-slim AS runner
 WORKDIR /app
 RUN apt-get update && \
-    apt-get -y install libssl-dev openssl supervisor
+    apt-get -y install libssl-dev openssl supervisor libsasl2-dev
 COPY --from=builder /app/target/release/arroyo-api /app/target/release/arroyo-controller ./
 COPY --from=builder /app/arroyo-console/dist ./dist
 COPY --from=builder /app/arroyo-api/migrations /migrations

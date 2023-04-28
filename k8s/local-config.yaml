@@ -1,0 +1,19 @@
+externalDatabase:
+  host: 10.0.1.1
+
+
+outputDir: "/tmp/arroyo-test"
+
+volumes:
+  - name: checkpoints
+    hostPath:
+      path: /tmp/arroyo-test
+      type: DirectoryOrCreate
+
+volumeMounts:
+  - name: checkpoints
+    mountPath: /tmp/arroyo-test
+
+serviceImage:
+  repository: "localhost:32000/arroyo-services"
+  pullPolicy: "Always"
