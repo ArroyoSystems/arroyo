@@ -39,8 +39,6 @@ use types::{StructDef, StructField, TypeDef};
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::expressions::ExpressionGenerator;
-
 #[cfg(test)]
 mod test;
 
