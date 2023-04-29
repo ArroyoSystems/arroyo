@@ -15,8 +15,13 @@ spec:
       labels:
         {{- include "arroyo.labels" . | nindent 8 }}
         app: {{ include "arroyo.fullname" . }}-api
-      {{- with .Values.podAnnotations }}
       annotations:
+        {{- if .Values.prometheus.setAnnotations }}
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8002"
+        {{- end }}
+      {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
 

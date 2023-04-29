@@ -26,6 +26,10 @@ worker:
       cpu: 400m
   slots: 4
 
+prometheus:
+  deploy: false
+  externalEndpoint: "http://prometheus-server.default.svc.cluster.local"
+  setAnnotations: true
 
 
 # Image for the arroyo control plane services

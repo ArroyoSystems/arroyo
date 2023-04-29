@@ -18,8 +18,13 @@ spec:
       labels:
       {{- include "arroyo.labels" . | nindent 8 }}
         app: {{ include "arroyo.fullname" . }}-controller
-      {{- with .Values.podAnnotations }}
       annotations:
+        {{- if .Values.prometheus.setAnnotations }}
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "9191"
+        {{- end }}
+      {{- with .Values.podAnnotations }}
       {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
@@ -57,8 +62,13 @@ spec:
           value: "{{ include "arroyo.fullname" . }}"
         - name: K8S_WORKER_LABELS
           value: {{ include "arroyo.labels" . | quote }}
-        - name: K8S_WORKER_ANNOTIONS
+        - name: K8S_WORKER_ANNOTATIONS
+        {{- if .Values.prometheus.setAnnotations }}
+          {{- $merged := merge (dict "prometheus.io/scrape" "true" "prometheus.io/path" "/metrics" "prometheus.io/port" "6901") .Values.podAnnotations  }}
+          value: {{ toYaml $merged | quote }}
+        {{- else }}
           value: {{ .Values.podAnnotations | toYaml | quote }}
+        {{- end }}
         - name: K8S_WORKER_IMAGE
           value: "{{ .Values.workerImage.repository }}:{{ .Values.workerImage.tag }}"
         - name: K8S_WORKER_IMAGE_PULL_POLICY

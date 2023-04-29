@@ -2,8 +2,8 @@ use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
 use arroyo_rpc::grpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_types::{
-    string_config, u32_config, WorkerId, CONTROLLER_ADDR_ENV, GRPC_PORT_ENV, JOB_ID_ENV,
-    K8S_NAMESPACE_ENV, K8S_WORKER_ANNOTATIONS_ENV, K8S_WORKER_IMAGE_ENV,
+    string_config, u32_config, WorkerId, ADMIN_PORT_ENV, CONTROLLER_ADDR_ENV, GRPC_PORT_ENV,
+    JOB_ID_ENV, K8S_NAMESPACE_ENV, K8S_WORKER_ANNOTATIONS_ENV, K8S_WORKER_IMAGE_ENV,
     K8S_WORKER_IMAGE_PULL_POLICY_ENV, K8S_WORKER_LABELS_ENV, K8S_WORKER_NAME_ENV,
     K8S_WORKER_RESOURCES_ENV, K8S_WORKER_SLOTS_ENV, K8S_WORKER_VOLUMES_ENV,
     K8S_WORKER_VOLUME_MOUNTS_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV,
@@ -130,7 +130,10 @@ impl Scheduler for KubernetesScheduler {
                 "name": RUN_ID_ENV, "value": format!("{}", req.run_id),
             },
             {
-                "name": GRPC_PORT_ENV, "value": "8000",
+                "name": GRPC_PORT_ENV, "value": "6900",
+            },
+            {
+                "name": ADMIN_PORT_ENV, "value": "6901",
             },
             {
                 "name": "WORKER_BIN",
@@ -163,6 +166,7 @@ impl Scheduler for KubernetesScheduler {
                 "name": format!("{}-{}-{}", self.name, req.job_id, req.run_id),
                 "namespace": self.namespace,
                 "labels": labels,
+                "annotations": annotations,
             },
             "spec": {
                 "replicas": replicas,
@@ -186,8 +190,12 @@ impl Scheduler for KubernetesScheduler {
                                 "resources": self.resources,
                                 "ports": [
                                     {
-                                        "containerPort": 8000,
+                                        "containerPort": 6900,
                                         "name": "grpc",
+                                    },
+                                    {
+                                        "containerPort": 6901,
+                                        "name": "admin",
                                     }
                                 ],
                                 "env": env,
