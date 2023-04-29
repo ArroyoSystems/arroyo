@@ -1,10 +1,7 @@
 use std::time::Duration;
 
 use crate::{
-    expressions::{
-        to_expression_generator, AggregationExpression, Aggregator, Column, Expression,
-        ExpressionGenerator,
-    },
+    expressions::{to_expression_generator, AggregationExpression, Aggregator, Column, Expression},
     schemas::window_type_def,
     types::{StructDef, StructField, TypeDef},
 };
@@ -113,10 +110,8 @@ impl Projection {
             .collect();
         StructDef { name: None, fields }
     }
-}
 
-impl ExpressionGenerator for Projection {
-    fn to_syn_expression(&self) -> syn::Expr {
+    pub fn to_syn_expression(&self) -> syn::Expr {
         let assignments: Vec<_> = self
             .field_computations
             .iter()
@@ -174,9 +169,8 @@ impl AggregateProjection {
             .collect();
         StructDef { name: None, fields }
     }
-}
-impl ExpressionGenerator for AggregateProjection {
-    fn to_syn_expression(&self) -> syn::Expr {
+
+    pub fn to_syn_expression(&self) -> syn::Expr {
         let assignments: Vec<_> = self
             .field_computations
             .iter()
