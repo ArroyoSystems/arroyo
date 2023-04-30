@@ -28,10 +28,8 @@ export function needsOrgSetup(): JSX.Element | null {
 }
 
 export function getClient(): ApiClient {
-  let endpoint = window.location.protocol + "//" + window.location.host.split(":")[0] + ":8001";
-
   const transport = createGrpcWebTransport({
-    baseUrl: endpoint,
+    baseUrl: (window as any).__API_ENDPOINT
   });
 
   const client = createPromiseClient(ApiGrpc, transport);

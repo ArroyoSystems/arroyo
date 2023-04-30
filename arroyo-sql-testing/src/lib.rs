@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use arroyo_sql_macro::single_test_codegen;
-    use chrono;
 
     // Casts
     single_test_codegen!(
@@ -393,10 +392,21 @@ mod tests {
         "bit_length_empty_string",
         "bit_length(non_nullable_string)",
         arroyo_sql::TestStruct {
-            non_nullable_string: "".into(),
+            non_nullable_string: "hello".into(),
             ..Default::default()
         },
-        0
+        40i32
+    );
+
+    // bit_length unicode
+    single_test_codegen!(
+        "bit_length_unicode",
+        "bit_length(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "😀😀😀😀😀".into(),
+            ..Default::default()
+        },
+        160i32
     );
 
     // Btrim
@@ -431,14 +441,47 @@ mod tests {
         None
     );
 
+    // character_length unicode
     single_test_codegen!(
-        "character_length_empty_string",
+        "character_length_unicode",
         "character_length(non_nullable_string)",
         arroyo_sql::TestStruct {
-            non_nullable_string: "".into(),
+            non_nullable_string: "👍".into(),
             ..Default::default()
         },
-        0
+        1
+    );
+
+    // octet_length non null
+    single_test_codegen!(
+        "octet_length_non_null",
+        "octet_length(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "hello".into(),
+            ..Default::default()
+        },
+        5
+    );
+
+    // upper and lower
+    single_test_codegen!(
+        "upper_non_null",
+        "upper(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "hello".into(),
+            ..Default::default()
+        },
+        "HELLO".to_string()
+    );
+
+    single_test_codegen!(
+        "lower_non_null",
+        "lower(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "HELLO".into(),
+            ..Default::default()
+        },
+        "hello".to_string()
     );
 
     // Chr
@@ -610,5 +653,211 @@ mod tests {
             ..Default::default()
         },
         None
+    );
+
+    //Pad Functions
+    single_test_codegen!(
+        "lpad",
+        "lpad(non_nullable_string, 10, 'x')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello".into(),
+            ..Default::default()
+        },
+        "xxxxxHello".to_string()
+    );
+
+    single_test_codegen!(
+        "lpad_null",
+        "lpad(nullable_string, 10, 'x')",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "rpad",
+        "rpad(non_nullable_string, 10, 'x')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello".into(),
+            ..Default::default()
+        },
+        "Helloxxxxx".to_string()
+    );
+
+    single_test_codegen!(
+        "rpad_null",
+        "rpad(nullable_string, non_nullable_i32, 'x')",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        None
+    );
+
+    // strpos
+    single_test_codegen!(
+        "strpos",
+        "strpos(non_nullable_string, 'l')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello, World".into(),
+            ..Default::default()
+        },
+        3i32
+    );
+
+    // left
+    single_test_codegen!(
+        "left",
+        "left(non_nullable_string, 3)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello, World".into(),
+            ..Default::default()
+        },
+        "Hel".to_string()
+    );
+    // right
+    single_test_codegen!(
+        "right",
+        "right(non_nullable_string, 3)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello, World".into(),
+            ..Default::default()
+        },
+        "rld".to_string()
+    );
+
+    // Hash
+    single_test_codegen!(
+        "md5_non_null",
+        "md5(non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello, World".into(),
+            ..Default::default()
+        },
+        "82bb413746aee42f89dea2b59614f9ef".to_string()
+    );
+
+    single_test_codegen!(
+        "md5_null",
+        "md5(nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "sha224_non_null",
+        "sha224(non_nullable_bytes)",
+        arroyo_sql::TestStruct {
+            non_nullable_bytes: "asdf".as_bytes().to_vec(),
+            ..Default::default()
+        },
+        hex::decode("7872a74bcbf298a1e77d507cd95d4f8d96131cbbd4cdfc571e776c8a").unwrap()
+    );
+
+    single_test_codegen!(
+        "sha224_null",
+        "sha224(nullable_bytes)",
+        arroyo_sql::TestStruct {
+            nullable_bytes: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "sha256_non_null",
+        "sha256(non_nullable_bytes)",
+        arroyo_sql::TestStruct {
+            non_nullable_bytes: "asdf".as_bytes().to_vec(),
+            ..Default::default()
+        },
+        hex::decode("f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b").unwrap()
+    );
+
+    single_test_codegen!(
+        "sha256_null",
+        "sha256(nullable_bytes)",
+        arroyo_sql::TestStruct {
+            nullable_bytes: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "sha384_non_null",
+        "sha384(non_nullable_bytes)",
+        arroyo_sql::TestStruct {
+            non_nullable_bytes: "asdf".as_bytes().to_vec(),
+            ..Default::default()
+        },
+        hex::decode("a69e7df30b24c042ec540ccbbdbfb1562c85787038c885749c1e408e2d62fa36642cd0075fa351e822e2b8a59139cd9d").unwrap()
+    );
+
+    single_test_codegen!(
+        "sha384_null",
+        "sha384(nullable_bytes)",
+        arroyo_sql::TestStruct {
+            nullable_bytes: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "sha512_non_null",
+        "sha512(non_nullable_bytes)",
+        arroyo_sql::TestStruct {
+            non_nullable_bytes: "asdf".as_bytes().to_vec(),
+            ..Default::default()
+        },
+        hex::decode("401b09eab3c013d4ca54922bb802bec8fd5318192b0a75f201d8b3727429080fb337591abd3e44453b954555b7a0812e1081c39b740293f765eae731f5a65ed1").unwrap()
+    );
+
+    single_test_codegen!(
+        "sha512_null",
+        "sha512(nullable_bytes)",
+        arroyo_sql::TestStruct {
+            nullable_bytes: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "float_literal",
+        "100.0",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        100f64
+    );
+    single_test_codegen!(
+        "int_literal_plus_float",
+        "100 + non_nullable_f32",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        100f32
+    );
+    single_test_codegen!(
+        "float_literal_plus_int",
+        "100.0 + non_nullable_i32",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        100f64
+    );
+    single_test_codegen!(
+        "i32_plus_i64",
+        "non_nullable_i32 + non_nullable_i64",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        0i64
     );
 }

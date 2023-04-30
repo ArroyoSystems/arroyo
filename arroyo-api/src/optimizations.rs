@@ -339,7 +339,7 @@ impl FusedExpressionOperatorBuilder {
             }
             Some(Record) => {
                 self.body.push(quote!(
-                    let record:#out_type = #expression;));
+                    let record:#out_type = #expression?;));
                 self.current_return_type = Some(OptionalRecord);
             }
             Some(OptionalRecord) => {

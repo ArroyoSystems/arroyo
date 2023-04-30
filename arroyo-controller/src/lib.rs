@@ -1,7 +1,6 @@
 #![allow(clippy::new_without_default)]
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
-use crate::scheduler::{NomadScheduler, ProcessScheduler, Scheduler};
 
 use anyhow::bail;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
@@ -22,7 +21,6 @@ use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
 use prometheus::{register_gauge, Gauge};
 use regex::Regex;
-use scheduler::NodeScheduler;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -40,11 +38,12 @@ use tracing::{debug, info, warn};
 
 mod compiler;
 mod job_controller;
-pub mod scheduler;
+pub mod schedulers;
 mod states;
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
+use crate::schedulers::{nomad::NomadScheduler, NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::StopMode;
 
 pub const CHECKPOINTS_TO_KEEP: u32 = 5;
@@ -428,6 +427,15 @@ impl ControllerServer {
                 info!("Using nomad scheduler");
                 Arc::new(NomadScheduler::new())
             }
+            Some("kubernetes") | Some("k8s") => {
+                #[cfg(feature = "k8s")]
+                {
+                    info!("Using kubernetes scheduler");
+                    Arc::new(crate::schedulers::kubernetes::KubernetesScheduler::new().await)
+                }
+                #[cfg(not(feature = "k8s"))]
+                panic!("Kubernetes not enabled -- compile with `--features k8s` to enable")
+            }
             _ => {
                 info!("Using process scheduler");
                 Arc::new(ProcessScheduler::new())
@@ -438,6 +446,7 @@ impl ControllerServer {
         let mut cfg = deadpool_postgres::Config::new();
         cfg.dbname = Some(config.name);
         cfg.host = Some(config.host);
+        cfg.port = Some(config.port);
         cfg.user = Some(config.user);
         cfg.password = Some(config.password);
         cfg.manager = Some(ManagerConfig {
@@ -446,6 +455,18 @@ impl ControllerServer {
         let pool = cfg
             .create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls)
             .unwrap();
+
+        // test that the DB connection is valid
+        let _ = pool.get().await.unwrap_or_else(|e| {
+            panic!(
+                "Failed to connect to database {} at {}@{}:{} {:?}",
+                cfg.dbname.unwrap(),
+                cfg.user.unwrap(),
+                cfg.host.unwrap(),
+                cfg.port.unwrap(),
+                e
+            );
+        });
 
         Self {
             scheduler,
@@ -549,7 +570,7 @@ impl ControllerServer {
         let (shutdown_tx, shutdown_rx) = broadcast::channel(16);
 
         arroyo_server_common::start_admin_server(
-            "arroyo-controller".to_string(),
+            "controller",
             ports::CONTROLLER_ADMIN,
             shutdown_rx,
         );

@@ -11,6 +11,7 @@ import {
   Badge,
   Box,
   Button,
+  ButtonGroup,
   chakra,
   Code,
   Flex,
@@ -41,6 +42,7 @@ import {
   theme,
   Tr,
   UnorderedList,
+  useDisclosure
 } from "@chakra-ui/react";
 import React, { ReactElement, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -76,6 +78,7 @@ import { PipelineGraph } from "./JobGraph";
 import { ApiClient } from "../../main";
 import { PipelineOutputs } from "./JobOutputs";
 import { SqlEditor } from "./SqlEditor";
+import PipelineConfigModal from "./PipelineConfigModal";
 
 interface JobDetailState {
   pipeline?: JobDetailsResp;
@@ -95,6 +98,11 @@ export function JobDetail({ client }: { client: ApiClient }) {
   const [checkpoints, setCheckpoints] = useState<Array<CheckpointOverview>>([]);
   const [checkpointFetchInProgress, setCheckpointFetchInProgress] = useState<boolean>(false);
   const [subscribed, setSubscribed] = useState<boolean>(false);
+  const {
+    isOpen: configModalOpen,
+    onOpen: onConfigModalOpen,
+    onClose: onConfigModalClose
+  } = useDisclosure();
 
   let { id } = useParams();
 
@@ -186,6 +194,15 @@ export function JobDetail({ client }: { client: ApiClient }) {
     fetchPipeline();
   }
 
+  async function updateJobParallelism (parallelism: number) {
+    console.log(`Setting pipeline parallelism=${parallelism}`);
+    await (await client()).updateJob({
+      jobId: id,
+      parallelism
+    });
+    fetchPipeline();
+  }
+
   let inner;
   if (state.pipeline == null || state.pipeline.jobGraph == null) {
     inner = <p>Loading</p>;
@@ -274,7 +291,35 @@ export function JobDetail({ client }: { client: ApiClient }) {
     );
   }
 
+  let configModal = <></>;
+  if (state.pipeline?.jobGraph?.nodes) {
+    const { nodes } = state.pipeline.jobGraph;
+    const parallelism = Math.max(...nodes.map(({ parallelism }) => parallelism));
 
+    configModal = (
+      <PipelineConfigModal
+        isOpen={configModalOpen}
+        parallelism={parallelism}
+        onClose={onConfigModalClose}
+        updateJobParallelism={updateJobParallelism}
+      />
+    );
+  }
+
+  const editPipelineButton = <Button onClick={onConfigModalOpen}>Edit</Button>;
+
+  const actionButton = (
+    <Button
+      isDisabled={state.pipeline?.action == undefined}
+      isLoading={state.pipeline?.inProgress}
+      loadingText={state.pipeline?.actionText}
+      onClick={async () => {
+        await updateJobState(state.pipeline?.action!);
+      }}
+    >
+      {state.pipeline?.actionText}
+    </Button>
+  );
 
   return (
     <Box top={0} bottom={0} right={0} left={200} position="absolute" overflowY="hidden">
@@ -286,17 +331,14 @@ export function JobDetail({ client }: { client: ApiClient }) {
         </Box>
         <Spacer />
         <Box p={5}>
-          <Button
-            isDisabled={state.pipeline?.action == undefined}
-            isLoading={state.pipeline?.inProgress}
-            loadingText={state.pipeline?.actionText}
-            onClick={() => updateJobState(state.pipeline?.action!)}
-          >
-            {state.pipeline?.actionText}
-          </Button>
+          <ButtonGroup>
+            {editPipelineButton}
+            {actionButton}
+          </ButtonGroup>
         </Box>
       </Flex>
       {inner}
+      {configModal}
     </Box>
   );
 }

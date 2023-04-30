@@ -36,7 +36,7 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-#[derive(StreamNode)]
+#[derive(StreamNode, Debug)]
 pub struct ImpulseSourceFunc {
     interval: Option<Duration>,
     spec: ImpulseSpec,
@@ -112,7 +112,6 @@ impl ImpulseSourceFunc {
                 .interval
                 .map(|d| self.state.start_time + d * self.state.counter as u32)
                 .unwrap_or_else(SystemTime::now);
-
             ctx.collect(Record {
                 timestamp,
                 key: None,
