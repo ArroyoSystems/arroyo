@@ -1,8 +1,8 @@
 use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
     DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq,
-    DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetSinksReq, GetSinksResp, PipelineProgram,
-    SourceMetadataResp,
+    DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetSinksReq, GetSinksResp, GetSourceReq,
+    GetSourceResp, PipelineProgram, SourceMetadataResp,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -420,6 +420,19 @@ impl ApiGrpc for ApiServer {
 
         Ok(Response::new(GetSourcesResp {
             sources: sources::get_sources(&auth, &self.client().await?).await?,
+        }))
+    }
+
+    async fn get_source(
+        &self,
+        request: Request<GetSourceReq>,
+    ) -> Result<Response<GetSourceResp>, Status> {
+        let (request, auth) = self.authenticate(request).await?;
+
+        Ok(Response::new(GetSourceResp {
+            source: Some(
+                sources::get_source(request.into_inner(), &auth, &self.client().await?).await?,
+            ),
         }))
     }
 
