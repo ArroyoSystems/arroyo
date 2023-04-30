@@ -57,6 +57,9 @@ pub const HTTP_PORT_ENV: &str = "HTTP_PORT";
 pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
 // Endpoint that the frontend should query for the API
 pub const API_ENDPOINT_ENV: &str = "API_ENDPOINT";
+// The rate parameter (e.g., "15s") used by the API when querying prometheus metrics -- this should
+// be at least 4x the configured scrape interval for your prometheus config
+pub const API_METRICS_RATE_ENV: &str = "API_METRICS_RATE";
 
 pub const S3_REGION_ENV: &str = "S3_REGION";
 pub const S3_BUCKET_ENV: &str = "S3_BUCKET";

@@ -18,5 +18,9 @@ serviceImage:
   repository: "localhost:32000/arroyo-services"
   pullPolicy: "Always"
 
+compilerImage:
+  repository: "localhost:32000/arroyo-compiler"
+  pullPolicy: "Always"
+
 podAnnotations:
   myAnnotation: yay

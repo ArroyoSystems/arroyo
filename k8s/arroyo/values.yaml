@@ -28,8 +28,12 @@ worker:
 
 prometheus:
   deploy: false
-  externalEndpoint: "http://prometheus-server.default.svc.cluster.local"
+  endpoint: "http://prometheus-server.default.svc.cluster.local"
   setAnnotations: true
+  # the rate interval that should be used for queries; should be at least 4x the scrape
+  # interval configured on prometheus -- setting this (and your scrape interval) to a
+  # lower value will improve metric freshness and resolution
+  queryRate: "4m"
 
 
 # Image for the arroyo control plane services

@@ -211,7 +211,7 @@ impl WorkerServer {
 
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
-        start_admin_server("api", 0, shutdown_rx);
+        start_admin_server("worker", 0, shutdown_rx);
 
         tokio::spawn(async move {
             // ideally, get a signal when the server is started...

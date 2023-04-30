@@ -44,6 +44,10 @@ spec:
         {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
         - name: CONTROLLER_ADDR
           value: "http://{{ include "arroyo.fullname" . }}-controller:9190"
+        - name: PROM_ENDPOINT
+          value: "{{ .Values.prometheus.endpoint }}"
+        - name: API_METRICS_RATE
+          value: "{{ .Values.prometheus.rate }}"
         ports:
         - containerPort: 8000
           name: http

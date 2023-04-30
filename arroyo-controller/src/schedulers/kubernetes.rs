@@ -20,10 +20,10 @@ use std::env;
 use std::time::Duration;
 use tonic::Status;
 
-const CLUSTER_LABEL: &'static str = "arroyo.dev/cluster";
-const JOB_ID_LABEL: &'static str = "arroyo.dev/job-id";
-const RUN_ID_LABEL: &'static str = "arroyo.dev/run-id";
-const JOB_NAME_LABEL: &'static str = "arroyo.dev/job-name";
+const CLUSTER_LABEL: &'static str = "cluster";
+const JOB_ID_LABEL: &'static str = "job_id";
+const RUN_ID_LABEL: &'static str = "run_id";
+const JOB_NAME_LABEL: &'static str = "job_name";
 
 pub struct KubernetesScheduler {
     client: Client,
@@ -178,7 +178,8 @@ impl Scheduler for KubernetesScheduler {
                 },
                 "template": {
                     "metadata": {
-                        "labels": labels
+                        "labels": labels,
+                        "annotations": annotations,
                     },
                     "spec": {
                         "volumes": self.volumes,
