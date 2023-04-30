@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::{
-    expressions::{to_expression_generator, Aggregator, Column, Expression, ExpressionGenerator},
+    expressions::{to_expression_generator, AggregationExpression, Aggregator, Column, Expression},
     schemas::window_type_def,
     types::{StructDef, StructField, TypeDef},
 };
@@ -18,7 +18,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{parse_quote, parse_str, Ident, LitInt};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Projection {
     pub field_names: Vec<Column>,
     pub field_computations: Vec<Expression>,
@@ -110,10 +110,8 @@ impl Projection {
             .collect();
         StructDef { name: None, fields }
     }
-}
 
-impl ExpressionGenerator for Projection {
-    fn to_syn_expression(&self) -> syn::Expr {
+    pub fn to_syn_expression(&self) -> syn::Expr {
         let assignments: Vec<_> = self
             .field_computations
             .iter()
@@ -147,11 +145,12 @@ impl ExpressionGenerator for Projection {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AggregateProjection {
     pub field_names: Vec<Column>,
-    pub field_computations: Vec<Expression>,
+    pub field_computations: Vec<AggregationExpression>,
 }
+
 impl AggregateProjection {
     pub fn output_struct(&self) -> StructDef {
         let fields = self
@@ -170,9 +169,8 @@ impl AggregateProjection {
             .collect();
         StructDef { name: None, fields }
     }
-}
-impl ExpressionGenerator for AggregateProjection {
-    fn to_syn_expression(&self) -> syn::Expr {
+
+    pub fn to_syn_expression(&self) -> syn::Expr {
         let assignments: Vec<_> = self
             .field_computations
             .iter()
@@ -208,7 +206,7 @@ impl ExpressionGenerator for AggregateProjection {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GroupByKind {
     Basic,
     WindowOutput {
@@ -219,12 +217,7 @@ pub enum GroupByKind {
 }
 
 impl GroupByKind {
-    pub fn output_struct(
-        &self,
-        key_projection: &Projection,
-        aggregate_struct: StructDef,
-    ) -> StructDef {
-        let key_struct = key_projection.output_struct();
+    pub fn output_struct(&self, key_struct: &StructDef, aggregate_struct: &StructDef) -> StructDef {
         let key_fields = key_struct.fields.len();
         let aggregate_fields = aggregate_struct.fields.len();
         match self {
@@ -271,11 +264,10 @@ impl GroupByKind {
 
     pub fn to_syn_expression(
         &self,
-        key_projection: &Projection,
-        aggregate_struct: StructDef,
+        key_struct: &StructDef,
+        aggregate_struct: &StructDef,
     ) -> syn::Expr {
         let mut assignments: Vec<_> = vec![];
-        let key_struct = key_projection.output_struct();
 
         key_struct.fields.iter().for_each(|field| {
             let field_name: Ident = format_ident!("{}", field.field_name());
@@ -285,7 +277,7 @@ impl GroupByKind {
             let field_name: Ident = format_ident!("{}", field.field_name());
             assignments.push(quote!(#field_name : arg.aggregate.#field_name.clone()));
         });
-        let return_struct = self.output_struct(key_projection, aggregate_struct);
+        let return_struct = self.output_struct(key_struct, aggregate_struct);
         if let GroupByKind::WindowOutput {
             index,
             column: _,
@@ -312,10 +304,25 @@ impl GroupByKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TwoPhaseAggregateProjection {
     pub field_names: Vec<Column>,
     pub field_computations: Vec<TwoPhaseAggregation>,
+}
+
+impl TryFrom<AggregateProjection> for TwoPhaseAggregateProjection {
+    type Error = anyhow::Error;
+
+    fn try_from(aggregate_projection: AggregateProjection) -> Result<Self> {
+        Ok(Self {
+            field_names: aggregate_projection.field_names,
+            field_computations: aggregate_projection
+                .field_computations
+                .into_iter()
+                .map(|computation| computation.try_into().unwrap())
+                .collect(),
+        })
+    }
 }
 
 impl TwoPhaseAggregateProjection {
@@ -544,14 +551,17 @@ impl TwoPhaseAggregateProjection {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TwoPhaseAggregation {
-    incoming_expression: Expression,
-    aggregator: Aggregator,
+    pub incoming_expression: Expression,
+    pub aggregator: Aggregator,
 }
 
 impl TwoPhaseAggregation {
     pub fn from_expression(expr: &Expr, input_struct: &StructDef) -> Result<TwoPhaseAggregation> {
+        if !input_struct.fields.is_empty() {
+            bail!("expected single field input");
+        }
         match expr {
             Expr::AggregateFunction(AggregateFunction {
                 fun,

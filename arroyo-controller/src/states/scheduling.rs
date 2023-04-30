@@ -15,9 +15,9 @@ use anyhow::anyhow;
 use arroyo_state::{parquet::StorageClient, BackingStore, StateBackend};
 
 use crate::{job_controller::JobController, queries::controller_queries};
-use crate::{scheduler::SchedulerError, JobMessage};
+use crate::{schedulers::SchedulerError, JobMessage};
 use crate::{
-    scheduler::StartPipelineReq,
+    schedulers::StartPipelineReq,
     states::{fatal, StateError},
 };
 
@@ -150,7 +150,7 @@ impl State for Scheduling {
 
     async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
         // clear out any existing workers for this job
-        if let Err(e) = ctx.scheduler.clean_cluster(&ctx.config.id).await {
+        if let Err(e) = ctx.scheduler.stop_workers(&ctx.config.id, None, true).await {
             warn!(
                 message = "failed to clean cluster prior to scheduling",
                 job_id = ctx.config.id,
@@ -230,7 +230,7 @@ impl State for Scheduling {
                 }
             }
 
-            if workers.values().map(|w| w.slots).sum::<usize>() == slots_needed {
+            if workers.values().map(|w| w.slots).sum::<usize>() >= slots_needed {
                 break;
             }
         }
@@ -275,7 +275,7 @@ impl State for Scheduling {
             let mut metadata = StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch)
                 .await
                 .unwrap_or_else(|| panic!("epoch {} not found for job {}", epoch, ctx.config.id));
-            if let Err(e) = StateBackend::prepare_checkpoint(&metadata).await {
+            if let Err(e) = StateBackend::prepare_checkpoint_load(&metadata).await {
                 return Err(ctx.retryable(self, "failed to prepare checkpoint for loading", e, 10));
             }
             metadata.min_epoch = min_epoch;

@@ -51,7 +51,7 @@ function ConfigureImpulse({
         <Input
           type="number"
           value={config.intervalMicros}
-          onChange={onChangeNumber(state, setState, "intervalMs", config)}
+          onChange={onChangeNumber(state, setState, "intervalMicros", config)}
         />
         <FormHelperText>
           The number of microseconds in between the event times of subsequent events emmitted by the

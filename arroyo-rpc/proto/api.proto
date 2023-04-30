@@ -145,6 +145,7 @@ message Operator {
     TumblingWindowAggregator tumbling_window_aggregator = 18;
     TumblingTopN tumbling_top_n = 19;
     SlidingAggregatingTopN sliding_aggregating_top_n = 20;
+    JoinWithExpiration join_with_expiration = 21;
   }
 }
 
@@ -308,6 +309,11 @@ message SlidingAggregatingTopN {
   string mem_type = 10;
   string sort_key_type = 11;
   uint64 max_elements = 12;
+}
+
+message JoinWithExpiration {
+  uint64 left_expiration_micros = 1;
+  uint64 right_expiration_micros = 2;
 }
 enum ExpressionReturnType {
   UNUSED_ERT = 0;

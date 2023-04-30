@@ -11,7 +11,9 @@ use datafusion::physical_plan::functions::make_scalar_function;
 
 mod expressions;
 mod operators;
+mod optimizations;
 mod pipeline;
+mod plan_graph;
 pub mod schemas;
 pub mod types;
 
@@ -258,6 +260,8 @@ pub struct TestStruct {
     pub nullable_i32: Option<i32>,
     pub non_nullable_bool: bool,
     pub nullable_bool: Option<bool>,
+    pub non_nullable_f32: f32,
+    pub nullable_f32: Option<f32>,
     pub non_nullable_f64: f64,
     pub nullable_f64: Option<f64>,
     pub non_nullable_i64: i64,
@@ -266,6 +270,8 @@ pub struct TestStruct {
     pub nullable_string: Option<String>,
     pub non_nullable_timestamp: SystemTime,
     pub nullable_timestamp: Option<SystemTime>,
+    pub non_nullable_bytes: Vec<u8>,
+    pub nullable_bytes: Option<Vec<u8>>,
 }
 
 impl Default for TestStruct {
@@ -275,6 +281,8 @@ impl Default for TestStruct {
             nullable_i32: Default::default(),
             non_nullable_bool: Default::default(),
             nullable_bool: Default::default(),
+            non_nullable_f32: Default::default(),
+            nullable_f32: Default::default(),
             non_nullable_f64: Default::default(),
             nullable_f64: Default::default(),
             non_nullable_i64: Default::default(),
@@ -283,6 +291,8 @@ impl Default for TestStruct {
             nullable_string: Default::default(),
             non_nullable_timestamp: SystemTime::UNIX_EPOCH,
             nullable_timestamp: None,
+            non_nullable_bytes: Default::default(),
+            nullable_bytes: Default::default(),
         }
     }
 }
@@ -310,6 +320,16 @@ fn test_struct_def() -> StructDef {
                 name: "nullable_bool".to_string(),
                 alias: None,
                 data_type: TypeDef::DataType(DataType::Boolean, true),
+            },
+            StructField {
+                name: "non_nullable_f32".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Float32, false),
+            },
+            StructField {
+                name: "nullable_f32".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Float32, true),
             },
             StructField {
                 name: "non_nullable_f64".to_string(),
@@ -356,6 +376,16 @@ fn test_struct_def() -> StructDef {
                     DataType::Timestamp(TimeUnit::Microsecond, None),
                     true,
                 ),
+            },
+            StructField {
+                name: "non_nullable_bytes".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Binary, false),
+            },
+            StructField {
+                name: "nullable_bytes".to_string(),
+                alias: None,
+                data_type: TypeDef::DataType(DataType::Binary, true),
             },
         ],
     }
@@ -405,10 +435,10 @@ pub fn get_test_expression(
     let statement = &ast[0];
     let sql_to_rel = SqlToRel::new(&schema_provider);
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone()).unwrap();
-    let mut optimizer_config = OptimizerContext::default();
+    let optimizer_config = OptimizerContext::default();
     let optimizer = Optimizer::new();
     let plan = optimizer
-        .optimize(&plan, &mut optimizer_config, |_plan, _rule| {})
+        .optimize(&plan, &optimizer_config, |_plan, _rule| {})
         .unwrap();
     let LogicalPlan::Projection(projection) = plan else {panic!("expect projection")};
     let generating_expression = to_expression_generator(&projection.expr[0], &struct_def).unwrap();

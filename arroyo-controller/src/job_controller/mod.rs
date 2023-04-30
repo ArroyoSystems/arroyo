@@ -533,10 +533,6 @@ impl JobController {
         }
     }
 
-    pub fn get_workers(&self) -> Vec<WorkerId> {
-        self.model.workers.keys().copied().collect()
-    }
-
     pub fn operator_parallelism(&self, op: &str) -> Option<usize> {
         self.model.operator_parallelism.get(op).cloned()
     }

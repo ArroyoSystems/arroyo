@@ -7,6 +7,7 @@ use arroyo_datastream::{
 };
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::CompileQueryReq;
+use arroyo_sql::types::duration_to_syn_expr;
 use arroyo_types::{to_micros, REMOTE_COMPILER_ENDPOINT_ENV};
 use petgraph::Direction;
 use proc_macro2::TokenStream;
@@ -15,7 +16,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, io};
-use syn::{parse_str, GenericArgument, PathArguments, Type, TypePath};
+use syn::{parse_quote, parse_str, GenericArgument, PathArguments, Type, TypePath};
 use tokio::process::Command;
 use tonic::{Code, Request};
 use tracing::info;
@@ -73,8 +74,10 @@ impl ProgramCompiler {
 
     pub async fn compile(&self) -> Result<CompiledProgram> {
         if let Ok(endpoint) = std::env::var(REMOTE_COMPILER_ENDPOINT_ENV) {
+            info!("Compiling remotely on {}", endpoint);
             self.compile_remote(endpoint).await
         } else {
+            info!("Compiling locally");
             self.compile_local().await
         }
     }
@@ -83,9 +86,7 @@ impl ProgramCompiler {
         let req = CompileQueryReq {
             job_id: self.job_id.clone(),
             types: self.compile_types().to_string(),
-            pipeline: self
-                .compile_pipeline_main(&self.name, &self.program.get_hash())
-                .to_string(),
+            pipeline: self.compile_pipeline_main(&self.name, &self.program.get_hash()),
             wasm_fns: self.compile_wasm_lib().to_string(),
         };
 
@@ -133,9 +134,7 @@ impl ProgramCompiler {
         fs::create_dir_all(&dir)?;
 
         let types = self.compile_types().to_string();
-        let main = self
-            .compile_pipeline_main(&self.name, &self.program.get_hash())
-            .to_string();
+        let main = self.compile_pipeline_main(&self.name, &self.program.get_hash());
         let wasm = self.compile_wasm_lib().to_string();
 
         let workspace_toml = r#"
@@ -230,7 +229,13 @@ wasm-opt = false
             .arg("build")
             .arg("--release")
             .output()
-            .await?;
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to run `cargo`; is rust and cargo installed? {:?}",
+                    e
+                )
+            })?;
 
         if !result.status.success() {
             return Err(fatal("Compilation failed for this query. We have been notified and are looking into the problem.",
@@ -241,7 +246,9 @@ wasm-opt = false
             .arg("build")
             .current_dir(&dir.join("wasm-fns"))
             .output()
-            .await?;
+            .await
+            .map_err(|e| anyhow!(
+                "Failed to run `wasm-pack`; you may need to run `$cargo install wasm-pack`: {:?}", e))?;
 
         if !result.status.success() {
             return Err(fatal("Compilation failed for this query. We have been notified and are looking into the problem.",
@@ -277,9 +284,6 @@ wasm-opt = false
         fs::create_dir_all(&src)?;
         let src_file_path = src.join(src_file);
         fs::write(&src_file_path, body)?;
-
-        Self::rustfmt(&src_file_path).await;
-
         Ok(())
     }
 
@@ -304,8 +308,9 @@ wasm-opt = false
         }
     }
 
-    fn compile_pipeline_main(&self, name: &str, hash: &str) -> TokenStream {
+    fn compile_pipeline_main(&self, name: &str, hash: &str) -> String {
         let imports = quote! {
+            #![allow(warnings)]
             use petgraph::graph::DiGraph;
             use arroyo_worker::operators::*;
             use arroyo_worker::operators::sources::*;
@@ -331,20 +336,20 @@ wasm-opt = false
             let body = match &node.operator {
                 Operator::FileSource { dir, delay } => {
                     let dir = dir.to_string_lossy();
-                    let delay = delay.as_millis() as u64;
+                    let delay = duration_to_syn_expr(*delay);
                     let out_t = parse_type(&output.unwrap().weight().value);
                     quote! {
-                        Box::new(FileSourceFunc::<#out_t>::from_dir(&std::path::PathBuf::from(#dir), std::time::Duration::from_millis(#delay)))
+                        Box::new(FileSourceFunc::<#out_t>::from_dir(&std::path::PathBuf::from(#dir), #delay))
                     }
                 }
                 Operator::ImpulseSource { start_time, spec, total_events } => {
                     let start_time = to_micros(*start_time);
                     let (interval, spec) = match spec {
-                        arroyo_datastream::ImpulseSpec::Delay(d) => {
-                            let micros = d.as_micros() as u64;
+                        arroyo_datastream::ImpulseSpec::Delay(delay) => {
+                            let delay = duration_to_syn_expr(*delay);
                             (
-                                quote! { Duration::from_micros(#micros) },
-                                quote!{ sources::ImpulseSpec::Delay(Duration::from_micros(#micros)) }
+                                quote! { Some(#delay) },
+                                quote!{ sources::ImpulseSpec::Delay(#delay) }
                             )
                         }
                         arroyo_datastream::ImpulseSpec::EventsPerSecond(eps) => {
@@ -430,21 +435,20 @@ wasm-opt = false
 
                     match typ {
                         WindowType::Tumbling { width } => {
-                            let width = width.as_millis() as u64;
+                            let width = duration_to_syn_expr(*width);
 
                             quote! {
                                 Box::new(KeyedWindowFunc::<#in_k, #in_t, #out_t, TumblingWindowAssigner>::
-                                    tumbling_window(std::time::Duration::from_millis(#width), #agg))
+                                    tumbling_window(#width, #agg))
                             }
                         }
                         WindowType::Sliding { width, slide } => {
-                            let width = width.as_millis() as u64;
-                            let slide = slide.as_millis() as u64;
+                            let width = duration_to_syn_expr(*width);
+                            let slide = duration_to_syn_expr(*slide);
 
                             quote! {
                                 Box::new(KeyedWindowFunc::<#in_k, #in_t, #out_t, SlidingWindowAssigner>::
-                                    sliding_window(std::time::Duration::from_millis(#width),
-                                        std::time::Duration::from_millis(#slide), #agg))
+                                    sliding_window(#width, #slide, #agg))
                             }
                         }
                         WindowType::Instant => {
@@ -491,12 +495,12 @@ wasm-opt = false
 
                     match watermark {
                         WatermarkType::Periodic { period, max_lateness } => {
-                            let period = period.as_millis() as u64;
-                            let max_lateness = max_lateness.as_millis() as u64;
+                            let period = duration_to_syn_expr(*period);
+                            let max_lateness = duration_to_syn_expr(*max_lateness);
                             quote! {
-                                Box::new(PeriodicWatermarkGenerator::<#in_k, #in_t>::new(
-                                    std::time::Duration::from_millis(#period),
-                                    std::time::Duration::from_millis(#max_lateness)))
+                                Box::new(
+                                    PeriodicWatermarkGenerator::<#in_k, #in_t>::
+                                    new(#period,#max_lateness))
                             }
                         }
                     }
@@ -521,19 +525,18 @@ wasm-opt = false
 
                     match window {
                         WindowType::Tumbling { width } => {
-                            let width = width.as_millis() as u64;
+                            let width = duration_to_syn_expr(*width);
                             quote! {
                                 Box::new(WindowedHashJoin::<#in_k, #in_t1, #in_t2, TumblingWindowAssigner, TumblingWindowAssigner>::
-                                    tumbling_window(std::time::Duration::from_millis(#width)))
+                                    tumbling_window(#width))
                             }
                         }
                         WindowType::Sliding { width, slide } => {
-                            let width = width.as_millis() as u64;
-                            let slide = slide.as_millis() as u64;
+                            let width = duration_to_syn_expr(*width);
+                            let slide = duration_to_syn_expr(*slide);
                             quote! {
                                 Box::new(WindowedHashJoin::<#in_k, #in_t1, #in_t2, SlidingWindowAssigner, SlidingWindowAssigner>::
-                                    sliding_window(std::time::Duration::from_millis(#width),
-                                        std::time::Duration::from_millis(#slide)))
+                                    sliding_window(#width, #slide))
                             }
                         }
                         WindowType::Instant => {
@@ -686,8 +689,8 @@ wasm-opt = false
                     let out_t = parse_type(&output.unwrap().weight().value);
                     let bin_t = parse_type(bin_type);
                     let mem_t = parse_type(mem_type);
-                    let width = width.as_millis() as u64;
-                    let slide = slide.as_millis() as u64;
+                    let width = duration_to_syn_expr(*width);
+                    let slide = duration_to_syn_expr(*slide);
                     let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
                     let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
                     let in_memory_add: syn::ExprClosure = parse_str(in_memory_add).unwrap();
@@ -695,12 +698,12 @@ wasm-opt = false
 
                     quote!{
                         Box::new(arroyo_worker::operators::aggregating_window::AggregatingWindowFunc::<#in_k, #in_t, #bin_t, #mem_t, #out_t>::
-                        new(std::time::Duration::from_millis(#width),
-                        std::time::Duration::from_millis(#slide),
-                            #aggregator,
-                            #bin_merger,
-                            #in_memory_add,
-                            #in_memory_remove))
+                            new(#width,
+                                #slide,
+                                #aggregator,
+                                #bin_merger,
+                                #in_memory_add,
+                                #in_memory_remove))
                     }
                 },
                 Operator::TumblingWindowAggregator(TumblingWindowAggregator { width, aggregator, bin_merger, bin_type }) => {
@@ -708,13 +711,13 @@ wasm-opt = false
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_t = parse_type(&output.unwrap().weight().value);
                     let bin_t = parse_type(bin_type);
-                    let width = width.as_millis() as u64;
+                    let width = duration_to_syn_expr(*width);
                     let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
                     let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
                     quote!{
                         Box::new(arroyo_worker::operators::tumbling_aggregating_window::
                             TumblingAggregatingWindowFunc::<#in_k, #in_t, #bin_t, #out_t>::
-                        new(std::time::Duration::from_millis(#width),
+                        new(#width,
                             #aggregator,
                             #bin_merger))
                     }
@@ -732,17 +735,17 @@ wasm-opt = false
                         let in_t = parse_type(&input.unwrap().weight().value);
                         let out_t = parse_type(&output.unwrap().weight().value);
                         let pk_type = parse_type(partition_key_type);
-                        let width = width.as_millis() as u64;
+                        let width = duration_to_syn_expr(*width);
                         let extractor: syn::ExprClosure = parse_str(extractor).expect(extractor);
                         let converter: syn::ExprClosure = parse_str(converter).unwrap();
                         quote! {
-                        Box::new(arroyo_worker::operators::tumbling_top_n_window::
-                            TumblingTopNWindowFunc::<#in_k, #in_t, #pk_type, #out_t>::
-                        new(std::time::Duration::from_millis(#width),
-                            #max_elements,
-                            #extractor,
-                            #converter))
-                    }
+                            Box::new(arroyo_worker::operators::tumbling_top_n_window::
+                                TumblingTopNWindowFunc::<#in_k, #in_t, #pk_type, #out_t>::
+                            new(#width,
+                                #max_elements,
+                                #extractor,
+                                #converter))
+                        }
                     }
 
                 Operator::SlidingAggregatingTopN(
@@ -767,8 +770,8 @@ wasm-opt = false
                     let out_k = parse_type(&output.unwrap().weight().key);
                     let bin_t = parse_type(bin_type);
                     let mem_t = parse_type(mem_type);
-                    let width = width.as_millis() as u64;
-                    let slide = slide.as_millis() as u64;
+                    let width = duration_to_syn_expr(*width);
+                    let slide = duration_to_syn_expr(*slide);
                     let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
                     let in_memory_add: syn::ExprClosure = parse_str(in_memory_add).unwrap();
                     let in_memory_remove: syn::ExprClosure =
@@ -782,8 +785,8 @@ wasm-opt = false
                     quote! {
                     Box::new(arroyo_worker::operators::sliding_top_n_aggregating_window::
                         SlidingAggregatingTopNWindowFunc::<#in_k, #in_t, #bin_t, #mem_t, #out_k, #sort_key_type, #out_t>::
-                    new(std::time::Duration::from_millis(#width),
-                    std::time::Duration::from_millis(#slide),
+                    new(#width,
+                        #slide,
                         #bin_merger,
                         #in_memory_add,
                         #in_memory_remove,
@@ -793,6 +796,24 @@ wasm-opt = false
                         #max_elements))
                 }
                 }
+                Operator::JoinWithExpiration { left_expiration, right_expiration } => {
+                    let mut inputs: Vec<_> = self.program.graph.edges_directed(idx, Direction::Incoming)
+                        .collect();
+                    inputs.sort_by_key(|e| e.weight().typ.clone());
+                    assert_eq!(2, inputs.len(), "JoinWithExpiration should have 2 inputs, but has {}", inputs.len());
+                    assert_eq!(inputs[0].weight().key, inputs[1].weight().key, "JoinWithExpiration inputs must have the same key type");
+
+                    let in_k = parse_type(&inputs[0].weight().key);
+                    let in_t1 = parse_type(&inputs[0].weight().value);
+                    let in_t2 = parse_type(&inputs[1].weight().value);
+                    let left_expiration = duration_to_syn_expr(*left_expiration);
+                    let right_expiration = duration_to_syn_expr(*right_expiration);
+                    quote!{
+                        Box::new(arroyo_worker::operators::join_with_expiration::
+                            JoinWithExpiration::<#in_k, #in_t1, #in_t2>::
+                        new(#left_expiration, #right_expiration))
+                    }
+                },
             };
 
             (node.operator_id.clone(), description, body, node.parallelism)
@@ -862,7 +883,7 @@ wasm-opt = false
             .map(|t| parse_str(t).unwrap())
             .collect();
 
-        quote! {
+        prettyplease::unparse(&parse_quote! {
             #imports
 
             pub fn make_graph() -> DiGraph<LogicalNode, LogicalEdge> {
@@ -881,7 +902,7 @@ wasm-opt = false
             }
 
             #(#other_defs )*
-        }
+        })
     }
 
     fn compile_wasm_lib(&self) -> TokenStream {
@@ -1012,7 +1033,7 @@ wasm-opt = false
             })
             .collect();
 
-        quote! {
+        parse_quote! {
             use types::*;
             use std::time::SystemTime;
 
@@ -1037,10 +1058,6 @@ wasm-opt = false
             #(#wasm_fns )*
         }
     }
-
-    async fn rustfmt(file: &Path) {
-        Command::new("rustfmt").arg(file).output().await.unwrap();
-    }
 }
 
 #[cfg(test)]
@@ -1057,10 +1074,7 @@ mod tests {
 
         let v = extract_container_type("Vec", &parse_str("Vec<String>").unwrap()).unwrap();
         assert_eq!("String", quote! { #v }.to_string());
-
-        assert_eq!(
-            None,
-            extract_container_type("Vec", &parse_str("HashMap<String, u8>").unwrap())
-        );
+        let t = extract_container_type("Vec", &parse_str("HashMap<String, u8>").unwrap());
+        assert!(t.is_none())
     }
 }

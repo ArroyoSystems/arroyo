@@ -7,7 +7,10 @@ use arroyo_rpc::grpc::{
     SubtaskCheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType,
 };
 use arroyo_rpc::{CheckpointCompleted, ControlResp};
-use arroyo_types::{from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo};
+use arroyo_types::{
+    from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, OUTPUT_DIR_ENV, S3_BUCKET_ENV,
+    S3_REGION_ENV,
+};
 use bincode::config;
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
@@ -21,20 +24,18 @@ use rusoto_s3::{
     DeleteObjectRequest, GetObjectError, GetObjectRequest, PutObjectRequest, S3Client, S3,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::env;
 use std::io::ErrorKind;
 use std::ops::RangeInclusive;
 use std::path::Path;
 use std::str::FromStr;
-use std::time::SystemTime;
-use tokio::fs::{remove_file, File};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::time::{Duration, SystemTime};
+use tokio::fs::{remove_file, DirBuilder};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tracing::warn;
 use tracing::{debug, info};
-
-pub const S3_STORAGE_ENGINE_ENV: &str = "S3_BUCKET";
-pub const S3_REGION_ENV: &str = "S3_STORAGE_REGION";
 
 pub struct ParquetBackend {
     epoch: u32,
@@ -47,24 +48,24 @@ pub struct ParquetBackend {
     storage_client: StorageClient,
 }
 
+fn base_path(job_id: &str, epoch: u32) -> String {
+    format!("{}/checkpoints/checkpoint-{:0>7}", job_id, epoch)
+}
+
+fn metadata_path(path: &str) -> String {
+    format!("{}/metadata", path)
+}
+
+fn operator_path(job_id: &str, epoch: u32, operator: &str) -> String {
+    format!("{}/operator-{}", base_path(job_id, epoch), operator)
+}
+
 fn table_checkpoint_path(task_info: &TaskInfo, table: char, epoch: u32) -> String {
     format!(
-        "job-id-{}/checkpoint-{:0>7}/data/operator-id-{}/table-{}/subtask-{:0>3}",
-        task_info.job_id, epoch, task_info.operator_id, table, task_info.task_index,
-    )
-}
-
-fn operator_metadata_path(job_id: &str, operator_id: &str, epoch: u32) -> String {
-    format!(
-        "job-id-{}/checkpoint-{:0>7}/metadata/operators/operator-id-{}",
-        job_id, epoch, operator_id
-    )
-}
-
-fn checkpoint_metadata_path(job_id: &str, epoch: u32) -> String {
-    format!(
-        "job-id-{}/checkpoint-{:0>7}/metadata/checkpoint-overall",
-        job_id, epoch
+        "{}/table-{}-{:0>3}",
+        operator_path(&task_info.job_id, epoch, &task_info.operator_id),
+        table,
+        task_info.task_index,
     )
 }
 
@@ -82,7 +83,7 @@ impl BackingStore for ParquetBackend {
     async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Option<CheckpointMetadata> {
         let storage_client = StorageClient::new();
         let data = storage_client
-            .get_bytes(checkpoint_metadata_path(job_id, epoch))
+            .get_bytes(&metadata_path(&base_path(job_id, epoch)))
             .await?;
         let metadata = CheckpointMetadata::decode(&data[..]).unwrap();
         Some(metadata)
@@ -95,22 +96,49 @@ impl BackingStore for ParquetBackend {
     ) -> Option<OperatorCheckpointMetadata> {
         let storage_client = StorageClient::new();
         let data = storage_client
-            .get_bytes(operator_metadata_path(job_id, operator_id, epoch))
+            .get_bytes(&metadata_path(&operator_path(job_id, epoch, operator_id)))
             .await?;
         Some(OperatorCheckpointMetadata::decode(&data[..]).unwrap())
     }
 
+    async fn initialize_checkpoint(job_id: &str, epoch: u32, operators: &[&str]) -> Result<()> {
+        let storage_client = StorageClient::new();
+        let path = base_path(&job_id, epoch);
+
+        storage_client.initialize(&path).await?;
+
+        for operator in operators {
+            storage_client
+                .initialize(&operator_path(job_id, epoch, *operator))
+                .await?;
+        }
+
+        Ok(())
+    }
+
     async fn complete_operator_checkpoint(metadata: OperatorCheckpointMetadata) {
         let storage_client = StorageClient::new();
-        let path = operator_metadata_path(&metadata.job_id, &metadata.operator_id, metadata.epoch);
-        storage_client.write(path, metadata.encode_to_vec()).await;
+        let path = metadata_path(&operator_path(
+            &metadata.job_id,
+            metadata.epoch,
+            &metadata.operator_id,
+        ));
+        // TODO: propagate error
+        storage_client
+            .write(&path, metadata.encode_to_vec())
+            .await
+            .unwrap();
     }
 
     async fn complete_checkpoint(metadata: CheckpointMetadata) {
         debug!("writing checkpoint {:?}", metadata);
         let storage_client = StorageClient::new();
-        let path = checkpoint_metadata_path(&metadata.job_id, metadata.epoch);
-        storage_client.write(path, metadata.encode_to_vec()).await;
+        let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
+        // TODO: propagate error
+        storage_client
+            .write(&path, metadata.encode_to_vec())
+            .await
+            .unwrap();
     }
 
     async fn new(
@@ -199,7 +227,7 @@ impl BackingStore for ParquetBackend {
         }
     }
 
-    async fn prepare_checkpoint(_metadata: &CheckpointMetadata) -> anyhow::Result<()> {
+    async fn prepare_checkpoint_load(_metadata: &CheckpointMetadata) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -230,9 +258,13 @@ impl BackingStore for ParquetBackend {
             let operator_id = result?;
 
             for epoch_to_remove in old_min_epoch..min_epoch {
-                let path = operator_metadata_path(&metadata.job_id, &operator_id, epoch_to_remove);
+                let path = metadata_path(&operator_path(
+                    &metadata.job_id,
+                    epoch_to_remove,
+                    &operator_id,
+                ));
                 debug!("deleting {}", path);
-                storage_client.remove(path).await;
+                storage_client.remove(path).await?;
             }
             debug!(
                 message = "Finished compacting operator",
@@ -244,8 +276,8 @@ impl BackingStore for ParquetBackend {
 
         for epoch_to_remove in old_min_epoch..min_epoch {
             StorageClient::new()
-                .remove(checkpoint_metadata_path(&metadata.job_id, epoch_to_remove))
-                .await;
+                .remove(metadata_path(&base_path(&metadata.job_id, epoch_to_remove)))
+                .await?;
         }
         metadata.min_epoch = min_epoch;
         Self::complete_checkpoint(metadata).await;
@@ -277,7 +309,7 @@ impl BackingStore for ParquetBackend {
                 for file in files.values().flatten() {
                     let bytes = self
                         .storage_client
-                        .get_bytes(file.file.clone())
+                        .get_bytes(&file.file)
                         .await
                         .unwrap_or_else(|| {
                             panic!("unable to find file {} in checkpoint", file.file)
@@ -324,7 +356,7 @@ impl BackingStore for ParquetBackend {
         for file in files.values().flatten() {
             let bytes = self
                 .storage_client
-                .get_bytes(file.file.clone())
+                .get_bytes(&file.file)
                 .await
                 .unwrap_or_else(|| panic!("unable to find file {} in checkpoint", file.file));
             for (_timestamp, key, value) in self.triples_from_parquet_bytes(bytes, &(0..=u64::MAX))
@@ -351,7 +383,9 @@ impl ParquetBackend {
                 .iter()
                 .map(|backend_data| {
                     let Some(BackendData::ParquetStore(parquet_store)) =
-                  &backend_data.backend_data else {unreachable!("expect parquet backends")};
+                  &backend_data.backend_data else {
+                        unreachable!("expect parquet backends")
+                    };
                     parquet_store.file.clone()
                 })
                 .collect();
@@ -365,13 +399,14 @@ impl ParquetBackend {
                 continue;
             };
             for backend_data in metadata.backend_data {
-                let Some(BackendData::ParquetStore(parquet_store)) =  &backend_data.backend_data
-                else {unreachable!("expect parquet backends")};
+                let Some(BackendData::ParquetStore(parquet_store)) = &backend_data.backend_data else {
+                    unreachable!("expect parquet backends")
+                };
                 let file = parquet_store.file.clone();
                 if !paths_to_keep.contains(&file) {
                     if !deleted_paths.contains(&file) {
                         deleted_paths.insert(file.clone());
-                        storage_client.remove(file).await;
+                        storage_client.remove(file).await?;
                     }
                 }
             }
@@ -658,49 +693,60 @@ pub enum StorageClient {
 // TODO: Better way to configure this.
 impl StorageClient {
     pub fn new() -> Self {
-        let bucket = std::env::var(S3_STORAGE_ENGINE_ENV).ok();
-        let region = std::env::var(S3_REGION_ENV).ok();
-        match (bucket, region) {
-            (Some(bucket), Some(region)) => match bucket.as_str() {
-                "local" => Self::LocalDirectory("/tmp/arroyo-data".to_owned()),
+        let bucket = env::var(S3_BUCKET_ENV).ok();
+        let region = env::var(S3_REGION_ENV).ok();
+        let output_dir = env::var(OUTPUT_DIR_ENV).ok();
+
+        match (bucket.as_ref(), region.as_ref(), output_dir.as_ref()) {
+            (Some(bucket), Some(region), _) => match bucket.as_str() {
                 bucket => {
                     let client = S3Client::new(Region::from_str(&region).unwrap());
                     Self::S3 {
                         client,
-                        region,
+                        region: region.clone(),
                         bucket: bucket.to_owned(),
                     }
                 }
             },
-            _ => Self::LocalDirectory("/tmp/arroyo-data".to_owned()),
+            (_, _, Some(output_dir)) => Self::LocalDirectory(output_dir.clone()),
+            _ => Self::LocalDirectory("/tmp/arroyo".to_string()),
         }
     }
     pub fn get_storage_environment_variables() -> HashMap<String, String> {
-        let (Ok(region), Ok(bucket)) = (std::env::var(S3_REGION_ENV),
-        std::env::var(S3_STORAGE_ENGINE_ENV)) else {
-            return HashMap::new();
-        };
-        match bucket.as_str() {
-            "local" => HashMap::new(),
-            bucket => vec![
-                (S3_STORAGE_ENGINE_ENV.to_string(), bucket.to_string()),
-                (S3_REGION_ENV.to_string(), region.to_string()),
-            ]
-            .into_iter()
-            .collect(),
-        }
+        [S3_REGION_ENV, S3_BUCKET_ENV, OUTPUT_DIR_ENV]
+            .iter()
+            .filter_map(|&var| env::var(var).ok().map(|v| (var.to_string(), v)))
+            .collect()
     }
 
-    async fn write(&self, key: String, parquet_bytes: Vec<u8>) {
+    async fn initialize(&self, key: &str) -> Result<()> {
+        match self {
+            StorageClient::LocalDirectory(directory) => {
+                DirBuilder::new()
+                    // when jobs are running in a container but the controller is outside, this
+                    // allows the controller to modify the checkpoint files
+                    .mode(0o6777)
+                    .recursive(true)
+                    .create(&Path::new(directory).join(&key))
+                    .await?;
+            }
+            StorageClient::S3 { .. } => {
+                // no initialization needed for S3
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn write(&self, key: &str, parquet_bytes: Vec<u8>) -> Result<()> {
         match self {
             StorageClient::LocalDirectory(directory) => {
                 let file_path = Path::new(directory).join(Path::new(&key));
-
-                if let Some(parent) = file_path.parent() {
-                    tokio::fs::create_dir_all(parent).await.unwrap();
-                }
-                let mut file = File::create(file_path).await.unwrap();
-                file.write_all(&parquet_bytes).await.unwrap();
+                DirBuilder::new()
+                    .recursive(true)
+                    .create(file_path.parent().unwrap())
+                    .await?;
+                tokio::fs::write(&file_path, &parquet_bytes).await?;
             }
             StorageClient::S3 {
                 client,
@@ -709,22 +755,24 @@ impl StorageClient {
             } => {
                 let request = PutObjectRequest {
                     bucket: bucket.into(),
-                    key,
+                    key: key.to_string(),
                     body: Some(parquet_bytes.into()),
                     ..Default::default()
                 };
-                client.put_object(request).await.unwrap();
+                client.put_object(request).await?;
             }
         }
+
+        Ok(())
     }
 
-    async fn remove(&self, key: String) {
+    async fn remove(&self, key: String) -> Result<()> {
         match self {
             StorageClient::LocalDirectory(directory) => {
                 let file_path = Path::new(directory).join(Path::new(&key));
                 if let Err(e) = remove_file(&file_path).await {
                     if e.kind() != ErrorKind::NotFound {
-                        panic!("Error deleting file: {:?}", e);
+                        return Err(e.into());
                     }
                 }
             }
@@ -733,31 +781,32 @@ impl StorageClient {
                 region: _,
                 bucket,
             } => {
-                let delete_object_request = DeleteObjectRequest {
-                    bucket: bucket.into(),
-                    key: key.clone(),
-                    ..Default::default()
-                };
-                if let Err(error) = client.delete_object(delete_object_request).await {
-                    warn!("failed to delete object, trying again. error: {}", error);
-                    let delete_object_request = DeleteObjectRequest {
+                for i in (0..5).rev() {
+                    let req = DeleteObjectRequest {
                         bucket: bucket.into(),
-                        key,
+                        key: key.clone(),
                         ..Default::default()
                     };
-                    client
-                        .delete_object(delete_object_request)
-                        .await
-                        .expect("second try failed");
+
+                    match (client.delete_object(req).await, i) {
+                        (Ok(_), _) => return Ok(()),
+                        (Err(e), 0) => return Err(e.into()),
+                        (Err(e), _) => {
+                            warn!("failed to delete object, retrying {}", e);
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    }
                 }
             }
         }
+
+        Ok(())
     }
 
-    async fn get_bytes(&self, key: String) -> Option<Vec<u8>> {
+    async fn get_bytes(&self, key: &str) -> Option<Vec<u8>> {
         match self {
             StorageClient::LocalDirectory(local_directory) => {
-                let file_path = Path::new(local_directory).join(Path::new(&key));
+                let file_path = Path::new(local_directory).join(key);
                 match tokio::fs::read(file_path).await {
                     Ok(bytes) => Some(bytes),
                     Err(e) => match e.kind() {
@@ -773,7 +822,7 @@ impl StorageClient {
             } => {
                 let request = GetObjectRequest {
                     bucket: bucket.into(),
-                    key: key.clone(),
+                    key: key.to_string(),
                     ..Default::default()
                 };
                 let response = match client.get_object(request).await {
@@ -801,7 +850,7 @@ impl ParquetFlusher {
     fn start(mut self) {
         tokio::spawn(async move {
             loop {
-                if !self.flush_iteration().await {
+                if !self.flush_iteration().await.unwrap() {
                     return;
                 }
             }
@@ -809,9 +858,9 @@ impl ParquetFlusher {
     }
     async fn upload_record_batch(
         &self,
-        key: String,
+        key: &str,
         record_batch: arrow_array::RecordBatch,
-    ) -> usize {
+    ) -> Result<usize> {
         let props = WriterProperties::builder()
             .set_compression(parquet::basic::Compression::SNAPPY)
             .build();
@@ -821,11 +870,11 @@ impl ParquetFlusher {
         writer.flush().unwrap();
         let parquet_bytes = writer.into_inner().unwrap();
         let bytes = parquet_bytes.len();
-        self.storage_client.write(key, parquet_bytes).await;
-        bytes
+        self.storage_client.write(key, parquet_bytes).await?;
+        Ok(bytes)
     }
 
-    async fn flush_iteration(&mut self) -> bool {
+    async fn flush_iteration(&mut self) -> Result<bool> {
         let mut checkpoint_epoch = None;
 
         while checkpoint_epoch.is_none() {
@@ -840,7 +889,7 @@ impl ParquetFlusher {
                         }
                         None => {
                             debug!("Parquet flusher closed");
-                            return false;
+                            return Ok(false);
                         }
                     }
                 }
@@ -861,7 +910,7 @@ impl ParquetFlusher {
             }
 
             for (record_batch, s3_key, table, stats) in to_write {
-                bytes += self.upload_record_batch(s3_key.clone(), record_batch).await;
+                bytes += self.upload_record_batch(&s3_key, record_batch).await?;
                 self.current_files
                     .entry(table)
                     .or_default()
@@ -934,9 +983,9 @@ impl ParquetFlusher {
                 .unwrap();
             if cp.then_stop {
                 self.finish_tx.take().unwrap().send(()).unwrap();
-                return false;
+                return Ok(false);
             }
         }
-        true
+        Ok(true)
     }
 }

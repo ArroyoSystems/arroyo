@@ -2,10 +2,11 @@
 name = "arroyo-controller"
 version = "0.1.0"
 edition = "2021"
+
 [features]
 default = []
 kafka-sasl = []
-
+k8s = ["kube", "k8s-openapi"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
@@ -27,7 +28,8 @@ bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = {version = "0.6", features = ["serde-1"]}
 quote = "1"
 proc-macro2 = "1"
-syn = {version = "1", features = ["full"]}
+prettyplease = "0.2.4"
+syn = {version = "2", features = ["full"]}
 fork = "0.1"
 prometheus = "0.13"
 async-trait = "0.1"
@@ -40,6 +42,11 @@ object_store = {version = "0.5.5", features = ["aws"]}
 serde = "1"
 
 anyhow = "1.0.70"
+
+# Kubernetes
+kube = { version = "0.82.1", features = ["runtime", "derive"], optional = true }
+k8s-openapi = { version = "0.18.0", features = ["v1_26"], optional = true }
+
 
 # json-schema support
 typify = "0.0.10"

@@ -181,7 +181,6 @@ message ParquetStoreData {
   uint64 max_timestamp_micros = 6;
 }
 
-
 // Checkpoint metadata
 message CheckpointMetadata {
   string job_id = 1;
@@ -355,7 +354,13 @@ message StopWorkerReq {
 }
 
 message StopWorkerResp {
-  bool stopped = 1;
+  StopWorkerStatus status = 1;
+}
+enum StopWorkerStatus {
+  PLACEHOLDER = 0;
+  STOPPED = 1;
+  STOP_FAILED = 2;
+  NOT_FOUND = 3;
 }
 
 service NodeGrpc {

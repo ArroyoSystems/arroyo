@@ -23,6 +23,11 @@ pub struct StructDef {
     pub name: Option<String>,
     pub fields: Vec<StructField>,
 }
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StructPair {
+    pub left: StructDef,
+    pub right: StructDef,
+}
 
 impl StructDef {
     pub fn struct_name(&self) -> String {
@@ -135,6 +140,14 @@ pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration 
     std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
 }
 
+// quote a duration as a syn::Expr
+pub fn duration_to_syn_expr(duration: Duration) -> syn::Expr {
+    let secs = duration.as_secs();
+    let nanos = duration.subsec_nanos();
+
+    parse_quote!(std::time::Duration::new(#secs, #nanos))
+}
+
 impl From<StructField> for Field {
     fn from(struct_field: StructField) -> Self {
         let (dt, nullable) = match struct_field.data_type {
@@ -178,13 +191,13 @@ impl TypeDef {
 
     pub fn get_literal(scalar: &ScalarValue) -> syn::Expr {
         if scalar.is_null() {
-            return parse_str("None").unwrap();
+            return parse_quote!("None");
         }
         match scalar {
-            ScalarValue::Null => parse_str("None").unwrap(),
-            ScalarValue::Boolean(Some(value)) => parse_str(&format!("{}", value)).unwrap(),
-            ScalarValue::Float32(Some(value)) => parse_str(&format!("{}", value)).unwrap(),
-            ScalarValue::Float64(Some(value)) => parse_str(&format!("{}", value)).unwrap(),
+            ScalarValue::Null => parse_quote!("None"),
+            ScalarValue::Boolean(Some(value)) => parse_quote!(#value),
+            ScalarValue::Float32(Some(value)) => parse_quote!(#value),
+            ScalarValue::Float64(Some(value)) => parse_quote!(#value),
             ScalarValue::Decimal128(Some(value), precision, scale) => parse_str(
                 &Decimal128Array::from_value(*value, 1)
                     .with_precision_and_scale(*precision, *scale)
@@ -192,16 +205,16 @@ impl TypeDef {
                     .value_as_string(0),
             )
             .unwrap(),
-            ScalarValue::Int8(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::Int16(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::Int32(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::Int64(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::UInt8(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::UInt16(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::UInt32(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::UInt64(Some(val)) => parse_str(&val.to_string()).unwrap(),
-            ScalarValue::Utf8(Some(val)) | ScalarValue::LargeUtf8(Some(val)) => {
-                parse_str(&quote!(#val.to_string()).to_string()).unwrap()
+            ScalarValue::Int8(Some(value)) => parse_quote!(#value),
+            ScalarValue::Int16(Some(value)) => parse_quote!(#value),
+            ScalarValue::Int32(Some(value)) => parse_quote!(#value),
+            ScalarValue::Int64(Some(value)) => parse_quote!(#value),
+            ScalarValue::UInt8(Some(value)) => parse_quote!(#value),
+            ScalarValue::UInt16(Some(value)) => parse_quote!(#value),
+            ScalarValue::UInt32(Some(value)) => parse_quote!(#value),
+            ScalarValue::UInt64(Some(value)) => parse_quote!(#value),
+            ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
+                parse_quote!(#value.to_string())
             }
             ScalarValue::Binary(Some(bin)) => parse_str(&format!("{:?}", bin)).unwrap(),
             ScalarValue::LargeBinary(_) => todo!(),
@@ -232,7 +245,7 @@ impl TypeDef {
             ScalarValue::IntervalDayTime(None) => todo!(),
             ScalarValue::IntervalMonthDayNano(Some(val)) => {
                 let duration = interval_month_day_nanos_to_duration(*val);
-                let seconds  = duration.as_secs();
+                let seconds = duration.as_secs();
                 let nanos = duration.subsec_nanos() as u64;
                 parse_quote!((std::time::Duration::from_secs(#seconds) + std::time::Duration::from_nanos(#nanos)))
             }

@@ -63,7 +63,7 @@ jobs:
           kafka_*/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/kraft/server.properties
           kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/kraft/server.properties
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --all-features
       - name: Test
         run: cargo nextest run --release
   build-console:

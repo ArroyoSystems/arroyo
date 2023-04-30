@@ -46,18 +46,34 @@ pub const NOMAD_DC_ENV: &str = "NOMAD_DC";
 
 pub const DATABASE_NAME_ENV: &str = "DATABASE_NAME";
 pub const DATABASE_HOST_ENV: &str = "DATABASE_HOST";
+pub const DATABASE_PORT_ENV: &str = "DATABASE_PORT";
 pub const DATABASE_USER_ENV: &str = "DATABASE_USER";
 pub const DATABASE_PASSWORD_ENV: &str = "DATABASE_PASSWORD";
 
 pub const ADMIN_PORT_ENV: &str = "ADMIN_PORT";
 pub const GRPC_PORT_ENV: &str = "GRPC_PORT";
+pub const HTTP_PORT_ENV: &str = "HTTP_PORT";
 
 pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
+// Endpoint that the frontend should query for the API
+pub const API_ENDPOINT_ENV: &str = "API_ENDPOINT";
+
+pub const S3_REGION_ENV: &str = "S3_REGION";
+pub const S3_BUCKET_ENV: &str = "S3_BUCKET";
+pub const OUTPUT_DIR_ENV: &str = "OUTPUT_DIR";
+
+// kubernetes scheduler configuration
+pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
+pub const K8S_IMAGE_ENV: &str = "K8S_IMAGE";
+pub const K8S_POD_CPU_ENV: &str = "K8S_POD_CPU";
+pub const K8S_POD_MEM_MB_ENV: &str = "K8S_POD_MEM_MB";
+pub const K8S_POD_SLOTS_ENV: &str = "K8S_POD_SLOTS";
 
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     pub name: String,
     pub host: String,
+    pub port: u16,
     pub user: String,
     pub password: String,
 }
@@ -67,6 +83,10 @@ impl DatabaseConfig {
         DatabaseConfig {
             name: env::var(DATABASE_NAME_ENV).unwrap_or_else(|_| "arroyo".to_string()),
             host: env::var(DATABASE_HOST_ENV).unwrap_or_else(|_| "localhost".to_string()),
+            port: u16::from_str(
+                &env::var(DATABASE_PORT_ENV).unwrap_or_else(|_| "5432".to_string()),
+            )
+            .unwrap_or_else(|_| 5432),
             user: env::var(DATABASE_USER_ENV).unwrap_or_else(|_| "arroyo".to_string()),
             password: env::var(DATABASE_PASSWORD_ENV).unwrap_or_else(|_| "arroyo".to_string()),
         }
@@ -84,13 +104,24 @@ pub mod ports {
     pub const API_HTTP: u16 = 8000;
     pub const API_GRPC: u16 = 8001;
     pub const API_ADMIN: u16 = 8002;
+
+    pub const COMPILER_GRPC: u16 = 9000;
+    pub const COMPILER_ADMIN: u16 = 9001;
 }
 
-pub fn grpc_port(default: u16) -> u16 {
-    env::var(GRPC_PORT_ENV)
-        .map(|s| {
-            u16::from_str(&s).unwrap_or_else(|_| panic!("Invalid setting for {}", GRPC_PORT_ENV))
-        })
+pub fn grpc_port(service: &str, default: u16) -> u16 {
+    service_port(service, default, GRPC_PORT_ENV)
+}
+
+pub fn admin_port(service: &str, default: u16) -> u16 {
+    service_port(service, default, ADMIN_PORT_ENV)
+}
+
+pub fn service_port(service: &str, default: u16, env_var: &str) -> u16 {
+    env::var(&format!("{}_{}", service.to_uppercase(), env_var))
+        .ok()
+        .or(env::var(env_var).ok())
+        .map(|s| u16::from_str(&s).unwrap_or_else(|_| panic!("Invalid setting for {}", env_var)))
         .unwrap_or(default)
 }
 
@@ -98,12 +129,11 @@ pub fn grpc_port(default: u16) -> u16 {
 pub struct WorkerId(pub u64);
 
 impl WorkerId {
-    pub fn from_env() -> WorkerId {
-        WorkerId(
-            std::env::var(WORKER_ID_ENV)
-                .map(|s| u64::from_str(&s).unwrap())
-                .unwrap_or_else(|_| panic!("{} not set", WORKER_ID_ENV)),
-        )
+    pub fn from_env() -> Option<WorkerId> {
+        std::env::var(WORKER_ID_ENV)
+            .map(|s| u64::from_str(&s).unwrap())
+            .ok()
+            .map(|i| WorkerId(i))
     }
 }
 
