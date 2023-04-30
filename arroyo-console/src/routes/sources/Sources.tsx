@@ -34,7 +34,7 @@ import {
 } from "@chakra-ui/react";
 import { useEffect, useState } from "react";
 import { FiEdit2, FiEye, FiInfo, FiXCircle } from "react-icons/fi";
-import { useLinkClickHandler, useNavigate } from "react-router-dom";
+import { useLinkClickHandler, useNavigate, Link } from "react-router-dom";
 import { ApiGrpc } from "../../gen/api_connectweb";
 import { DeleteSourceReq, GetSourcesReq, SourceDef } from "../../gen/api_pb";
 import { ApiClient } from "../../main";
@@ -49,10 +49,6 @@ interface ColumnDef {
 }
 
 const columns: Array<ColumnDef> = [
-  {
-    name: "name",
-    accessor: s => s.name,
-  },
   {
     name: "type",
     accessor: s => s.sourceType.case!,
@@ -148,6 +144,9 @@ function SourceTable({ client }: { client: ApiClient }) {
       <Table>
         <Thead>
           <Tr>
+            <Th key="name">
+              <Text>name</Text>
+            </Th>
             {columns.map(c => {
               return (
                 <Th key={c.name}>
@@ -161,22 +160,16 @@ function SourceTable({ client }: { client: ApiClient }) {
         <Tbody>
           {state.sources?.flatMap(source => (
             <Tr key={source.name}>
-              {columns.map(column => (
-                <Td key={source.name + column.name}>{column.accessor(source)}</Td>
-              ))}
+              <Td key={source.name + "name"}>
+                <Link to={`${source.id}`}>{source.name}</Link>
+              </Td>
+              {
+                columns.map(column => (
+                  <Td key={source.name + column.name}>{column.accessor(source)}</Td>
+                ))
+              }
 
-              <Td textAlign="right">
-                {/* icon button that is an eyeball */}
-                <IconButton
-                  icon={<FiEye fontSize="1.25rem" />}
-                  variant="ghost"
-                  aria-label="View source details"
-                  onClick={() => {
-                    console.log("clicked the eyeball")
-                    navigate(`/sources/${source.id}`);
-                  }}
-                  title="Inspect"
-                />
+              < Td textAlign="right" >
                 <IconButton
                   icon={<FiInfo fontSize="1.25rem" />}
                   variant="ghost"
@@ -198,8 +191,8 @@ function SourceTable({ client }: { client: ApiClient }) {
             </Tr>
           ))}
         </Tbody>
-      </Table>
-    </Stack>
+      </Table >
+    </Stack >
   );
 }
 
