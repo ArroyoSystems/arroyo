@@ -3,7 +3,7 @@
 /* eslint-disable */
 /* @ts-nocheck */
 
-import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq, DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSinksReq, GetSinksResp, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, SourceMetadataResp, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
+import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq, DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSinksReq, GetSinksResp, GetSourceReq, GetSourceResp, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, SourceMetadataResp, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
 import {MethodKind} from "@bufbuild/protobuf";
 
 /**
@@ -64,6 +64,15 @@ export const ApiGrpc = {
       name: "GetSources",
       I: GetSourcesReq,
       O: GetSourcesResp,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc arroyo_api.ApiGrpc.GetSource
+     */
+    getSource: {
+      name: "GetSource",
+      I: GetSourceReq,
+      O: GetSourceResp,
       kind: MethodKind.Unary,
     },
     /**
