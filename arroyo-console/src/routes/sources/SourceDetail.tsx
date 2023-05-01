@@ -1,20 +1,18 @@
-import { useParams } from "react-router-dom";
-import { ApiClient } from "../../main";
-import { Divider, Spinner, VStack, Flex, Text, Spacer, Box, AccordionItem, AccordionButton, AccordionPanel, AccordionIcon, Button, Badge, Center, HStack } from "@chakra-ui/react";
-import { PipelineOutputs } from "../pipelines/JobOutputs";
+import { Badge, Box, Button, Center, Divider, Flex, Spacer, Table, TableContainer, Tbody, Td, Text, Tr, VStack } from "@chakra-ui/react";
 import { useEffect, useState } from "react";
-import { BuiltinSink, JobDetailsReq, OutputData, SourceDef } from "../../gen/api_pb";
-import { Catalog } from "../pipelines/Catalog";
-import { GrpcOutputSubscription, CreatePipelineReq, CreateSqlJob } from "../../gen/api_pb";
+import { useParams } from "react-router-dom";
+import { BuiltinSink, CreatePipelineReq, CreateSqlJob, GrpcOutputSubscription, JobDetailsReq, OutputData, SourceDef } from "../../gen/api_pb";
+import { ApiClient } from "../../main";
+import { PipelineOutputs } from "../pipelines/JobOutputs";
 
-function PipelinePreview({ client, jobId, subscribed, setSubscribed, setJobState }: { client: ApiClient, jobId: string, subscribed: boolean, setSubscribed: (b: boolean) => void, setJobState: (s: string | undefined) => void }) {
+function PipelinePreview({ client, jobId, subscribed, setSubscribed, setJobState }: { client: ApiClient, jobId: string | null, subscribed: boolean, setSubscribed: (b: boolean) => void, setJobState: (s: string | undefined) => void }) {
     let [outputs, setOutputs] = useState<Array<{ id: number, data: OutputData }>>([]);
 
     const subscribe = async () => {
         let row = 1;
         for await (const res of (await client()).subscribeToOutput(
             new GrpcOutputSubscription({
-                jobId: jobId,
+                jobId: jobId!,
             })
         )) {
             setOutputs(prevState => {
@@ -40,14 +38,37 @@ function PipelinePreview({ client, jobId, subscribed, setSubscribed, setJobState
     }
 
     useEffect(() => {
-        setSubscribed(true);
-        blockUntilJobReady().then(subscribe);
+        if (jobId != null) {
+            setSubscribed(true);
+            blockUntilJobReady().then(subscribe);
+        }
     }, [jobId]);
 
     return (
         <Box>
             <PipelineOutputs outputs={outputs} />
         </Box>
+    )
+}
+
+function DetailFieldTable({ data }: { data: Array<{ field: string, value: string }> }) {
+    return (
+        <TableContainer w="400px">
+            <Table variant="unstyled" bg="">
+                <Tbody>
+                    {data.map((row, i) => {
+                        if (row.value != "") {
+                            return (
+                                <Tr key={i}>
+                                    <Td textAlign="right" w="15%" fontWeight="bold" fontSize="sm">{row.field}</Td>
+                                    <Td textAlign="left" fontSize="xl">{row.value}</Td>
+                                </Tr>
+                            )
+                        }
+                    })}
+                </Tbody>
+            </Table>
+        </TableContainer>
     )
 }
 
@@ -103,15 +124,14 @@ export function SourceDetail({ client }: { client: ApiClient }) {
                 <Box>
                     <Flex w="100%">
                         <Box w="calc(100vw - 600px)">
-                            {previewJobId ? <PipelinePreview client={client} jobId={previewJobId} subscribed setSubscribed={setSubscribed} setJobState={setJobState} /> : <Box />}
+                            <PipelinePreview client={client} jobId={previewJobId} subscribed setSubscribed={setSubscribed} setJobState={setJobState} />
                         </Box>
                         <Spacer />
-                        <Box w="400px" p="5">
-                            <Text>Source Type: {source?.sourceType.case}</Text>
-                            {source == null ? null : <Catalog sources={[source]} />}
-                            <Text>Consumers: {source?.consumers}</Text>
-                            <Text>Connection: {source?.connection != null ? source?.connection : "n/a"}</Text>
-                        </Box>
+                        <DetailFieldTable data={[
+                            { field: "Name", value: source?.name ?? "" },
+                            { field: "# of Consumers", value: source?.consumers?.toString() ?? "" },
+                            { field: "Connection", value: source?.connection ?? "" },
+                        ]} />
                     </Flex>
                 </Box>
             </VStack>
