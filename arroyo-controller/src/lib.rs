@@ -431,7 +431,7 @@ impl ControllerServer {
                 #[cfg(feature = "k8s")]
                 {
                     info!("Using kubernetes scheduler");
-                    Arc::new(crate::schedulers::kubernetes::KubernetesScheduler::new().await)
+                    Arc::new(crate::schedulers::kubernetes::KubernetesScheduler::from_env().await)
                 }
                 #[cfg(not(feature = "k8s"))]
                 panic!("Kubernetes not enabled -- compile with `--features k8s` to enable")

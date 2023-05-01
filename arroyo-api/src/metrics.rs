@@ -1,10 +1,12 @@
 use cornucopia_async::GenericClient;
 use std::str::FromStr;
-use std::{collections::HashMap, time::SystemTime};
+use std::{collections::HashMap, env, time::SystemTime};
 
 use arroyo_rpc::grpc::api::{job_metrics_resp::OperatorMetrics, JobMetricsResp};
 use arroyo_rpc::grpc::api::{Metric, SubtaskMetrics};
-use arroyo_types::{to_millis, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT};
+use arroyo_types::{
+    to_millis, API_METRICS_RATE_ENV, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+};
 use http::{header::AUTHORIZATION, HeaderMap, HeaderValue};
 use once_cell::sync::Lazy;
 use prometheus_http_query::Client;
@@ -40,6 +42,8 @@ pub(crate) async fn get_metrics(
     // validate that the job exists and user can access it
     let job_details = jobs::get_job_details(&job_id, &auth, client).await?;
 
+    let rate = env::var(API_METRICS_RATE_ENV).unwrap_or_else(|_| "15s".to_string());
+
     #[derive(Copy, Clone)]
     enum QueryMetrics {
         BytesRecv,
@@ -49,7 +53,7 @@ pub(crate) async fn get_metrics(
     }
 
     impl QueryMetrics {
-        fn get_query(&self, job_id: &str, run_id: u64) -> String {
+        fn get_query(&self, job_id: &str, run_id: u64, rate: &str) -> String {
             let metric = match self {
                 BytesRecv => BYTES_RECV,
                 BytesSent => BYTES_SENT,
@@ -57,8 +61,8 @@ pub(crate) async fn get_metrics(
                 MessagesSent => MESSAGES_SENT,
             };
             format!(
-                "rate({}{{job_id=\"{}\",run_id=\"{}\"}}[15s])",
-                metric, job_id, run_id
+                "rate({}{{job_id=\"{}\",run_id=\"{}\"}}[{}])",
+                metric, job_id, run_id, rate
             )
         }
     }
@@ -72,7 +76,7 @@ pub(crate) async fn get_metrics(
     let result = tokio::try_join!(
         METRICS_CLIENT
             .query_range(
-                BytesRecv.get_query(&job_id, run_id),
+                BytesRecv.get_query(&job_id, run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -80,7 +84,7 @@ pub(crate) async fn get_metrics(
             .get(),
         METRICS_CLIENT
             .query_range(
-                BytesSent.get_query(&job_id, run_id),
+                BytesSent.get_query(&job_id, run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -88,7 +92,7 @@ pub(crate) async fn get_metrics(
             .get(),
         METRICS_CLIENT
             .query_range(
-                MessagesRecv.get_query(&job_id, run_id),
+                MessagesRecv.get_query(&job_id, run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -96,7 +100,7 @@ pub(crate) async fn get_metrics(
             .get(),
         METRICS_CLIENT
             .query_range(
-                MessagesSent.get_query(&job_id, run_id),
+                MessagesSent.get_query(&job_id, run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
