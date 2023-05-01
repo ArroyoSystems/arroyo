@@ -41,8 +41,8 @@ spec:
       - name: arroyo-controller
         securityContext:
         {{- toYaml .Values.securityContext | nindent 12 }}
-        image: "{{ .Values.serviceImage.repository }}:{{ .Values.serviceImage.tag }}"
-        imagePullPolicy: {{ .Values.serviceImage.pullPolicy }}
+        image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+        imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
         args: ["controller"]
 
         env:
@@ -70,9 +70,9 @@ spec:
           value: {{ .Values.podAnnotations | toYaml | quote }}
         {{- end }}
         - name: K8S_WORKER_IMAGE
-          value: "{{ .Values.workerImage.repository }}:{{ .Values.workerImage.tag }}"
+          value: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
         - name: K8S_WORKER_IMAGE_PULL_POLICY
-          value: "{{ .Values.workerImage.pullPolicy }}"
+          value: "{{ .Values.worker.image.pullPolicy }}"
         # TODO: image pull secret
         - name: K8S_WORKER_RESOURCES
           value: {{ .Values.worker.resources | toYaml | quote }}

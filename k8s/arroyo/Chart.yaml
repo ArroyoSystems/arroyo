@@ -11,3 +11,12 @@ keywords:
   - data
   - real-time
 
+dependencies:
+  - name: prometheus
+    version: "^21"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.deploy
+  - name: postgresql
+    version: "^12"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.deploy

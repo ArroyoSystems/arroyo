@@ -24,6 +24,25 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{/*
+Prometheus endpoint
+*/}}
+{{- define "arroyo.prometheusEndpoint" -}}
+{{- if .Values.prometheus.endpoint }}
+{{- .Values.prometheus.endpoint }}
+{{- else if .Values.prometheus.deploy -}}
+http://{{- template "prometheus.fullname" . }}-prometheus-server.{{- default .Release.Namespace }}.svc.cluster.local
+{{- end }}
+{{- end }}
+
+{{/*
+{{- end }}
+{{- end }}
+
+{{/*
+
+{{/*
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "arroyo.chart" -}}
@@ -72,60 +91,37 @@ Create the name of the role to use
 {{- end }}
 {{- end }}
 
-
 {{/*
-Postgres Hostname
-*/}}
-{{- define "arroyo.databaseHost" -}}
-{{- printf "%s" .Values.externalDatabase.host -}}
-{{- end -}}
-
-{{/*
-Postgres Port
-*/}}
-{{- define "arroyo.databasePort" -}}
-{{- printf "%d" (.Values.externalDatabase.port | int ) -}}
-{{- end -}}
-
-{{/*
-Postgres database name
-*/}}
-{{- define "arroyo.databaseName" -}}
-{{- printf "%s" .Values.externalDatabase.name -}}
-{{- end -}}
-
-{{/*
-Postgres database user
-*/}}
-{{- define "arroyo.databaseUser" -}}
-{{- printf "%s" .Values.externalDatabase.user -}}
-{{- end -}}
-
-
-{{/*
-Postgres database password
-*/}}
-{{- define "arroyo.databasePassword" -}}
-{{- printf "%s" .Values.externalDatabase.password -}}
-{{- end -}}
-
-
-{{/*
-Database configuration env vars
+Database environment variables
 */}}
 {{- define "arroyo.databaseEnvVars" -}}
+{{- if .Values.postgresql.deploy }}
 - name: DATABASE_HOST
-  value: {{ include "arroyo.databaseHost" . }}
+  value: "{{- include "arroyo.fullname" . }}-postgresql.{{- default .Release.Namespace }}.svc.cluster.local"
 - name: DATABASE_PORT
-  value: "{{ include "arroyo.databasePort" . }}"
+  value: "{{ default "5432" .Values.postgresql.auth.port }}"
 - name: DATABASE_NAME
-  value: {{ include "arroyo.databaseName" . }}
+  value: arroyo
 - name: DATABASE_USER
-  value: {{ include "arroyo.databaseUser" . }}
+  value: arroyo
 - name: DATABASE_PASSWORD
-  value: {{ include "arroyo.databasePassword" . }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "arroyo.fullname" . }}-postgresql
+      key: password
+{{- else -}}
+- name: DATABASE_HOST
+  value: "{{ .Values.postgresql.externalDatabase.host }}"
+- name: DATABASE_PORT
+  value: "{{ .Values.postgresql.externalDatabase.port }}"
+- name: DATABASE_NAME
+  value: "{{ .Values.postgresql.externalDatabase.name }}"
+- name: DATABASE_USER
+  value: "{{ .Values.postgresql.externalDatabase.user }}"
+- name: DATABASE_PASSWORD
+  value: "{{ .Values.postgresql.externalDatabase.password }}"
 {{- end }}
-
+{{- end }}
 
 {{/*
 Checkpoint / artifact storage env vars

@@ -37,17 +37,17 @@ spec:
       - name: arroyo-api
         securityContext:
           {{- toYaml .Values.securityContext | nindent 12 }}
-        image: "{{ .Values.serviceImage.repository }}:{{ .Values.serviceImage.tag }}"
-        imagePullPolicy: {{ .Values.serviceImage.pullPolicy }}
+        image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+        imagePullPolicy: {{ .Values.api.image.pullPolicy }}
         args: ["api"]
         env:
         {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
         - name: CONTROLLER_ADDR
           value: "http://{{ include "arroyo.fullname" . }}-controller:9190"
         - name: PROM_ENDPOINT
-          value: "{{ .Values.prometheus.endpoint }}"
+          value: "{{ include "arroyo.prometheusEndpoint" .}}"
         - name: API_METRICS_RATE
-          value: "{{ .Values.prometheus.rate }}"
+          value: "{{ .Values.prometheus.queryRate }}"
         ports:
         - containerPort: 8000
           name: http

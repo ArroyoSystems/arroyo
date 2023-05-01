@@ -6,7 +6,7 @@ metadata:
     {{- include "arroyo.labels" . | nindent 4 }}
     app: {{ include "arroyo.fullname" . }}-compiler
 spec:
-  replicas: {{ .Values.compiler.replicaCount }}
+  replicas: {{ .Values.compiler.replicas }}
   selector:
     matchLabels:
       app: {{ include "arroyo.fullname" . }}-compiler
@@ -35,8 +35,8 @@ spec:
       - name: arroyo-compiler
         securityContext:
           {{- toYaml .Values.securityContext | nindent 10 }}
-        image: "{{ .Values.compilerImage.repository }}:{{ .Values.compilerImage.tag }}"
-        imagePullPolicy: {{ .Values.compilerImage.pullPolicy }}
+        image: "{{ .Values.compiler.image.repository }}:{{ .Values.compiler.image.tag }}"
+        imagePullPolicy: {{ .Values.compiler.image.pullPolicy }}
         env:
           {{- include "arroyo.storageEnvVars" . | nindent 10 }}
         ports:

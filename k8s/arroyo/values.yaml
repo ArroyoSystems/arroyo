@@ -1,22 +1,44 @@
 # Default values for arroyo.
 
-# Number of replicas for the api server
+nameOverride: ""
+fullnameOverride: ""
+imagePullSecrets: []
+
+# service-specific configuration
 api:
-  replicaCount: 1
+  replicas: 1
   resources:
     limits: {}
     requests:
       memory: 256Mi
-      cpu: 300m
+      cpu: 200m
+  image:
+    repository: ghcr.io/arroyosystems/arroyo-services
+    pullPolicy: IfNotPresent
+    tag: "amd64"
 
-# Number of replicas for the compiler
+controller:
+  resources:
+    limits: {}
+    requests:
+      memory: 256Mi
+      cpu: 500m
+  image:
+    repository: ghcr.io/arroyosystems/arroyo-services
+    pullPolicy: IfNotPresent
+    tag: "amd64"
+
 compiler:
-  replicaCount: 1
+  replicas: 1
   resources:
     limits: {}
     requests:
       memory: 2048Mi
       cpu: 1000m
+  image:
+    repository: ghcr.io/arroyosystems/arroyo-compiler
+    pullPolicy: IfNotPresent
+    tag: "amd64"
 
 worker:
   resources:
@@ -25,48 +47,59 @@ worker:
       memory: 200Mi
       cpu: 400m
   slots: 4
+  image:
+    repository: ghcr.io/arroyosystems/arroyo-worker
+    pullPolicy: IfNotPresent
+    tag: "amd64"
+
+postgresql:
+  # set to true to deploy a postgres instance in-cluster
+  deploy: true
+
+  # otherwise, configure the connection to an external postgres instance
+  externalDatabase:
+    host: localhost
+    port: 5432
+    name: arroyo
+    user: arroyo
+    password: arroyo
+
+  # postgresql configuration
+  auth:
+    username: arroyo
+    password: arroyo
+    database: arroyo
+
+  primary:
+    initdb:
+      user: postgres
+
 
 prometheus:
-  deploy: false
-  endpoint: "http://prometheus-server.default.svc.cluster.local"
+  deploy: true
+  endpoint: ""
+  # set to true to enable prometheus annotations on Arroyo cluster resources; if false,
+  # you will need to configure prometheus separately to discover Arroyo pods
   setAnnotations: true
   # the rate interval that should be used for queries; should be at least 4x the scrape
   # interval configured on prometheus -- setting this (and your scrape interval) to a
   # lower value will improve metric freshness and resolution
-  queryRate: "4m"
+  queryRate: "15s"
 
+  # Prometheus configuration
+  server:
+    global:
+      scrape_interval: 5s
+      scrape_timeout: 5s
 
-# Image for the arroyo control plane services
-serviceImage:
-  repository: ghcr.io/arroyosystems/arroyo-services
-  pullPolicy: IfNotPresent
-  tag: "amd64"
-
-# Image for the arroyo compiler (this also determines the version of the worker code used)
-compilerImage:
-  repository: ghcr.io/arroyosystems/arroyo-compiler
-  pullPolicy: IfNotPresent
-  tag: "amd64"
-
-# Image for the arroyo workers
-workerImage:
-  repository: ghcr.io/arroyosystems/arroyo-worker
-  pullPolicy: IfNotPresent
-  tag: "amd64"
-
-
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
-
-externalPrometheusEndpoint: "http://localhost:8081"
-
-externalDatabase:
-  host: localhost
-  port: 5432
-  name: arroyo
-  user: arroyo
-  password: arroyo
+  alertmanager:
+    enabled: false
+  kube-state-metrics:
+    enabled: false
+  prometheus-node-exporter:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
 
 s3:
   region: ""
