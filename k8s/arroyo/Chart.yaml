@@ -1,0 +1,22 @@
+apiVersion: v2
+name: arroyo
+description: Helm chart for the Arroyo stream processing engine
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords:
+  - stream processing
+  - data
+  - real-time
+
+dependencies:
+  - name: prometheus
+    version: "^21"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.deploy
+  - name: postgresql
+    version: "^12"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.deploy

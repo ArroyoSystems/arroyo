@@ -57,6 +57,9 @@ pub const HTTP_PORT_ENV: &str = "HTTP_PORT";
 pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
 // Endpoint that the frontend should query for the API
 pub const API_ENDPOINT_ENV: &str = "API_ENDPOINT";
+// The rate parameter (e.g., "15s") used by the API when querying prometheus metrics -- this should
+// be at least 4x the configured scrape interval for your prometheus config
+pub const API_METRICS_RATE_ENV: &str = "API_METRICS_RATE";
 
 pub const S3_REGION_ENV: &str = "S3_REGION";
 pub const S3_BUCKET_ENV: &str = "S3_BUCKET";
@@ -64,10 +67,25 @@ pub const OUTPUT_DIR_ENV: &str = "OUTPUT_DIR";
 
 // kubernetes scheduler configuration
 pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
-pub const K8S_IMAGE_ENV: &str = "K8S_IMAGE";
-pub const K8S_POD_CPU_ENV: &str = "K8S_POD_CPU";
-pub const K8S_POD_MEM_MB_ENV: &str = "K8S_POD_MEM_MB";
-pub const K8S_POD_SLOTS_ENV: &str = "K8S_POD_SLOTS";
+pub const K8S_WORKER_NAME_ENV: &str = "K8S_WORKER_NAME";
+pub const K8S_WORKER_IMAGE_ENV: &str = "K8S_IMAGE";
+pub const K8S_WORKER_IMAGE_PULL_POLICY_ENV: &str = "K8S_IMAGE_PULL_POLICY";
+pub const K8S_WORKER_LABELS_ENV: &str = "K8S_WORKER_LABELS";
+pub const K8S_WORKER_ANNOTATIONS_ENV: &str = "K8S_WORKER_ANNOTATIONS";
+pub const K8S_WORKER_RESOURCES_ENV: &str = "K8S_WORKER_RESOURCES";
+pub const K8S_WORKER_SLOTS_ENV: &str = "K8S_WORKER_SLOTS";
+pub const K8S_WORKER_VOLUMES_ENV: &str = "K8S_WORKER_VOLUMES";
+pub const K8S_WORKER_VOLUME_MOUNTS_ENV: &str = "K8S_WORKER_VOLUME_MOUNTS";
+
+pub fn string_config(var: &str, default: &str) -> String {
+    env::var(var).unwrap_or_else(|_| default.to_string())
+}
+
+pub fn u32_config(var: &str, default: u32) -> u32 {
+    env::var(var)
+        .map(|s| u32::from_str(&s).unwrap_or(default))
+        .unwrap_or(default)
+}
 
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {

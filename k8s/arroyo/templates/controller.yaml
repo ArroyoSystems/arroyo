@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "arroyo.fullname" . }}-controller
+  labels:
+    {{- include "arroyo.labels" . | nindent 4 }}
+    app: {{ include "arroyo.fullname" . }}-controller
+spec:
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "arroyo.fullname" . }}-controller
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+      {{- include "arroyo.labels" . | nindent 8 }}
+        app: {{ include "arroyo.fullname" . }}-controller
+      annotations:
+        {{- if .Values.prometheus.setAnnotations }}
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "9191"
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ template "arroyo.serviceAccountName" . }}
+      volumes:
+      {{- if .Values.volumes }}
+      {{- include "tplvalues.render" (dict "value" .Values.volumes "context" $) | nindent 10 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- toYaml . | nindent 10 }}
+      {{- end }}
+      containers:
+      - name: arroyo-controller
+        securityContext:
+        {{- toYaml .Values.securityContext | nindent 12 }}
+        image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+        imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+        args: ["controller"]
+
+        env:
+        {{- include "arroyo.storageEnvVars" . | nindent 8 }}
+        {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
+        - name: CONTROLLER_ADDR
+          value: "http://{{ include "arroyo.fullname" . }}-controller:9190"
+        - name: REMOTE_COMPILER_ENDPOINT
+          value: "http://{{ include "arroyo.fullname" . }}-compiler:9000"
+        - name: SCHEDULER
+          value: "kubernetes"
+        - name: K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: K8S_WORKER_NAME
+          value: "{{ include "arroyo.fullname" . }}"
+        - name: K8S_WORKER_LABELS
+          value: {{ include "arroyo.labels" . | quote }}
+        - name: K8S_WORKER_ANNOTATIONS
+        {{- if .Values.prometheus.setAnnotations }}
+          {{- $merged := merge (dict "prometheus.io/scrape" "true" "prometheus.io/path" "/metrics" "prometheus.io/port" "6901") .Values.podAnnotations  }}
+          value: {{ toYaml $merged | quote }}
+        {{- else }}
+          value: {{ .Values.podAnnotations | toYaml | quote }}
+        {{- end }}
+        - name: K8S_WORKER_IMAGE
+          value: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+        - name: K8S_WORKER_IMAGE_PULL_POLICY
+          value: "{{ .Values.worker.image.pullPolicy }}"
+        # TODO: image pull secret
+        - name: K8S_WORKER_RESOURCES
+          value: {{ .Values.worker.resources | toYaml | quote }}
+        - name: K8S_WORKER_SLOTS
+          value: {{ .Values.workerSlots | quote }}
+        {{- if .Values.volumes }}
+        - name: K8S_WORKER_VOLUMES
+          value: {{ .Values.volumes | toYaml | quote }}
+        {{- end }}
+        {{- if .Values.volumeMounts }}
+        - name: K8S_WORKER_VOLUME_MOUNTS
+          value: {{ .Values.volumeMounts | toYaml | quote }}
+        {{- end }}
+        ports:
+        - containerPort: 9190
+          name: grpc
+        - containerPort: 9191
+          name: admin
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: admin
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: admin
+        {{- if .Values.compiler.resources }}
+        resources: {{- toYaml .Values.compiler.resources | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        {{- if .Values.volumeMounts }}
+        {{- include "tplvalues.render" (dict "value" .Values.volumeMounts "context" $) | nindent 10 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "arroyo.fullname" . }}-controller
+spec:
+  selector:
+    app: {{ include "arroyo.fullname" . }}-controller
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 9190
+      targetPort: 9190
+    - name: http
+      protocol: TCP
+      port: 9191
+      targetPort: 9191

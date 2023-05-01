@@ -12,8 +12,10 @@ use arroyo_rpc::grpc::{
     StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp, WorkerResources,
 };
 use arroyo_rpc::ControlMessage;
+use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    from_millis, ports, CheckpointBarrier, NodeId, WorkerId, GRPC_PORT_ENV, JOB_ID_ENV, RUN_ID_ENV,
+    admin_port, from_millis, grpc_port, ports, CheckpointBarrier, NodeId, WorkerId, ADMIN_PORT_ENV,
+    JOB_ID_ENV, RUN_ID_ENV,
 };
 use engine::RunningEngine;
 use lazy_static::lazy_static;
@@ -27,6 +29,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
@@ -180,10 +183,7 @@ impl WorkerServer {
 
         let node_id = NodeId::from_env();
 
-        let grpc_port = env::var(GRPC_PORT_ENV)
-            .ok()
-            .map(|t| t.parse().unwrap())
-            .unwrap_or(0);
+        let grpc_port = grpc_port("worker", 0);
 
         let listener = TcpListener::bind(format!("0.0.0.0:{}", grpc_port)).await?;
         let local_addr = listener.local_addr()?;
@@ -208,6 +208,11 @@ impl WorkerServer {
         let data_address = format!("{}:{}", local_ip, data_port);
         let hash = self.hash;
         let job_id = self.job_id.clone();
+
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+        start_admin_server("worker", 0, shutdown_rx);
+
         tokio::spawn(async move {
             // ideally, get a signal when the server is started...
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -233,6 +238,8 @@ impl WorkerServer {
             .add_service(WorkerGrpcServer::new(self))
             .serve_with_incoming(TcpListenerStream::new(listener))
             .await?;
+
+        shutdown_tx.send(0).unwrap();
 
         Ok(())
     }

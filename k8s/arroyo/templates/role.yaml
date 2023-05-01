@@ -1,0 +1,49 @@
+{{- if .Values.role.create -}}
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "arroyo.roleName" . }}
+rules:
+ - apiGroups:
+    - ""
+   resources:
+    - services
+    - pods
+   verbs:
+    - create
+    - get
+    - list
+    - watch
+    - update
+    - delete
+    - deletecollection
+ - apiGroups:
+    - extensions
+    - apps
+   resources:
+    - replicasets
+    - replicasets/status
+    - ingresses
+    - ingresses/status
+   verbs:
+    - get
+    - list
+    - watch
+    - create
+    - update
+    - delete
+    - deletecollection
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "arroyo.roleName" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "arroyo.roleName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "arroyo.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace}}
+{{- end }}

@@ -1,0 +1,152 @@
+# Default values for arroyo.
+
+nameOverride: ""
+fullnameOverride: ""
+imagePullSecrets: []
+
+# service-specific configuration
+api:
+  replicas: 1
+  resources:
+    limits: {}
+    requests:
+      memory: 256Mi
+      cpu: 200m
+  image:
+    repository: ghcr.io/arroyosystems/arroyo-services
+    pullPolicy: IfNotPresent
+    tag: "amd64"
+
+controller:
+  resources:
+    limits: {}
+    requests:
+      memory: 256Mi
+      cpu: 500m
+  image:
+    repository: ghcr.io/arroyosystems/arroyo-services
+    pullPolicy: IfNotPresent
+    tag: "amd64"
+
+compiler:
+  replicas: 1
+  resources:
+    limits: {}
+    requests:
+      memory: 2048Mi
+      cpu: 1000m
+  image:
+    repository: ghcr.io/arroyosystems/arroyo-compiler
+    pullPolicy: IfNotPresent
+    tag: "amd64"
+
+worker:
+  resources:
+    limits: {}
+    requests:
+      memory: 200Mi
+      cpu: 400m
+  slots: 4
+  image:
+    repository: ghcr.io/arroyosystems/arroyo-worker
+    pullPolicy: IfNotPresent
+    tag: "amd64"
+
+postgresql:
+  # set to true to deploy a postgres instance in-cluster
+  deploy: true
+
+  # otherwise, configure the connection to an external postgres instance
+  externalDatabase:
+    host: localhost
+    port: 5432
+    name: arroyo
+    user: arroyo
+    password: arroyo
+
+  # postgresql configuration
+  auth:
+    username: arroyo
+    password: arroyo
+    database: arroyo
+
+  primary:
+    initdb:
+      user: postgres
+
+
+prometheus:
+  deploy: true
+  endpoint: ""
+  # set to true to enable prometheus annotations on Arroyo cluster resources; if false,
+  # you will need to configure prometheus separately to discover Arroyo pods
+  setAnnotations: true
+  # the rate interval that should be used for queries; should be at least 4x the scrape
+  # interval configured on prometheus -- setting this (and your scrape interval) to a
+  # lower value will improve metric freshness and resolution
+  queryRate: "15s"
+
+  # Prometheus configuration
+  server:
+    global:
+      scrape_interval: 5s
+      scrape_timeout: 5s
+
+  alertmanager:
+    enabled: false
+  kube-state-metrics:
+    enabled: false
+  prometheus-node-exporter:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+
+s3:
+  region: ""
+  bucket: ""
+
+outputDir: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+role:
+  # Specified whether the role should be created
+  create: true
+
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 80
+
+apiResources: {}
+controllerResources: {}
+compilerResources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+volumes: []
+volumeMounts: []
