@@ -1,20 +1,22 @@
+use std::sync::Arc;
+
 use arrow::datatypes::{DataType, TimeUnit};
 
 use crate::types::{StructDef, StructField, TypeDef};
 
 pub(crate) fn window_arrow_struct() -> DataType {
     DataType::Struct(vec![
-        arrow::datatypes::Field::new(
+        Arc::new(arrow::datatypes::Field::new(
             "start_time",
             DataType::Timestamp(TimeUnit::Millisecond, None),
             false,
-        ),
-        arrow::datatypes::Field::new(
+        )),
+        Arc::new(arrow::datatypes::Field::new(
             "end_time",
             DataType::Timestamp(TimeUnit::Millisecond, None),
             false,
-        ),
-    ])
+        )),
+    ].into())
 }
 
 pub(crate) fn window_type_def() -> TypeDef {
