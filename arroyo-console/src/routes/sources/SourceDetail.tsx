@@ -28,7 +28,7 @@ function PipelinePreview({ client, jobId, subscribed, setSubscribed, setJobState
     }
 
     const blockUntilJobReady = async () => {
-        let job = await (await client()).getJobDetails(new JobDetailsReq({ jobId: jobId }));
+        let job = await (await client()).getJobDetails(new JobDetailsReq({ jobId: jobId! }));
         let jobState = job.jobStatus?.state;
         setJobState(jobState);
         if (job.jobStatus?.state != "Running") {
@@ -98,11 +98,11 @@ export function SourceDetail({ client }: { client: ApiClient }) {
 
     const tail = async () => {
         let jobResp = await (await client()).previewPipeline(new CreatePipelineReq({
-            name: source!.name,
+            name: `preview-source-${source!.name}`,
             config: {
                 case: "sql",
                 value: new CreateSqlJob({
-                    query: `SELECT * FROM ${source!.name};`,
+                    query: `SELECT * FROM ${source!.name}; `,
                     sink: { case: "builtin", value: BuiltinSink.Web }
                 }),
             },
