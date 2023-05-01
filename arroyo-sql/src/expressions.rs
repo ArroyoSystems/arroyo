@@ -5,8 +5,9 @@ use crate::{
     pipeline::SortDirection,
     types::{StructDef, StructField, TypeDef},
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, Ok, Result};
 use arrow::datatypes::DataType;
+use arrow_schema::Field;
 use datafusion_common::ScalarValue;
 use datafusion_expr::{
     aggregate_function,
@@ -34,6 +35,7 @@ pub enum Expression {
     Numeric(NumericExpression),
     String(StringFunction),
     Hash(HashExpression),
+    DataStructure(DataStructureFunction),
 }
 
 impl Expression {
@@ -58,6 +60,9 @@ impl Expression {
             Expression::Numeric(numeric_expression) => numeric_expression.to_syn_expression(),
             Expression::String(string_function) => string_function.to_syn_expression(),
             Expression::Hash(hash_expression) => hash_expression.to_syn_expression(),
+            Expression::DataStructure(data_structure_expression) => {
+                data_structure_expression.to_syn_expression()
+            }
         }
     }
 
@@ -80,6 +85,9 @@ impl Expression {
             Expression::Numeric(numeric_expression) => numeric_expression.return_type(),
             Expression::String(string_function) => string_function.return_type(),
             Expression::Hash(hash_expression) => hash_expression.return_type(),
+            Expression::DataStructure(data_structure_expression) => {
+                data_structure_expression.return_type()
+            }
         }
     }
 
@@ -345,11 +353,24 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
                 BuiltinScalarFunction::RegexpMatch | BuiltinScalarFunction::RegexpReplace => {
                     bail!("regex function {:?} not yet implemented", fun)
                 }
-                BuiltinScalarFunction::Coalesce
-                | BuiltinScalarFunction::NullIf
-                | BuiltinScalarFunction::MakeArray
-                | BuiltinScalarFunction::Struct
-                | BuiltinScalarFunction::ArrowTypeof => {
+                BuiltinScalarFunction::Coalesce => Ok(Expression::DataStructure(
+                    DataStructureFunction::Coalesce(arg_expressions),
+                )),
+                BuiltinScalarFunction::NullIf => {
+                    Ok(Expression::DataStructure(DataStructureFunction::NullIf {
+                        left: Box::new(arg_expressions.remove(0)),
+                        right: Box::new(arg_expressions.remove(0)),
+                    }))
+                }
+                BuiltinScalarFunction::MakeArray => {
+                    if matches!(arg_expressions[0].return_type(), TypeDef::StructDef(_, _)) {
+                        bail!("make_array only supports primitive types");
+                    };
+                    Ok(Expression::DataStructure(DataStructureFunction::MakeArray(
+                        arg_expressions,
+                    )))
+                }
+                BuiltinScalarFunction::Struct | BuiltinScalarFunction::ArrowTypeof => {
                     bail!("data structure function {:?} not implemented", fun)
                 }
                 BuiltinScalarFunction::DatePart
@@ -1829,6 +1850,140 @@ impl StringFunction {
             }
             StringFunction::RegexpMatch(_, _) => todo!(),
             StringFunction::RegexpReplace(_, _, _, _, _) => todo!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum DataStructureFunction {
+    Coalesce(Vec<Expression>),
+    NullIf {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+    MakeArray(Vec<Expression>),
+}
+
+impl DataStructureFunction {
+    fn to_syn_expression(&self) -> syn::Expr {
+        match self {
+            DataStructureFunction::Coalesce(terms) => {
+                let exprs: Vec<_> = terms
+                    .iter()
+                    .map(|term| (term.to_syn_expression(), term.nullable()))
+                    .collect();
+                // return the first Some() value, or None if all are None
+                let mut iterator = exprs.into_iter();
+                let (first_expression, nullable) = iterator.next().unwrap();
+                if !nullable {
+                    return first_expression;
+                }
+                let mut result = first_expression;
+                for (syn_expr, nullable) in iterator {
+                    if !nullable {
+                        return parse_quote!(#result.unwrap_or_else(|| #syn_expr));
+                    }
+                    result = parse_quote!(#result.or_else(||#syn_expr));
+                }
+                result
+            }
+            DataStructureFunction::NullIf { left, right } => {
+                let left_expr = left.to_syn_expression();
+                let right_expr = right.to_syn_expression();
+                let left_nullable = left.nullable();
+                let right_nullable = right.nullable();
+                match (left_nullable, right_nullable) {
+                    (true, true) => parse_quote!({
+                        let left = #left_expr;
+                        let right = #right_expr;
+                        if left == right {
+                            None
+                        } else {
+                            left
+                        }
+                    }),
+                    (true, false) => parse_quote!({
+                        let left = #left_expr;
+                        let right = #right_expr;
+                        match left {
+                            Some(left) if left == right => None,
+                            _ => left,
+                        }
+                    }),
+                    (false, true) => parse_quote!({
+                        let left = #left_expr;
+                        let right = #right_expr;
+                        match right {
+                            Some(right) if left == right => None,
+                            _ => Some(left),
+                        }
+                    }),
+                    (false, false) => parse_quote!({
+                        let left = #left_expr;
+                        let right = #right_expr;
+                        if left == right {
+                            None
+                        } else {
+                            Some(left)
+                        }
+                    }),
+                }
+            }
+            DataStructureFunction::MakeArray(terms) => {
+                if self.return_type().is_optional() {
+                    let entries: Vec<syn::Expr> = terms
+                        .iter()
+                        .map(|term| {
+                            let expr = term.to_syn_expression();
+                            if term.nullable() {
+                                parse_quote!(#expr)
+                            } else {
+                                parse_quote!(Some(#expr))
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    parse_quote!(Some(vec![#(#entries),*]))
+                } else {
+                    let nullable = terms.iter().any(|term| term.nullable());
+                    if nullable {
+                        let entries = terms
+                            .iter()
+                            .map(|term| {
+                                let expr = term.to_syn_expression();
+                                if term.nullable() {
+                                    parse_quote!(#expr)
+                                } else {
+                                    parse_quote!(Some(#expr))
+                                }
+                            })
+                            .collect::<Vec<syn::Expr>>();
+                        parse_quote!(vec![#(#entries),*])
+                    } else {
+                        let entries = terms.iter().map(|term| term.to_syn_expression());
+                        parse_quote!(vec![#(#entries),*])
+                    }
+                }
+            }
+        }
+    }
+
+    fn return_type(&self) -> TypeDef {
+        match self {
+            DataStructureFunction::Coalesce(terms) => {
+                let nullable = terms.iter().all(|term| term.nullable());
+                terms[0].return_type().with_nullity(nullable)
+            }
+            DataStructureFunction::NullIf { left, right: _ } => left.return_type().as_nullable(),
+            DataStructureFunction::MakeArray(terms) => {
+                let TypeDef::DataType(primitive_type, _ ) = terms[0].return_type() else {
+                    unreachable!("make_array should only be called on a primitive type")
+                };
+                let nullable = terms.iter().any(|term| term.nullable());
+                TypeDef::DataType(
+                    DataType::List(Box::new(Field::new("items", primitive_type, nullable))),
+                    false,
+                )
+            }
         }
     }
 }

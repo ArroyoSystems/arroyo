@@ -860,4 +860,93 @@ mod tests {
         },
         0i64
     );
+
+    // Test Coalesce
+    single_test_codegen!(
+        "coalesce",
+        "coalesce(nullable_string, non_nullable_string)",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello".into(),
+            ..Default::default()
+        },
+        "Hello".to_string()
+    );
+
+    single_test_codegen!(
+        "coalesce_nullable_non_null",
+        "coalesce(nullable_string, 'Hello')",
+        arroyo_sql::TestStruct {
+            nullable_string: Some("World".into()),
+            ..Default::default()
+        },
+        "World".to_string()
+    );
+
+    // NULLIF tests, all for possible nullity pairs
+    single_test_codegen!(
+        "nullif_nullable_nullable",
+        "nullif(nullable_string, nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: Some("Hello".into()),
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "nullif_nullable_non_nullable",
+        "nullif(nullable_string, non_nullable_string)",
+        arroyo_sql::TestStruct {
+            nullable_string: Some("Hello".into()),
+            non_nullable_string: "Hello".into(),
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "nullif_non_nulls_non_equal",
+        "nullif(non_nullable_string, 'World')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Hello".into(),
+            ..Default::default()
+        },
+        Some("Hello".to_string())
+    );
+
+    //classic divide by zero nullif example
+    single_test_codegen!(
+        "nullif_division",
+        "non_nullable_i32 / nullif(non_nullable_i64, 0)",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 1,
+            non_nullable_i64: 0,
+            ..Default::default()
+        },
+        None
+    );
+
+    // Test make_array, including automatic coercion
+    single_test_codegen!(
+        "make_array",
+        "make_array(non_nullable_i32, non_nullable_i64)",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 1,
+            non_nullable_i64: 2,
+            ..Default::default()
+        },
+        vec![1i64, 2i64]
+    );
+
+    // mixed nullability make_array
+    single_test_codegen!(
+        "make_array_mixed_nullability",
+        "make_array(non_nullable_i32, nullable_i64)",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 1,
+            nullable_i64: Some(2),
+            ..Default::default()
+        },
+        vec![Some(1i64), Some(2i64)]
+    );
 }
