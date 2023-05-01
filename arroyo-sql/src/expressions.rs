@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::{
     operators::TwoPhaseAggregation,
@@ -299,13 +299,19 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
                 | BuiltinScalarFunction::Acos
                 | BuiltinScalarFunction::Asin
                 | BuiltinScalarFunction::Atan
+                | BuiltinScalarFunction::Acosh
+                | BuiltinScalarFunction::Asinh
+                | BuiltinScalarFunction::Atanh
                 | BuiltinScalarFunction::Cos
+                | BuiltinScalarFunction::Cosh
                 | BuiltinScalarFunction::Ln
                 | BuiltinScalarFunction::Log
                 | BuiltinScalarFunction::Log10
                 | BuiltinScalarFunction::Sin
+                | BuiltinScalarFunction::Sinh
                 | BuiltinScalarFunction::Sqrt
                 | BuiltinScalarFunction::Tan
+                | BuiltinScalarFunction::Tanh
                 | BuiltinScalarFunction::Ceil
                 | BuiltinScalarFunction::Floor
                 | BuiltinScalarFunction::Round
@@ -399,6 +405,9 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
                 BuiltinScalarFunction::ToHex => bail!("hex not implemented"),
                 BuiltinScalarFunction::Uuid => bail!("UUID unimplemented"),
                 BuiltinScalarFunction::Cbrt => bail!("cube root unimplemented"),
+                BuiltinScalarFunction::Degrees => bail!("degrees not implemented yet"),
+                BuiltinScalarFunction::Pi => bail!("pi not implemented yet"),
+                BuiltinScalarFunction::Radians => bail!("radians not implemented yet"),
             }
         }
         expression => {
@@ -1071,15 +1080,21 @@ impl CastExpression {
 enum NumericFunction {
     Abs,
     Acos,
+    Acosh,
     Asin,
+    Asinh,
     Atan,
+    Atanh,
     Cos,
+    Cosh,
     Ln,
     Log,
     Log10,
     Sin,
+    Sinh,
     Sqrt,
     Tan,
+    Tanh,
     Ceil,
     Floor,
     Round,
@@ -1094,15 +1109,21 @@ impl NumericFunction {
         let name = match self {
             NumericFunction::Abs => "abs",
             NumericFunction::Acos => "acos",
+            NumericFunction::Acosh => "acosh",
             NumericFunction::Asin => "asin",
+            NumericFunction::Asinh => "asinh",
             NumericFunction::Atan => "atan",
+            NumericFunction::Atanh => "atanh",
             NumericFunction::Cos => "cos",
+            NumericFunction::Cosh => "cosh",
             NumericFunction::Ln => "ln",
             NumericFunction::Log => "log",
             NumericFunction::Log10 => "log10",
             NumericFunction::Sin => "sin",
+            NumericFunction::Sinh => "sinh",
             NumericFunction::Sqrt => "sqrt",
             NumericFunction::Tan => "tan",
+            NumericFunction::Tanh => "tanh",
             NumericFunction::Log2 => "log2",
             NumericFunction::Exp => "exp",
             NumericFunction::Ceil => "ceil",
@@ -1122,15 +1143,21 @@ impl TryFrom<BuiltinScalarFunction> for NumericFunction {
         match fun {
             BuiltinScalarFunction::Abs => Ok(Self::Abs),
             BuiltinScalarFunction::Acos => Ok(Self::Acos),
+            BuiltinScalarFunction::Acosh => Ok(Self::Acosh),
             BuiltinScalarFunction::Asin => Ok(Self::Asin),
+            BuiltinScalarFunction::Asinh => Ok(Self::Asinh),
             BuiltinScalarFunction::Atan => Ok(Self::Atan),
+            BuiltinScalarFunction::Atanh => Ok(Self::Atanh),
             BuiltinScalarFunction::Cos => Ok(Self::Cos),
+            BuiltinScalarFunction::Cosh => Ok(Self::Cosh),
             BuiltinScalarFunction::Ln => Ok(Self::Ln),
             BuiltinScalarFunction::Log => Ok(Self::Log),
             BuiltinScalarFunction::Log10 => Ok(Self::Log10),
             BuiltinScalarFunction::Sin => Ok(Self::Sin),
+            BuiltinScalarFunction::Sinh => Ok(Self::Sinh),
             BuiltinScalarFunction::Sqrt => Ok(Self::Sqrt),
             BuiltinScalarFunction::Tan => Ok(Self::Tan),
+            BuiltinScalarFunction::Tanh => Ok(Self::Tanh),
             BuiltinScalarFunction::Ceil => Ok(Self::Ceil),
             BuiltinScalarFunction::Floor => Ok(Self::Floor),
             BuiltinScalarFunction::Round => Ok(Self::Round),
@@ -1980,7 +2007,7 @@ impl DataStructureFunction {
                 };
                 let nullable = terms.iter().any(|term| term.nullable());
                 TypeDef::DataType(
-                    DataType::List(Box::new(Field::new("items", primitive_type, nullable))),
+                    DataType::List(Arc::new(Field::new("items", primitive_type, nullable))),
                     false,
                 )
             }

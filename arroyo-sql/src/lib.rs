@@ -5,6 +5,7 @@ use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
 use arroyo_datastream::{NexmarkSource, Operator, Program, Source};
 
+use datafusion::optimizer::analyzer::Analyzer;
 use datafusion::optimizer::optimizer::Optimizer;
 use datafusion::optimizer::OptimizerContext;
 use datafusion::physical_plan::functions::make_scalar_function;
@@ -23,12 +24,13 @@ use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::{Parser, ParserError};
 use datafusion::sql::{planner::ContextProvider, TableReference};
 use datafusion_common::DataFusionError;
+use datafusion_common::config::ConfigOptions;
 use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
 use datafusion_expr::{
     AccumulatorFunctionImplementation, LogicalPlan, ReturnTypeFunction, Signature,
-    StateTypeFunction, TypeSignature, Volatility,
+    StateTypeFunction, TypeSignature, Volatility, Analyze,
 };
 use expressions::{to_expression_generator, Expression};
 use pipeline::get_program_from_plan;
@@ -234,24 +236,32 @@ pub async fn parse_and_get_program(
 
     tokio::spawn(async move {
         // parse the SQL
-        let dialect = PostgreSqlDialect {};
-        let ast = Parser::parse_sql(&dialect, &query)
-            .map_err(|e| match e {
-                ParserError::TokenizerError(s) | ParserError::ParserError(s) => anyhow!(s),
-                ParserError::RecursionLimitExceeded => anyhow!("recursion limit"),
-            })
-            .with_context(|| "parse_failure")?;
-        let statement = &ast[0];
-        let sql_to_rel = SqlToRel::new(&schema_provider);
-
-        let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
-        let optimizer_config = OptimizerContext::default();
-        let optimizer = Optimizer::new();
-        let optimized_plan = optimizer.optimize(&plan, &optimizer_config, |_plan, _rule| {})?;
-        get_program_from_plan(config, schema_provider, &optimized_plan)
+        let plan = get_plan_from_query(&query, &schema_provider)?;
+        get_program_from_plan(config, schema_provider, &plan)
     })
     .await
     .map_err(|_| anyhow!("Something went wrong"))?
+}
+
+fn get_plan_from_query(query: &str, schema_provider: &ArroyoSchemaProvider) -> Result<LogicalPlan> {
+    // parse the SQL
+    let dialect = PostgreSqlDialect {};
+    let ast = Parser::parse_sql(&dialect, &query)
+        .map_err(|e| match e {
+            ParserError::TokenizerError(s) | ParserError::ParserError(s) => anyhow!(s),
+            ParserError::RecursionLimitExceeded => anyhow!("recursion limit"),
+        })
+        .with_context(|| "parse_failure")?;
+    let statement = &ast[0];
+    let sql_to_rel = SqlToRel::new(schema_provider);
+
+    let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
+    let optimizer_config = OptimizerContext::default();
+    let analyzer = Analyzer::default();
+    let optimizer = Optimizer::new();
+    let analyzed_plan = analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
+    let optimized_plan = optimizer.optimize(&analyzed_plan, &optimizer_config, |_plan, _rule| {})?;
+    Ok(optimized_plan)
 }
 
 #[derive(Clone)]
@@ -426,20 +436,7 @@ pub fn get_test_expression(
         .as_operator(),
         struct_def.name.clone(),
     );
-    let dialect = PostgreSqlDialect {};
-    let ast = Parser::parse_sql(
-        &dialect,
-        &format!("SELECT {} FROM test_source", calculation_string),
-    )
-    .unwrap();
-    let statement = &ast[0];
-    let sql_to_rel = SqlToRel::new(&schema_provider);
-    let plan = sql_to_rel.sql_statement_to_plan(statement.clone()).unwrap();
-    let optimizer_config = OptimizerContext::default();
-    let optimizer = Optimizer::new();
-    let plan = optimizer
-        .optimize(&plan, &optimizer_config, |_plan, _rule| {})
-        .unwrap();
+    let plan = get_plan_from_query(&format!("SELECT {} FROM test_source", calculation_string), &schema_provider).unwrap();
     let LogicalPlan::Projection(projection) = plan else {panic!("expect projection")};
     let generating_expression = to_expression_generator(&projection.expr[0], &struct_def).unwrap();
     generate_test_code(

@@ -1,7 +1,7 @@
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
-    time::Duration,
+    time::Duration, sync::Arc,
 };
 
 use anyhow::anyhow;
@@ -152,7 +152,8 @@ impl From<StructField> for Field {
     fn from(struct_field: StructField) -> Self {
         let (dt, nullable) = match struct_field.data_type {
             TypeDef::StructDef(s, nullable) => (
-                DataType::Struct(s.fields.into_iter().map(|f| f.into()).collect()),
+                DataType::Struct(s.fields.into_iter().map(|f| {let field: Field = f.into();
+                Arc::new(field)}).collect()),
                 nullable,
             ),
             TypeDef::DataType(dt, nullable) => (dt, nullable),
@@ -344,7 +345,7 @@ impl StructField {
             DataType::FixedSizeList(_, _) => todo!(),
             DataType::LargeList(_) => todo!(),
             DataType::Struct(_) => unreachable!(),
-            DataType::Union(_, _, _) => todo!(),
+            DataType::Union(_, _) => todo!(),
             DataType::Dictionary(_, _) => todo!(),
             DataType::Decimal128(_, _) => todo!(),
             DataType::Decimal256(_, _) => todo!(),
