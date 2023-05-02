@@ -670,6 +670,14 @@ message GetSourcesResp {
   repeated SourceDef sources = 1;
 }
 
+message GetSourceReq {
+  int64 id = 1;
+}
+
+message GetSourceResp {
+  SourceDef source = 1;
+}
+
 message DeleteSourceReq {
   string name = 1;
 }
@@ -764,6 +772,7 @@ service ApiGrpc {
 
   rpc CreateSource(CreateSourceReq) returns (CreateSourceResp);
   rpc GetSources(GetSourcesReq) returns (GetSourcesResp);
+  rpc GetSource(GetSourceReq) returns (GetSourceResp);
   rpc DeleteSource(DeleteSourceReq) returns (DeleteSourceResp);
 
   rpc CreateSink(CreateSinkReq) returns (CreateSinkResp);

@@ -22,6 +22,7 @@ import { CreatePipeline } from "./routes/pipelines/CreatePipeline";
 import { SinkEditor } from "./routes/sinks/CreateSink";
 
 import { addCloudRoutes, createRoot, getClient, needsOrgSetup } from "./lib/CloudComponents";
+import { SourceDetail } from "./routes/sources/SourceDetail";
 
 export type ApiClient = () => Promise<PromiseClient<typeof ApiGrpc>>;
 
@@ -53,6 +54,10 @@ export function Router(): JSX.Element {
     {
       path: "sources/new",
       element: <CreateSource client={client} />,
+    },
+    {
+      path: "sources/:id",
+      element: <SourceDetail client={client} />,
     },
     {
       path: "sinks",

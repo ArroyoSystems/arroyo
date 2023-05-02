@@ -17,8 +17,8 @@ use arroyo_rpc::grpc::api::{
     source_def::SourceType,
     source_schema::{self, Schema},
     ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
-    JsonSchemaDef, KafkaAuthConfig, KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField,
-    SourceMetadataResp, TestSourceMessage,
+    GetSourceReq, JsonSchemaDef, KafkaAuthConfig, KafkaSourceConfig, KafkaSourceDef, SourceDef,
+    SourceField, SourceMetadataResp, TestSourceMessage,
 };
 use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
@@ -727,80 +727,94 @@ pub(crate) async fn create_source(
     Ok(())
 }
 
+/// Convert from cornucopia Source to api rpc SourceDef
+impl From<api_queries::Source> for SourceDef {
+    fn from(rec: api_queries::Source) -> Self {
+        let schema = match rec.schema_type {
+            SchemaType::builtin => {
+                Schema::Builtin(serde_json::from_value(rec.schema_config.unwrap()).unwrap())
+            }
+            SchemaType::json_schema => {
+                Schema::JsonSchema(serde_json::from_value(rec.schema_config.unwrap()).unwrap())
+            }
+            SchemaType::json_fields => {
+                Schema::JsonFields(serde_json::from_value(rec.schema_config.unwrap()).unwrap())
+            }
+        };
+
+        let source_schema = api::SourceSchema {
+            kafka_schema_registry: rec.kafka_schema_registry,
+            schema: Some(schema),
+        };
+
+        let ss = SourceSchema::try_from(&rec.source_name, source_schema.clone()).unwrap();
+
+        let source_type = match rec.source_type {
+            public::SourceType::nexmark => {
+                SourceType::Nexmark(serde_json::from_value(rec.source_config.unwrap()).unwrap())
+            }
+            public::SourceType::impulse => {
+                SourceType::Impulse(serde_json::from_value(rec.source_config.unwrap()).unwrap())
+            }
+            public::SourceType::file => {
+                SourceType::File(serde_json::from_value(rec.source_config.unwrap()).unwrap())
+            }
+            public::SourceType::kafka => {
+                let config: KafkaSourceConfig =
+                    serde_json::from_value(rec.source_config.unwrap()).unwrap();
+                assert_eq!(rec.connection_type.unwrap(), public::ConnectionType::kafka);
+                SourceType::Kafka(KafkaSourceDef {
+                    connection_name: rec.connection_name.as_ref().unwrap().clone(),
+                    connection: serde_json::from_value(
+                        rec.connection_config.as_ref().unwrap().clone(),
+                    )
+                    .unwrap(),
+                    topic: config.topic,
+                })
+            }
+        };
+
+        SourceDef {
+            id: rec.source_id,
+            name: rec.source_name,
+            schema: Some(source_schema),
+            connection: rec.connection_name,
+            consumers: rec.consumer_count as i32,
+            sql_fields: ss
+                .fields()
+                .into_iter()
+                .map(|f| f.try_into().unwrap())
+                .collect(),
+            source_type: Some(source_type),
+        }
+    }
+}
+
+pub(crate) async fn get_source<E: GenericClient>(
+    request: GetSourceReq,
+    auth: &AuthData,
+    client: &E,
+) -> Result<SourceDef, Status> {
+    Ok(api_queries::get_source()
+        .bind(client, &auth.organization_id, &request.id)
+        .one()
+        .await
+        .map_err(log_and_map)?
+        .into())
+}
+
 pub(crate) async fn get_sources<E: GenericClient>(
     auth: &AuthData,
     client: &E,
 ) -> Result<Vec<SourceDef>, Status> {
-    let res = api_queries::get_sources()
+    Ok(api_queries::get_sources()
         .bind(client, &auth.organization_id)
         .all()
         .await
-        .map_err(log_and_map)?;
-
-    let defs = res
+        .map_err(log_and_map)?
         .into_iter()
-        .map(|rec| {
-            let schema = match rec.schema_type {
-                SchemaType::builtin => {
-                    Schema::Builtin(serde_json::from_value(rec.schema_config.unwrap()).unwrap())
-                }
-                SchemaType::json_schema => {
-                    Schema::JsonSchema(serde_json::from_value(rec.schema_config.unwrap()).unwrap())
-                }
-                SchemaType::json_fields => {
-                    Schema::JsonFields(serde_json::from_value(rec.schema_config.unwrap()).unwrap())
-                }
-            };
-
-            let source_schema = api::SourceSchema {
-                kafka_schema_registry: rec.kafka_schema_registry,
-                schema: Some(schema),
-            };
-
-            let ss = SourceSchema::try_from(&rec.source_name, source_schema.clone()).unwrap();
-
-            let source_type = match rec.source_type {
-                public::SourceType::nexmark => {
-                    SourceType::Nexmark(serde_json::from_value(rec.source_config.unwrap()).unwrap())
-                }
-                public::SourceType::impulse => {
-                    SourceType::Impulse(serde_json::from_value(rec.source_config.unwrap()).unwrap())
-                }
-                public::SourceType::file => {
-                    SourceType::File(serde_json::from_value(rec.source_config.unwrap()).unwrap())
-                }
-                public::SourceType::kafka => {
-                    let config: KafkaSourceConfig =
-                        serde_json::from_value(rec.source_config.unwrap()).unwrap();
-                    assert_eq!(rec.connection_type.unwrap(), public::ConnectionType::kafka);
-                    SourceType::Kafka(KafkaSourceDef {
-                        connection_name: rec.connection_name.as_ref().unwrap().clone(),
-                        connection: serde_json::from_value(
-                            rec.connection_config.as_ref().unwrap().clone(),
-                        )
-                        .unwrap(),
-                        topic: config.topic,
-                    })
-                }
-            };
-
-            SourceDef {
-                id: rec.source_id,
-                name: rec.source_name,
-                schema: Some(source_schema),
-                connection: rec.connection_name,
-                consumers: rec.consumer_count as i32,
-                sql_fields: ss
-                    .fields()
-                    .into_iter()
-                    .map(|f| f.try_into().unwrap())
-                    .collect(),
-                source_type: Some(source_type),
-            }
-        })
-        .collect();
-
-    Ok(defs)
+        .map(|rec| rec.into())
+        .collect())
 }
 
 pub(crate) async fn test_schema(req: CreateSourceReq) -> Result<Vec<String>, Status> {

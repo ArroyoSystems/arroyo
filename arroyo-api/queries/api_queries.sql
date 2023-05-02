@@ -44,7 +44,9 @@ INSERT INTO sources
 (organization_id, created_by, name, type, config, schema_id, connection_id)
 VALUES (:organization_id, :created_by, :name, :type, :config, :schema_id, :connection_id);
 
---! get_sources: (schema_config?, connection_name?, connection_type?, connection_config?, source_config?)
+--: Source(schema_config?, connection_name?, connection_type?, connection_config?, source_config?)
+
+--! get_sources: Source
 SELECT
     schemas.id as schema_id,
     schemas.type as schema_type,
@@ -65,6 +67,28 @@ FROM sources as sd
 INNER JOIN schemas ON schema_id = schemas.id
 LEFT JOIN connections ON connection_id = connections.id
 WHERE sd.organization_id = :organization_id;
+
+--! get_source: Source
+SELECT
+    schemas.id as schema_id,
+    schemas.type as schema_type,
+    schemas.config as schema_config,
+    schemas.kafka_schema_registry as kafka_schema_registry,
+    sd.id as source_id,
+    sd.name as source_name,
+    sd.type as source_type,
+    sd.config as source_config,
+    connections.name as connection_name,
+    connections.type as connection_type,
+    connections.config as connection_config,
+    (SELECT count(*) as consumer_count
+        FROM pipeline_sources
+        WHERE pipeline_sources.source_id = sd.id
+    ) as consumer_count
+FROM sources as sd
+INNER JOIN schemas ON schema_id = schemas.id
+LEFT JOIN connections ON connection_id = connections.id
+WHERE sd.organization_id = :organization_id AND sd.id = :id;
 
 --! delete_source
 DELETE FROM sources

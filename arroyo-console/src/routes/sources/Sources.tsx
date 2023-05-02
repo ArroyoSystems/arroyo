@@ -33,8 +33,8 @@ import {
   useDisclosure,
 } from "@chakra-ui/react";
 import { useEffect, useState } from "react";
-import { FiEdit2, FiInfo, FiXCircle } from "react-icons/fi";
-import { useLinkClickHandler } from "react-router-dom";
+import { FiEdit2, FiEye, FiInfo, FiXCircle } from "react-icons/fi";
+import { useLinkClickHandler, useNavigate, Link } from "react-router-dom";
 import { ApiGrpc } from "../../gen/api_connectweb";
 import { DeleteSourceReq, GetSourcesReq, SourceDef } from "../../gen/api_pb";
 import { ApiClient } from "../../main";
@@ -49,10 +49,6 @@ interface ColumnDef {
 }
 
 const columns: Array<ColumnDef> = [
-  {
-    name: "name",
-    accessor: s => s.name,
-  },
   {
     name: "type",
     accessor: s => s.sourceType.case!,
@@ -77,6 +73,8 @@ function SourceTable({ client }: { client: ApiClient }) {
   const [selected, setSelected] = useState<SourceDef | null>(null);
 
   const { isOpen, onOpen, onClose } = useDisclosure();
+
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -133,7 +131,7 @@ function SourceTable({ client }: { client: ApiClient }) {
           <ModalCloseButton />
           <ModalBody>
             <Code colorScheme="black" width="100%" p={4}>
-              { /* toJson -> parse -> stringify to get around the inabilityof JSON.stringify to handle BigInt */ }
+              { /* toJson -> parse -> stringify to get around the inabilityof JSON.stringify to handle BigInt */}
               <pre>{JSON.stringify(JSON.parse(selected?.sourceType.value?.toJsonString() || "{}"), null, 2)}</pre>
             </Code>
           </ModalBody>
@@ -146,6 +144,9 @@ function SourceTable({ client }: { client: ApiClient }) {
       <Table>
         <Thead>
           <Tr>
+            <Th key="name">
+              <Text>name</Text>
+            </Th>
             {columns.map(c => {
               return (
                 <Th key={c.name}>
@@ -159,11 +160,16 @@ function SourceTable({ client }: { client: ApiClient }) {
         <Tbody>
           {state.sources?.flatMap(source => (
             <Tr key={source.name}>
-              {columns.map(column => (
-                <Td key={source.name + column.name}>{column.accessor(source)}</Td>
-              ))}
+              <Td key={source.name + "name"}>
+                <Link to={`${source.id}`}>{source.name}</Link>
+              </Td>
+              {
+                columns.map(column => (
+                  <Td key={source.name + column.name}>{column.accessor(source)}</Td>
+                ))
+              }
 
-              <Td textAlign="right">
+              < Td textAlign="right" >
                 <IconButton
                   icon={<FiInfo fontSize="1.25rem" />}
                   variant="ghost"
@@ -185,8 +191,8 @@ function SourceTable({ client }: { client: ApiClient }) {
             </Tr>
           ))}
         </Tbody>
-      </Table>
-    </Stack>
+      </Table >
+    </Stack >
   );
 }
 

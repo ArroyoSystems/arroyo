@@ -1293,6 +1293,7 @@ pub enum StringFunction {
     Rpad(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
     Rtrim(Box<Expression>, Option<Box<Expression>>),
 }
+// postgres has to be active for build for some reason?
 
 #[derive(Debug, Clone)]
 pub enum HashFunction {

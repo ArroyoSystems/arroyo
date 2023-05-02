@@ -4943,6 +4943,80 @@ export class GetSourcesResp extends Message<GetSourcesResp> {
 }
 
 /**
+ * @generated from message arroyo_api.GetSourceReq
+ */
+export class GetSourceReq extends Message<GetSourceReq> {
+  /**
+   * @generated from field: int64 id = 1;
+   */
+  id = protoInt64.zero;
+
+  constructor(data?: PartialMessage<GetSourceReq>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.GetSourceReq";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSourceReq {
+    return new GetSourceReq().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSourceReq {
+    return new GetSourceReq().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSourceReq {
+    return new GetSourceReq().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetSourceReq | PlainMessage<GetSourceReq> | undefined, b: GetSourceReq | PlainMessage<GetSourceReq> | undefined): boolean {
+    return proto3.util.equals(GetSourceReq, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.GetSourceResp
+ */
+export class GetSourceResp extends Message<GetSourceResp> {
+  /**
+   * @generated from field: arroyo_api.SourceDef source = 1;
+   */
+  source?: SourceDef;
+
+  constructor(data?: PartialMessage<GetSourceResp>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.GetSourceResp";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "source", kind: "message", T: SourceDef },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSourceResp {
+    return new GetSourceResp().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSourceResp {
+    return new GetSourceResp().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSourceResp {
+    return new GetSourceResp().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetSourceResp | PlainMessage<GetSourceResp> | undefined, b: GetSourceResp | PlainMessage<GetSourceResp> | undefined): boolean {
+    return proto3.util.equals(GetSourceResp, a, b);
+  }
+}
+
+/**
  * @generated from message arroyo_api.DeleteSourceReq
  */
 export class DeleteSourceReq extends Message<DeleteSourceReq> {
