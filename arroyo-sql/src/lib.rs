@@ -23,14 +23,14 @@ use datafusion::sql::planner::SqlToRel;
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::{Parser, ParserError};
 use datafusion::sql::{planner::ContextProvider, TableReference};
-use datafusion_common::DataFusionError;
 use datafusion_common::config::ConfigOptions;
+use datafusion_common::DataFusionError;
 use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
 use datafusion_expr::{
     AccumulatorFunctionImplementation, LogicalPlan, ReturnTypeFunction, Signature,
-    StateTypeFunction, TypeSignature, Volatility, Analyze,
+    StateTypeFunction, TypeSignature, Volatility,
 };
 use expressions::{to_expression_generator, Expression};
 use pipeline::get_program_from_plan;
@@ -79,6 +79,40 @@ impl ArroyoSchemaProvider {
                 "tumble",
                 vec![DataType::Interval(datatypes::IntervalUnit::MonthDayNano)],
                 window_return_type,
+                Volatility::Volatile,
+                make_scalar_function(fn_impl),
+            )),
+        );
+        functions.insert(
+            "get_first_json_object".to_string(),
+            Arc::new(create_udf(
+                "get_first_json_object",
+                vec![DataType::Utf8, DataType::Utf8],
+                Arc::new(DataType::Utf8),
+                Volatility::Volatile,
+                make_scalar_function(fn_impl),
+            )),
+        );
+        functions.insert(
+            "get_json_objects".to_string(),
+            Arc::new(create_udf(
+                "get_json_objects",
+                vec![DataType::Utf8, DataType::Utf8],
+                Arc::new(DataType::List(Arc::new(Field::new(
+                    "item",
+                    DataType::Utf8,
+                    false,
+                )))),
+                Volatility::Volatile,
+                make_scalar_function(fn_impl),
+            )),
+        );
+        functions.insert(
+            "extract_json_string".to_string(),
+            Arc::new(create_udf(
+                "extract_json_string",
+                vec![DataType::Utf8, DataType::Utf8],
+                Arc::new(DataType::Utf8),
                 Volatility::Volatile,
                 make_scalar_function(fn_impl),
             )),
@@ -259,8 +293,10 @@ fn get_plan_from_query(query: &str, schema_provider: &ArroyoSchemaProvider) -> R
     let optimizer_config = OptimizerContext::default();
     let analyzer = Analyzer::default();
     let optimizer = Optimizer::new();
-    let analyzed_plan = analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
-    let optimized_plan = optimizer.optimize(&analyzed_plan, &optimizer_config, |_plan, _rule| {})?;
+    let analyzed_plan =
+        analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
+    let optimized_plan =
+        optimizer.optimize(&analyzed_plan, &optimizer_config, |_plan, _rule| {})?;
     Ok(optimized_plan)
 }
 
@@ -436,7 +472,11 @@ pub fn get_test_expression(
         .as_operator(),
         struct_def.name.clone(),
     );
-    let plan = get_plan_from_query(&format!("SELECT {} FROM test_source", calculation_string), &schema_provider).unwrap();
+    let plan = get_plan_from_query(
+        &format!("SELECT {} FROM test_source", calculation_string),
+        &schema_provider,
+    )
+    .unwrap();
     let LogicalPlan::Projection(projection) = plan else {panic!("expect projection")};
     let generating_expression = to_expression_generator(&projection.expr[0], &struct_def).unwrap();
     generate_test_code(

@@ -949,4 +949,69 @@ mod tests {
         },
         vec![Some(1i64), Some(2i64)]
     );
+    // test get_first_json_object
+    single_test_codegen!(
+        "get_first_json_object",
+        "get_first_json_object(non_nullable_string, '$.a.b')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: r#"{"a": {"b": {"c": "d"}}}"#.into(),
+            ..Default::default()
+        },
+        Some(r#"{"c":"d"}"#.to_string())
+    );
+    // test get_json_objects
+    single_test_codegen!(
+        "get_json_objects",
+        "get_json_objects(non_nullable_string, '$.letters.lowercase[*].value')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: r#"{
+                "letters": {
+                  "lowercase": [
+                    { "value": "a" },
+                    { "value": "b" },
+                    { "value": "c" }
+                  ],
+                  "uppercase": [
+                    { "value": "A" },
+                    { "value": "B" },
+                    { "value": "C" }
+                  ]
+                }
+              }
+              "#
+            .into(),
+            ..Default::default()
+        },
+        Some(vec![
+            r#""a""#.to_string(),
+            r#""b""#.to_string(),
+            r#""c""#.to_string()
+        ])
+    );
+
+    // test extract_json_string
+    single_test_codegen!(
+        "extract_json_string",
+        "extract_json_string(non_nullable_string, '$.letters.lowercase[0].value')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: r#"{
+                "letters": {
+                  "lowercase": [
+                    { "value": "a" },
+                    { "value": "b" },
+                    { "value": "c" }
+                  ],
+                  "uppercase": [
+                    { "value": "A" },
+                    { "value": "B" },
+                    { "value": "C" }
+                  ]
+                }
+              }
+              "#
+            .into(),
+            ..Default::default()
+        },
+        Some("a".to_string())
+    );
 }

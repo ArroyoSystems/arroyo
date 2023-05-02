@@ -20,6 +20,7 @@ use wasmtime::{
     PoolingAllocationStrategy, Store, TypedFunc,
 };
 pub mod aggregating_window;
+pub mod functions;
 pub mod join_with_expiration;
 pub mod joins;
 pub mod sinks;

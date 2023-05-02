@@ -1,14 +1,7 @@
-use std::{
-    collections::HashMap,
-    fmt::{Display, Formatter},
-    path::PathBuf,
-    str::FromStr,
-    time::{Duration, SystemTime},
-};
-
 use arrow::datatypes::TimeUnit;
 use arroyo_datastream::{
-    FileSource, ImpulseSpec, NexmarkSource, OffsetMode, Operator, Source as ApiSource,
+    FileSource, ImpulseSpec, NexmarkSource, OffsetMode, Operator, SerializationMode,
+    Source as ApiSource,
 };
 use arroyo_rpc::grpc::api::{
     self,
@@ -17,8 +10,8 @@ use arroyo_rpc::grpc::api::{
     source_def::SourceType,
     source_schema::{self, Schema},
     ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
-    JsonSchemaDef, KafkaAuthConfig, KafkaSourceConfig, KafkaSourceDef, SourceDef, SourceField,
-    SourceMetadataResp, TestSourceMessage,
+    JsonSchemaDef, KafkaAuthConfig, KafkaSourceConfig, KafkaSourceDef, RawJsonDef, SourceDef,
+    SourceField, SourceMetadataResp, TestSourceMessage,
 };
 use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
@@ -27,6 +20,13 @@ use arroyo_sql::{
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Pool;
 use http::StatusCode;
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter},
+    path::PathBuf,
+    str::FromStr,
+    time::{Duration, SystemTime},
+};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tonic::Status;
 use tracing::warn;
@@ -54,6 +54,17 @@ pub fn impulse_schema() -> SourceSchema {
                 SchemaFieldType::Primitive(PrimitiveType::UInt64),
             ),
         ],
+        kafka_schema: false,
+    }
+}
+
+pub fn raw_schema() -> SourceSchema {
+    SourceSchema {
+        format: SourceFormat::RawJson,
+        fields: vec![SchemaField::new(
+            "value",
+            SchemaFieldType::Primitive(PrimitiveType::String),
+        )],
         kafka_schema: false,
     }
 }
@@ -361,10 +372,12 @@ impl TryFrom<SchemaField> for SourceField {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum SourceFormat {
     Native(String),
     JsonFields,
     JsonSchema(String),
+    RawJson,
 }
 
 pub struct SourceSchema {
@@ -405,7 +418,8 @@ impl SourceSchema {
                     kafka_schema: s.kafka_schema_registry,
                 })
             }
-            api::source_schema::Schema::Protobuf(_) => todo!(),
+            Schema::RawJson(_) => Ok(raw_schema()),
+            api::source_schema::Schema::Protobuf(_) => Err(format!("protobuf not supported yet")),
         }
     }
 
@@ -436,6 +450,7 @@ impl TryFrom<&SourceSchema> for api::SourceSchema {
                         json_schema: s.clone(),
                     })
                 }
+                SourceFormat::RawJson => api::source_schema::Schema::RawJson(api::RawJsonDef {}),
             }),
             kafka_schema_registry: s.kafka_schema,
         })
@@ -453,13 +468,13 @@ impl TryFrom<SourceDef> for Source {
     type Error = String;
 
     fn try_from(value: SourceDef) -> Result<Self, Self::Error> {
-        let schema = match value.source_type.as_ref().unwrap() {
-            SourceType::Kafka(_) | SourceType::File(_) => {
-                SourceSchema::try_from(&value.name, value.schema.clone().unwrap())
-                    .map_err(|e| format!("Invalid schema: {}", e))?
-            }
-            SourceType::Impulse(_) => impulse_schema(),
-            SourceType::Nexmark(_) => nexmark_schema(),
+        let schema = if let api::source_schema::Schema::Builtin(name) =
+            value.schema.as_ref().unwrap().schema.as_ref().unwrap()
+        {
+            builtin_for_name(&name)?
+        } else {
+            SourceSchema::try_from(&value.name, value.schema.clone().unwrap())
+                .map_err(|e| format!("Invalid schema: {}", e))?
         };
 
         Ok(Source {
@@ -473,18 +488,19 @@ impl TryFrom<SourceDef> for Source {
 
 impl Source {
     pub(crate) fn register(&self, provider: &mut ArroyoSchemaProvider, auth: &AuthData) {
-        let name = match self.schema.format {
-            SourceFormat::Native(_) => None,
-            SourceFormat::JsonFields => None,
+        let name = match &self.schema.format {
+            SourceFormat::Native(_) | SourceFormat::JsonFields => None,
             SourceFormat::JsonSchema(_) => {
                 Some(format!("{}::{}", self.name, json_schema::ROOT_NAME))
             }
+            SourceFormat::RawJson => Some("arroyo_types::RawJson".to_string()),
         };
 
         let defs = match &self.schema.format {
             SourceFormat::Native(_) => None,
             SourceFormat::JsonFields => None,
             SourceFormat::JsonSchema(s) => Some(json_schema::get_defs(&self.name, s).unwrap()),
+            SourceFormat::RawJson => None,
         };
 
         let fields = self.schema.fields.iter().map(|f| f.into()).collect();
@@ -494,6 +510,13 @@ impl Source {
                 topic,
                 client_configs,
             } => {
+                let serialization_mode = if self.schema.format == SourceFormat::RawJson {
+                    SerializationMode::RawJson
+                } else if self.schema.kafka_schema {
+                    SerializationMode::JsonSchemaRegistry
+                } else {
+                    SerializationMode::Json
+                };
                 let node = Operator::KafkaSource {
                     topic: topic.to_string(),
                     bootstrap_servers: bootstrap_servers
@@ -502,7 +525,7 @@ impl Source {
                         .collect(),
                     // TODO: allow this to be configured via SQL
                     offset_mode: OffsetMode::Latest,
-                    schema_registry: self.schema.kafka_schema,
+                    kafka_input_format: serialization_mode,
                     messages_per_second: auth.org_metadata.kafka_qps,
                     client_configs: client_configs.clone(),
                 };
@@ -582,7 +605,7 @@ pub(crate) async fn create_source(
     req: CreateSourceReq,
     auth: AuthData,
     pool: &Pool,
-) -> Result<(), Status> {
+) -> core::result::Result<(), Status> {
     let schema_name = format!("{}_schema", req.name);
 
     let mut c = pool.get().await.map_err(log_and_map)?;
@@ -598,7 +621,6 @@ pub(crate) async fn create_source(
         .all()
         .await
         .map_err(log_and_map)?;
-
     // insert schema
     let schema = req
         .schema
@@ -609,6 +631,9 @@ pub(crate) async fn create_source(
                 }
                 Some(create_source_req::TypeOneof::Nexmark { .. }) => {
                     Some(source_schema::Schema::Builtin("nexmark".to_string()))
+                }
+                Some(create_source_req::TypeOneof::Kafka { .. }) => {
+                    Some(source_schema::Schema::RawJson(RawJsonDef {}))
                 }
                 _ => None,
             }
@@ -638,6 +663,9 @@ pub(crate) async fn create_source(
             SchemaType::json_fields,
             serde_json::to_value(fields).unwrap(),
         ),
+        source_schema::Schema::RawJson(_) => {
+            (SchemaType::raw_json, serde_json::to_value(&()).unwrap())
+        }
         source_schema::Schema::Protobuf(_) => todo!(),
     };
 
@@ -750,6 +778,7 @@ pub(crate) async fn get_sources<E: GenericClient>(
                 SchemaType::json_fields => {
                     Schema::JsonFields(serde_json::from_value(rec.schema_config.unwrap()).unwrap())
                 }
+                SchemaType::raw_json => Schema::RawJson(api::RawJsonDef {}),
             };
 
             let source_schema = api::SourceSchema {

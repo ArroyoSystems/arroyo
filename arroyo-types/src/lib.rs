@@ -9,8 +9,6 @@ use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub mod functions;
-
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord)]
 pub struct Window {
     pub start_time: SystemTime,
@@ -297,6 +295,11 @@ pub struct GlobalKey {}
 pub struct ImpulseEvent {
     pub counter: u64,
     pub subtask_index: u64,
+}
+
+#[derive(Encode, Decode, Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RawJson {
+    pub value: String,
 }
 
 pub mod nexmark {

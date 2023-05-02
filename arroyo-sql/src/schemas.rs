@@ -5,18 +5,21 @@ use arrow::datatypes::{DataType, TimeUnit};
 use crate::types::{StructDef, StructField, TypeDef};
 
 pub(crate) fn window_arrow_struct() -> DataType {
-    DataType::Struct(vec![
-        Arc::new(arrow::datatypes::Field::new(
-            "start_time",
-            DataType::Timestamp(TimeUnit::Millisecond, None),
-            false,
-        )),
-        Arc::new(arrow::datatypes::Field::new(
-            "end_time",
-            DataType::Timestamp(TimeUnit::Millisecond, None),
-            false,
-        )),
-    ].into())
+    DataType::Struct(
+        vec![
+            Arc::new(arrow::datatypes::Field::new(
+                "start_time",
+                DataType::Timestamp(TimeUnit::Millisecond, None),
+                false,
+            )),
+            Arc::new(arrow::datatypes::Field::new(
+                "end_time",
+                DataType::Timestamp(TimeUnit::Millisecond, None),
+                false,
+            )),
+        ]
+        .into(),
+    )
 }
 
 pub(crate) fn window_type_def() -> TypeDef {

@@ -36,6 +36,7 @@ pub enum Expression {
     String(StringFunction),
     Hash(HashExpression),
     DataStructure(DataStructureFunction),
+    Json(JsonExpression),
 }
 
 impl Expression {
@@ -63,6 +64,7 @@ impl Expression {
             Expression::DataStructure(data_structure_expression) => {
                 data_structure_expression.to_syn_expression()
             }
+            Expression::Json(json_function) => json_function.to_syn_expression(),
         }
     }
 
@@ -88,6 +90,7 @@ impl Expression {
             Expression::DataStructure(data_structure_expression) => {
                 data_structure_expression.return_type()
             }
+            Expression::Json(json_function) => json_function.return_type(),
         }
     }
 
@@ -410,6 +413,38 @@ pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> R
                 BuiltinScalarFunction::Radians => bail!("radians not implemented yet"),
             }
         }
+        Expr::ScalarUDF { fun, args } => match fun.name.as_str() {
+            "get_first_json_object" => {
+                let json_string = Box::new(to_expression_generator(&args[0], input_struct)?);
+                let path = Box::new(to_expression_generator(&args[1], input_struct)?);
+                Ok(Expression::Json(JsonExpression {
+                    function: JsonFunction::GetFirstJsonObject,
+                    json_string,
+                    path,
+                }))
+            }
+            "get_json_objects" => {
+                let json_string = Box::new(to_expression_generator(&args[0], input_struct)?);
+                let path = Box::new(to_expression_generator(&args[1], input_struct)?);
+                Ok(Expression::Json(JsonExpression {
+                    function: JsonFunction::GetJsonObjects,
+                    json_string,
+                    path,
+                }))
+            }
+            "extract_json_string" => {
+                let json_string = Box::new(to_expression_generator(&args[0], input_struct)?);
+                let path = Box::new(to_expression_generator(&args[1], input_struct)?);
+                Ok(Expression::Json(JsonExpression {
+                    function: JsonFunction::ExtractJsonString,
+                    json_string,
+                    path,
+                }))
+            }
+            _ => {
+                bail!("UDF {:?} not implemented", fun)
+            }
+        },
         expression => {
             bail!("expression {:?} not yet implemented", expression)
         }
@@ -1358,11 +1393,13 @@ impl HashExpression {
         match self.input.nullable() {
             true => parse_quote!({
                 match #input {
-                    Some(unwrapped) => Some(arroyo_types::functions::hash::#hash_fn(unwrapped #coerce)),
+                    Some(unwrapped) => Some(arroyo_worker::operators::functions::hash::#hash_fn(unwrapped #coerce)),
                     None => None,
                 }
             }),
-            false => parse_quote!(arroyo_types::functions::hash::#hash_fn(#input #coerce)),
+            false => {
+                parse_quote!(arroyo_worker::operators::functions::hash::#hash_fn(#input #coerce))
+            }
         }
     }
 
@@ -1571,84 +1608,115 @@ impl StringFunction {
     }
     fn non_null_function_invocation(&self) -> syn::Expr {
         match self {
-            StringFunction::Ascii(_) => parse_quote!(arroyo_types::functions::strings::ascii(arg)),
+            StringFunction::Ascii(_) => {
+                parse_quote!(arroyo_worker::operators::functions::strings::ascii(arg))
+            }
             StringFunction::BitLength(_) => {
-                parse_quote!(arroyo_types::functions::strings::bit_length(arg))
+                parse_quote!(arroyo_worker::operators::functions::strings::bit_length(
+                    arg
+                ))
             }
             StringFunction::CharacterLength(_) => parse_quote!((arg.chars().count() as i32)),
-            StringFunction::Chr(_) => parse_quote!((arroyo_types::functions::strings::chr(arg))),
+            StringFunction::Chr(_) => {
+                parse_quote!((arroyo_worker::operators::functions::strings::chr(arg)))
+            }
             StringFunction::InitCap(_) => {
-                parse_quote!(arroyo_types::functions::strings::initcap(arg))
+                parse_quote!(arroyo_worker::operators::functions::strings::initcap(arg))
             }
             StringFunction::OctetLength(_) => {
-                parse_quote!(arroyo_types::functions::strings::octet_length(arg))
+                parse_quote!(arroyo_worker::operators::functions::strings::octet_length(
+                    arg
+                ))
             }
             StringFunction::Lower(_) => parse_quote!(arg.to_lowercase()),
             StringFunction::Upper(_) => parse_quote!(arg.to_uppercase()),
             StringFunction::Reverse(_) => parse_quote!(arg.chars().rev().collect()),
             StringFunction::Btrim(_, None) | StringFunction::Trim(_, None) => {
-                parse_quote!(arroyo_types::functions::strings::trim(arg, " ".to_string()))
+                parse_quote!(arroyo_worker::operators::functions::strings::trim(
+                    arg,
+                    " ".to_string()
+                ))
             }
             StringFunction::Ltrim(_, None) => {
-                parse_quote!(arroyo_types::functions::strings::ltrim(
+                parse_quote!(arroyo_worker::operators::functions::strings::ltrim(
                     arg,
                     " ".to_string()
                 ))
             }
             StringFunction::Rtrim(_, None) => {
-                parse_quote!(arroyo_types::functions::strings::rtrim(
+                parse_quote!(arroyo_worker::operators::functions::strings::rtrim(
                     arg,
                     " ".to_string()
                 ))
             }
             StringFunction::Btrim(_, Some(_)) | StringFunction::Trim(_, Some(_)) => {
-                parse_quote!(arroyo_types::functions::strings::trim(arg1, arg2))
+                parse_quote!(arroyo_worker::operators::functions::strings::trim(
+                    arg1, arg2
+                ))
             }
             StringFunction::Substr(_, _, None) => {
-                parse_quote!(arroyo_types::functions::strings::substr(arg1, arg2, None))
+                parse_quote!(arroyo_worker::operators::functions::strings::substr(
+                    arg1, arg2, None
+                ))
             }
             StringFunction::StartsWith(_, _) => {
-                parse_quote!(arroyo_types::functions::strings::starts_with(arg1, arg2))
+                parse_quote!(arroyo_worker::operators::functions::strings::starts_with(
+                    arg1, arg2
+                ))
             }
             StringFunction::Strpos(_, _) => {
-                parse_quote!(arroyo_types::functions::strings::strpos(arg1, arg2))
+                parse_quote!(arroyo_worker::operators::functions::strings::strpos(
+                    arg1, arg2
+                ))
             }
             StringFunction::Left(_, _) => {
-                parse_quote!(arroyo_types::functions::strings::left(arg1, arg2))
+                parse_quote!(arroyo_worker::operators::functions::strings::left(
+                    arg1, arg2
+                ))
             }
             StringFunction::Lpad(_, _, None) => parse_quote!(
-                arroyo_types::functions::strings::lpad(arg1, arg2, " ".to_string())
+                arroyo_worker::operators::functions::strings::lpad(arg1, arg2, " ".to_string())
             ),
             StringFunction::Ltrim(_, Some(_)) => {
-                parse_quote!(arroyo_types::functions::strings::ltrim(arg1, arg2))
+                parse_quote!(arroyo_worker::operators::functions::strings::ltrim(
+                    arg1, arg2
+                ))
             }
             StringFunction::RegexpMatch(_, _) => todo!(),
             StringFunction::RegexpReplace(_, _, _, _, _) => todo!(),
             StringFunction::Repeat(_, _) => parse_quote!(arg1.repeat(arg2 as usize)),
             StringFunction::Right(_, _) => {
-                parse_quote!(arroyo_types::functions::strings::right(arg1, arg2))
+                parse_quote!(arroyo_worker::operators::functions::strings::right(
+                    arg1, arg2
+                ))
             }
             StringFunction::Rpad(_, _, None) => parse_quote!(
-                arroyo_types::functions::strings::rpad(arg1, arg2, " ".to_string())
+                arroyo_worker::operators::functions::strings::rpad(arg1, arg2, " ".to_string())
             ),
             StringFunction::Rtrim(_, Some(_)) => {
-                parse_quote!(arroyo_types::functions::strings::rtrim(arg1, arg2))
+                parse_quote!(arroyo_worker::operators::functions::strings::rtrim(
+                    arg1, arg2
+                ))
             }
             StringFunction::Replace(_, _, _) => parse_quote!(arg1.replace(&arg2, &arg3)),
             StringFunction::Substr(_, _, Some(_)) => parse_quote!(
-                arroyo_types::functions::strings::substr(arg1, arg2, Some(arg3))
+                arroyo_worker::operators::functions::strings::substr(arg1, arg2, Some(arg3))
             ),
             StringFunction::Translate(_, _, _) => parse_quote!(
-                arroyo_types::functions::strings::translate(arg1, arg2, arg3)
+                arroyo_worker::operators::functions::strings::translate(arg1, arg2, arg3)
             ),
             StringFunction::Lpad(_, _, Some(_)) => {
-                parse_quote!(arroyo_types::functions::strings::lpad(arg1, arg2, arg3))
+                parse_quote!(arroyo_worker::operators::functions::strings::lpad(
+                    arg1, arg2, arg3
+                ))
             }
             StringFunction::Rpad(_, _, Some(_)) => {
-                parse_quote!(arroyo_types::functions::strings::rpad(arg1, arg2, arg3))
+                parse_quote!(arroyo_worker::operators::functions::strings::rpad(
+                    arg1, arg2, arg3
+                ))
             }
             StringFunction::SplitPart(_, _, _) => parse_quote!(
-                arroyo_types::functions::strings::split_part(arg1, arg2, arg3)
+                arroyo_worker::operators::functions::strings::split_part(arg1, arg2, arg3)
             ),
             StringFunction::Concat(_) => parse_quote!(args.join("")),
             StringFunction::ConcatWithSeparator(_, _) => parse_quote!(args.join(arg)),
@@ -1993,7 +2061,6 @@ impl DataStructureFunction {
             }
         }
     }
-
     fn return_type(&self) -> TypeDef {
         match self {
             DataStructureFunction::Coalesce(terms) => {
@@ -2011,6 +2078,76 @@ impl DataStructureFunction {
                     false,
                 )
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum JsonFunction {
+    GetFirstJsonObject,
+    GetJsonObjects,
+    ExtractJsonString,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsonExpression {
+    function: JsonFunction,
+    json_string: Box<Expression>,
+    path: Box<Expression>,
+}
+
+impl JsonExpression {
+    fn to_syn_expression(&self) -> syn::Expr {
+        let path_nullable = self.path.nullable();
+        let json_nullable = self.json_string.nullable();
+        let path_expr = self.path.to_syn_expression();
+        let json_string_expr = self.json_string.to_syn_expression();
+        let function_tokens = match self.function {
+            JsonFunction::GetFirstJsonObject => quote!(get_first_json_object),
+            JsonFunction::GetJsonObjects => quote!(get_json_objects),
+            JsonFunction::ExtractJsonString => quote!(extract_json_string),
+        };
+        // Handle different nullabilities.
+        match (path_nullable, json_nullable) {
+            (true, true) => parse_quote!({
+                if let (Some(path), Some(json_string)) = (#path_expr, #json_string_expr) {
+                    arroyo_worker::operators::functions::json::#function_tokens(json_string, path)
+                } else {
+                    None
+                }
+            }),
+            (true, false) => parse_quote!({
+                let json_string = #json_string_expr;
+                if let Some(path) = #path_expr {
+                    arroyo_worker::operators::functions::json::#function_tokens(json_string, path)
+                } else {
+                    None
+                }
+            }),
+            (false, true) => parse_quote!({
+                let path = #path_expr;
+                if let Some(json_string) = #json_string_expr {
+                    arroyo_worker::operators::functions::json::#function_tokens(json_string, path)
+                } else {
+                    None
+                }
+            }),
+            (false, false) => parse_quote!({
+                let path = #path_expr;
+                let json_string = #json_string_expr;
+                arroyo_worker::operators::functions::json::#function_tokens(json_string, path)
+            }),
+        }
+    }
+
+    fn return_type(&self) -> TypeDef {
+        match self.function {
+            JsonFunction::GetFirstJsonObject => TypeDef::DataType(DataType::Utf8, true),
+            JsonFunction::GetJsonObjects => TypeDef::DataType(
+                DataType::List(Arc::new(Field::new("item", DataType::Utf8, false))),
+                true,
+            ),
+            JsonFunction::ExtractJsonString => TypeDef::DataType(DataType::Utf8, true),
         }
     }
 }

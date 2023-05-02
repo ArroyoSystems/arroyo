@@ -233,6 +233,33 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
+#[derive(Clone, Copy, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SerializationMode {
+    Json,
+    // https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#wire-format
+    JsonSchemaRegistry,
+    RawJson,
+}
+impl SerializationMode {
+    pub fn from_has_registry_flag(has_registry: bool) -> Self {
+        if has_registry {
+            Self::JsonSchemaRegistry
+        } else {
+            Self::Json
+        }
+    }
+}
+
+impl From<GrpcApi::SerializationMode> for SerializationMode {
+    fn from(mode: GrpcApi::SerializationMode) -> Self {
+        match mode {
+            GrpcApi::SerializationMode::Json => Self::Json,
+            GrpcApi::SerializationMode::JsonSchemaRegistry => Self::JsonSchemaRegistry,
+            GrpcApi::SerializationMode::Raw => Self::RawJson,
+        }
+    }
+}
+
 #[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
 pub enum Operator {
     FileSource {
@@ -248,7 +275,7 @@ pub enum Operator {
         topic: String,
         bootstrap_servers: Vec<String>,
         offset_mode: OffsetMode,
-        schema_registry: bool,
+        kafka_input_format: SerializationMode,
         messages_per_second: u32,
         client_configs: HashMap<String, String>,
     },
@@ -604,7 +631,7 @@ impl Source<Vec<u8>> for KafkaSource {
             topic: self.topic.clone(),
             bootstrap_servers: self.bootstrap_servers.clone(),
             offset_mode: self.offset_mode,
-            schema_registry: false,
+            kafka_input_format: SerializationMode::Json,
             messages_per_second: self.messages_per_second,
             client_configs: HashMap::default(),
         }
@@ -1452,7 +1479,7 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 topic,
                 bootstrap_servers,
                 offset_mode,
-                schema_registry,
+                kafka_input_format,
                 messages_per_second,
                 client_configs,
             } => GrpcOperator::KafkaSource(GrpcApi::KafkaSource {
@@ -1462,7 +1489,10 @@ impl From<Operator> for GrpcApi::operator::Operator {
                     OffsetMode::Earliest => GrpcApi::OffsetMode::Earliest.into(),
                     OffsetMode::Latest => GrpcApi::OffsetMode::Latest.into(),
                 },
-                schema_registry,
+                serialization_mode: {
+                    let grpc_enum: GrpcApi::SerializationMode = kafka_input_format.into();
+                    grpc_enum.into()
+                },
                 messages_per_second,
                 client_configs,
             }),
@@ -1644,6 +1674,16 @@ impl From<ImpulseSpec> for GrpcApi::impulse_source::Spec {
     }
 }
 
+impl From<SerializationMode> for GrpcApi::SerializationMode {
+    fn from(value: SerializationMode) -> Self {
+        match value {
+            SerializationMode::Json => GrpcApi::SerializationMode::Json,
+            SerializationMode::JsonSchemaRegistry => GrpcApi::SerializationMode::JsonSchemaRegistry,
+            SerializationMode::RawJson => GrpcApi::SerializationMode::Raw,
+        }
+    }
+}
+
 impl From<WasmUDF> for WasmFunction {
     fn from(udf: WasmUDF) -> Self {
         WasmFunction {
@@ -1772,11 +1812,12 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                 }
                 GrpcOperator::KafkaSource(kafka_source) => {
                     let offset_mode = kafka_source.offset_mode().into();
+                    let kafka_input_format = kafka_source.serialization_mode().into();
                     Operator::KafkaSource {
                         topic: kafka_source.topic,
                         bootstrap_servers: kafka_source.bootstrap_servers,
                         offset_mode,
-                        schema_registry: kafka_source.schema_registry,
+                        kafka_input_format,
                         messages_per_second: kafka_source.messages_per_second,
                         client_configs: kafka_source.client_configs,
                     }
