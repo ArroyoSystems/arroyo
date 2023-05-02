@@ -30,7 +30,7 @@ CREATE TABLE connections (
     UNIQUE (organization_id, name)
 );
 
-create TYPE schema_type as ENUM ('builtin', 'json_schema', 'json_fields', 'raw_json');
+create TYPE schema_type as ENUM ('builtin', 'json_schema', 'json_fields');
 
 CREATE TABLE schemas (
     id BIGSERIAL PRIMARY KEY,
