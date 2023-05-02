@@ -584,7 +584,7 @@ dependencies = [
  "arrow-schema 36.0.0",
  "arrow-select 36.0.0",
  "regex",
- "regex-syntax",
+ "regex-syntax 0.6.29",
 ]
 
 [[package]]
