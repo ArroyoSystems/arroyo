@@ -71,6 +71,32 @@ proto3.util.setEnumType(StopType, "arroyo_api.StopType", [
 ]);
 
 /**
+ * @generated from enum arroyo_api.SerializationMode
+ */
+export enum SerializationMode {
+  /**
+   * @generated from enum value: JSON = 0;
+   */
+  JSON = 0,
+
+  /**
+   * @generated from enum value: JSON_SCHEMA_REGISTRY = 1;
+   */
+  JSON_SCHEMA_REGISTRY = 1,
+
+  /**
+   * @generated from enum value: RAW = 2;
+   */
+  RAW = 2,
+}
+// Retrieve enum metadata with: proto3.getEnumType(SerializationMode)
+proto3.util.setEnumType(SerializationMode, "arroyo_api.SerializationMode", [
+  { no: 0, name: "JSON" },
+  { no: 1, name: "JSON_SCHEMA_REGISTRY" },
+  { no: 2, name: "RAW" },
+]);
+
+/**
  * @generated from enum arroyo_api.WasmBehavior
  */
 export enum WasmBehavior {
@@ -1482,9 +1508,9 @@ export class KafkaSource extends Message<KafkaSource> {
   offsetMode = OffsetMode.EARLIEST;
 
   /**
-   * @generated from field: bool schema_registry = 4;
+   * @generated from field: arroyo_api.SerializationMode serialization_mode = 4;
    */
-  schemaRegistry = false;
+  serializationMode = SerializationMode.JSON;
 
   /**
    * @generated from field: uint32 messages_per_second = 5;
@@ -1507,7 +1533,7 @@ export class KafkaSource extends Message<KafkaSource> {
     { no: 1, name: "topic", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "bootstrap_servers", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 3, name: "offset_mode", kind: "enum", T: proto3.getEnumType(OffsetMode) },
-    { no: 4, name: "schema_registry", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "serialization_mode", kind: "enum", T: proto3.getEnumType(SerializationMode) },
     { no: 5, name: "messages_per_second", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 6, name: "client_configs", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
   ]);
@@ -4285,6 +4311,37 @@ export class ProtobufSchemaDef extends Message<ProtobufSchemaDef> {
 }
 
 /**
+ * @generated from message arroyo_api.RawJsonDef
+ */
+export class RawJsonDef extends Message<RawJsonDef> {
+  constructor(data?: PartialMessage<RawJsonDef>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.RawJsonDef";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RawJsonDef {
+    return new RawJsonDef().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RawJsonDef {
+    return new RawJsonDef().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RawJsonDef {
+    return new RawJsonDef().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RawJsonDef | PlainMessage<RawJsonDef> | undefined, b: RawJsonDef | PlainMessage<RawJsonDef> | undefined): boolean {
+    return proto3.util.equals(RawJsonDef, a, b);
+  }
+}
+
+/**
  * @generated from message arroyo_api.StructType
  */
 export class StructType extends Message<StructType> {
@@ -4451,6 +4508,12 @@ export class SourceSchema extends Message<SourceSchema> {
      */
     value: ProtobufSchemaDef;
     case: "protobuf";
+  } | {
+    /**
+     * @generated from field: arroyo_api.RawJsonDef raw_json = 6;
+     */
+    value: RawJsonDef;
+    case: "rawJson";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   /**
@@ -4470,6 +4533,7 @@ export class SourceSchema extends Message<SourceSchema> {
     { no: 3, name: "json_schema", kind: "message", T: JsonSchemaDef, oneof: "schema" },
     { no: 4, name: "json_fields", kind: "message", T: JsonFieldDef, oneof: "schema" },
     { no: 5, name: "protobuf", kind: "message", T: ProtobufSchemaDef, oneof: "schema" },
+    { no: 6, name: "raw_json", kind: "message", T: RawJsonDef, oneof: "schema" },
     { no: 7, name: "kafka_schema_registry", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
@@ -4709,12 +4773,6 @@ export class CreateSourceReq extends Message<CreateSourceReq> {
      */
     value: NexmarkSourceConfig;
     case: "nexmark";
-  } | {
-    /**
-     * @generated from field: arroyo_api.KafkaSourceConfig raw_kafka = 7;
-     */
-    value: KafkaSourceConfig;
-    case: "rawKafka";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<CreateSourceReq>) {
@@ -4731,7 +4789,6 @@ export class CreateSourceReq extends Message<CreateSourceReq> {
     { no: 4, name: "impulse", kind: "message", T: ImpulseSourceConfig, oneof: "type_oneof" },
     { no: 5, name: "file", kind: "message", T: FileSourceConfig, oneof: "type_oneof" },
     { no: 6, name: "nexmark", kind: "message", T: NexmarkSourceConfig, oneof: "type_oneof" },
-    { no: 7, name: "raw_kafka", kind: "message", T: KafkaSourceConfig, oneof: "type_oneof" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateSourceReq {

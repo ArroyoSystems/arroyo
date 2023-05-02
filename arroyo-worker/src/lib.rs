@@ -14,15 +14,13 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::ControlMessage;
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    admin_port, from_millis, grpc_port, ports, CheckpointBarrier, NodeId, WorkerId, ADMIN_PORT_ENV,
-    JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, grpc_port, ports, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
 };
 use engine::RunningEngine;
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
 use rand::Rng;
-use std::env;
 use std::fmt::{Debug, Display, Formatter};
 use std::process::exit;
 use std::str::FromStr;

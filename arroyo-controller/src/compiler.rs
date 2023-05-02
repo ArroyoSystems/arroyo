@@ -376,9 +376,9 @@ wasm-opt = false
                     let out_t = parse_type(&output.unwrap().weight().value);
                     let bootstrap_servers = bootstrap_servers.join(",");
                     let serialization_mode = match kafka_input_format {
-                        arroyo_datastream::KafkaSerializationMode::Json => quote!(Json),
-                        arroyo_datastream::KafkaSerializationMode::JsonSchemaRegistry => quote!(JsonSchemaRegistry),
-                        arroyo_datastream::KafkaSerializationMode::Raw => quote!(Raw),
+                        arroyo_datastream::SerializationMode::Json => quote!(Json),
+                        arroyo_datastream::SerializationMode::JsonSchemaRegistry => quote!(JsonSchemaRegistry),
+                        arroyo_datastream::SerializationMode::RawJson => quote!(RawJson),
                     };
                     let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
 

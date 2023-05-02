@@ -298,7 +298,7 @@ pub struct ImpulseEvent {
 }
 
 #[derive(Encode, Decode, Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct RawKafkaEvent {
+pub struct RawJson {
     pub value: String,
 }
 

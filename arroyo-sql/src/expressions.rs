@@ -2144,7 +2144,7 @@ impl JsonExpression {
         match self.function {
             JsonFunction::GetFirstJsonObject => TypeDef::DataType(DataType::Utf8, true),
             JsonFunction::GetJsonObjects => TypeDef::DataType(
-                DataType::List(Box::new(Field::new("item", DataType::Utf8, false))),
+                DataType::List(Arc::new(Field::new("item", DataType::Utf8, false))),
                 true,
             ),
             JsonFunction::ExtractJsonString => TypeDef::DataType(DataType::Utf8, true),

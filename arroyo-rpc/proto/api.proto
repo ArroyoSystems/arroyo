@@ -167,12 +167,12 @@ message KafkaSource {
   string topic = 1;
   repeated string bootstrap_servers = 2;
   OffsetMode offset_mode = 3;
-  KafkaSerializationMode kafka_serialization_mode = 4;
+  SerializationMode serialization_mode = 4;
   uint32 messages_per_second = 5;
   map<string, string> client_configs = 6;
 }
 
-enum KafkaSerializationMode {
+enum SerializationMode {
   JSON = 0;
   JSON_SCHEMA_REGISTRY = 1;
   RAW = 2;
@@ -565,6 +565,8 @@ message ProtobufSchemaDef {
   string protobuf_schema = 1;
 }
 
+message RawJsonDef {}
+
 enum PrimitiveType {
   Int32 = 0;
   Int64 = 1;
@@ -601,7 +603,8 @@ message SourceSchema {
     JsonSchemaDef json_schema = 3;
     JsonFieldDef json_fields = 4;
     ProtobufSchemaDef protobuf = 5;
- }
+    RawJsonDef raw_json = 6;
+  }
 
  bool kafka_schema_registry = 7;
 }
@@ -642,7 +645,6 @@ message CreateSourceReq {
     ImpulseSourceConfig impulse = 4;
     FileSourceConfig file = 5;
     NexmarkSourceConfig nexmark = 6;
-    KafkaSourceConfig raw_kafka = 7;
   }
 }
 

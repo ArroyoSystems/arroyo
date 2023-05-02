@@ -43,8 +43,8 @@ export function ChooseSchemaType({
 }) {
   const handleChange = (v: string) => {
     if (v == "rawKafka") {
-      state.typeOneof.case = "rawKafka";
-
+      state.typeOneof.case = "kafka";
+      state.schema = undefined;
     }
     setState({
       ...state,
@@ -53,7 +53,7 @@ export function ChooseSchemaType({
     });
   };
   const onClick = async () => {
-    if (state.typeOneof.case == "rawKafka") {
+    if (state.typeOneof.case == "kafka") {
       state.schema = undefined;
       setState(
         new CreateSourceReq({
@@ -78,7 +78,7 @@ export function ChooseSchemaType({
         <RadioCard value="avro" isDisabled>
           Avro (coming soon)
         </RadioCard>
-        {state.typeOneof.case == "kafka" || state.typeOneof.case == "rawKafka" ? (
+        {state.typeOneof.case == "kafka" ? (
           <RadioCard value="confluentSchema">Confluent Schema Registry</RadioCard>
         ) : null}
         <RadioCard value="rawKafka">Raw Schema</RadioCard>

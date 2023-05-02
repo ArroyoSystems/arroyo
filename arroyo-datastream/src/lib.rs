@@ -234,13 +234,13 @@ pub enum ImpulseSpec {
 }
 
 #[derive(Clone, Copy, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
-pub enum KafkaSerializationMode {
+pub enum SerializationMode {
     Json,
     // https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#wire-format
     JsonSchemaRegistry,
-    Raw,
+    RawJson,
 }
-impl KafkaSerializationMode {
+impl SerializationMode {
     pub fn from_has_registry_flag(has_registry: bool) -> Self {
         if has_registry {
             Self::JsonSchemaRegistry
@@ -250,12 +250,12 @@ impl KafkaSerializationMode {
     }
 }
 
-impl From<GrpcApi::KafkaSerializationMode> for KafkaSerializationMode {
-    fn from(mode: GrpcApi::KafkaSerializationMode) -> Self {
+impl From<GrpcApi::SerializationMode> for SerializationMode {
+    fn from(mode: GrpcApi::SerializationMode) -> Self {
         match mode {
-            GrpcApi::KafkaSerializationMode::Json => Self::Json,
-            GrpcApi::KafkaSerializationMode::JsonSchemaRegistry => Self::JsonSchemaRegistry,
-            GrpcApi::KafkaSerializationMode::Raw => Self::Raw,
+            GrpcApi::SerializationMode::Json => Self::Json,
+            GrpcApi::SerializationMode::JsonSchemaRegistry => Self::JsonSchemaRegistry,
+            GrpcApi::SerializationMode::Raw => Self::RawJson,
         }
     }
 }
@@ -275,7 +275,7 @@ pub enum Operator {
         topic: String,
         bootstrap_servers: Vec<String>,
         offset_mode: OffsetMode,
-        kafka_input_format: KafkaSerializationMode,
+        kafka_input_format: SerializationMode,
         messages_per_second: u32,
         client_configs: HashMap<String, String>,
     },
@@ -631,7 +631,7 @@ impl Source<Vec<u8>> for KafkaSource {
             topic: self.topic.clone(),
             bootstrap_servers: self.bootstrap_servers.clone(),
             offset_mode: self.offset_mode,
-            kafka_input_format: KafkaSerializationMode::Json,
+            kafka_input_format: SerializationMode::Json,
             messages_per_second: self.messages_per_second,
             client_configs: HashMap::default(),
         }
@@ -1489,8 +1489,8 @@ impl From<Operator> for GrpcApi::operator::Operator {
                     OffsetMode::Earliest => GrpcApi::OffsetMode::Earliest.into(),
                     OffsetMode::Latest => GrpcApi::OffsetMode::Latest.into(),
                 },
-                kafka_serialization_mode: {
-                    let grpc_enum: GrpcApi::KafkaSerializationMode = kafka_input_format.into();
+                serialization_mode: {
+                    let grpc_enum: GrpcApi::SerializationMode = kafka_input_format.into();
                     grpc_enum.into()
                 },
                 messages_per_second,
@@ -1674,14 +1674,12 @@ impl From<ImpulseSpec> for GrpcApi::impulse_source::Spec {
     }
 }
 
-impl From<KafkaSerializationMode> for GrpcApi::KafkaSerializationMode {
-    fn from(value: KafkaSerializationMode) -> Self {
+impl From<SerializationMode> for GrpcApi::SerializationMode {
+    fn from(value: SerializationMode) -> Self {
         match value {
-            KafkaSerializationMode::Json => GrpcApi::KafkaSerializationMode::Json,
-            KafkaSerializationMode::JsonSchemaRegistry => {
-                GrpcApi::KafkaSerializationMode::JsonSchemaRegistry
-            }
-            KafkaSerializationMode::Raw => GrpcApi::KafkaSerializationMode::Raw,
+            SerializationMode::Json => GrpcApi::SerializationMode::Json,
+            SerializationMode::JsonSchemaRegistry => GrpcApi::SerializationMode::JsonSchemaRegistry,
+            SerializationMode::RawJson => GrpcApi::SerializationMode::Raw,
         }
     }
 }
@@ -1814,7 +1812,7 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                 }
                 GrpcOperator::KafkaSource(kafka_source) => {
                     let offset_mode = kafka_source.offset_mode().into();
-                    let kafka_input_format = kafka_source.kafka_serialization_mode().into();
+                    let kafka_input_format = kafka_source.serialization_mode().into();
                     Operator::KafkaSource {
                         topic: kafka_source.topic,
                         bootstrap_servers: kafka_source.bootstrap_servers,
