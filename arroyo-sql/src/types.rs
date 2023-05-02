@@ -19,7 +19,7 @@ use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
-use syn::{parse_quote, parse_str, Type};
+use syn::{parse_quote, parse_str, FnArg, Type};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StructDef {
@@ -469,5 +469,15 @@ pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> R
         )
     } else {
         Ok(DataType::Decimal128(precision, scale))
+    }
+}
+
+pub fn rust_to_datafusion(typ: &Type) -> Option<DataType> {
+    match typ {
+        Type::Path(pat) => match pat.path.get_ident()?.to_string().as_str() {
+            "u64" => Some(DataType::UInt64),
+            _ => None,
+        },
+        _ => None,
     }
 }

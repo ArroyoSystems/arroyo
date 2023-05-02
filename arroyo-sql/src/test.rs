@@ -195,3 +195,30 @@ async fn test_window_function() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn test_udf() {
+    let mut schema_provider = ArroyoSchemaProvider::new();
+
+    schema_provider
+        .add_rust_udf("fn my_sqr(x: u64) -> u64 { x * x }")
+        .unwrap();
+
+    schema_provider.add_source_with_type(
+        1,
+        "nexmark".to_string(),
+        test_schema(),
+        NexmarkSource {
+            first_event_rate: 10,
+            num_events: Some(100),
+        }
+        .as_operator(),
+        Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
+    );
+
+    let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
+
+    parse_and_get_program(sql, schema_provider, SqlConfig::default())
+        .await
+        .unwrap();
+}

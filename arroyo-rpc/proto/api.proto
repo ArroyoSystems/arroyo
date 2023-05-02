@@ -10,9 +10,21 @@ enum BuiltinSink {
   Log = 2;
 }
 
+
+enum UdfLanguage {
+  Rust = 0;
+}
+
+message CreateUdf {
+  string name = 1;
+  string body = 2;
+  UdfLanguage language = 3;
+}
+
 message CreateSqlJob {
   string query = 1;
   uint64 parallelism = 2;
+
   oneof sink {
     BuiltinSink builtin = 3;
     string user = 4;

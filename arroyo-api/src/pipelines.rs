@@ -28,6 +28,12 @@ use crate::{
     AuthData,
 };
 
+const TEST_UDF: &'static str = r#"
+fn test_udf(x: u64) -> u64 {
+  x * x
+}
+"#;
+
 async fn compile_sql<'e, E>(
     sql: &CreateSqlJob,
     auth_data: &AuthData,

@@ -40,9 +40,10 @@ use datafusion_expr::{
 use expressions::{to_expression_generator, Expression};
 use pipeline::get_program_from_plan;
 use schemas::window_arrow_struct;
-use syn::{parse_quote, parse_str};
+use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, Type};
 use types::{convert_data_type, StructDef, StructField, TypeDef};
 
+use crate::types::rust_to_datafusion;
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
 
@@ -181,13 +182,13 @@ impl ArroyoSchemaProvider {
         query: &Statement,
     ) -> Result<(String, Vec<StructField>, Operator)> {
         let Statement::CreateTable {
-        name,
-        columns,
-        with_options,
-        ..
-    } = query else {
-        bail!("expected create table statement");
-    };
+            name,
+            columns,
+            with_options,
+            ..
+        } = query else {
+            bail!("expected create table statement");
+        };
         let connection_name = with_options
             .iter()
             .filter_map(|option| match option.name.value.as_str() {
@@ -254,6 +255,47 @@ impl ArroyoSchemaProvider {
             }
             None => bail!("malformed connection, missing type."),
         }
+    }
+
+    pub fn add_rust_udf(&mut self, body: &str) -> Result<()> {
+        let item: syn::Item = parse_str(body)?;
+
+        let Item::Fn(function) = item else {
+            bail!("not a function");
+        };
+
+        let mut args = vec![];
+        for (i, arg) in function.sig.inputs.iter().enumerate() {
+            match arg {
+                FnArg::Receiver(_) => bail!("self types are not allowed in UDFs"),
+                FnArg::Typed(t) => {
+                    args.push(rust_to_datafusion(&*t.ty).ok_or_else(|| {
+                        anyhow!("Could not convert arg {} into a SQL data type", i)
+                    })?);
+                }
+            }
+        }
+
+        let ret = match function.sig.output {
+            ReturnType::Default => bail!("return type must be specified in UDF"),
+            ReturnType::Type(_, t) => rust_to_datafusion(&*t)
+                .ok_or_else(|| anyhow!("Could not convert return type into a SQL data type"))?,
+        };
+
+        let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
+
+        self.functions.insert(
+            function.sig.ident.to_string(),
+            Arc::new(create_udf(
+                &function.sig.ident.to_string(),
+                args,
+                Arc::new(ret),
+                Volatility::Immutable,
+                make_scalar_function(fn_impl),
+            )),
+        );
+
+        Ok(())
     }
 }
 
