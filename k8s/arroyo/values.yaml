@@ -74,6 +74,9 @@ postgresql:
     initdb:
       user: postgres
 
+  serviceAccount:
+    name: ""
+
 
 prometheus:
   deploy: true
