@@ -826,6 +826,7 @@ dependencies = [
  "arrow 37.0.0",
  "arrow-schema 37.0.0",
  "arroyo-datastream",
+ "arroyo-rpc",
  "arroyo-types",
  "bincode 2.0.0-rc.3",
  "datafusion",

@@ -3,8 +3,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
-use arroyo_datastream::{NexmarkSource, Operator, Program, Source};
+use arroyo_datastream::{
+    auth_config_to_hashmap, NexmarkSource, OffsetMode, Operator, Program, SerializationMode, Source,
+};
 
+use arroyo_rpc::grpc::api::connection::ConnectionType;
+use arroyo_rpc::grpc::api::Connection;
 use datafusion::optimizer::analyzer::Analyzer;
 use datafusion::optimizer::optimizer::Optimizer;
 use datafusion::optimizer::OptimizerContext;
@@ -20,6 +24,7 @@ pub mod types;
 
 use datafusion::prelude::create_udf;
 use datafusion::sql::planner::SqlToRel;
+use datafusion::sql::sqlparser::ast::{ColumnOption, Statement, Value};
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::{Parser, ParserError};
 use datafusion::sql::{planner::ContextProvider, TableReference};
@@ -36,7 +41,7 @@ use expressions::{to_expression_generator, Expression};
 use pipeline::get_program_from_plan;
 use schemas::window_arrow_struct;
 use syn::{parse_quote, parse_str};
-use types::{StructDef, StructField, TypeDef};
+use types::{convert_data_type, StructDef, StructField, TypeDef};
 
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
@@ -49,6 +54,7 @@ pub struct ArroyoSchemaProvider {
     pub tables: HashMap<String, Arc<dyn TableSource>>,
     pub functions: HashMap<String, Arc<ScalarUDF>>,
     pub sources: HashMap<String, SqlSource>,
+    pub connections: HashMap<String, Connection>,
     config_options: datafusion::config::ConfigOptions,
 }
 
@@ -122,13 +128,18 @@ impl ArroyoSchemaProvider {
             functions,
             sources: HashMap::new(),
             source_defs: HashMap::new(),
+            connections: HashMap::new(),
             config_options: datafusion::config::ConfigOptions::new(),
         }
     }
 
+    pub fn add_connection(&mut self, connection: Connection) {
+        self.connections.insert(connection.name.clone(), connection);
+    }
+
     pub fn add_source(
         &mut self,
-        id: i64,
+        id: Option<i64>,
         name: impl Into<String>,
         fields: Vec<StructField>,
         operator: Operator,
@@ -138,7 +149,7 @@ impl ArroyoSchemaProvider {
 
     pub fn add_source_with_type(
         &mut self,
-        id: i64,
+        id: Option<i64>,
         name: impl Into<String>,
         fields: Vec<StructField>,
         operator: Operator,
@@ -164,12 +175,98 @@ impl ArroyoSchemaProvider {
     pub fn add_defs(&mut self, source: impl Into<String>, defs: impl Into<String>) {
         self.source_defs.insert(source.into(), defs.into());
     }
+
+    fn get_inlined_source(
+        &self,
+        query: &Statement,
+    ) -> Result<(String, Vec<StructField>, Operator)> {
+        let Statement::CreateTable {
+        name,
+        columns,
+        with_options,
+        ..
+    } = query else {
+        bail!("expected create table statement");
+    };
+        let connection_name = with_options
+            .iter()
+            .filter_map(|option| match option.name.value.as_str() {
+                "connection" => Some(value_to_inner_string(&option.value)),
+                _ => None,
+            })
+            .next()
+            .ok_or_else(|| anyhow!("expect connection in with block"))??;
+        let connection = self
+            .connections
+            .get(&connection_name)
+            .ok_or_else(|| anyhow!("connection {} not found", connection_name))?;
+
+        let json_fields: Vec<StructField> = columns
+            .iter()
+            .map(|column| {
+                let name = column.name.value.to_string();
+                let data_type = convert_data_type(&column.data_type)?;
+                let nullable = !column
+                    .options
+                    .iter()
+                    .any(|option| matches!(option.option, ColumnOption::NotNull));
+                Ok(StructField {
+                    name,
+                    alias: None,
+                    data_type: TypeDef::DataType(data_type, nullable),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        match connection.connection_type {
+            Some(ConnectionType::Kafka(ref kafka_connection)) => {
+                let topic: String = with_options
+                    .iter()
+                    .filter_map(|option| match option.name.value.as_str() {
+                        "topic" => Some(value_to_inner_string(&option.value)),
+                        _ => None,
+                    })
+                    .next()
+                    .ok_or_else(|| anyhow!("expect topic in with block"))??;
+                Ok((
+                    name.to_string(),
+                    json_fields,
+                    Operator::KafkaSource {
+                        topic,
+                        // split to a vec
+                        bootstrap_servers: kafka_connection
+                            .bootstrap_servers
+                            .split(",")
+                            .map(|s| s.to_string())
+                            .collect(),
+                        offset_mode: OffsetMode::Latest,
+                        kafka_input_format: SerializationMode::Json,
+                        // TODO: use setting for account
+                        messages_per_second: 10000000,
+                        client_configs: auth_config_to_hashmap(
+                            kafka_connection.auth_config.clone(),
+                        ),
+                    },
+                ))
+            }
+            _ => bail!("unsupported connection type"),
+        }
+    }
 }
 
 fn create_table_source(fields: Vec<Field>) -> Arc<dyn TableSource> {
     Arc::new(LogicalTableSource::new(Arc::new(
         datatypes::Schema::new_with_metadata(fields, HashMap::new()),
     )))
+}
+
+fn value_to_inner_string(value: &Value) -> Result<String> {
+    match value {
+        Value::SingleQuotedString(inner_string)
+        | Value::UnQuotedString(inner_string)
+        | Value::DoubleQuotedString(inner_string) => Ok(inner_string.clone()),
+        _ => bail!("Expected a string value, found {:?}", value),
+    }
 }
 
 impl ContextProvider for ArroyoSchemaProvider {
@@ -237,7 +334,7 @@ impl ContextProvider for ArroyoSchemaProvider {
 
 #[derive(Clone, Debug)]
 pub struct SqlSource {
-    pub id: i64,
+    pub id: Option<i64>,
     pub struct_def: StructDef,
     pub operator: Operator,
 }
@@ -259,7 +356,7 @@ impl Default for SqlConfig {
 
 pub async fn parse_and_get_program(
     query: &str,
-    schema_provider: ArroyoSchemaProvider,
+    mut schema_provider: ArroyoSchemaProvider,
     config: SqlConfig,
 ) -> Result<(Program, Vec<SqlSource>)> {
     let query = query.to_string();
@@ -270,23 +367,35 @@ pub async fn parse_and_get_program(
 
     tokio::spawn(async move {
         // parse the SQL
-        let plan = get_plan_from_query(&query, &schema_provider)?;
+        let plan = get_plan_from_query(&query, &mut schema_provider)?;
         get_program_from_plan(config, schema_provider, &plan)
     })
     .await
     .map_err(|_| anyhow!("Something went wrong"))?
 }
 
-fn get_plan_from_query(query: &str, schema_provider: &ArroyoSchemaProvider) -> Result<LogicalPlan> {
+fn get_plan_from_query(
+    query: &str,
+    schema_provider: &mut ArroyoSchemaProvider,
+) -> Result<LogicalPlan> {
     // parse the SQL
     let dialect = PostgreSqlDialect {};
-    let ast = Parser::parse_sql(&dialect, &query)
+    let mut ast = Parser::parse_sql(&dialect, &query)
         .map_err(|e| match e {
             ParserError::TokenizerError(s) | ParserError::ParserError(s) => anyhow!(s),
             ParserError::RecursionLimitExceeded => anyhow!("recursion limit"),
         })
         .with_context(|| "parse_failure")?;
-    let statement = &ast[0];
+    if ast.len() == 0 {
+        bail!("Query is empty");
+    }
+    while ast.len() > 1 {
+        let statement = ast.remove(0);
+        let (name, fields, operator) = schema_provider.get_inlined_source(&statement)?;
+        schema_provider.add_source(None, name, fields, operator);
+    }
+    let statement = ast.remove(0);
+
     let sql_to_rel = SqlToRel::new(schema_provider);
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
@@ -462,7 +571,7 @@ pub fn get_test_expression(
 
     let mut schema_provider = ArroyoSchemaProvider::new();
     schema_provider.add_source_with_type(
-        1,
+        Some(1),
         "test_source".to_string(),
         struct_def.fields.clone(),
         NexmarkSource {
@@ -474,7 +583,7 @@ pub fn get_test_expression(
     );
     let plan = get_plan_from_query(
         &format!("SELECT {} FROM test_source", calculation_string),
-        &schema_provider,
+        &mut schema_provider,
     )
     .unwrap();
     let LogicalPlan::Projection(projection) = plan else {panic!("expect projection")};

@@ -65,7 +65,7 @@ impl From<DbConnection> for Connection {
 }
 
 pub(crate) async fn get_connections(
-    auth: AuthData,
+    auth: &AuthData,
     client: &impl GenericClient,
 ) -> Result<Vec<Connection>, Status> {
     let res = api_queries::get_connections()

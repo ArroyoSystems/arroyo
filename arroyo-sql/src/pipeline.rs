@@ -376,8 +376,12 @@ impl SqlPipelineBuilder {
             LogicalPlan::CreateExternalTable(_) => {
                 bail!("creating external tables is not currently supported")
             }
-            LogicalPlan::CreateMemoryTable(_) => {
-                bail!("creating memory tables is not currently supported")
+            LogicalPlan::CreateMemoryTable(create_memory_table) => {
+                bail!(
+                    "creating memory tables is not currently supported: {:?}, {:?}",
+                    create_memory_table.input,
+                    create_memory_table.primary_key
+                )
             }
             LogicalPlan::CreateView(_) => bail!("creating views is not currently supported"),
             LogicalPlan::CreateCatalogSchema(_) => {

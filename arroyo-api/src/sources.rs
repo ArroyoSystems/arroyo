@@ -1,7 +1,7 @@
 use arrow::datatypes::TimeUnit;
 use arroyo_datastream::{
-    FileSource, ImpulseSpec, NexmarkSource, OffsetMode, Operator, SerializationMode,
-    Source as ApiSource,
+    auth_config_to_hashmap, FileSource, ImpulseSpec, NexmarkSource, OffsetMode, Operator,
+    SerializationMode, Source as ApiSource,
 };
 use arroyo_rpc::grpc::api::{
     self,
@@ -10,8 +10,8 @@ use arroyo_rpc::grpc::api::{
     source_def::SourceType,
     source_schema::{self, Schema},
     ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
-    JsonSchemaDef, KafkaAuthConfig, KafkaSourceConfig, KafkaSourceDef, RawJsonDef, SourceDef,
-    SourceField, SourceMetadataResp, TestSourceMessage,
+    JsonSchemaDef, KafkaSourceConfig, KafkaSourceDef, RawJsonDef, SourceDef, SourceField,
+    SourceMetadataResp, TestSourceMessage,
 };
 use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
@@ -147,20 +147,6 @@ enum SourceConfig {
         event_rate: u64,
         runtime: Option<Duration>,
     },
-}
-
-pub fn auth_config_to_hashmap(config: Option<KafkaAuthConfig>) -> HashMap<String, String> {
-    match config.map(|config| config.auth_type).flatten() {
-        None | Some(api::kafka_auth_config::AuthType::NoAuth(_)) => HashMap::default(),
-        Some(api::kafka_auth_config::AuthType::SaslAuth(sasl_auth)) => vec![
-            ("security.protocol".to_owned(), sasl_auth.protocol),
-            ("sasl.mechanism".to_owned(), sasl_auth.mechanism),
-            ("sasl.username".to_owned(), sasl_auth.username),
-            ("sasl.password".to_owned(), sasl_auth.password),
-        ]
-        .into_iter()
-        .collect(),
-    }
 }
 
 impl SourceConfig {
@@ -530,7 +516,7 @@ impl Source {
                     client_configs: client_configs.clone(),
                 };
 
-                provider.add_source_with_type(self.id, &self.name, fields, node, name);
+                provider.add_source_with_type(Some(self.id), &self.name, fields, node, name);
 
                 if let Some(defs) = defs {
                     provider.add_defs(&self.name, defs);
@@ -543,7 +529,7 @@ impl Source {
                 let node = FileSource::from_dir(PathBuf::from_str(directory).unwrap(), *interval);
 
                 provider.add_source_with_type(
-                    self.id,
+                    Some(self.id),
                     &self.name,
                     fields,
                     node.as_operator(),
@@ -568,7 +554,7 @@ impl Source {
                 };
 
                 provider.add_source_with_type(
-                    self.id,
+                    Some(self.id),
                     &self.name,
                     fields,
                     node,
@@ -584,7 +570,7 @@ impl Source {
                     num_events: runtime.map(|runtime| event_rate * runtime.as_secs()),
                 };
                 provider.add_source_with_type(
-                    self.id,
+                    Some(self.id),
                     &self.name,
                     fields,
                     node.as_operator(),
@@ -890,7 +876,7 @@ pub(crate) async fn get_source_metadata(
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<SourceMetadataResp, Status> {
-    let connections = get_connections(auth, client).await?;
+    let connections = get_connections(&auth, client).await?;
 
     let partitions = match req.type_oneof.ok_or_else(|| required_field("type"))? {
         create_source_req::TypeOneof::Kafka(kafka) => {
@@ -923,7 +909,7 @@ pub(crate) async fn test_source(
         .schema
         .ok_or_else(|| required_field("schema.schema"))?;
 
-    let connections = get_connections(auth, client).await?;
+    let connections = get_connections(&auth, client).await?;
 
     match source {
         create_source_req::TypeOneof::Kafka(kafka) => {

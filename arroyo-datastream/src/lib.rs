@@ -15,8 +15,11 @@ use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::grpc::api::create_pipeline_req::Config;
 use arroyo_rpc::grpc::api::impulse_source::Spec;
+use arroyo_rpc::grpc::api::kafka_auth_config::AuthType;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
-use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
+use arroyo_rpc::grpc::api::{
+    self as GrpcApi, ExpressionAggregator, Flatten, KafkaAuthConfig, ProgramEdge,
+};
 use arroyo_types::nexmark::Event;
 use arroyo_types::{from_micros, to_micros, Data, GlobalKey, ImpulseEvent, Key};
 use bincode::{Decode, Encode};
@@ -591,6 +594,20 @@ impl Source<ImpulseEvent> for ImpulseSource {
             spec: ImpulseSpec::Delay(self.interval),
             total_events: None,
         }
+    }
+}
+
+pub fn auth_config_to_hashmap(config: Option<KafkaAuthConfig>) -> HashMap<String, String> {
+    match config.map(|config| config.auth_type).flatten() {
+        None | Some(AuthType::NoAuth(_)) => HashMap::default(),
+        Some(AuthType::SaslAuth(sasl_auth)) => vec![
+            ("security.protocol".to_owned(), sasl_auth.protocol),
+            ("sasl.mechanism".to_owned(), sasl_auth.mechanism),
+            ("sasl.username".to_owned(), sasl_auth.username),
+            ("sasl.password".to_owned(), sasl_auth.password),
+        ]
+        .into_iter()
+        .collect(),
     }
 }
 
