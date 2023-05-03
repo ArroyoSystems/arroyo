@@ -28,7 +28,7 @@ spec:
       {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
-      serviceAccountName: {{ template "arroyo.serviceAccountName" . }}
+      serviceAccountName: {{ template "arroyo.serviceAccountName" . }}-controller
       volumes:
       {{- if .Values.volumes }}
       {{- include "tplvalues.render" (dict "value" .Values.volumes "context" $) | nindent 10 }}

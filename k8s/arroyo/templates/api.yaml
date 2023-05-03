@@ -30,7 +30,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "arroyo.serviceAccountName" . }}
+      serviceAccountName: {{ include "arroyo.serviceAccountName" . }}-api
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
