@@ -30,8 +30,8 @@ spec:
     spec:
       serviceAccountName: {{ template "arroyo.serviceAccountName" . }}
       volumes:
-      {{- if .Values.volumes }}
-      {{- include "tplvalues.render" (dict "value" .Values.volumes "context" $) | nindent 10 }}
+      {{- if .Values.controller.volumes }}
+      {{- include "tplvalues.render" (dict "value" .Values.controller.volumes "context" $) | nindent 10 }}
       {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -78,13 +78,13 @@ spec:
           value: {{ .Values.worker.resources | toYaml | quote }}
         - name: K8S_WORKER_SLOTS
           value: {{ .Values.workerSlots | quote }}
-        {{- if .Values.volumes }}
+        {{- if .Values.controller.volumes }}
         - name: K8S_WORKER_VOLUMES
-          value: {{ .Values.volumes | toYaml | quote }}
+          value: {{ .Values.controller.volumes | toYaml | quote }}
         {{- end }}
-        {{- if .Values.volumeMounts }}
+        {{- if .Values.controller.volumeMounts }}
         - name: K8S_WORKER_VOLUME_MOUNTS
-          value: {{ .Values.volumeMounts | toYaml | quote }}
+          value: {{ .Values.controller.volumeMounts | toYaml | quote }}
         {{- end }}
         ports:
         - containerPort: 9190
@@ -103,8 +103,8 @@ spec:
         resources: {{- toYaml .Values.compiler.resources | nindent 10 }}
         {{- end }}
         volumeMounts:
-        {{- if .Values.volumeMounts }}
-        {{- include "tplvalues.render" (dict "value" .Values.volumeMounts "context" $) | nindent 10 }}
+        {{- if .Values.controller.volumeMounts }}
+        {{- include "tplvalues.render" (dict "value" .Values.controller.volumeMounts "context" $) | nindent 10 }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

@@ -27,6 +27,8 @@ controller:
     repository: ghcr.io/arroyosystems/arroyo-services
     pullPolicy: IfNotPresent
     tag: "amd64"
+  volumes: []
+  volumeMounts: []
 
 compiler:
   replicas: 1
@@ -39,6 +41,8 @@ compiler:
     repository: ghcr.io/arroyosystems/arroyo-compiler
     pullPolicy: IfNotPresent
     tag: "amd64"
+  volumes: []
+  volumeMounts: []
 
 worker:
   resources:

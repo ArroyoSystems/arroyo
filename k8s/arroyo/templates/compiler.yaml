@@ -21,8 +21,8 @@ spec:
       {{- end }}
     spec:
       volumes:
-        {{- if .Values.volumes }}
-        {{- include "tplvalues.render" (dict "value" .Values.volumes "context" $) | nindent 8 }}
+        {{- if .Values.compiler.volumes }}
+        {{- include "tplvalues.render" (dict "value" .Values.compiler.volumes "context" $) | nindent 8 }}
         {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -56,8 +56,8 @@ spec:
         resources: {{- toYaml .Values.compiler.resources | nindent 10 }}
         {{- end }}
         volumeMounts:
-        {{- if .Values.volumeMounts }}
-        {{- include "tplvalues.render" (dict "value" .Values.volumeMounts "context" $) | nindent 10 }}
+        {{- if .Values.compiler.volumeMounts }}
+        {{- include "tplvalues.render" (dict "value" .Values.compiler.volumeMounts "context" $) | nindent 10 }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
