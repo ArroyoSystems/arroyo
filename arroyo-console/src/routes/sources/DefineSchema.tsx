@@ -42,10 +42,6 @@ export function ChooseSchemaType({
   next: (step?: number) => void;
 }) {
   const handleChange = (v: string) => {
-    if (v == "rawKafka") {
-      state.typeOneof.case = "kafka";
-      state.schema = undefined;
-    }
     setState({
       ...state,
       /* @ts-ignore */
@@ -53,8 +49,7 @@ export function ChooseSchemaType({
     });
   };
   const onClick = async () => {
-    if (state.typeOneof.case == "kafka") {
-      state.schema = undefined;
+    if (state.schema?.schema.case == "rawJson") {
       setState(
         new CreateSourceReq({
           ...state,
@@ -81,7 +76,7 @@ export function ChooseSchemaType({
         {state.typeOneof.case == "kafka" ? (
           <RadioCard value="confluentSchema">Confluent Schema Registry</RadioCard>
         ) : null}
-        <RadioCard value="rawKafka">Raw Schema</RadioCard>
+        <RadioCard value="rawJson">Raw Schema</RadioCard>
       </RadioCardGroup>
       <Button variant="primary" onClick={onClick}>
         Continue
