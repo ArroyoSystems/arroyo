@@ -52,7 +52,7 @@ impl StructDef {
         };
         quote! (
             #extra_derives
-            #[derive(Clone, Debug, bincode::Encode, bincode::Decode, PartialEq,  PartialOrd, serde::Serialize)]
+            #[derive(Clone, Debug, bincode::Encode, bincode::Decode, PartialEq,  PartialOrd, serde::Serialize, serde::Deserialize)]
             pub struct #schema_name {
                 #(#fields)
                 ,*
