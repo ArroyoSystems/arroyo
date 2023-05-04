@@ -249,7 +249,10 @@ impl ArroyoSchemaProvider {
                     },
                 ))
             }
-            _ => bail!("unsupported connection type"),
+            Some(ConnectionType::Kinesis(ref _kinesis_connection)) => {
+                bail!("Kinesis not yet supported")
+            }
+            None => bail!("malformed connection, missing type."),
         }
     }
 }
