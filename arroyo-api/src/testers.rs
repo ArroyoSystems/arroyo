@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use arroyo_datastream::auth_config_to_hashmap;
 use arroyo_rpc::grpc::api::{source_schema::Schema, KafkaConnection, TestSourceMessage};
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
@@ -10,7 +11,7 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
 
-use crate::{required_field, sources::auth_config_to_hashmap};
+use crate::required_field;
 
 pub struct KafkaTester {
     connection: KafkaConnection,

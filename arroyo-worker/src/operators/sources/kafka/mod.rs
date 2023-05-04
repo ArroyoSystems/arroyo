@@ -172,7 +172,7 @@ where
                                     key: None,
                                     value: match self.serialization_mode {
                                         SerializationMode::Json => serde_json::from_slice(v)
-                                            .unwrap_or_else(|_| panic!("Failed to deserialize message: {}", String::from_utf8_lossy(v))),
+                                            .unwrap_or_else(|err| panic!("Failed to deserialize message {} with error {}", String::from_utf8_lossy(v), err)),
                                         SerializationMode::JsonSchemaRegistry => serde_json::from_slice(&v[5..]).unwrap(),
                                         SerializationMode::RawJson => {
                                             let object = String::from_utf8_lossy(v).to_string();

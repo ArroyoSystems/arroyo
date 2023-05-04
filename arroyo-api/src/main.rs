@@ -403,7 +403,7 @@ impl ApiGrpc for ApiServer {
         let (_, auth) = self.authenticate(request).await?;
 
         Ok(Response::new(GetConnectionsResp {
-            connections: connections::get_connections(auth, &self.client().await?).await?,
+            connections: connections::get_connections(&auth, &self.client().await?).await?,
         }))
     }
 

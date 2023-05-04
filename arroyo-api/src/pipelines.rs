@@ -1,10 +1,11 @@
 use anyhow::Context;
-use arroyo_datastream::{Operator, Program};
+use arroyo_datastream::{auth_config_to_hashmap, Operator, Program};
 use arroyo_rpc::grpc::api::create_sql_job::Sink;
 use arroyo_rpc::grpc::api::sink::SinkType;
 use arroyo_rpc::grpc::api::{
-    self, connection, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob,
-    PipelineDef, PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors,
+    self, connection, create_pipeline_req, BuiltinSink, Connection, CreatePipelineReq,
+    CreateSqlJob, PipelineDef, PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError,
+    SqlErrors,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
@@ -20,7 +21,6 @@ use tracing::warn;
 
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbPipeline;
-use crate::sources::auth_config_to_hashmap;
 use crate::types::public::PipelineType;
 use crate::{
     connections, handle_db_error, log_and_map, optimizations, required_field, sinks,
@@ -41,6 +41,10 @@ where
     for source in sources::get_sources(auth_data, tx).await? {
         let s: Source = source.try_into().map_err(log_and_map)?;
         s.register(&mut schema_provider, auth_data);
+    }
+    for connections in connections::get_connections(auth_data, tx).await? {
+        let connection: Connection = connections.try_into().map_err(log_and_map)?;
+        schema_provider.add_connection(connection)
     }
 
     let sinks = sinks::get_sinks(auth_data, tx).await?;
@@ -98,7 +102,7 @@ where
 
     Ok((
         program,
-        sources.into_iter().map(|s| s.id).collect(),
+        sources.into_iter().filter_map(|s| s.id).collect(),
         used_sink_ids,
     ))
 }

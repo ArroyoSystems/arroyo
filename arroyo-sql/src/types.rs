@@ -5,13 +5,15 @@ use std::{
     time::Duration,
 };
 
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::{anyhow, bail};
 use arrow::datatypes::{DataType, IntervalMonthDayNanoType};
 use arrow::{
     array::Decimal128Array,
     datatypes::{Field, IntervalDayTimeType},
 };
+use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
+use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
 use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
@@ -52,7 +54,7 @@ impl StructDef {
         };
         quote! (
             #extra_derives
-            #[derive(Clone, Debug, bincode::Encode, bincode::Decode, PartialEq,  PartialOrd, serde::Serialize)]
+            #[derive(Clone, Debug, bincode::Encode, bincode::Decode, PartialEq,  PartialOrd, serde::Serialize, serde::Deserialize)]
             pub struct #schema_name {
                 #(#fields)
                 ,*
@@ -377,5 +379,95 @@ impl StructField {
 
     pub(crate) fn nullable(&self) -> bool {
         self.data_type.is_optional()
+    }
+}
+
+// Pulled from DataFusion
+
+pub(crate) fn convert_data_type(sql_type: &SQLDataType) -> Result<DataType> {
+    match sql_type {
+        SQLDataType::Array(Some(inner_sql_type)) => {
+            let data_type = convert_simple_data_type(inner_sql_type)?;
+
+            Ok(DataType::List(Arc::new(Field::new(
+                "field", data_type, true,
+            ))))
+        }
+        SQLDataType::Array(None) => {
+            bail!("Arrays with unspecified type is not supported".to_string())
+        }
+        other => convert_simple_data_type(other),
+    }
+}
+
+fn convert_simple_data_type(sql_type: &SQLDataType) -> Result<DataType> {
+    match sql_type {
+        SQLDataType::Boolean => Ok(DataType::Boolean),
+        SQLDataType::TinyInt(_) => Ok(DataType::Int8),
+        SQLDataType::SmallInt(_) => Ok(DataType::Int16),
+        SQLDataType::Int(_) | SQLDataType::Integer(_) => Ok(DataType::Int32),
+        SQLDataType::BigInt(_) => Ok(DataType::Int64),
+        SQLDataType::UnsignedTinyInt(_) => Ok(DataType::UInt8),
+        SQLDataType::UnsignedSmallInt(_) => Ok(DataType::UInt16),
+        SQLDataType::UnsignedInt(_) | SQLDataType::UnsignedInteger(_) => Ok(DataType::UInt32),
+        SQLDataType::UnsignedBigInt(_) => Ok(DataType::UInt64),
+        SQLDataType::Float(_) => Ok(DataType::Float32),
+        SQLDataType::Real => Ok(DataType::Float32),
+        SQLDataType::Double | SQLDataType::DoublePrecision => Ok(DataType::Float64),
+        SQLDataType::Char(_)
+        | SQLDataType::Varchar(_)
+        | SQLDataType::Text
+        | SQLDataType::String => Ok(DataType::Utf8),
+        SQLDataType::Timestamp(None, TimezoneInfo::None) => {
+            Ok(DataType::Timestamp(TimeUnit::Nanosecond, None))
+        }
+        SQLDataType::Date => Ok(DataType::Date32),
+        SQLDataType::Time(None, tz_info) => {
+            if matches!(tz_info, TimezoneInfo::None)
+                || matches!(tz_info, TimezoneInfo::WithoutTimeZone)
+            {
+                Ok(DataType::Time64(TimeUnit::Nanosecond))
+            } else {
+                // We dont support TIMETZ and TIME WITH TIME ZONE for now
+                bail!(format!("Unsupported SQL type {sql_type:?}"))
+            }
+        }
+        SQLDataType::Numeric(exact_number_info) | SQLDataType::Decimal(exact_number_info) => {
+            let (precision, scale) = match *exact_number_info {
+                ExactNumberInfo::None => (None, None),
+                ExactNumberInfo::Precision(precision) => (Some(precision), None),
+                ExactNumberInfo::PrecisionAndScale(precision, scale) => {
+                    (Some(precision), Some(scale))
+                }
+            };
+            make_decimal_type(precision, scale)
+        }
+        SQLDataType::Bytea => Ok(DataType::Binary),
+        SQLDataType::Interval => Ok(DataType::Interval(IntervalUnit::MonthDayNano)),
+        SQLDataType::JSON => bail!("JSON data type is not supported yet".to_string()),
+        _ => bail!(format!("Unsupported SQL type {sql_type:?}")),
+    }
+}
+
+/// Returns a validated `DataType` for the specified precision and
+/// scale
+pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> Result<DataType> {
+    // postgres like behavior
+    let (precision, scale) = match (precision, scale) {
+        (Some(p), Some(s)) => (p as u8, s as i8),
+        (Some(p), None) => (p as u8, 0),
+        (None, Some(_)) => {
+            bail!("Cannot specify only scale for decimal data type".to_string())
+        }
+        (None, None) => (DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE),
+    };
+
+    // Arrow decimal is i128 meaning 38 maximum decimal digits
+    if precision == 0 || precision > DECIMAL128_MAX_PRECISION || scale.unsigned_abs() > precision {
+        bail!(
+            "Decimal(precision = {precision}, scale = {scale}) should satisfy `0 < precision <= 38`, and `scale <= precision`."
+        )
+    } else {
+        Ok(DataType::Decimal128(precision, scale))
     }
 }

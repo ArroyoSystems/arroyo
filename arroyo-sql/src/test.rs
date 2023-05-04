@@ -98,7 +98,7 @@ async fn test_parse() {
 
     let mut schema_provider = ArroyoSchemaProvider::new();
     schema_provider.add_source_with_type(
-        1,
+        Some(1),
         "nexmark".to_string(),
         test_schema(),
         NexmarkSource {
@@ -118,7 +118,7 @@ async fn test_parse() {
 async fn test_program_compilation() {
     let mut schema_provider = ArroyoSchemaProvider::new();
     schema_provider.add_source_with_type(
-        1,
+        Some(1),
         "nexmark".to_string(),
         test_schema(),
         NexmarkSource {
@@ -149,7 +149,7 @@ async fn test_program_compilation() {
 async fn test_table_alias() {
     let mut schema_provider = ArroyoSchemaProvider::new();
     schema_provider.add_source_with_type(
-        1,
+        Some(1),
         "nexmark".to_string(),
         test_schema(),
         NexmarkSource {
@@ -171,7 +171,7 @@ async fn test_table_alias() {
 async fn test_window_function() {
     let mut schema_provider = ArroyoSchemaProvider::new();
     schema_provider.add_source_with_type(
-        1,
+        Some(1),
         "nexmark".to_string(),
         test_schema(),
         NexmarkSource {

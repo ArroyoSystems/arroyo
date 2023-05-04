@@ -8,6 +8,7 @@ edition = "2021"
 datafusion = "23.0"
 datafusion-expr = "23.0"
 datafusion-common = "23.0"
+arroyo-rpc = {path = "../arroyo-rpc"}
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-types = { path = "../arroyo-types" }
 arrow-schema = {version = "37.0", features = ["serde"]}

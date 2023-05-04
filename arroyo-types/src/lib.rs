@@ -306,7 +306,17 @@ pub mod nexmark {
     use bincode::{Decode, Encode};
 
     #[derive(
-        Debug, Clone, Encode, Decode, Eq, PartialEq, Hash, PartialOrd, Ord, serde::Serialize,
+        Debug,
+        Clone,
+        Encode,
+        Decode,
+        Eq,
+        PartialEq,
+        Hash,
+        PartialOrd,
+        Ord,
+        serde::Serialize,
+        serde::Deserialize,
     )]
     pub struct Person {
         pub id: i64,
@@ -320,7 +330,17 @@ pub mod nexmark {
     }
 
     #[derive(
-        Debug, Clone, Encode, Decode, Eq, PartialEq, Hash, PartialOrd, Ord, serde::Serialize,
+        Debug,
+        Clone,
+        Encode,
+        Decode,
+        Eq,
+        PartialEq,
+        Hash,
+        PartialOrd,
+        Ord,
+        serde::Serialize,
+        serde::Deserialize,
     )]
     pub struct Auction {
         pub id: i64,
@@ -336,7 +356,17 @@ pub mod nexmark {
     }
 
     #[derive(
-        Debug, Clone, Encode, Decode, Eq, PartialEq, Hash, PartialOrd, Ord, serde::Serialize,
+        Debug,
+        Clone,
+        Encode,
+        Decode,
+        Eq,
+        PartialEq,
+        Hash,
+        PartialOrd,
+        Ord,
+        serde::Serialize,
+        serde::Deserialize,
     )]
     pub struct Bid {
         pub auction: i64,
@@ -350,7 +380,17 @@ pub mod nexmark {
 
     // TODO: Use an enum once Data Fusion supports Unions.
     #[derive(
-        Debug, Clone, Encode, Decode, Eq, PartialEq, Hash, PartialOrd, Ord, serde::Serialize,
+        Debug,
+        Clone,
+        Encode,
+        Decode,
+        Eq,
+        PartialEq,
+        Hash,
+        PartialOrd,
+        Ord,
+        serde::Serialize,
+        serde::Deserialize,
     )]
     pub struct Event {
         pub person: Option<Person>,
