@@ -74,6 +74,10 @@ postgresql:
     initdb:
       user: postgres
 
+  serviceAccount:
+    create: true
+    name: arroyo-postgresql
+
 
 prometheus:
   deploy: true
