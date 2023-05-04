@@ -19,7 +19,8 @@ use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
-use syn::{parse_quote, parse_str, FnArg, Type};
+use syn::PathArguments::AngleBracketed;
+use syn::{parse_quote, parse_str, FnArg, GenericArgument, Type};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StructDef {
@@ -178,6 +179,42 @@ pub enum TypeDef {
     DataType(DataType, bool),
 }
 
+fn rust_to_arrow(typ: &Type) -> std::result::Result<DataType, ()> {
+    match typ {
+        Type::Path(pat) => match pat.path.get_ident().ok_or(())?.to_string().as_str() {
+            "u64" => Ok(DataType::UInt64),
+            _ => Err(()),
+        },
+        _ => Err(()),
+    }
+}
+
+impl TryFrom<&Type> for TypeDef {
+    type Error = ();
+
+    fn try_from(typ: &Type) -> std::result::Result<Self, Self::Error> {
+        match typ {
+            Type::Path(pat) => {
+                let last = pat.path.segments.last().unwrap();
+                if last.ident.to_string() == "Option" {
+                    let AngleBracketed(args) = &last.arguments else {
+                        return Err(())
+                    };
+
+                    let GenericArgument::Type(inner) = args.args.first().ok_or(())? else {
+                        return Err(())
+                    };
+
+                    Ok(TypeDef::DataType(rust_to_arrow(inner)?, true))
+                } else {
+                    Ok(TypeDef::DataType(rust_to_arrow(typ)?, false))
+                }
+            }
+            _ => Err(()),
+        }
+    }
+}
+
 impl TypeDef {
     pub fn is_optional(&self) -> bool {
         match self {
@@ -197,6 +234,13 @@ impl TypeDef {
         match self {
             TypeDef::StructDef(details, _) => details.struct_name(),
             TypeDef::DataType(data_type, _) => StructField::data_type_name(data_type).to_string(),
+        }
+    }
+
+    pub fn as_datatype(&self) -> Option<&DataType> {
+        match self {
+            TypeDef::StructDef(_, _) => None,
+            TypeDef::DataType(dt, _) => Some(dt),
         }
     }
 

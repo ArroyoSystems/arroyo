@@ -4,8 +4,9 @@ use crate::{
     operators::TwoPhaseAggregation,
     pipeline::SortDirection,
     types::{StructDef, StructField, TypeDef},
+    ArroyoSchemaProvider,
 };
-use anyhow::{bail, Ok, Result};
+use anyhow::{anyhow, bail, Ok, Result};
 use arrow::datatypes::DataType;
 use arrow_schema::Field;
 use datafusion_common::ScalarValue;
@@ -13,11 +14,11 @@ use datafusion_expr::{
     aggregate_function,
     expr::Sort,
     type_coercion::aggregates::{avg_return_type, sum_return_type},
-    BinaryExpr, BuiltinScalarFunction, Expr, TryCast,
+    BinaryExpr, BuiltinScalarFunction, Expr, ExprSchemable, TryCast, TypeSignature,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_quote, parse_str, Ident};
+use syn::{parse_quote, parse_str, Ident, ItemFn};
 
 #[derive(Debug, Clone)]
 pub struct BinaryOperator(datafusion_expr::Operator);
@@ -37,6 +38,7 @@ pub enum Expression {
     Hash(HashExpression),
     DataStructure(DataStructureFunction),
     Json(JsonExpression),
+    RustUdf(RustUdfExpression),
 }
 
 impl Expression {
@@ -65,6 +67,7 @@ impl Expression {
                 data_structure_expression.to_syn_expression()
             }
             Expression::Json(json_function) => json_function.to_syn_expression(),
+            Expression::RustUdf(t) => t.to_syn_expression(),
         }
     }
 
@@ -91,6 +94,7 @@ impl Expression {
                 data_structure_expression.return_type()
             }
             Expression::Json(json_function) => json_function.return_type(),
+            Expression::RustUdf(t) => t.return_type(),
         }
     }
 
@@ -166,287 +170,318 @@ impl Expression {
     }
 }
 
-pub fn to_expression_generator(expression: &Expr, input_struct: &StructDef) -> Result<Expression> {
-    match expression {
-        Expr::Alias(expr, _alias) => to_expression_generator(expr, input_struct),
-        Expr::Column(column) => Ok(Expression::Column(ColumnExpression::from_column(
-            column,
-            input_struct,
-        )?)),
-        Expr::Literal(literal) => Ok(LiteralExpression::new(literal.clone())),
-        Expr::BinaryExpr(BinaryExpr { left, op, right }) => match op {
-            datafusion_expr::Operator::Eq
-            | datafusion_expr::Operator::NotEq
-            | datafusion_expr::Operator::Lt
-            | datafusion_expr::Operator::LtEq
-            | datafusion_expr::Operator::Gt
-            | datafusion_expr::Operator::GtEq
-            | datafusion_expr::Operator::IsDistinctFrom
-            | datafusion_expr::Operator::IsNotDistinctFrom
-            | datafusion_expr::Operator::And
-            | datafusion_expr::Operator::Or => Ok(BinaryComparisonExpression::new(
-                Box::new(to_expression_generator(left, input_struct)?),
-                *op,
-                Box::new(to_expression_generator(right, input_struct)?),
-            )?),
-            datafusion_expr::Operator::Plus
-            | datafusion_expr::Operator::Minus
-            | datafusion_expr::Operator::Multiply
-            | datafusion_expr::Operator::Divide
-            | datafusion_expr::Operator::Modulo => BinaryMathExpression::new(
-                Box::new(to_expression_generator(left, input_struct)?),
-                *op,
-                Box::new(to_expression_generator(right, input_struct)?),
-            ),
-            datafusion_expr::Operator::StringConcat => {
-                Ok(Expression::String(StringFunction::Concat(vec![
-                    to_expression_generator(left, input_struct)?,
-                    to_expression_generator(right, input_struct)?,
-                ])))
-            }
-            datafusion_expr::Operator::RegexMatch
-            | datafusion_expr::Operator::RegexIMatch
-            | datafusion_expr::Operator::RegexNotMatch
-            | datafusion_expr::Operator::RegexNotIMatch
-            | datafusion_expr::Operator::BitwiseAnd
-            | datafusion_expr::Operator::BitwiseOr
-            | datafusion_expr::Operator::BitwiseXor
-            | datafusion_expr::Operator::BitwiseShiftRight
-            | datafusion_expr::Operator::BitwiseShiftLeft => bail!("{:?} is unimplemented", op),
-        },
-        Expr::Not(_) => bail!("NOT is unimplemented"),
-        Expr::IsNotNull(expr) => Ok(UnaryBooleanExpression::new(
-            UnaryOperator::IsNotNull,
-            Box::new(to_expression_generator(expr, input_struct)?),
-        )),
-        Expr::IsNull(expr) => Ok(UnaryBooleanExpression::new(
-            UnaryOperator::IsNull,
-            Box::new(to_expression_generator(expr, input_struct)?),
-        )),
-        Expr::IsTrue(expr) => Ok(UnaryBooleanExpression::new(
-            UnaryOperator::IsTrue,
-            Box::new(to_expression_generator(expr, input_struct)?),
-        )),
-        Expr::IsFalse(expr) => Ok(UnaryBooleanExpression::new(
-            UnaryOperator::IsFalse,
-            Box::new(to_expression_generator(expr, input_struct)?),
-        )),
-        Expr::IsUnknown(expr) => Ok(UnaryBooleanExpression::new(
-            UnaryOperator::IsUnknown,
-            Box::new(to_expression_generator(expr, input_struct)?),
-        )),
-        Expr::IsNotTrue(expr) => Ok(UnaryBooleanExpression::new(
-            UnaryOperator::IsNotTrue,
-            Box::new(to_expression_generator(expr, input_struct)?),
-        )),
-        Expr::IsNotFalse(expr) => Ok(UnaryBooleanExpression::new(
-            UnaryOperator::IsNotFalse,
-            Box::new(to_expression_generator(expr, input_struct)?),
-        )),
-        Expr::IsNotUnknown(expr) => Ok(UnaryBooleanExpression::new(
-            UnaryOperator::IsNotUnknown,
-            Box::new(to_expression_generator(expr, input_struct)?),
-        )),
-        Expr::Negative(expr) => Ok(UnaryBooleanExpression::new(
-            UnaryOperator::Negative,
-            Box::new(to_expression_generator(expr, input_struct)?),
-        )),
-        Expr::GetIndexedField(datafusion_expr::GetIndexedField { expr, key }) => {
-            StructFieldExpression::new(Box::new(to_expression_generator(expr, input_struct)?), key)
-        }
-        Expr::AggregateFunction(datafusion_expr::expr::AggregateFunction {
-            fun,
-            args,
-            distinct,
-            filter,
-        }) => {
-            if args.len() != 1 {
-                bail!("multiple aggregation parameters is not yet supported");
-            }
+pub struct ExpressionContext<'a> {
+    pub schema_provider: &'a ArroyoSchemaProvider,
+    pub input_struct: &'a StructDef,
+}
 
-            if filter.is_some() {
-                bail!("filters in aggregations is not yet supported");
-            }
-
-            Ok(AggregationExpression::new(
-                Box::new(to_expression_generator(&args[0], input_struct)?),
-                fun.clone(),
-                *distinct,
-            )?)
-        }
-        Expr::AggregateUDF { .. } => bail!("aggregate UDFs not supported"),
-        Expr::Case(datafusion_expr::Case {
-            expr: _,
-            when_then_expr: _,
-            else_expr: _,
-        }) => bail!("case statements not supported yet"),
-        Expr::Cast(datafusion_expr::Cast { expr, data_type }) => Ok(CastExpression::new(
-            Box::new(to_expression_generator(expr, input_struct)?),
-            data_type,
-        )?),
-        Expr::TryCast(TryCast { expr, data_type }) => {
-            bail!(
-                "try cast not implemented yet expr:{:?}, data_type:{:?}",
-                expr,
-                data_type
-            )
-        }
-        Expr::ScalarFunction { fun, args } => {
-            let mut arg_expressions: Vec<_> = args
-                .iter()
-                .map(|arg| to_expression_generator(arg, input_struct))
-                .collect::<Result<Vec<_>>>()?;
-            //let arg_expression = Box::new(to_expression_generator(&args[0], input_struct)?);
-            match fun {
-                BuiltinScalarFunction::Abs
-                | BuiltinScalarFunction::Acos
-                | BuiltinScalarFunction::Asin
-                | BuiltinScalarFunction::Atan
-                | BuiltinScalarFunction::Acosh
-                | BuiltinScalarFunction::Asinh
-                | BuiltinScalarFunction::Atanh
-                | BuiltinScalarFunction::Cos
-                | BuiltinScalarFunction::Cosh
-                | BuiltinScalarFunction::Ln
-                | BuiltinScalarFunction::Log
-                | BuiltinScalarFunction::Log10
-                | BuiltinScalarFunction::Sin
-                | BuiltinScalarFunction::Sinh
-                | BuiltinScalarFunction::Sqrt
-                | BuiltinScalarFunction::Tan
-                | BuiltinScalarFunction::Tanh
-                | BuiltinScalarFunction::Ceil
-                | BuiltinScalarFunction::Floor
-                | BuiltinScalarFunction::Round
-                | BuiltinScalarFunction::Signum
-                | BuiltinScalarFunction::Trunc
-                | BuiltinScalarFunction::Log2
-                | BuiltinScalarFunction::Exp => Ok(NumericExpression::new(
-                    fun.clone(),
-                    Box::new(arg_expressions.remove(0)),
+impl<'a> ExpressionContext<'a> {
+    pub fn compile_expr(&mut self, expression: &Expr) -> Result<Expression> {
+        match expression {
+            Expr::Alias(expr, _alias) => self.compile_expr(expr),
+            Expr::Column(column) => Ok(Expression::Column(ColumnExpression::from_column(
+                column,
+                self.input_struct,
+            )?)),
+            Expr::Literal(literal) => Ok(LiteralExpression::new(literal.clone())),
+            Expr::BinaryExpr(BinaryExpr { left, op, right }) => match op {
+                datafusion_expr::Operator::Eq
+                | datafusion_expr::Operator::NotEq
+                | datafusion_expr::Operator::Lt
+                | datafusion_expr::Operator::LtEq
+                | datafusion_expr::Operator::Gt
+                | datafusion_expr::Operator::GtEq
+                | datafusion_expr::Operator::IsDistinctFrom
+                | datafusion_expr::Operator::IsNotDistinctFrom
+                | datafusion_expr::Operator::And
+                | datafusion_expr::Operator::Or => Ok(BinaryComparisonExpression::new(
+                    Box::new(self.compile_expr(left)?),
+                    *op,
+                    Box::new(self.compile_expr(right)?),
                 )?),
-                BuiltinScalarFunction::Power | BuiltinScalarFunction::Atan2 => bail!(
-                    "multiple argument numeric function {:?} not implemented",
-                    fun
+                datafusion_expr::Operator::Plus
+                | datafusion_expr::Operator::Minus
+                | datafusion_expr::Operator::Multiply
+                | datafusion_expr::Operator::Divide
+                | datafusion_expr::Operator::Modulo => BinaryMathExpression::new(
+                    Box::new(self.compile_expr(left)?),
+                    *op,
+                    Box::new(self.compile_expr(right)?),
                 ),
-                BuiltinScalarFunction::Ascii
-                | BuiltinScalarFunction::BitLength
-                | BuiltinScalarFunction::Btrim
-                | BuiltinScalarFunction::CharacterLength
-                | BuiltinScalarFunction::Chr
-                | BuiltinScalarFunction::Concat
-                | BuiltinScalarFunction::ConcatWithSeparator
-                | BuiltinScalarFunction::InitCap
-                | BuiltinScalarFunction::SplitPart
-                | BuiltinScalarFunction::StartsWith
-                | BuiltinScalarFunction::Strpos
-                | BuiltinScalarFunction::Substr
-                | BuiltinScalarFunction::Left
-                | BuiltinScalarFunction::Lpad
-                | BuiltinScalarFunction::Lower
-                | BuiltinScalarFunction::Ltrim
-                | BuiltinScalarFunction::Trim
-                | BuiltinScalarFunction::Translate
-                | BuiltinScalarFunction::OctetLength
-                | BuiltinScalarFunction::Upper
-                | BuiltinScalarFunction::Repeat
-                | BuiltinScalarFunction::Replace
-                | BuiltinScalarFunction::Reverse
-                | BuiltinScalarFunction::Right
-                | BuiltinScalarFunction::Rpad
-                | BuiltinScalarFunction::Rtrim => {
-                    let string_function: StringFunction =
-                        (fun.clone(), arg_expressions).try_into()?;
-                    Ok(Expression::String(string_function))
+                datafusion_expr::Operator::StringConcat => {
+                    Ok(Expression::String(StringFunction::Concat(vec![
+                        self.compile_expr(left)?,
+                        self.compile_expr(right)?,
+                    ])))
                 }
-                BuiltinScalarFunction::RegexpMatch | BuiltinScalarFunction::RegexpReplace => {
-                    bail!("regex function {:?} not yet implemented", fun)
+                datafusion_expr::Operator::RegexMatch
+                | datafusion_expr::Operator::RegexIMatch
+                | datafusion_expr::Operator::RegexNotMatch
+                | datafusion_expr::Operator::RegexNotIMatch
+                | datafusion_expr::Operator::BitwiseAnd
+                | datafusion_expr::Operator::BitwiseOr
+                | datafusion_expr::Operator::BitwiseXor
+                | datafusion_expr::Operator::BitwiseShiftRight
+                | datafusion_expr::Operator::BitwiseShiftLeft => bail!("{:?} is unimplemented", op),
+            },
+            Expr::Not(_) => bail!("NOT is unimplemented"),
+            Expr::IsNotNull(expr) => Ok(UnaryBooleanExpression::new(
+                UnaryOperator::IsNotNull,
+                Box::new(self.compile_expr(expr)?),
+            )),
+            Expr::IsNull(expr) => Ok(UnaryBooleanExpression::new(
+                UnaryOperator::IsNull,
+                Box::new(self.compile_expr(expr)?),
+            )),
+            Expr::IsTrue(expr) => Ok(UnaryBooleanExpression::new(
+                UnaryOperator::IsTrue,
+                Box::new(self.compile_expr(expr)?),
+            )),
+            Expr::IsFalse(expr) => Ok(UnaryBooleanExpression::new(
+                UnaryOperator::IsFalse,
+                Box::new(self.compile_expr(expr)?),
+            )),
+            Expr::IsUnknown(expr) => Ok(UnaryBooleanExpression::new(
+                UnaryOperator::IsUnknown,
+                Box::new(self.compile_expr(expr)?),
+            )),
+            Expr::IsNotTrue(expr) => Ok(UnaryBooleanExpression::new(
+                UnaryOperator::IsNotTrue,
+                Box::new(self.compile_expr(expr)?),
+            )),
+            Expr::IsNotFalse(expr) => Ok(UnaryBooleanExpression::new(
+                UnaryOperator::IsNotFalse,
+                Box::new(self.compile_expr(expr)?),
+            )),
+            Expr::IsNotUnknown(expr) => Ok(UnaryBooleanExpression::new(
+                UnaryOperator::IsNotUnknown,
+                Box::new(self.compile_expr(expr)?),
+            )),
+            Expr::Negative(expr) => Ok(UnaryBooleanExpression::new(
+                UnaryOperator::Negative,
+                Box::new(self.compile_expr(expr)?),
+            )),
+            Expr::GetIndexedField(datafusion_expr::GetIndexedField { expr, key }) => {
+                StructFieldExpression::new(Box::new(self.compile_expr(expr)?), key)
+            }
+            Expr::AggregateFunction(datafusion_expr::expr::AggregateFunction {
+                fun,
+                args,
+                distinct,
+                filter,
+            }) => {
+                if args.len() != 1 {
+                    bail!("multiple aggregation parameters is not yet supported");
                 }
-                BuiltinScalarFunction::Coalesce => Ok(Expression::DataStructure(
-                    DataStructureFunction::Coalesce(arg_expressions),
-                )),
-                BuiltinScalarFunction::NullIf => {
-                    Ok(Expression::DataStructure(DataStructureFunction::NullIf {
-                        left: Box::new(arg_expressions.remove(0)),
-                        right: Box::new(arg_expressions.remove(0)),
+
+                if filter.is_some() {
+                    bail!("filters in aggregations is not yet supported");
+                }
+
+                Ok(AggregationExpression::new(
+                    Box::new(self.compile_expr(&args[0])?),
+                    fun.clone(),
+                    *distinct,
+                )?)
+            }
+            Expr::AggregateUDF { .. } => bail!("aggregate UDFs not supported"),
+            Expr::Case(datafusion_expr::Case {
+                expr: _,
+                when_then_expr: _,
+                else_expr: _,
+            }) => bail!("case statements not supported yet"),
+            Expr::Cast(datafusion_expr::Cast { expr, data_type }) => Ok(CastExpression::new(
+                Box::new(self.compile_expr(expr)?),
+                data_type,
+            )?),
+            Expr::TryCast(TryCast { expr, data_type }) => {
+                bail!(
+                    "try cast not implemented yet expr:{:?}, data_type:{:?}",
+                    expr,
+                    data_type
+                )
+            }
+            Expr::ScalarFunction { fun, args } => {
+                let mut arg_expressions: Vec<_> = args
+                    .iter()
+                    .map(|arg| self.compile_expr(arg))
+                    .collect::<Result<Vec<_>>>()?;
+                //let arg_expression = Box::new(self.compile_expr(&args[0])?);
+                match fun {
+                    BuiltinScalarFunction::Abs
+                    | BuiltinScalarFunction::Acos
+                    | BuiltinScalarFunction::Asin
+                    | BuiltinScalarFunction::Atan
+                    | BuiltinScalarFunction::Acosh
+                    | BuiltinScalarFunction::Asinh
+                    | BuiltinScalarFunction::Atanh
+                    | BuiltinScalarFunction::Cos
+                    | BuiltinScalarFunction::Cosh
+                    | BuiltinScalarFunction::Ln
+                    | BuiltinScalarFunction::Log
+                    | BuiltinScalarFunction::Log10
+                    | BuiltinScalarFunction::Sin
+                    | BuiltinScalarFunction::Sinh
+                    | BuiltinScalarFunction::Sqrt
+                    | BuiltinScalarFunction::Tan
+                    | BuiltinScalarFunction::Tanh
+                    | BuiltinScalarFunction::Ceil
+                    | BuiltinScalarFunction::Floor
+                    | BuiltinScalarFunction::Round
+                    | BuiltinScalarFunction::Signum
+                    | BuiltinScalarFunction::Trunc
+                    | BuiltinScalarFunction::Log2
+                    | BuiltinScalarFunction::Exp => Ok(NumericExpression::new(
+                        fun.clone(),
+                        Box::new(arg_expressions.remove(0)),
+                    )?),
+                    BuiltinScalarFunction::Power | BuiltinScalarFunction::Atan2 => bail!(
+                        "multiple argument numeric function {:?} not implemented",
+                        fun
+                    ),
+                    BuiltinScalarFunction::Ascii
+                    | BuiltinScalarFunction::BitLength
+                    | BuiltinScalarFunction::Btrim
+                    | BuiltinScalarFunction::CharacterLength
+                    | BuiltinScalarFunction::Chr
+                    | BuiltinScalarFunction::Concat
+                    | BuiltinScalarFunction::ConcatWithSeparator
+                    | BuiltinScalarFunction::InitCap
+                    | BuiltinScalarFunction::SplitPart
+                    | BuiltinScalarFunction::StartsWith
+                    | BuiltinScalarFunction::Strpos
+                    | BuiltinScalarFunction::Substr
+                    | BuiltinScalarFunction::Left
+                    | BuiltinScalarFunction::Lpad
+                    | BuiltinScalarFunction::Lower
+                    | BuiltinScalarFunction::Ltrim
+                    | BuiltinScalarFunction::Trim
+                    | BuiltinScalarFunction::Translate
+                    | BuiltinScalarFunction::OctetLength
+                    | BuiltinScalarFunction::Upper
+                    | BuiltinScalarFunction::Repeat
+                    | BuiltinScalarFunction::Replace
+                    | BuiltinScalarFunction::Reverse
+                    | BuiltinScalarFunction::Right
+                    | BuiltinScalarFunction::Rpad
+                    | BuiltinScalarFunction::Rtrim => {
+                        let string_function: StringFunction =
+                            (fun.clone(), arg_expressions).try_into()?;
+                        Ok(Expression::String(string_function))
+                    }
+                    BuiltinScalarFunction::RegexpMatch | BuiltinScalarFunction::RegexpReplace => {
+                        bail!("regex function {:?} not yet implemented", fun)
+                    }
+                    BuiltinScalarFunction::Coalesce => Ok(Expression::DataStructure(
+                        DataStructureFunction::Coalesce(arg_expressions),
+                    )),
+                    BuiltinScalarFunction::NullIf => {
+                        Ok(Expression::DataStructure(DataStructureFunction::NullIf {
+                            left: Box::new(arg_expressions.remove(0)),
+                            right: Box::new(arg_expressions.remove(0)),
+                        }))
+                    }
+                    BuiltinScalarFunction::MakeArray => {
+                        if matches!(arg_expressions[0].return_type(), TypeDef::StructDef(_, _)) {
+                            bail!("make_array only supports primitive types");
+                        };
+                        Ok(Expression::DataStructure(DataStructureFunction::MakeArray(
+                            arg_expressions,
+                        )))
+                    }
+                    BuiltinScalarFunction::Struct | BuiltinScalarFunction::ArrowTypeof => {
+                        bail!("data structure function {:?} not implemented", fun)
+                    }
+                    BuiltinScalarFunction::DatePart
+                    | BuiltinScalarFunction::DateTrunc
+                    | BuiltinScalarFunction::ToTimestamp
+                    | BuiltinScalarFunction::ToTimestampMillis
+                    | BuiltinScalarFunction::ToTimestampMicros
+                    | BuiltinScalarFunction::ToTimestampSeconds
+                    | BuiltinScalarFunction::DateBin
+                    | BuiltinScalarFunction::CurrentDate
+                    | BuiltinScalarFunction::FromUnixtime
+                    | BuiltinScalarFunction::Now
+                    | BuiltinScalarFunction::CurrentTime => {
+                        bail!("date function {:?} not implemented", fun)
+                    }
+                    BuiltinScalarFunction::Digest
+                    | BuiltinScalarFunction::MD5
+                    | BuiltinScalarFunction::Random
+                    | BuiltinScalarFunction::SHA224
+                    | BuiltinScalarFunction::SHA256
+                    | BuiltinScalarFunction::SHA384
+                    | BuiltinScalarFunction::SHA512 => Ok(HashExpression::new(
+                        fun.clone(),
+                        Box::new(arg_expressions.remove(0)),
+                    )?),
+                    BuiltinScalarFunction::ToHex => bail!("hex not implemented"),
+                    BuiltinScalarFunction::Uuid => bail!("UUID unimplemented"),
+                    BuiltinScalarFunction::Cbrt => bail!("cube root unimplemented"),
+                    BuiltinScalarFunction::Degrees => bail!("degrees not implemented yet"),
+                    BuiltinScalarFunction::Pi => bail!("pi not implemented yet"),
+                    BuiltinScalarFunction::Radians => bail!("radians not implemented yet"),
+                }
+            }
+            Expr::ScalarUDF { fun, args } => match fun.name.as_str() {
+                "get_first_json_object" => {
+                    let json_string = Box::new(self.compile_expr(&args[0])?);
+                    let path = Box::new(self.compile_expr(&args[1])?);
+                    Ok(Expression::Json(JsonExpression {
+                        function: JsonFunction::GetFirstJsonObject,
+                        json_string,
+                        path,
                     }))
                 }
-                BuiltinScalarFunction::MakeArray => {
-                    if matches!(arg_expressions[0].return_type(), TypeDef::StructDef(_, _)) {
-                        bail!("make_array only supports primitive types");
-                    };
-                    Ok(Expression::DataStructure(DataStructureFunction::MakeArray(
-                        arg_expressions,
-                    )))
+                "get_json_objects" => {
+                    let json_string = Box::new(self.compile_expr(&args[0])?);
+                    let path = Box::new(self.compile_expr(&args[1])?);
+                    Ok(Expression::Json(JsonExpression {
+                        function: JsonFunction::GetJsonObjects,
+                        json_string,
+                        path,
+                    }))
                 }
-                BuiltinScalarFunction::Struct | BuiltinScalarFunction::ArrowTypeof => {
-                    bail!("data structure function {:?} not implemented", fun)
+                "extract_json_string" => {
+                    let json_string = Box::new(self.compile_expr(&args[0])?);
+                    let path = Box::new(self.compile_expr(&args[1])?);
+                    Ok(Expression::Json(JsonExpression {
+                        function: JsonFunction::ExtractJsonString,
+                        json_string,
+                        path,
+                    }))
                 }
-                BuiltinScalarFunction::DatePart
-                | BuiltinScalarFunction::DateTrunc
-                | BuiltinScalarFunction::ToTimestamp
-                | BuiltinScalarFunction::ToTimestampMillis
-                | BuiltinScalarFunction::ToTimestampMicros
-                | BuiltinScalarFunction::ToTimestampSeconds
-                | BuiltinScalarFunction::DateBin
-                | BuiltinScalarFunction::CurrentDate
-                | BuiltinScalarFunction::FromUnixtime
-                | BuiltinScalarFunction::Now
-                | BuiltinScalarFunction::CurrentTime => {
-                    bail!("date function {:?} not implemented", fun)
+                udf => {
+                    // get udf from context
+                    let def = self
+                        .schema_provider
+                        .udf_defs
+                        .get(udf)
+                        .ok_or_else(|| anyhow!("no UDF with name '{}'", udf))?;
+
+                    let inputs: Result<Vec<Expression>> =
+                        args.iter().map(|e| (self.compile_expr(e))).collect();
+                    let inputs = inputs?;
+
+                    if inputs.len() != def.args.len() {
+                        bail!(
+                            "wrong number of arguments for udf {} (found {}, expected {})",
+                            udf,
+                            args.len(),
+                            def.args.len()
+                        );
+                    }
+
+                    Ok(Expression::RustUdf(RustUdfExpression {
+                        name: udf.to_string(),
+                        args: def.args.clone().into_iter().zip(inputs).collect(),
+                        ret_type: def.ret.clone(),
+                    }))
                 }
-                BuiltinScalarFunction::Digest
-                | BuiltinScalarFunction::MD5
-                | BuiltinScalarFunction::Random
-                | BuiltinScalarFunction::SHA224
-                | BuiltinScalarFunction::SHA256
-                | BuiltinScalarFunction::SHA384
-                | BuiltinScalarFunction::SHA512 => Ok(HashExpression::new(
-                    fun.clone(),
-                    Box::new(arg_expressions.remove(0)),
-                )?),
-                BuiltinScalarFunction::ToHex => bail!("hex not implemented"),
-                BuiltinScalarFunction::Uuid => bail!("UUID unimplemented"),
-                BuiltinScalarFunction::Cbrt => bail!("cube root unimplemented"),
-                BuiltinScalarFunction::Degrees => bail!("degrees not implemented yet"),
-                BuiltinScalarFunction::Pi => bail!("pi not implemented yet"),
-                BuiltinScalarFunction::Radians => bail!("radians not implemented yet"),
+            },
+            expression => {
+                bail!("expression {:?} not yet implemented", expression)
             }
-        }
-        Expr::ScalarUDF { fun, args } => match fun.name.as_str() {
-            "get_first_json_object" => {
-                let json_string = Box::new(to_expression_generator(&args[0], input_struct)?);
-                let path = Box::new(to_expression_generator(&args[1], input_struct)?);
-                Ok(Expression::Json(JsonExpression {
-                    function: JsonFunction::GetFirstJsonObject,
-                    json_string,
-                    path,
-                }))
-            }
-            "get_json_objects" => {
-                let json_string = Box::new(to_expression_generator(&args[0], input_struct)?);
-                let path = Box::new(to_expression_generator(&args[1], input_struct)?);
-                Ok(Expression::Json(JsonExpression {
-                    function: JsonFunction::GetJsonObjects,
-                    json_string,
-                    path,
-                }))
-            }
-            "extract_json_string" => {
-                let json_string = Box::new(to_expression_generator(&args[0], input_struct)?);
-                let path = Box::new(to_expression_generator(&args[1], input_struct)?);
-                Ok(Expression::Json(JsonExpression {
-                    function: JsonFunction::ExtractJsonString,
-                    json_string,
-                    path,
-                }))
-            }
-            _ => {
-                bail!("UDF {:?} not implemented", fun)
-            }
-        },
-        expression => {
-            bail!("expression {:?} not yet implemented", expression)
         }
     }
 }
@@ -920,7 +955,7 @@ impl AggregationExpression {
         }
     }
 
-    pub fn try_from_expression(expr: &Expr, input_struct: &StructDef) -> Result<Self> {
+    pub fn try_from_expression(ctx: &mut ExpressionContext, expr: &Expr) -> Result<Self> {
         match expr {
             Expr::AggregateFunction(datafusion_expr::expr::AggregateFunction {
                 fun,
@@ -931,8 +966,7 @@ impl AggregationExpression {
                 if args.len() != 1 {
                     bail!("unexpected arg length");
                 }
-                let producing_expression =
-                    Box::new(to_expression_generator(&args[0], input_struct)?);
+                let producing_expression = Box::new(ctx.compile_expr(&args[0])?);
                 let aggregator = Aggregator::from_datafusion(fun.clone(), *distinct)?;
                 Ok(AggregationExpression {
                     producing_expression,
@@ -1239,8 +1273,8 @@ pub struct SortExpression {
 }
 
 impl SortExpression {
-    pub fn from_expression(sort: &Sort, input_struct: &StructDef) -> Result<Self> {
-        let value = to_expression_generator(&sort.expr, input_struct)?;
+    pub fn from_expression(ctx: &mut ExpressionContext, sort: &Sort) -> Result<Self> {
+        let value = ctx.compile_expr(&sort.expr)?;
         let direction = if sort.asc {
             SortDirection::Asc
         } else {
@@ -2149,5 +2183,58 @@ impl JsonExpression {
             ),
             JsonFunction::ExtractJsonString => TypeDef::DataType(DataType::Utf8, true),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RustUdfExpression {
+    name: String,
+    args: Vec<(TypeDef, Expression)>,
+    ret_type: TypeDef,
+}
+
+impl RustUdfExpression {
+    fn to_syn_expression(&self) -> syn::Expr {
+        let name = format_ident!("{}", &self.name);
+
+        let (defs, args): (Vec<_>, Vec<_>) = self
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, (def, expr))| {
+                let t = expr.to_syn_expression();
+                let id = format_ident!("__{}", i);
+                let def = match (def.is_optional(), expr.nullable()) {
+                    (true, true) | (false, false) => quote!(let #id = #t),
+                    (true, false) => quote!(let #id = Some(#t)),
+                    (false, true) => quote!(let #id = (#t)?),
+                };
+                (def, quote!(#id))
+            })
+            .unzip();
+
+        let mut ret = quote!(udfs::#name(#(#args, )*));
+
+        if self.return_type().is_optional() && !self.ret_type.is_optional() {
+            // we have to wrap the result in Some
+            ret = quote! { Some(#ret) }
+        };
+
+        parse_quote!({
+            (|| {
+                #(#defs; )*
+                #ret
+            })()
+        })
+    }
+
+    fn return_type(&self) -> TypeDef {
+        self.ret_type.with_nullity(
+            self.ret_type.is_optional()
+                || self
+                    .args
+                    .iter()
+                    .any(|(t, e)| t.is_optional() ^ e.nullable()),
+        )
     }
 }

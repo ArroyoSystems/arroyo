@@ -29,8 +29,8 @@ use crate::{
 };
 
 const TEST_UDF: &'static str = r#"
-fn test_udf(x: u64) -> u64 {
-  x * x
+fn my_sqr(x: Option<u64>) -> Option<u64> {
+  Some(x? * x?)
 }
 "#;
 
@@ -43,6 +43,8 @@ where
     E: GenericClient,
 {
     let mut schema_provider = ArroyoSchemaProvider::new();
+
+    schema_provider.add_rust_udf(TEST_UDF).unwrap();
 
     for source in sources::get_sources(auth_data, tx).await? {
         let s: Source = source.try_into().map_err(log_and_map)?;

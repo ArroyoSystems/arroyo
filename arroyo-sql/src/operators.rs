@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use crate::expressions::ExpressionContext;
 use crate::{
-    expressions::{to_expression_generator, AggregationExpression, Aggregator, Column, Expression},
+    expressions::{AggregationExpression, Aggregator, Column, Expression},
     schemas::window_type_def,
     types::{StructDef, StructField, TypeDef},
 };
@@ -558,8 +559,11 @@ pub struct TwoPhaseAggregation {
 }
 
 impl TwoPhaseAggregation {
-    pub fn from_expression(expr: &Expr, input_struct: &StructDef) -> Result<TwoPhaseAggregation> {
-        if !input_struct.fields.is_empty() {
+    pub fn from_expression(
+        ctx: &mut ExpressionContext,
+        expr: &Expr,
+    ) -> Result<TwoPhaseAggregation> {
+        if !ctx.input_struct.fields.is_empty() {
             bail!("expected single field input");
         }
         match expr {
@@ -572,7 +576,7 @@ impl TwoPhaseAggregation {
                 if args.len() != 1 {
                     bail!("unexpected arg length");
                 }
-                let incoming_expression = to_expression_generator(&args[0], input_struct)?;
+                let incoming_expression = ctx.compile_expr(&args[0])?;
                 let aggregator = Aggregator::from_datafusion(fun.clone(), false)?;
                 Ok(TwoPhaseAggregation {
                     incoming_expression,

@@ -5,6 +5,7 @@ use anyhow::Result;
 use anyhow::{anyhow, bail};
 use arrow_schema::DataType;
 use arroyo_datastream::{Operator, Program, WindowType};
+use datafusion::catalog::schema::SchemaProvider;
 
 use datafusion_common::{DFField, ScalarValue};
 use datafusion_expr::{
@@ -14,11 +15,9 @@ use datafusion_expr::{
 use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
 
+use crate::expressions::ExpressionContext;
 use crate::{
-    expressions::{
-        to_expression_generator, AggregationExpression, Column, ColumnExpression, Expression,
-        SortExpression,
-    },
+    expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
     operators::{
         AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection,
         TwoPhaseAggregation,
@@ -58,7 +57,7 @@ impl RecordTransform {
         }
     }
 
-    pub fn into_operator(&self) -> Operator {
+    pub fn as_operator(&self) -> Operator {
         match self {
             RecordTransform::ValueProjection(projection) => {
                 let map_method = projection.to_syn_expression();
@@ -346,14 +345,21 @@ impl SqlOperator {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SqlPipelineBuilder {
-    pub sources: HashMap<String, SqlSource>,
+#[derive(Clone)]
+pub struct SqlPipelineBuilder<'a> {
+    schema_provider: &'a ArroyoSchemaProvider,
 }
 
-impl SqlPipelineBuilder {
-    pub fn new(sources: HashMap<String, SqlSource>) -> Self {
-        SqlPipelineBuilder { sources }
+impl<'a> SqlPipelineBuilder<'a> {
+    pub fn new(schema_provider: &'a ArroyoSchemaProvider) -> Self {
+        SqlPipelineBuilder { schema_provider }
+    }
+
+    fn ctx(&'a self, input_struct: &'a StructDef) -> ExpressionContext<'a> {
+        ExpressionContext {
+            schema_provider: self.schema_provider,
+            input_struct,
+        }
     }
 
     pub fn insert_sql_plan(&mut self, plan: &LogicalPlan) -> Result<SqlOperator> {
@@ -409,8 +415,9 @@ impl SqlPipelineBuilder {
         filter: &datafusion_expr::logical_plan::Filter,
     ) -> Result<SqlOperator> {
         let input = self.insert_sql_plan(&filter.input)?;
-        let input_struct = input.return_type();
-        let predicate = to_expression_generator(&filter.predicate, &input_struct)?;
+        let struct_def = input.return_type();
+        let mut ctx = self.ctx(&struct_def);
+        let predicate = ctx.compile_expr(&filter.predicate)?;
         // TODO: this should probably happen through a more principled optimization pass.
         Ok(SqlOperator::RecordTransform(
             Box::new(input),
@@ -424,10 +431,13 @@ impl SqlPipelineBuilder {
     ) -> Result<SqlOperator> {
         let input = self.insert_sql_plan(&projection.input)?;
 
+        let struct_def = input.return_type();
+        let mut ctx = self.ctx(&struct_def);
+
         let functions = projection
             .expr
             .iter()
-            .map(|expr| to_expression_generator(expr, &input.return_type()))
+            .map(|expr| ctx.compile_expr(expr))
             .collect::<Result<Vec<_>>>()?;
 
         let names = projection
@@ -499,6 +509,8 @@ impl SqlPipelineBuilder {
         fields: &[DFField],
         input_struct: &StructDef,
     ) -> Result<Projection> {
+        let mut ctx = self.ctx(input_struct);
+
         let field_pairs: Vec<Option<(Column, Expression)>> = group_expressions
             .iter()
             .enumerate()
@@ -506,7 +518,7 @@ impl SqlPipelineBuilder {
                 if Self::is_window(expr) {
                     Ok(None)
                 } else {
-                    let field = to_expression_generator(expr, input_struct)?;
+                    let field = ctx.compile_expr(expr)?;
                     Ok(Some((
                         Column::convert(&fields[i].qualified_column()),
                         field,
@@ -651,14 +663,14 @@ impl SqlPipelineBuilder {
             field_names: join_projection_field_names.clone(),
             field_computations: columns
                 .iter()
-                .map(|(left, _right)| to_expression_generator(left, &left_input.return_type()))
+                .map(|(left, _right)| self.ctx(&left_input.return_type()).compile_expr(left))
                 .collect::<Result<Vec<_>>>()?,
         };
         let right_key = Projection {
             field_names: join_projection_field_names,
             field_computations: columns
                 .iter()
-                .map(|(_left, right)| to_expression_generator(right, &right_input.return_type()))
+                .map(|(_left, right)| self.ctx(&right_input.return_type()).compile_expr(right))
                 .collect::<Result<Vec<_>>>()?,
         };
         Ok(SqlOperator::JoinOperator(
@@ -677,6 +689,7 @@ impl SqlPipelineBuilder {
         table_scan: &datafusion::logical_expr::TableScan,
     ) -> Result<SqlOperator> {
         let source = self
+            .schema_provider
             .sources
             .get(&table_scan.table_name.to_string())
             .ok_or_else(|| anyhow!("Source {} does not exist", table_scan.table_name))?;
@@ -735,14 +748,16 @@ impl SqlPipelineBuilder {
                             bail!("Window UDAFs not yet supported");
                         }
                     };
+
                     let input_struct = input.return_type();
+                    let mut ctx = self.ctx(&input_struct);
 
                     let order_by: Vec<_> = w
                         .order_by
                         .iter()
                         .map(|expr| {
                             if let Expr::Sort(sort) = expr {
-                                SortExpression::from_expression(sort, &input_struct)
+                                SortExpression::from_expression(&mut ctx, sort)
                             } else {
                                 panic!("expected sort expression, found {:?}", expr);
                             }
@@ -764,7 +779,7 @@ impl SqlPipelineBuilder {
                         .partition_by
                         .iter()
                         .filter(|expr| !Self::is_window(expr))
-                        .map(|expression| to_expression_generator(expression, &input_struct))
+                        .map(|expression| ctx.compile_expr(expression))
                         .collect::<Result<Vec<_>>>()?;
 
                     let partition = Projection {
@@ -832,13 +847,15 @@ impl SqlPipelineBuilder {
         input_struct: &StructDef,
         window: WindowType,
     ) -> Result<AggregatingStrategy> {
+        let mut ctx = self.ctx(input_struct);
+
         let field_names = aggregate_fields
             .iter()
             .map(|field| Column::convert(&field.qualified_column()))
             .collect();
         let two_phase_field_computations = aggr_expr
             .iter()
-            .map(|expr| TwoPhaseAggregation::from_expression(expr, input_struct))
+            .map(|expr| TwoPhaseAggregation::from_expression(&mut ctx, expr))
             .collect::<Result<Vec<_>>>();
 
         match (two_phase_field_computations, window) {
@@ -863,9 +880,10 @@ impl SqlPipelineBuilder {
             }
             _ => {}
         }
+
         let field_computations = aggr_expr
             .iter()
-            .map(|expr| AggregationExpression::try_from_expression(expr, input_struct))
+            .map(|expr| AggregationExpression::try_from_expression(&mut ctx, expr))
             .collect::<Result<Vec<_>>>()?;
         Ok(AggregatingStrategy::AggregateProjection(
             AggregateProjection {
@@ -1103,8 +1121,7 @@ pub fn get_program_from_plan(
     schema_provider: ArroyoSchemaProvider,
     logical_plan: &LogicalPlan,
 ) -> Result<(Program, Vec<SqlSource>)> {
-    let sql_operator =
-        SqlPipelineBuilder::new(schema_provider.sources.clone()).insert_sql_plan(logical_plan)?;
+    let sql_operator = SqlPipelineBuilder::new(&schema_provider).insert_sql_plan(logical_plan)?;
 
     get_program_from_operator_with_plan(config, sql_operator, schema_provider)
 }
