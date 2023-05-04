@@ -3,12 +3,13 @@ name: arroyo
 description: Helm chart for the Arroyo stream processing engine
 
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 
 keywords:
-  - stream processing
+  - stream-processing
   - data
+  - sql
   - real-time
 
 dependencies:
@@ -20,3 +21,10 @@ dependencies:
     version: "^12"
     repository: https://charts.bitnami.com/bitnami
     condition: postgresql.deploy
+
+maintainers:
+  - name: Arroyo Systems
+    email: support@arroyo.systems
+    url: https://arroyo.dev
+
+icon: https://github.com/ArroyoSystems/arroyo/blob/9ca9d1eeb6ef07593f0491a806928fac8e4d341a/docs/images/arroyo_logo.png
