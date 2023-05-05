@@ -50,6 +50,7 @@ import {
   CreateJobReq,
   CreatePipelineReq,
   CreateSqlJob,
+  CreateUdf,
   GetPipelineReq,
   GetSinksReq,
   GetSourcesReq,
@@ -63,12 +64,13 @@ import {
   Sink,
   SourceDef,
   StopType,
+  UdfLanguage,
 } from "../../gen/api_pb";
 import { ApiClient } from "../../main";
 import { Catalog } from "./Catalog";
 import { PipelineGraph } from "./JobGraph";
 import { PipelineOutputs } from "./JobOutputs";
-import { SqlEditor } from "./SqlEditor";
+import { CodeEditor } from "./SqlEditor";
 
 type SqlOptions = {
   name?: string;
@@ -108,6 +110,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   const [sinks, setSinks] = useState<Array<SinkOpt>>([]);
   const [graph, setGraph] = useState<JobGraph | null>(null);
   const [query, setQuery] = useState<string>("");
+  const [udfs, setUdfs] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [options, setOptions] = useState<SqlOptions>({ parallelism: 4, checkpointMS: 5000 });
@@ -125,6 +128,11 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     setQuery(query);
   }
 
+  const updateUdf = (udf: string) => {
+    window.localStorage.setItem("udf", udf);
+    setUdfs(udf);
+  }
+
   useEffect(() => {
     const copyFrom = queryParams.get("from");
     const fetch = async (copyFrom: string) => {
@@ -135,17 +143,24 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
       );
 
       setQuery(def.definition || "");
+      setUdfs(def.udfs[0].definition || "");
       setOptions({
         ...options,
         name: def.name + "-copy",
       });
     };
 
-    let saved = window.localStorage.getItem("query");
+    let savedQuery = window.localStorage.getItem("query");
+    let savedUdfs = window.localStorage.getItem("udf");
     if (copyFrom != null) {
       fetch(copyFrom);
-    } else if (saved != null) {
-      setQuery(saved);
+    } else {
+      if (savedQuery != null) {
+        setQuery(savedQuery);
+      }
+      if (savedUdfs != null) {
+        setUdfs(savedUdfs);
+      }
     }
   }, [queryParams]);
 
@@ -182,9 +197,10 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     setGraph(null);
     setError(null);
 
-    let resp = await (await client()).graphForPipeline(
+    let resp = await(await client()).graphForPipeline(
       new PipelineGraphReq({
         query: query,
+        udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfs })],
       })
     );
 
@@ -214,6 +230,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
             case: "sql",
             value: new CreateSqlJob({
               query: query,
+              udfs: [ new CreateUdf({ language: UdfLanguage.Rust, definition: udfs })],
               sink: { case: "builtin", value: BuiltinSink.Web },
             }),
           },
@@ -307,13 +324,14 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     try {
       let sink = sinks[options.sink!];
 
-      let resp = await (await client()).startPipeline(
+      let resp = await(await client()).startPipeline(
         new CreatePipelineReq({
           name: options.name,
           config: {
             case: "sql",
             value: new CreateSqlJob({
               query: query,
+              udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfs })],
               sink: sink.value,
             }),
           },
@@ -351,7 +369,20 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
             </Stack>
             <Stack flex={2} spacing={0}>
               <Box padding={5} pl={0} backgroundColor="#1e1e1e">
-                <SqlEditor query={query} setQuery={updateQuery}></SqlEditor>
+                <Tabs>
+                  <TabList>
+                    <Tab>query.sql</Tab>
+                    <Tab>udfs.rs</Tab>
+                  </TabList>
+                  <TabPanels>
+                    <TabPanel>
+                      <CodeEditor query={query} setQuery={updateQuery}></CodeEditor>
+                    </TabPanel>
+                    <TabPanel>
+                      <CodeEditor query={udfs} setQuery={updateUdf} language="rust"></CodeEditor>
+                    </TabPanel>
+                  </TabPanels>
+                </Tabs>
               </Box>
 
               <HStack spacing={4} p={2} backgroundColor="gray.500">

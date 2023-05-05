@@ -5,7 +5,7 @@ use arroyo_rpc::grpc::api::sink::SinkType;
 use arroyo_rpc::grpc::api::{
     self, connection, create_pipeline_req, BuiltinSink, Connection, CreatePipelineReq,
     CreateSqlJob, PipelineDef, PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError,
-    SqlErrors,
+    SqlErrors, Udf, UdfLanguage,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
@@ -13,6 +13,7 @@ use cornucopia_async::GenericClient;
 use deadpool_postgres::Transaction;
 use petgraph::Direction;
 use prost::Message;
+use serde_json::Value;
 use tracing::log::info;
 
 use std::str::FromStr;
@@ -37,6 +38,19 @@ where
     E: GenericClient,
 {
     let mut schema_provider = ArroyoSchemaProvider::new();
+
+    for (i, udf) in sql.udfs.iter().enumerate() {
+        match UdfLanguage::from_i32(udf.language) {
+            Some(UdfLanguage::Rust) => {
+                schema_provider.add_rust_udf(&udf.definition).map_err(|e| {
+                    Status::invalid_argument(format!("Could not process UDF: {:?}", e))
+                })?;
+            }
+            None => {
+                return Err(required_field(&format!("udfs[{}].language", i)));
+            }
+        }
+    }
 
     for source in sources::get_sources(auth_data, tx).await? {
         let s: Source = source.try_into().map_err(log_and_map)?;
@@ -173,6 +187,7 @@ pub(crate) async fn create_pipeline<'a>(
     let sinks;
     let text;
     let compute_parallelism;
+    let udfs: Option<Vec<Udf>>;
 
     match req.config.ok_or_else(|| required_field("config"))? {
         create_pipeline_req::Config::Program(bytes) => {
@@ -189,6 +204,7 @@ pub(crate) async fn create_pipeline<'a>(
             sources = vec![];
             sinks = vec![];
             text = None;
+            udfs = None;
             compute_parallelism = false;
         }
         create_pipeline_req::Config::Sql(sql) => {
@@ -203,6 +219,15 @@ pub(crate) async fn create_pipeline<'a>(
             pipeline_type = PipelineType::sql;
             (program, sources, sinks) = compile_sql(&sql, &auth, tx).await?;
             text = Some(sql.query);
+            udfs = Some(
+                sql.udfs
+                    .iter()
+                    .map(|t| Udf {
+                        language: t.language.clone(),
+                        definition: t.definition.clone(),
+                    })
+                    .collect(),
+            );
             compute_parallelism = sql.parallelism == 0;
         }
     };
@@ -263,6 +288,7 @@ pub(crate) async fn create_pipeline<'a>(
             &pipeline_id,
             &version,
             &text,
+            &udfs.map(|t| serde_json::to_value(&t).unwrap()),
             &program,
         )
         .one()
@@ -302,6 +328,8 @@ impl TryInto<PipelineDef> for DbPipeline {
             name: self.name,
             r#type: format!("{:?}", self.r#type),
             definition: self.textual_repr,
+            udfs: serde_json::from_value(self.udfs.unwrap_or_else(|| Value::Array(vec![])))
+                .map_err(log_and_map)?,
             job_graph: Some(program.as_job_graph()),
         })
     }
@@ -335,6 +363,7 @@ pub(crate) async fn sql_graph(
     let sql = CreateSqlJob {
         query: req.query,
         parallelism: 1,
+        udfs: req.udfs,
         sink: Some(Sink::Builtin(BuiltinSink::Null as i32)),
     };
 

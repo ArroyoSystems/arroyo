@@ -99,13 +99,13 @@ INSERT INTO pipelines (organization_id, created_by, name, type, current_version)
 VALUES (:organization_id, :created_by, :name, :type, :current_version)
 RETURNING id;
 
---! create_pipeline_definition (textual_repr?)
-INSERT INTO pipeline_definitions (organization_id, created_by, pipeline_id, version, textual_repr, program)
-VALUES  (:organization_id, :created_by, :pipeline_id, :version, :textual_repr, :program)
+--! create_pipeline_definition (textual_repr?, udfs?)
+INSERT INTO pipeline_definitions (organization_id, created_by, pipeline_id, version, textual_repr, udfs, program)
+VALUES  (:organization_id, :created_by, :pipeline_id, :version, :textual_repr, :udfs, :program)
 RETURNING id;
 
---! get_pipeline: DbPipeline(textual_repr?)
-SELECT pipelines.id as id, name, type, textual_repr, program FROM pipelines
+--! get_pipeline: DbPipeline(textual_repr?, udfs?)
+SELECT pipelines.id as id, name, type, textual_repr, udfs, program FROM pipelines
 INNER JOIN pipeline_definitions as d ON pipelines.id = d.pipeline_id AND pipelines.current_version = d.version
 WHERE pipelines.id = :pipeline_id AND pipelines.organization_id = :organization_id;
 
@@ -143,16 +143,16 @@ VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_definition
 --! create_job_status
 INSERT INTO job_statuses (id, organization_id) VALUES (:id, :organization_id);
 
---! get_jobs: (start_time?, finish_time?, state?, tasks?, textual_repr?, failure_message?, run_id?)
-SELECT job_configs.id as id, pipeline_name, stop, textual_repr, start_time, finish_time, state, tasks, pipeline_definition, failure_message, run_id
+--! get_jobs: (start_time?, finish_time?, state?, tasks?, textual_repr?, failure_message?, run_id?, udfs?)
+SELECT job_configs.id as id, pipeline_name, stop, textual_repr, start_time, finish_time, state, tasks, pipeline_definition, failure_message, run_id, udfs
 FROM job_configs
          LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipeline_definitions ON pipeline_definition = pipeline_definitions.id
 WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY COALESCE(job_configs.updated_at, job_configs.created_at) DESC;
 
---! get_job_details: (start_time?, finish_time?, state?, tasks?, textual_repr?, failure_message?, run_id?)
-SELECT pipeline_name, stop, parallelism_overrides, state, start_time, finish_time, tasks, textual_repr, program, pipeline_definition, failure_message, run_id
+--! get_job_details: (start_time?, finish_time?, state?, tasks?, textual_repr?, udfs?, failure_message?, run_id?)
+SELECT pipeline_name, stop, parallelism_overrides, state, start_time, finish_time, tasks, textual_repr, program, pipeline_definition, udfs, failure_message, run_id
 FROM job_configs
          LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipeline_definitions ON pipeline_definition = pipeline_definitions.id

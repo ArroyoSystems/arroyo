@@ -280,7 +280,7 @@ impl PlanNode {
         match &self.operator {
             PlanOperator::Source(_name, source) => source.operator.clone(),
             PlanOperator::Watermark(watermark) => Operator::Watermark(watermark.clone()),
-            PlanOperator::RecordTransform(record_transform) => record_transform.into_operator(),
+            PlanOperator::RecordTransform(record_transform) => record_transform.as_operator(),
             PlanOperator::WindowAggregate { window, projection } => {
                 let aggregate_expr = projection.to_syn_expression();
                 arroyo_datastream::Operator::Window {
@@ -1351,6 +1351,17 @@ pub fn get_program_from_operator_with_plan(
             .filter(|(k, _)| plan_graph.sources.contains_key(k))
             .map(|(_, v)| v),
     );
+
+    other_defs.push(format!(
+        "mod udfs {{ {} }}",
+        schema_provider
+            .udf_defs
+            .values()
+            .map(|u| u.def.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    ));
+
     let graph: DiGraph<StreamNode, StreamEdge> = plan_graph.into();
 
     Ok((

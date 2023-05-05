@@ -19,7 +19,8 @@ use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
-use syn::{parse_quote, parse_str, Type};
+use syn::PathArguments::AngleBracketed;
+use syn::{parse_quote, parse_str, GenericArgument, Type};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StructDef {
@@ -178,6 +179,57 @@ pub enum TypeDef {
     DataType(DataType, bool),
 }
 
+fn rust_to_arrow(typ: &Type) -> std::result::Result<DataType, ()> {
+    match typ {
+        Type::Path(pat) => match pat.path.get_ident().ok_or(())?.to_string().as_str() {
+            "bool" => Ok(DataType::Boolean),
+            "i8" => Ok(DataType::Int8),
+            "i16" => Ok(DataType::Int16),
+            "i32" => Ok(DataType::Int32),
+            "i64" => Ok(DataType::Int64),
+            "u8" => Ok(DataType::UInt8),
+            "u16" => Ok(DataType::UInt16),
+            "u32" => Ok(DataType::UInt32),
+            "u64" => Ok(DataType::UInt64),
+            "f16" => Ok(DataType::Float16),
+            "f32" => Ok(DataType::Float32),
+            "f64" => Ok(DataType::Float64),
+            "std::time::SystemTime" => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
+            "std::time::Duration" => Ok(DataType::Duration(TimeUnit::Microsecond)),
+            "String" => Ok(DataType::Utf8),
+            "Vec<u8>" => Ok(DataType::Binary),
+            _ => Err(()),
+        },
+        _ => Err(()),
+    }
+}
+
+impl TryFrom<&Type> for TypeDef {
+    type Error = ();
+
+    fn try_from(typ: &Type) -> std::result::Result<Self, Self::Error> {
+        match typ {
+            Type::Path(pat) => {
+                let last = pat.path.segments.last().unwrap();
+                if last.ident.to_string() == "Option" {
+                    let AngleBracketed(args) = &last.arguments else {
+                        return Err(())
+                    };
+
+                    let GenericArgument::Type(inner) = args.args.first().ok_or(())? else {
+                        return Err(())
+                    };
+
+                    Ok(TypeDef::DataType(rust_to_arrow(inner)?, true))
+                } else {
+                    Ok(TypeDef::DataType(rust_to_arrow(typ)?, false))
+                }
+            }
+            _ => Err(()),
+        }
+    }
+}
+
 impl TypeDef {
     pub fn is_optional(&self) -> bool {
         match self {
@@ -197,6 +249,13 @@ impl TypeDef {
         match self {
             TypeDef::StructDef(details, _) => details.struct_name(),
             TypeDef::DataType(data_type, _) => StructField::data_type_name(data_type).to_string(),
+        }
+    }
+
+    pub fn as_datatype(&self) -> Option<&DataType> {
+        match self {
+            TypeDef::StructDef(_, _) => None,
+            TypeDef::DataType(dt, _) => Some(dt),
         }
     }
 

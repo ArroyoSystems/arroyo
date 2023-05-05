@@ -7,7 +7,7 @@ use cornucopia_async::GenericClient;
 use deadpool_postgres::{Pool, Transaction};
 use prost::Message;
 use rand::{distributions::Alphanumeric, Rng};
-use serde_json::from_str;
+use serde_json::{from_str, Value};
 use std::{collections::HashMap, time::Duration};
 use tonic::Status;
 
@@ -96,22 +96,25 @@ pub(crate) async fn get_jobs(
         .await
         .map_err(log_and_map)?;
 
-    Ok(res
-        .into_iter()
-        .map(|rec| JobStatus {
-            job_id: rec.id,
-            pipeline_name: rec.pipeline_name,
-            running_desired: rec.stop == public::StopMode::none,
-            state: rec.state.unwrap_or_else(|| "Created".to_string()),
-            run_id: rec.run_id.unwrap_or(0) as u64,
-            start_time: rec.start_time.map(to_micros),
-            finish_time: rec.finish_time.map(to_micros),
-            tasks: rec.tasks.map(|t| t as u64),
-            definition: rec.textual_repr,
-            definition_id: format!("{}", rec.pipeline_definition),
-            failure_message: rec.failure_message,
+    res.into_iter()
+        .map(|rec| {
+            Ok(JobStatus {
+                job_id: rec.id,
+                pipeline_name: rec.pipeline_name,
+                running_desired: rec.stop == public::StopMode::none,
+                state: rec.state.unwrap_or_else(|| "Created".to_string()),
+                run_id: rec.run_id.unwrap_or(0) as u64,
+                start_time: rec.start_time.map(to_micros),
+                finish_time: rec.finish_time.map(to_micros),
+                tasks: rec.tasks.map(|t| t as u64),
+                definition: rec.textual_repr,
+                udfs: serde_json::from_value(rec.udfs.unwrap_or_else(|| Value::Array(vec![])))
+                    .map_err(log_and_map)?,
+                definition_id: format!("{}", rec.pipeline_definition),
+                failure_message: rec.failure_message,
+            })
         })
-        .collect())
+        .collect()
 }
 
 pub(crate) async fn get_job_details(
@@ -202,6 +205,8 @@ pub(crate) async fn get_job_details(
         tasks: res.tasks.map(|t| t as u64),
         definition: res.textual_repr,
         definition_id: format!("{}", res.pipeline_definition),
+        udfs: serde_json::from_value(res.udfs.unwrap_or_else(|| Value::Array(vec![])))
+            .map_err(log_and_map)?,
         failure_message: res.failure_message,
     };
 

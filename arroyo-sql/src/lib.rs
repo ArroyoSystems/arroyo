@@ -37,17 +37,25 @@ use datafusion_expr::{
     AccumulatorFunctionImplementation, LogicalPlan, ReturnTypeFunction, Signature,
     StateTypeFunction, TypeSignature, Volatility,
 };
-use expressions::{to_expression_generator, Expression};
+use expressions::Expression;
 use pipeline::get_program_from_plan;
 use schemas::window_arrow_struct;
-use syn::{parse_quote, parse_str};
-use types::{convert_data_type, StructDef, StructField, TypeDef};
 
+use crate::expressions::ExpressionContext;
+use crate::types::{convert_data_type, StructDef, StructField, TypeDef};
+use quote::ToTokens;
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
+use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, VisPublic, Visibility};
 
 #[cfg(test)]
 mod test;
+
+pub struct UdfDef {
+    args: Vec<TypeDef>,
+    ret: TypeDef,
+    def: String,
+}
 
 pub struct ArroyoSchemaProvider {
     pub source_defs: HashMap<String, String>,
@@ -55,6 +63,7 @@ pub struct ArroyoSchemaProvider {
     pub functions: HashMap<String, Arc<ScalarUDF>>,
     pub sources: HashMap<String, SqlSource>,
     pub connections: HashMap<String, Connection>,
+    pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
 }
 
@@ -123,12 +132,14 @@ impl ArroyoSchemaProvider {
                 make_scalar_function(fn_impl),
             )),
         );
+
         Self {
             tables,
             functions,
             sources: HashMap::new(),
             source_defs: HashMap::new(),
             connections: HashMap::new(),
+            udf_defs: HashMap::new(),
             config_options: datafusion::config::ConfigOptions::new(),
         }
     }
@@ -181,13 +192,13 @@ impl ArroyoSchemaProvider {
         query: &Statement,
     ) -> Result<(String, Vec<StructField>, Operator)> {
         let Statement::CreateTable {
-        name,
-        columns,
-        with_options,
-        ..
-    } = query else {
-        bail!("expected create table statement");
-    };
+            name,
+            columns,
+            with_options,
+            ..
+        } = query else {
+            bail!("expected create table statement");
+        };
         let connection_name = with_options
             .iter()
             .filter_map(|option| match option.name.value.as_str() {
@@ -254,6 +265,72 @@ impl ArroyoSchemaProvider {
             }
             None => bail!("malformed connection, missing type."),
         }
+    }
+
+    pub fn add_rust_udf(&mut self, body: &str) -> Result<()> {
+        let file = syn::parse_file(body)?;
+
+        for item in file.items {
+            let Item::Fn(mut function) = item else {
+                bail!("not a function");
+            };
+
+            let mut args: Vec<TypeDef> = vec![];
+            for (i, arg) in function.sig.inputs.iter().enumerate() {
+                match arg {
+                    FnArg::Receiver(_) => bail!("self types are not allowed in UDFs"),
+                    FnArg::Typed(t) => {
+                        args.push((&*t.ty).try_into().map_err(|_| {
+                            anyhow!("Could not convert arg {} into a SQL data type", i)
+                        })?);
+                    }
+                }
+            }
+
+            let ret: TypeDef = match &function.sig.output {
+                ReturnType::Default => bail!("return type must be specified in UDF"),
+                ReturnType::Type(_, t) => (&**t)
+                    .try_into()
+                    .map_err(|_| anyhow!("Could not convert return type into a SQL data type"))?,
+            };
+
+            let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
+
+            if self
+                .functions
+                .insert(
+                    function.sig.ident.to_string(),
+                    Arc::new(create_udf(
+                        &function.sig.ident.to_string(),
+                        args.iter()
+                            .map(|t| t.as_datatype().unwrap().clone())
+                            .collect(),
+                        Arc::new(ret.as_datatype().unwrap().clone()),
+                        Volatility::Volatile,
+                        make_scalar_function(fn_impl),
+                    )),
+                )
+                .is_some()
+            {
+                bail!("Could not register UDF '{}', as there is already a built-in function with that name",
+                    function.sig.ident.to_string());
+            };
+
+            function.vis = Visibility::Public(VisPublic {
+                pub_token: Default::default(),
+            });
+
+            self.udf_defs.insert(
+                function.sig.ident.to_string(),
+                UdfDef {
+                    args,
+                    ret,
+                    def: function.to_token_stream().to_string(),
+                },
+            );
+        }
+
+        Ok(())
     }
 }
 
@@ -590,7 +667,13 @@ pub fn get_test_expression(
     )
     .unwrap();
     let LogicalPlan::Projection(projection) = plan else {panic!("expect projection")};
-    let generating_expression = to_expression_generator(&projection.expr[0], &struct_def).unwrap();
+
+    let mut ctx = ExpressionContext {
+        schema_provider: &schema_provider,
+        input_struct: &struct_def,
+    };
+
+    let generating_expression = ctx.compile_expr(&projection.expr[0]).unwrap();
     generate_test_code(
         test_name,
         &generating_expression,

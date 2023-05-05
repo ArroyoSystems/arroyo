@@ -1,8 +1,9 @@
 use arrow_schema::{DataType, TimeUnit};
 use arroyo_datastream::{NexmarkSource, Source};
 
+use crate::pipeline::get_program_from_plan;
 use crate::{
-    parse_and_get_program,
+    get_plan_from_query, parse_and_get_program,
     types::{StructDef, StructField, TypeDef},
     ArroyoSchemaProvider, SqlConfig,
 };
@@ -194,4 +195,30 @@ async fn test_window_function() {
     parse_and_get_program(sql, schema_provider, SqlConfig::default())
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn test_udf() {
+    let mut schema_provider = ArroyoSchemaProvider::new();
+
+    schema_provider
+        .add_rust_udf("fn my_sqr(x: u64) -> u64 { x * x }")
+        .unwrap();
+
+    schema_provider.add_source_with_type(
+        Some(1),
+        "nexmark".to_string(),
+        test_schema(),
+        NexmarkSource {
+            first_event_rate: 10,
+            num_events: Some(100),
+        }
+        .as_operator(),
+        Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
+    );
+
+    let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
+
+    let plan = get_plan_from_query(&sql, &mut schema_provider).unwrap();
+    get_program_from_plan(SqlConfig::default(), schema_provider, &plan).unwrap();
 }
