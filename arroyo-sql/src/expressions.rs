@@ -12,7 +12,7 @@ use arrow_schema::Field;
 use datafusion_common::ScalarValue;
 use datafusion_expr::{
     aggregate_function,
-    expr::Sort,
+    expr::{AggregateFunction, Sort},
     type_coercion::aggregates::{avg_return_type, sum_return_type},
     BinaryExpr, BuiltinScalarFunction, Expr, TryCast,
 };
@@ -482,6 +482,31 @@ impl<'a> ExpressionContext<'a> {
             expression => {
                 bail!("expression {:?} not yet implemented", expression)
             }
+        }
+    }
+
+    pub fn as_two_phase_aggregation(&mut self, expr: &Expr) -> Result<TwoPhaseAggregation> {
+        if !self.input_struct.fields.is_empty() {
+            bail!("expected single field input");
+        }
+        match expr {
+            Expr::AggregateFunction(AggregateFunction {
+                fun,
+                args,
+                distinct: false,
+                filter: None,
+            }) => {
+                if args.len() != 1 {
+                    bail!("unexpected arg length");
+                }
+                let incoming_expression = self.compile_expr(&args[0])?;
+                let aggregator = Aggregator::from_datafusion(fun.clone(), false)?;
+                Ok(TwoPhaseAggregation {
+                    incoming_expression,
+                    aggregator,
+                })
+            }
+            _ => bail!("expected aggregate expression"),
         }
     }
 }
@@ -2234,7 +2259,7 @@ impl RustUdfExpression {
                 || self
                     .args
                     .iter()
-                    .any(|(t, e)| t.is_optional() ^ e.nullable()),
+                    .any(|(t, e)| t.is_optional() && !e.nullable()),
         )
     }
 }

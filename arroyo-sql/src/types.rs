@@ -530,13 +530,3 @@ pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> R
         Ok(DataType::Decimal128(precision, scale))
     }
 }
-
-pub fn rust_to_datafusion(typ: &Type) -> Option<DataType> {
-    match typ {
-        Type::Path(pat) => match pat.path.get_ident()?.to_string().as_str() {
-            "u64" => Some(DataType::UInt64),
-            _ => None,
-        },
-        _ => None,
-    }
-}

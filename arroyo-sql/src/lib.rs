@@ -296,18 +296,25 @@ impl ArroyoSchemaProvider {
 
             let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
 
-            self.functions.insert(
-                function.sig.ident.to_string(),
-                Arc::new(create_udf(
-                    &function.sig.ident.to_string(),
-                    args.iter()
-                        .map(|t| t.as_datatype().unwrap().clone())
-                        .collect(),
-                    Arc::new(ret.as_datatype().unwrap().clone()),
-                    Volatility::Volatile,
-                    make_scalar_function(fn_impl),
-                )),
-            );
+            if self
+                .functions
+                .insert(
+                    function.sig.ident.to_string(),
+                    Arc::new(create_udf(
+                        &function.sig.ident.to_string(),
+                        args.iter()
+                            .map(|t| t.as_datatype().unwrap().clone())
+                            .collect(),
+                        Arc::new(ret.as_datatype().unwrap().clone()),
+                        Volatility::Volatile,
+                        make_scalar_function(fn_impl),
+                    )),
+                )
+                .is_some()
+            {
+                bail!("Could not register UDF '{}', as there is already a built-in function with that name",
+                    function.sig.ident.to_string());
+            };
 
             function.vis = Visibility::Public(VisPublic {
                 pub_token: Default::default(),

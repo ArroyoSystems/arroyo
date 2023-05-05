@@ -17,10 +17,7 @@ use syn::{parse_quote, Type};
 use crate::expressions::ExpressionContext;
 use crate::{
     expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
-    operators::{
-        AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection,
-        TwoPhaseAggregation,
-    },
+    operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     plan_graph::get_program_from_operator_with_plan,
     types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider, SqlConfig, SqlSource,
@@ -854,7 +851,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             .collect();
         let two_phase_field_computations = aggr_expr
             .iter()
-            .map(|expr| TwoPhaseAggregation::from_expression(&mut ctx, expr))
+            .map(|expr| ctx.as_two_phase_aggregation(expr))
             .collect::<Result<Vec<_>>>();
 
         match (two_phase_field_computations, window) {

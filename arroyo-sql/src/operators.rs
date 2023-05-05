@@ -1,20 +1,14 @@
 use std::time::Duration;
 
-use crate::expressions::ExpressionContext;
 use crate::{
     expressions::{AggregationExpression, Aggregator, Column, Expression},
     schemas::window_type_def,
     types::{StructDef, StructField, TypeDef},
 };
-use anyhow::bail;
 use anyhow::Result;
 use arrow_schema::DataType;
 use arroyo_datastream::WindowType;
-use datafusion_expr::{
-    expr::AggregateFunction,
-    type_coercion::aggregates::{avg_return_type, sum_return_type},
-    Expr,
-};
+use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{parse_quote, parse_str, Ident, LitInt};
@@ -559,34 +553,6 @@ pub struct TwoPhaseAggregation {
 }
 
 impl TwoPhaseAggregation {
-    pub fn from_expression(
-        ctx: &mut ExpressionContext,
-        expr: &Expr,
-    ) -> Result<TwoPhaseAggregation> {
-        if !ctx.input_struct.fields.is_empty() {
-            bail!("expected single field input");
-        }
-        match expr {
-            Expr::AggregateFunction(AggregateFunction {
-                fun,
-                args,
-                distinct: false,
-                filter: None,
-            }) => {
-                if args.len() != 1 {
-                    bail!("unexpected arg length");
-                }
-                let incoming_expression = ctx.compile_expr(&args[0])?;
-                let aggregator = Aggregator::from_datafusion(fun.clone(), false)?;
-                Ok(TwoPhaseAggregation {
-                    incoming_expression,
-                    aggregator,
-                })
-            }
-            _ => bail!("expected aggregate expression"),
-        }
-    }
-
     fn aggregate_type(&self) -> syn::Type {
         self.aggregate_type_def().return_type()
     }
