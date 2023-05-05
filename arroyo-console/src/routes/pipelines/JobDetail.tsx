@@ -77,7 +77,7 @@ import * as util from "../../lib/util";
 import { PipelineGraph } from "./JobGraph";
 import { ApiClient } from "../../main";
 import { PipelineOutputs } from "./JobOutputs";
-import { SqlEditor } from "./SqlEditor";
+import { CodeEditor } from "./SqlEditor";
 import PipelineConfigModal from "./PipelineConfigModal";
 
 interface JobDetailState {
@@ -225,6 +225,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
           <Tab>Outputs</Tab>
           <Tab>Checkpoints</Tab>
           <Tab>Query</Tab>
+          <Tab>UDFs</Tab>
         </TabList>
         <TabPanels h="100%">
           <TabPanel h="100%">
@@ -283,7 +284,15 @@ export function JobDetail({ client }: { client: ApiClient }) {
 
           <TabPanel>
             <Box>
-              <SqlEditor query={state.pipeline?.jobStatus?.definition!} readOnly={true} />
+              <CodeEditor query={state.pipeline?.jobStatus?.definition!} readOnly={true} />
+            </Box>
+          </TabPanel>
+
+          <TabPanel>
+            <Box>
+              <CodeEditor query={(state.pipeline?.jobStatus?.udfs || [{definition: ""}])[0].definition}
+                language="rust"
+                readOnly={true} />
             </Box>
           </TabPanel>
         </TabPanels>

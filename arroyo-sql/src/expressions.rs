@@ -14,11 +14,11 @@ use datafusion_expr::{
     aggregate_function,
     expr::Sort,
     type_coercion::aggregates::{avg_return_type, sum_return_type},
-    BinaryExpr, BuiltinScalarFunction, Expr, ExprSchemable, TryCast, TypeSignature,
+    BinaryExpr, BuiltinScalarFunction, Expr, TryCast,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_quote, parse_str, Ident, ItemFn};
+use syn::{parse_quote, parse_str, Ident};
 
 #[derive(Debug, Clone)]
 pub struct BinaryOperator(datafusion_expr::Operator);

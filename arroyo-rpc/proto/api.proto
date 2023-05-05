@@ -16,14 +16,15 @@ enum UdfLanguage {
 }
 
 message CreateUdf {
-  string name = 1;
-  string body = 2;
-  UdfLanguage language = 3;
+  UdfLanguage language = 1;
+  string definition = 2;
 }
 
 message CreateSqlJob {
   string query = 1;
   uint64 parallelism = 2;
+
+  repeated CreateUdf udfs = 5;
 
   oneof sink {
     BuiltinSink builtin = 3;
@@ -53,6 +54,7 @@ message SqlErrors {
 
 message PipelineGraphReq {
   string query = 1;
+  repeated CreateUdf udfs = 2;
 }
 
 message PipelineGraphResp {
@@ -66,11 +68,17 @@ message GetPipelineReq {
   string pipeline_id = 1;
 }
 
+message Udf {
+  UdfLanguage language = 1;
+  string definition = 2;
+}
+
 message PipelineDef {
   string pipeline_id = 1;
   string name = 2;
   string type = 3;
   optional string definition = 4;
+  repeated Udf udfs = 6;
   JobGraph job_graph = 5;
 }
 
@@ -387,6 +395,7 @@ message JobStatus {
   optional uint64 finish_time = 5;
   optional uint64 tasks = 6;
   optional string definition = 7;
+  repeated Udf udfs = 12;
   optional string failure_message = 10;
 }
 

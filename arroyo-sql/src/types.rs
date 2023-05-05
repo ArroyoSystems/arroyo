@@ -20,7 +20,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
 use syn::PathArguments::AngleBracketed;
-use syn::{parse_quote, parse_str, FnArg, GenericArgument, Type};
+use syn::{parse_quote, parse_str, GenericArgument, Type};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StructDef {
@@ -182,7 +182,22 @@ pub enum TypeDef {
 fn rust_to_arrow(typ: &Type) -> std::result::Result<DataType, ()> {
     match typ {
         Type::Path(pat) => match pat.path.get_ident().ok_or(())?.to_string().as_str() {
+            "bool" => Ok(DataType::Boolean),
+            "i8" => Ok(DataType::Int8),
+            "i16" => Ok(DataType::Int16),
+            "i32" => Ok(DataType::Int32),
+            "i64" => Ok(DataType::Int64),
+            "u8" => Ok(DataType::UInt8),
+            "u16" => Ok(DataType::UInt16),
+            "u32" => Ok(DataType::UInt32),
             "u64" => Ok(DataType::UInt64),
+            "f16" => Ok(DataType::Float16),
+            "f32" => Ok(DataType::Float32),
+            "f64" => Ok(DataType::Float64),
+            "std::time::SystemTime" => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
+            "std::time::Duration" => Ok(DataType::Duration(TimeUnit::Microsecond)),
+            "String" => Ok(DataType::Utf8),
+            "Vec<u8>" => Ok(DataType::Binary),
             _ => Err(()),
         },
         _ => Err(()),

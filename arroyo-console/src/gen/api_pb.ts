@@ -33,6 +33,20 @@ proto3.util.setEnumType(BuiltinSink, "arroyo_api.BuiltinSink", [
 ]);
 
 /**
+ * @generated from enum arroyo_api.UdfLanguage
+ */
+export enum UdfLanguage {
+  /**
+   * @generated from enum value: Rust = 0;
+   */
+  Rust = 0,
+}
+// Retrieve enum metadata with: proto3.getEnumType(UdfLanguage)
+proto3.util.setEnumType(UdfLanguage, "arroyo_api.UdfLanguage", [
+  { no: 0, name: "Rust" },
+]);
+
+/**
  * @generated from enum arroyo_api.StopType
  */
 export enum StopType {
@@ -383,6 +397,49 @@ proto3.util.setEnumType(KafkaOffsetMode, "arroyo_api.KafkaOffsetMode", [
 ]);
 
 /**
+ * @generated from message arroyo_api.CreateUdf
+ */
+export class CreateUdf extends Message<CreateUdf> {
+  /**
+   * @generated from field: arroyo_api.UdfLanguage language = 1;
+   */
+  language = UdfLanguage.Rust;
+
+  /**
+   * @generated from field: string definition = 2;
+   */
+  definition = "";
+
+  constructor(data?: PartialMessage<CreateUdf>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.CreateUdf";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "language", kind: "enum", T: proto3.getEnumType(UdfLanguage) },
+    { no: 2, name: "definition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateUdf {
+    return new CreateUdf().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CreateUdf {
+    return new CreateUdf().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CreateUdf {
+    return new CreateUdf().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CreateUdf | PlainMessage<CreateUdf> | undefined, b: CreateUdf | PlainMessage<CreateUdf> | undefined): boolean {
+    return proto3.util.equals(CreateUdf, a, b);
+  }
+}
+
+/**
  * @generated from message arroyo_api.CreateSqlJob
  */
 export class CreateSqlJob extends Message<CreateSqlJob> {
@@ -395,6 +452,11 @@ export class CreateSqlJob extends Message<CreateSqlJob> {
    * @generated from field: uint64 parallelism = 2;
    */
   parallelism = protoInt64.zero;
+
+  /**
+   * @generated from field: repeated arroyo_api.CreateUdf udfs = 5;
+   */
+  udfs: CreateUdf[] = [];
 
   /**
    * @generated from oneof arroyo_api.CreateSqlJob.sink
@@ -423,6 +485,7 @@ export class CreateSqlJob extends Message<CreateSqlJob> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "parallelism", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "udfs", kind: "message", T: CreateUdf, repeated: true },
     { no: 3, name: "builtin", kind: "enum", T: proto3.getEnumType(BuiltinSink), oneof: "sink" },
     { no: 4, name: "user", kind: "scalar", T: 9 /* ScalarType.STRING */, oneof: "sink" },
   ]);
@@ -620,6 +683,11 @@ export class PipelineGraphReq extends Message<PipelineGraphReq> {
    */
   query = "";
 
+  /**
+   * @generated from field: repeated arroyo_api.CreateUdf udfs = 2;
+   */
+  udfs: CreateUdf[] = [];
+
   constructor(data?: PartialMessage<PipelineGraphReq>) {
     super();
     proto3.util.initPartial(data, this);
@@ -629,6 +697,7 @@ export class PipelineGraphReq extends Message<PipelineGraphReq> {
   static readonly typeName = "arroyo_api.PipelineGraphReq";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "udfs", kind: "message", T: CreateUdf, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PipelineGraphReq {
@@ -736,6 +805,49 @@ export class GetPipelineReq extends Message<GetPipelineReq> {
 }
 
 /**
+ * @generated from message arroyo_api.Udf
+ */
+export class Udf extends Message<Udf> {
+  /**
+   * @generated from field: arroyo_api.UdfLanguage language = 1;
+   */
+  language = UdfLanguage.Rust;
+
+  /**
+   * @generated from field: string definition = 2;
+   */
+  definition = "";
+
+  constructor(data?: PartialMessage<Udf>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.Udf";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "language", kind: "enum", T: proto3.getEnumType(UdfLanguage) },
+    { no: 2, name: "definition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Udf {
+    return new Udf().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): Udf {
+    return new Udf().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): Udf {
+    return new Udf().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: Udf | PlainMessage<Udf> | undefined, b: Udf | PlainMessage<Udf> | undefined): boolean {
+    return proto3.util.equals(Udf, a, b);
+  }
+}
+
+/**
  * @generated from message arroyo_api.PipelineDef
  */
 export class PipelineDef extends Message<PipelineDef> {
@@ -760,6 +872,11 @@ export class PipelineDef extends Message<PipelineDef> {
   definition?: string;
 
   /**
+   * @generated from field: repeated arroyo_api.Udf udfs = 6;
+   */
+  udfs: Udf[] = [];
+
+  /**
    * @generated from field: arroyo_api.JobGraph job_graph = 5;
    */
   jobGraph?: JobGraph;
@@ -776,6 +893,7 @@ export class PipelineDef extends Message<PipelineDef> {
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "definition", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 6, name: "udfs", kind: "message", T: Udf, repeated: true },
     { no: 5, name: "job_graph", kind: "message", T: JobGraph },
   ]);
 
@@ -2820,6 +2938,11 @@ export class JobStatus extends Message<JobStatus> {
   definition?: string;
 
   /**
+   * @generated from field: repeated arroyo_api.Udf udfs = 12;
+   */
+  udfs: Udf[] = [];
+
+  /**
    * @generated from field: optional string failure_message = 10;
    */
   failureMessage?: string;
@@ -2842,6 +2965,7 @@ export class JobStatus extends Message<JobStatus> {
     { no: 5, name: "finish_time", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
     { no: 6, name: "tasks", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
     { no: 7, name: "definition", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 12, name: "udfs", kind: "message", T: Udf, repeated: true },
     { no: 10, name: "failure_message", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 

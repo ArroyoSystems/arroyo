@@ -1,11 +1,10 @@
 #![allow(clippy::comparison_chain)]
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use anyhow::Result;
 use anyhow::{anyhow, bail};
 use arrow_schema::DataType;
 use arroyo_datastream::{Operator, Program, WindowType};
-use datafusion::catalog::schema::SchemaProvider;
 
 use datafusion_common::{DFField, ScalarValue};
 use datafusion_expr::{

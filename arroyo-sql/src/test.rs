@@ -202,11 +202,11 @@ async fn test_udf() {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
     schema_provider
-        .add_rust_udf("fn my_sqr(x: i64) -> i64 { x * x }")
+        .add_rust_udf("fn my_sqr(x: u64) -> u64 { x * x }")
         .unwrap();
 
     schema_provider.add_source_with_type(
-        1,
+        Some(1),
         "nexmark".to_string(),
         test_schema(),
         NexmarkSource {
@@ -219,6 +219,6 @@ async fn test_udf() {
 
     let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
 
-    let plan = get_plan_from_query(&sql, &schema_provider).unwrap();
+    let plan = get_plan_from_query(&sql, &mut schema_provider).unwrap();
     get_program_from_plan(SqlConfig::default(), schema_provider, &plan).unwrap();
 }

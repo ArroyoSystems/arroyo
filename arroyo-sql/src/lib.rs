@@ -42,11 +42,11 @@ use pipeline::get_program_from_plan;
 use schemas::window_arrow_struct;
 
 use crate::expressions::ExpressionContext;
+use crate::types::{convert_data_type, StructDef, StructField, TypeDef};
 use quote::ToTokens;
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
-use syn::{FnArg, Item, parse_quote, parse_str, ReturnType, Visibility, VisPublic};
-use crate::types::{convert_data_type, StructDef, StructField, TypeDef};
+use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, VisPublic, Visibility};
 
 #[cfg(test)]
 mod test;
@@ -268,58 +268,60 @@ impl ArroyoSchemaProvider {
     }
 
     pub fn add_rust_udf(&mut self, body: &str) -> Result<()> {
-        let item: syn::Item = parse_str(body)?;
+        let file = syn::parse_file(body)?;
 
-        let Item::Fn(mut function) = item else {
-            bail!("not a function");
-        };
+        for item in file.items {
+            let Item::Fn(mut function) = item else {
+                bail!("not a function");
+            };
 
-        let mut args: Vec<TypeDef> = vec![];
-        for (i, arg) in function.sig.inputs.iter().enumerate() {
-            match arg {
-                FnArg::Receiver(_) => bail!("self types are not allowed in UDFs"),
-                FnArg::Typed(t) => {
-                    args.push((&*t.ty).try_into().map_err(|_| {
-                        anyhow!("Could not convert arg {} into a SQL data type", i)
-                    })?);
+            let mut args: Vec<TypeDef> = vec![];
+            for (i, arg) in function.sig.inputs.iter().enumerate() {
+                match arg {
+                    FnArg::Receiver(_) => bail!("self types are not allowed in UDFs"),
+                    FnArg::Typed(t) => {
+                        args.push((&*t.ty).try_into().map_err(|_| {
+                            anyhow!("Could not convert arg {} into a SQL data type", i)
+                        })?);
+                    }
                 }
             }
+
+            let ret: TypeDef = match &function.sig.output {
+                ReturnType::Default => bail!("return type must be specified in UDF"),
+                ReturnType::Type(_, t) => (&**t)
+                    .try_into()
+                    .map_err(|_| anyhow!("Could not convert return type into a SQL data type"))?,
+            };
+
+            let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
+
+            self.functions.insert(
+                function.sig.ident.to_string(),
+                Arc::new(create_udf(
+                    &function.sig.ident.to_string(),
+                    args.iter()
+                        .map(|t| t.as_datatype().unwrap().clone())
+                        .collect(),
+                    Arc::new(ret.as_datatype().unwrap().clone()),
+                    Volatility::Volatile,
+                    make_scalar_function(fn_impl),
+                )),
+            );
+
+            function.vis = Visibility::Public(VisPublic {
+                pub_token: Default::default(),
+            });
+
+            self.udf_defs.insert(
+                function.sig.ident.to_string(),
+                UdfDef {
+                    args,
+                    ret,
+                    def: function.to_token_stream().to_string(),
+                },
+            );
         }
-
-        let ret: TypeDef = match &function.sig.output {
-            ReturnType::Default => bail!("return type must be specified in UDF"),
-            ReturnType::Type(_, t) => (&**t)
-                .try_into()
-                .map_err(|_| anyhow!("Could not convert return type into a SQL data type"))?,
-        };
-
-        let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
-
-        self.functions.insert(
-            function.sig.ident.to_string(),
-            Arc::new(create_udf(
-                &function.sig.ident.to_string(),
-                args.iter()
-                    .map(|t| t.as_datatype().unwrap().clone())
-                    .collect(),
-                Arc::new(ret.as_datatype().unwrap().clone()),
-                Volatility::Volatile,
-                make_scalar_function(fn_impl),
-            )),
-        );
-
-        function.vis = Visibility::Public(VisPublic {
-            pub_token: Default::default(),
-        });
-
-        self.udf_defs.insert(
-            function.sig.ident.to_string(),
-            UdfDef {
-                args,
-                ret,
-                def: function.to_token_stream().to_string(),
-            },
-        );
 
         Ok(())
     }
