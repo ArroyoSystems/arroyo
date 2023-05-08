@@ -167,6 +167,7 @@ impl ArroyoSchemaProvider {
         type_name: Option<String>,
     ) {
         let name: String = name.into();
+
         self.sources.insert(
             name.clone(),
             SqlSource {

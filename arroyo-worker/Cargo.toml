@@ -41,6 +41,7 @@ serde = "1.0"
 sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
+ordered-float = "3"
 
 tonic = "0.8"
 prost = "0.11"
