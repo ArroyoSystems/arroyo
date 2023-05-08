@@ -33,6 +33,8 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::info;
 
+pub use ordered_float::OrderedFloat;
+
 pub mod engine;
 mod inq_reader;
 mod network_manager;

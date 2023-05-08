@@ -18,7 +18,7 @@ use datafusion_expr::{
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_quote, parse_str, Ident};
+use syn::{parse_quote, parse_str, Ident, Path};
 
 #[derive(Debug, Clone)]
 pub struct BinaryOperator(datafusion_expr::Operator);
@@ -39,6 +39,7 @@ pub enum Expression {
     DataStructure(DataStructureFunction),
     Json(JsonExpression),
     RustUdf(RustUdfExpression),
+    WrapType(WrapTypeExpression),
 }
 
 impl Expression {
@@ -68,6 +69,7 @@ impl Expression {
             }
             Expression::Json(json_function) => json_function.to_syn_expression(),
             Expression::RustUdf(t) => t.to_syn_expression(),
+            Expression::WrapType(t) => t.to_syn_expression(),
         }
     }
 
@@ -95,6 +97,7 @@ impl Expression {
             }
             Expression::Json(json_function) => json_function.return_type(),
             Expression::RustUdf(t) => t.return_type(),
+            Expression::WrapType(t) => t.return_type(),
         }
     }
 
@@ -1299,7 +1302,8 @@ pub struct SortExpression {
 
 impl SortExpression {
     pub fn from_expression(ctx: &mut ExpressionContext, sort: &Sort) -> Result<Self> {
-        let value = ctx.compile_expr(&sort.expr)?;
+        let mut value = ctx.compile_expr(&sort.expr)?;
+
         let direction = if sort.asc {
             SortDirection::Asc
         } else {
@@ -1330,7 +1334,16 @@ impl SortExpression {
     }
 
     pub fn to_syn_expr(&self) -> syn::Expr {
-        let value_expr = self.value.to_syn_expression();
+        let value = if true {
+            Expression::WrapType(WrapTypeExpression::new(
+                "arroyo_worker::OrderedFloat",
+                self.value.clone(),
+            ))
+        } else {
+            self.value.clone()
+        };
+
+        let value_expr = value.to_syn_expression();
         match (self.value.nullable(), &self.direction, self.nulls_first) {
             (false, SortDirection::Asc, _) | (true, SortDirection::Asc, true) => {
                 parse_quote!(#value_expr)
@@ -1339,8 +1352,8 @@ impl SortExpression {
                 parse_quote!(std::cmp::Reverse(#value_expr))
             }
             (true, SortDirection::Asc, false) => parse_quote!({
-                    let option = #value_expr;
-                    (option.is_none(), option)
+                let option = #value_expr;
+                (option.is_none(), option)
             }),
             (true, SortDirection::Desc, false) => parse_quote!({
                 let option = #value_expr;
@@ -2261,5 +2274,37 @@ impl RustUdfExpression {
                     .iter()
                     .any(|(t, e)| t.is_optional() && !e.nullable()),
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WrapTypeExpression {
+    name: String,
+    arg: Box<Expression>,
+    ret_type: TypeDef,
+}
+
+impl WrapTypeExpression {
+    fn new(name: &str, arg: Expression) -> Self {
+        Self {
+            name: name.to_string(),
+            ret_type: arg.return_type(),
+            arg: Box::new(arg),
+        }
+    }
+
+    fn to_syn_expression(&self) -> syn::Expr {
+        let path: Path = parse_str(&self.name).unwrap();
+        let arg = self.arg.to_syn_expression();
+
+        if self.arg.nullable() {
+            parse_quote!(#arg.map(|f| #path(f)))
+        } else {
+            parse_quote!(#path(#arg))
+        }
+    }
+
+    fn return_type(&self) -> TypeDef {
+        self.ret_type.clone()
     }
 }
