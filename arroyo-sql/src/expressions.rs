@@ -1302,7 +1302,7 @@ pub struct SortExpression {
 
 impl SortExpression {
     pub fn from_expression(ctx: &mut ExpressionContext, sort: &Sort) -> Result<Self> {
-        let mut value = ctx.compile_expr(&sort.expr)?;
+        let value = ctx.compile_expr(&sort.expr)?;
 
         let direction = if sort.asc {
             SortDirection::Asc
@@ -1318,7 +1318,13 @@ impl SortExpression {
     }
 
     pub fn tuple_type(&self) -> syn::Type {
-        let value_type = self.value.return_type().return_type();
+        let value_type = if self.value.return_type().is_float() {
+            let t = self.value.return_type().return_type();
+            parse_quote! { arroyo_worker::OrderedFloat<#t> }
+        } else {
+            self.value.return_type().return_type()
+        };
+
         match (self.value.nullable(), &self.direction, self.nulls_first) {
             (false, SortDirection::Asc, _) | (true, SortDirection::Asc, true) => {
                 parse_quote!(#value_type)
@@ -1334,7 +1340,7 @@ impl SortExpression {
     }
 
     pub fn to_syn_expr(&self) -> syn::Expr {
-        let value = if true {
+        let value = if self.value.return_type().is_float() {
             Expression::WrapType(WrapTypeExpression::new(
                 "arroyo_worker::OrderedFloat",
                 self.value.clone(),
