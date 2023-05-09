@@ -226,7 +226,7 @@ impl CompileService {
                 .current_dir(&build_dir.join("wasm-fns"))
                 .output()
                 .await
-                .unwrap();
+                .expect("wasm-pack not found -- install with `cargo install wasm-pack`");
 
             if !result.status.success() {
                 return Err(io::Error::new(
