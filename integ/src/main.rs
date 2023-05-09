@@ -19,8 +19,8 @@ mod embedded {
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub fn run_service(name: &'static str, args: &[&str], env: Vec<(String, String)>) -> Result<()> {
-    let child = tokio::process::Command::new(name)
+pub fn run_service(name: String, args: &[&str], env: Vec<(String, String)>) -> Result<()> {
+    let child = tokio::process::Command::new(&name)
         .args(args)
         .envs(env)
         .kill_on_drop(true)
@@ -91,6 +91,12 @@ async fn connect() -> ApiGrpcClient<Channel> {
 pub async fn main() {
     tracing_subscriber::fmt::init();
 
+    let profile = if std::env::var("DEBUG").is_ok() {
+        "debug"
+    } else {
+        "release"
+    };
+
     let run_id = rand::thread_rng().next_u32();
 
     let c = DatabaseConfig::load();
@@ -116,9 +122,9 @@ pub async fn main() {
         .unwrap();
 
     info!("Starting services");
-    run_service("target/debug/arroyo-api", &[], vec![]).expect("Failed to run api");
+    run_service(format!("target/{}/arroyo-api", profile), &[], vec![]).expect("Failed to run api");
     run_service(
-        "target/debug/arroyo-controller",
+        format!("target/{}/arroyo-controller", profile),
         &[],
         vec![
             ("OUTPUT_DIR".to_string(), "/tmp/arroyo".to_string()),
@@ -130,12 +136,9 @@ pub async fn main() {
     )
     .expect("Failed to run controller");
     run_service(
-        "target/debug/arroyo-compiler-service",
+        format!("target/{}/arroyo-compiler-service", profile),
         &["start"],
-        vec![
-            ("OUTPUT_DIR".to_string(), "/tmp/arroyo".to_string()),
-            ("DEBUG".to_string(), "true".to_string()),
-        ],
+        vec![("OUTPUT_DIR".to_string(), "/tmp/arroyo".to_string())],
     )
     .expect("Failed to run compiler service");
 
