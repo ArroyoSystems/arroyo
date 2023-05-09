@@ -21,6 +21,7 @@ use tokio::select;
 use tokio::time::sleep;
 use tracing::{debug, info};
 
+pub mod eventsource;
 pub mod kafka;
 pub mod nexmark;
 

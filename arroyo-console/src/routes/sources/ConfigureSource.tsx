@@ -16,6 +16,7 @@ import { Link } from "react-router-dom";
 import {
   Connection,
   CreateSourceReq,
+  EventSourceSourceConfig,
   ImpulseSourceConfig,
   KafkaSourceConfig,
   NexmarkSourceConfig,
@@ -241,6 +242,59 @@ function ConfigureKafka({
   );
 }
 
+function ConfigureEventSource({
+  state,
+  setState,
+  setReady,
+}: {
+  state: CreateSourceReq;
+  setState: Dispatch<CreateSourceReq>;
+  setReady: Dispatch<boolean>;
+}) {
+  const config = state.typeOneof.value as EventSourceSourceConfig;
+
+  useEffect(() => setReady(config.url != ""));
+
+  return (
+    <Stack spacing={5}>
+      <FormControl isRequired>
+        <FormLabel>URL</FormLabel>
+        <Input
+          type="url"
+          value={config.url}
+          onChange={onChangeString(state, setState, "url", config)}
+        />
+        <FormHelperText>The URL endpoint to connect to</FormHelperText>
+      </FormControl>
+
+      <FormControl isRequired>
+        <FormLabel>Headers</FormLabel>
+        <Input
+          type="text"
+          value={config.headers}
+          placeholder="Authorization: <token>, Content-Type: application/json"
+          onChange={onChangeString(state, setState, "headers", config)}
+        />
+        <FormHelperText>Comma-seperated list of headers to send</FormHelperText>
+      </FormControl>
+
+      <FormControl>
+        <FormLabel>Events</FormLabel>
+        <Input
+          type="string"
+          value={config.events}
+          onChange={onChangeString(state, setState, "events", config)}
+        />
+        <FormHelperText>
+          Comma-separated list of event types that the source will accept; leave blank to read all
+          events
+        </FormHelperText>
+      </FormControl>
+    </Stack>
+  );
+}
+
+
 export function ConfigureSource({
   state,
   setState,
@@ -269,6 +323,14 @@ export function ConfigureSource({
         client={client}
       />,
     ],
+    [
+      "eventSource",
+      <ConfigureEventSource
+        state={state}
+        setState={setState}
+        setReady={setReady}
+        />
+    ]
   ]);
 
   const onClick = async () => {

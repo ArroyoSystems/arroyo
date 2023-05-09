@@ -22,8 +22,6 @@ wasmtime = "1.0"
 lazy_static = "1.4.0"
 petgraph = "0.6"
 chrono = "0.4"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
-rdkafka-sys = "=4.2.0"
 prometheus = {version = "0.13", features = ["process"] }
 futures = "0.3"
 tokio = { version = "1", features = ["full", "tracing"] }
@@ -49,6 +47,11 @@ prost = "0.11"
 #logging
 tracing = "0.1"
 governor = "0.5.1"
+
+# connectors
+rdkafka = { version = "0.28", features = ["cmake-build"] }
+rdkafka-sys = "=4.2.0"
+eventsource-client = "0.11.0"
 
 [dev-dependencies]
 test-case = "2.2"

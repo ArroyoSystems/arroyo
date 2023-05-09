@@ -149,6 +149,7 @@ message Operator {
     FileSource file_source = 1;
     ImpulseSource impulse_source = 2;
     KafkaSource kafka_source = 3;
+    EventSourceSource event_source_source = 22;
     WasmUdfs wasm_udfs = 4;
     WindowOperator window = 5;
     Aggregator aggregator = 6;
@@ -190,6 +191,13 @@ message KafkaSource {
   SerializationMode serialization_mode = 4;
   uint32 messages_per_second = 5;
   map<string, string> client_configs = 6;
+}
+
+message EventSourceSource {
+  string url = 1;
+  map<string, string> headers = 2;
+  SerializationMode serialization_mode = 3;
+  repeated string events = 4;
 }
 
 enum SerializationMode {
@@ -659,6 +667,12 @@ message NexmarkSourceConfig {
   optional uint64 runtime_micros = 2;
 }
 
+message EventSourceSourceConfig {
+  string url = 1;
+  string events = 2;
+  string headers = 3;
+}
+
 message CreateSourceReq {
   string name = 1;
 
@@ -669,6 +683,7 @@ message CreateSourceReq {
     ImpulseSourceConfig impulse = 4;
     FileSourceConfig file = 5;
     NexmarkSourceConfig nexmark = 6;
+    EventSourceSourceConfig event_source = 7;
   }
 }
 
@@ -693,6 +708,7 @@ message SourceDef {
     ImpulseSourceConfig impulse = 4;
     FileSourceConfig file = 5;
     NexmarkSourceConfig nexmark = 6;
+    EventSourceSourceConfig event_source = 11;
   }
 
   repeated SourceField sql_fields = 7;

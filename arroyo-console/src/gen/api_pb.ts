@@ -1352,6 +1352,12 @@ export class Operator extends Message<Operator> {
     case: "kafkaSource";
   } | {
     /**
+     * @generated from field: arroyo_api.EventSourceSource event_source_source = 22;
+     */
+    value: EventSourceSource;
+    case: "eventSourceSource";
+  } | {
+    /**
      * @generated from field: arroyo_api.WasmUdfs wasm_udfs = 4;
      */
     value: WasmUdfs;
@@ -1465,6 +1471,7 @@ export class Operator extends Message<Operator> {
     { no: 1, name: "file_source", kind: "message", T: FileSource, oneof: "operator" },
     { no: 2, name: "impulse_source", kind: "message", T: ImpulseSource, oneof: "operator" },
     { no: 3, name: "kafka_source", kind: "message", T: KafkaSource, oneof: "operator" },
+    { no: 22, name: "event_source_source", kind: "message", T: EventSourceSource, oneof: "operator" },
     { no: 4, name: "wasm_udfs", kind: "message", T: WasmUdfs, oneof: "operator" },
     { no: 5, name: "window", kind: "message", T: WindowOperator, oneof: "operator" },
     { no: 6, name: "aggregator", kind: "enum", T: proto3.getEnumType(Aggregator), oneof: "operator" },
@@ -1670,6 +1677,61 @@ export class KafkaSource extends Message<KafkaSource> {
 
   static equals(a: KafkaSource | PlainMessage<KafkaSource> | undefined, b: KafkaSource | PlainMessage<KafkaSource> | undefined): boolean {
     return proto3.util.equals(KafkaSource, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.EventSourceSource
+ */
+export class EventSourceSource extends Message<EventSourceSource> {
+  /**
+   * @generated from field: string url = 1;
+   */
+  url = "";
+
+  /**
+   * @generated from field: map<string, string> headers = 2;
+   */
+  headers: { [key: string]: string } = {};
+
+  /**
+   * @generated from field: arroyo_api.SerializationMode serialization_mode = 3;
+   */
+  serializationMode = SerializationMode.JSON;
+
+  /**
+   * @generated from field: repeated string events = 4;
+   */
+  events: string[] = [];
+
+  constructor(data?: PartialMessage<EventSourceSource>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.EventSourceSource";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "url", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "headers", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 3, name: "serialization_mode", kind: "enum", T: proto3.getEnumType(SerializationMode) },
+    { no: 4, name: "events", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): EventSourceSource {
+    return new EventSourceSource().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): EventSourceSource {
+    return new EventSourceSource().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): EventSourceSource {
+    return new EventSourceSource().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: EventSourceSource | PlainMessage<EventSourceSource> | undefined, b: EventSourceSource | PlainMessage<EventSourceSource> | undefined): boolean {
+    return proto3.util.equals(EventSourceSource, a, b);
   }
 }
 
@@ -4865,6 +4927,55 @@ export class NexmarkSourceConfig extends Message<NexmarkSourceConfig> {
 }
 
 /**
+ * @generated from message arroyo_api.EventSourceSourceConfig
+ */
+export class EventSourceSourceConfig extends Message<EventSourceSourceConfig> {
+  /**
+   * @generated from field: string url = 1;
+   */
+  url = "";
+
+  /**
+   * @generated from field: string events = 2;
+   */
+  events = "";
+
+  /**
+   * @generated from field: string headers = 3;
+   */
+  headers = "";
+
+  constructor(data?: PartialMessage<EventSourceSourceConfig>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.EventSourceSourceConfig";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "url", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "events", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "headers", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): EventSourceSourceConfig {
+    return new EventSourceSourceConfig().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): EventSourceSourceConfig {
+    return new EventSourceSourceConfig().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): EventSourceSourceConfig {
+    return new EventSourceSourceConfig().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: EventSourceSourceConfig | PlainMessage<EventSourceSourceConfig> | undefined, b: EventSourceSourceConfig | PlainMessage<EventSourceSourceConfig> | undefined): boolean {
+    return proto3.util.equals(EventSourceSourceConfig, a, b);
+  }
+}
+
+/**
  * @generated from message arroyo_api.CreateSourceReq
  */
 export class CreateSourceReq extends Message<CreateSourceReq> {
@@ -4905,6 +5016,12 @@ export class CreateSourceReq extends Message<CreateSourceReq> {
      */
     value: NexmarkSourceConfig;
     case: "nexmark";
+  } | {
+    /**
+     * @generated from field: arroyo_api.EventSourceSourceConfig event_source = 7;
+     */
+    value: EventSourceSourceConfig;
+    case: "eventSource";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<CreateSourceReq>) {
@@ -4921,6 +5038,7 @@ export class CreateSourceReq extends Message<CreateSourceReq> {
     { no: 4, name: "impulse", kind: "message", T: ImpulseSourceConfig, oneof: "type_oneof" },
     { no: 5, name: "file", kind: "message", T: FileSourceConfig, oneof: "type_oneof" },
     { no: 6, name: "nexmark", kind: "message", T: NexmarkSourceConfig, oneof: "type_oneof" },
+    { no: 7, name: "event_source", kind: "message", T: EventSourceSourceConfig, oneof: "type_oneof" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateSourceReq {
@@ -5076,6 +5194,12 @@ export class SourceDef extends Message<SourceDef> {
      */
     value: NexmarkSourceConfig;
     case: "nexmark";
+  } | {
+    /**
+     * @generated from field: arroyo_api.EventSourceSourceConfig event_source = 11;
+     */
+    value: EventSourceSourceConfig;
+    case: "eventSource";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   /**
@@ -5100,6 +5224,7 @@ export class SourceDef extends Message<SourceDef> {
     { no: 4, name: "impulse", kind: "message", T: ImpulseSourceConfig, oneof: "source_type" },
     { no: 5, name: "file", kind: "message", T: FileSourceConfig, oneof: "source_type" },
     { no: 6, name: "nexmark", kind: "message", T: NexmarkSourceConfig, oneof: "source_type" },
+    { no: 11, name: "event_source", kind: "message", T: EventSourceSourceConfig, oneof: "source_type" },
     { no: 7, name: "sql_fields", kind: "message", T: SourceField, repeated: true },
   ]);
 
