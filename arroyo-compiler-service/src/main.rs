@@ -169,10 +169,15 @@ pub struct CompileService {
 impl CompileService {
     async fn get_output(&self) -> io::Result<Output> {
         if self.debug {
+            let args = if std::env::var("VERBOSE").is_ok() {
+                vec!["build", "--verbose"]
+            } else {
+                vec!["build"]
+            };
+
             Command::new("cargo")
                 .current_dir(&self.build_dir)
-                .arg("build")
-                .arg("--verbose")
+                .args(&args)
                 .output()
                 .await
         } else {

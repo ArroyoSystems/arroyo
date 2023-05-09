@@ -55,7 +55,7 @@ jobs:
           wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-x86_64.zip
           unzip protoc*.zip
           sudo mv bin/protoc /usr/local/bin
-          cargo install wasm-pack
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Install Kafka
         run: |
           wget --progress=dot --show-progress https://downloads.apache.org/kafka/3.2.3/kafka_2.12-3.2.3.tgz
