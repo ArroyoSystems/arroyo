@@ -66,6 +66,8 @@ jobs:
         run: cargo build --release --all-features
       - name: Test
         run: cargo nextest run --release
+      - name: Integ
+        run: target/release/integ
   build-console:
     runs-on: ubuntu-latest
     steps:

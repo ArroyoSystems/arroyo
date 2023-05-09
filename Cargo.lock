@@ -149,9 +149,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.70"
+version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7de8ce5e0f9f8d88245311066a578d72b7af3e7088f32783804676302df237e4"
+checksum = "9c7d0618f0e0b7e8ff11427422b64564d5fb0be1940354bfe2e0529b18a9d9b8"
 dependencies = [
  "backtrace",
 ]
@@ -3317,6 +3317,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "integ"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arroyo-rpc",
+ "arroyo-types",
+ "rand",
+ "refinery",
+ "tokio",
+ "tokio-postgres",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "integer-encoding"
 version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5162,9 +5178,9 @@ dependencies = [
 
 [[package]]
 name = "refinery"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6762a07453650132443ac393c5bf4836f790e0d96958507cfd05d560f05034a9"
+checksum = "431fd1854421586de5e83614052cb0d2d82025647829db6d9499b27385e58a6b"
 dependencies = [
  "refinery-core",
  "refinery-macros",
@@ -5172,9 +5188,9 @@ dependencies = [
 
 [[package]]
 name = "refinery-core"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6eb938c73230daa3fbd5ed56f5638068df0e444897e1fd94f30103b0bbc52c00"
+checksum = "ebe9a0b52b3bc15434bccebe267fe279d08e1fe1771bd492822412c50ec120d2"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -5186,6 +5202,8 @@ dependencies = [
  "siphasher",
  "thiserror",
  "time 0.3.20",
+ "tokio",
+ "tokio-postgres",
  "toml 0.7.3",
  "url",
  "walkdir",
@@ -5193,9 +5211,9 @@ dependencies = [
 
 [[package]]
 name = "refinery-macros"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b95c4a9354004140b5ac1d3606cbb71c86107887f09d54955f12f97a637c041"
+checksum = "effe7bc109e071e59425848e04d56507a0a5eecaf95e6acbf28168604f82753a"
 dependencies = [
  "proc-macro2",
  "quote",

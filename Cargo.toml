@@ -15,6 +15,7 @@ members = [
     "arroyo-state",
     "arroyo-types",
     "arroyo-worker",
+    "integ",
 ]
 
 exclude = [
