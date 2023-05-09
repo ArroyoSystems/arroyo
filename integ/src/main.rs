@@ -121,13 +121,15 @@ pub async fn main() {
         .await
         .unwrap();
 
+    let output_dir = std::env::var("OUTPUT_DIR").unwrap_or_else(|_| "/tmp/arroyo".to_string());
+
     info!("Starting services");
     run_service(format!("target/{}/arroyo-api", profile), &[], vec![]).expect("Failed to run api");
     run_service(
         format!("target/{}/arroyo-controller", profile),
         &[],
         vec![
-            ("OUTPUT_DIR".to_string(), "/tmp/arroyo".to_string()),
+            ("OUTPUT_DIR".to_string(), output_dir.clone()),
             (
                 "REMOTE_COMPILER_ENDPOINT".to_string(),
                 "http://localhost:9000".to_string(),
@@ -138,7 +140,7 @@ pub async fn main() {
     run_service(
         format!("target/{}/arroyo-compiler-service", profile),
         &["start"],
-        vec![("OUTPUT_DIR".to_string(), "/tmp/arroyo".to_string())],
+        vec![("OUTPUT_DIR".to_string(), output_dir.clone())],
     )
     .expect("Failed to run compiler service");
 

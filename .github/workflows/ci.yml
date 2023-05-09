@@ -67,7 +67,9 @@ jobs:
       - name: Test
         run: cargo nextest run --release
       - name: Integ
-        run: target/release/integ
+        run: |
+          mkdir /tmp/arroyo-integ
+          OUTPUT_DIR=/tmp/arroyo-integ target/release/integ
   build-console:
     runs-on: ubuntu-latest
     steps:
