@@ -193,6 +193,21 @@ pub enum PrimitiveType {
     UnixMillis,
 }
 
+fn primitive_to_sql(primitive_type: &PrimitiveType) -> &'static str {
+    match primitive_type {
+        PrimitiveType::Int32 => "INTEGER",
+        PrimitiveType::Int64 => "BIGINT",
+        PrimitiveType::UInt32 => "INTEGER UNSIGNED",
+        PrimitiveType::UInt64 => "BIGINT UNSIGNED",
+        PrimitiveType::F32 => "FLOAT",
+        PrimitiveType::F64 => "DOUBLE",
+        PrimitiveType::Bool => "BOOLEAN",
+        PrimitiveType::String => "TEXT",
+        PrimitiveType::Bytes => "BINARY",
+        PrimitiveType::UnixMillis => "TIMESTAMP",
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum SchemaFieldType {
     Primitive(PrimitiveType),
@@ -326,7 +341,7 @@ impl TryFrom<SchemaField> for SourceField {
     type Error = String;
 
     fn try_from(value: SchemaField) -> Result<Self, Self::Error> {
-        let typ = match value.typ {
+        let typ = match &value.typ {
             SchemaFieldType::Primitive(p) => api::source_field_type::Type::Primitive(match p {
                 PrimitiveType::Int32 => api::PrimitiveType::Int32,
                 PrimitiveType::Int64 => api::PrimitiveType::Int64,
@@ -344,15 +359,24 @@ impl TryFrom<SchemaField> for SourceField {
                 api::source_field_type::Type::Struct(api::StructType {
                     fields: fields
                         .into_iter()
-                        .filter_map(|f| f.try_into().ok())
+                        .filter_map(|f| f.clone().try_into().ok())
                         .collect(),
                 })
             }
         };
 
+        let sql_name = match value.typ {
+            SchemaFieldType::Primitive(p) => Some(String::from(primitive_to_sql(&p))),
+            SchemaFieldType::Struct(..) => None,
+            SchemaFieldType::NamedStruct(..) => None
+        };
+
         Ok(SourceField {
             field_name: value.name,
-            field_type: Some(api::SourceFieldType { r#type: Some(typ) }),
+            field_type: Some(api::SourceFieldType {
+                r#type: Some(typ),
+                sql_name
+            }),
             nullable: value.nullable,
         })
     }
