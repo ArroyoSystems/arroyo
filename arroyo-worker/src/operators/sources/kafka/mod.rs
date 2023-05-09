@@ -17,6 +17,8 @@ use std::time::Duration;
 use tokio::select;
 use tracing::{debug, error, info};
 
+use crate::operators::SerializationMode;
+
 #[cfg(test)]
 mod test;
 
@@ -33,14 +35,6 @@ impl OffsetMode {
             OffsetMode::Latest => Offset::End,
         }
     }
-}
-
-#[derive(Clone, Copy)]
-pub enum SerializationMode {
-    Json,
-    // https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#wire-format
-    JsonSchemaRegistry,
-    RawJson,
 }
 
 #[derive(StreamNode, Clone)]
@@ -170,16 +164,7 @@ where
                                 ctx.collector.collect(Record {
                                     timestamp: from_millis(msg.timestamp().to_millis().unwrap() as u64),
                                     key: None,
-                                    value: match self.serialization_mode {
-                                        SerializationMode::Json => serde_json::from_slice(v)
-                                            .unwrap_or_else(|err| panic!("Failed to deserialize message {} with error {}", String::from_utf8_lossy(v), err)),
-                                        SerializationMode::JsonSchemaRegistry => serde_json::from_slice(&v[5..]).unwrap(),
-                                        SerializationMode::RawJson => {
-                                            let object = String::from_utf8_lossy(v).to_string();
-                                            let json_map = serde_json::Map::from_iter(vec![(String::from("value"), serde_json::Value::String(object))]);
-                                            serde_json::from_value(serde_json::Value::Object(json_map)).unwrap()
-                                        },
-                                    }
+                                    value:self.serialization_mode.deserialize_slice(&v).unwrap(),
                                 }).await;
                                 offsets.insert(msg.partition(), msg.offset());
                                 rate_limiter.until_ready().await;

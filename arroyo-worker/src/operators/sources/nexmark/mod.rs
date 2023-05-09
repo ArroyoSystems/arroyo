@@ -4,7 +4,7 @@ use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::ControlMessage;
 use arroyo_types::nexmark::*;
-use arroyo_types::{Message, *};
+use arroyo_types::*;
 use bincode::{Decode, Encode};
 use rand::{distributions::Alphanumeric, rngs::SmallRng, seq::SliceRandom, Rng, SeedableRng};
 use std::collections::HashMap;

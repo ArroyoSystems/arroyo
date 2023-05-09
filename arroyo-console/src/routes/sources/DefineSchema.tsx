@@ -76,7 +76,7 @@ export function ChooseSchemaType({
         {state.typeOneof.case == "kafka" ? (
           <RadioCard value="confluentSchema">Confluent Schema Registry</RadioCard>
         ) : null}
-        <RadioCard value="rawJson">Raw Schema</RadioCard>
+        <RadioCard value="rawJson">Raw Json</RadioCard>
       </RadioCardGroup>
       <Button variant="primary" onClick={onClick}>
         Continue

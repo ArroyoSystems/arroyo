@@ -25,7 +25,8 @@ use arroyo_types::{from_micros, to_micros, Data, GlobalKey, ImpulseEvent, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use proc_macro2::Ident;
+use proc_macro2::{Ident, TokenStream};
+use quote::{ToTokens, TokenStreamExt};
 use serde::{Deserialize, Serialize};
 use syn::parse_str;
 use tonic::{Request, Status};
@@ -253,6 +254,24 @@ impl SerializationMode {
     }
 }
 
+impl ToTokens for SerializationMode {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let serialization_mode = match self {
+            SerializationMode::Json => {
+                quote::quote!(arroyo_worker::operators::SerializationMode::Json)
+            }
+            SerializationMode::JsonSchemaRegistry => {
+                quote::quote!(arroyo_worker::operators::SerializationMode::JsonSchemaRegistry)
+            }
+            SerializationMode::RawJson => {
+                quote::quote!(arroyo_worker::operators::SerializationMode::RawJson)
+            }
+        };
+
+        tokens.append_all(serialization_mode);
+    }
+}
+
 impl From<GrpcApi::SerializationMode> for SerializationMode {
     fn from(mode: GrpcApi::SerializationMode) -> Self {
         match mode {
@@ -281,6 +300,12 @@ pub enum Operator {
         kafka_input_format: SerializationMode,
         messages_per_second: u32,
         client_configs: HashMap<String, String>,
+    },
+    EventSourceSource {
+        url: String,
+        headers: HashMap<String, String>,
+        events: Vec<String>,
+        serialization_mode: SerializationMode,
     },
     FusedWasmUDFs {
         name: String,
@@ -369,6 +394,9 @@ impl Debug for Operator {
             Operator::FileSource { dir, .. } => write!(f, "FileSource<{:?}>", dir),
             Operator::ImpulseSource { .. } => write!(f, "ImpulseSource"),
             Operator::KafkaSource { topic, .. } => write!(f, "KafkaSource<{}>", topic),
+            Operator::EventSourceSource { url, .. } => {
+                write!(f, "EventSource<{}>", url)
+            }
             Operator::FusedWasmUDFs { udfs, .. } => {
                 if udfs.len() == 1 {
                     write_behavior(f, &udfs[0])
@@ -1513,6 +1541,17 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 messages_per_second,
                 client_configs,
             }),
+            Operator::EventSourceSource {
+                url,
+                headers,
+                events,
+                serialization_mode,
+            } => GrpcOperator::EventSourceSource(GrpcApi::EventSourceSource {
+                url,
+                headers,
+                events,
+                serialization_mode: GrpcApi::SerializationMode::from(serialization_mode).into(),
+            }),
             FusedWasmUDFs { name, udfs } => GrpcOperator::WasmUdfs(GrpcApi::WasmUdfs {
                 name,
                 wasm_functions: udfs.into_iter().map(|udf| udf.into()).collect(),
@@ -1837,6 +1876,15 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         kafka_input_format,
                         messages_per_second: kafka_source.messages_per_second,
                         client_configs: kafka_source.client_configs,
+                    }
+                }
+                GrpcOperator::EventSourceSource(source) => {
+                    let serialization_mode = source.serialization_mode().into();
+                    Operator::EventSourceSource {
+                        url: source.url,
+                        headers: source.headers,
+                        events: source.events,
+                        serialization_mode,
                     }
                 }
                 GrpcOperator::WasmUdfs(wasm_udfs) => Operator::FusedWasmUDFs {

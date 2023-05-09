@@ -167,6 +167,7 @@ async fn set_default_parallelism(_auth: &AuthData, program: &mut Program) -> Res
             Operator::NexmarkSource {
                 first_event_rate, ..
             } => (*first_event_rate as f32 / 50_000.0).round() as usize,
+            Operator::EventSourceSource { .. } => 1,
             op => panic!("Found non-source in a source position in graph: {:?}", op),
         });
     }

@@ -43,13 +43,14 @@ import { ApiGrpc } from "../../gen/api_connectweb";
 import { RadioCard, RadioCardGroup } from "../../lib/RadioGroup";
 
 import { SiApachekafka } from "react-icons/si";
-import { FaStream } from "react-icons/fa";
+import { FaStream, FaSync } from "react-icons/fa";
 import { RiAuctionLine } from "react-icons/ri";
 import { GiMetronome } from "react-icons/gi";
 import {
   Connection,
   CreateJobReq,
   CreateSourceReq,
+  EventSourceSourceConfig,
   GetConnectionsReq,
   ImpulseSourceConfig,
   KafkaSourceConfig,
@@ -314,6 +315,12 @@ const sourceTypes = [
     icon: FaStream,
     description: "AWS Kinesis stream (coming soon)",
     disabled: true,
+  },
+  {
+    name: "eventSource",
+    icon: FaSync,
+    description: "(also known as Server-Sent Events)",
+    initialState: new EventSourceSourceConfig({}),
   },
   {
     name: "nexmark",

@@ -375,11 +375,6 @@ wasm-opt = false
                     let offset_mode = format_ident!("{}", offset_mode);
                     let out_t = parse_type(&output.unwrap().weight().value);
                     let bootstrap_servers = bootstrap_servers.join(",");
-                    let serialization_mode = match kafka_input_format {
-                        arroyo_datastream::SerializationMode::Json => quote!(Json),
-                        arroyo_datastream::SerializationMode::JsonSchemaRegistry => quote!(JsonSchemaRegistry),
-                        arroyo_datastream::SerializationMode::RawJson => quote!(RawJson),
-                    };
                     let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
 
                     quote! {
@@ -387,9 +382,22 @@ wasm-opt = false
                             #bootstrap_servers,
                             #topic,
                             sources::kafka::OffsetMode::#offset_mode,
-                            sources::kafka::SerializationMode::#serialization_mode,
+                            #kafka_input_format,
                             #messages_per_second,
                             vec![#(#client_configs),*]))
+                    }
+                }
+                Operator::EventSourceSource { url, headers, events, serialization_mode } => {
+                    let out_t = parse_type(&output.unwrap().weight().value);
+                    let headers = headers.iter().map(|(k, v)| quote!((#k, #v))).collect::<Vec<_>>();
+                    let headers = quote!{ vec![#(#headers),*] };
+                    let events = events.iter().map(|v| quote!(#v)).collect::<Vec<_>>();
+                    quote! {
+                        Box::new(eventsource::EventSourceSourceFunc::<#out_t>::new(
+                            #url,
+                            #headers,
+                            vec![#(#events),*],
+                            #serialization_mode,))
                     }
                 }
                 Operator::FusedWasmUDFs { name, udfs: _ } => {

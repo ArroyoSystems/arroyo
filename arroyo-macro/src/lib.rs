@@ -414,7 +414,7 @@ fn impl_stream_node_type(
                 let local_idx = idx - (in_partitions / #handler_count) * #i;
                 tracing::debug!("[{}] Received message {}-{}, {:?} [{:?}]", ctx.task_info.operator_name, #i, local_idx, message, stacker::remaining_stack());
 
-                if let Message::Record(record) = &message {
+                if let arroyo_types::Message::Record(record) = &message {
                     ctx.counters
                         .get("arroyo_worker_messages_recv")
                         .expect("msg received")
@@ -672,7 +672,7 @@ fn impl_stream_node_type(
 
             crate::process_fn::ProcessFnUtils::send_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::FinishedSync).await;
 
-            ctx.broadcast(Message::Barrier(checkpoint_barrier)).await;
+            ctx.broadcast(arroyo_types::Message::Barrier(checkpoint_barrier)).await;
 
             checkpoint_barrier.then_stop
         }
@@ -682,7 +682,7 @@ fn impl_stream_node_type(
         async fn handle_watermark_int(&mut self, watermark: std::time::SystemTime, ctx: &mut crate::engine::Context<#out_k, #out_t>) {
             // process timers
             use tracing::trace;
-            trace!("handling watermark {} for {}-{}", to_millis(watermark), ctx.task_info.operator_name, ctx.task_info.task_index);
+            trace!("handling watermark {} for {}-{}", arroyo_types::to_millis(watermark), ctx.task_info.operator_name, ctx.task_info.task_index);
 
             let finished = crate::process_fn::ProcessFnUtils::finished_timers(watermark, ctx).await;
 

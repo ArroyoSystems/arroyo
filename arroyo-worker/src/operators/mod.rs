@@ -13,6 +13,8 @@ use arroyo_types::{
     Window,
 };
 use bincode::{config, Decode, Encode};
+use serde::de::DeserializeOwned;
+use serde_json::json;
 use std::time::{Duration, SystemTime};
 use tracing::debug;
 use wasmtime::{
@@ -29,6 +31,65 @@ pub mod sources;
 pub mod tumbling_aggregating_window;
 pub mod tumbling_top_n_window;
 pub mod windows;
+
+#[derive(Clone, Copy)]
+pub enum SerializationMode {
+    Json,
+    // https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#wire-format
+    JsonSchemaRegistry,
+    RawJson,
+}
+
+impl SerializationMode {
+    pub fn deserialize_slice<T: DeserializeOwned>(&self, msg: &[u8]) -> Result<T, String> {
+        match self {
+            SerializationMode::Json => serde_json::from_slice(msg)
+                .map_err(|err| format!("Failed to deserialize message '{}' from json, with error {}",
+                String::from_utf8_lossy(msg), err)),
+            SerializationMode::JsonSchemaRegistry => serde_json::from_slice(&msg[5..])
+                .map_err(|err|
+                    format!("Failed to deserialize message '{}' from confluent schema registry json, with error {}",
+                        String::from_utf8_lossy(msg), err)),
+            SerializationMode::RawJson => {
+                let s = String::from_utf8_lossy(&msg);
+                let j = json! {
+                    { "value": s }
+                };
+
+                // TODO: this is inefficient, because we know that T is RawJson in this case and can much more directly
+                //  produce that value. However, without specialization I don't know how to get the compiler to emit
+                //  the optimized code that case.
+                serde_json::from_value(j)
+                    .map_err(|e| format!("Could not represent data as RawJson: {:?}", e))
+            },
+        }
+    }
+
+    pub fn deserialize_str<T: DeserializeOwned>(&self, msg: &str) -> Result<T, String> {
+        match self {
+            SerializationMode::Json => serde_json::from_str(msg).map_err(|err| {
+                format!(
+                    "Failed to deserialize message '{}' from json, with error {}",
+                    msg, err
+                )
+            }),
+            SerializationMode::JsonSchemaRegistry => {
+                panic!("cannot read json schema registry data from str")
+            }
+            SerializationMode::RawJson => {
+                let j = json! {
+                    { "value": msg }
+                };
+
+                // TODO: this is inefficient, because we know that T is RawJson in this case and can much more directly
+                //  produce that value. However, without specialization I don't know how to get the compiler to emit
+                //  the optimized code that case.
+                serde_json::from_value(j)
+                    .map_err(|e| format!("Could not represent data as RawJson: {:?}", e))
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {

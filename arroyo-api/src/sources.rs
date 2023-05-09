@@ -147,6 +147,11 @@ enum SourceConfig {
         event_rate: u64,
         runtime: Option<Duration>,
     },
+    EventSourceSource {
+        url: String,
+        headers: HashMap<String, String>,
+        events: Vec<String>,
+    },
 }
 
 impl SourceConfig {
@@ -174,6 +179,22 @@ impl SourceConfig {
             SourceType::Nexmark(nexmark) => SourceConfig::NexmarkSource {
                 event_rate: nexmark.events_per_second.into(),
                 runtime: nexmark.runtime_micros.map(Duration::from_micros),
+            },
+            SourceType::EventSource(event) => SourceConfig::EventSourceSource {
+                url: event.url,
+                headers: event
+                    .headers
+                    .split(",")
+                    .filter_map(|s| {
+                        let mut kv = s.trim().split(":");
+                        Some((kv.next()?.trim().to_string(), kv.next()?.trim().to_string()))
+                    })
+                    .collect(),
+                events: event
+                    .events
+                    .split(",")
+                    .map(|s| s.trim().to_string())
+                    .collect(),
             },
         }
     }
@@ -436,6 +457,16 @@ impl SourceSchema {
     pub fn fields(&self) -> Vec<SchemaField> {
         self.fields.clone()
     }
+
+    pub fn serialization_mode(&self) -> SerializationMode {
+        if self.format == SourceFormat::RawJson {
+            SerializationMode::RawJson
+        } else if self.kafka_schema {
+            SerializationMode::JsonSchemaRegistry
+        } else {
+            SerializationMode::Json
+        }
+    }
 }
 
 impl TryFrom<&SourceSchema> for api::SourceSchema {
@@ -513,6 +544,10 @@ impl Source {
             SourceFormat::RawJson => None,
         };
 
+        if let Some(defs) = defs {
+            provider.add_defs(&self.name, defs);
+        }
+
         let fields = self.schema.fields.iter().map(|f| f.into()).collect();
         match &self.config {
             SourceConfig::Kafka {
@@ -520,13 +555,6 @@ impl Source {
                 topic,
                 client_configs,
             } => {
-                let serialization_mode = if self.schema.format == SourceFormat::RawJson {
-                    SerializationMode::RawJson
-                } else if self.schema.kafka_schema {
-                    SerializationMode::JsonSchemaRegistry
-                } else {
-                    SerializationMode::Json
-                };
                 let node = Operator::KafkaSource {
                     topic: topic.to_string(),
                     bootstrap_servers: bootstrap_servers
@@ -535,16 +563,12 @@ impl Source {
                         .collect(),
                     // TODO: allow this to be configured via SQL
                     offset_mode: OffsetMode::Latest,
-                    kafka_input_format: serialization_mode,
+                    kafka_input_format: self.schema.serialization_mode(),
                     messages_per_second: auth.org_metadata.kafka_qps,
                     client_configs: client_configs.clone(),
                 };
 
                 provider.add_source_with_type(Some(self.id), &self.name, fields, node, name);
-
-                if let Some(defs) = defs {
-                    provider.add_defs(&self.name, defs);
-                }
             }
             SourceConfig::FileSource {
                 directory,
@@ -559,10 +583,6 @@ impl Source {
                     node.as_operator(),
                     name,
                 );
-
-                if let Some(defs) = defs {
-                    provider.add_defs(&self.name, defs);
-                }
             }
             SourceConfig::Impulse {
                 events_per_second,
@@ -600,6 +620,19 @@ impl Source {
                     node.as_operator(),
                     Some("arroyo_types::nexmark::Event".to_string()),
                 );
+            }
+            SourceConfig::EventSourceSource {
+                url,
+                headers,
+                events,
+            } => {
+                let node = Operator::EventSourceSource {
+                    url: url.clone(),
+                    headers: headers.clone(),
+                    events: events.clone(),
+                    serialization_mode: self.schema.serialization_mode(),
+                };
+                provider.add_source(Some(self.id), &self.name, fields, node);
             }
         }
     }
@@ -720,6 +753,11 @@ pub(crate) async fn create_source(
                     Some(connection.id),
                 )
             }
+            create_source_req::TypeOneof::EventSource(event) => (
+                public::SourceType::event_source,
+                serde_json::to_value(&event).unwrap(),
+                None,
+            ),
             create_source_req::TypeOneof::Impulse(impulse) => {
                 if impulse.events_per_second > auth.org_metadata.max_impulse_qps as f32 {
                     return rate_limit_error("impulse", auth.org_metadata.max_impulse_qps as usize);
@@ -821,6 +859,9 @@ pub(crate) async fn get_sources<E: GenericClient>(
                         topic: config.topic,
                     })
                 }
+                public::SourceType::event_source => SourceType::EventSource(
+                    serde_json::from_value(rec.source_config.unwrap()).unwrap(),
+                ),
             };
 
             SourceDef {
@@ -908,6 +949,7 @@ pub(crate) async fn get_source_metadata(
             let tester = get_kafka_tester(&kafka, None, connections, tx)?;
             tester.topic_metadata().await?.partitions
         }
+        create_source_req::TypeOneof::EventSource(_) => 1,
         create_source_req::TypeOneof::Impulse(_) => 1,
         create_source_req::TypeOneof::File(_) => 1,
         create_source_req::TypeOneof::Nexmark(_) => 1,
