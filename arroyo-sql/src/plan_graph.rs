@@ -15,13 +15,14 @@ use syn::{parse_quote, parse_str};
 
 use crate::{
     expressions::SortExpression,
+    external::{SqlSink, SqlSource},
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
     pipeline::{
         AggregatingStrategy, JoinType, MethodCompiler, RecordTransform, SqlOperator, WindowFunction,
     },
     types::{StructDef, StructField, StructPair, TypeDef},
-    ArroyoSchemaProvider, SqlConfig, SqlSource,
+    ArroyoSchemaProvider, SqlConfig,
 };
 use anyhow::Result;
 
@@ -83,6 +84,7 @@ pub enum PlanOperator {
     },
     // for external nodes, mainly sinks.
     StreamOperator(String, Operator),
+    Sink(String, SqlSink),
 }
 
 #[derive(Debug, Clone)]
@@ -239,15 +241,16 @@ pub struct PlanNode {
 }
 
 impl PlanNode {
-    fn into_stream_node(&self, index: usize, parallelism: usize) -> StreamNode {
+    fn into_stream_node(&self, index: usize, sql_config: &SqlConfig) -> StreamNode {
         let name = format!("{}_{}", self.prefix(), index);
-        let operator = self.to_operator();
+        let operator = self.to_operator(sql_config);
         StreamNode {
             operator_id: name,
-            parallelism,
+            parallelism: sql_config.default_parallelism,
             operator,
         }
     }
+
     fn prefix(&self) -> String {
         match &self.operator {
             PlanOperator::Source(name, _) => name.to_string(),
@@ -273,12 +276,13 @@ impl PlanNode {
             PlanOperator::TumblingLocalAggregator { .. } => "tumbling_local_aggregator".to_string(),
             PlanOperator::SlidingAggregatingTopN { .. } => "sliding_aggregating_top_n".to_string(),
             PlanOperator::TumblingTopN { .. } => "tumbling_top_n".to_string(),
+            PlanOperator::Sink(name, _) => format!("sink_{}", name),
         }
     }
 
-    fn to_operator(&self) -> Operator {
+    fn to_operator(&self, sql_config: &SqlConfig) -> Operator {
         match &self.operator {
-            PlanOperator::Source(_name, source) => source.operator.clone(),
+            PlanOperator::Source(_name, source) => source.get_operator(sql_config),
             PlanOperator::Watermark(watermark) => Operator::Watermark(watermark.clone()),
             PlanOperator::RecordTransform(record_transform) => record_transform.as_operator(),
             PlanOperator::WindowAggregate { window, projection } => {
@@ -619,6 +623,35 @@ impl PlanNode {
             PlanOperator::Flatten => arroyo_datastream::Operator::FlattenOperator {
                 name: "flatten".into(),
             },
+            PlanOperator::Sink(_sink_name, sql_sink) => {
+                match &sql_sink.sink_config {
+                    arroyo_datastream::SinkConfig::Kafka {
+                        bootstrap_servers,
+                        topic,
+                        client_configs,
+                    } => {
+                        arroyo_datastream::Operator::KafkaSink {
+                            topic: topic.clone(),
+                            // split by comma
+                            bootstrap_servers: bootstrap_servers
+                                .split(',')
+                                .map(|s| s.to_string())
+                                .collect(),
+                            client_configs: client_configs.clone(),
+                        }
+                    }
+                    arroyo_datastream::SinkConfig::Console => {
+                        arroyo_datastream::Operator::ConsoleSink
+                    }
+                    arroyo_datastream::SinkConfig::File { directory } => {
+                        arroyo_datastream::Operator::FileSink {
+                            dir: directory.into(),
+                        }
+                    }
+                    arroyo_datastream::SinkConfig::Grpc => arroyo_datastream::Operator::GrpcSink,
+                    arroyo_datastream::SinkConfig::Null => arroyo_datastream::Operator::NullSink,
+                }
+            }
         }
     }
 
@@ -852,39 +885,22 @@ pub struct PlanGraph {
     pub types: HashSet<StructDef>,
     pub key_structs: HashSet<String>,
     pub sources: HashMap<String, NodeIndex>,
+    pub named_tables: HashMap<String, NodeIndex>,
     pub sql_config: SqlConfig,
+    pub saved_sources_used: Vec<i64>,
 }
 
 impl PlanGraph {
-    pub fn new(sql_config: SqlConfig, operator: SqlOperator) -> Self {
-        let mut plan_graph = PlanGraph {
+    pub fn new(sql_config: SqlConfig) -> Self {
+        Self {
             graph: DiGraph::new(),
             types: HashSet::new(),
             key_structs: HashSet::new(),
             sources: HashMap::new(),
+            named_tables: HashMap::new(),
             sql_config,
-        };
-        let result_index = plan_graph.add_sql_operator(operator);
-        let edge_type = plan_graph
-            .graph
-            .node_weight(result_index)
-            .unwrap()
-            .output_type
-            .clone();
-
-        let sink_index = plan_graph.insert_operator(
-            PlanOperator::StreamOperator("sink".into(), plan_graph.sql_config.sink.clone()),
-            edge_type.clone(),
-        );
-        let sink_edge = PlanEdge {
-            edge_data_type: edge_type,
-            edge_type: EdgeType::Forward,
-        };
-        plan_graph
-            .graph
-            .add_edge(result_index, sink_index, sink_edge);
-
-        plan_graph
+            saved_sources_used: vec![],
+        }
     }
 
     pub fn add_sql_operator(&mut self, operator: SqlOperator) -> NodeIndex {
@@ -895,11 +911,20 @@ impl PlanGraph {
                 self.add_join(left, right, join_operator)
             }
             SqlOperator::Window(input, window_operator) => self.add_window(input, window_operator),
-            SqlOperator::WindowAggregateTopN(input, aggregate, projection, top_n) => {
-                self.add_window_aggregate_top_n(input, aggregate, projection, top_n)
-            }
             SqlOperator::RecordTransform(input, transform) => {
                 self.add_record_transform(input, transform)
+            }
+            SqlOperator::Sink(name, sql_sink, input) => self.add_sql_sink(name, sql_sink, input),
+            SqlOperator::NamedTable(name, input) => {
+                let index = self.named_tables.get(&name);
+                match index {
+                    Some(index) => *index,
+                    None => {
+                        let index = self.add_sql_operator(*input);
+                        self.named_tables.insert(name, index);
+                        index
+                    }
+                }
             }
         }
     }
@@ -907,6 +932,9 @@ impl PlanGraph {
     fn add_sql_source(&mut self, name: String, sql_source: SqlSource) -> NodeIndex {
         if let Some(node_index) = self.sources.get(&name) {
             return *node_index;
+        }
+        if let Some(source_id) = sql_source.id {
+            self.saved_sources_used.push(source_id);
         }
         let plan_type = PlanType::Unkeyed(sql_source.struct_def.clone());
         let source_index = self.insert_operator(
@@ -1059,23 +1087,23 @@ impl PlanGraph {
         self.graph
             .add_edge(right_index, right_key_index, right_key_edge);
         if has_window {
-            return self.add_post_window_join(
+            self.add_post_window_join(
                 left_key_index,
                 right_key_index,
                 key_struct,
                 left_type,
                 right_type,
                 join_type,
-            );
+            )
         } else {
-            return self.add_join_with_expiration(
+            self.add_join_with_expiration(
                 left_key_index,
                 right_key_index,
                 key_struct,
                 left_type,
                 right_type,
                 join_type,
-            );
+            )
         }
     }
 
@@ -1281,16 +1309,6 @@ impl PlanGraph {
         unkey_index
     }
 
-    fn add_window_aggregate_top_n(
-        &self,
-        _input: Box<SqlOperator>,
-        _aggregate: crate::pipeline::AggregateOperator,
-        _projection: crate::operators::Projection,
-        _top_n: crate::pipeline::SqlWindowOperator,
-    ) -> NodeIndex {
-        todo!()
-    }
-
     fn add_record_transform(
         &mut self,
         input: Box<SqlOperator>,
@@ -1308,37 +1326,55 @@ impl PlanGraph {
         self.graph.add_edge(input_index, plan_node_index, edge);
         plan_node_index
     }
+
+    fn add_sql_sink(
+        &mut self,
+        name: String,
+        sql_sink: crate::external::SqlSink,
+        input: Box<SqlOperator>,
+    ) -> NodeIndex {
+        let input_type = input.return_type();
+        let input_index = self.add_sql_operator(*input);
+        let plan_node = PlanOperator::Sink(name, sql_sink);
+        let plan_node_index =
+            self.insert_operator(plan_node, PlanType::Unkeyed(input_type.clone()));
+        let edge = PlanEdge {
+            edge_data_type: PlanType::Unkeyed(input_type),
+            edge_type: EdgeType::Forward,
+        };
+        self.graph.add_edge(input_index, plan_node_index, edge);
+        plan_node_index
+    }
 }
 
 impl From<PlanGraph> for DiGraph<StreamNode, StreamEdge> {
     fn from(val: PlanGraph) -> Self {
         val.graph.map(
-            |index: NodeIndex, node| {
-                node.into_stream_node(index.index(), val.sql_config.default_parallelism)
-            },
+            |index: NodeIndex, node| node.into_stream_node(index.index(), &val.sql_config),
             |_index, edge| edge.into_stream_edge(),
         )
     }
 }
 
-pub fn get_program_from_operator_with_plan(
-    config: SqlConfig,
-    operator: SqlOperator,
+pub fn get_program(
+    mut plan_graph: PlanGraph,
     schema_provider: ArroyoSchemaProvider,
-) -> Result<(Program, Vec<SqlSource>)> {
-    let mut plan_graph = PlanGraph::new(config, operator);
+) -> Result<(Program, Vec<i64>)> {
     optimize(&mut plan_graph.graph);
 
     let mut key_structs = HashSet::new();
+    let sources = plan_graph.saved_sources_used.clone();
     plan_graph.graph.node_weights().for_each(|node| {
         let key_names = node.output_type.get_key_struct_names();
         key_structs.extend(key_names);
     });
+
     let types: HashSet<_> = plan_graph
         .graph
         .node_weights()
         .flat_map(|node| node.get_all_types())
         .collect();
+
     let mut other_defs: Vec<_> = types
         .iter()
         .map(|s| s.def(key_structs.contains(&s.struct_name())))
@@ -1372,6 +1408,6 @@ pub fn get_program_from_operator_with_plan(
             other_defs,
             graph,
         },
-        vec![],
+        sources,
     ))
 }

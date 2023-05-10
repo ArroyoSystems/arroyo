@@ -30,6 +30,7 @@ message CreateSqlJob {
     BuiltinSink builtin = 3;
     string user = 4;
   };
+  bool preview = 6;
 }
 
 message CreatePipelineReq {

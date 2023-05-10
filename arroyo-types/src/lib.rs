@@ -102,7 +102,7 @@ impl DatabaseConfig {
             port: u16::from_str(
                 &env::var(DATABASE_PORT_ENV).unwrap_or_else(|_| "5432".to_string()),
             )
-            .unwrap_or_else(|_| 5432),
+            .unwrap_or(5432),
             user: env::var(DATABASE_USER_ENV).unwrap_or_else(|_| "arroyo".to_string()),
             password: env::var(DATABASE_PASSWORD_ENV).unwrap_or_else(|_| "arroyo".to_string()),
         }
@@ -134,7 +134,7 @@ pub fn admin_port(service: &str, default: u16) -> u16 {
 }
 
 pub fn service_port(service: &str, default: u16, env_var: &str) -> u16 {
-    env::var(&format!("{}_{}", service.to_uppercase(), env_var))
+    env::var(format!("{}_{}", service.to_uppercase(), env_var))
         .ok()
         .or(env::var(env_var).ok())
         .map(|s| u16::from_str(&s).unwrap_or_else(|_| panic!("Invalid setting for {}", env_var)))
@@ -149,7 +149,7 @@ impl WorkerId {
         std::env::var(WORKER_ID_ENV)
             .map(|s| u64::from_str(&s).unwrap())
             .ok()
-            .map(|i| WorkerId(i))
+            .map(WorkerId)
     }
 }
 

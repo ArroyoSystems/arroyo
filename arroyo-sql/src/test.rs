@@ -1,9 +1,10 @@
-use arrow_schema::{DataType, TimeUnit};
-use arroyo_datastream::{NexmarkSource, Source};
+use std::time::Duration;
 
-use crate::pipeline::get_program_from_plan;
+use arrow_schema::{DataType, TimeUnit};
+use arroyo_datastream::SerializationMode;
+
 use crate::{
-    get_plan_from_query, parse_and_get_program,
+    parse_and_get_program,
     types::{StructDef, StructField, TypeDef},
     ArroyoSchemaProvider, SqlConfig,
 };
@@ -80,7 +81,7 @@ async fn test_parse() {
         1,2
     ) AS AuctionBids
     JOIN (
-      SELECT
+      SELECT 
         max(num) AS maxn,
         window
       FROM (
@@ -98,16 +99,16 @@ async fn test_parse() {
        and AuctionBids.window = MaxBids.window;";
 
     let mut schema_provider = ArroyoSchemaProvider::new();
-    schema_provider.add_source_with_type(
-        Some(1),
+    schema_provider.add_saved_source_with_type(
+        1,
         "nexmark".to_string(),
         test_schema(),
-        NexmarkSource {
-            first_event_rate: 10,
-            num_events: Some(100),
-        }
-        .as_operator(),
         Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
+        arroyo_datastream::SourceConfig::NexmarkSource {
+            event_rate: 10,
+            runtime: Some(Duration::from_secs(10)),
+        },
+        SerializationMode::Json,
     );
 
     parse_and_get_program(sql, schema_provider, SqlConfig::default())
@@ -118,16 +119,16 @@ async fn test_parse() {
 #[tokio::test]
 async fn test_program_compilation() {
     let mut schema_provider = ArroyoSchemaProvider::new();
-    schema_provider.add_source_with_type(
-        Some(1),
+    schema_provider.add_saved_source_with_type(
+        1,
         "nexmark".to_string(),
         test_schema(),
-        NexmarkSource {
-            first_event_rate: 10,
-            num_events: Some(100),
-        }
-        .as_operator(),
         Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
+        arroyo_datastream::SourceConfig::NexmarkSource {
+            event_rate: 10,
+            runtime: Some(Duration::from_secs(10)),
+        },
+        SerializationMode::Json,
     );
 
     let sql = "
@@ -149,16 +150,16 @@ async fn test_program_compilation() {
 #[tokio::test]
 async fn test_table_alias() {
     let mut schema_provider = ArroyoSchemaProvider::new();
-    schema_provider.add_source_with_type(
-        Some(1),
+    schema_provider.add_saved_source_with_type(
+        1,
         "nexmark".to_string(),
         test_schema(),
-        NexmarkSource {
-            first_event_rate: 10,
-            num_events: Some(100),
-        }
-        .as_operator(),
         Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
+        arroyo_datastream::SourceConfig::NexmarkSource {
+            event_rate: 10,
+            runtime: Some(Duration::from_secs(10)),
+        },
+        SerializationMode::Json,
     );
 
     let sql = "SELECT P1.bid FROM nexmark as P1";
@@ -171,16 +172,16 @@ async fn test_table_alias() {
 #[tokio::test]
 async fn test_window_function() {
     let mut schema_provider = ArroyoSchemaProvider::new();
-    schema_provider.add_source_with_type(
-        Some(1),
+    schema_provider.add_saved_source_with_type(
+        1,
         "nexmark".to_string(),
         test_schema(),
-        NexmarkSource {
-            first_event_rate: 10,
-            num_events: Some(100),
-        }
-        .as_operator(),
         Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
+        arroyo_datastream::SourceConfig::NexmarkSource {
+            event_rate: 10,
+            runtime: Some(Duration::from_secs(10)),
+        },
+        SerializationMode::Json,
     );
 
     let sql = "SELECT * FROM (
@@ -205,20 +206,20 @@ async fn test_udf() {
         .add_rust_udf("fn my_sqr(x: u64) -> u64 { x * x }")
         .unwrap();
 
-    schema_provider.add_source_with_type(
-        Some(1),
+    schema_provider.add_saved_source_with_type(
+        1,
         "nexmark".to_string(),
         test_schema(),
-        NexmarkSource {
-            first_event_rate: 10,
-            num_events: Some(100),
-        }
-        .as_operator(),
         Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
+        arroyo_datastream::SourceConfig::NexmarkSource {
+            event_rate: 10,
+            runtime: Some(Duration::from_secs(10)),
+        },
+        SerializationMode::Json,
     );
 
     let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
-
-    let plan = get_plan_from_query(&sql, &mut schema_provider).unwrap();
-    get_program_from_plan(SqlConfig::default(), schema_provider, &plan).unwrap();
+    parse_and_get_program(sql, schema_provider, SqlConfig::default())
+        .await
+        .unwrap();
 }

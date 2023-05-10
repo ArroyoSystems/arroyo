@@ -1,8 +1,5 @@
 use arrow::datatypes::TimeUnit;
-use arroyo_datastream::{
-    auth_config_to_hashmap, FileSource, ImpulseSpec, NexmarkSource, OffsetMode, Operator,
-    SerializationMode, Source as ApiSource,
-};
+use arroyo_datastream::{SerializationMode, SourceConfig};
 use arroyo_rpc::grpc::api::{
     self,
     connection::ConnectionType,
@@ -20,13 +17,7 @@ use arroyo_sql::{
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Pool;
 use http::StatusCode;
-use std::{
-    collections::HashMap,
-    fmt::{Display, Formatter},
-    path::PathBuf,
-    str::FromStr,
-    time::{Duration, SystemTime},
-};
+use std::fmt::{Display, Formatter};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tonic::Status;
 use tracing::warn;
@@ -125,78 +116,6 @@ pub fn nexmark_schema() -> SourceSchema {
             ),
         ],
         kafka_schema: false,
-    }
-}
-
-enum SourceConfig {
-    Kafka {
-        bootstrap_servers: String,
-        topic: String,
-        client_configs: HashMap<String, String>,
-    },
-    Impulse {
-        interval: Option<Duration>,
-        events_per_second: f32,
-        total_events: Option<usize>,
-    },
-    FileSource {
-        directory: String,
-        interval: Duration,
-    },
-    NexmarkSource {
-        event_rate: u64,
-        runtime: Option<Duration>,
-    },
-    EventSourceSource {
-        url: String,
-        headers: HashMap<String, String>,
-        events: Vec<String>,
-    },
-}
-
-impl SourceConfig {
-    fn from_source_type(t: SourceType) -> SourceConfig {
-        match t {
-            SourceType::Kafka(kafka) => {
-                let Some(connection) = kafka.connection else {panic!("require a connection on a KafkaSourceDef")};
-                SourceConfig::Kafka {
-                    bootstrap_servers: connection.bootstrap_servers,
-                    topic: kafka.topic,
-                    client_configs: auth_config_to_hashmap(connection.auth_config),
-                }
-            }
-            SourceType::Impulse(impulse) => SourceConfig::Impulse {
-                interval: impulse
-                    .interval_micros
-                    .map(|ms| Duration::from_micros(ms.into())),
-                events_per_second: impulse.events_per_second,
-                total_events: impulse.total_messages.map(|t| t as usize),
-            },
-            SourceType::File(file) => SourceConfig::FileSource {
-                directory: file.directory,
-                interval: Duration::from_millis(file.interval_ms as u64),
-            },
-            SourceType::Nexmark(nexmark) => SourceConfig::NexmarkSource {
-                event_rate: nexmark.events_per_second.into(),
-                runtime: nexmark.runtime_micros.map(Duration::from_micros),
-            },
-            SourceType::EventSource(event) => SourceConfig::EventSourceSource {
-                url: event.url,
-                headers: event
-                    .headers
-                    .split(",")
-                    .filter_map(|s| {
-                        let mut kv = s.trim().split(":");
-                        Some((kv.next()?.trim().to_string(), kv.next()?.trim().to_string()))
-                    })
-                    .collect(),
-                events: event
-                    .events
-                    .split(",")
-                    .map(|s| s.trim().to_string())
-                    .collect(),
-            },
-        }
     }
 }
 
@@ -450,7 +369,9 @@ impl SourceSchema {
                 })
             }
             Schema::RawJson(_) => Ok(raw_schema()),
-            api::source_schema::Schema::Protobuf(_) => Err(format!("protobuf not supported yet")),
+            api::source_schema::Schema::Protobuf(_) => {
+                Err("protobuf not supported yet".to_string())
+            }
         }
     }
 
@@ -512,7 +433,7 @@ impl TryFrom<SourceDef> for Source {
         let schema = if let api::source_schema::Schema::Builtin(name) =
             value.schema.as_ref().unwrap().schema.as_ref().unwrap()
         {
-            builtin_for_name(&name)?
+            builtin_for_name(name)?
         } else {
             SourceSchema::try_from(&value.name, value.schema.clone().unwrap())
                 .map_err(|e| format!("Invalid schema: {}", e))?
@@ -522,15 +443,21 @@ impl TryFrom<SourceDef> for Source {
             id: value.id,
             name: value.name,
             schema,
-            config: SourceConfig::from_source_type(value.source_type.unwrap()),
+            config: value.source_type.unwrap().into(),
         })
     }
 }
 
 impl Source {
-    pub(crate) fn register(&self, provider: &mut ArroyoSchemaProvider, auth: &AuthData) {
-        let name = match &self.schema.format {
-            SourceFormat::Native(_) | SourceFormat::JsonFields => None,
+    // TODO: pass down restriction on kafka source QPS from auth.
+    pub(crate) fn register(&self, provider: &mut ArroyoSchemaProvider, _auth: &AuthData) {
+        let type_name = match &self.schema.format {
+            SourceFormat::Native(native_name) => match native_name.as_str() {
+                "nexmark" => Some("arroyo_types::nexmark::Event".to_string()),
+                "impulse" => Some("arroyo_types::ImpulseEvent".to_string()),
+                _ => None,
+            },
+            SourceFormat::JsonFields => None,
             SourceFormat::JsonSchema(_) => {
                 Some(format!("{}::{}", self.name, json_schema::ROOT_NAME))
             }
@@ -548,93 +475,14 @@ impl Source {
             provider.add_defs(&self.name, defs);
         }
 
-        let fields = self.schema.fields.iter().map(|f| f.into()).collect();
-        match &self.config {
-            SourceConfig::Kafka {
-                bootstrap_servers,
-                topic,
-                client_configs,
-            } => {
-                let node = Operator::KafkaSource {
-                    topic: topic.to_string(),
-                    bootstrap_servers: bootstrap_servers
-                        .split(',')
-                        .map(|s| s.to_string())
-                        .collect(),
-                    // TODO: allow this to be configured via SQL
-                    offset_mode: OffsetMode::Latest,
-                    kafka_input_format: self.schema.serialization_mode(),
-                    messages_per_second: auth.org_metadata.kafka_qps,
-                    client_configs: client_configs.clone(),
-                };
-
-                provider.add_source_with_type(Some(self.id), &self.name, fields, node, name);
-            }
-            SourceConfig::FileSource {
-                directory,
-                interval,
-            } => {
-                let node = FileSource::from_dir(PathBuf::from_str(directory).unwrap(), *interval);
-
-                provider.add_source_with_type(
-                    Some(self.id),
-                    &self.name,
-                    fields,
-                    node.as_operator(),
-                    name,
-                );
-            }
-            SourceConfig::Impulse {
-                events_per_second,
-                interval,
-                total_events,
-            } => {
-                let node = Operator::ImpulseSource {
-                    start_time: SystemTime::now(),
-                    spec: interval
-                        .map(ImpulseSpec::Delay)
-                        .unwrap_or(ImpulseSpec::EventsPerSecond(*events_per_second)),
-                    total_events: *total_events,
-                };
-
-                provider.add_source_with_type(
-                    Some(self.id),
-                    &self.name,
-                    fields,
-                    node,
-                    Some("arroyo_types::ImpulseEvent".to_string()),
-                );
-            }
-            SourceConfig::NexmarkSource {
-                event_rate,
-                runtime,
-            } => {
-                let node = NexmarkSource {
-                    first_event_rate: *event_rate,
-                    num_events: runtime.map(|runtime| event_rate * runtime.as_secs()),
-                };
-                provider.add_source_with_type(
-                    Some(self.id),
-                    &self.name,
-                    fields,
-                    node.as_operator(),
-                    Some("arroyo_types::nexmark::Event".to_string()),
-                );
-            }
-            SourceConfig::EventSourceSource {
-                url,
-                headers,
-                events,
-            } => {
-                let node = Operator::EventSourceSource {
-                    url: url.clone(),
-                    headers: headers.clone(),
-                    events: events.clone(),
-                    serialization_mode: self.schema.serialization_mode(),
-                };
-                provider.add_source(Some(self.id), &self.name, fields, node);
-            }
-        }
+        provider.add_saved_source_with_type(
+            self.id,
+            self.name.clone(),
+            self.schema.fields.iter().map(|f| f.into()).collect(),
+            type_name,
+            self.config.clone(),
+            self.schema.serialization_mode(),
+        );
     }
 }
 
@@ -707,7 +555,7 @@ pub(crate) async fn create_source(
             serde_json::to_value(fields).unwrap(),
         ),
         source_schema::Schema::RawJson(_) => {
-            (SchemaType::raw_json, serde_json::to_value(&()).unwrap())
+            (SchemaType::raw_json, serde_json::to_value(()).unwrap())
         }
         source_schema::Schema::Protobuf(_) => todo!(),
     };

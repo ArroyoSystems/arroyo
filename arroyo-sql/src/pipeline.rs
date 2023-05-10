@@ -1,41 +1,40 @@
 #![allow(clippy::comparison_chain)]
+use std::collections::HashMap;
+
 use std::time::Duration;
 
 use anyhow::Result;
 use anyhow::{anyhow, bail};
 use arrow_schema::DataType;
-use arroyo_datastream::{Operator, Program, WindowType};
+use arroyo_datastream::{Operator, WindowType};
 
 use datafusion_common::{DFField, ScalarValue};
 use datafusion_expr::{
-    BinaryExpr, BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window,
+    BinaryExpr, BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp,
 };
 
 use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
 
 use crate::expressions::ExpressionContext;
+use crate::external::{SqlSink, SqlSource};
+use crate::Table;
 use crate::{
     expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
-    plan_graph::get_program_from_operator_with_plan,
     types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
-    ArroyoSchemaProvider, SqlConfig, SqlSource,
+    ArroyoSchemaProvider,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SqlOperator {
     Source(String, SqlSource),
     Aggregator(Box<SqlOperator>, AggregateOperator),
     JoinOperator(Box<SqlOperator>, Box<SqlOperator>, JoinOperator),
     Window(Box<SqlOperator>, SqlWindowOperator),
-    WindowAggregateTopN(
-        Box<SqlOperator>,
-        AggregateOperator,
-        Projection,
-        SqlWindowOperator,
-    ),
     RecordTransform(Box<SqlOperator>, RecordTransform),
+    Sink(String, SqlSink, Box<SqlOperator>),
+    NamedTable(String, Box<SqlOperator>),
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +78,7 @@ impl RecordTransform {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AggregateOperator {
     pub key: Projection,
     pub window: WindowType,
@@ -94,7 +93,7 @@ impl AggregateOperator {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AggregatingStrategy {
     AggregateProjection(AggregateProjection),
     TwoPhaseAggregateProjection(TwoPhaseAggregateProjection),
@@ -123,7 +122,7 @@ pub enum SortDirection {
     Desc,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SqlWindowOperator {
     pub window_fn: WindowFunction,
     pub partition: Projection,
@@ -132,7 +131,7 @@ pub struct SqlWindowOperator {
     pub window: WindowType,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct JoinOperator {
     pub left_key: Projection,
     pub right_key: Projection,
@@ -288,18 +287,11 @@ impl SqlOperator {
                 });
                 input_struct
             }
-            SqlOperator::WindowAggregateTopN(_input, _aggregate_operator, projection, window) => {
-                let mut input_struct = projection.output_struct();
-                input_struct.fields.push(StructField {
-                    name: window.field_name.clone(),
-                    alias: None,
-                    data_type: TypeDef::DataType(DataType::UInt64, false),
-                });
-                input_struct
-            }
             SqlOperator::RecordTransform(input, record_transform) => {
                 record_transform.output_struct(input.return_type())
             }
+            SqlOperator::Sink(_, sql_sink, _) => sql_sink.struct_def.clone(),
+            SqlOperator::NamedTable(_table_name, table) => table.return_type(),
         }
     }
 
@@ -335,20 +327,27 @@ impl SqlOperator {
             SqlOperator::Aggregator(_, _) => true,
             SqlOperator::JoinOperator(left, right, _) => left.has_window() || right.has_window(),
             SqlOperator::Window(_, _) => true,
-            SqlOperator::WindowAggregateTopN(_, _, _, _) => true,
             SqlOperator::RecordTransform(input, _) => input.has_window(),
+            SqlOperator::Sink(_, _, input) => input.has_window(),
+            SqlOperator::NamedTable(_, input) => input.has_window(),
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct SqlPipelineBuilder<'a> {
-    schema_provider: &'a ArroyoSchemaProvider,
+    pub schema_provider: &'a ArroyoSchemaProvider,
+    pub planned_tables: HashMap<String, SqlOperator>,
+    pub output_nodes: Vec<SqlOperator>,
 }
 
 impl<'a> SqlPipelineBuilder<'a> {
     pub fn new(schema_provider: &'a ArroyoSchemaProvider) -> Self {
-        SqlPipelineBuilder { schema_provider }
+        SqlPipelineBuilder {
+            schema_provider,
+            planned_tables: HashMap::new(),
+            output_nodes: vec![],
+        }
     }
 
     fn ctx(&'a self, input_struct: &'a StructDef) -> ExpressionContext<'a> {
@@ -399,10 +398,69 @@ impl<'a> SqlPipelineBuilder<'a> {
             LogicalPlan::Distinct(_) => bail!("distinct is not currently supported"),
             LogicalPlan::Window(window) => self.insert_window(window),
             LogicalPlan::Prepare(_) => bail!("prepare commands are not currently supported"),
-            LogicalPlan::Dml(_) => bail!("DML statements not currently supported"),
+            LogicalPlan::Dml(dml) => self.insert_dml(dml),
             LogicalPlan::DescribeTable(_) => bail!("describe table not currently supported"),
             LogicalPlan::Unnest(_) => bail!("unnest not currently supported"),
             LogicalPlan::Statement(_) => bail!("statements not currently supported"),
+        }
+    }
+    fn insert_dml(
+        &mut self,
+        dml_statement: &datafusion_expr::logical_plan::DmlStatement,
+    ) -> Result<SqlOperator> {
+        if !matches!(dml_statement.op, WriteOp::Insert) {
+            bail!("only insert statements are currently supported")
+        }
+        let input = self.insert_sql_plan(&dml_statement.input)?;
+        let insert_table = self
+            .schema_provider
+            .get_table(&dml_statement.table_name.to_string())
+            .ok_or_else(|| {
+                anyhow!(
+                    "table {} not found in schema provider",
+                    dml_statement.table_name
+                )
+            })?;
+        match insert_table {
+            crate::Table::SavedSource {
+                name: _,
+                id: _,
+                fields: _,
+                type_name: _,
+                source_config: _,
+                serialization_mode: _,
+            } => bail!("inserting into saved sources is not currently supported"),
+            crate::Table::SavedSink {
+                name,
+                id,
+                sink_config,
+            } => Ok(SqlOperator::Sink(
+                name.clone(),
+                SqlSink {
+                    id: Some(*id),
+                    struct_def: input.return_type(),
+                    sink_config: sink_config.clone(),
+                },
+                Box::new(input),
+            )),
+            crate::Table::MemoryTable { name, fields: _ } => {
+                Ok(SqlOperator::NamedTable(name.clone(), Box::new(input)))
+            }
+            crate::Table::MemoryTableWithConnectionConfig {
+                name: _,
+                fields: _,
+                connection: _,
+                connection_config: _,
+            } => todo!(),
+            crate::Table::TableFromQuery {
+                name: _,
+                logical_plan: _,
+            } => todo!(),
+            crate::Table::InsertQuery {
+                sink_name: _,
+                logical_plan: _,
+            } => todo!(),
+            crate::Table::Anonymous { logical_plan: _ } => todo!(),
         }
     }
 
@@ -648,7 +706,10 @@ impl<'a> SqlPipelineBuilder<'a> {
         {
             columns.push((*left, *right));
         } else if join.filter.is_some() {
-            bail!("non-join filters on joins. This doesn't seem to actually happen in practice");
+            bail!(
+                "non-join filters on joins. This doesn't seem to actually happen in practice, {:?}",
+                join.on
+            );
         }
         let join_projection_field_names: Vec<_> = columns
             .iter()
@@ -669,6 +730,10 @@ impl<'a> SqlPipelineBuilder<'a> {
                 .map(|(_left, right)| self.ctx(&right_input.return_type()).compile_expr(right))
                 .collect::<Result<Vec<_>>>()?,
         };
+
+        if right_key.output_struct() != left_key.output_struct() {
+            bail!("join key types must match. Try casting?");
+        }
         Ok(SqlOperator::JoinOperator(
             Box::new(left_input),
             Box::new(right_input),
@@ -684,19 +749,81 @@ impl<'a> SqlPipelineBuilder<'a> {
         &mut self,
         table_scan: &datafusion::logical_expr::TableScan,
     ) -> Result<SqlOperator> {
+        let table_name = table_scan.table_name.to_string();
         let source = self
             .schema_provider
-            .sources
-            .get(&table_scan.table_name.to_string())
-            .ok_or_else(|| anyhow!("Source {} does not exist", table_scan.table_name))?;
-
-        let source_operator =
-            SqlOperator::Source(table_scan.table_name.to_string(), source.clone());
+            .get_table(&table_name)
+            .ok_or_else(|| anyhow!("table {} not found", table_scan.table_name))?;
+        let source = match source {
+            crate::Table::SavedSource {
+                name: _,
+                id,
+                fields,
+                type_name,
+                source_config,
+                serialization_mode,
+            } => {
+                let source = SqlSource {
+                    id: Some(*id),
+                    struct_def: StructDef {
+                        name: type_name.clone(),
+                        fields: fields.clone(),
+                    },
+                    source_config: source_config.clone(),
+                    serialization_mode: *serialization_mode,
+                };
+                SqlOperator::Source(table_name, source)
+            }
+            crate::Table::SavedSink {
+                name: _,
+                id: _,
+                sink_config: _,
+            } => bail!("can't read from a saved sink."),
+            crate::Table::MemoryTable { name, fields: _ } => {
+                let planned_table = self.planned_tables.get(name).ok_or_else(|| {
+                    anyhow!(
+                        "memory table {} not found in planned tables. This is a bug.",
+                        name
+                    )
+                })?;
+                planned_table.clone()
+            }
+            crate::Table::MemoryTableWithConnectionConfig {
+                name: _,
+                fields,
+                connection,
+                connection_config,
+            } => {
+                let source = SqlSource::try_new(
+                    None,
+                    StructDef {
+                        name: None,
+                        fields: fields.clone(),
+                    },
+                    connection.clone(),
+                    connection_config,
+                )?;
+                SqlOperator::Source(table_name, source)
+            }
+            crate::Table::TableFromQuery {
+                name: _,
+                logical_plan,
+            } => self.insert_sql_plan(&logical_plan.clone())?,
+            crate::Table::InsertQuery {
+                sink_name: _,
+                logical_plan: _,
+            } => {
+                bail!("insert queries can't be a table scan");
+            }
+            crate::Table::Anonymous { logical_plan: _ } => {
+                bail!("anonymous queries can't be table sources.")
+            }
+        };
 
         if let Some(projection) = table_scan.projection.as_ref() {
             let fields: Vec<StructField> = projection
                 .iter()
-                .map(|i| source.struct_def.fields[*i].clone())
+                .map(|i| source.return_type().fields[*i].clone())
                 .collect();
 
             let field_names = fields
@@ -713,7 +840,7 @@ impl<'a> SqlPipelineBuilder<'a> {
                 .collect();
 
             return Ok(SqlOperator::RecordTransform(
-                Box::new(source_operator),
+                Box::new(source),
                 RecordTransform::ValueProjection(Projection {
                     field_names,
                     field_computations,
@@ -721,7 +848,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             ));
         }
 
-        Ok(source_operator)
+        Ok(source)
     }
 
     fn insert_window(&mut self, window: &Window) -> Result<SqlOperator> {
@@ -887,6 +1014,127 @@ impl<'a> SqlPipelineBuilder<'a> {
                 field_computations,
             },
         ))
+    }
+
+    pub(crate) fn insert_table(&mut self, table: Table) -> Result<()> {
+        match table {
+            Table::SavedSource {
+                name: _,
+                id: _,
+                fields: _,
+                type_name: _,
+                source_config: _,
+                serialization_mode: _,
+            } => todo!(),
+            Table::SavedSink {
+                name: _,
+                id: _,
+                sink_config: _,
+            } => todo!(),
+            Table::MemoryTable { name: _, fields: _ } => todo!(),
+            Table::MemoryTableWithConnectionConfig {
+                name: _,
+                fields: _,
+                connection: _,
+                connection_config: _,
+            } => todo!(),
+            Table::TableFromQuery {
+                name: _,
+                logical_plan: _,
+            } => todo!(),
+            Table::InsertQuery {
+                sink_name,
+                logical_plan,
+            } => {
+                let input = self.insert_sql_plan(&logical_plan)?;
+                let sink = self.schema_provider.get_table(&sink_name).ok_or_else(|| {
+                    anyhow!("Could not find sink {} in schema provider", sink_name)
+                })?;
+                match sink {
+                    Table::SavedSource {
+                        name: _,
+                        id: _,
+                        fields: _,
+                        type_name: _,
+                        source_config: _,
+                        serialization_mode: _,
+                    } => bail!("can't insert into a saved source"),
+                    Table::SavedSink {
+                        name,
+                        id,
+                        sink_config,
+                    } => {
+                        let sql_operator = SqlOperator::Sink(
+                            name.clone(),
+                            SqlSink {
+                                id: Some(*id),
+                                struct_def: input.return_type(),
+                                sink_config: sink_config.clone(),
+                            },
+                            Box::new(input),
+                        );
+                        self.output_nodes.push(sql_operator);
+                    }
+                    Table::MemoryTable { name, fields } => {
+                        if self.planned_tables.contains_key(name) {
+                            bail!("can't insert into {} twice", name);
+                        }
+                        let input_struct = input.return_type();
+                        // insert into is done column-wise, and DataFusion will have already coerced all the types.
+                        let mapping = RecordTransform::ValueProjection(Projection {
+                            field_names: fields
+                                .iter()
+                                .map(|f| Column {
+                                    relation: None,
+                                    name: f.name.clone(),
+                                })
+                                .collect(),
+                            field_computations: input_struct
+                                .fields
+                                .iter()
+                                .map(|f| Expression::Column(ColumnExpression::new(f.clone())))
+                                .collect(),
+                        });
+                        self.planned_tables.insert(
+                            name.clone(),
+                            SqlOperator::RecordTransform(Box::new(input), mapping),
+                        );
+                    }
+                    Table::MemoryTableWithConnectionConfig {
+                        name,
+                        fields: _,
+                        connection,
+                        connection_config,
+                    } => {
+                        let sql_operator = SqlOperator::Sink(
+                            name.clone(),
+                            SqlSink::try_new(
+                                None,
+                                input.return_type(),
+                                connection.clone(),
+                                connection_config.clone(),
+                            )?,
+                            Box::new(input),
+                        );
+                        self.output_nodes.push(sql_operator);
+                    }
+                    Table::TableFromQuery {
+                        name: _,
+                        logical_plan: _,
+                    } => todo!(),
+                    Table::InsertQuery {
+                        sink_name: _,
+                        logical_plan: _,
+                    } => todo!(),
+                    Table::Anonymous { logical_plan: _ } => todo!(),
+                }
+            }
+            Table::Anonymous { logical_plan } => {
+                let operator = self.insert_sql_plan(&logical_plan)?;
+                self.output_nodes.push(operator);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1110,14 +1358,4 @@ impl MethodCompiler {
             return_type: arroyo_datastream::ExpressionReturnType::Record,
         })
     }
-}
-
-pub fn get_program_from_plan(
-    config: SqlConfig,
-    schema_provider: ArroyoSchemaProvider,
-    logical_plan: &LogicalPlan,
-) -> Result<(Program, Vec<SqlSource>)> {
-    let sql_operator = SqlPipelineBuilder::new(&schema_provider).insert_sql_plan(logical_plan)?;
-
-    get_program_from_operator_with_plan(config, sql_operator, schema_provider)
 }
