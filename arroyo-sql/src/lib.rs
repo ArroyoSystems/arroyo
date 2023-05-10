@@ -371,8 +371,7 @@ pub async fn parse_and_get_program(
             schema_provider: &mut schema_provider,
         };
         let outputs = sql_program_builder.plan_query(&query)?;
-        let mut sql_pipeline_builder =
-            SqlPipelineBuilder::new(sql_program_builder.schema_provider);
+        let mut sql_pipeline_builder = SqlPipelineBuilder::new(sql_program_builder.schema_provider);
         for output in outputs {
             sql_pipeline_builder.insert_table(output)?;
         }
@@ -415,7 +414,7 @@ impl<'a> SqlProgramBuilder<'a> {
     fn plan_query(&mut self, query: &str) -> Result<Vec<Table>> {
         let dialect = PostgreSqlDialect {};
         let mut outputs = Vec::new();
-        for statement in Parser::parse_sql(&dialect, query).unwrap() {
+        for statement in Parser::parse_sql(&dialect, query)? {
             let table = self.process_statement(statement)?;
             match table.name() {
                 Some(_) => self.schema_provider.insert_table(table),

@@ -1,13 +1,13 @@
-use bincode::{ config, Decode, Encode };
+use bincode::{config, Decode, Encode};
 use serde::ser::SerializeStruct;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
-use std::time::{ Duration, SystemTime, UNIX_EPOCH };
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
 pub struct Window {
@@ -16,7 +16,10 @@ pub struct Window {
 }
 
 impl Serialize for Window {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
         let mut state = serializer.serialize_struct("Window", 2)?;
 
         state.serialize_field("start", &to_millis(self.start_time))?;
@@ -96,9 +99,10 @@ impl DatabaseConfig {
         DatabaseConfig {
             name: env::var(DATABASE_NAME_ENV).unwrap_or_else(|_| "arroyo".to_string()),
             host: env::var(DATABASE_HOST_ENV).unwrap_or_else(|_| "localhost".to_string()),
-            port: u16
-                ::from_str(&env::var(DATABASE_PORT_ENV).unwrap_or_else(|_| "5432".to_string()))
-                .unwrap_or(5432),
+            port: u16::from_str(
+                &env::var(DATABASE_PORT_ENV).unwrap_or_else(|_| "5432".to_string()),
+            )
+            .unwrap_or(5432),
             user: env::var(DATABASE_USER_ENV).unwrap_or_else(|_| "arroyo".to_string()),
             password: env::var(DATABASE_PASSWORD_ENV).unwrap_or_else(|_| "arroyo".to_string()),
         }
@@ -142,8 +146,7 @@ pub struct WorkerId(pub u64);
 
 impl WorkerId {
     pub fn from_env() -> Option<WorkerId> {
-        std::env
-            ::var(WORKER_ID_ENV)
+        std::env::var(WORKER_ID_ENV)
             .map(|s| u64::from_str(&s).unwrap())
             .ok()
             .map(WorkerId)
@@ -156,10 +159,9 @@ pub struct NodeId(pub u64);
 impl NodeId {
     pub fn from_env() -> NodeId {
         NodeId(
-            std::env
-                ::var(NODE_ID_ENV)
+            std::env::var(NODE_ID_ENV)
                 .map(|s| u64::from_str(&s).unwrap())
-                .unwrap_or_else(|_| panic!("{} not set", NODE_ID_ENV))
+                .unwrap_or_else(|_| panic!("{} not set", NODE_ID_ENV)),
         )
     }
 }
@@ -301,7 +303,7 @@ pub struct RawJson {
 }
 
 pub mod nexmark {
-    use bincode::{ Decode, Encode };
+    use bincode::{Decode, Encode};
 
     #[derive(
         Debug,
@@ -314,7 +316,7 @@ pub mod nexmark {
         PartialOrd,
         Ord,
         serde::Serialize,
-        serde::Deserialize
+        serde::Deserialize,
     )]
     pub struct Person {
         pub id: i64,
@@ -338,7 +340,7 @@ pub mod nexmark {
         PartialOrd,
         Ord,
         serde::Serialize,
-        serde::Deserialize
+        serde::Deserialize,
     )]
     pub struct Auction {
         pub id: i64,
@@ -364,7 +366,7 @@ pub mod nexmark {
         PartialOrd,
         Ord,
         serde::Serialize,
-        serde::Deserialize
+        serde::Deserialize,
     )]
     pub struct Bid {
         pub auction: i64,
@@ -388,7 +390,7 @@ pub mod nexmark {
         PartialOrd,
         Ord,
         serde::Serialize,
-        serde::Deserialize
+        serde::Deserialize,
     )]
     pub struct Event {
         pub person: Option<Person>,

@@ -252,7 +252,7 @@ pub(crate) async fn create_pipeline<'a>(
         for node in program.graph.node_weights_mut() {
             // if it is a kafka sink or file sink, switch to null
             if let Operator::KafkaSink { .. } | Operator::FileSink { .. } = node.operator {
-                node.operator = Operator::NullSink;
+                node.operator = Operator::GrpcSink;
             }
         }
     } else if compute_parallelism {

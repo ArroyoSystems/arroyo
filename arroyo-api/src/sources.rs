@@ -452,12 +452,10 @@ impl Source {
     // TODO: pass down restriction on kafka source QPS from auth.
     pub(crate) fn register(&self, provider: &mut ArroyoSchemaProvider, _auth: &AuthData) {
         let type_name = match &self.schema.format {
-            SourceFormat::Native(native_name) => {
-                match native_name.as_str() {
-                    "nexmark" => Some("arroyo_types::nexmark::Event".to_string()),
-                    "impulse" => Some("arroyo_types::ImpulseEvent".to_string()),
-                    _ => None,
-                }
+            SourceFormat::Native(native_name) => match native_name.as_str() {
+                "nexmark" => Some("arroyo_types::nexmark::Event".to_string()),
+                "impulse" => Some("arroyo_types::ImpulseEvent".to_string()),
+                _ => None,
             },
             SourceFormat::JsonFields => None,
             SourceFormat::JsonSchema(_) => {
@@ -476,7 +474,7 @@ impl Source {
         if let Some(defs) = defs {
             provider.add_defs(&self.name, defs);
         }
-        
+
         provider.add_saved_source_with_type(
             self.id,
             self.name.clone(),
@@ -603,7 +601,7 @@ pub(crate) async fn create_source(
                     Some(connection.id),
                 )
             }
-            create_source_req::TypeOneof::EventSource(event) => ( 
+            create_source_req::TypeOneof::EventSource(event) => (
                 public::SourceType::event_source,
                 serde_json::to_value(&event).unwrap(),
                 None,
@@ -709,7 +707,7 @@ pub(crate) async fn get_sources<E: GenericClient>(
                         topic: config.topic,
                     })
                 }
-                public::SourceType::event_source => SourceType::EventSource( 
+                public::SourceType::event_source => SourceType::EventSource(
                     serde_json::from_value(rec.source_config.unwrap()).unwrap(),
                 ),
             };

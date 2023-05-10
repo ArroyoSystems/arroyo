@@ -182,6 +182,7 @@ pub async fn main() {
                     sink: Some(arroyo_rpc::grpc::api::create_sql_job::Sink::Builtin(
                         BuiltinSink::Web as i32,
                     )),
+                    preview: false,
                 },
             )),
         })
