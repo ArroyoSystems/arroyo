@@ -1,0 +1,146 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use anyhow::anyhow;
+use anyhow::bail;
+use anyhow::Result;
+use arroyo_datastream::auth_config_to_hashmap;
+use arroyo_datastream::Operator;
+use arroyo_datastream::SerializationMode;
+use arroyo_datastream::SinkConfig;
+use arroyo_datastream::SourceConfig;
+use arroyo_datastream::{ImpulseSpec, OffsetMode};
+use arroyo_rpc::grpc::api::connection::ConnectionType;
+use arroyo_rpc::grpc::api::Connection;
+
+use crate::types::StructDef;
+use crate::SqlConfig;
+
+#[derive(Clone, Debug)]
+pub struct SqlSource {
+    pub id: Option<i64>,
+    pub struct_def: StructDef,
+    pub source_config: SourceConfig,
+    pub serialization_mode: SerializationMode,
+}
+
+impl SqlSource {
+    pub(crate) fn get_operator(&self, sql_config: &SqlConfig) -> Operator {
+        match self.source_config.clone() {
+            SourceConfig::Kafka {
+                bootstrap_servers,
+                topic,
+                client_configs,
+            } => Operator::KafkaSource {
+                topic,
+                bootstrap_servers: vec![bootstrap_servers],
+                offset_mode: OffsetMode::Latest,
+                kafka_input_format: self.serialization_mode,
+                messages_per_second: sql_config.kafka_qps.unwrap_or(10_000),
+                client_configs,
+            },
+            SourceConfig::Impulse {
+                interval,
+                events_per_second,
+                total_events,
+            } => Operator::ImpulseSource {
+                start_time: SystemTime::now(),
+                spec: interval
+                    .map(ImpulseSpec::Delay)
+                    .unwrap_or(ImpulseSpec::EventsPerSecond(events_per_second)),
+                total_events,
+            },
+            SourceConfig::FileSource {
+                directory: _,
+                interval: _,
+            } => unimplemented!("file source not exposed in SQL"),
+            SourceConfig::NexmarkSource {
+                event_rate,
+                runtime,
+            } => Operator::NexmarkSource {
+                first_event_rate: event_rate,
+                num_events: runtime.map(|runtime| event_rate * runtime.as_secs()),
+            },
+            SourceConfig::EventSourceSource {
+                url,
+                headers,
+                events,
+            } => Operator::EventSourceSource {
+                url,
+                headers,
+                events,
+                serialization_mode: self.serialization_mode,
+            },
+        }
+    }
+
+    pub fn try_new(
+        id: Option<i64>,
+        struct_def: StructDef,
+        connection: Connection,
+        connection_config: &HashMap<String, String>,
+    ) -> Result<Self> {
+        let Some(ConnectionType::Kafka(kafka_config)) = connection.connection_type else {
+            bail!("Only Kafka sources are supported")
+        };
+        let topic = connection_config
+            .get("topic")
+            .cloned()
+            .ok_or_else(|| anyhow!("Missing topic"))?;
+        let serialization_mode = SerializationMode::from_config_value(
+            connection_config
+                .get("serialization_mode")
+                .map(|x| x.as_str()),
+        );
+        Ok(SqlSource {
+            id,
+            struct_def,
+            source_config: SourceConfig::Kafka {
+                topic,
+                bootstrap_servers: kafka_config.bootstrap_servers,
+                client_configs: auth_config_to_hashmap(kafka_config.auth_config),
+            },
+            serialization_mode,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SqlSink {
+    pub id: Option<i64>,
+    pub struct_def: StructDef,
+    pub sink_config: SinkConfig,
+}
+
+impl SqlSink {
+    pub fn try_new(
+        id: Option<i64>,
+        struct_def: StructDef,
+        connection: Connection,
+        connection_config: HashMap<String, String>,
+    ) -> Result<Self> {
+        let Some(ConnectionType::Kafka(kafka_config)) = connection.connection_type else {
+            bail!("Only Kafka sinks are supported")
+        };
+        let topic = Arc::new(connection_config)
+            .get("topic")
+            .cloned()
+            .ok_or_else(|| anyhow!("Missing topic"))?;
+        Ok(SqlSink {
+            id,
+            struct_def,
+            sink_config: SinkConfig::Kafka {
+                topic,
+                bootstrap_servers: kafka_config.bootstrap_servers,
+                client_configs: auth_config_to_hashmap(kafka_config.auth_config),
+            },
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SqlTable {
+    pub struct_def: StructDef,
+    pub name: String,
+}

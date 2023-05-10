@@ -232,6 +232,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
               query: query,
               udfs: [ new CreateUdf({ language: UdfLanguage.Rust, definition: udfs })],
               sink: { case: "builtin", value: BuiltinSink.Web },
+              preview: true,
             }),
           },
         })

@@ -1,5 +1,5 @@
 use anyhow::Context;
-use arroyo_datastream::{auth_config_to_hashmap, Operator, Program};
+use arroyo_datastream::{auth_config_to_hashmap, Operator, Program, SinkConfig};
 use arroyo_rpc::grpc::api::create_sql_job::Sink;
 use arroyo_rpc::grpc::api::sink::SinkType;
 use arroyo_rpc::grpc::api::{
@@ -67,9 +67,9 @@ where
 
     let sink = match sql.sink.as_ref().ok_or_else(|| required_field("sink"))? {
         Sink::Builtin(builtin) => match BuiltinSink::from_i32(*builtin).unwrap() {
-            BuiltinSink::Null => Operator::NullSink,
-            BuiltinSink::Web => Operator::GrpcSink,
-            BuiltinSink::Log => Operator::ConsoleSink,
+            BuiltinSink::Null => SinkConfig::Null,
+            BuiltinSink::Web => SinkConfig::Grpc,
+            BuiltinSink::Log => SinkConfig::Console,
         },
         Sink::User(name) => {
             let sink = sinks.into_iter().find(|s| s.name == *name).ok_or_else(|| {
@@ -85,13 +85,9 @@ where
                     let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
                         panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
                     };
-                    Operator::KafkaSink {
+                    SinkConfig::Kafka {
+                        bootstrap_servers: kafka.bootstrap_servers.clone(),
                         topic: k.topic,
-                        bootstrap_servers: kafka
-                            .bootstrap_servers
-                            .split(',')
-                            .map(|t| t.to_string())
-                            .collect(),
                         client_configs: auth_config_to_hashmap(kafka.auth_config),
                     }
                 }
@@ -105,6 +101,7 @@ where
         SqlConfig {
             default_parallelism: sql.parallelism as usize,
             sink,
+            kafka_qps: Some(auth_data.org_metadata.kafka_qps),
         },
     )
     .await
@@ -114,11 +111,7 @@ where
         Status::invalid_argument(format!("{}", err.root_cause()))
     })?;
 
-    Ok((
-        program,
-        sources.into_iter().filter_map(|s| s.id).collect(),
-        used_sink_ids,
-    ))
+    Ok((program, sources, used_sink_ids))
 }
 
 fn set_parallelism(program: &mut Program, parallelism: usize) {
@@ -189,6 +182,7 @@ pub(crate) async fn create_pipeline<'a>(
     let text;
     let compute_parallelism;
     let udfs: Option<Vec<Udf>>;
+    let is_preview;
 
     match req.config.ok_or_else(|| required_field("config"))? {
         create_pipeline_req::Config::Program(bytes) => {
@@ -207,6 +201,7 @@ pub(crate) async fn create_pipeline<'a>(
             text = None;
             udfs = None;
             compute_parallelism = false;
+            is_preview = false;
         }
         create_pipeline_req::Config::Sql(sql) => {
             if sql.parallelism > auth.org_metadata.max_parallelism as u64 {
@@ -230,6 +225,7 @@ pub(crate) async fn create_pipeline<'a>(
                     .collect(),
             );
             compute_parallelism = sql.parallelism == 0;
+            is_preview = sql.preview;
         }
     };
 
@@ -251,10 +247,14 @@ pub(crate) async fn create_pipeline<'a>(
         )));
     }
 
-    // TODO: this is very hacky
-    let is_preview = req.name.starts_with("preview");
     if is_preview {
         set_parallelism(&mut program, 1);
+        for node in program.graph.node_weights_mut() {
+            // if it is a kafka sink or file sink, switch to null
+            if let Operator::KafkaSink { .. } | Operator::FileSink { .. } = node.operator {
+                node.operator = Operator::NullSink;
+            }
+        }
     } else if compute_parallelism {
         set_default_parallelism(&auth, &mut program).await?;
     }
@@ -366,6 +366,7 @@ pub(crate) async fn sql_graph(
         parallelism: 1,
         udfs: req.udfs,
         sink: Some(Sink::Builtin(BuiltinSink::Null as i32)),
+        preview: false,
     };
 
     match compile_sql(&sql, &auth, client).await {

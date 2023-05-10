@@ -17,6 +17,7 @@ use arroyo_rpc::grpc::api::create_pipeline_req::Config;
 use arroyo_rpc::grpc::api::impulse_source::Spec;
 use arroyo_rpc::grpc::api::kafka_auth_config::AuthType;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
+use arroyo_rpc::grpc::api::source_def::SourceType;
 use arroyo_rpc::grpc::api::{
     self as GrpcApi, ExpressionAggregator, Flatten, KafkaAuthConfig, ProgramEdge,
 };
@@ -237,7 +238,7 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-#[derive(Clone, Copy, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Encode, Debug, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SerializationMode {
     Json,
     // https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#wire-format
@@ -250,6 +251,14 @@ impl SerializationMode {
             Self::JsonSchemaRegistry
         } else {
             Self::Json
+        }
+    }
+    pub fn from_config_value(config_value: Option<&str>) -> Self {
+        match config_value {
+            Some("json") => Self::Json,
+            Some("json_schema_registry") => Self::JsonSchemaRegistry,
+            Some("raw_json") => Self::RawJson,
+            _ => Self::Json,
         }
     }
 }
@@ -359,6 +368,94 @@ pub enum Operator {
         left_expiration: Duration,
         right_expiration: Duration,
     },
+}
+
+#[derive(Clone, Debug)]
+pub enum SourceConfig {
+    Kafka {
+        bootstrap_servers: String,
+        topic: String,
+        client_configs: HashMap<String, String>,
+    },
+    Impulse {
+        interval: Option<Duration>,
+        events_per_second: f32,
+        total_events: Option<usize>,
+    },
+    FileSource {
+        directory: String,
+        interval: Duration,
+    },
+    NexmarkSource {
+        event_rate: u64,
+        runtime: Option<Duration>,
+    },
+    EventSourceSource {
+        url: String,
+        headers: HashMap<String, String>,
+        events: Vec<String>,
+    },
+}
+
+impl From<SourceType> for SourceConfig {
+    fn from(value: SourceType) -> Self {
+        match value {
+            SourceType::Kafka(kafka) => {
+                let Some(connection) = kafka.connection else {panic!("require a connection on a KafkaSourceDef")};
+                SourceConfig::Kafka {
+                    bootstrap_servers: connection.bootstrap_servers,
+                    topic: kafka.topic,
+                    client_configs: auth_config_to_hashmap(connection.auth_config),
+                }
+            }
+            SourceType::Impulse(impulse) => SourceConfig::Impulse {
+                interval: impulse
+                    .interval_micros
+                    .map(|ms| Duration::from_micros(ms.into())),
+                events_per_second: impulse.events_per_second,
+                total_events: impulse.total_messages.map(|t| t as usize),
+            },
+            SourceType::File(file) => SourceConfig::FileSource {
+                directory: file.directory,
+                interval: Duration::from_millis(file.interval_ms as u64),
+            },
+            SourceType::Nexmark(nexmark) => SourceConfig::NexmarkSource {
+                event_rate: nexmark.events_per_second.into(),
+                runtime: nexmark.runtime_micros.map(Duration::from_micros),
+            },
+            SourceType::EventSource(event) => SourceConfig::EventSourceSource {
+                url: event.url,
+                headers: event
+                    .headers
+                    .split(',')
+                    .filter_map(|s| {
+                        let mut kv = s.trim().split(':');
+                        Some((kv.next()?.trim().to_string(), kv.next()?.trim().to_string()))
+                    })
+                    .collect(),
+                events: event
+                    .events
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .collect(),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum SinkConfig {
+    Kafka {
+        bootstrap_servers: String,
+        topic: String,
+        client_configs: HashMap<String, String>,
+    },
+    Console,
+    File {
+        directory: String,
+    },
+    Grpc,
+    Null,
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
