@@ -1715,7 +1715,7 @@ export class EventSourceSource extends Message<EventSourceSource> {
     proto3.util.initPartial(data, this);
   }
 
-  static readonly runtime = proto3;
+  static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "arroyo_api.EventSourceSource";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "url", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -3728,6 +3728,11 @@ export class SubtaskMetrics extends Message<SubtaskMetrics> {
    */
   messagesSent: Metric[] = [];
 
+  /**
+   * @generated from field: repeated arroyo_api.Metric backpressure = 5;
+   */
+  backpressure: Metric[] = [];
+
   constructor(data?: PartialMessage<SubtaskMetrics>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3740,6 +3745,7 @@ export class SubtaskMetrics extends Message<SubtaskMetrics> {
     { no: 2, name: "bytes_sent", kind: "message", T: Metric, repeated: true },
     { no: 3, name: "messages_recv", kind: "message", T: Metric, repeated: true },
     { no: 4, name: "messages_sent", kind: "message", T: Metric, repeated: true },
+    { no: 5, name: "backpressure", kind: "message", T: Metric, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SubtaskMetrics {
@@ -4956,7 +4962,7 @@ export class EventSourceSourceConfig extends Message<EventSourceSourceConfig> {
     proto3.util.initPartial(data, this);
   }
 
-  static readonly runtime = proto3;
+  static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "arroyo_api.EventSourceSourceConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "url", kind: "scalar", T: 9 /* ScalarType.STRING */ },

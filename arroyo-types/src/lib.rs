@@ -427,6 +427,8 @@ pub static MESSAGES_RECV: &str = "arroyo_worker_messages_recv";
 pub static MESSAGES_SENT: &str = "arroyo_worker_messages_sent";
 pub static BYTES_RECV: &str = "arroyo_worker_bytes_recv";
 pub static BYTES_SENT: &str = "arroyo_worker_bytes_sent";
+pub static TX_QUEUE_SIZE: &str = "arroyo_worker_tx_queue_size";
+pub static TX_QUEUE_REM: &str = "arroyo_worker_tx_queue_rem";
 
 #[derive(Debug, Copy, Clone, Encode, Decode)]
 pub struct CheckpointBarrier {

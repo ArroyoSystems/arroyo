@@ -503,6 +503,7 @@ message SubtaskMetrics {
   repeated Metric bytes_sent = 2;
   repeated Metric messages_recv = 3;
   repeated Metric messages_sent = 4;
+  repeated Metric backpressure = 5;
 }
 
 message JobMetricsReq {
