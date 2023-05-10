@@ -389,14 +389,14 @@ impl TryFrom<SchemaField> for SourceField {
         let sql_name = match value.typ {
             SchemaFieldType::Primitive(p) => Some(String::from(primitive_to_sql(&p))),
             SchemaFieldType::Struct(..) => None,
-            SchemaFieldType::NamedStruct(..) => None
+            SchemaFieldType::NamedStruct(..) => None,
         };
 
         Ok(SourceField {
             field_name: value.name,
             field_type: Some(api::SourceFieldType {
                 r#type: Some(typ),
-                sql_name
+                sql_name,
             }),
             nullable: value.nullable,
         })

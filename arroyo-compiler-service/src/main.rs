@@ -169,10 +169,15 @@ pub struct CompileService {
 impl CompileService {
     async fn get_output(&self) -> io::Result<Output> {
         if self.debug {
+            let args = if std::env::var("VERBOSE").is_ok() {
+                vec!["build", "--verbose"]
+            } else {
+                vec!["build"]
+            };
+
             Command::new("cargo")
                 .current_dir(&self.build_dir)
-                .arg("build")
-                .arg("--verbose")
+                .args(&args)
                 .output()
                 .await
         } else {
@@ -226,7 +231,7 @@ impl CompileService {
                 .current_dir(&build_dir.join("wasm-fns"))
                 .output()
                 .await
-                .unwrap();
+                .expect("wasm-pack not found -- install with `cargo install wasm-pack`");
 
             if !result.status.success() {
                 return Err(io::Error::new(

@@ -55,6 +55,7 @@ jobs:
           wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-x86_64.zip
           unzip protoc*.zip
           sudo mv bin/protoc /usr/local/bin
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Install Kafka
         run: |
           wget --progress=dot --show-progress https://downloads.apache.org/kafka/3.2.3/kafka_2.12-3.2.3.tgz
@@ -63,9 +64,13 @@ jobs:
           kafka_*/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/kraft/server.properties
           kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/kraft/server.properties
       - name: Build
-        run: cargo build --release --all-features
+        run: cargo build --all-features
       - name: Test
-        run: cargo nextest run --release
+        run: cargo nextest run
+      - name: Integ
+        run: |
+          mkdir /tmp/arroyo-integ
+          OUTPUT_DIR=/tmp/arroyo-integ DEBUG=true target/debug/integ
   build-console:
     runs-on: ubuntu-latest
     steps:
