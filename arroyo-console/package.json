@@ -33,7 +33,9 @@
     "metrics-graphics": "3.0.0-beta1",
     "monaco-editor": "^0.34.1",
     "monaco-sql-languages": "^0.9.5",
+    "msw": "^1.2.1",
     "prop-types": "^15.8.1",
+    "protobufjs": "^7.2.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-icons": "^4.8.0",
@@ -57,5 +59,8 @@
     "prettier": "^2.8.7",
     "typescript": "^4.9.5",
     "vite": "^4.2.1"
+  },
+  "msw": {
+    "workerDirectory": "public"
   }
 }

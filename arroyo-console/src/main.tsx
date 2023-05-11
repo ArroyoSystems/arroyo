@@ -18,9 +18,10 @@ import { Connections } from './routes/connections/Connections';
 import { ConnectionEditor } from './routes/connections/CreateConnection';
 import { CreatePipeline } from './routes/pipelines/CreatePipeline';
 import { SinkEditor } from './routes/sinks/CreateSink';
-
 import { addCloudRoutes, createRoot, getClient, needsOrgSetup } from './lib/CloudComponents';
 import PageNotFound from './routes/not_found/PageNotFound';
+import { setupWorker } from 'msw';
+import { handlers } from './mocks/handlers';
 
 export type ApiClient = () => Promise<PromiseClient<typeof ApiGrpc>>;
 
@@ -105,6 +106,11 @@ const theme = extendTheme(proTheme, {
   colors: { ...proTheme.colors, brand: proTheme.colors.blue },
   config: config,
 });
+
+if (process.env.NODE_ENV === 'development') {
+  const worker = setupWorker(...handlers);
+  worker.start();
+}
 
 const rootElement = document.getElementById('root');
 createRoot(rootElement!, theme);
