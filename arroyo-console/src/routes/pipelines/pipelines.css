@@ -17,11 +17,10 @@
   border-width: 1px;
   border-style: solid;
   border-color: #1a192b;
-  background-color: white;
 }
 
 .pipelineGraph .pipelineGraphNode.active {
-  background-color: rgb(149, 243, 220);
+  font-weight: bold;
 }
 
 .pipelineInfo {
@@ -39,7 +38,7 @@
 }
 
 .pipelineInfo .fieldName {
-  width: 90px;
+  width: 130px;
   font-weight: bold;
   text-transform: lowercase;
 }

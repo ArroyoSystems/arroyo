@@ -2,7 +2,8 @@ import { Box, Text } from '@chakra-ui/react';
 import dagre from 'dagre';
 import { useMemo } from 'react';
 import ReactFlow, { Handle, Position, Background } from 'reactflow';
-import { JobNode, JobGraph } from '../../gen/api_pb';
+import { JobNode, JobGraph, JobMetricsResp } from '../../gen/api_pb';
+import { getBackpressureColor, getOperatorBackpressure } from '../../lib/util';
 
 function PipelineGraphNode({
   data,
@@ -11,6 +12,7 @@ function PipelineGraphNode({
     node: JobNode;
     setActiveOperator: (op: string) => void;
     isActive: boolean;
+    operatorBackpressure: number;
   };
 }) {
   function handleClick(click: any) {
@@ -23,7 +25,11 @@ function PipelineGraphNode({
   }
 
   return (
-    <Box className={className} onClick={handleClick}>
+    <Box
+      bg={getBackpressureColor(data.operatorBackpressure)}
+      className={className}
+      onClick={handleClick}
+    >
       <Handle type="target" position={Position.Top} />
       <Text userSelect="none" pointerEvents="none">
         {data.node.operator}
@@ -35,10 +41,12 @@ function PipelineGraphNode({
 
 export function PipelineGraph({
   graph,
+  metrics,
   setActiveOperator,
   activeOperator,
 }: {
   graph: JobGraph;
+  metrics?: JobMetricsResp;
   setActiveOperator: (op: string) => void;
   activeOperator?: string;
 }) {
@@ -53,6 +61,7 @@ export function PipelineGraph({
         node: node,
         setActiveOperator: setActiveOperator,
         isActive: node.nodeId == activeOperator,
+        operatorBackpressure: getOperatorBackpressure(metrics, node.nodeId),
       },
       position: {
         x: 0,

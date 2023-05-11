@@ -59,6 +59,7 @@ import { ApiClient } from '../../main';
 import { PipelineOutputs } from './JobOutputs';
 import { CodeEditor } from './SqlEditor';
 import PipelineConfigModal from './PipelineConfigModal';
+import { getOperatorBackpressure } from '../../lib/util';
 
 interface JobDetailState {
   pipeline?: JobDetailsResp;
@@ -221,6 +222,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
               <Box flex="1">
                 <PipelineGraph
                   graph={state.pipeline?.jobGraph}
+                  metrics={metrics.metrics}
                   setActiveOperator={setActiveOperator}
                   activeOperator={activeOperator}
                 />
@@ -357,6 +359,17 @@ function OperatorDetail({
     const node = graph.nodes.find(n => n.nodeId == operator_id);
     const node_metrics = metrics.metrics[operator_id];
 
+    const backpressure = getOperatorBackpressure(metrics, operator_id);
+
+    let backpressureBadge;
+    if (backpressure < 0.33) {
+      backpressureBadge = <Badge colorScheme={'green'}>LOW</Badge>;
+    } else if (backpressure < 0.66) {
+      backpressureBadge = <Badge colorScheme={'yellow'}>MEDIUM</Badge>;
+    } else {
+      backpressureBadge = <Badge colorScheme={'red'}>HIGH</Badge>;
+    }
+
     let msgRecv = 0;
     let msgSent = 0;
     let msgSentData;
@@ -400,6 +413,7 @@ function OperatorDetail({
             {node?.parallelism}
           </Box>
         </HStack>
+        <Box marginTop="10px">Backpressure: {backpressureBadge}</Box>
         <Box marginTop="10px">{node?.operator}</Box>
         <Box marginTop="10px" fontFamily="monaco,ubuntu mono,fixed-width">
           <Code>{Math.round(msgRecv)} eps</Code> rx
