@@ -29,8 +29,6 @@ export interface PipelineConfigModalProps {
   updateJobParallelism: (parallelism: number) => void;
 }
 
-const MAX_PARALLELISM = 10;
-
 const PipelineConfigModal: React.FC<PipelineConfigModalProps> = ({
   isOpen,
   parallelism,
@@ -71,7 +69,6 @@ const PipelineConfigModal: React.FC<PipelineConfigModalProps> = ({
     <NumberInput
       isRequired
       min={1}
-      max={MAX_PARALLELISM}
       value={parallelismInputValue ?? ""}
       onChange={(valueAsString, valueAsNumber) => {
         if (isNaN(valueAsNumber)) {
@@ -104,7 +101,7 @@ const PipelineConfigModal: React.FC<PipelineConfigModalProps> = ({
     <FormControl isRequired isInvalid={parallelismHasError}>
       <FormLabel>Parallelism</FormLabel>
       {parallelismInput}
-      <FormHelperText>Number of parallel substacks for each node (maximum 10)</FormHelperText>
+      <FormHelperText>Number of parallel substacks for each node</FormHelperText>
       <FormErrorMessage>{parallelismErrorText}</FormErrorMessage>
     </FormControl>
   );

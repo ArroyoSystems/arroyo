@@ -35,15 +35,16 @@ impl NomadScheduler {
         }
     }
 
-    async fn stop_worker(
-        &self,
-        job_id: &str,
-        worker_id: WorkerId,
-        _force: bool,
-    ) -> anyhow::Result<()> {
+    async fn stop_worker(&self, job_id: &str, job: Value, _force: bool) -> anyhow::Result<()> {
+        let name = job
+            .pointer("/Name")
+            .ok_or_else(|| anyhow::anyhow!("Couldn't find name for nomad job"))?
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Nomad job name is not string"))?;
+
         let resp = self
             .client
-            .delete(format!("{}/v1/job/{}-{}", self.base, job_id, worker_id.0))
+            .delete(format!("{}/v1/job/{}", self.base, name))
             .send()
             .await?;
 
@@ -51,12 +52,54 @@ impl NomadScheduler {
             warn!(
                 message = "failed to stop worker",
                 job_id = job_id,
-                worker_id = worker_id.0,
+                nomad_job = name,
                 status = resp.status().as_u16()
             );
         }
 
         Ok(())
+    }
+
+    async fn nomad_jobs_for_job(
+        &self,
+        job_id: &str,
+        run_id: Option<i64>,
+    ) -> anyhow::Result<Vec<Value>> {
+        let prefix = if let Some(run_id) = run_id {
+            format!("{}-{}-", job_id, run_id)
+        } else {
+            format!("{}-", job_id)
+        };
+
+        let resp: Value = self
+            .client
+            // TODO: use the filter API instead
+            .get(format!("{}/v1/jobs?meta=true&prefix={}", self.base, prefix))
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        let jobs = resp
+            .as_array()
+            .ok_or(anyhow::anyhow!("invalid response from nomad api"))?;
+
+        let mut workers = vec![];
+
+        for job in jobs {
+            if job
+                .get("Status")
+                .ok_or(anyhow::anyhow!("missing status"))?
+                .as_str()
+                == Some("dead")
+            {
+                continue;
+            }
+
+            workers.push(job.clone());
+        }
+
+        Ok(workers)
     }
 }
 
@@ -104,7 +147,7 @@ impl Scheduler for NomadScheduler {
                     "Meta": {
                         "job_id": start_pipeline_req.job_id,
                         "worker_id": worker_id.to_string(),
-                        "run_id": start_pipeline_req.run_id,
+                        "run_id": start_pipeline_req.run_id.to_string(),
                         "job_name": start_pipeline_req.name,
                         "job_hash": start_pipeline_req.hash,
                     },
@@ -171,25 +214,7 @@ impl Scheduler for NomadScheduler {
         job_id: &str,
         run_id: Option<i64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
-        let prefix = if let Some(run_id) = run_id {
-            format!("{}-{}-", job_id, run_id)
-        } else {
-            format!("{}-", job_id)
-        };
-
-        let resp: Value = self
-            .client
-            // TODO: use the filter API instead
-            .get(format!("{}/v1/jobs?meta=true&prefix={}", self.base, prefix))
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        let jobs = resp
-            .as_array()
-            .ok_or(anyhow::anyhow!("invalid response from nomad api"))?;
-
+        let jobs = self.nomad_jobs_for_job(job_id, run_id).await?;
         let mut workers = vec![];
 
         for job in jobs {
@@ -238,10 +263,10 @@ impl Scheduler for NomadScheduler {
         info!(message = "stopping workers", job_id = job_id,);
 
         let futures = self
-            .workers_for_job(job_id, run_id)
+            .nomad_jobs_for_job(job_id, run_id)
             .await?
-            .iter()
-            .map(|worker| self.stop_worker(job_id, *worker, force))
+            .into_iter()
+            .map(|worker| self.stop_worker(job_id, worker, force))
             .collect::<Vec<_>>();
 
         for future in futures {
