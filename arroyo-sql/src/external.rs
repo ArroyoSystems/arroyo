@@ -13,6 +13,7 @@ use arroyo_datastream::SourceConfig;
 use arroyo_datastream::{ImpulseSpec, OffsetMode};
 use arroyo_rpc::grpc::api::connection::ConnectionType;
 use arroyo_rpc::grpc::api::Connection;
+use arroyo_types::string_to_map;
 
 use crate::types::StructDef;
 use crate::SqlConfig;
@@ -81,28 +82,58 @@ impl SqlSource {
         connection: Connection,
         connection_config: &HashMap<String, String>,
     ) -> Result<Self> {
-        let Some(ConnectionType::Kafka(kafka_config)) = connection.connection_type else {
-            bail!("Only Kafka sources are supported")
-        };
-        let topic = connection_config
-            .get("topic")
-            .cloned()
-            .ok_or_else(|| anyhow!("Missing topic"))?;
         let serialization_mode = SerializationMode::from_config_value(
             connection_config
                 .get("serialization_mode")
                 .map(|x| x.as_str()),
         );
-        Ok(SqlSource {
-            id,
-            struct_def,
-            source_config: SourceConfig::Kafka {
-                topic,
-                bootstrap_servers: kafka_config.bootstrap_servers,
-                client_configs: auth_config_to_hashmap(kafka_config.auth_config),
-            },
-            serialization_mode,
-        })
+
+        match connection.connection_type.unwrap() {
+            ConnectionType::Kafka(kafka) => {
+                let topic = connection_config
+                    .get("topic")
+                    .cloned()
+                    .ok_or_else(|| anyhow!("Missing topic"))?;
+                Ok(SqlSource {
+                    id,
+                    struct_def,
+                    source_config: SourceConfig::Kafka {
+                        topic,
+                        bootstrap_servers: kafka.bootstrap_servers,
+                        client_configs: auth_config_to_hashmap(kafka.auth_config),
+                    },
+                    serialization_mode,
+                })
+            }
+            ConnectionType::Kinesis(_) => {
+                bail!("Kinesis connections are not yet supported")
+            }
+            ConnectionType::Http(http) => {
+                let mut path = connection_config.get("path").cloned().unwrap_or_default();
+
+                if path != "" && !path.starts_with("/") {
+                    path = format!("/{}", path);
+                }
+
+                let events = connection_config
+                    .get("events")
+                    .map(|e| e.split(",").map(|t| t.to_string()).collect())
+                    .unwrap_or_default();
+
+                Ok(SqlSource {
+                    id,
+                    struct_def,
+                    source_config: SourceConfig::EventSourceSource {
+                        url: http.url + &path,
+                        headers: string_to_map(&http.headers)
+                            .ok_or_else(|| anyhow!("Headers are invalid, expected a comma-delimited set of
+                                header/value pairs, like `Content-Type: applicaiton/json,User-Agent:arroyo`"))?,
+                        events,
+                    },
+                    serialization_mode
+                })
+            }
+        }
     }
 }
 

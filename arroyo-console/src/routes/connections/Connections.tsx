@@ -23,7 +23,7 @@ import {
   CloseButton,
 } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
-import { FaStream } from 'react-icons/fa';
+import { FaGlobeAmericas, FaStream } from 'react-icons/fa';
 import { FiXCircle } from 'react-icons/fi';
 import { SiApachekafka } from 'react-icons/si';
 import { useLinkClickHandler } from 'react-router-dom';
@@ -42,6 +42,7 @@ interface ColumnDef {
 const icons = {
   kafka: SiApachekafka,
   kinesis: FaStream,
+  http: FaGlobeAmericas,
 };
 
 const columns: Array<ColumnDef> = [
