@@ -58,11 +58,12 @@ impl Projection {
         StructDef { name: None, fields }
     }
     pub fn to_truncated_syn_expression(&self, terms: usize) -> syn::Expr {
+        println!("self: {:?}, terms{:?}", self, terms);
         let assignments: Vec<_> = self
             .field_computations
             .iter()
-            .take(terms)
             .enumerate()
+            .skip(self.field_computations.len() - terms)
             .map(|(i, field)| {
                 let field_name = self.field_names[i].clone();
                 let name = field_name.name;
@@ -91,8 +92,8 @@ impl Projection {
         let fields = self
             .field_computations
             .iter()
-            .take(terms)
             .enumerate()
+            .skip(self.field_computations.len() - terms)
             .map(|(i, computation)| {
                 let field_name = self.field_names[i].clone();
                 let field_type = computation.return_type();

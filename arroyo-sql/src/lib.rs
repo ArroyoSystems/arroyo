@@ -21,12 +21,13 @@ pub mod types;
 
 use datafusion::prelude::create_udf;
 
-use datafusion::sql::planner::SqlToRel;
+use datafusion::sql::planner::{PlannerContext, SqlToRel};
 use datafusion::sql::sqlparser::ast::{ColumnOption, Statement, Value};
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
 use datafusion::sql::{planner::ContextProvider, TableReference};
 use datafusion_common::config::ConfigOptions;
+use datafusion_common::{DFField, DFSchema};
 
 use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
@@ -427,6 +428,7 @@ impl<'a> SqlProgramBuilder<'a> {
     fn process_statement(&mut self, statement: Statement) -> Result<Table> {
         // Handle naked create tables separately,
         // As DataFusion doesn't support the WITH clause.
+        let sql_to_rel = SqlToRel::new(self.schema_provider);
         if let Statement::CreateTable {
             name,
             columns,
@@ -444,7 +446,7 @@ impl<'a> SqlProgramBuilder<'a> {
                 );
             }
 
-            let fields: Vec<StructField> = columns
+            let struct_field_tuple = columns
                 .iter()
                 .map(|column| {
                     let name = column.name.value.to_string();
@@ -453,13 +455,86 @@ impl<'a> SqlProgramBuilder<'a> {
                         .options
                         .iter()
                         .any(|option| matches!(option.option, ColumnOption::NotNull));
-                    Ok(StructField {
+                    let struct_field = StructField {
                         name,
                         alias: None,
-                        data_type: TypeDef::DataType(data_type, nullable),
-                    })
+                        data_type: TypeDef::DataType(data_type.clone(), nullable),
+                    };
+                    let generating_expression = column.options.iter().find_map(|option| {
+                        if let ColumnOption::Generated {
+                            generated_as: _,
+                            sequence_options: _,
+                            generation_expr,
+                        } = &option.option
+                        {
+                            generation_expr.clone()
+                        } else {
+                            None
+                        }
+                    });
+                    Ok((struct_field, generating_expression))
                 })
                 .collect::<Result<Vec<_>>>()?;
+            // if there are virtual fields, need to do some additional work
+            let has_virtual_fields = struct_field_tuple
+                .iter()
+                .any(|(_, generating_expression)| generating_expression.is_some());
+            let fields: Vec<FieldSpec> = if has_virtual_fields {
+                let physical_struct = StructDef {
+                    name: None,
+                    fields: struct_field_tuple
+                        .iter()
+                        .filter_map(
+                            |(field, generating_expression)| match generating_expression {
+                                Some(_) => None,
+                                None => Some(field.clone()),
+                            },
+                        )
+                        .collect(),
+                };
+                let physical_schema = DFSchema::new_with_metadata(
+                    physical_struct
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            let TypeDef::DataType(data_type, nullable ) = f.data_type.clone() else {
+                    bail!("expect data type for generated column")
+                };
+                            Ok(DFField::new_unqualified(&f.name, data_type, nullable))
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                    HashMap::new(),
+                )?;
+                let expression_context = ExpressionContext {
+                    input_struct: &physical_struct,
+                    schema_provider: self.schema_provider,
+                };
+                struct_field_tuple
+                    .into_iter()
+                    .map(|(struct_field, generating_expression)| {
+                        match generating_expression {
+                            Some(generating_expression) => {
+                                // TODO: Implement automatic type coercion here, as we have elsewhere.
+                                // It is done by calling the Analyzer which inserts CAST operators where necessary.
+
+                                let df_expr = sql_to_rel.sql_to_expr(
+                                    generating_expression,
+                                    &physical_schema,
+                                    &mut PlannerContext::default(),
+                                )?;
+                                let expr = expression_context.compile_expr(&df_expr)?;
+                                Ok(FieldSpec::VirtualStructField(struct_field, expr))
+                            }
+                            None => Ok(FieldSpec::StructField(struct_field)),
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                struct_field_tuple
+                    .into_iter()
+                    .map(|(struct_field, _)| Ok(FieldSpec::StructField(struct_field)))
+                    .collect::<Result<Vec<_>>>()?
+            };
 
             let connection_name = with_map.get("connection");
             match connection_name {
@@ -477,11 +552,17 @@ impl<'a> SqlProgramBuilder<'a> {
                         connection_config: with_map,
                     })
                 }
-                None => Ok(Table::MemoryTable { name, fields }),
+                None => {
+                    let fields = fields
+                        .into_iter()
+                        .map(|field| match field {
+                            FieldSpec::StructField(struct_field) => Ok(struct_field),
+                            FieldSpec::VirtualStructField(..) => bail!("Virtual fields are not supported in memory tables. Just write a query"),
+                        }).collect::<Result<Vec<_>>>()?;
+                    Ok(Table::MemoryTable { name, fields })
+                }
             }
         } else {
-            let sql_to_rel = SqlToRel::new(self.schema_provider);
-
             let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 
             let optimizer_config = OptimizerContext::default();
@@ -523,6 +604,12 @@ impl<'a> SqlProgramBuilder<'a> {
 }
 
 #[derive(Debug, Clone)]
+pub enum FieldSpec {
+    StructField(StructField),
+    VirtualStructField(StructField, Expression),
+}
+
+#[derive(Debug, Clone)]
 pub enum Table {
     SavedSource {
         name: String,
@@ -543,7 +630,7 @@ pub enum Table {
     },
     MemoryTableWithConnectionConfig {
         name: String,
-        fields: Vec<StructField>,
+        fields: Vec<FieldSpec>,
         connection: Connection,
         connection_config: HashMap<String, String>,
     },
@@ -574,9 +661,16 @@ impl Table {
 
     fn get_fields(&self) -> Result<Vec<Field>> {
         match self {
-            Table::MemoryTable { fields, .. }
-            | Table::MemoryTableWithConnectionConfig { fields, .. }
-            | Table::SavedSource { fields, .. } => fields
+            Table::MemoryTableWithConnectionConfig { fields, .. } => fields
+                .iter()
+                .map(|field| match field {
+                    FieldSpec::StructField(struct_field) => Ok(struct_field.clone().into()),
+                    FieldSpec::VirtualStructField(struct_field, _) => {
+                        Ok(struct_field.clone().into())
+                    }
+                })
+                .collect::<Result<Vec<_>>>(),
+            Table::MemoryTable { fields, .. } | Table::SavedSource { fields, .. } => fields
                 .iter()
                 .map(|field| {
                     let field: Field = field.clone().into();
@@ -782,7 +876,7 @@ pub fn get_test_expression(
     .unwrap();
 
     let Table::Anonymous{logical_plan: LogicalPlan::Projection(projection)} = plan.remove(0) else {panic!("expect projection")};
-    let mut ctx = ExpressionContext {
+    let ctx = ExpressionContext {
         schema_provider: &schema_provider,
         input_struct: &struct_def,
     };
