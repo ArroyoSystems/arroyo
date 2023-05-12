@@ -413,7 +413,7 @@ impl Optimizer for WindowTopNOptimization {
                             return false;
                         };
                         let tumbling_local_operator = PlanOperator::TumblingLocalAggregator {
-                            width,
+                            width: slide,
                             projection: two_phase_projection.clone(),
                         };
                         let bin_type = two_phase_projection.bin_type();
