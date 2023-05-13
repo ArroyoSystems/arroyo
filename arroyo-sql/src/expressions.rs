@@ -1676,8 +1676,11 @@ impl StringFunction {
             StringFunction::ConcatWithSeparator(expr, _exprs) => {
                 TypeDef::DataType(DataType::Utf8, expr.nullable())
             }
-            StringFunction::RegexpReplace(..) | StringFunction::RegexpMatch(..) => {
-                todo!();
+            StringFunction::RegexpReplace(expr1, expr2, expr3) => {
+                TypeDef::DataType(DataType::Utf8, expr1.nullable() || expr2.nullable() || expr3.nullable())
+            },
+            StringFunction::RegexpMatch(expr1,expr2) => {
+                TypeDef::DataType(DataType::Utf8, expr1.nullable() || expr2.nullable())
             }
             StringFunction::Strpos(expr1, expr2) => {
                 TypeDef::DataType(DataType::Int32, expr1.nullable() || expr2.nullable())
