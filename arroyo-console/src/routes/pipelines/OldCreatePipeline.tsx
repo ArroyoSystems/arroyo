@@ -1,23 +1,21 @@
-import "./pipelines.css";
+import './pipelines.css';
 
-import { PromiseClient } from "@bufbuild/connect-web";
-import { Alert, AlertIcon, Box, Button, Flex, FormLabel, Input, Text } from "@chakra-ui/react";
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Form } from "react-router-dom";
-import { ApiGrpc } from "../../gen/api_connectweb";
-import { BuiltinSink, CreateJobReq, CreatePipelineReq, CreateSourceReq} from "../../gen/api_pb";
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
-import "monaco-sql-languages/out/esm/flinksql/flinksql.contribution";
-import { ApiClient } from "../../main";
+import { Alert, AlertIcon, Box, Button, Flex, FormLabel, Input, Text } from '@chakra-ui/react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+import { Form } from 'react-router-dom';
+import { BuiltinSink, CreateJobReq, CreatePipelineReq, CreateSourceReq } from '../../gen/api_pb';
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import 'monaco-sql-languages/out/esm/flinksql/flinksql.contribution';
+import { ApiClient } from '../../main';
 
 window.MonacoEnvironment = {
   getWorkerUrl: function (moduleId, label) {
     switch (label) {
-      case "flinksql": {
-        return "./flinksql.worker.js";
+      case 'flinksql': {
+        return './flinksql.worker.js';
       }
       default: {
-        return "./editor.worker.js";
+        return './editor.worker.js';
       }
     }
   },
@@ -43,8 +41,8 @@ export function OldCreatePipeline({ client }: { client: ApiClient }) {
     if (monacoEl && !editor && !created.current) {
       let e = monaco.editor.create(monacoEl.current!, {
         value: query5,
-        language: "flinksql",
-        theme: "vs-dark",
+        language: 'flinksql',
+        theme: 'vs-dark',
         minimap: {
           enabled: false,
         },
@@ -57,22 +55,22 @@ export function OldCreatePipeline({ client }: { client: ApiClient }) {
   }, []);
 
   async function startPipeline(event: FormEvent<HTMLFormElement>) {
-    const parallelism = Number((document.getElementById("parallelism") as HTMLInputElement).value);
-    const qps = Number((document.getElementById("nexmark_qps") as HTMLInputElement).value);
-    const runtime = Number((document.getElementById("nexmark_time") as HTMLInputElement).value);
+    const parallelism = Number((document.getElementById('parallelism') as HTMLInputElement).value);
+    const qps = Number((document.getElementById('nexmark_qps') as HTMLInputElement).value);
+    const runtime = Number((document.getElementById('nexmark_time') as HTMLInputElement).value);
     const checkpointMicros =
       BigInt(1000000) *
-      BigInt((document.getElementById("checkpoint_frequency") as HTMLInputElement).value);
+      BigInt((document.getElementById('checkpoint_frequency') as HTMLInputElement).value);
     let sql = editor?.getValue();
 
-    console.log("Submit", sql, parallelism, qps, runtime);
+    console.log('Submit', sql, parallelism, qps, runtime);
 
     let sourceName = `nexmark_${Math.round(new Date().getTime() / 1000)}`;
 
     let createSource = new CreateSourceReq({
       name: sourceName,
       typeOneof: {
-        case: "nexmark",
+        case: 'nexmark',
         value: {
           eventsPerSecond: qps,
           runtimeMicros: BigInt(runtime * 1000 * 1000),
@@ -81,21 +79,21 @@ export function OldCreatePipeline({ client }: { client: ApiClient }) {
     });
 
     await (await client()).createSource(createSource);
-    console.log("Created source " + sourceName);
+    console.log('Created source ' + sourceName);
 
     let req = new CreatePipelineReq({
-      name: "sql-job",
+      name: 'sql-job',
       config: {
         // @ts-ignore
-        case: "sql",
+        case: 'sql',
         // @ts-ignore
         value: {
           // hacky but temporary until the source interface exists
-          query: sql?.replace("nexmark", sourceName),
+          query: sql?.replace('nexmark', sourceName),
           parallelism: BigInt(parallelism),
           sink: {
-            case: "builtin",
-            value: BuiltinSink.Web
+            case: 'builtin',
+            value: BuiltinSink.Web,
           },
         },
       },
@@ -104,13 +102,13 @@ export function OldCreatePipeline({ client }: { client: ApiClient }) {
     var createPipelineRes = null;
     try {
       createPipelineRes = await (await client()).createPipeline(req);
-      console.log("Result {}", createPipelineRes);
+      console.log('Result {}', createPipelineRes);
     } catch (e) {
-      setError("Compilation failed");
+      setError('Compilation failed');
       return;
     }
 
-    console.log("Created pipeline", createPipelineRes.pipelineId);
+    console.log('Created pipeline', createPipelineRes.pipelineId);
 
     let createJob = new CreateJobReq({
       pipelineId: createPipelineRes.pipelineId,
@@ -119,10 +117,10 @@ export function OldCreatePipeline({ client }: { client: ApiClient }) {
 
     try {
       let result = await (await client()).createJob(createJob);
-      console.log("Result {}", result);
-      window.location.href = "/jobs/" + result.jobId;
+      console.log('Result {}', result);
+      window.location.href = '/jobs/' + result.jobId;
     } catch (e) {
-      setError("Compilation failed");
+      setError('Compilation failed');
     }
   }
 

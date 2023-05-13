@@ -1,12 +1,7 @@
-import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
+import { ConnectError } from '@bufbuild/connect-web';
 import {
-  Container,
   Stack,
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
   Flex,
-  Heading,
   Box,
   Text,
   Button,
@@ -26,13 +21,7 @@ import {
   FormLabel,
   Input,
   FormHelperText,
-  NumberInputField,
-  NumberInput,
-  NumberDecrementStepper,
-  NumberIncrementStepper,
-  NumberInputStepper,
   Select,
-  Divider,
   Spacer,
   TabList,
   Tabs,
@@ -40,14 +29,11 @@ import {
   TabPanels,
   TabPanel,
   Spinner,
-} from "@chakra-ui/react";
-import test from "node:test";
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ApiGrpc } from "../../gen/api_connectweb";
+} from '@chakra-ui/react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   BuiltinSink,
-  CreateJobReq,
   CreatePipelineReq,
   CreateSqlJob,
   CreateUdf,
@@ -56,21 +42,19 @@ import {
   GetSourcesReq,
   GrpcOutputSubscription,
   JobDetailsReq,
-  JobDetailsResp,
   JobGraph,
   JobStatus,
   OutputData,
   PipelineGraphReq,
-  Sink,
   SourceDef,
   StopType,
   UdfLanguage,
-} from "../../gen/api_pb";
-import { ApiClient } from "../../main";
-import { Catalog } from "./Catalog";
-import { PipelineGraph } from "./JobGraph";
-import { PipelineOutputs } from "./JobOutputs";
-import { CodeEditor } from "./SqlEditor";
+} from '../../gen/api_pb';
+import { ApiClient } from '../../main';
+import { Catalog } from './Catalog';
+import { PipelineGraph } from './JobGraph';
+import { PipelineOutputs } from './JobOutputs';
+import { CodeEditor } from './SqlEditor';
 
 type SqlOptions = {
   name?: string;
@@ -86,31 +70,31 @@ function useQuery() {
 }
 
 type SinkOpt = {
-        name: string;
-        value:
-          | {
-              value: BuiltinSink;
-              case: "builtin";
-            }
-          | {
-              value: string;
-              case: "user";
-            };
+  name: string;
+  value:
+    | {
+        value: BuiltinSink;
+        case: 'builtin';
+      }
+    | {
+        value: string;
+        case: 'user';
       };
+};
 
 type PreviewState = {
   id: string;
   status?: JobStatus;
-  outputs?: Array<{id: number, data: OutputData}>;
+  outputs?: Array<{ id: number; data: OutputData }>;
   active: boolean;
-}
+};
 
 export function CreatePipeline({ client }: { client: ApiClient }) {
   const [sources, setSources] = useState<Array<SourceDef>>([]);
   const [sinks, setSinks] = useState<Array<SinkOpt>>([]);
   const [graph, setGraph] = useState<JobGraph | null>(null);
-  const [query, setQuery] = useState<string>("");
-  const [udfs, setUdfs] = useState<string>("");
+  const [query, setQuery] = useState<string>('');
+  const [udfs, setUdfs] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [options, setOptions] = useState<SqlOptions>({ parallelism: 4, checkpointMS: 5000 });
@@ -120,38 +104,39 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   const [previewing, setPreviewing] = useState<PreviewState | null>(null);
   const [stopping, setStopping] = useState<boolean>(false);
 
-
   const queryParams = useQuery();
 
   const updateQuery = (query: string) => {
-    window.localStorage.setItem("query", query);
+    window.localStorage.setItem('query', query);
     setQuery(query);
-  }
+  };
 
   const updateUdf = (udf: string) => {
-    window.localStorage.setItem("udf", udf);
+    window.localStorage.setItem('udf', udf);
     setUdfs(udf);
-  }
+  };
 
   useEffect(() => {
-    const copyFrom = queryParams.get("from");
+    const copyFrom = queryParams.get('from');
     const fetch = async (copyFrom: string) => {
-      const def = await (await client()).getPipeline(
+      const def = await (
+        await client()
+      ).getPipeline(
         new GetPipelineReq({
           pipelineId: copyFrom,
         })
       );
 
-      setQuery(def.definition || "");
-      setUdfs(def.udfs[0].definition || "");
+      setQuery(def.definition || '');
+      setUdfs(def.udfs[0].definition || '');
       setOptions({
         ...options,
-        name: def.name + "-copy",
+        name: def.name + '-copy',
       });
     };
 
-    let savedQuery = window.localStorage.getItem("query");
-    let savedUdfs = window.localStorage.getItem("udf");
+    let savedQuery = window.localStorage.getItem('query');
+    let savedUdfs = window.localStorage.getItem('udf');
     if (copyFrom != null) {
       fetch(copyFrom);
     } else {
@@ -172,16 +157,16 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
       setSources((await sources).sources);
 
       let allSinks: Array<SinkOpt> = [
-        { name: "Web", value: { case: "builtin", value: BuiltinSink.Web } },
-        { name: "Log", value: { case: "builtin", value: BuiltinSink.Log } },
-        { name: "Null", value: { case: "builtin", value: BuiltinSink.Null } },
+        { name: 'Web', value: { case: 'builtin', value: BuiltinSink.Web } },
+        { name: 'Log', value: { case: 'builtin', value: BuiltinSink.Log } },
+        { name: 'Null', value: { case: 'builtin', value: BuiltinSink.Null } },
       ];
 
       (await sinks).sinks.forEach(sink => {
         allSinks.push({
           name: sink.name,
           value: {
-            case: "user",
+            case: 'user',
             value: sink.name,
           },
         });
@@ -197,19 +182,21 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     setGraph(null);
     setError(null);
 
-    let resp = await(await client()).graphForPipeline(
+    let resp = await (
+      await client()
+    ).graphForPipeline(
       new PipelineGraphReq({
         query: query,
         udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfs })],
       })
     );
 
-    if (resp.result.case == "jobGraph") {
+    if (resp.result.case == 'jobGraph') {
       setGraph(resp.result.value);
       if (navigateTo) {
         setTabIndex(0);
       }
-    } else if (resp.result.case == "errors") {
+    } else if (resp.result.case == 'errors') {
       setError(resp.result.value.errors[0].message);
     }
   };
@@ -222,43 +209,52 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     }
 
     try {
-      let resp = await(await client()).previewPipeline(
+      let resp = await (
+        await client()
+      ).previewPipeline(
         new CreatePipelineReq({
           //name: `preview-${new Date().getTime()}`,
-          name: "preview",
+          name: 'preview',
           config: {
-            case: "sql",
+            case: 'sql',
             value: new CreateSqlJob({
               query: query,
-              udfs: [ new CreateUdf({ language: UdfLanguage.Rust, definition: udfs })],
-              sink: { case: "builtin", value: BuiltinSink.Web },
+              udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfs })],
+              sink: { case: 'builtin', value: BuiltinSink.Web },
               preview: true,
             }),
           },
         })
       );
 
-      let ourPreviewing: PreviewState = {id: resp.jobId, active: false};
+      let ourPreviewing: PreviewState = { id: resp.jobId, active: false };
       setPreviewing(ourPreviewing);
       setTabIndex(1);
 
-
-      while (ourPreviewing.status?.state != "Running") {
+      while (ourPreviewing.status?.state != 'Running') {
         try {
-          let details = await (await client()).getJobDetails(new JobDetailsReq({
-            jobId: resp.jobId
-          }));
+          let details = await (
+            await client()
+          ).getJobDetails(
+            new JobDetailsReq({
+              jobId: resp.jobId,
+            })
+          );
 
-          ourPreviewing = { id: resp.jobId, status: details.jobStatus, active: details.jobStatus?.state == "Running" };
+          ourPreviewing = {
+            id: resp.jobId,
+            status: details.jobStatus,
+            active: details.jobStatus?.state == 'Running',
+          };
           setPreviewing(ourPreviewing);
         } catch (e) {
-          console.log("failed to fetch job status", e);
+          console.log('failed to fetch job status', e);
         }
 
         await new Promise(r => setTimeout(r, 1000));
       }
 
-      console.log("subscribing to output")
+      console.log('subscribing to output');
       let counter = 1;
       let outputs = [];
       for await (const res of (await client()).subscribeToOutput(
@@ -268,7 +264,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
       )) {
         let output = {
           id: counter++,
-          data: res
+          data: res,
         };
 
         outputs.push(output);
@@ -276,19 +272,19 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
           outputs.shift();
         }
 
-        setPreviewing({...ourPreviewing, outputs: outputs, active: true});
+        setPreviewing({ ...ourPreviewing, outputs: outputs, active: true });
       }
 
-      console.log("Job finished");
+      console.log('Job finished');
       setPreviewing({ ...ourPreviewing, outputs: outputs, active: false });
     } catch (e) {
       if (e instanceof ConnectError) {
-        setError(e.rawMessage)
+        setError(e.rawMessage);
       } else {
-        setError("Something went wrong. Please try again.");
+        setError('Something went wrong. Please try again.');
       }
     }
-  }
+  };
 
   const stopPreview = async () => {
     if (previewing == null) {
@@ -296,22 +292,24 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     }
 
     setStopping(true);
-    await (await client()).updateJob({
+    await (
+      await client()
+    ).updateJob({
       jobId: previewing.id,
-      stop: StopType.Immediate
+      stop: StopType.Immediate,
     });
 
     while (true) {
       const details = await (await client()).getJobDetails({ jobId: previewing.id });
 
-      if (details.jobStatus?.state == "Stopped") {
+      if (details.jobStatus?.state == 'Stopped') {
         break;
       }
     }
 
     setPreviewing({ ...previewing, active: false });
     setStopping(false);
-  }
+  };
 
   const run = async () => {
     await check(false);
@@ -325,11 +323,13 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     try {
       let sink = sinks[options.sink!];
 
-      let resp = await(await client()).startPipeline(
+      let resp = await (
+        await client()
+      ).startPipeline(
         new CreatePipelineReq({
           name: options.name,
           config: {
-            case: "sql",
+            case: 'sql',
             value: new CreateSqlJob({
               query: query,
               udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfs })],
@@ -339,14 +339,14 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
         })
       );
 
-      localStorage.removeItem("query");
+      localStorage.removeItem('query');
       navigate(`/jobs/${resp.jobId}`);
     } catch (e) {
       if (e instanceof ConnectError) {
         setStartError(e.rawMessage);
       } else {
-        setStartError("Something went wrong");
-        console.log("Unhandled error", e);
+        setStartError('Something went wrong');
+        console.log('Unhandled error', e);
       }
     }
   };
@@ -404,13 +404,13 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
                   borderRadius={2}
                   isLoading={
                     (previewing != null &&
-                      previewing.status?.state != "Running" &&
+                      previewing.status?.state != 'Running' &&
                       !previewing.active) ||
                     stopping
                   }
-                  loadingText={stopping ? "stopping" : previewing?.status?.state}
+                  loadingText={stopping ? 'stopping' : previewing?.status?.state}
                 >
-                  {previewing == null || !previewing.active ? "Preview" : "Stop preview"}
+                  {previewing == null || !previewing.active ? 'Preview' : 'Stop preview'}
                 </Button>
                 <Spacer />
                 <Button size="sm" colorScheme="green" onClick={run} borderRadius={2}>
@@ -438,7 +438,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
                   <TabPanel height="100%" position="relative">
                     {graph != null ? (
                       <Box
-                        style={{ top: 0, bottom: 0, left: 0, right: 0, position: "absolute" }}
+                        style={{ top: 0, bottom: 0, left: 0, right: 0, position: 'absolute' }}
                         overflow="auto"
                       >
                         <PipelineGraph graph={graph} setActiveOperator={() => {}} />
@@ -450,7 +450,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
                   <TabPanel overflowX="auto" height="100%" position="relative">
                     {previewing?.outputs != null ? (
                       <Box
-                        style={{ top: 0, bottom: 0, left: 0, right: 0, position: "absolute" }}
+                        style={{ top: 0, bottom: 0, left: 0, right: 0, position: 'absolute' }}
                         overflow="auto"
                       >
                         <PipelineOutputs outputs={previewing?.outputs} />
@@ -486,7 +486,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
                 <FormLabel>Name</FormLabel>
                 <Input
                   type="text"
-                  value={options.name || ""}
+                  value={options.name || ''}
                   onChange={v => setOptions({ ...options, name: v.target.value })}
                 />
                 <FormHelperText>Give this pipeline a name to help you identify it</FormHelperText>
@@ -522,7 +522,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
             <Button
               variant="primary"
               onClick={start}
-              isDisabled={options.name == "" || options.parallelism == null || options.sink == null}
+              isDisabled={options.name == '' || options.parallelism == null || options.sink == null}
             >
               Start
             </Button>

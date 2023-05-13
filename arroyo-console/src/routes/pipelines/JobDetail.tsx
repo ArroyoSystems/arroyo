@@ -1,8 +1,6 @@
-import "./pipelines.css";
+import './pipelines.css';
 
-import { PromiseClient } from "@bufbuild/connect-web";
-import { useParams } from "react-router-dom";
-import { ApiGrpc } from "../../gen/api_connectweb";
+import { useParams } from 'react-router-dom';
 import {
   Alert,
   AlertDescription,
@@ -12,15 +10,12 @@ import {
   Box,
   Button,
   ButtonGroup,
-  chakra,
   Code,
   Flex,
-  GridItem,
   Heading,
   HStack,
   Link,
   ListItem,
-  SimpleGrid,
   Spacer,
   Stack,
   Stat,
@@ -28,28 +23,20 @@ import {
   StatLabel,
   StatNumber,
   Tab,
-  Table,
   TabList,
   TabPanel,
   TabPanels,
   Tabs,
-  TagLeftIcon,
-  Tbody,
-  Td,
   Text,
-  Th,
-  Thead,
   theme,
-  Tr,
   UnorderedList,
-  useDisclosure
-} from "@chakra-ui/react";
-import React, { ReactElement, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+  useDisclosure,
+} from '@chakra-ui/react';
+import React, { ReactNode, useEffect, useState } from 'react';
 import {
   CheckpointDetailsReq,
   CheckpointDetailsResp,
   CheckpointOverview,
-  GetJobsResp,
   GrpcOutputSubscription,
   JobCheckpointsReq,
   JobDetailsReq,
@@ -57,28 +44,21 @@ import {
   JobGraph,
   JobMetricsReq,
   JobMetricsResp,
-  JobMetricsResp_OperatorMetrics,
-  JobNode,
-  JobStatus,
-  JobStatusReq,
-  JobStatusResp,
   OperatorCheckpointDetail,
   OutputData,
   StopType,
   TaskCheckpointEventType,
-} from "../../gen/api_pb";
-import ReactFlow, { Background, Controls, Handle, Position } from "reactflow";
-import "reactflow/dist/style.css";
-import dagre from "dagre";
-import * as MG from "metrics-graphics";
-import "metrics-graphics/dist/mg.css";
-import * as d3 from "d3";
-import * as util from "../../lib/util";
-import { PipelineGraph } from "./JobGraph";
-import { ApiClient } from "../../main";
-import { PipelineOutputs } from "./JobOutputs";
-import { CodeEditor } from "./SqlEditor";
-import PipelineConfigModal from "./PipelineConfigModal";
+} from '../../gen/api_pb';
+import 'reactflow/dist/style.css';
+import * as MG from 'metrics-graphics';
+import 'metrics-graphics/dist/mg.css';
+import * as d3 from 'd3';
+import * as util from '../../lib/util';
+import { PipelineGraph } from './JobGraph';
+import { ApiClient } from '../../main';
+import { PipelineOutputs } from './JobOutputs';
+import { CodeEditor } from './SqlEditor';
+import PipelineConfigModal from './PipelineConfigModal';
 
 interface JobDetailState {
   pipeline?: JobDetailsResp;
@@ -92,7 +72,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
   const [state, setState] = React.useState<JobDetailState>({});
   const [metrics, setMetrics] = useState<JobMetrics>({});
   const [activeOperator, setActiveOperator] = useState<string | undefined>(undefined);
-  const [outputs, setOutputs] = useState<Array<{id: number, data: OutputData}>>([]);
+  const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
   const [jobFetchInProgress, setJobFetchInProgress] = useState<boolean>(false);
   const [jobMetricsInProgress, setJobMetricsInProgress] = useState<boolean>(false);
   const [checkpoints, setCheckpoints] = useState<Array<CheckpointOverview>>([]);
@@ -101,7 +81,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
   const {
     isOpen: configModalOpen,
     onOpen: onConfigModalOpen,
-    onClose: onConfigModalClose
+    onClose: onConfigModalClose,
   } = useDisclosure();
 
   let { id } = useParams();
@@ -109,8 +89,10 @@ export function JobDetail({ client }: { client: ApiClient }) {
   const fetchPipeline = async () => {
     if (!jobFetchInProgress) {
       setJobFetchInProgress(true);
-      try  {
-        const response = await (await client()).getJobDetails(
+      try {
+        const response = await (
+          await client()
+        ).getJobDetails(
           new JobDetailsReq({
             jobId: id,
           })
@@ -118,7 +100,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
 
         setState({ pipeline: response });
       } catch (e) {
-        console.log("Failed while fetching job status", e);
+        console.log('Failed while fetching job status', e);
       }
       setJobFetchInProgress(false);
     }
@@ -127,7 +109,9 @@ export function JobDetail({ client }: { client: ApiClient }) {
   const fetchMetrics = async () => {
     if (!jobMetricsInProgress) {
       setJobMetricsInProgress(true);
-      const response = await (await client()).getJobMetrics(
+      const response = await (
+        await client()
+      ).getJobMetrics(
         new JobMetricsReq({
           jobId: id,
         })
@@ -141,7 +125,9 @@ export function JobDetail({ client }: { client: ApiClient }) {
   const fetchCheckpoints = async () => {
     if (!checkpointFetchInProgress) {
       setCheckpointFetchInProgress(true);
-      const response = await (await client()).getCheckpoints(
+      const response = await (
+        await client()
+      ).getCheckpoints(
         new JobCheckpointsReq({
           jobId: id,
         })
@@ -179,14 +165,14 @@ export function JobDetail({ client }: { client: ApiClient }) {
         jobId: id,
       })
     )) {
-      outputs.push({id: row++, data: res});
+      outputs.push({ id: row++, data: res });
       if (outputs.length > 20) {
         outputs.shift();
       }
 
       setOutputs(outputs);
     }
-  }
+  };
 
   async function updateJobState(stop: StopType) {
     console.log(`Setting pipeline stop_mode=${stop}`);
@@ -194,11 +180,13 @@ export function JobDetail({ client }: { client: ApiClient }) {
     fetchPipeline();
   }
 
-  async function updateJobParallelism (parallelism: number) {
+  async function updateJobParallelism(parallelism: number) {
     console.log(`Setting pipeline parallelism=${parallelism}`);
-    await (await client()).updateJob({
+    await (
+      await client()
+    ).updateJob({
       jobId: id,
-      parallelism
+      parallelism,
     });
     fetchPipeline();
   }
@@ -266,13 +254,13 @@ export function JobDetail({ client }: { client: ApiClient }) {
 
           <TabPanel>
             {outputs.length == 0 ? (
-              state.pipeline?.jobGraph?.nodes.find(n => n.operator.includes("GrpcSink")) != null ?
+              state.pipeline?.jobGraph?.nodes.find(n => n.operator.includes('GrpcSink')) != null ? (
                 <Button isLoading={subscribed} onClick={subscribe} width={150} size="sm">
                   Read output
-                </Button> :
-                <Text>
-                  Pipeline does not have a web sink
-                </Text>
+                </Button>
+              ) : (
+                <Text>Pipeline does not have a web sink</Text>
+              )
             ) : (
               <PipelineOutputs outputs={outputs} />
             )}
@@ -290,9 +278,11 @@ export function JobDetail({ client }: { client: ApiClient }) {
 
           <TabPanel>
             <Box>
-              <CodeEditor query={(state.pipeline?.jobStatus?.udfs || [{definition: ""}])[0].definition}
+              <CodeEditor
+                query={(state.pipeline?.jobStatus?.udfs || [{ definition: '' }])[0].definition}
                 language="rust"
-                readOnly={true} />
+                readOnly={true}
+              />
             </Box>
           </TabPanel>
         </TabPanels>
@@ -406,7 +396,9 @@ function OperatorDetail({
         <HStack fontWeight="semibold">
           <Box>operator</Box>
           <Spacer />
-          <Box border="1px solid #aaa" px={1.5} fontSize={12} title="parallelism for this operator">{node?.parallelism}</Box>
+          <Box border="1px solid #aaa" px={1.5} fontSize={12} title="parallelism for this operator">
+            {node?.parallelism}
+          </Box>
         </HStack>
         <Box marginTop="10px">{node?.operator}</Box>
         <Box marginTop="10px" fontFamily="monaco,ubuntu mono,fixed-width">
@@ -439,7 +431,7 @@ class TimeSeriesGraph extends React.Component<TimeSeries, {}> {
     if (this.props.data == null) {
       return;
     }
-    const id = "timeseries-graph-" + this.id;
+    const id = 'timeseries-graph-' + this.id;
     const now = new Date();
     const start = new Date(now.getTime() - this.props.timeWindowMs);
 
@@ -465,7 +457,7 @@ class TimeSeriesGraph extends React.Component<TimeSeries, {}> {
 
     // make sure we have a color for every series, otherwise the library defaults to black
     let colors = d3.schemeSet2.concat(
-      new Array(Math.max(0, this.props.data.length - d3.schemeSet2.length)).fill("white")
+      new Array(Math.max(0, this.props.data.length - d3.schemeSet2.length)).fill('white')
     );
 
     const data = {
@@ -474,8 +466,8 @@ class TimeSeriesGraph extends React.Component<TimeSeries, {}> {
       height: 200,
       width: 450,
       colors: colors,
-      xAccessor: "x",
-      yAccessor: "y",
+      xAccessor: 'x',
+      yAccessor: 'y',
       xScale: {
         minValue: start,
         maxValue: now,
@@ -491,9 +483,9 @@ class TimeSeriesGraph extends React.Component<TimeSeries, {}> {
         tickCount: 5,
       },
       tooltipFunction: (data: { x: Date; y: number }) => {
-        return `${new Intl.DateTimeFormat("en-US", { timeStyle: "medium" }).format(
-          data.x
-        )} ${Math.round(data.y * 10) / 10}`;
+        return `${new Intl.DateTimeFormat('en-US', { timeStyle: 'medium' }).format(data.x)} ${
+          Math.round(data.y * 10) / 10
+        }`;
       },
     };
 
@@ -510,10 +502,9 @@ class TimeSeriesGraph extends React.Component<TimeSeries, {}> {
   }
 
   render() {
-    return <div className="timeseriesGraph" id={"timeseries-graph-" + this.id}></div>;
+    return <div className="timeseriesGraph" id={'timeseries-graph-' + this.id}></div>;
   }
 }
-
 
 function formatDurationHMS(micros: number): string {
   let millis = micros / 1000;
@@ -521,9 +512,9 @@ function formatDurationHMS(micros: number): string {
   let m = Math.floor((millis - h * 1000 * 60 * 60) / 1000 / 60);
   let s = Math.floor((millis - h * 1000 * 60 * 60 - m * 1000 * 60) / 1000);
 
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(
     2,
-    "0"
+    '0'
   )}`;
 }
 
@@ -541,7 +532,7 @@ function OperatorCheckpoint({
   let now = new Date().getTime() * 1000;
 
   let left = scale(Number(op.checkpoint?.startTime));
-  let className = op.checkpoint?.finishTime == undefined ? "in-progress" : "finished";
+  let className = op.checkpoint?.finishTime == undefined ? 'in-progress' : 'finished';
   let finishTime = op.checkpoint?.finishTime == undefined ? now : Number(op.checkpoint?.finishTime);
   let width = Math.max(scale(finishTime) - left, 1);
 
@@ -575,7 +566,7 @@ function OperatorCheckpoint({
               )?.time;
               let syncLeft = syncTime == null ? null : scale(Number(syncTime));
 
-              let className = Number(t.finishTime) == 0 ? "in-progress" : "finished";
+              let className = Number(t.finishTime) == 0 ? 'in-progress' : 'finished';
               let finishTime = Number(t.finishTime) == 0 ? now : Number(t.finishTime);
               let width = Math.max(scale(finishTime) - left, 1);
 
@@ -674,7 +665,9 @@ function Checkpoints({
   const fetchDetails = async () => {
     if (!detailsFetchInProgress && epoch != null) {
       setDetailsFetchInProgress(true);
-      const response = await (await client()).getCheckpointDetail(
+      const response = await (
+        await client()
+      ).getCheckpointDetail(
         new CheckpointDetailsReq({
           jobId: job.jobStatus?.jobId,
           epoch: epoch,
@@ -725,7 +718,7 @@ function Checkpoints({
           checkpoint: checkpoint?.operators[n.nodeId],
         };
       })
-      .sort((a, b) => Number(a.id.split("_")[1]) - Number(b.id.split("_")[1]));
+      .sort((a, b) => Number(a.id.split('_')[1]) - Number(b.id.split('_')[1]));
 
     let checkpointBytes = Object.values(checkpoint.operators)
       .flatMap(op => Object.values(op.tasks).map(t => (t.bytes == null ? 0 : Number(t.bytes))))
@@ -741,9 +734,9 @@ function Checkpoints({
           <Stat>
             <StatLabel>Started</StatLabel>
             <StatNumber>
-              {new Intl.DateTimeFormat("en-us", {
+              {new Intl.DateTimeFormat('en-us', {
                 dateStyle: undefined,
-                timeStyle: "medium",
+                timeStyle: 'medium',
               }).format(new Date(Number(checkpoint.overview?.startTime) / 1000))}
             </StatNumber>
           </Stat>
@@ -751,11 +744,11 @@ function Checkpoints({
             <StatLabel>Finished</StatLabel>
             <StatNumber>
               {checkpoint.overview?.finishTime != null
-                ? new Intl.DateTimeFormat("en-us", {
+                ? new Intl.DateTimeFormat('en-us', {
                     dateStyle: undefined,
-                    timeStyle: "medium",
+                    timeStyle: 'medium',
                   }).format(new Date(Number(checkpoint.overview?.finishTime) / 1000))
-                : "-"}
+                : '-'}
             </StatNumber>
           </Stat>
           <Stat marginLeft={10}>
@@ -787,8 +780,8 @@ function Checkpoints({
             .map(c => {
               return (
                 <ListItem
-                  key={"a" + String(c.epoch)}
-                  className={c.epoch == epoch ? "selected" : ""}
+                  key={'a' + String(c.epoch)}
+                  className={c.epoch == epoch ? 'selected' : ''}
                 >
                   <Link onClick={() => setEpoch(c.epoch)}> {c.epoch}</Link>
                 </ListItem>

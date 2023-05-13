@@ -3,6 +3,22 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  lint-console:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v3
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2.2.4
+        with:
+          version: 8.3.0
+          run_install: |
+            - recursive: true
+              args: [--frozen-lockfile, --strict-peer-dependencies]
+      - name: Run prettier
+        run: |
+          cd arroyo-console
+          pnpm check
   build-rust:
     runs-on: ubuntu-latest-16-cores
     env:
@@ -79,7 +95,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v2.2.4
         with:
-          version: 7.13.5
+          version: 8.3.0
           run_install: |
             - recursive: true
               args: [--frozen-lockfile, --strict-peer-dependencies]

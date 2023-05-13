@@ -1,4 +1,4 @@
-import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
+import { ConnectError } from '@bufbuild/connect-web';
 import {
   Alert,
   AlertDescription,
@@ -18,49 +18,35 @@ import {
   FormHelperText,
   FormLabel,
   Heading,
-  HStack,
   Icon,
   Input,
-  Spacer,
   SquareProps,
   Stack,
   Text,
-  useBreakpointValue,
-} from "@chakra-ui/react";
-import {
-  ChangeEvent,
-  Dispatch,
-  SetStateAction,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import { HiCheck } from "react-icons/hi";
+} from '@chakra-ui/react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react';
+import { HiCheck } from 'react-icons/hi';
 
-import { Link, redirect, useNavigate } from "react-router-dom";
-import { ApiGrpc } from "../../gen/api_connectweb";
-import { RadioCard, RadioCardGroup } from "../../lib/RadioGroup";
+import { Link, useNavigate } from 'react-router-dom';
+import { RadioCard, RadioCardGroup } from '../../lib/RadioGroup';
 
-import { SiApachekafka } from "react-icons/si";
-import { FaStream, FaSync } from "react-icons/fa";
-import { RiAuctionLine } from "react-icons/ri";
-import { GiMetronome } from "react-icons/gi";
+import { SiApachekafka } from 'react-icons/si';
+import { FaStream, FaSync } from 'react-icons/fa';
+import { RiAuctionLine } from 'react-icons/ri';
+import { GiMetronome } from 'react-icons/gi';
 import {
   Connection,
-  CreateJobReq,
   CreateSourceReq,
   EventSourceSourceConfig,
   GetConnectionsReq,
   ImpulseSourceConfig,
   KafkaSourceConfig,
   NexmarkSourceConfig,
-} from "../../gen/api_pb";
-import { ConfigureSource } from "./ConfigureSource";
-import { ChooseSchemaType, DefineSchema } from "./DefineSchema";
-import { connect } from "http2";
-import { TestSource } from "./TestSource";
-import { ApiClient } from "../../main";
+} from '../../gen/api_pb';
+import { ConfigureSource } from './ConfigureSource';
+import { ChooseSchemaType, DefineSchema } from './DefineSchema';
+import { TestSource } from './TestSource';
+import { ApiClient } from '../../main';
 
 interface Helpers {
   goToNextStep: () => void;
@@ -89,7 +75,7 @@ export const useStep = (props: UseStepProps): [number, Helpers] => {
         setCurrentStep(newStep);
         return;
       }
-      throw new Error("Step not valid");
+      throw new Error('Step not valid');
     },
     [maxStep, currentStep]
   );
@@ -134,14 +120,14 @@ export const StepCircle = (props: RadioCircleProps) => {
     <Circle
       size="5"
       marginTop={0.5}
-      bg={isCompleted ? "accent" : "inherit"}
-      borderWidth={isCompleted ? "0" : "2px"}
-      borderColor={isActive ? "accent" : "inherit"}
+      bg={isCompleted ? 'accent' : 'inherit'}
+      borderWidth={isCompleted ? '0' : '2px'}
+      borderColor={isActive ? 'accent' : 'inherit'}
     >
       {isCompleted ? (
         <Icon as={HiCheck} color="inverted" boxSize="5" />
       ) : (
-        <Circle bg={isActive ? "accent" : "border"} size="3" />
+        <Circle bg={isActive ? 'accent' : 'border'} size="3" />
       )}
     </Circle>
   );
@@ -166,10 +152,10 @@ export const Step = (props: StepProps) => {
         <Divider
           orientation="vertical"
           borderWidth="1px"
-          borderColor={isCompleted ? "accent" : isLastStep ? "transparent" : "inherit"}
+          borderColor={isCompleted ? 'accent' : isLastStep ? 'transparent' : 'inherit'}
         />
       </Stack>
-      <Stack spacing="0.5" pb={isLastStep ? "0" : "8"}>
+      <Stack spacing="0.5" pb={isLastStep ? '0' : '8'}>
         <Text color="emphasized" fontWeight="medium">
           {title}
         </Text>
@@ -193,43 +179,49 @@ type StepDef = {
 
 export const steps: Array<StepDef> = [
   {
-    title: "Step 1",
-    description: "Select type",
+    title: 'Step 1',
+    description: 'Select type',
     view: (state, setState, next) => (
       <CreateTypeStep state={state} setState={setState} next={next} />
     ),
   },
   {
-    title: "Step 2",
-    description: "Configure source",
+    title: 'Step 2',
+    description: 'Configure source',
     view: (state, setState, next, client, connections) => (
-      <ConfigureSource client={client} state={state} setState={setState} next={next} connections={connections} />
+      <ConfigureSource
+        client={client}
+        state={state}
+        setState={setState}
+        next={next}
+        connections={connections}
+      />
     ),
   },
   {
-    title: "Step 3",
-    description: "Schema type",
+    title: 'Step 3',
+    description: 'Schema type',
     view: (state, setState, next) => (
       <ChooseSchemaType state={state} setState={setState} next={next} />
     ),
   },
   {
-    title: "Step 4",
-    description: "Define schema",
+    title: 'Step 4',
+    description: 'Define schema',
     view: (state, setState, next, client) => (
       <DefineSchema state={state} setState={setState} next={next} client={client} />
     ),
   },
   {
-    title: "Step 5",
-    description: "Test",
+    title: 'Step 5',
+    description: 'Test',
     view: (state, setState, next, client) => (
       <TestSource state={state} setState={setState} next={next} client={client} />
     ),
   },
   {
-    title: "Step 6",
-    description: "Publish",
+    title: 'Step 6',
+    description: 'Publish',
     view: (state, setState, _next, client) => (
       <PublishStep state={state} setState={setState} client={client} />
     ),
@@ -259,7 +251,7 @@ export function CreateSource({ client }: { client: ApiClient }) {
   if (connections != null) {
     return (
       <Container py="8" flex="1">
-        <Stack spacing={{ base: "8", lg: "6" }}>
+        <Stack spacing={{ base: '8', lg: '6' }}>
           <Breadcrumb>
             <BreadcrumbItem>
               <BreadcrumbLink as={Link} to="/sources">
@@ -305,35 +297,35 @@ export function CreateSource({ client }: { client: ApiClient }) {
 
 const sourceTypes = [
   {
-    name: "kafka",
+    name: 'kafka',
     icon: SiApachekafka,
-    description: "Confluent Cloud, EKS, or self-hosted Kafka",
+    description: 'Confluent Cloud, EKS, or self-hosted Kafka',
     initialState: new KafkaSourceConfig({}),
   },
   {
-    name: "kinesis",
+    name: 'kinesis',
     icon: FaStream,
-    description: "AWS Kinesis stream (coming soon)",
+    description: 'AWS Kinesis stream (coming soon)',
     disabled: true,
   },
   {
-    name: "eventSource",
+    name: 'eventSource',
     icon: FaSync,
-    description: "(also known as Server-Sent Events)",
+    description: '(also known as Server-Sent Events)',
     initialState: new EventSourceSourceConfig({}),
   },
   {
-    name: "nexmark",
+    name: 'nexmark',
     icon: RiAuctionLine,
-    description: "Demo source for an auction website",
+    description: 'Demo source for an auction website',
     initialState: new NexmarkSourceConfig({
       eventsPerSecond: 100,
     }),
   },
   {
-    name: "impulse",
+    name: 'impulse',
     icon: GiMetronome,
-    description: "Periodic demo source",
+    description: 'Periodic demo source',
     initialState: new ImpulseSourceConfig({
       eventsPerSecond: 100,
     }),
@@ -420,12 +412,12 @@ function PublishStep({
   const submit = async () => {
     try {
       let resp = await (await client()).createSource(state);
-      navigate("/sources");
+      navigate('/sources');
     } catch (e) {
-      if (e instanceof ConnectError){
+      if (e instanceof ConnectError) {
         setError(e.rawMessage);
       } else {
-        setError("Something went wrong: " + e);
+        setError('Something went wrong: ' + e);
       }
     }
   };
@@ -436,13 +428,13 @@ function PublishStep({
       <FormControl>
         <FormLabel>Source Name</FormLabel>
         <Input
-          isInvalid={state.name != "" && !isValid}
+          isInvalid={state.name != '' && !isValid}
           type="text"
           value={state.name}
           onChange={v => setState(new CreateSourceReq({ ...state, name: v.target.value }))}
         />
         <FormHelperText>
-          The source will be queryable in SQL using this name; it must be a {"\u00A0"}
+          The source will be queryable in SQL using this name; it must be a {'\u00A0'}
           <dfn title="Names must start with a letter or _, contain only letters\n, numbers, and _s, and have fewer than 63 characters">
             valid SQL table name
           </dfn>
@@ -454,7 +446,7 @@ function PublishStep({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
-      <Button variant="primary" isDisabled={state.name == "" || !isValid} onClick={submit}>
+      <Button variant="primary" isDisabled={state.name == '' || !isValid} onClick={submit}>
         Publish
       </Button>
     </Stack>

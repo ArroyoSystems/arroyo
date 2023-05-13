@@ -11,10 +11,10 @@ import {
   useRadioGroup,
   UseRadioProps,
   useStyleConfig,
-} from "@chakra-ui/react";
-import React from "react";
+} from '@chakra-ui/react';
+import React from 'react';
 
-interface RadioCardGroupProps<T> extends Omit<StackProps, "onChange"> {
+interface RadioCardGroupProps<T> extends Omit<StackProps, 'onChange'> {
   name?: string;
   value?: T;
   defaultValue?: string;
@@ -38,7 +38,7 @@ export const RadioCardGroup = <T extends string>(props: RadioCardGroupProps<T>) 
           return React.cloneElement(card, {
             radioProps: getRadioProps({
               value: card.props.value,
-              isDisabled: card.props.isDisabled
+              isDisabled: card.props.isDisabled,
             }),
           });
         }),
@@ -57,31 +57,26 @@ interface RadioCardProps extends BoxProps {
 export const RadioCard = (props: RadioCardProps) => {
   const { radioProps, children, isDisabled, ...rest } = props;
   const { getInputProps, getCheckboxProps, getLabelProps, state } = useRadio(radioProps);
-  const id = useId(undefined, "radio-button");
+  const id = useId(undefined, 'radio-button');
 
-  const styles = useStyleConfig("RadioCard", props);
+  const styles = useStyleConfig('RadioCard', props);
   const inputProps = getInputProps();
   const checkboxProps = getCheckboxProps();
   const labelProps = getLabelProps();
 
   const sx = isDisabled
     ? {
-      opacity: "0.5"
-    }
+        opacity: '0.5',
+      }
     : {
-        ".focus-visible + [data-focus]": {
-          boxShadow: "outline",
+        '.focus-visible + [data-focus]': {
+          boxShadow: 'outline',
           zIndex: 1,
         },
       };
 
   return (
-    <Box
-      as="label"
-      cursor="pointer"
-      {...labelProps}
-      sx={sx}
-    >
+    <Box as="label" cursor="pointer" {...labelProps} sx={sx}>
       <input {...inputProps} aria-labelledby={id} />
       <Box sx={styles} {...checkboxProps} {...rest}>
         <Stack direction="row">
@@ -100,8 +95,8 @@ export const RadioCard = (props: RadioCardProps) => {
 };
 
 export const CheckIcon = createIcon({
-  displayName: "CheckIcon",
-  viewBox: "0 0 12 10",
+  displayName: 'CheckIcon',
+  viewBox: '0 0 12 10',
   path: (
     <polyline
       fill="none"

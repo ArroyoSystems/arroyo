@@ -1,6 +1,6 @@
-import "./pipelines.css";
+import './pipelines.css';
 
-import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
+import { ConnectError } from '@bufbuild/connect-web';
 import {
   Alert,
   AlertDescription,
@@ -15,13 +15,9 @@ import {
   Button,
   CloseButton,
   Container,
-  Flex,
-  Grid,
-  GridItem,
   Heading,
   HStack,
   IconButton,
-  Spacer,
   Stack,
   Table,
   Tbody,
@@ -32,14 +28,12 @@ import {
   Tr,
   useColorModeValue,
   useDisclosure,
-} from "@chakra-ui/react";
-import { Link, useLinkClickHandler, useNavigate } from "react-router-dom";
-import { DeleteJobReq, GetJobsReq, GetJobsResp, GetSourcesReq, JobStatus } from "../../gen/api_pb";
-import React, { RefObject, useEffect, useRef, useState } from "react";
-import { ApiGrpc } from "../../gen/api_connectweb";
-import { FiCopy, FiEdit2, FiXCircle } from "react-icons/fi";
-import { ApiClient } from "../../main";
-import { isError } from "node:util";
+} from '@chakra-ui/react';
+import { Link, useLinkClickHandler, useNavigate } from 'react-router-dom';
+import { DeleteJobReq, GetJobsReq, JobStatus } from '../../gen/api_pb';
+import React, { useEffect, useRef, useState } from 'react';
+import { FiCopy, FiXCircle } from 'react-icons/fi';
+import { ApiClient } from '../../main';
 
 interface ColumnDef {
   name: string;
@@ -66,44 +60,44 @@ function formatDuration(micros: number): string {
   } else if (millis / 1000 < 60 * 60) {
     let minutes = Math.floor(secs / 60);
     let seconds = secs - minutes * 60;
-    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   } else {
     let hours = Math.floor(secs / (60 * 60));
     let minutes = Math.floor((secs - hours * 60 * 60) / 60);
     let seconds = secs - hours * 60 * 60 - minutes * 60;
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   }
 }
 
 const columns: Array<ColumnDef> = [
   {
-    name: "name",
+    name: 'name',
     accessor: s => s.pipelineName,
   },
   {
-    name: "state",
+    name: 'state',
     accessor: s => s.state,
   },
   {
-    name: "started",
+    name: 'started',
     accessor: s => {
       if (s.startTime == null) {
-        return "-";
+        return '-';
       } else {
-        return new Intl.DateTimeFormat("en", {
-          dateStyle: "short",
-          timeStyle: "short",
+        return new Intl.DateTimeFormat('en', {
+          dateStyle: 'short',
+          timeStyle: 'short',
         }).format(new Date(Number(s.startTime) / 1000));
       }
     },
   },
   {
-    name: "runtime",
+    name: 'runtime',
     accessor: s => formatDuration(Number(pipelineDuration(s))),
   },
   {
-    name: "tasks",
-    accessor: s => String(s.tasks ? Number(s.tasks) : "-"),
+    name: 'tasks',
+    accessor: s => String(s.tasks ? Number(s.tasks) : '-'),
   },
 ];
 
@@ -113,7 +107,7 @@ function JobsTable({ client }: { client: ApiClient }) {
 
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const [message, setMessage] = useState<{text: string, type: "success" | "error"} | null>(null);
+  const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [jobToBeDeleted, setJobToBeDelete] = useState<JobStatus | null>(null);
 
   useEffect(() => {
@@ -125,7 +119,6 @@ function JobsTable({ client }: { client: ApiClient }) {
 
     fetchData();
   }, [message]);
-
 
   let messageBox = null;
   if (message != null) {
@@ -145,19 +138,18 @@ function JobsTable({ client }: { client: ApiClient }) {
         await client()
       ).deleteJob(
         new DeleteJobReq({
-          jobId: job.jobId
+          jobId: job.jobId,
         })
       );
-      setMessage({text: `Job ${job.jobId} successfully deleted`, type: "success"});
+      setMessage({ text: `Job ${job.jobId} successfully deleted`, type: 'success' });
     } catch (e) {
       if (e instanceof ConnectError) {
-        setMessage({text: e.rawMessage, type: "error"});
+        setMessage({ text: e.rawMessage, type: 'error' });
       } else {
-        setMessage({text: "Something went wrong", type: "error"});
+        setMessage({ text: 'Something went wrong', type: 'error' });
       }
     }
   };
-
 
   return (
     <Stack spacing={2}>
@@ -168,7 +160,9 @@ function JobsTable({ client }: { client: ApiClient }) {
               Delete Job {jobToBeDeleted?.pipelineName}
             </AlertDialogHeader>
 
-            <AlertDialogBody>Are you sure you want to delete job {jobToBeDeleted?.jobId}? Job state will be lost.</AlertDialogBody>
+            <AlertDialogBody>
+              Are you sure you want to delete job {jobToBeDeleted?.jobId}? Job state will be lost.
+            </AlertDialogBody>
 
             <AlertDialogFooter>
               <Button ref={cancelRef} onClick={onClose}>
@@ -208,7 +202,7 @@ function JobsTable({ client }: { client: ApiClient }) {
               ))}
               <Td textAlign="right">
                 <IconButton
-                  onClick={() => navigate("/pipelines/new?from=" + job.definitionId)}
+                  onClick={() => navigate('/pipelines/new?from=' + job.definitionId)}
                   icon={<FiCopy fontSize="1.25rem" />}
                   variant="ghost"
                   aria-label="Duplicate"
@@ -218,7 +212,10 @@ function JobsTable({ client }: { client: ApiClient }) {
                   icon={<FiXCircle fontSize="1.25rem" />}
                   variant="ghost"
                   aria-label="Delete source"
-                  onClick={() => { setJobToBeDelete(job); onOpen() }}
+                  onClick={() => {
+                    setJobToBeDelete(job);
+                    onOpen();
+                  }}
                   title="Delete"
                 />
               </Td>
@@ -233,12 +230,12 @@ function JobsTable({ client }: { client: ApiClient }) {
 export function JobsIndex({ client }: { client: ApiClient }) {
   return (
     <Container py="8" flex="1">
-      <Stack spacing={{ base: "8", lg: "6" }}>
+      <Stack spacing={{ base: '8', lg: '6' }}>
         <Stack
           spacing="4"
-          direction={{ base: "column", lg: "row" }}
+          direction={{ base: 'column', lg: 'row' }}
           justify="space-between"
-          align={{ base: "start", lg: "center" }}
+          align={{ base: 'start', lg: 'center' }}
         >
           <Stack spacing="1">
             <Heading size="sm" fontWeight="medium">
@@ -246,17 +243,17 @@ export function JobsIndex({ client }: { client: ApiClient }) {
             </Heading>
           </Stack>
           <HStack spacing="3">
-            <Button variant="primary" onClick={useLinkClickHandler("/pipelines/new")}>
+            <Button variant="primary" onClick={useLinkClickHandler('/pipelines/new')}>
               Create Pipeline
             </Button>
           </HStack>
         </Stack>
         <Box
           bg="bg-surface"
-          boxShadow={{ base: "none", md: useColorModeValue("sm", "sm-dark") }}
+          boxShadow={{ base: 'none', md: useColorModeValue('sm', 'sm-dark') }}
           borderRadius="lg"
         >
-          <Stack spacing={{ base: "5", lg: "6" }}>
+          <Stack spacing={{ base: '5', lg: '6' }}>
             <JobsTable client={client} />
           </Stack>
         </Box>
