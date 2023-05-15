@@ -5,7 +5,7 @@ use std::{collections::HashMap, env, time::SystemTime};
 use arroyo_rpc::grpc::api::{job_metrics_resp::OperatorMetrics, JobMetricsResp};
 use arroyo_rpc::grpc::api::{Metric, SubtaskMetrics};
 use arroyo_types::{
-    to_millis, API_METRICS_RATE_ENV, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+    to_millis, API_METRICS_RATE_ENV, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT, TX_QUEUE_SIZE, TX_QUEUE_REM
 };
 use http::{header::AUTHORIZATION, HeaderMap, HeaderValue};
 use once_cell::sync::Lazy;
@@ -50,20 +50,38 @@ pub(crate) async fn get_metrics(
         BytesSent,
         MessagesRecv,
         MessagesSent,
+        Backpressure
     }
 
     impl QueryMetrics {
-        fn get_query(&self, job_id: &str, run_id: u64, rate: &str) -> String {
-            let metric = match self {
-                BytesRecv => BYTES_RECV,
-                BytesSent => BYTES_SENT,
-                MessagesRecv => MESSAGES_RECV,
-                MessagesSent => MESSAGES_SENT,
-            };
+
+        fn simple_query(&self, metric: &str, job_id: &str, run_id: u64, rate: &str) -> String {
             format!(
                 "rate({}{{job_id=\"{}\",run_id=\"{}\"}}[{}])",
                 metric, job_id, run_id, rate
             )
+        }
+
+        fn backpressure_query(&self, job_id: &str, run_id: u64) -> String {
+            let tx_queue_size: String =
+                format!("{}{{job_id=\"{}\",run_id=\"{}\"}}", TX_QUEUE_SIZE, job_id, run_id);
+            let tx_queue_rem: String =
+                format!("{}{{job_id=\"{}\",run_id=\"{}\"}}", TX_QUEUE_REM, job_id, run_id);
+            format!(
+                "({} - {}) / {}",
+                tx_queue_size, tx_queue_rem, tx_queue_size
+            )
+        }
+
+        fn get_query(&self, job_id: &str, run_id: u64, rate: &str) -> String {
+            let query = match self {
+                BytesRecv => self.simple_query(BYTES_RECV, job_id, run_id, rate),
+                BytesSent => self.simple_query(BYTES_SENT, job_id, run_id, rate),
+                MessagesRecv => self.simple_query(MESSAGES_RECV, job_id, run_id, rate),
+                MessagesSent => self.simple_query(MESSAGES_SENT, job_id, run_id, rate),
+                Backpressure => self.backpressure_query(job_id, run_id),
+            };
+            return query;
         }
     }
 
@@ -106,10 +124,18 @@ pub(crate) async fn get_metrics(
                 METRICS_GRANULARITY_SECS
             )
             .get(),
+        METRICS_CLIENT
+            .query_range(
+                Backpressure.get_query(&job_id, run_id, &rate),
+                start,
+                end,
+                METRICS_GRANULARITY_SECS
+            )
+            .get(),
     );
 
     match result {
-        Ok((r1, r2, r3, r4)) => {
+        Ok((r1, r2, r3, r4, r5)) => {
             let mut metrics = HashMap::new();
 
             for (q, r) in [
@@ -117,6 +143,7 @@ pub(crate) async fn get_metrics(
                 (BytesSent, r2),
                 (MessagesRecv, r3),
                 (MessagesSent, r4),
+                (Backpressure, r5),
             ] {
                 for v in r.data().as_matrix().unwrap() {
                     let operator_id = v.metric().get("operator_id").unwrap().clone();
@@ -140,6 +167,7 @@ pub(crate) async fn get_metrics(
                         bytes_sent: vec![],
                         messages_recv: vec![],
                         messages_sent: vec![],
+                        backpressure: vec![],
                     });
 
                     match q {
@@ -147,6 +175,7 @@ pub(crate) async fn get_metrics(
                         BytesSent => entry.bytes_sent = data,
                         MessagesRecv => entry.messages_recv = data,
                         MessagesSent => entry.messages_sent = data,
+                        Backpressure => entry.backpressure = data,
                     };
                 }
             }
