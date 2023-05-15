@@ -1,3 +1,5 @@
+import { JobMetricsResp, Metric } from '../gen/api_pb';
+
 export function durationFormat(micros: number): string {
   const units = [
     ['μs', 1000],
@@ -80,4 +82,59 @@ export function stringifyBigint(data: any, indent: number): string {
     (_, value) => (typeof value === 'bigint' ? value.toString() + 'n' : value),
     indent
   );
+}
+
+export function getBackpressureColor(backpressure: number): string {
+  // backPressure should be a value between 0 and 1
+  const thresholds = [0.33, 0.66];
+  const colors = ['#ffffff', '#ffdb5d', '#e06262'];
+
+  // Find the corresponding color based on the number
+  for (let i = 0; i < thresholds.length; i++) {
+    if (backpressure <= thresholds[i]) {
+      return colors[i];
+    }
+  }
+
+  // If the number is greater than the last threshold, return the last color
+  return colors[colors.length - 1];
+}
+
+export function getOperatorBackpressure(
+  metrics: JobMetricsResp | undefined,
+  operator: string
+): number {
+  if (!metrics) {
+    return 0;
+  }
+
+  // reduce the subtasks backpressure to an operator-level backpressure
+
+  const nodeMetrics = metrics.metrics[operator];
+
+  if (!nodeMetrics) {
+    return 0;
+  }
+
+  const backPressureMetrics = Object.entries(nodeMetrics.subtasks)
+    .map(kv => {
+      return kv[1].backpressure;
+    })
+    .filter(ml => ml.length);
+
+  if (!backPressureMetrics.length) {
+    return 0;
+  }
+
+  const recent = backPressureMetrics.map(m =>
+    m.reduce((r: Metric, c: Metric) => {
+      if (c.time > r.time) {
+        return c;
+      } else {
+        return r;
+      }
+    }, m[0])
+  );
+
+  return recent.map(m => m.value).reduce((max, curr) => Math.max(max, curr));
 }
