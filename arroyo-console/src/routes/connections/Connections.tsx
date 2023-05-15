@@ -1,4 +1,4 @@
-import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
+import { ConnectError } from '@bufbuild/connect-web';
 import {
   Container,
   Stack,
@@ -7,7 +7,6 @@ import {
   Button,
   Box,
   useColorModeValue,
-  Skeleton,
   IconButton,
   Table,
   Tbody,
@@ -18,21 +17,18 @@ import {
   Tr,
   Icon,
   Code,
-  useDisclosure,
   Alert,
   AlertDescription,
   AlertIcon,
-  AlertTitle,
   CloseButton,
-} from "@chakra-ui/react";
-import { useEffect, useState } from "react";
-import { FaStream } from "react-icons/fa";
-import { FiDelete, FiEdit2, FiX, FiXCircle } from "react-icons/fi";
-import { SiApachekafka } from "react-icons/si";
-import { useLinkClickHandler } from "react-router-dom";
-import { ApiGrpc } from "../../gen/api_connectweb";
-import { Connection, DeleteConnectionReq, GetConnectionsReq } from "../../gen/api_pb";
-import { ApiClient } from "../../main";
+} from '@chakra-ui/react';
+import { useEffect, useState } from 'react';
+import { FaStream } from 'react-icons/fa';
+import { FiXCircle } from 'react-icons/fi';
+import { SiApachekafka } from 'react-icons/si';
+import { useLinkClickHandler } from 'react-router-dom';
+import { Connection, DeleteConnectionReq, GetConnectionsReq } from '../../gen/api_pb';
+import { ApiClient } from '../../main';
 
 interface ConnectionsState {
   connections: Array<Connection> | null;
@@ -50,7 +46,7 @@ const icons = {
 
 const columns: Array<ColumnDef> = [
   {
-    name: "type",
+    name: 'type',
     accessor: s => (
       <Stack direction="row">
         <Icon boxSize="5" as={icons[s.connectionType.case!]} />
@@ -59,11 +55,11 @@ const columns: Array<ColumnDef> = [
     ),
   },
   {
-    name: "name",
+    name: 'name',
     accessor: s => <Text>{s.name}</Text>,
   },
   {
-    name: "config",
+    name: 'config',
     accessor: s => (
       <Box maxW={400} whiteSpace="pre-wrap">
         <Code>{JSON.stringify(s.connectionType.value!, null, 2)}</Code>
@@ -71,11 +67,11 @@ const columns: Array<ColumnDef> = [
     ),
   },
   {
-    name: "sources",
+    name: 'sources',
     accessor: s => <Text>{s.sources}</Text>,
   },
   {
-    name: "sinks",
+    name: 'sinks',
     accessor: s => <Text>{s.sinks}</Text>,
   },
 ];
@@ -97,16 +93,20 @@ function ConnectionTable({ client }: { client: ApiClient }) {
 
   const deleteConnection = async (connection: Connection) => {
     try {
-      await (await client()).deleteConnection(new DeleteConnectionReq({
-        name: connection.name
-      }));
+      await (
+        await client()
+      ).deleteConnection(
+        new DeleteConnectionReq({
+          name: connection.name,
+        })
+      );
       setMessage(`Connection ${connection.name} successfully deleted`);
     } catch (e) {
       setIsError(true);
       if (e instanceof ConnectError) {
         setMessage(e.rawMessage);
       } else {
-        setMessage("Something went wrong");
+        setMessage('Something went wrong');
       }
     }
   };
@@ -114,22 +114,17 @@ function ConnectionTable({ client }: { client: ApiClient }) {
   const onClose = () => {
     setMessage(null);
     setIsError(false);
-  }
+  };
 
   let messageBox = null;
   if (message != null) {
-      messageBox = <Alert status={isError ? "error" : "success"} width="100%">
+    messageBox = (
+      <Alert status={isError ? 'error' : 'success'} width="100%">
         <AlertIcon />
-        <AlertDescription flexGrow={1}>
-          { message }
-        </AlertDescription>
-        <CloseButton
-          alignSelf="flex-end"
-          right={-1}
-          top={-1}
-          onClick={onClose}
-        />
-      </Alert>;
+        <AlertDescription flexGrow={1}>{message}</AlertDescription>
+        <CloseButton alignSelf="flex-end" right={-1} top={-1} onClick={onClose} />
+      </Alert>
+    );
   }
 
   return (
@@ -174,12 +169,12 @@ function ConnectionTable({ client }: { client: ApiClient }) {
 export function Connections({ client }: { client: ApiClient }) {
   return (
     <Container py="8" flex="1">
-      <Stack spacing={{ base: "8", lg: "6" }}>
+      <Stack spacing={{ base: '8', lg: '6' }}>
         <Stack
           spacing="4"
-          direction={{ base: "column", lg: "row" }}
+          direction={{ base: 'column', lg: 'row' }}
           justify="space-between"
-          align={{ base: "start", lg: "center" }}
+          align={{ base: 'start', lg: 'center' }}
         >
           <Stack spacing="1">
             <Heading size="sm" fontWeight="medium">
@@ -187,17 +182,17 @@ export function Connections({ client }: { client: ApiClient }) {
             </Heading>
           </Stack>
           <HStack spacing="3">
-            <Button variant="primary" onClick={useLinkClickHandler("/connections/new")}>
+            <Button variant="primary" onClick={useLinkClickHandler('/connections/new')}>
               Create Connection
             </Button>
           </HStack>
         </Stack>
         <Box
           bg="bg-surface"
-          boxShadow={{ base: "none", md: useColorModeValue("sm", "sm-dark") }}
+          boxShadow={{ base: 'none', md: useColorModeValue('sm', 'sm-dark') }}
           borderRadius="lg"
         >
-          <Stack spacing={{ base: "5", lg: "6" }}>
+          <Stack spacing={{ base: '5', lg: '6' }}>
             <ConnectionTable client={client} />
           </Stack>
         </Box>

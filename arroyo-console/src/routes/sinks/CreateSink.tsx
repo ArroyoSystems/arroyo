@@ -1,13 +1,6 @@
-import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
+import { ConnectError } from '@bufbuild/connect-web';
 import {
   Alert,
-  AlertDescription,
-  AlertDialog,
-  AlertDialogBody,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogOverlay,
   AlertIcon,
   Box,
   Breadcrumb,
@@ -27,32 +20,21 @@ import {
   Spinner,
   Stack,
   Text,
-  useDisclosure,
-} from "@chakra-ui/react";
-import { ChangeEvent, ChangeEventHandler, Dispatch, useEffect, useRef, useState } from "react";
-import { FaStream } from "react-icons/fa";
-import { FiDatabase } from "react-icons/fi";
-import { SiApachekafka } from "react-icons/si";
-import { Link, useNavigate } from "react-router-dom";
-import { ApiGrpc } from "../../gen/api_connectweb";
-import {
-    Connection,
-  CreateSinkReq,
-  GetConnectionsReq,
-  KafkaSinkConfig,
-  TestSchemaResp,
-  TestSourceMessage,
-} from "../../gen/api_pb";
-import { RadioCardGroup, RadioCard } from "../../lib/RadioGroup";
-import { ApiClient } from "../../main";
-import { Connections } from "../connections/Connections";
+} from '@chakra-ui/react';
+import { ChangeEvent, Dispatch, useEffect, useState } from 'react';
+import { FaStream } from 'react-icons/fa';
+import { SiApachekafka } from 'react-icons/si';
+import { Link, useNavigate } from 'react-router-dom';
+import { Connection, CreateSinkReq, GetConnectionsReq, KafkaSinkConfig } from '../../gen/api_pb';
+import { RadioCardGroup, RadioCard } from '../../lib/RadioGroup';
+import { ApiClient } from '../../main';
 
 function onChangeString(
   state: CreateSinkReq,
   setState: Dispatch<CreateSinkReq>,
   field: string,
   config: any,
-  nullable: boolean = false,
+  nullable: boolean = false
 ) {
   return (v: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     if (nullable && v.target == null) {
@@ -73,7 +55,7 @@ function ConfigureKafka({
   state,
   setState,
   setReady,
-  connections
+  connections,
 }: {
   state: CreateSinkReq;
   setState: Dispatch<CreateSinkReq>;
@@ -84,8 +66,8 @@ function ConfigureKafka({
 
   function updateReady<T>(f: (a: T) => void) {
     return (a: T) => {
-        f(a);
-        setReady(config.topic != "" && config.connection != "");
+      f(a);
+      setReady(config.topic != '' && config.connection != '');
     };
   }
 
@@ -96,10 +78,10 @@ function ConfigureKafka({
         <Select
           placeholder="Select connection"
           value={config.connection}
-          onChange={updateReady(onChangeString(state, setState, "connection", config))}
+          onChange={updateReady(onChangeString(state, setState, 'connection', config))}
         >
           {connections
-            .filter(c => c.connectionType.case == "kafka")
+            .filter(c => c.connectionType.case == 'kafka')
             .map(c => (
               <option key={c.name} value={c.name}>
                 {c.name}
@@ -107,7 +89,7 @@ function ConfigureKafka({
             ))}
         </Select>
         <FormHelperText>
-          Choose the Kafka cluster to connect to, or set up a new one{" "}
+          Choose the Kafka cluster to connect to, or set up a new one{' '}
           <Link to="/connections/new">here</Link>
         </FormHelperText>
       </FormControl>
@@ -117,7 +99,7 @@ function ConfigureKafka({
         <Input
           type="text"
           value={config.topic}
-          onChange={updateReady(onChangeString(state, setState, "topic", config))}
+          onChange={updateReady(onChangeString(state, setState, 'topic', config))}
         />
         <FormHelperText>Kafka Topic that data will be written to</FormHelperText>
       </FormControl>
@@ -125,13 +107,7 @@ function ConfigureKafka({
   );
 }
 
-export function SinkEditor({
-  client,
-  edit,
-}: {
-  client: ApiClient;
-  edit?: CreateSinkReq;
-}) {
+export function SinkEditor({ client, edit }: { client: ApiClient; edit?: CreateSinkReq }) {
   const [state, setState] = useState<CreateSinkReq>(edit || new CreateSinkReq({}));
   const [connections, setConnections] = useState<Array<Connection>>([]);
   const [ready, setReady] = useState<boolean>(false);
@@ -149,12 +125,11 @@ export function SinkEditor({
     fetchData();
   }, []);
 
-
   const sinkTypes = [
     {
-      name: "kafka",
+      name: 'kafka',
       icon: SiApachekafka,
-      description: "Output to a Kafka stream",
+      description: 'Output to a Kafka stream',
       initialState: new KafkaSinkConfig({}),
       editor: (
         <ConfigureKafka
@@ -166,15 +141,15 @@ export function SinkEditor({
       ),
     },
     {
-      name: "kinesis",
+      name: 'kinesis',
       icon: FaStream,
-      description: "Output to a Kinesis stream (coming soon)",
+      description: 'Output to a Kinesis stream (coming soon)',
       initialState: new KafkaSinkConfig({}),
       disabled: true,
-    }
+    },
   ];
 
-  const handleChange = (v: "kafka" | "state") => {
+  const handleChange = (v: 'kafka' | 'state') => {
     setState({
       ...state,
       /* @ts-ignore */
@@ -187,12 +162,12 @@ export function SinkEditor({
   const onSubmit = async () => {
     try {
       await (await client()).createSink(state);
-      navigate("/sinks");
+      navigate('/sinks');
     } catch (e) {
       if (e instanceof ConnectError) {
         setError(e.rawMessage);
       } else {
-        setError("Something went wrong... try again");
+        setError('Something went wrong... try again');
       }
     }
   };
@@ -210,7 +185,7 @@ export function SinkEditor({
   return (
     <Container py="8" flex="1">
       {errorAlert}
-      <Stack spacing={{ base: "8", lg: "6" }}>
+      <Stack spacing={{ base: '8', lg: '6' }}>
         <Breadcrumb>
           <BreadcrumbItem>
             <BreadcrumbLink as={Link} to="/sinks">
@@ -269,15 +244,13 @@ export function SinkEditor({
                           setState(new CreateSinkReq({ ...state, name: v.target.value }))
                         }
                       />
-                      <FormHelperText>
-                        A unique name to identify this sink
-                      </FormHelperText>
+                      <FormHelperText>A unique name to identify this sink</FormHelperText>
                     </FormControl>
 
                     {selectedType.editor}
                     <Button
                       variant="primary"
-                      isDisabled={!ready || state.name == ""}
+                      isDisabled={!ready || state.name == ''}
                       spinner={<Spinner />}
                       onClick={onSubmit}
                     >
@@ -285,7 +258,6 @@ export function SinkEditor({
                     </Button>
                   </Stack>
                 ) : null}
-
               </Stack>
             </Box>
           </Stack>

@@ -7,12 +7,12 @@ import {
   Box,
   Flex,
   Text,
-} from "@chakra-ui/react";
-import { SourceDef, SourceField, PrimitiveType } from "../../gen/api_pb";
+} from '@chakra-ui/react';
+import { SourceDef, SourceField } from '../../gen/api_pb';
 
 function CatalogField({ field, nesting }: { field: SourceField; nesting: number }) {
   switch (field.fieldType!.type.case) {
-    case "primitive":
+    case 'primitive':
       return (
         <Flex>
           <Box flex="1" textAlign="left">
@@ -23,7 +23,7 @@ function CatalogField({ field, nesting }: { field: SourceField; nesting: number 
           </Box>
         </Flex>
       );
-    case "struct":
+    case 'struct':
       return (
         <Box mr={1} mb={2}>
           <Box>{field.fieldName}</Box>

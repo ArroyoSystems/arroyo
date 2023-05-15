@@ -1,6 +1,6 @@
 //import './Sources.css';
 
-import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
+import { ConnectError } from '@bufbuild/connect-web';
 import {
   Alert,
   AlertDescription,
@@ -20,7 +20,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-  Skeleton,
   Stack,
   Table,
   Tbody,
@@ -31,13 +30,12 @@ import {
   Tr,
   useColorModeValue,
   useDisclosure,
-} from "@chakra-ui/react";
-import { useEffect, useState } from "react";
-import { FiEdit2, FiInfo, FiXCircle } from "react-icons/fi";
-import { useLinkClickHandler } from "react-router-dom";
-import { ApiGrpc } from "../../gen/api_connectweb";
-import { DeleteSourceReq, GetSourcesReq, SourceDef } from "../../gen/api_pb";
-import { ApiClient } from "../../main";
+} from '@chakra-ui/react';
+import { useEffect, useState } from 'react';
+import { FiInfo, FiXCircle } from 'react-icons/fi';
+import { useLinkClickHandler } from 'react-router-dom';
+import { DeleteSourceReq, GetSourcesReq, SourceDef } from '../../gen/api_pb';
+import { ApiClient } from '../../main';
 
 interface SourcesState {
   sources: Array<SourceDef> | null;
@@ -50,23 +48,22 @@ interface ColumnDef {
 
 const columns: Array<ColumnDef> = [
   {
-    name: "name",
+    name: 'name',
     accessor: s => s.name,
   },
   {
-    name: "type",
+    name: 'type',
     accessor: s => s.sourceType.case!,
   },
   {
-    name: "format",
+    name: 'format',
     accessor: s => s.schema?.schema.case!,
   },
   {
-    name: "consumers",
+    name: 'consumers',
     accessor: s => String(s.consumers),
-  }
+  },
 ];
-
 
 function SourceTable({ client }: { client: ApiClient }) {
   const [state, setState] = useState<SourcesState>({ sources: null });
@@ -103,7 +100,7 @@ function SourceTable({ client }: { client: ApiClient }) {
       if (e instanceof ConnectError) {
         setMessage(e.rawMessage);
       } else {
-        setMessage("Something went wrong");
+        setMessage('Something went wrong');
       }
     }
   };
@@ -116,7 +113,7 @@ function SourceTable({ client }: { client: ApiClient }) {
   let messageBox = null;
   if (message != null) {
     messageBox = (
-      <Alert status={isError ? "error" : "success"} width="100%">
+      <Alert status={isError ? 'error' : 'success'} width="100%">
         <AlertIcon />
         <AlertDescription flexGrow={1}>{message}</AlertDescription>
         <CloseButton alignSelf="flex-end" right={-1} top={-1} onClick={onMessageClose} />
@@ -133,8 +130,14 @@ function SourceTable({ client }: { client: ApiClient }) {
           <ModalCloseButton />
           <ModalBody>
             <Code colorScheme="black" width="100%" p={4}>
-              { /* toJson -> parse -> stringify to get around the inabilityof JSON.stringify to handle BigInt */ }
-              <pre>{JSON.stringify(JSON.parse(selected?.sourceType.value?.toJsonString() || "{}"), null, 2)}</pre>
+              {/* toJson -> parse -> stringify to get around the inabilityof JSON.stringify to handle BigInt */}
+              <pre>
+                {JSON.stringify(
+                  JSON.parse(selected?.sourceType.value?.toJsonString() || '{}'),
+                  null,
+                  2
+                )}
+              </pre>
             </Code>
           </ModalBody>
           <ModalFooter>
@@ -191,15 +194,14 @@ function SourceTable({ client }: { client: ApiClient }) {
 }
 
 export function Sources({ client }: { client: ApiClient }) {
-
   return (
     <Container py="8" flex="1">
-      <Stack spacing={{ base: "8", lg: "6" }}>
+      <Stack spacing={{ base: '8', lg: '6' }}>
         <Stack
           spacing="4"
-          direction={{ base: "column", lg: "row" }}
+          direction={{ base: 'column', lg: 'row' }}
           justify="space-between"
-          align={{ base: "start", lg: "center" }}
+          align={{ base: 'start', lg: 'center' }}
         >
           <Stack spacing="1">
             <Heading size="sm" fontWeight="medium">
@@ -207,17 +209,17 @@ export function Sources({ client }: { client: ApiClient }) {
             </Heading>
           </Stack>
           <HStack spacing="3">
-            <Button variant="primary" onClick={useLinkClickHandler("/sources/new")}>
+            <Button variant="primary" onClick={useLinkClickHandler('/sources/new')}>
               Create Source
             </Button>
           </HStack>
         </Stack>
         <Box
           bg="bg-surface"
-          boxShadow={{ base: "none", md: useColorModeValue("sm", "sm-dark") }}
+          boxShadow={{ base: 'none', md: useColorModeValue('sm', 'sm-dark') }}
           borderRadius="lg"
         >
-          <Stack spacing={{ base: "5", lg: "6" }}>
+          <Stack spacing={{ base: '5', lg: '6' }}>
             <SourceTable client={client} />
           </Stack>
         </Box>

@@ -1,21 +1,30 @@
-import { Textarea } from "@chakra-ui/react";
-import Editor from "@monaco-editor/react";
-import { Dispatch } from "react";
+import Editor from '@monaco-editor/react';
+import { Dispatch } from 'react';
 
-export function CodeEditor({ query, setQuery, readOnly, language }: { query: string; setQuery?: Dispatch<string>, readOnly?: boolean, language?: string }) {
+export function CodeEditor({
+  query,
+  setQuery,
+  readOnly,
+  language,
+}: {
+  query: string;
+  setQuery?: Dispatch<string>;
+  readOnly?: boolean;
+  language?: string;
+}) {
   const onChange = (value: string | undefined) => {
     if (setQuery != null) {
-      setQuery(value || "");
+      setQuery(value || '');
     }
   };
 
   return (
     <Editor
       height="50vh"
-      defaultLanguage={language || "sql"}
+      defaultLanguage={language || 'sql'}
       onChange={onChange}
       theme="vs-dark"
-      options={{ minimap: { enabled: false }, wordWrap: "on", readOnly: readOnly || false }}
+      options={{ minimap: { enabled: false }, wordWrap: 'on', readOnly: readOnly || false }}
       value={query}
     />
   );

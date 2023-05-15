@@ -1,13 +1,8 @@
-import { Box, Text } from "@chakra-ui/react";
-import dagre from "dagre";
-import { useMemo } from "react";
-import ReactFlow, { Handle, Position, Background, Controls } from "reactflow";
-import {
-  JobNode,
-  JobMetricsResp_OperatorMetrics,
-  JobGraph,
-  JobMetricsResp,
-} from "../../gen/api_pb";
+import { Box, Text } from '@chakra-ui/react';
+import dagre from 'dagre';
+import { useMemo } from 'react';
+import ReactFlow, { Handle, Position, Background } from 'reactflow';
+import { JobNode, JobGraph } from '../../gen/api_pb';
 
 function PipelineGraphNode({
   data,
@@ -22,9 +17,9 @@ function PipelineGraphNode({
     data.setActiveOperator(data.node.nodeId);
   }
 
-  let className = "pipelineGraphNode";
+  let className = 'pipelineGraphNode';
   if (data.isActive) {
-    className += " active";
+    className += ' active';
   }
 
   return (
@@ -52,7 +47,7 @@ export function PipelineGraph({
   const nodes = graph.nodes.map(node => {
     return {
       id: node.nodeId,
-      type: "pipelineNode",
+      type: 'pipelineNode',
       data: {
         label: node.operator,
         node: node,
@@ -75,7 +70,7 @@ export function PipelineGraph({
       id: `${edge.srcId}-${edge.destId}`,
       source: edge.srcId,
       target: edge.destId,
-      type: "step",
+      type: 'step',
     };
   });
 

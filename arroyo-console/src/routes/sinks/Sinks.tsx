@@ -1,4 +1,4 @@
-import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
+import { ConnectError } from '@bufbuild/connect-web';
 import {
   Alert,
   AlertDescription,
@@ -18,7 +18,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-  Skeleton,
   Stack,
   Table,
   Tbody,
@@ -29,14 +28,13 @@ import {
   Tr,
   useColorModeValue,
   useDisclosure,
-} from "@chakra-ui/react";
-import { useEffect, useState } from "react";
-import { FiEdit2, FiInfo, FiXCircle } from "react-icons/fi";
-import { useLinkClickHandler } from "react-router-dom";
-import { ApiGrpc } from "../../gen/api_connectweb";
-import { DeleteSinkReq, GetSinksReq, Sink } from "../../gen/api_pb";
-import { stringifyBigint } from "../../lib/util";
-import { ApiClient } from "../../main";
+} from '@chakra-ui/react';
+import { useEffect, useState } from 'react';
+import { FiInfo, FiXCircle } from 'react-icons/fi';
+import { useLinkClickHandler } from 'react-router-dom';
+import { DeleteSinkReq, GetSinksReq, Sink } from '../../gen/api_pb';
+import { stringifyBigint } from '../../lib/util';
+import { ApiClient } from '../../main';
 
 interface SinksState {
   sinks: Array<Sink> | null;
@@ -49,28 +47,28 @@ interface ColumnDef {
 
 const columns: Array<ColumnDef> = [
   {
-    name: "name",
+    name: 'name',
     accessor: s => s.name,
   },
   {
-    name: "type",
+    name: 'type',
     accessor: s => s.sinkType.case!,
   },
   {
-    name: "format",
-    accessor: _ => "json",
+    name: 'format',
+    accessor: _ => 'json',
   },
   {
-    name: "consumers",
-    accessor: _ => "-",
+    name: 'consumers',
+    accessor: _ => '-',
   },
   {
-    name: "status",
-    accessor: _ => "-",
+    name: 'status',
+    accessor: _ => '-',
   },
   {
-    name: "data rate",
-    accessor: _ => "-",
+    name: 'data rate',
+    accessor: _ => '-',
   },
 ];
 
@@ -83,7 +81,6 @@ function SinkTable({ client }: { client: ApiClient }) {
   const [selected, setSelected] = useState<Sink | null>(null);
 
   const { isOpen, onOpen, onClose } = useDisclosure();
-
 
   useEffect(() => {
     const fetchData = async () => {
@@ -110,7 +107,7 @@ function SinkTable({ client }: { client: ApiClient }) {
       if (e instanceof ConnectError) {
         setMessage(e.rawMessage);
       } else {
-        setMessage("Something went wrong");
+        setMessage('Something went wrong');
       }
     }
   };
@@ -123,7 +120,7 @@ function SinkTable({ client }: { client: ApiClient }) {
   let messageBox = null;
   if (message != null) {
     messageBox = (
-      <Alert status={isError ? "error" : "success"} width="100%">
+      <Alert status={isError ? 'error' : 'success'} width="100%">
         <AlertIcon />
         <AlertDescription flexGrow={1}>{message}</AlertDescription>
         <CloseButton alignSelf="flex-end" right={-1} top={-1} onClick={onMessageClose} />
@@ -199,12 +196,12 @@ function SinkTable({ client }: { client: ApiClient }) {
 export function Sinks({ client }: { client: ApiClient }) {
   return (
     <Container py="8" flex="1">
-      <Stack spacing={{ base: "8", lg: "6" }}>
+      <Stack spacing={{ base: '8', lg: '6' }}>
         <Stack
           spacing="4"
-          direction={{ base: "column", lg: "row" }}
+          direction={{ base: 'column', lg: 'row' }}
           justify="space-between"
-          align={{ base: "start", lg: "center" }}
+          align={{ base: 'start', lg: 'center' }}
         >
           <Stack spacing="1">
             <Heading size="sm" fontWeight="medium">
@@ -212,17 +209,17 @@ export function Sinks({ client }: { client: ApiClient }) {
             </Heading>
           </Stack>
           <HStack spacing="3">
-            <Button variant="primary" onClick={useLinkClickHandler("/sinks/new")}>
+            <Button variant="primary" onClick={useLinkClickHandler('/sinks/new')}>
               Create Sink
             </Button>
           </HStack>
         </Stack>
         <Box
           bg="bg-surface"
-          boxShadow={{ base: "none", md: useColorModeValue("sm", "sm-dark") }}
+          boxShadow={{ base: 'none', md: useColorModeValue('sm', 'sm-dark') }}
           borderRadius="lg"
         >
-          <Stack spacing={{ base: "5", lg: "6" }}>
+          <Stack spacing={{ base: '5', lg: '6' }}>
             <SinkTable client={client} />
           </Stack>
         </Box>

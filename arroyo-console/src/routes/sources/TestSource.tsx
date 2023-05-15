@@ -1,4 +1,3 @@
-import { PromiseClient } from "@bufbuild/connect-web";
 import {
   Stack,
   Heading,
@@ -7,7 +6,6 @@ import {
   Code,
   Card,
   CardBody,
-  CardHeader,
   StackDivider,
   Button,
   Spinner,
@@ -21,17 +19,10 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogOverlay,
-} from "@chakra-ui/react";
-import { config } from "process";
-import { Dispatch, useRef, useState } from "react";
-import { ApiGrpc } from "../../gen/api_connectweb";
-import {
-  CreateSourceReq,
-  JsonSchemaDef,
-  TestSchemaResp,
-  TestSourceMessage,
-} from "../../gen/api_pb";
-import { ApiClient } from "../../main";
+} from '@chakra-ui/react';
+import { Dispatch, useRef, useState } from 'react';
+import { CreateSourceReq, JsonSchemaDef, TestSourceMessage } from '../../gen/api_pb';
+import { ApiClient } from '../../main';
 
 export function TestSource({
   state,
@@ -51,7 +42,7 @@ export function TestSource({
 
   const schemaDisplay = new Map([
     [
-      "jsonSchema",
+      'jsonSchema',
       <Box>
         <Text fontWeight="bold">Json Schema</Text>
         <Code maxHeight={250} overflowY="scroll" whiteSpace="pre" width="100%">
@@ -80,7 +71,7 @@ export function TestSource({
           await new Promise(r => setTimeout(r, 300));
         }
       } catch (e) {
-        console.log("Request failed", e);
+        console.log('Request failed', e);
       }
     }
   };
@@ -99,11 +90,11 @@ export function TestSource({
       <Box bg="bg-surface">
         <Stack divider={<StackDivider />} spacing="0">
           {messages.map((m, i) => {
-            let status: "error" | "success" | "info" = m.error
-              ? "error"
+            let status: 'error' | 'success' | 'info' = m.error
+              ? 'error'
               : m.done
-              ? "success"
-              : "info";
+              ? 'success'
+              : 'info';
             return (
               <Alert key={i} status={status}>
                 <AlertIcon />
@@ -144,7 +135,7 @@ export function TestSource({
           Test Source
         </Button>
       ) : (
-        <Button colorScheme={errored ? "red" : "green"} onClick={onClickContinue}>
+        <Button colorScheme={errored ? 'red' : 'green'} onClick={onClickContinue}>
           Continue
         </Button>
       )}
