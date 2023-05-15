@@ -18,6 +18,7 @@ use datafusion_expr::{
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use regex::Regex;
 use syn::{parse_quote, parse_str, Ident, Path};
 
 #[derive(Debug, Clone)]
@@ -1391,12 +1392,19 @@ pub enum StringFunction {
     Translate(Box<Expression>, Box<Expression>, Box<Expression>),
     OctetLength(Box<Expression>),
     Upper(Box<Expression>),
-    RegexpMatch(Box<Expression>, Box<Expression>),
+    RegexpMatch(
+        Box<Expression>,
+        // Checked regex
+        String,
+    ),
     RegexpReplace(
+        // String to mutate
         Box<Expression>,
+        // Checked Regex
+        String,
+        // String to replace
         Box<Expression>,
-        Box<Expression>,
-        Option<Box<Expression>>,
+        // Optional flags of 'i'  (insensitive) and 'g' (global)
         Option<Box<Expression>>,
     ),
     Repeat(Box<Expression>, Box<Expression>),
@@ -1556,6 +1564,15 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
                 Box::new(args.remove(0)),
                 Some(Box::new(args.remove(0))),
             )),
+            (2, BuiltinScalarFunction::RegexpMatch) => {
+                let first_argument = Box::new(args.remove(0));
+                let regex_arg = args.remove(0);
+                let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(regex))}) = regex_arg else {
+                    bail!("regex argument must be a string literal")
+                };
+                let _ = Regex::new(&regex)?;
+                Ok(StringFunction::RegexpMatch(first_argument, regex))
+            }
             (2, BuiltinScalarFunction::Repeat) => Ok(StringFunction::Repeat(
                 Box::new(args.remove(0)),
                 Box::new(args.remove(0)),
@@ -1620,6 +1637,22 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
                 Box::new(args.remove(0)),
                 Box::new(args.remove(0)),
             )),
+            (3, BuiltinScalarFunction::RegexpReplace) => {
+                let first_argument = Box::new(args.remove(0));
+                let regex_arg = args.remove(0);
+                let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(regex))}) = regex_arg else {
+                    bail!("regex argument must be a string literal")
+                };
+                let _ = Regex::new(&regex)?;
+                let substitute = args.remove(0);
+                Ok(StringFunction::RegexpReplace(
+                    first_argument,
+                    regex,
+                    Box::new(substitute),
+                    None,
+                ))
+            }
+
             (_, BuiltinScalarFunction::Concat) => Ok(StringFunction::Concat(args)),
             (1..=usize::MAX, func) if func == BuiltinScalarFunction::Concat => {
                 let separator = Box::new(args.remove(0));
@@ -1676,11 +1709,11 @@ impl StringFunction {
             StringFunction::ConcatWithSeparator(expr, _exprs) => {
                 TypeDef::DataType(DataType::Utf8, expr.nullable())
             }
-            StringFunction::RegexpReplace(expr1, expr2, expr3) => {
-                TypeDef::DataType(DataType::Utf8, expr1.nullable() || expr2.nullable() || expr3.nullable())
-            },
-            StringFunction::RegexpMatch(expr1,expr2) => {
-                TypeDef::DataType(DataType::Utf8, expr1.nullable() || expr2.nullable())
+            StringFunction::RegexpReplace(expr1, _, expr3, _) => {
+                TypeDef::DataType(DataType::Utf8, expr1.nullable() || expr3.nullable())
+            }
+            StringFunction::RegexpMatch(expr1, _) => {
+                TypeDef::DataType(DataType::Utf8, expr1.nullable())
             }
             StringFunction::Strpos(expr1, expr2) => {
                 TypeDef::DataType(DataType::Int32, expr1.nullable() || expr2.nullable())
@@ -1763,8 +1796,16 @@ impl StringFunction {
                     arg1, arg2
                 ))
             }
-            StringFunction::RegexpMatch(_, _) => todo!(),
-            StringFunction::RegexpReplace(_, _, _, _, _) => todo!(),
+            StringFunction::RegexpMatch(_, regex) => {
+                parse_quote!(arroyo_worker::operators::functions::regex::regexp_match(
+                    arg1, #regex.to_string()
+                ))
+            }
+            StringFunction::RegexpReplace(_, regex, _, _) => {
+                parse_quote!(arroyo_worker::operators::functions::regex::regexp_replace(
+                    arg1, #regex.to_string(), arg2, arg3
+                ))
+            }
             StringFunction::Repeat(_, _) => parse_quote!(arg1.repeat(arg2 as usize)),
             StringFunction::Right(_, _) => {
                 parse_quote!(arroyo_worker::operators::functions::strings::right(
@@ -2024,8 +2065,17 @@ impl StringFunction {
                     })
                 }
             }
-            StringFunction::RegexpMatch(_, _) => todo!(),
-            StringFunction::RegexpReplace(_, _, _, _, _) => todo!(),
+            StringFunction::RegexpMatch(arg1, arg2) => {
+                // TODO: is this a normal or something special is required?
+                todo!();
+            }
+            StringFunction::RegexpReplace(arg1, arg2, arg3, arg4) => {
+                todo!();
+                // TODO: is this a normal or something special is required?
+                // parse_quote!({
+                //     #function
+                // })
+            }
         }
     }
 }
