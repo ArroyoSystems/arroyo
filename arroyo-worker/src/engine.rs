@@ -372,7 +372,6 @@ impl<K: Key, T: Data> Context<K, T> {
             })
             .collect();
 
-
         Context {
             task_info,
             control_rx,
