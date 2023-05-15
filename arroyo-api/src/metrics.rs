@@ -5,7 +5,8 @@ use std::{collections::HashMap, env, time::SystemTime};
 use arroyo_rpc::grpc::api::{job_metrics_resp::OperatorMetrics, JobMetricsResp};
 use arroyo_rpc::grpc::api::{Metric, SubtaskMetrics};
 use arroyo_types::{
-    to_millis, API_METRICS_RATE_ENV, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT, TX_QUEUE_SIZE, TX_QUEUE_REM
+    to_millis, API_METRICS_RATE_ENV, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+    TX_QUEUE_REM, TX_QUEUE_SIZE,
 };
 use http::{header::AUTHORIZATION, HeaderMap, HeaderValue};
 use once_cell::sync::Lazy;
@@ -50,11 +51,10 @@ pub(crate) async fn get_metrics(
         BytesSent,
         MessagesRecv,
         MessagesSent,
-        Backpressure
+        Backpressure,
     }
 
     impl QueryMetrics {
-
         fn simple_query(&self, metric: &str, job_id: &str, run_id: u64, rate: &str) -> String {
             format!(
                 "rate({}{{job_id=\"{}\",run_id=\"{}\"}}[{}])",
@@ -63,14 +63,15 @@ pub(crate) async fn get_metrics(
         }
 
         fn backpressure_query(&self, job_id: &str, run_id: u64) -> String {
-            let tx_queue_size: String =
-                format!("{}{{job_id=\"{}\",run_id=\"{}\"}}", TX_QUEUE_SIZE, job_id, run_id);
-            let tx_queue_rem: String =
-                format!("{}{{job_id=\"{}\",run_id=\"{}\"}}", TX_QUEUE_REM, job_id, run_id);
-            format!(
-                "({} - {}) / {}",
-                tx_queue_size, tx_queue_rem, tx_queue_size
-            )
+            let tx_queue_size: String = format!(
+                "{}{{job_id=\"{}\",run_id=\"{}\"}}",
+                TX_QUEUE_SIZE, job_id, run_id
+            );
+            let tx_queue_rem: String = format!(
+                "{}{{job_id=\"{}\",run_id=\"{}\"}}",
+                TX_QUEUE_REM, job_id, run_id
+            );
+            format!("({} - {}) / {}", tx_queue_size, tx_queue_rem, tx_queue_size)
         }
 
         fn get_query(&self, job_id: &str, run_id: u64, rate: &str) -> String {
