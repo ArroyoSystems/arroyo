@@ -7,8 +7,8 @@ use arroyo_rpc::grpc::api::{
     source_def::SourceType,
     source_schema::{self, Schema},
     ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
-    JsonSchemaDef, KafkaSourceConfig, KafkaSourceDef, RawJsonDef, SourceDef, SourceField,
-    SourceMetadataResp, TestSourceMessage,
+    EventSourceSourceConfig, EventSourceSourceDef, JsonSchemaDef, KafkaSourceConfig,
+    KafkaSourceDef, RawJsonDef, SourceDef, SourceField, SourceMetadataResp, TestSourceMessage,
 };
 use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
@@ -601,11 +601,30 @@ pub(crate) async fn create_source(
                     Some(connection.id),
                 )
             }
-            create_source_req::TypeOneof::EventSource(event) => (
-                public::SourceType::event_source,
-                serde_json::to_value(&event).unwrap(),
-                None,
-            ),
+            create_source_req::TypeOneof::EventSource(event) => {
+                let connection = connections
+                    .iter()
+                    .find(|c| c.name == event.connection)
+                    .ok_or_else(|| {
+                        Status::failed_precondition(format!(
+                            "Could not find connection with name '{}'",
+                            event.connection
+                        ))
+                    })?;
+
+                if connection.r#type != public::ConnectionType::http {
+                    return Err(Status::invalid_argument(format!(
+                        "Connection '{}' is not an HTTP endpoint",
+                        event.connection
+                    )));
+                }
+
+                (
+                    public::SourceType::event_source,
+                    serde_json::to_value(&event).unwrap(),
+                    Some(connection.id),
+                )
+            }
             create_source_req::TypeOneof::Impulse(impulse) => {
                 if impulse.events_per_second > auth.org_metadata.max_impulse_qps as f32 {
                     return rate_limit_error("impulse", auth.org_metadata.max_impulse_qps as usize);
@@ -707,9 +726,21 @@ pub(crate) async fn get_sources<E: GenericClient>(
                         topic: config.topic,
                     })
                 }
-                public::SourceType::event_source => SourceType::EventSource(
-                    serde_json::from_value(rec.source_config.unwrap()).unwrap(),
-                ),
+                public::SourceType::event_source => {
+                    let config: EventSourceSourceConfig =
+                        serde_json::from_value(rec.source_config.unwrap()).unwrap();
+                    assert_eq!(rec.connection_type.unwrap(), public::ConnectionType::http);
+
+                    SourceType::EventSource(EventSourceSourceDef {
+                        connection_name: rec.connection_name.as_ref().unwrap().clone(),
+                        connection: serde_json::from_value(
+                            rec.connection_config.as_ref().unwrap().clone(),
+                        )
+                        .unwrap(),
+                        path: config.path,
+                        events: config.events,
+                    })
+                }
             };
 
             SourceDef {

@@ -31,10 +31,11 @@ import {
   useDisclosure,
 } from '@chakra-ui/react';
 import { ChangeEvent, Dispatch, useRef, useState } from 'react';
-import { FaStream } from 'react-icons/fa';
+import { FaGlobeAmericas, FaStream } from 'react-icons/fa';
 import { SiApachekafka } from 'react-icons/si';
 import {
   CreateConnectionReq,
+  HttpConnection,
   KafkaAuthConfig,
   KafkaConnection,
   KinesisConnection,
@@ -90,6 +91,50 @@ const KafkaAuthTypes = [
   },
 ];
 
+function ConfigureHttp({
+  state,
+  setState,
+  setReady,
+}: {
+  state: CreateConnectionReq;
+  setState: Dispatch<CreateConnectionReq>;
+  setReady: Dispatch<boolean>;
+}) {
+  const config = state.connectionType.value as HttpConnection;
+
+  const onChange = (field: string) => {
+    return (e: ChangeEvent<HTMLInputElement>) => {
+      onChangeString(state, setState, field, config)(e);
+      setReady(config.url != '');
+    };
+  };
+
+  return (
+    <Stack spacing={5}>
+      <FormControl isRequired>
+        <FormLabel>URL</FormLabel>
+        <Input
+          type="text"
+          value={config.url}
+          onChange={onChange('url')}
+          placeholder="https://api.example.com"
+        />
+        <FormHelperText>The URL of the HTTP server to connect to</FormHelperText>
+      </FormControl>
+      <FormControl>
+        <FormLabel>Headers</FormLabel>
+        <Input
+          type="text"
+          value={config.headers}
+          placeholder="Content-Type: application/json"
+          onChange={onChangeString(state, setState, 'headers', config)}
+        />
+        <FormHelperText>Comma-seperated list of headers to send</FormHelperText>
+      </FormControl>
+    </Stack>
+  );
+}
+
 function ConfigureKafka({
   state,
   setState,
@@ -125,6 +170,7 @@ function ConfigureKafka({
     setState(
       new CreateConnectionReq({
         ...state,
+        /* @ts-ignore */
         connectionType: { case: state.connectionType.case!, value: config },
       })
     );
@@ -232,9 +278,17 @@ export function ConnectionEditor({
       initialState: new KinesisConnection({}),
       disabled: true,
     },
+    {
+      name: 'http',
+      icon: FaGlobeAmericas,
+      description: 'HTTP/HTTPS server',
+      initialState: new HttpConnection({}),
+      editor: <ConfigureHttp state={state} setState={setState} setReady={setReady} />,
+      disabled: false,
+    },
   ];
 
-  const handleChange = (v: 'kafka' | 'kinesis') => {
+  const handleChange = (v: 'kafka' | 'kinesis' | 'http') => {
     setState({
       ...state,
       /* @ts-ignore */
@@ -344,9 +398,7 @@ export function ConnectionEditor({
                           setState(new CreateConnectionReq({ ...state, name: v.target.value }))
                         }
                       />
-                      <FormHelperText>
-                        A unique name to identify this Kafka connection
-                      </FormHelperText>
+                      <FormHelperText>A unique name to identify this connection</FormHelperText>
                     </FormControl>
 
                     {selectedType.editor}

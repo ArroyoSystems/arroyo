@@ -17,6 +17,7 @@ import {
   Connection,
   CreateSourceReq,
   EventSourceSourceConfig,
+  HttpConnection,
   ImpulseSourceConfig,
   KafkaSourceConfig,
   NexmarkSourceConfig,
@@ -251,36 +252,43 @@ function ConfigureEventSource({
   state,
   setState,
   setReady,
+  connections,
 }: {
   state: CreateSourceReq;
   setState: Dispatch<CreateSourceReq>;
   setReady: Dispatch<boolean>;
+  connections: Array<Connection>;
 }) {
   const config = state.typeOneof.value as EventSourceSourceConfig;
 
-  useEffect(() => setReady(config.url != ''));
+  useEffect(() => setReady(config.connection != null));
 
   return (
     <Stack spacing={5}>
-      <FormControl isRequired>
-        <FormLabel>URL</FormLabel>
-        <Input
-          type="url"
-          value={config.url}
-          onChange={onChangeString(state, setState, 'url', config)}
-        />
-        <FormHelperText>The URL endpoint to connect to</FormHelperText>
-      </FormControl>
+      <FormLabel>HTTP Connection</FormLabel>
+      <Select
+        placeholder="Select connection"
+        value={config.connection}
+        onChange={onChangeString(state, setState, 'connection', config)}
+      >
+        {connections
+          .filter(c => c.connectionType.case == 'http')
+          .map(c => (
+            <option key={c.name} value={c.name}>
+              {c.name} ({(c.connectionType.value as HttpConnection).url})
+            </option>
+          ))}
+      </Select>
 
-      <FormControl isRequired>
-        <FormLabel>Headers</FormLabel>
+      <FormControl>
+        <FormLabel>Path</FormLabel>
         <Input
           type="text"
-          value={config.headers}
-          placeholder="Authorization: <token>, Content-Type: application/json"
-          onChange={onChangeString(state, setState, 'headers', config)}
+          value={config.path}
+          placeholder="/stream"
+          onChange={onChangeString(state, setState, 'path', config)}
         />
-        <FormHelperText>Comma-seperated list of headers to send</FormHelperText>
+        <FormHelperText>Optional path appended to endpoint</FormHelperText>
       </FormControl>
 
       <FormControl>
@@ -327,7 +335,15 @@ export function ConfigureSource({
         client={client}
       />,
     ],
-    ['eventSource', <ConfigureEventSource state={state} setState={setState} setReady={setReady} />],
+    [
+      'eventSource',
+      <ConfigureEventSource
+        state={state}
+        setState={setState}
+        setReady={setReady}
+        connections={connections}
+      />,
+    ],
   ]);
 
   const onClick = async () => {
