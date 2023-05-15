@@ -52,6 +52,7 @@ governor = "0.5.1"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 rdkafka-sys = "=4.2.0"
 eventsource-client = "0.11.0"
+regex = "1.8.1"
 
 [dev-dependencies]
 test-case = "2.2"
