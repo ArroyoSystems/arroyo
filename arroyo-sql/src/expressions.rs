@@ -1137,12 +1137,14 @@ impl CastExpression {
     }
     fn cast_expr(input_type: &DataType, output_type: &DataType, sub_expr: syn::Expr) -> syn::Expr {
         if Self::is_numeric(input_type) && Self::is_numeric(output_type) {
-            let cast_type: syn::Type = parse_str(StructField::data_type_name(output_type)).unwrap();
+            let cast_type: syn::Type =
+                parse_str(&StructField::data_type_name(output_type)).unwrap();
             parse_quote!(#sub_expr as #cast_type)
         } else if Self::is_numeric(input_type) && Self::is_string(output_type) {
             parse_quote!(#sub_expr.to_string())
         } else if Self::is_string(input_type) && Self::is_numeric(output_type) {
-            let cast_type: syn::Type = parse_str(StructField::data_type_name(output_type)).unwrap();
+            let cast_type: syn::Type =
+                parse_str(&StructField::data_type_name(output_type)).unwrap();
             parse_quote!(#sub_expr.parse::<#cast_type>().unwrap())
         } else if Self::is_date(input_type) && Self::is_string(output_type) {
             parse_quote!({
@@ -2103,7 +2105,7 @@ impl DataStructureFunction {
                 }
             }
             DataStructureFunction::MakeArray(terms) => {
-                if self.return_type().is_optional() {
+                if terms.iter().any(|term| term.nullable()) {
                     let entries: Vec<syn::Expr> = terms
                         .iter()
                         .map(|term| {
@@ -2115,7 +2117,7 @@ impl DataStructureFunction {
                             }
                         })
                         .collect::<Vec<_>>();
-                    parse_quote!(Some(vec![#(#entries),*]))
+                    parse_quote!(vec![#(#entries),*])
                 } else {
                     let nullable = terms.iter().any(|term| term.nullable());
                     if nullable {

@@ -314,8 +314,8 @@ impl TryFrom<AggregateProjection> for TwoPhaseAggregateProjection {
             field_computations: aggregate_projection
                 .field_computations
                 .into_iter()
-                .map(|computation| computation.try_into().unwrap())
-                .collect(),
+                .map(|computation| computation.try_into())
+                .collect::<Result<Vec<_>>>()?,
         })
     }
 }

@@ -248,7 +248,7 @@ impl TypeDef {
     pub fn type_string(&self) -> String {
         match self {
             TypeDef::StructDef(details, _) => details.struct_name(),
-            TypeDef::DataType(data_type, _) => StructField::data_type_name(data_type).to_string(),
+            TypeDef::DataType(data_type, _) => StructField::data_type_name(data_type),
         }
     }
 
@@ -388,39 +388,45 @@ impl StructField {
             TypeDef::DataType(data_type, true) => {
                 format!("Option<{}>", Self::data_type_name(data_type))
             }
-            TypeDef::DataType(data_type, false) => Self::data_type_name(data_type).to_string(),
+            TypeDef::DataType(data_type, false) => Self::data_type_name(data_type),
         };
         parse_str(&type_string).unwrap()
     }
 
-    pub(crate) fn data_type_name(data_type: &DataType) -> &str {
+    pub(crate) fn data_type_name(data_type: &DataType) -> String {
         match data_type {
             DataType::Null => todo!(),
-            DataType::Boolean => "bool",
-            DataType::Int8 => "i8",
-            DataType::Int16 => "i16",
-            DataType::Int32 => "i32",
-            DataType::Int64 => "i64",
-            DataType::UInt8 => "u8",
-            DataType::UInt16 => "u16",
-            DataType::UInt32 => "u32",
-            DataType::UInt64 => "u64",
-            DataType::Float16 => "f16",
-            DataType::Float32 => "f32",
-            DataType::Float64 => "f64",
-            DataType::Timestamp(_, _) => "std::time::SystemTime",
-            DataType::Date32 => "std::time::SystemTime",
-            DataType::Date64 => "std::time::SystemTime",
+            DataType::Boolean => "bool".to_string(),
+            DataType::Int8 => "i8".to_string(),
+            DataType::Int16 => "i16".to_string(),
+            DataType::Int32 => "i32".to_string(),
+            DataType::Int64 => "i64".to_string(),
+            DataType::UInt8 => "u8".to_string(),
+            DataType::UInt16 => "u16".to_string(),
+            DataType::UInt32 => "u32".to_string(),
+            DataType::UInt64 => "u64".to_string(),
+            DataType::Float16 => "f16".to_string(),
+            DataType::Float32 => "f32".to_string(),
+            DataType::Float64 => "f64".to_string(),
+            DataType::Timestamp(_, _) | DataType::Date32 | DataType::Date64 => {
+                "std::time::SystemTime".to_string()
+            }
             DataType::Time32(_) => todo!(),
             DataType::Time64(_) => todo!(),
-            DataType::Duration(_) => "std::time::Duration",
-            DataType::Interval(_) => "std::time::Duration",
+            DataType::Duration(_) | DataType::Interval(_) => "std::time::Duration".to_string(),
             DataType::Binary => todo!(),
             DataType::FixedSizeBinary(_) => todo!(),
             DataType::LargeBinary => todo!(),
-            DataType::Utf8 => "String",
+            DataType::Utf8 => "String".to_string(),
             DataType::LargeUtf8 => todo!(),
-            DataType::List(_) => todo!(),
+            DataType::List(field) => {
+                let list_data_type = Self::data_type_name(field.data_type());
+                if field.is_nullable() {
+                    format!("Vec<Option<{}>>", list_data_type)
+                } else {
+                    format!("Vec<{}>", list_data_type)
+                }
+            }
             DataType::FixedSizeList(_, _) => todo!(),
             DataType::LargeList(_) => todo!(),
             DataType::Struct(_) => unreachable!(),
