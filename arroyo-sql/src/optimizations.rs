@@ -188,9 +188,9 @@ impl FusedExpressionOperatorBuilder {
                 self.sequence.push(record_transform.clone());
                 self.output_types.push(node.output_type.clone());
                 match record_transform {
-                    RecordTransform::ValueProjection(_) | RecordTransform::KeyProjection(_) => {
-                        self.add_projection()
-                    }
+                    RecordTransform::ValueProjection(_)
+                    | RecordTransform::KeyProjection(_)
+                    | RecordTransform::TimestampAssignment(_) => self.add_projection(),
                     RecordTransform::Filter(_) => self.add_filter(),
                 }
                 true

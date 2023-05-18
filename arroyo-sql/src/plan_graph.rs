@@ -19,7 +19,8 @@ use crate::{
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
     pipeline::{
-        AggregatingStrategy, JoinType, MethodCompiler, RecordTransform, SqlOperator, WindowFunction,
+        AggregatingStrategy, JoinType, MethodCompiler, RecordTransform, SourceOperator,
+        SqlOperator, WindowFunction,
     },
     types::{StructDef, StructField, StructPair, TypeDef},
     ArroyoSchemaProvider, SqlConfig,
@@ -164,6 +165,20 @@ impl FusedRecordTransform {
                     };
                     ));
                 }
+                RecordTransform::TimestampAssignment(timestamp_expression) => {
+                    let expr = timestamp_expression.to_syn_expression();
+                    let record_type = output_type.record_type();
+                    record_expressions.push(parse_quote!(
+
+                            let record: #record_type = { let arg = &record.value;
+                                arroyo_types::Record {
+                                timestamp: #expr,
+                                key: record.key.clone(),
+                                value: record.value.clone()
+                        }
+                    };
+                    ));
+                }
                 RecordTransform::Filter(_) => unreachable!(),
             }
         }
@@ -218,6 +233,20 @@ impl FusedRecordTransform {
                         if !{let arg = &record.value;#expr} {
                             return None;
                         }
+                    ));
+                }
+                RecordTransform::TimestampAssignment(timestamp_expression) => {
+                    let expr = timestamp_expression.to_syn_expression();
+                    let record_type = output_type.record_type();
+                    record_expressions.push(parse_quote!(
+
+                            let record: #record_type = { let arg = &record.value;
+                                arroyo_types::Record {
+                                timestamp: #expr,
+                                key: record.key.clone(),
+                                value: record.value.clone()
+                        }
+                    };
                     ));
                 }
             }
@@ -540,20 +569,25 @@ impl PlanNode {
                         #projection_expr
                     }
                 ).to_string();
-                arroyo_datastream::Operator::SlidingAggregatingTopN(SlidingAggregatingTopN {
-                    width: *width,
-                    slide: *slide,
-                    bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
-                    in_memory_add: quote!(|current, bin_value| {#in_memory_add}).to_string(),
-                    in_memory_remove: quote!(|current, bin_value| {#in_memory_remove}).to_string(),
-                    partitioning_func: quote!(|arg| {#partition_function}).to_string(),
-                    extractor,
-                    aggregator,
-                    bin_type: quote!(#bin_type).to_string(),
-                    mem_type: quote!(#mem_type).to_string(),
-                    sort_key_type,
-                    max_elements: *max_elements,
-                })
+                let operator =
+                    arroyo_datastream::Operator::SlidingAggregatingTopN(SlidingAggregatingTopN {
+                        width: *width,
+                        slide: *slide,
+                        bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
+                        in_memory_add: quote!(|current, bin_value| {#in_memory_add}).to_string(),
+                        in_memory_remove: quote!(|current, bin_value| {#in_memory_remove})
+                            .to_string(),
+                        partitioning_func: quote!(|arg| {#partition_function}).to_string(),
+                        extractor,
+                        aggregator,
+                        bin_type: quote!(#bin_type).to_string(),
+                        mem_type: quote!(#mem_type).to_string(),
+                        sort_key_type,
+                        max_elements: *max_elements,
+                    });
+                println!("sliding logical plan operator {:#?}", self);
+                println!("sliding physical plan operator {:#?}", operator);
+                operator
             }
             PlanOperator::TumblingTopN {
                 width,
@@ -905,7 +939,7 @@ impl PlanGraph {
 
     pub fn add_sql_operator(&mut self, operator: SqlOperator) -> NodeIndex {
         match operator {
-            SqlOperator::Source(name, sql_source) => self.add_sql_source(name, sql_source),
+            SqlOperator::Source(source_operator) => self.add_sql_source(source_operator),
             SqlOperator::Aggregator(input, projection) => self.add_aggregator(input, projection),
             SqlOperator::JoinOperator(left, right, join_operator) => {
                 self.add_join(left, right, join_operator)
@@ -929,31 +963,62 @@ impl PlanGraph {
         }
     }
 
-    fn add_sql_source(&mut self, name: String, sql_source: SqlSource) -> NodeIndex {
-        if let Some(node_index) = self.sources.get(&name) {
+    fn add_sql_source(&mut self, source_operator: SourceOperator) -> NodeIndex {
+        if let Some(node_index) = self.sources.get(&source_operator.name) {
             return *node_index;
         }
-        if let Some(source_id) = sql_source.id {
+        if let Some(source_id) = source_operator.source.id {
             self.saved_sources_used.push(source_id);
         }
-        let plan_type = PlanType::Unkeyed(sql_source.struct_def.clone());
-        let source_index = self.insert_operator(
-            PlanOperator::Source(name.clone(), sql_source),
-            plan_type.clone(),
+        let mut current_type = PlanType::Unkeyed(source_operator.source.struct_def.clone());
+        let mut current_index = self.insert_operator(
+            PlanOperator::Source(source_operator.name.clone(), source_operator.source.clone()),
+            current_type.clone(),
         );
+        if let Some(virtual_projection) = source_operator.virtual_field_projection {
+            let virtual_plan_type = PlanType::Unkeyed(virtual_projection.output_struct());
+            let virtual_index = self.insert_operator(
+                PlanOperator::RecordTransform(RecordTransform::ValueProjection(virtual_projection)),
+                virtual_plan_type.clone(),
+            );
+            let virtual_edge = PlanEdge {
+                edge_data_type: current_type.clone(),
+                edge_type: EdgeType::Forward,
+            };
+            self.graph
+                .add_edge(current_index, virtual_index, virtual_edge);
+            current_index = virtual_index;
+            current_type = virtual_plan_type;
+        }
+
+        if let Some(timestamp_expression) = source_operator.timestamp_override {
+            let timestamp_index = self.insert_operator(
+                PlanOperator::RecordTransform(RecordTransform::TimestampAssignment(
+                    timestamp_expression,
+                )),
+                current_type.clone(),
+            );
+            let timestamp_edge = PlanEdge {
+                edge_data_type: current_type.clone(),
+                edge_type: EdgeType::Forward,
+            };
+            self.graph
+                .add_edge(current_index, timestamp_index, timestamp_edge);
+            current_index = timestamp_index;
+        }
         let watermark_operator =
             PlanOperator::Watermark(arroyo_datastream::WatermarkType::Periodic {
                 period: Duration::from_secs(1),
                 max_lateness: Duration::from_secs(1),
             });
-        let watermark_index = self.insert_operator(watermark_operator, plan_type.clone());
+        let watermark_index = self.insert_operator(watermark_operator, current_type.clone());
         let watermark_edge = PlanEdge {
-            edge_data_type: plan_type,
+            edge_data_type: current_type,
             edge_type: EdgeType::Forward,
         };
         self.graph
-            .add_edge(source_index, watermark_index, watermark_edge);
-        self.sources.insert(name, watermark_index);
+            .add_edge(current_index, watermark_index, watermark_edge);
+        self.sources.insert(source_operator.name, watermark_index);
         watermark_index
     }
 

@@ -493,7 +493,7 @@ fn convert_simple_data_type(sql_type: &SQLDataType) -> Result<DataType> {
         | SQLDataType::Varchar(_)
         | SQLDataType::Text
         | SQLDataType::String => Ok(DataType::Utf8),
-        SQLDataType::Timestamp(None, TimezoneInfo::None) => {
+        SQLDataType::Timestamp(None, TimezoneInfo::None) | SQLDataType::Datetime(_) => {
             Ok(DataType::Timestamp(TimeUnit::Nanosecond, None))
         }
         SQLDataType::Date => Ok(DataType::Date32),
