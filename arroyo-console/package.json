@@ -17,6 +17,7 @@
     "@bufbuild/protobuf": "^0.1.1",
     "@bufbuild/protoc-gen-connect-web": "^0.2.1",
     "@bufbuild/protoc-gen-es": "^0.1.1",
+    "@chakra-ui/icons": "^2.0.19",
     "@chakra-ui/pro-theme": "^0.0.57",
     "@chakra-ui/react": "^2.5.5",
     "@chakra-ui/styled-system": "^2.8.0",
@@ -38,7 +39,8 @@
     "react-icons": "^4.8.0",
     "react-router-dom": "^6.10.0",
     "react-test-renderer": "^18.2.0",
-    "reactflow": "^11.7.0"
+    "reactflow": "^11.7.0",
+    "swr": "^2.1.5"
   },
   "devDependencies": {
     "@chakra-ui/cli": "^2.3.0",
