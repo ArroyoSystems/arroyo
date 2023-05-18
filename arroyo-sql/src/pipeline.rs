@@ -10,9 +10,7 @@ use arrow_schema::DataType;
 use arroyo_datastream::{Operator, WindowType};
 
 use datafusion_common::{DFField, ScalarValue};
-use datafusion_expr::{
-    BinaryExpr, BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp,
-};
+use datafusion_expr::{BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp};
 
 use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
@@ -725,44 +723,39 @@ impl<'a> SqlPipelineBuilder<'a> {
             _ => {}
         }
 
-        let mut columns = join.on.clone();
-        if let Some(Expr::BinaryExpr(BinaryExpr {
-            left,
-            op: datafusion_expr::Operator::Eq,
-            right,
-        })) = join.filter.clone()
-        {
-            columns.push((*left, *right));
-        } else if join.filter.is_some() {
-            bail!(
-                "non-join filters on joins. This doesn't seem to actually happen in practice, {:?}",
-                join.on
-            );
-        }
-        let join_projection_field_names: Vec<_> = columns
+        let join_projection_field_names: Vec<_> = join
+            .on
             .iter()
             .map(|(left, _right)| Column::convert_expr(left))
             .collect::<Result<Vec<_>>>()?;
+        let (left_computations, right_computations): (Vec<_>, Vec<_>) = join
+            .on
+            .iter()
+            .map(|(left, right)| {
+                Ok((
+                    self.ctx(&left_input.return_type()).compile_expr(left)?,
+                    self.ctx(&right_input.return_type()).compile_expr(right)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .into_iter()
+            .unzip();
 
         let left_key = Projection {
             field_names: join_projection_field_names.clone(),
-            field_computations: columns
-                .iter()
-                .map(|(left, _right)| self.ctx(&left_input.return_type()).compile_expr(left))
-                .collect::<Result<Vec<_>>>()?,
+            field_computations: left_computations,
         };
+
         let right_key = Projection {
             field_names: join_projection_field_names,
-            field_computations: columns
-                .iter()
-                .map(|(_left, right)| self.ctx(&right_input.return_type()).compile_expr(right))
-                .collect::<Result<Vec<_>>>()?,
+            field_computations: right_computations,
         };
 
         if right_key.output_struct() != left_key.output_struct() {
             bail!("join key types must match. Try casting?");
         }
-        Ok(SqlOperator::JoinOperator(
+        let join_operator = SqlOperator::JoinOperator(
             Box::new(left_input),
             Box::new(right_input),
             JoinOperator {
@@ -770,9 +763,18 @@ impl<'a> SqlPipelineBuilder<'a> {
                 right_key,
                 join_type,
             },
+        );
+        let Some(join_filter) = &join.filter else {
+            return Ok(join_operator)
+        };
+        let join_filter = self
+            .ctx(&join_operator.return_type())
+            .compile_expr(join_filter)?;
+        Ok(SqlOperator::RecordTransform(
+            Box::new(join_operator),
+            RecordTransform::Filter(join_filter),
         ))
     }
-
     fn insert_table_scan(
         &mut self,
         table_scan: &datafusion::logical_expr::TableScan,
