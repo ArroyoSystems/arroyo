@@ -20,6 +20,7 @@ import { CreatePipeline } from './routes/pipelines/CreatePipeline';
 import { SinkEditor } from './routes/sinks/CreateSink';
 
 import { addCloudRoutes, createRoot, getClient, needsOrgSetup } from './lib/CloudComponents';
+import PageNotFound from './routes/not_found/PageNotFound';
 
 export type ApiClient = () => Promise<PromiseClient<typeof ApiGrpc>>;
 
@@ -32,6 +33,10 @@ export function Router(): JSX.Element {
   const client = getClient();
 
   let routes = [
+    {
+      path: '*',
+      element: <PageNotFound />,
+    },
     {
       path: '',
       element: <Home client={client} />,
