@@ -25,7 +25,7 @@ pub struct KafkaSinkFunc<K: Key + Serialize, T: Data + Serialize> {
     topic: String,
     bootstrap_servers: String,
     producer: Option<FutureProducer>,
-    last_write: Option<DeliveryFuture>,
+    write_futures: Vec<DeliveryFuture>,
     client_config: HashMap<String, String>,
     _t: PhantomData<(K, T)>,
 }
@@ -36,7 +36,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
             topic: topic.to_string(),
             bootstrap_servers: servers.to_string(),
             producer: None,
-            last_write: None,
+            write_futures: vec![],
             client_config: client_config
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
@@ -52,7 +52,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
         format!("kafka-producer-{}", self.topic)
     }
 
-    fn get_producer(&mut self) -> FutureProducer {
+    async fn on_start(&mut self, _ctx: &mut Context<(), ()>) {
         info!("Creating kafka producer for {}", self.bootstrap_servers);
         let mut client_config = ClientConfig::new();
 
@@ -61,11 +61,8 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
         for (key, value) in &self.client_config {
             client_config.set(key, value);
         }
-        client_config.create().expect("Producer creation failed")
-    }
 
-    async fn on_start(&mut self, _ctx: &mut Context<(), ()>) {
-        self.producer = Some(self.get_producer());
+        self.producer = Some(client_config.create().expect("Producer creation failed"));
     }
 
     async fn handle_checkpoint(&mut self, _: &CheckpointBarrier, _: &mut Context<(), ()>) {
@@ -80,20 +77,34 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
             // but better to send a signal immediately
             // Duration 0 timeouts are non-blocking,
             .poll(Timeout::After(Duration::ZERO));
-        if let Some(delivery_future) = self.last_write.as_mut() {
-            // block on confirmation the last message before the checkpoint was delivered.
-            delivery_future.await.unwrap().unwrap();
+
+        // ensure all messages were delivered before finishing the checkpoint
+        for future in self.write_futures.drain(..) {
+            match future.await.expect("Kafka producer shut down") {
+                Ok(_) => {}
+                Err((e, _)) => match e {
+                    _ => {
+                        panic!("Unhandled kafka error: {:?}", e);
+                    }
+                },
+            }
         }
     }
 
-    async fn publish<'a>(
-        producer: &mut FutureProducer,
-        mut rec: FutureRecord<'a, String, String>,
-    ) -> DeliveryFuture {
+    async fn publish(&mut self, k: Option<String>, v: String) {
+        let mut rec = {
+            if let Some(k) = k.as_ref() {
+                FutureRecord::to(&self.topic).key(k).payload(&v)
+            } else {
+                FutureRecord::to(&self.topic).payload(&v)
+            }
+        };
+
         loop {
-            match producer.send_result(rec) {
+            match self.producer.as_mut().unwrap().send_result(rec) {
                 Ok(future) => {
-                    return future;
+                    self.write_futures.push(future);
+                    return;
                 }
                 Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), f)) => {
                     rec = f;
@@ -115,14 +126,6 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
             .map(|k| serde_json::to_string(k).unwrap());
         let v = serde_json::to_string(&record.value).unwrap();
 
-        let future_record = {
-            if let Some(k) = k.as_ref() {
-                FutureRecord::to(&self.topic).key(k).payload(&v)
-            } else {
-                FutureRecord::to(&self.topic).payload(&v)
-            }
-        };
-
-        self.last_write = Some(Self::publish(self.producer.as_mut().unwrap(), future_record).await);
+        self.publish(k, v).await;
     }
 }
