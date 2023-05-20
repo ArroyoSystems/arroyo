@@ -1,15 +1,8 @@
 import './pipelines.css';
 
-import { ConnectError } from '@bufbuild/connect-web';
 import {
   Alert,
   AlertDescription,
-  AlertDialog,
-  AlertDialogBody,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogOverlay,
   AlertIcon,
   Box,
   Button,
@@ -30,10 +23,13 @@ import {
   useDisclosure,
 } from '@chakra-ui/react';
 import { Link, useLinkClickHandler, useNavigate } from 'react-router-dom';
-import { DeleteJobReq, GetJobsReq, JobStatus } from '../../gen/api_pb';
-import React, { useEffect, useRef, useState } from 'react';
-import { FiCopy, FiXCircle } from 'react-icons/fi';
-import { ApiClient } from '../../main';
+import { JobStatus } from '../../gen/api_pb';
+import React, { useRef, useState } from 'react';
+import { FiCopy, FiTrash2 } from 'react-icons/fi';
+import DeleteJobModal from '../../lib/DeleteJobModal';
+import { FaRegStopCircle } from 'react-icons/all';
+import { useJobs } from '../../lib/data_fetching';
+import { ConnectError } from '@bufbuild/connect-web';
 
 interface ColumnDef {
   name: string;
@@ -101,24 +97,15 @@ const columns: Array<ColumnDef> = [
   },
 ];
 
-function JobsTable({ client }: { client: ApiClient }) {
+function JobsTable() {
   const navigate = useNavigate();
-  const [state, setState] = useState<Array<JobStatus> | null>();
 
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-  const [jobToBeDeleted, setJobToBeDelete] = useState<JobStatus | null>(null);
+  const [jobToBeDeleted, setJobToBeDeleted] = useState<JobStatus | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const jobs = await (await client()).getJobs(new GetJobsReq({}));
-
-      setState(jobs.jobs);
-    };
-
-    fetchData();
-  }, [message]);
+  const { jobs, deleteJob: swrDeleteJob, stopJob } = useJobs();
 
   let messageBox = null;
   if (message != null) {
@@ -134,13 +121,7 @@ function JobsTable({ client }: { client: ApiClient }) {
   const deleteJob = async (job: JobStatus) => {
     onClose();
     try {
-      await (
-        await client()
-      ).deleteJob(
-        new DeleteJobReq({
-          jobId: job.jobId,
-        })
-      );
+      await swrDeleteJob(job.jobId);
       setMessage({ text: `Job ${job.jobId} successfully deleted`, type: 'success' });
     } catch (e) {
       if (e instanceof ConnectError) {
@@ -151,83 +132,87 @@ function JobsTable({ client }: { client: ApiClient }) {
     }
   };
 
+  const tableHead = (
+    <Thead>
+      <Tr>
+        <Th>Id</Th>
+        {columns.map(c => {
+          return (
+            <Th key={c.name}>
+              <Text>{c.name}</Text>
+            </Th>
+          );
+        })}
+        <Th></Th>
+      </Tr>
+    </Thead>
+  );
+
+  const tableBody = (
+    <Tbody>
+      {jobs?.jobs.flatMap(job => (
+        <Tr key={job.jobId}>
+          <Td>
+            <Link to={`/jobs/${job.jobId}`}>{job.jobId}</Link>
+          </Td>
+          {columns.map(column => (
+            <Td key={job.jobId + column.name}>{column.accessor(job)}</Td>
+          ))}
+          <Td textAlign="right">
+            <IconButton
+              onClick={() => navigate('/pipelines/new?from=' + job.definitionId)}
+              icon={<FiCopy fontSize="1.25rem" />}
+              variant="ghost"
+              aria-label="Duplicate"
+              title="Copy"
+            />
+            <IconButton
+              icon={<FaRegStopCircle fontSize="1.25rem" />}
+              variant="ghost"
+              aria-label="Stop"
+              title="Stop"
+              onClick={() => stopJob(job.jobId)}
+              isDisabled={job.state != 'Running'}
+            />
+            <IconButton
+              icon={<FiTrash2 fontSize="1.25rem" />}
+              variant="ghost"
+              aria-label="Delete source"
+              onClick={() => {
+                setJobToBeDeleted(job);
+                onOpen();
+              }}
+              title="Delete"
+            />
+          </Td>
+        </Tr>
+      ))}
+    </Tbody>
+  );
+
+  const deleteJobModal = (
+    <DeleteJobModal
+      isOpen={isOpen}
+      cancelRef={cancelRef}
+      onClose={onClose}
+      jobToBeDeleted={jobToBeDeleted}
+      deleteJob={deleteJob}
+    />
+  );
+
   return (
     <Stack spacing={2}>
-      <AlertDialog isOpen={isOpen} leastDestructiveRef={cancelRef} onClose={onClose}>
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              Delete Job {jobToBeDeleted?.pipelineName}
-            </AlertDialogHeader>
-
-            <AlertDialogBody>
-              Are you sure you want to delete job {jobToBeDeleted?.jobId}? Job state will be lost.
-            </AlertDialogBody>
-
-            <AlertDialogFooter>
-              <Button ref={cancelRef} onClick={onClose}>
-                Cancel
-              </Button>
-              <Button colorScheme="red" onClick={() => deleteJob(jobToBeDeleted!)} ml={3}>
-                Delete
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
-
+      {deleteJobModal}
       {messageBox}
       <Table>
-        <Thead>
-          <Tr>
-            <Th>Id</Th>
-            {columns.map(c => {
-              return (
-                <Th key={c.name}>
-                  <Text>{c.name}</Text>
-                </Th>
-              );
-            })}
-            <Th></Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {state?.flatMap(job => (
-            <Tr key={job.jobId}>
-              <Td>
-                <Link to={`/jobs/${job.jobId}`}>{job.jobId}</Link>
-              </Td>
-              {columns.map(column => (
-                <Td key={job.jobId + column.name}>{column.accessor(job)}</Td>
-              ))}
-              <Td textAlign="right">
-                <IconButton
-                  onClick={() => navigate('/pipelines/new?from=' + job.definitionId)}
-                  icon={<FiCopy fontSize="1.25rem" />}
-                  variant="ghost"
-                  aria-label="Duplicate"
-                  title="Copy"
-                />
-                <IconButton
-                  icon={<FiXCircle fontSize="1.25rem" />}
-                  variant="ghost"
-                  aria-label="Delete source"
-                  onClick={() => {
-                    setJobToBeDelete(job);
-                    onOpen();
-                  }}
-                  title="Delete"
-                />
-              </Td>
-            </Tr>
-          ))}
-        </Tbody>
+        {tableHead}
+        {tableBody}
       </Table>
     </Stack>
   );
 }
 
-export function JobsIndex({ client }: { client: ApiClient }) {
+export function JobsIndex() {
   return (
     <Container py="8" flex="1">
       <Stack spacing={{ base: '8', lg: '6' }}>
@@ -254,7 +239,7 @@ export function JobsIndex({ client }: { client: ApiClient }) {
           borderRadius="lg"
         >
           <Stack spacing={{ base: '5', lg: '6' }}>
-            <JobsTable client={client} />
+            <JobsTable />
           </Stack>
         </Box>
       </Stack>

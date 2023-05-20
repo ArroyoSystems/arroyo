@@ -67,7 +67,7 @@ export function Router(): JSX.Element {
     },
     {
       path: 'jobs',
-      element: <JobsIndex client={client} />,
+      element: <JobsIndex />,
     },
     {
       path: 'pipelines/new',
