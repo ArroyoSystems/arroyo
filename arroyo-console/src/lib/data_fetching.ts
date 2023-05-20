@@ -1,5 +1,6 @@
 import {
   CheckpointDetailsReq,
+  GetJobsReq,
   JobCheckpointsReq,
   JobDetailsReq,
   JobMetricsReq,
@@ -12,6 +13,10 @@ import { mutate as globalMutate } from 'swr';
 const client = getClient();
 
 // Keys
+
+const jobsKey = () => {
+  return { key: 'Job' };
+};
 
 const jobDetailsKey = (jobId?: string) => {
   return jobId ? { key: 'Job', jobId } : null;
@@ -27,6 +32,41 @@ const jobCheckpointsKey = (jobId?: string) => {
 
 const checkpointDetailsKey = (jobId?: string, epoch?: number) => {
   return jobId ? { key: 'CheckpointDetails', jobId, epoch } : null;
+};
+
+// GetJobsReq
+
+const jobsFetcher = async () => {
+  return await (await client()).getJobs(new GetJobsReq({}));
+};
+
+export const useJobs = () => {
+  const { data, mutate } = useSWR(jobsKey(), jobsFetcher, {
+    refreshInterval: 1000,
+  });
+
+  const deleteJob = async (jobId: string) => {
+    await (
+      await client()
+    ).deleteJob({
+      jobId,
+    });
+    mutate();
+  };
+
+  const stopJob = async (jobId: string) => {
+    (await client()).updateJob({
+      jobId,
+      stop: StopType.Graceful,
+    });
+    mutate();
+  };
+
+  return {
+    jobs: data,
+    deleteJob,
+    stopJob,
+  };
 };
 
 // JobDetailsReq
