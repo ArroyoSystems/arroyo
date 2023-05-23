@@ -1795,13 +1795,13 @@ impl StringFunction {
                 ))
             }
             StringFunction::RegexpMatch(_, regex) => {
-                parse_quote!(arroyo_worker::operators::functions::regex::regexp_match(
-                    arg1, #regex.to_string()
+                parse_quote!(arroyo_worker::operators::functions::regexp::regexp_match(
+                    arg, #regex.to_string()
                 ))
             }
             StringFunction::RegexpReplace(_, regex, _, _) => {
-                parse_quote!(arroyo_worker::operators::functions::regex::regexp_replace(
-                    arg1, #regex.to_string(), arg2, arg3
+                parse_quote!(arroyo_worker::operators::functions::regexp::regexp_replace(
+                    arg1, #regex.to_string(), arg2
                 ))
             }
             StringFunction::Repeat(_, _) => parse_quote!(arg1.repeat(arg2 as usize)),
@@ -1865,8 +1865,7 @@ impl StringFunction {
             | StringFunction::Trim(arg, None)
             | StringFunction::Ltrim(arg, None)
             | StringFunction::Rtrim(arg, None)
-            | StringFunction::RegexpMatch(arg, _)
-            | StringFunction::RegexpReplace(arg, _, _, _) => {
+            | StringFunction::RegexpMatch(arg, _) => {
                 let expr = arg.to_syn_expression();
                 match arg.nullable() {
                     true => parse_quote!({
@@ -1894,7 +1893,8 @@ impl StringFunction {
             | StringFunction::Rtrim(arg1, Some(arg2))
             | StringFunction::Substr(arg1, arg2, None)
             | StringFunction::Lpad(arg1, arg2, None)
-            | StringFunction::Rpad(arg1, arg2, None) => {
+            | StringFunction::Rpad(arg1, arg2, None)
+            | StringFunction::RegexpReplace(arg1, _, arg2, None) => {
                 let expr1 = arg1.to_syn_expression();
                 let expr2 = arg2.to_syn_expression();
                 match (arg1.nullable(), arg2.nullable()) {
@@ -2065,6 +2065,7 @@ impl StringFunction {
                     })
                 }
             }
+            StringFunction::RegexpReplace(_, _, _, _) => unreachable!(),
         }
     }
 }

@@ -1023,7 +1023,7 @@ mod tests {
             non_nullable_string: "foobarbequebaz".into(),
             ..Default::default()
         },
-        Some(vec!["bar", "beque"])
+        vec!["bar".to_string(), "beque".to_string()]
     );
 
     // test regexp_replace
@@ -1035,6 +1035,6 @@ mod tests {
             non_nullable_string: "Thomas".into(),
             ..Default::default()
         },
-        Some(String::from("ThoXXs"))
+        String::from("ThoXXs")
     );
 }
