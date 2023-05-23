@@ -1651,7 +1651,6 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
                     None,
                 ))
             }
-
             (_, BuiltinScalarFunction::Concat) => Ok(StringFunction::Concat(args)),
             (1..=usize::MAX, func) if func == BuiltinScalarFunction::Concat => {
                 let separator = Box::new(args.remove(0));

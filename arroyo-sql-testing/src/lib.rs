@@ -1018,7 +1018,7 @@ mod tests {
     // test regexp_match see https://www.postgresql.org/docs/current/functions-string.html
     single_test_codegen!(
         "regexp_match",
-        "regexp_match(non_nullable_string, '(bar)(beque)'",
+        "regexp_match(non_nullable_string, '(bar)(beque)')",
         arroyo_sql::TestStruct {
             non_nullable_string: "foobarbequebaz".into(),
             ..Default::default()
