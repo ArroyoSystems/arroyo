@@ -368,13 +368,12 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Reverse
                     | BuiltinScalarFunction::Right
                     | BuiltinScalarFunction::Rpad
-                    | BuiltinScalarFunction::Rtrim => {
+                    | BuiltinScalarFunction::Rtrim
+                    | BuiltinScalarFunction::RegexpMatch
+                    | BuiltinScalarFunction::RegexpReplace => {
                         let string_function: StringFunction =
                             (fun.clone(), arg_expressions).try_into()?;
                         Ok(Expression::String(string_function))
-                    }
-                    BuiltinScalarFunction::RegexpMatch | BuiltinScalarFunction::RegexpReplace => {
-                        bail!("regex function {:?} not yet implemented", fun)
                     }
                     BuiltinScalarFunction::Coalesce => Ok(Expression::DataStructure(
                         DataStructureFunction::Coalesce(arg_expressions),
@@ -1866,7 +1865,9 @@ impl StringFunction {
             | StringFunction::Btrim(arg, None)
             | StringFunction::Trim(arg, None)
             | StringFunction::Ltrim(arg, None)
-            | StringFunction::Rtrim(arg, None) => {
+            | StringFunction::Rtrim(arg, None)
+            | StringFunction::RegexpMatch(arg, _)
+            | StringFunction::RegexpReplace(arg, _, _, _) => {
                 let expr = arg.to_syn_expression();
                 match arg.nullable() {
                     true => parse_quote!({
@@ -2064,17 +2065,6 @@ impl StringFunction {
                         #non_null_computation
                     })
                 }
-            }
-            StringFunction::RegexpMatch(arg1, arg2) => {
-                // TODO: is this a normal or something special is required?
-                todo!();
-            }
-            StringFunction::RegexpReplace(arg1, arg2, arg3, arg4) => {
-                todo!();
-                // TODO: is this a normal or something special is required?
-                // parse_quote!({
-                //     #function
-                // })
             }
         }
     }

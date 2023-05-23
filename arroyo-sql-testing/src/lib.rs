@@ -1020,7 +1020,7 @@ mod tests {
         "regexp_match",
         "regexp_match(non_nullable_string, '(bar)(beque)'",
         arroyo_sql::TestStruct {
-            non_nullable_string: "foobarbequebaz",
+            non_nullable_string: "foobarbequebaz".into(),
             ..Default::default()
         },
         Some(vec!["bar", "beque"])
@@ -1032,7 +1032,7 @@ mod tests {
         "regexp_replace",
         "regexp_replace(non_nullable_string, 'm|a', 'X')",
         arroyo_sql::TestStruct {
-            non_nullable_string: "Thomas",
+            non_nullable_string: "Thomas".into(),
             ..Default::default()
         },
         Some(String::from("ThoXXs"))
