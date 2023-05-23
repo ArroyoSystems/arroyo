@@ -70,7 +70,7 @@ export function PipelineGraph({
       x: 0,
       y: 0,
       width: 200,
-      height: 60,
+      height: 100,
     };
   });
 
