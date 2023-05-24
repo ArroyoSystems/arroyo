@@ -1014,4 +1014,27 @@ mod tests {
         },
         Some("a".to_string())
     );
+
+    // test regexp_match see https://www.postgresql.org/docs/current/functions-string.html
+    single_test_codegen!(
+        "regexp_match",
+        "regexp_match(non_nullable_string, '(bar)(beque)')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "foobarbequebaz".into(),
+            ..Default::default()
+        },
+        vec!["bar".to_string(), "beque".to_string()]
+    );
+
+    // test regexp_replace
+
+    single_test_codegen!(
+        "regexp_replace",
+        "regexp_replace(non_nullable_string, 'm|a', 'X')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "Thomas".into(),
+            ..Default::default()
+        },
+        String::from("ThoXXs")
+    );
 }

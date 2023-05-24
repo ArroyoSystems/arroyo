@@ -935,6 +935,7 @@ dependencies = [
  "rand",
  "rdkafka",
  "rdkafka-sys",
+ "regex",
  "serde",
  "serde_json",
  "serde_json_path",
