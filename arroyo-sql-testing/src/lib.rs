@@ -1,3 +1,4 @@
+mod full_query_tests;
 #[cfg(test)]
 mod tests {
     use arroyo_sql_macro::single_test_codegen;
