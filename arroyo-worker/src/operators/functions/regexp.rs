@@ -31,21 +31,19 @@ mod tests {
     use std::error::Error;
 
     #[test]
-    pub fn test_regexp_match_is_correct() -> Result<(), Box<dyn Error>> {
+    pub fn test_regexp_match_is_correct() {
         let result = regexp_match(String::from("foobarbequebaz"), String::from("(bar)(beque)"));
         assert_eq!(&result[0], "bar");
         assert_eq!(&result[1], "beque");
-        Ok(())
     }
 
     #[test]
-    pub fn test_regexp_replace_is_correct() -> Result<(), Box<dyn Error>> {
+    pub fn test_regexp_replace_is_correct() {
         let result = regexp_replace(
             String::from("Thomas"),
             String::from("m|a"),
             String::from("X"),
         );
         assert_eq!(result.as_str(), "ThoXXs");
-        Ok(())
     }
 }

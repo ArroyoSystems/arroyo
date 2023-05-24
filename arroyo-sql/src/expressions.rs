@@ -2085,7 +2085,7 @@ impl StringFunction {
                     })
                 }
             }
-            StringFunction::RegexpReplace(_, _, _, _) => unreachable!(),
+            StringFunction::RegexpReplace(_, _, _, Some(_)) => unreachable!(),
         }
     }
 }
