@@ -180,7 +180,7 @@ pub struct ExpressionContext<'a> {
 }
 
 impl<'a> ExpressionContext<'a> {
-    pub fn compile_expr(&mut self, expression: &Expr) -> Result<Expression> {
+    pub fn compile_expr(&self, expression: &Expr) -> Result<Expression> {
         match expression {
             Expr::Alias(expr, _alias) => self.compile_expr(expr),
             Expr::Column(column) => Ok(Expression::Column(ColumnExpression::from_column(
@@ -290,10 +290,15 @@ impl<'a> ExpressionContext<'a> {
             }
             Expr::AggregateUDF { .. } => bail!("aggregate UDFs not supported"),
             Expr::Case(datafusion_expr::Case {
-                expr: _,
-                when_then_expr: _,
-                else_expr: _,
-            }) => bail!("case statements not supported yet"),
+                expr,
+                when_then_expr,
+                else_expr,
+            }) => bail!(
+                "case expressions not supported: expr:{:?}, when_then_expr:{:?}, else_expr:{:?}",
+                expr,
+                when_then_expr,
+                else_expr
+            ),
             Expr::Cast(datafusion_expr::Cast { expr, data_type }) => Ok(CastExpression::new(
                 Box::new(self.compile_expr(expr)?),
                 data_type,
@@ -1100,14 +1105,19 @@ impl CastExpression {
 
     fn allowed_types(input_data_type: &DataType, output_data_type: &DataType) -> bool {
         // handle casts between strings and numerics.
-        if Self::is_numeric(input_data_type)
-            || Self::is_string(input_data_type) && Self::is_numeric(output_data_type)
-            || Self::is_string(output_data_type)
+        if (Self::is_numeric(input_data_type) || Self::is_string(input_data_type))
+            && (Self::is_numeric(output_data_type) || Self::is_string(output_data_type))
         {
             true
         // handle date to string casts.
+        } else if Self::is_date(input_data_type) && Self::is_string(output_data_type) {
+            true
+        }
+        // handle string to date casts.
+        else if Self::is_string(input_data_type) && Self::is_date(output_data_type) {
+            true
         } else {
-            Self::is_date(input_data_type) || Self::is_string(output_data_type)
+            false
         }
     }
 
@@ -1137,20 +1147,30 @@ impl CastExpression {
     }
     fn cast_expr(input_type: &DataType, output_type: &DataType, sub_expr: syn::Expr) -> syn::Expr {
         if Self::is_numeric(input_type) && Self::is_numeric(output_type) {
-            let cast_type: syn::Type = parse_str(StructField::data_type_name(output_type)).unwrap();
+            let cast_type: syn::Type =
+                parse_str(&StructField::data_type_name(output_type)).unwrap();
             parse_quote!(#sub_expr as #cast_type)
         } else if Self::is_numeric(input_type) && Self::is_string(output_type) {
             parse_quote!(#sub_expr.to_string())
         } else if Self::is_string(input_type) && Self::is_numeric(output_type) {
-            let cast_type: syn::Type = parse_str(StructField::data_type_name(output_type)).unwrap();
+            let cast_type: syn::Type =
+                parse_str(&StructField::data_type_name(output_type)).unwrap();
             parse_quote!(#sub_expr.parse::<#cast_type>().unwrap())
         } else if Self::is_date(input_type) && Self::is_string(output_type) {
             parse_quote!({
                 let datetime: chrono::DateTime<chrono::Utc> = #sub_expr.into();
                 datetime.to_rfc3339()
             })
+        } else if Self::is_date(input_type) && Self::is_date(output_type) {
+            parse_quote!(#sub_expr)
+        } else if Self::is_string(input_type) && Self::is_date(output_type) {
+            parse_quote!({
+                let datetime = chrono::DateTime::parse_from_rfc3339(&#sub_expr).unwrap();
+                std::time::SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_micros(datetime.with_timezone(&chrono::Utc).timestamp_micros() as u64)
+            })
         } else {
-            unreachable!()
+            unreachable!("invalid cast from {:?} to {:?}", input_type, output_type)
         }
     }
 
@@ -2146,7 +2166,7 @@ impl DataStructureFunction {
                 }
             }
             DataStructureFunction::MakeArray(terms) => {
-                if self.return_type().is_optional() {
+                if terms.iter().any(|term| term.nullable()) {
                     let entries: Vec<syn::Expr> = terms
                         .iter()
                         .map(|term| {
@@ -2158,7 +2178,7 @@ impl DataStructureFunction {
                             }
                         })
                         .collect::<Vec<_>>();
-                    parse_quote!(Some(vec![#(#entries),*]))
+                    parse_quote!(vec![#(#entries),*])
                 } else {
                     let nullable = terms.iter().any(|term| term.nullable());
                     if nullable {

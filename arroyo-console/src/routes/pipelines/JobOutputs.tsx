@@ -1,8 +1,8 @@
-import { Th, Td, Tr, Table, Thead, Tbody } from "@chakra-ui/react";
-import { ReactElement } from "react";
-import { OutputData } from "../../gen/api_pb";
+import { Th, Td, Tr, Table, Thead, Tbody } from '@chakra-ui/react';
+import { ReactElement } from 'react';
+import { OutputData } from '../../gen/api_pb';
 
-export function PipelineOutputs({ outputs }: { outputs: Array<{id: number, data: OutputData}> }) {
+export function PipelineOutputs({ outputs }: { outputs: Array<{ id: number; data: OutputData }> }) {
   let headers: Array<ReactElement> = [];
   const data = outputs
     .map(row => {
@@ -25,7 +25,7 @@ export function PipelineOutputs({ outputs }: { outputs: Array<{id: number, data:
         <Tr key={row.id}>
           <Th>{row.id}</Th>
           <Th>
-            {new Intl.DateTimeFormat("en-US", { dateStyle: "short", timeStyle: "long" }).format(
+            {new Intl.DateTimeFormat('en-US', { dateStyle: 'short', timeStyle: 'long' }).format(
               new Date(Number(output.timestamp) / 1000)
             )}
           </Th>
@@ -37,14 +37,14 @@ export function PipelineOutputs({ outputs }: { outputs: Array<{id: number, data:
 
   return (
     <Table maxWidth="500px">
-        <Thead>
-            <Tr>
-              <Th>Row</Th>
-              <Th>Time</Th>
-              {headers}
-            </Tr>
-        </Thead>
-        <Tbody>{data}</Tbody>
+      <Thead>
+        <Tr>
+          <Th>Row</Th>
+          <Th>Time</Th>
+          {headers}
+        </Tr>
+      </Thead>
+      <Tbody>{data}</Tbody>
     </Table>
   );
 }

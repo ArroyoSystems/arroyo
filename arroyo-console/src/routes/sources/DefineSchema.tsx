@@ -2,12 +2,7 @@ import {
   Stack,
   Heading,
   Button,
-  Tabs,
-  TabPanel,
-  TabList,
-  Tab,
   Box,
-  Spinner,
   ListItem,
   List,
   Alert,
@@ -17,20 +12,19 @@ import {
   FormLabel,
   Input,
   Code,
-} from "@chakra-ui/react";
-import { Dispatch, useEffect, useRef, useState } from "react";
+} from '@chakra-ui/react';
+import { Dispatch, useEffect, useRef, useState } from 'react';
 import {
   ConfluentSchemaReq,
   CreateSourceReq,
   KafkaSourceConfig,
   SourceSchema,
-} from "../../gen/api_pb";
-import { RadioCard, RadioCardGroup } from "../../lib/RadioGroup";
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
-import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
-import { ApiGrpc } from "../../gen/api_connectweb";
-import { ApiClient } from "../../main";
-import { steps } from "./CreateSource";
+} from '../../gen/api_pb';
+import { RadioCard, RadioCardGroup } from '../../lib/RadioGroup';
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import { ConnectError } from '@bufbuild/connect-web';
+import { ApiClient } from '../../main';
+import { steps } from './CreateSource';
 
 export function ChooseSchemaType({
   state,
@@ -49,7 +43,7 @@ export function ChooseSchemaType({
     });
   };
   const onClick = async () => {
-    if (state.schema?.schema.case == "rawJson") {
+    if (state.schema?.schema.case == 'rawJson') {
       setState(
         new CreateSourceReq({
           ...state,
@@ -73,7 +67,7 @@ export function ChooseSchemaType({
         <RadioCard value="avro" isDisabled>
           Avro (coming soon)
         </RadioCard>
-        {state.typeOneof.case == "kafka" ? (
+        {state.typeOneof.case == 'kafka' ? (
           <RadioCard value="confluentSchema">Confluent Schema Registry</RadioCard>
         ) : null}
         <RadioCard value="rawJson">Raw Json</RadioCard>
@@ -113,8 +107,8 @@ function SchemaEditor({
       let resp = await (await client()).testSchema(state);
       setErrors(resp.errors);
     } catch (e) {
-      console.log("test failed", e);
-      setErrors(["Something went wrong... try again"]);
+      console.log('test failed', e);
+      setErrors(['Something went wrong... try again']);
     }
     setTested(state);
 
@@ -154,7 +148,7 @@ function SchemaEditor({
         /* @ts-ignore */
         value: state.schema?.schema.value[field],
         language: language,
-        theme: "vs-dark",
+        theme: 'vs-dark',
         minimap: {
           enabled: false,
         },
@@ -211,7 +205,7 @@ function ConfluentSchema({
   next: (step?: number) => void;
   client: ApiClient;
 }) {
-  const [host, setHost] = useState<string>("");
+  const [host, setHost] = useState<string>('');
   const [schema, setSchema] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -222,7 +216,9 @@ function ConfluentSchema({
     setError(null);
     try {
       setLoading(true);
-      const resp = await (await client()).getConfluentSchema(
+      const resp = await (
+        await client()
+      ).getConfluentSchema(
         new ConfluentSchemaReq({
           endpoint: host,
           /* @ts-ignore */
@@ -237,7 +233,7 @@ function ConfluentSchema({
           ...state,
           schema: new SourceSchema({
             kafkaSchemaRegistry: true,
-            schema: { case: "jsonSchema", value: { jsonSchema: resp.schema } },
+            schema: { case: 'jsonSchema', value: { jsonSchema: resp.schema } },
           }),
         })
       );
@@ -247,7 +243,7 @@ function ConfluentSchema({
       if (e instanceof ConnectError) {
         setError(e.rawMessage);
       } else {
-        setError("Something went wrong... try again");
+        setError('Something went wrong... try again');
       }
     }
     setLoading(false);
@@ -293,7 +289,7 @@ function ConfluentSchema({
 
       <Button
         variant="primary"
-        isDisabled={host == "" || schema != null}
+        isDisabled={host == '' || schema != null}
         isLoading={loading}
         onClick={fetchSchema}
       >
@@ -318,9 +314,9 @@ export function DefineSchema({
 }) {
   const types = new Map([
     [
-      "jsonSchema",
+      'jsonSchema',
       {
-        name: "Json Schema",
+        name: 'Json Schema',
         view: (
           <SchemaEditor
             state={state}
@@ -334,9 +330,9 @@ export function DefineSchema({
       },
     ],
     [
-      "protobuf",
+      'protobuf',
       {
-        name: "Protobuf Schema",
+        name: 'Protobuf Schema',
         view: (
           <SchemaEditor
             state={state}
@@ -347,20 +343,20 @@ export function DefineSchema({
             client={client}
           />
         ),
-        disabled: true
+        disabled: true,
       },
     ],
     [
-      "confluentSchema",
+      'confluentSchema',
       {
-        name: "Confluent Schema Registry",
+        name: 'Confluent Schema Registry',
         view: <ConfluentSchema state={state} setState={setState} next={next} client={client} />,
       },
     ],
   ]);
 
   const config = state.schema?.kafkaSchemaRegistry
-    ? types.get("confluentSchema")
+    ? types.get('confluentSchema')
     : types.get(state.schema?.schema.case!);
 
   return (

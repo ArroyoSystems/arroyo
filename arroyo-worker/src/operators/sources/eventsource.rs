@@ -152,7 +152,7 @@ where
                                         }
                                     }
                                     SSE::Comment(s) => {
-                                        warn!("Unhandled comment {:?}", s);
+                                        debug!("Received comment {:?}", s);
                                     }
                                 }
                             }

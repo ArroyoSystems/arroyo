@@ -15,7 +15,7 @@ use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::time::Duration;
 use tokio::select;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::operators::SerializationMode;
 
@@ -105,11 +105,12 @@ where
         }
         let consumer: StreamConsumer = client_config
             .set("bootstrap.servers", &self.bootstrap_servers)
+            .set("enable.partition.eof", "false")
             .set("enable.auto.commit", "false")
             .set(
                 "group.id",
                 format!(
-                    "{}-{}-consumer",
+                    "arroyo-{}-{}-consumer",
                     ctx.task_info.job_id, ctx.task_info.operator_id
                 ),
             )
@@ -119,6 +120,10 @@ where
         let mut s: GlobalKeyedState<i32, KafkaState, _> =
             ctx.state.get_global_keyed_state('k').await;
         let state: Vec<&KafkaState> = s.get_all();
+
+        // did we restore any partitions?
+        let has_state = !state.is_empty();
+
         let state: HashMap<i32, KafkaState> = state.iter().map(|s| (s.partition, **s)).collect();
         let metadata = consumer
             .fetch_metadata(Some(&self.topic), Duration::from_secs(30))
@@ -136,7 +141,15 @@ where
                     let offset = state
                         .get(&p.id())
                         .map(|s| Offset::Offset(s.offset))
-                        .unwrap_or_else(|| self.offset_mode.get_offset());
+                        .unwrap_or_else(|| {
+                            if has_state {
+                                // if we've restored partitions and we don't know about this one, that means it's
+                                // new, and we want to start from the beginning so we don't drop data
+                                Offset::Beginning
+                            } else {
+                                self.offset_mode.get_offset()
+                            }
+                        });
 
                     ((self.topic.clone(), p.id()), offset)
                 })
@@ -164,7 +177,7 @@ where
                                 ctx.collector.collect(Record {
                                     timestamp: from_millis(msg.timestamp().to_millis().unwrap() as u64),
                                     key: None,
-                                    value:self.serialization_mode.deserialize_slice(&v).unwrap(),
+                                    value: self.serialization_mode.deserialize_slice(&v).unwrap(),
                                 }).await;
                                 offsets.insert(msg.partition(), msg.offset());
                                 rate_limiter.until_ready().await;
@@ -191,7 +204,11 @@ where
                                     &self.topic, *partition, Offset::Offset(*offset)).unwrap();
                             }
 
-                            consumer.commit(&topic_partitions, CommitMode::Async).unwrap();
+                            if let Err(e) = consumer.commit(&topic_partitions, CommitMode::Async) {
+                                // This is just used for progress tracking for metrics, so it's not a fatal error if it
+                                // fails. The actual offset is stored in state.
+                                warn!("Failed to commit offset to Kafka {:?}", e);
+                            }
                             if self.checkpoint(c, ctx).await {
                                 return SourceFinishType::Immediate;
                             }

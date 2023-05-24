@@ -503,6 +503,7 @@ message SubtaskMetrics {
   repeated Metric bytes_sent = 2;
   repeated Metric messages_recv = 3;
   repeated Metric messages_sent = 4;
+  repeated Metric backpressure = 5;
 }
 
 message JobMetricsReq {
@@ -542,7 +543,11 @@ message SaslAuth {
   string password = 4;
 }
 message KinesisConnection {
+}
 
+message HttpConnection {
+  string url = 1;
+  string headers = 2;
 }
 
 message Connection {
@@ -550,6 +555,7 @@ message Connection {
   oneof connection_type {
     KafkaConnection kafka = 2;
     KinesisConnection kinesis = 3;
+    HttpConnection http = 6;
   }
 
   int32 sources = 4;
@@ -561,6 +567,7 @@ message CreateConnectionReq {
   oneof connection_type {
     KafkaConnection kafka = 2;
     KinesisConnection kinesis = 3;
+    HttpConnection http = 4;
   }
 }
 
@@ -669,9 +676,16 @@ message NexmarkSourceConfig {
 }
 
 message EventSourceSourceConfig {
-  string url = 1;
-  string events = 2;
-  string headers = 3;
+  string connection = 1;
+  string path = 2;
+  string events = 3;
+}
+
+message EventSourceSourceDef {
+  string connection_name = 1;
+  HttpConnection connection = 2;
+  string path = 3;
+  string events = 4;
 }
 
 message CreateSourceReq {
@@ -709,7 +723,7 @@ message SourceDef {
     ImpulseSourceConfig impulse = 4;
     FileSourceConfig file = 5;
     NexmarkSourceConfig nexmark = 6;
-    EventSourceSourceConfig event_source = 11;
+    EventSourceSourceDef event_source = 11;
   }
 
   repeated SourceField sql_fields = 7;

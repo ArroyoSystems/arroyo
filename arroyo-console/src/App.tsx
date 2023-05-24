@@ -1,29 +1,21 @@
-import "./App.css";
+import './App.css';
 import {
   As,
-  Box,
   Button,
   ButtonProps,
-  Center,
   Divider,
   Flex,
   Grid,
   GridItem,
   HStack,
   Icon,
-  Spacer,
   Stack,
   Text,
-} from "@chakra-ui/react";
+} from '@chakra-ui/react';
 
-import {
-  Link,
-  Outlet,
-  useLinkClickHandler,
-  useMatch,
-} from "react-router-dom";
-import { FiHome, FiLogIn, FiGitBranch, FiLogOut, FiLink } from "react-icons/fi";
-import { CloudSidebar, UserProfile } from "./lib/CloudComponents";
+import { Link, Outlet, useLinkClickHandler, useMatch } from 'react-router-dom';
+import { FiHome, FiLogIn, FiGitBranch, FiLogOut, FiLink } from 'react-icons/fi';
+import { CloudSidebar, UserProfile } from './lib/CloudComponents';
 
 function logout() {
   // TODO: also send a request to the server to delete the session
@@ -40,7 +32,7 @@ interface NavButtonProps extends ButtonProps {
 export const NavButton = (props: NavButtonProps) => {
   const { icon, label, ...buttonProps } = props;
 
-  let isActive = useMatch(props.to + "/*");
+  let isActive = useMatch(props.to + '/*');
 
   let onClick = useLinkClickHandler(props.to);
 
@@ -50,7 +42,7 @@ export const NavButton = (props: NavButtonProps) => {
       justifyContent="start"
       /* @ts-ignore */
       onClick={onClick}
-      aria-current={isActive ? "page" : "false"}
+      aria-current={isActive ? 'page' : 'false'}
       {...buttonProps}
     >
       <HStack spacing="3">
@@ -61,22 +53,21 @@ export const NavButton = (props: NavButtonProps) => {
   );
 };
 
-
 function Sidebar() {
   return (
-    <GridItem className="sidebar" area={"nav"}>
+    <GridItem className="sidebar" area={'nav'}>
       <Flex as="section" minH="100vh" bg="bg-canvas">
         <Flex
           flex="1"
           bg="bg-surface"
           boxShadow="sm-dark"
-          maxW={{ base: "full", sm: "xs" }}
-          py={{ base: "6", sm: "8" }}
-          px={{ base: "4", sm: "6" }}
+          maxW={{ base: 'full', sm: 'xs' }}
+          py={{ base: '6', sm: '8' }}
+          px={{ base: '4', sm: '6' }}
         >
           <Stack justify="space-between" spacing="1" width="full">
             <Stack spacing="4" shouldWrapChildren>
-              <Link to={"/"}>
+              <Link to={'/'}>
                 <img width="140px" src="/logo.svg" />
               </Link>
               <Stack spacing="1">
@@ -104,9 +95,9 @@ function Sidebar() {
 
 function App() {
   return (
-    <Grid templateAreas={`"nav main"`} gridTemplateColumns={`200px 1fr`} h="100vh">
+    <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px 1fr'} h="100vh">
       <Sidebar />
-      <GridItem className="main" area={"main"}>
+      <GridItem className="main" area={'main'}>
         {<Outlet />}
       </GridItem>
     </Grid>

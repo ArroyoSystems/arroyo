@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -20,7 +20,7 @@ import {
   NumberInput,
   NumberInputField,
   NumberInputStepper,
-} from "@chakra-ui/react";
+} from '@chakra-ui/react';
 
 export interface PipelineConfigModalProps {
   isOpen: boolean;
@@ -69,7 +69,7 @@ const PipelineConfigModal: React.FC<PipelineConfigModalProps> = ({
     <NumberInput
       isRequired
       min={1}
-      value={parallelismInputValue ?? ""}
+      value={parallelismInputValue ?? ''}
       onChange={(valueAsString, valueAsNumber) => {
         if (isNaN(valueAsNumber)) {
           setParallelismInputValue(undefined);
@@ -87,12 +87,12 @@ const PipelineConfigModal: React.FC<PipelineConfigModalProps> = ({
   );
 
   let parallelismHasError = false;
-  let parallelismErrorText = "";
+  let parallelismErrorText = '';
   let saveEnabled: boolean;
 
   if (!parallelismInputValue) {
     parallelismHasError = true;
-    parallelismErrorText = "Enter a valid number.";
+    parallelismErrorText = 'Enter a valid number.';
   }
 
   saveEnabled = !parallelismHasError;

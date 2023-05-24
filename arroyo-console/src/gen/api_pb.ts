@@ -1715,7 +1715,7 @@ export class EventSourceSource extends Message<EventSourceSource> {
     proto3.util.initPartial(data, this);
   }
 
-  static readonly runtime = proto3;
+  static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "arroyo_api.EventSourceSource";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "url", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -3728,6 +3728,11 @@ export class SubtaskMetrics extends Message<SubtaskMetrics> {
    */
   messagesSent: Metric[] = [];
 
+  /**
+   * @generated from field: repeated arroyo_api.Metric backpressure = 5;
+   */
+  backpressure: Metric[] = [];
+
   constructor(data?: PartialMessage<SubtaskMetrics>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3740,6 +3745,7 @@ export class SubtaskMetrics extends Message<SubtaskMetrics> {
     { no: 2, name: "bytes_sent", kind: "message", T: Metric, repeated: true },
     { no: 3, name: "messages_recv", kind: "message", T: Metric, repeated: true },
     { no: 4, name: "messages_sent", kind: "message", T: Metric, repeated: true },
+    { no: 5, name: "backpressure", kind: "message", T: Metric, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SubtaskMetrics {
@@ -4101,6 +4107,49 @@ export class KinesisConnection extends Message<KinesisConnection> {
 }
 
 /**
+ * @generated from message arroyo_api.HttpConnection
+ */
+export class HttpConnection extends Message<HttpConnection> {
+  /**
+   * @generated from field: string url = 1;
+   */
+  url = "";
+
+  /**
+   * @generated from field: string headers = 2;
+   */
+  headers = "";
+
+  constructor(data?: PartialMessage<HttpConnection>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.HttpConnection";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "url", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "headers", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HttpConnection {
+    return new HttpConnection().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HttpConnection {
+    return new HttpConnection().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HttpConnection {
+    return new HttpConnection().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HttpConnection | PlainMessage<HttpConnection> | undefined, b: HttpConnection | PlainMessage<HttpConnection> | undefined): boolean {
+    return proto3.util.equals(HttpConnection, a, b);
+  }
+}
+
+/**
  * @generated from message arroyo_api.Connection
  */
 export class Connection extends Message<Connection> {
@@ -4124,6 +4173,12 @@ export class Connection extends Message<Connection> {
      */
     value: KinesisConnection;
     case: "kinesis";
+  } | {
+    /**
+     * @generated from field: arroyo_api.HttpConnection http = 6;
+     */
+    value: HttpConnection;
+    case: "http";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   /**
@@ -4147,6 +4202,7 @@ export class Connection extends Message<Connection> {
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "kafka", kind: "message", T: KafkaConnection, oneof: "connection_type" },
     { no: 3, name: "kinesis", kind: "message", T: KinesisConnection, oneof: "connection_type" },
+    { no: 6, name: "http", kind: "message", T: HttpConnection, oneof: "connection_type" },
     { no: 4, name: "sources", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 5, name: "sinks", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
@@ -4192,6 +4248,12 @@ export class CreateConnectionReq extends Message<CreateConnectionReq> {
      */
     value: KinesisConnection;
     case: "kinesis";
+  } | {
+    /**
+     * @generated from field: arroyo_api.HttpConnection http = 4;
+     */
+    value: HttpConnection;
+    case: "http";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<CreateConnectionReq>) {
@@ -4205,6 +4267,7 @@ export class CreateConnectionReq extends Message<CreateConnectionReq> {
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "kafka", kind: "message", T: KafkaConnection, oneof: "connection_type" },
     { no: 3, name: "kinesis", kind: "message", T: KinesisConnection, oneof: "connection_type" },
+    { no: 4, name: "http", kind: "message", T: HttpConnection, oneof: "connection_type" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateConnectionReq {
@@ -4937,31 +5000,31 @@ export class NexmarkSourceConfig extends Message<NexmarkSourceConfig> {
  */
 export class EventSourceSourceConfig extends Message<EventSourceSourceConfig> {
   /**
-   * @generated from field: string url = 1;
+   * @generated from field: string connection = 1;
    */
-  url = "";
+  connection = "";
 
   /**
-   * @generated from field: string events = 2;
+   * @generated from field: string path = 2;
+   */
+  path = "";
+
+  /**
+   * @generated from field: string events = 3;
    */
   events = "";
-
-  /**
-   * @generated from field: string headers = 3;
-   */
-  headers = "";
 
   constructor(data?: PartialMessage<EventSourceSourceConfig>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
-  static readonly runtime = proto3;
+  static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "arroyo_api.EventSourceSourceConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "url", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "events", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "headers", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "connection", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "events", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): EventSourceSourceConfig {
@@ -4978,6 +5041,61 @@ export class EventSourceSourceConfig extends Message<EventSourceSourceConfig> {
 
   static equals(a: EventSourceSourceConfig | PlainMessage<EventSourceSourceConfig> | undefined, b: EventSourceSourceConfig | PlainMessage<EventSourceSourceConfig> | undefined): boolean {
     return proto3.util.equals(EventSourceSourceConfig, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.EventSourceSourceDef
+ */
+export class EventSourceSourceDef extends Message<EventSourceSourceDef> {
+  /**
+   * @generated from field: string connection_name = 1;
+   */
+  connectionName = "";
+
+  /**
+   * @generated from field: arroyo_api.HttpConnection connection = 2;
+   */
+  connection?: HttpConnection;
+
+  /**
+   * @generated from field: string path = 3;
+   */
+  path = "";
+
+  /**
+   * @generated from field: string events = 4;
+   */
+  events = "";
+
+  constructor(data?: PartialMessage<EventSourceSourceDef>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.EventSourceSourceDef";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "connection_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "connection", kind: "message", T: HttpConnection },
+    { no: 3, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "events", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): EventSourceSourceDef {
+    return new EventSourceSourceDef().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): EventSourceSourceDef {
+    return new EventSourceSourceDef().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): EventSourceSourceDef {
+    return new EventSourceSourceDef().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: EventSourceSourceDef | PlainMessage<EventSourceSourceDef> | undefined, b: EventSourceSourceDef | PlainMessage<EventSourceSourceDef> | undefined): boolean {
+    return proto3.util.equals(EventSourceSourceDef, a, b);
   }
 }
 
@@ -5202,9 +5320,9 @@ export class SourceDef extends Message<SourceDef> {
     case: "nexmark";
   } | {
     /**
-     * @generated from field: arroyo_api.EventSourceSourceConfig event_source = 11;
+     * @generated from field: arroyo_api.EventSourceSourceDef event_source = 11;
      */
-    value: EventSourceSourceConfig;
+    value: EventSourceSourceDef;
     case: "eventSource";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
@@ -5230,7 +5348,7 @@ export class SourceDef extends Message<SourceDef> {
     { no: 4, name: "impulse", kind: "message", T: ImpulseSourceConfig, oneof: "source_type" },
     { no: 5, name: "file", kind: "message", T: FileSourceConfig, oneof: "source_type" },
     { no: 6, name: "nexmark", kind: "message", T: NexmarkSourceConfig, oneof: "source_type" },
-    { no: 11, name: "event_source", kind: "message", T: EventSourceSourceConfig, oneof: "source_type" },
+    { no: 11, name: "event_source", kind: "message", T: EventSourceSourceDef, oneof: "source_type" },
     { no: 7, name: "sql_fields", kind: "message", T: SourceField, repeated: true },
   ]);
 

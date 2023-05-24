@@ -181,7 +181,8 @@ pub struct Collector<K: Key, T: Data> {
     _ts: PhantomData<(K, T)>,
     sent_bytes: Option<IntCounter>,
     sent_messages: Option<IntCounter>,
-    tx_queue_size: Vec<Vec<Option<IntGauge>>>,
+    tx_queue_rem_gauges: Vec<Vec<Option<IntGauge>>>,
+    tx_queue_size_gauges: Vec<Vec<Option<IntGauge>>>,
 }
 
 impl<K: Key, T: Data> Collector<K, T> {
@@ -202,9 +203,13 @@ impl<K: Key, T: Data> Collector<K, T> {
         if self.out_qs.len() == 1 {
             let idx = out_idx(&record.key, self.out_qs[0].len());
 
-            self.tx_queue_size[0][idx]
+            self.tx_queue_rem_gauges[0][idx]
                 .iter()
                 .for_each(|g| g.set(self.out_qs[0][idx].tx.capacity() as i64));
+
+            self.tx_queue_size_gauges[0][idx]
+                .iter()
+                .for_each(|g| g.set(QUEUE_SIZE as i64));
 
             self.out_qs[0][idx]
                 .send(Message::Record(record), &self.sent_bytes)
@@ -215,9 +220,13 @@ impl<K: Key, T: Data> Collector<K, T> {
 
             for (i, out_node_qs) in self.out_qs.iter().enumerate() {
                 let idx = out_idx(&key, out_node_qs.len());
-                self.tx_queue_size[i][idx]
+                self.tx_queue_rem_gauges[i][idx]
                     .iter()
                     .for_each(|c| c.set(self.out_qs[i][idx].tx.capacity() as i64));
+
+                self.tx_queue_size_gauges[i][idx]
+                    .iter()
+                    .for_each(|c| c.set(QUEUE_SIZE as i64));
 
                 out_node_qs[idx]
                     .send(message.clone(), &self.sent_bytes)
@@ -321,7 +330,28 @@ impl<K: Key, T: Data> Context<K, T> {
             counters.insert(BYTES_SENT, c);
         }
 
-        let tx_queue_size = out_qs
+        let tx_queue_size_gauges = out_qs
+            .iter()
+            .enumerate()
+            .map(|(i, qs)| {
+                qs.iter()
+                    .enumerate()
+                    .map(|(j, _)| {
+                        gauge_for_task(
+                            &task_info,
+                            "arroyo_worker_tx_queue_size",
+                            "Size of a tx queue",
+                            labels! {
+                                "next_node".to_string() => format!("{}", i),
+                                "next_node_idx".to_string() => format!("{}", j)
+                            },
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let tx_queue_rem_gauges = out_qs
             .iter()
             .enumerate()
             .map(|(i, qs)| {
@@ -351,7 +381,8 @@ impl<K: Key, T: Data> Context<K, T> {
                 out_qs,
                 sent_messages: counters.remove(MESSAGES_SENT),
                 sent_bytes: counters.remove(BYTES_SENT),
-                tx_queue_size,
+                tx_queue_rem_gauges,
+                tx_queue_size_gauges,
                 _ts: PhantomData,
             },
             state,

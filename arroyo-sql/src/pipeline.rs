@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 
 use std::time::Duration;
+use std::unreachable;
 
 use anyhow::Result;
 use anyhow::{anyhow, bail};
@@ -9,26 +10,24 @@ use arrow_schema::DataType;
 use arroyo_datastream::{Operator, WindowType};
 
 use datafusion_common::{DFField, ScalarValue};
-use datafusion_expr::{
-    BinaryExpr, BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp,
-};
+use datafusion_expr::{BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp};
 
 use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
 
 use crate::expressions::ExpressionContext;
 use crate::external::{SqlSink, SqlSource};
-use crate::Table;
 use crate::{
     expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
+use crate::{FieldSpec, Table};
 
 #[derive(Debug, Clone)]
 pub enum SqlOperator {
-    Source(String, SqlSource),
+    Source(SourceOperator),
     Aggregator(Box<SqlOperator>, AggregateOperator),
     JoinOperator(Box<SqlOperator>, Box<SqlOperator>, JoinOperator),
     Window(Box<SqlOperator>, SqlWindowOperator),
@@ -41,7 +40,25 @@ pub enum SqlOperator {
 pub enum RecordTransform {
     ValueProjection(Projection),
     KeyProjection(Projection),
+    TimestampAssignment(Expression),
     Filter(Expression),
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceOperator {
+    pub name: String,
+    pub source: SqlSource,
+    pub virtual_field_projection: Option<Projection>,
+    pub timestamp_override: Option<Expression>,
+}
+impl SourceOperator {
+    fn return_type(&self) -> StructDef {
+        if let Some(ref projection) = self.virtual_field_projection {
+            projection.output_struct()
+        } else {
+            self.source.struct_def.clone()
+        }
+    }
 }
 
 impl RecordTransform {
@@ -49,6 +66,7 @@ impl RecordTransform {
         match self {
             RecordTransform::ValueProjection(projection) => projection.output_struct(),
             RecordTransform::KeyProjection(_) | RecordTransform::Filter(_) => input_struct,
+            RecordTransform::TimestampAssignment(_) => input_struct,
         }
     }
 
@@ -66,6 +84,13 @@ impl RecordTransform {
                 expression.to_syn_expression(),
                 expression.nullable(),
             ),
+            RecordTransform::TimestampAssignment(timestamp_expression) => {
+                MethodCompiler::timestamp_assigning_operator(
+                    "timestamp",
+                    timestamp_expression.to_syn_expression(),
+                    timestamp_expression.nullable(),
+                )
+            }
         }
     }
 
@@ -74,6 +99,7 @@ impl RecordTransform {
             RecordTransform::ValueProjection(_) => "value_project".into(),
             RecordTransform::KeyProjection(_) => "key_project".into(),
             RecordTransform::Filter(_) => "filter".into(),
+            RecordTransform::TimestampAssignment(_) => "timestamp".into(),
         }
     }
 }
@@ -268,7 +294,7 @@ impl JoinType {
 impl SqlOperator {
     pub fn return_type(&self) -> StructDef {
         match self {
-            SqlOperator::Source(_, source) => source.struct_def.clone(),
+            SqlOperator::Source(source_operator) => source_operator.return_type(),
             SqlOperator::Aggregator(_input, aggregate_operator) => {
                 aggregate_operator.merge.output_struct(
                     &aggregate_operator.key.output_struct(),
@@ -323,7 +349,7 @@ impl SqlOperator {
 
     pub fn has_window(&self) -> bool {
         match self {
-            SqlOperator::Source(_, _) => false,
+            SqlOperator::Source(_) => false,
             SqlOperator::Aggregator(_, _) => true,
             SqlOperator::JoinOperator(left, right, _) => left.has_window() || right.has_window(),
             SqlOperator::Window(_, _) => true,
@@ -470,7 +496,7 @@ impl<'a> SqlPipelineBuilder<'a> {
     ) -> Result<SqlOperator> {
         let input = self.insert_sql_plan(&filter.input)?;
         let struct_def = input.return_type();
-        let mut ctx = self.ctx(&struct_def);
+        let ctx = self.ctx(&struct_def);
         let predicate = ctx.compile_expr(&filter.predicate)?;
         // TODO: this should probably happen through a more principled optimization pass.
         Ok(SqlOperator::RecordTransform(
@@ -486,7 +512,7 @@ impl<'a> SqlPipelineBuilder<'a> {
         let input = self.insert_sql_plan(&projection.input)?;
 
         let struct_def = input.return_type();
-        let mut ctx = self.ctx(&struct_def);
+        let ctx = self.ctx(&struct_def);
 
         let functions = projection
             .expr
@@ -563,7 +589,7 @@ impl<'a> SqlPipelineBuilder<'a> {
         fields: &[DFField],
         input_struct: &StructDef,
     ) -> Result<Projection> {
-        let mut ctx = self.ctx(input_struct);
+        let ctx = self.ctx(input_struct);
 
         let field_pairs: Vec<Option<(Column, Expression)>> = group_expressions
             .iter()
@@ -697,44 +723,39 @@ impl<'a> SqlPipelineBuilder<'a> {
             _ => {}
         }
 
-        let mut columns = join.on.clone();
-        if let Some(Expr::BinaryExpr(BinaryExpr {
-            left,
-            op: datafusion_expr::Operator::Eq,
-            right,
-        })) = join.filter.clone()
-        {
-            columns.push((*left, *right));
-        } else if join.filter.is_some() {
-            bail!(
-                "non-join filters on joins. This doesn't seem to actually happen in practice, {:?}",
-                join.on
-            );
-        }
-        let join_projection_field_names: Vec<_> = columns
+        let join_projection_field_names: Vec<_> = join
+            .on
             .iter()
             .map(|(left, _right)| Column::convert_expr(left))
             .collect::<Result<Vec<_>>>()?;
+        let (left_computations, right_computations): (Vec<_>, Vec<_>) = join
+            .on
+            .iter()
+            .map(|(left, right)| {
+                Ok((
+                    self.ctx(&left_input.return_type()).compile_expr(left)?,
+                    self.ctx(&right_input.return_type()).compile_expr(right)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .into_iter()
+            .unzip();
 
         let left_key = Projection {
             field_names: join_projection_field_names.clone(),
-            field_computations: columns
-                .iter()
-                .map(|(left, _right)| self.ctx(&left_input.return_type()).compile_expr(left))
-                .collect::<Result<Vec<_>>>()?,
+            field_computations: left_computations,
         };
+
         let right_key = Projection {
             field_names: join_projection_field_names,
-            field_computations: columns
-                .iter()
-                .map(|(_left, right)| self.ctx(&right_input.return_type()).compile_expr(right))
-                .collect::<Result<Vec<_>>>()?,
+            field_computations: right_computations,
         };
 
         if right_key.output_struct() != left_key.output_struct() {
             bail!("join key types must match. Try casting?");
         }
-        Ok(SqlOperator::JoinOperator(
+        let join_operator = SqlOperator::JoinOperator(
             Box::new(left_input),
             Box::new(right_input),
             JoinOperator {
@@ -742,9 +763,18 @@ impl<'a> SqlPipelineBuilder<'a> {
                 right_key,
                 join_type,
             },
+        );
+        let Some(join_filter) = &join.filter else {
+            return Ok(join_operator)
+        };
+        let join_filter = self
+            .ctx(&join_operator.return_type())
+            .compile_expr(join_filter)?;
+        Ok(SqlOperator::RecordTransform(
+            Box::new(join_operator),
+            RecordTransform::Filter(join_filter),
         ))
     }
-
     fn insert_table_scan(
         &mut self,
         table_scan: &datafusion::logical_expr::TableScan,
@@ -772,7 +802,12 @@ impl<'a> SqlPipelineBuilder<'a> {
                     source_config: source_config.clone(),
                     serialization_mode: *serialization_mode,
                 };
-                SqlOperator::Source(table_name, source)
+                SqlOperator::Source(SourceOperator {
+                    name: table_name,
+                    source,
+                    virtual_field_projection: None,
+                    timestamp_override: None,
+                })
             }
             crate::Table::SavedSink {
                 name: _,
@@ -794,16 +829,77 @@ impl<'a> SqlPipelineBuilder<'a> {
                 connection,
                 connection_config,
             } => {
-                let source = SqlSource::try_new(
+                let physical_fields = fields
+                    .iter()
+                    .filter_map(|field| match field {
+                        FieldSpec::VirtualStructField(..) => None,
+                        FieldSpec::StructField(struct_field) => Some(struct_field.clone()),
+                    })
+                    .collect::<Vec<_>>();
+                let has_virtual_fields = physical_fields.len() < fields.len();
+                let physical_source = SqlSource::try_new(
                     None,
                     StructDef {
                         name: None,
-                        fields: fields.clone(),
+                        fields: physical_fields,
                     },
                     connection.clone(),
                     connection_config,
                 )?;
-                SqlOperator::Source(table_name, source)
+                // check for virtual fields
+                let virtual_field_projection = if has_virtual_fields {
+                    let (field_names, field_computations) = fields
+                        .iter()
+                        .map(|field| match field {
+                            FieldSpec::StructField(struct_field) => (
+                                Column {
+                                    relation: None,
+                                    name: struct_field.name.clone(),
+                                },
+                                Expression::Column(ColumnExpression::new(struct_field.clone())),
+                            ),
+                            FieldSpec::VirtualStructField(struct_field, expr) => (
+                                Column {
+                                    relation: None,
+                                    name: struct_field.name.clone(),
+                                },
+                                expr.clone(),
+                            ),
+                        })
+                        .unzip();
+                    Some(Projection {
+                        field_names,
+                        field_computations,
+                    })
+                } else {
+                    None
+                };
+                let timestamp_override = if let Some(field_name) =
+                    connection_config.get("event_time_field")
+                {
+                    // check that a column exists and it is a timestamp
+                    let Some(event_column) = fields.iter().find_map(|f| match f {
+                        FieldSpec::StructField(struct_field) |
+                        FieldSpec::VirtualStructField(struct_field, _) =>
+                        if struct_field.name == *field_name
+                            && matches!(struct_field.data_type, TypeDef::DataType(DataType::Timestamp(..), _)) {
+                            Some(struct_field.clone())
+                            } else {
+                                None
+                            },
+                    }) else {
+                        bail!("event_time_field {} not found or not a timestamp", field_name)
+                    };
+                    Some(Expression::Column(ColumnExpression::new(event_column)))
+                } else {
+                    None
+                };
+                SqlOperator::Source(SourceOperator {
+                    name: table_name,
+                    source: physical_source,
+                    virtual_field_projection,
+                    timestamp_override,
+                })
             }
             crate::Table::TableFromQuery {
                 name: _,
@@ -1204,6 +1300,34 @@ impl MethodCompiler {
             name: name.to_string(),
             expression: quote!(#expression).to_string(),
             return_type: arroyo_datastream::ExpressionReturnType::Predicate,
+        }
+    }
+
+    pub fn timestamp_assigning_operator(
+        name: impl ToString,
+        timestamp_expr: syn::Expr,
+        expression_nullable: bool,
+    ) -> Operator {
+        let unwrap_tokens = if expression_nullable {
+            Some(quote!(.expect("require a non-null timestamp")))
+        } else {
+            None
+        };
+        let expression: syn::Expr = parse_quote!(
+            {
+                let arg = &record.value;
+                let timestamp = (#timestamp_expr)#unwrap_tokens;
+                arroyo_types::Record {
+                    timestamp,
+                    key: record.key.clone(),
+                    value: record.value.clone()
+                }
+            }
+        );
+        Operator::ExpressionOperator {
+            name: name.to_string(),
+            expression: quote!(#expression).to_string(),
+            return_type: arroyo_datastream::ExpressionReturnType::Record,
         }
     }
 

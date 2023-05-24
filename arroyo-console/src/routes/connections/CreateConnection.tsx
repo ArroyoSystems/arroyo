@@ -1,4 +1,4 @@
-import { ConnectError, PromiseClient } from "@bufbuild/connect-web";
+import { ConnectError } from '@bufbuild/connect-web';
 import {
   Alert,
   AlertDescription,
@@ -29,27 +29,26 @@ import {
   Stack,
   Text,
   useDisclosure,
-} from "@chakra-ui/react";
-import { ChangeEvent, ChangeEventHandler, Dispatch, useEffect, useRef, useState } from "react";
-import { FaStream } from "react-icons/fa";
-import { SiApachekafka } from "react-icons/si";
-import { ApiGrpc } from "../../gen/api_connectweb";
+} from '@chakra-ui/react';
+import { ChangeEvent, Dispatch, useRef, useState } from 'react';
+import { FaGlobeAmericas, FaStream } from 'react-icons/fa';
+import { SiApachekafka } from 'react-icons/si';
 import {
   CreateConnectionReq,
+  HttpConnection,
   KafkaAuthConfig,
   KafkaConnection,
   KinesisConnection,
   NoAuth,
   SaslAuth,
-  TestSchemaResp,
   TestSourceMessage,
-} from "../../gen/api_pb";
-import { RadioCardGroup, RadioCard } from "../../lib/RadioGroup";
-import { ApiClient } from "../../main";
+} from '../../gen/api_pb';
+import { RadioCardGroup, RadioCard } from '../../lib/RadioGroup';
+import { ApiClient } from '../../main';
 
 // set the value of the field in config at the dot delimited path given by field
 function setField(field: string, config: any, value: any) {
-  const parts = field.split(".");
+  const parts = field.split('.');
   let current = config;
   for (let i = 0; i < parts.length - 1; i++) {
     current = current[parts[i]];
@@ -81,16 +80,60 @@ function onChangeString(
 
 const KafkaAuthTypes = [
   {
-    name: "None",
-    case: "noAuth",
+    name: 'None',
+    case: 'noAuth',
     value: new NoAuth({}),
   },
   {
-    name: "SASL",
-    case: "saslAuth",
+    name: 'SASL',
+    case: 'saslAuth',
     value: new SaslAuth({}),
-  }
+  },
 ];
+
+function ConfigureHttp({
+  state,
+  setState,
+  setReady,
+}: {
+  state: CreateConnectionReq;
+  setState: Dispatch<CreateConnectionReq>;
+  setReady: Dispatch<boolean>;
+}) {
+  const config = state.connectionType.value as HttpConnection;
+
+  const onChange = (field: string) => {
+    return (e: ChangeEvent<HTMLInputElement>) => {
+      onChangeString(state, setState, field, config)(e);
+      setReady(config.url != '');
+    };
+  };
+
+  return (
+    <Stack spacing={5}>
+      <FormControl isRequired>
+        <FormLabel>URL</FormLabel>
+        <Input
+          type="text"
+          value={config.url}
+          onChange={onChange('url')}
+          placeholder="https://api.example.com"
+        />
+        <FormHelperText>The URL of the HTTP server to connect to</FormHelperText>
+      </FormControl>
+      <FormControl>
+        <FormLabel>Headers</FormLabel>
+        <Input
+          type="text"
+          value={config.headers}
+          placeholder="Content-Type: application/json"
+          onChange={onChangeString(state, setState, 'headers', config)}
+        />
+        <FormHelperText>Comma-seperated list of headers to send</FormHelperText>
+      </FormControl>
+    </Stack>
+  );
+}
 
 function ConfigureKafka({
   state,
@@ -106,21 +149,28 @@ function ConfigureKafka({
   const onChange = (field: string) => {
     return (e: ChangeEvent<HTMLInputElement>) => {
       onChangeString(state, setState, field, config)(e);
-      setReady(config.bootstrapServers != "" &&
-        (config.authConfig!.authType.case == "noAuth" ||
-          (config.authConfig?.authType.value?.mechanism != "" &&
-          config.authConfig?.authType.value?.username != "" &&
-          config.authConfig?.authType.value?.password != "" &&
-          config.authConfig?.authType.value?.protocol != "")));
+      setReady(
+        config.bootstrapServers != '' &&
+          (config.authConfig!.authType.case == 'noAuth' ||
+            (config.authConfig?.authType.value?.mechanism != '' &&
+              config.authConfig?.authType.value?.username != '' &&
+              config.authConfig?.authType.value?.password != '' &&
+              config.authConfig?.authType.value?.protocol != ''))
+      );
     };
   };
 
   const onChangeAuthType = (e: ChangeEvent<HTMLSelectElement>) => {
     /* @ts-ignore */
-    config.authConfig.authType = { case: e.target.value, value: KafkaAuthTypes.find(t => t.case == e.target.value)?.value };
+    config.authConfig.authType = {
+      /* @ts-ignore */
+      case: e.target.value,
+      value: KafkaAuthTypes.find(t => t.case == e.target.value)?.value,
+    };
     setState(
       new CreateConnectionReq({
         ...state,
+        /* @ts-ignore */
         connectionType: { case: state.connectionType.case!, value: config },
       })
     );
@@ -133,7 +183,7 @@ function ConfigureKafka({
         <Input
           type="text"
           value={config.bootstrapServers}
-          onChange={onChange("bootstrapServers")}
+          onChange={onChange('bootstrapServers')}
         />
         <FormHelperText>Comma-separated list of kafka brokers to connect to</FormHelperText>
       </FormControl>
@@ -149,14 +199,14 @@ function ConfigureKafka({
         </Select>
       </FormControl>
 
-      {config.authConfig?.authType.case === "saslAuth" && (
+      {config.authConfig?.authType.case === 'saslAuth' && (
         <Stack spacing={5}>
           <FormControl isRequired>
             <FormLabel>Protocol</FormLabel>
             <Input
               type="text"
-              value={config.authConfig.authType.value.protocol || ""}
-              onChange={onChange("authConfig.authType.value.protocol")}
+              value={config.authConfig.authType.value.protocol || ''}
+              onChange={onChange('authConfig.authType.value.protocol')}
             />
             <FormHelperText>The SASL protocol used. SASL_PLAINTEXT, SASL_SSL, etc.</FormHelperText>
           </FormControl>
@@ -164,8 +214,8 @@ function ConfigureKafka({
             <FormLabel>Mechanism</FormLabel>
             <Input
               type="text"
-              value={config.authConfig.authType.value.mechanism || ""}
-              onChange={onChange("authConfig.authType.value.mechanism")}
+              value={config.authConfig.authType.value.mechanism || ''}
+              onChange={onChange('authConfig.authType.value.mechanism')}
             />
             <FormHelperText>
               The SASL mechanism used for authentication (e.g., SCRAM-SHA-256, SCRAM-SHA-512 etc.)
@@ -175,16 +225,16 @@ function ConfigureKafka({
             <FormLabel>Username</FormLabel>
             <Input
               type="text"
-              value={config.authConfig.authType.value.username || ""}
-              onChange={onChange("authConfig.authType.value.username")}
+              value={config.authConfig.authType.value.username || ''}
+              onChange={onChange('authConfig.authType.value.username')}
             />
           </FormControl>
           <FormControl isRequired>
             <FormLabel>Password</FormLabel>
             <Input
               type="password"
-              value={config.authConfig.authType.value.password || ""}
-              onChange={onChange("authConfig.authType.value.password")}
+              value={config.authConfig.authType.value.password || ''}
+              onChange={onChange('authConfig.authType.value.password')}
             />
           </FormControl>
         </Stack>
@@ -210,27 +260,35 @@ export function ConnectionEditor({
 
   const connectionTypes = [
     {
-      name: "kafka",
+      name: 'kafka',
       icon: SiApachekafka,
-      description: "Confluent Cloud, Amazon MSK, or self-hosted",
+      description: 'Confluent Cloud, Amazon MSK, or self-hosted',
       initialState: new KafkaConnection({
         authConfig: new KafkaAuthConfig({
-          authType: { case: "noAuth", value: new NoAuth({}) },
-        })
+          authType: { case: 'noAuth', value: new NoAuth({}) },
+        }),
       }),
       editor: <ConfigureKafka state={state} setState={setState} setReady={setReady} />,
-      disabled: false
+      disabled: false,
     },
     {
-      name: "kinesis",
+      name: 'kinesis',
       icon: FaStream,
-      description: "AWS Kinesis stream (coming soon)",
+      description: 'AWS Kinesis stream (coming soon)',
       initialState: new KinesisConnection({}),
-      disabled: true
+      disabled: true,
+    },
+    {
+      name: 'http',
+      icon: FaGlobeAmericas,
+      description: 'HTTP/HTTPS server',
+      initialState: new HttpConnection({}),
+      editor: <ConfigureHttp state={state} setState={setState} setReady={setReady} />,
+      disabled: false,
     },
   ];
 
-  const handleChange = (v: "kafka" | "kinesis") => {
+  const handleChange = (v: 'kafka' | 'kinesis' | 'http') => {
     setState({
       ...state,
       /* @ts-ignore */
@@ -250,12 +308,12 @@ export function ConnectionEditor({
   const onSubmit = async () => {
     try {
       await (await client()).createConnection(state);
-      window.location.href = "/connections";
+      window.location.href = '/connections';
     } catch (e) {
       if (e instanceof ConnectError) {
         setError(e.rawMessage);
       } else {
-        setError("Something went wrong... try again");
+        setError('Something went wrong... try again');
       }
     }
   };
@@ -281,7 +339,7 @@ export function ConnectionEditor({
   return (
     <Container py="8" flex="1">
       {errorAlert}
-      <Stack spacing={{ base: "8", lg: "6" }}>
+      <Stack spacing={{ base: '8', lg: '6' }}>
         <Breadcrumb>
           <BreadcrumbItem>
             <BreadcrumbLink as={Link} href="/connections">
@@ -340,15 +398,13 @@ export function ConnectionEditor({
                           setState(new CreateConnectionReq({ ...state, name: v.target.value }))
                         }
                       />
-                      <FormHelperText>
-                        A unique name to identify this Kafka connection
-                      </FormHelperText>
+                      <FormHelperText>A unique name to identify this connection</FormHelperText>
                     </FormControl>
 
                     {selectedType.editor}
                     <Button
                       variant="primary"
-                      isDisabled={!ready || state.name == "" || testing}
+                      isDisabled={!ready || state.name == '' || testing}
                       isLoading={testing}
                       spinner={<Spinner />}
                       onClick={onTest}
@@ -361,13 +417,13 @@ export function ConnectionEditor({
                 {result != null ? (
                   <>
                     <Box bg="bg-surface">
-                      <Alert status={result.error ? "error" : "success"}>
+                      <Alert status={result.error ? 'error' : 'success'}>
                         <AlertIcon />
                         <AlertDescription>{result.message}</AlertDescription>
                       </Alert>
                     </Box>
 
-                    <Button colorScheme={result.error ? "red" : "green"} onClick={onClickCreate}>
+                    <Button colorScheme={result.error ? 'red' : 'green'} onClick={onClickCreate}>
                       Create
                     </Button>
                   </>

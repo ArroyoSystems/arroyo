@@ -10,6 +10,7 @@ use tonic::Status;
 use crate::handle_delete;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnection;
+use crate::testers::HttpTester;
 use crate::types::public;
 use crate::{handle_db_error, log_and_map, required_field, testers::KafkaTester, AuthData};
 
@@ -29,6 +30,10 @@ pub(crate) async fn create_connection(
         ReqConnectionType::Kinesis(_) => {
             return Err(Status::failed_precondition("Kinesis is not yet supported"));
         }
+        ReqConnectionType::Http(c) => (
+            public::ConnectionType::http,
+            serde_json::to_value(c).map_err(log_and_map)?,
+        ),
     };
 
     api_queries::create_connection()
@@ -56,6 +61,9 @@ impl From<DbConnection> for Connection {
                 }
                 public::ConnectionType::kinesis => {
                     ConnectionType::Kinesis(serde_json::from_value(val.config).unwrap())
+                }
+                public::ConnectionType::http => {
+                    ConnectionType::Http(serde_json::from_value(val.config).unwrap())
                 }
             }),
             sources: val.source_count as i32,
@@ -102,6 +110,7 @@ pub(crate) async fn test_connection(req: CreateConnectionReq) -> Result<TestSour
         ReqConnectionType::Kafka(kafka) => Ok(KafkaTester::new(kafka, None, None, tx)
             .test_connection()
             .await),
+        ReqConnectionType::Http(http) => Ok((HttpTester { connection: &http }).test().await),
         _ => Ok(TestSourceMessage {
             error: false,
             done: true,

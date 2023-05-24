@@ -1,13 +1,9 @@
-import { Box, Text } from "@chakra-ui/react";
-import dagre from "dagre";
-import { useMemo } from "react";
-import ReactFlow, { Handle, Position, Background, Controls } from "reactflow";
-import {
-  JobNode,
-  JobMetricsResp_OperatorMetrics,
-  JobGraph,
-  JobMetricsResp,
-} from "../../gen/api_pb";
+import { Box, Text } from '@chakra-ui/react';
+import dagre from 'dagre';
+import { useMemo } from 'react';
+import ReactFlow, { Handle, Position, Background } from 'reactflow';
+import { JobNode, JobGraph, JobMetricsResp } from '../../gen/api_pb';
+import { getBackpressureColor, getOperatorBackpressure } from '../../lib/util';
 
 function PipelineGraphNode({
   data,
@@ -16,19 +12,24 @@ function PipelineGraphNode({
     node: JobNode;
     setActiveOperator: (op: string) => void;
     isActive: boolean;
+    operatorBackpressure: number;
   };
 }) {
   function handleClick(click: any) {
     data.setActiveOperator(data.node.nodeId);
   }
 
-  let className = "pipelineGraphNode";
+  let className = 'pipelineGraphNode';
   if (data.isActive) {
-    className += " active";
+    className += ' active';
   }
 
   return (
-    <Box className={className} onClick={handleClick}>
+    <Box
+      bg={getBackpressureColor(data.operatorBackpressure)}
+      className={className}
+      onClick={handleClick}
+    >
       <Handle type="target" position={Position.Top} />
       <Text userSelect="none" pointerEvents="none">
         {data.node.operator}
@@ -40,10 +41,12 @@ function PipelineGraphNode({
 
 export function PipelineGraph({
   graph,
+  metrics,
   setActiveOperator,
   activeOperator,
 }: {
   graph: JobGraph;
+  metrics?: JobMetricsResp;
   setActiveOperator: (op: string) => void;
   activeOperator?: string;
 }) {
@@ -52,12 +55,13 @@ export function PipelineGraph({
   const nodes = graph.nodes.map(node => {
     return {
       id: node.nodeId,
-      type: "pipelineNode",
+      type: 'pipelineNode',
       data: {
         label: node.operator,
         node: node,
         setActiveOperator: setActiveOperator,
         isActive: node.nodeId == activeOperator,
+        operatorBackpressure: getOperatorBackpressure(metrics, node.nodeId),
       },
       position: {
         x: 0,
@@ -66,7 +70,7 @@ export function PipelineGraph({
       x: 0,
       y: 0,
       width: 200,
-      height: 60,
+      height: 100,
     };
   });
 
@@ -75,7 +79,7 @@ export function PipelineGraph({
       id: `${edge.srcId}-${edge.destId}`,
       source: edge.srcId,
       target: edge.destId,
-      type: "step",
+      type: 'step',
     };
   });
 

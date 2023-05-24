@@ -1,4 +1,4 @@
-import { ConnectError } from "@bufbuild/connect-web";
+import { ConnectError } from '@bufbuild/connect-web';
 import {
   Stack,
   FormControl,
@@ -10,19 +10,20 @@ import {
   Select,
   Alert,
   AlertIcon,
-} from "@chakra-ui/react";
-import { ChangeEvent, Dispatch, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+} from '@chakra-ui/react';
+import { ChangeEvent, Dispatch, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Connection,
   CreateSourceReq,
   EventSourceSourceConfig,
+  HttpConnection,
   ImpulseSourceConfig,
   KafkaSourceConfig,
   NexmarkSourceConfig,
-} from "../../gen/api_pb";
-import { ApiClient } from "../../main";
-import { steps } from "./CreateSource";
+} from '../../gen/api_pb';
+import { ApiClient } from '../../main';
+import { steps } from './CreateSource';
 
 function ConfigureImpulse({
   state,
@@ -40,7 +41,7 @@ function ConfigureImpulse({
         <Input
           type="number"
           value={config.eventsPerSecond}
-          onChange={onChangeNumber(state, setState, "eventsPerSecond", config)}
+          onChange={onChangeNumber(state, setState, 'eventsPerSecond', config)}
         />
         <FormHelperText>
           The number of messages the Impulse source will emit per second
@@ -52,7 +53,7 @@ function ConfigureImpulse({
         <Input
           type="number"
           value={config.intervalMicros}
-          onChange={onChangeNumber(state, setState, "intervalMicros", config)}
+          onChange={onChangeNumber(state, setState, 'intervalMicros', config)}
         />
         <FormHelperText>
           The number of microseconds in between the event times of subsequent events emmitted by the
@@ -65,7 +66,7 @@ function ConfigureImpulse({
         <Input
           type="number"
           value={config.totalMessages}
-          onChange={onChangeNumber(state, setState, "totalMessages", config, true)}
+          onChange={onChangeNumber(state, setState, 'totalMessages', config, true)}
         />
         <FormHelperText>
           If set, the source will finish about sending this many messages.
@@ -130,7 +131,7 @@ function ConfigureNexmark({
         <Input
           type="number"
           value={Number(config.eventsPerSecond)}
-          onChange={onChangeNumber(state, setState, "eventsPerSecond", config)}
+          onChange={onChangeNumber(state, setState, 'eventsPerSecond', config)}
         />
         <FormHelperText>
           The number of messages the Nexmark source will emit per second
@@ -142,7 +143,7 @@ function ConfigureNexmark({
         <Input
           type="number"
           value={config.runtimeMicros ? Number(config.runtimeMicros) / 1e6 : undefined}
-          onChange={onChangeNumber(state, setState, "runtimeMicros", config, true, v => v * 1e6)}
+          onChange={onChangeNumber(state, setState, 'runtimeMicros', config, true, v => v * 1e6)}
         />
         <FormHelperText>
           If set, the source will finish after running for this many seconds
@@ -167,11 +168,12 @@ function ConfigureKafka({
 }) {
   const config = state.typeOneof.value as KafkaSourceConfig;
   const [testing, setTesting] = useState<boolean>(false);
-  const [message, setMessage] = useState<{message: string, type: "success" | "error"} | null>(null);
+  const [message, setMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(
+    null
+  );
   const [tested, setTested] = useState<boolean>(false);
 
-
-  useEffect(() => setReady(config.topic != "" && config.connection != ""));
+  useEffect(() => setReady(config.topic != '' && config.connection != ''));
 
   let errorAlert = null;
   if (message != null) {
@@ -188,19 +190,21 @@ function ConfigureKafka({
     let testedState = state.clone();
     try {
       await (await client()).getSourceMetadata(testedState);
-      setMessage({message: "Topic is valid", type: "success"});
+      setMessage({ message: 'Topic is valid', type: 'success' });
     } catch (e) {
       if (e instanceof ConnectError) {
-        setMessage({message: e.rawMessage, type: "error"});
+        setMessage({ message: e.rawMessage, type: 'error' });
       } else {
-        setMessage({message: "Something went wrong while validating the source configuration", type: "error"});
+        setMessage({
+          message: 'Something went wrong while validating the source configuration',
+          type: 'error',
+        });
       }
     }
 
     setTesting(false);
     setTested(true);
   };
-
 
   return (
     <Stack spacing={5}>
@@ -209,10 +213,10 @@ function ConfigureKafka({
         <Select
           placeholder="Select connection"
           value={config.connection}
-          onChange={onChangeString(state, setState, "connection", config)}
+          onChange={onChangeString(state, setState, 'connection', config)}
         >
           {connections
-            .filter(c => c.connectionType.case == "kafka")
+            .filter(c => c.connectionType.case == 'kafka')
             .map(c => (
               <option key={c.name} value={c.name}>
                 {c.name}
@@ -220,7 +224,7 @@ function ConfigureKafka({
             ))}
         </Select>
         <FormHelperText>
-          Choose the Kafka cluster to connect to, or set up a new one{" "}
+          Choose the Kafka cluster to connect to, or set up a new one{' '}
           <Link to="/connections/new">here</Link>
         </FormHelperText>
       </FormControl>
@@ -230,12 +234,14 @@ function ConfigureKafka({
         <Input
           type="text"
           value={config.topic}
-          onChange={onChangeString(state, setState, "topic", config)}
+          onChange={onChangeString(state, setState, 'topic', config)}
         />
         <FormHelperText>The Kafka topic to read from</FormHelperText>
       </FormControl>
 
-      <Button variant="primary" onClick={test}>Validate</Button>
+      <Button variant="primary" onClick={test}>
+        Validate
+      </Button>
 
       {errorAlert}
     </Stack>
@@ -246,36 +252,43 @@ function ConfigureEventSource({
   state,
   setState,
   setReady,
+  connections,
 }: {
   state: CreateSourceReq;
   setState: Dispatch<CreateSourceReq>;
   setReady: Dispatch<boolean>;
+  connections: Array<Connection>;
 }) {
   const config = state.typeOneof.value as EventSourceSourceConfig;
 
-  useEffect(() => setReady(config.url != ""));
+  useEffect(() => setReady(config.connection != null));
 
   return (
     <Stack spacing={5}>
-      <FormControl isRequired>
-        <FormLabel>URL</FormLabel>
-        <Input
-          type="url"
-          value={config.url}
-          onChange={onChangeString(state, setState, "url", config)}
-        />
-        <FormHelperText>The URL endpoint to connect to</FormHelperText>
-      </FormControl>
+      <FormLabel>HTTP Connection</FormLabel>
+      <Select
+        placeholder="Select connection"
+        value={config.connection}
+        onChange={onChangeString(state, setState, 'connection', config)}
+      >
+        {connections
+          .filter(c => c.connectionType.case == 'http')
+          .map(c => (
+            <option key={c.name} value={c.name}>
+              {c.name} ({(c.connectionType.value as HttpConnection).url})
+            </option>
+          ))}
+      </Select>
 
-      <FormControl isRequired>
-        <FormLabel>Headers</FormLabel>
+      <FormControl>
+        <FormLabel>Path</FormLabel>
         <Input
           type="text"
-          value={config.headers}
-          placeholder="Authorization: <token>, Content-Type: application/json"
-          onChange={onChangeString(state, setState, "headers", config)}
+          value={config.path}
+          placeholder="/stream"
+          onChange={onChangeString(state, setState, 'path', config)}
         />
-        <FormHelperText>Comma-seperated list of headers to send</FormHelperText>
+        <FormHelperText>Optional path appended to endpoint</FormHelperText>
       </FormControl>
 
       <FormControl>
@@ -283,7 +296,7 @@ function ConfigureEventSource({
         <Input
           type="string"
           value={config.events}
-          onChange={onChangeString(state, setState, "events", config)}
+          onChange={onChangeString(state, setState, 'events', config)}
         />
         <FormHelperText>
           Comma-separated list of event types that the source will accept; leave blank to read all
@@ -294,7 +307,6 @@ function ConfigureEventSource({
   );
 }
 
-
 export function ConfigureSource({
   state,
   setState,
@@ -304,17 +316,17 @@ export function ConfigureSource({
 }: {
   state: CreateSourceReq;
   setState: Dispatch<CreateSourceReq>;
-  client: ApiClient,
+  client: ApiClient;
   next: (step?: number) => void;
   connections: Array<Connection>;
 }) {
   const [ready, setReady] = useState<boolean>(true);
 
   const forms = new Map([
-    ["impulse", <ConfigureImpulse state={state} setState={setState} />],
-    ["nexmark", <ConfigureNexmark state={state} setState={setState} />],
+    ['impulse', <ConfigureImpulse state={state} setState={setState} />],
+    ['nexmark', <ConfigureNexmark state={state} setState={setState} />],
     [
-      "kafka",
+      'kafka',
       <ConfigureKafka
         state={state}
         setState={setState}
@@ -324,23 +336,23 @@ export function ConfigureSource({
       />,
     ],
     [
-      "eventSource",
+      'eventSource',
       <ConfigureEventSource
         state={state}
         setState={setState}
         setReady={setReady}
-        />
-    ]
+        connections={connections}
+      />,
+    ],
   ]);
 
   const onClick = async () => {
-    if (state.typeOneof.case == "impulse" || state.typeOneof.case == "nexmark") {
+    if (state.typeOneof.case == 'impulse' || state.typeOneof.case == 'nexmark') {
       next(steps.length - 1);
     } else {
       next();
     }
   };
-
 
   return (
     <Stack spacing={10} maxWidth={500}>

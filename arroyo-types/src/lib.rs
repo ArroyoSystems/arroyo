@@ -189,6 +189,20 @@ pub fn to_nanos(time: SystemTime) -> u128 {
 pub fn from_nanos(ts: u128) -> SystemTime {
     UNIX_EPOCH + Duration::from_nanos(ts as u64)
 }
+
+pub fn string_to_map(s: &str) -> Option<HashMap<String, String>> {
+    if s.trim().is_empty() {
+        return Some(HashMap::new());
+    }
+
+    s.split(',')
+        .map(|s| {
+            let mut kv = s.trim().split(':');
+            Some((kv.next()?.trim().to_string(), kv.next()?.trim().to_string()))
+        })
+        .collect()
+}
+
 pub trait Key: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + 'static {}
 impl<T: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + 'static> Key for T {}
 
@@ -427,6 +441,8 @@ pub static MESSAGES_RECV: &str = "arroyo_worker_messages_recv";
 pub static MESSAGES_SENT: &str = "arroyo_worker_messages_sent";
 pub static BYTES_RECV: &str = "arroyo_worker_bytes_recv";
 pub static BYTES_SENT: &str = "arroyo_worker_bytes_sent";
+pub static TX_QUEUE_SIZE: &str = "arroyo_worker_tx_queue_size";
+pub static TX_QUEUE_REM: &str = "arroyo_worker_tx_queue_rem";
 
 #[derive(Debug, Copy, Clone, Encode, Decode)]
 pub struct CheckpointBarrier {

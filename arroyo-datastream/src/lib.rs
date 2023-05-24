@@ -22,7 +22,7 @@ use arroyo_rpc::grpc::api::{
     self as GrpcApi, ExpressionAggregator, Flatten, KafkaAuthConfig, ProgramEdge,
 };
 use arroyo_types::nexmark::Event;
-use arroyo_types::{from_micros, to_micros, Data, GlobalKey, ImpulseEvent, Key};
+use arroyo_types::{from_micros, string_to_map, to_micros, Data, GlobalKey, ImpulseEvent, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -423,22 +423,19 @@ impl From<SourceType> for SourceConfig {
                 event_rate: nexmark.events_per_second.into(),
                 runtime: nexmark.runtime_micros.map(Duration::from_micros),
             },
-            SourceType::EventSource(event) => SourceConfig::EventSourceSource {
-                url: event.url,
-                headers: event
-                    .headers
-                    .split(',')
-                    .filter_map(|s| {
-                        let mut kv = s.trim().split(':');
-                        Some((kv.next()?.trim().to_string(), kv.next()?.trim().to_string()))
-                    })
-                    .collect(),
-                events: event
-                    .events
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .collect(),
-            },
+            SourceType::EventSource(event) => {
+                let Some(connection) = event.connection else { panic!("eventsource requires a connection") };
+
+                SourceConfig::EventSourceSource {
+                    url: connection.url + &event.path,
+                    headers: string_to_map(&connection.headers).expect("Headers are invalid"),
+                    events: event
+                        .events
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .collect(),
+                }
+            }
         }
     }
 }
