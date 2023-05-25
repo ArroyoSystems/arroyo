@@ -11,7 +11,7 @@ tasks:
       until pg_isready ; do sleep 1; done
       psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
       createdb arroyo
-      refinery migrate -c dev/refinery.toml -p arroyo-api/migrations -t 1
+      refinery migrate -c dev/refinery.toml -p arroyo-api/migrations
 
 
 ports:
