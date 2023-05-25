@@ -28,7 +28,6 @@ pub fn regexp_replace(argument: String, regex: String, replacement: String) -> S
 mod tests {
 
     use super::*;
-    use std::error::Error;
 
     #[test]
     pub fn test_regexp_match_is_correct() {
