@@ -18,6 +18,7 @@ use datafusion_expr::{
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use regex::Regex;
 use syn::{parse_quote, parse_str, Ident, Path};
 
 #[derive(Debug, Clone)]
@@ -372,13 +373,12 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Reverse
                     | BuiltinScalarFunction::Right
                     | BuiltinScalarFunction::Rpad
-                    | BuiltinScalarFunction::Rtrim => {
+                    | BuiltinScalarFunction::Rtrim
+                    | BuiltinScalarFunction::RegexpMatch
+                    | BuiltinScalarFunction::RegexpReplace => {
                         let string_function: StringFunction =
                             (fun.clone(), arg_expressions).try_into()?;
                         Ok(Expression::String(string_function))
-                    }
-                    BuiltinScalarFunction::RegexpMatch | BuiltinScalarFunction::RegexpReplace => {
-                        bail!("regex function {:?} not yet implemented", fun)
                     }
                     BuiltinScalarFunction::Coalesce => Ok(Expression::DataStructure(
                         DataStructureFunction::Coalesce(arg_expressions),
@@ -1411,12 +1411,19 @@ pub enum StringFunction {
     Translate(Box<Expression>, Box<Expression>, Box<Expression>),
     OctetLength(Box<Expression>),
     Upper(Box<Expression>),
-    RegexpMatch(Box<Expression>, Box<Expression>),
+    RegexpMatch(
+        Box<Expression>,
+        // Checked regex
+        String,
+    ),
     RegexpReplace(
+        // String to mutate
         Box<Expression>,
+        // Checked Regex
+        String,
+        // String to replace
         Box<Expression>,
-        Box<Expression>,
-        Option<Box<Expression>>,
+        // Optional flags of 'i'  (insensitive) and 'g' (global)
         Option<Box<Expression>>,
     ),
     Repeat(Box<Expression>, Box<Expression>),
@@ -1576,6 +1583,15 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
                 Box::new(args.remove(0)),
                 Some(Box::new(args.remove(0))),
             )),
+            (2, BuiltinScalarFunction::RegexpMatch) => {
+                let first_argument = Box::new(args.remove(0));
+                let regex_arg = args.remove(0);
+                let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(regex))}) = regex_arg else {
+                    bail!("regex argument must be a string literal")
+                };
+                let _ = Regex::new(&regex)?;
+                Ok(StringFunction::RegexpMatch(first_argument, regex))
+            }
             (2, BuiltinScalarFunction::Repeat) => Ok(StringFunction::Repeat(
                 Box::new(args.remove(0)),
                 Box::new(args.remove(0)),
@@ -1640,6 +1656,21 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
                 Box::new(args.remove(0)),
                 Box::new(args.remove(0)),
             )),
+            (3, BuiltinScalarFunction::RegexpReplace) => {
+                let first_argument = Box::new(args.remove(0));
+                let regex_arg = args.remove(0);
+                let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(regex))}) = regex_arg else {
+                    bail!("regex argument must be a string literal")
+                };
+                let _ = Regex::new(&regex)?;
+                let substitute = args.remove(0);
+                Ok(StringFunction::RegexpReplace(
+                    first_argument,
+                    regex,
+                    Box::new(substitute),
+                    None,
+                ))
+            }
             (_, BuiltinScalarFunction::Concat) => Ok(StringFunction::Concat(args)),
             (1..=usize::MAX, func) if func == BuiltinScalarFunction::Concat => {
                 let separator = Box::new(args.remove(0));
@@ -1696,8 +1727,11 @@ impl StringFunction {
             StringFunction::ConcatWithSeparator(expr, _exprs) => {
                 TypeDef::DataType(DataType::Utf8, expr.nullable())
             }
-            StringFunction::RegexpReplace(..) | StringFunction::RegexpMatch(..) => {
-                todo!();
+            StringFunction::RegexpReplace(expr1, _, expr3, _) => {
+                TypeDef::DataType(DataType::Utf8, expr1.nullable() || expr3.nullable())
+            }
+            StringFunction::RegexpMatch(expr1, _) => {
+                TypeDef::DataType(DataType::Utf8, expr1.nullable())
             }
             StringFunction::Strpos(expr1, expr2) => {
                 TypeDef::DataType(DataType::Int32, expr1.nullable() || expr2.nullable())
@@ -1780,8 +1814,16 @@ impl StringFunction {
                     arg1, arg2
                 ))
             }
-            StringFunction::RegexpMatch(_, _) => todo!(),
-            StringFunction::RegexpReplace(_, _, _, _, _) => todo!(),
+            StringFunction::RegexpMatch(_, regex) => {
+                parse_quote!(arroyo_worker::operators::functions::regexp::regexp_match(
+                    arg, #regex.to_string()
+                ))
+            }
+            StringFunction::RegexpReplace(_, regex, _, _) => {
+                parse_quote!(arroyo_worker::operators::functions::regexp::regexp_replace(
+                    arg1, #regex.to_string(), arg2
+                ))
+            }
             StringFunction::Repeat(_, _) => parse_quote!(arg1.repeat(arg2 as usize)),
             StringFunction::Right(_, _) => {
                 parse_quote!(arroyo_worker::operators::functions::strings::right(
@@ -1842,7 +1884,8 @@ impl StringFunction {
             | StringFunction::Btrim(arg, None)
             | StringFunction::Trim(arg, None)
             | StringFunction::Ltrim(arg, None)
-            | StringFunction::Rtrim(arg, None) => {
+            | StringFunction::Rtrim(arg, None)
+            | StringFunction::RegexpMatch(arg, _) => {
                 let expr = arg.to_syn_expression();
                 match arg.nullable() {
                     true => parse_quote!({
@@ -1870,7 +1913,8 @@ impl StringFunction {
             | StringFunction::Rtrim(arg1, Some(arg2))
             | StringFunction::Substr(arg1, arg2, None)
             | StringFunction::Lpad(arg1, arg2, None)
-            | StringFunction::Rpad(arg1, arg2, None) => {
+            | StringFunction::Rpad(arg1, arg2, None)
+            | StringFunction::RegexpReplace(arg1, _, arg2, None) => {
                 let expr1 = arg1.to_syn_expression();
                 let expr2 = arg2.to_syn_expression();
                 match (arg1.nullable(), arg2.nullable()) {
@@ -2041,8 +2085,7 @@ impl StringFunction {
                     })
                 }
             }
-            StringFunction::RegexpMatch(_, _) => todo!(),
-            StringFunction::RegexpReplace(_, _, _, _, _) => todo!(),
+            StringFunction::RegexpReplace(_, _, _, Some(_)) => unreachable!(),
         }
     }
 }
