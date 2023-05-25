@@ -4,8 +4,6 @@ image:
 tasks:
   - init: cargo build
     command: cargo watch -x run
-  - name: Start Postgres in background
-    init: sudo service postgresql start
   - name: Set up arroyo database
     command: |
       until pg_isready ; do sleep 1; done
