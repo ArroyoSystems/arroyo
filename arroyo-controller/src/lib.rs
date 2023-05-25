@@ -36,7 +36,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
 
-mod compiler;
+pub mod compiler;
 mod job_controller;
 pub mod schedulers;
 mod states;

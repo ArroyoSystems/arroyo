@@ -1,8 +1,11 @@
-use arroyo_sql::get_test_expression;
+use arroyo_datastream::{SerializationMode, SourceConfig};
+use arroyo_sql::{
+    get_test_expression, parse_and_get_program_sync, ArroyoSchemaProvider, SqlConfig,
+};
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, Expr, LitStr, Token};
+use syn::{parse_macro_input, parse_str, Expr, LitStr, Token};
 
 /// This macro is used to generate a test function for a single test case.
 /// Used in the `arroyo-sql-testing` crate.
@@ -31,7 +34,7 @@ use syn::{parse_macro_input, Expr, LitStr, Token};
 /// );
 /// ```
 #[proc_macro]
-pub fn single_test_codegen(input: TokenStream) -> TokenStream {
+pub fn single_test_codegen(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let test_case = parse_macro_input!(input as TestCase);
 
     let test_name = &test_case.test_name;
@@ -77,5 +80,96 @@ impl Parse for TestCase {
             input_value,
             expected_result,
         })
+    }
+}
+
+/// This macro is used to generate the pipeline code for a given query.
+/// While it doesn't run the pipeline it validates that the generated code
+/// will compile.
+/// Used in the `arroyo-sql-testing` crate.
+///
+/// # Arguments
+///
+/// * `test_name` - The name of the test.
+/// * `query` - The query to compile. Assumes a nexmark source named "nexmark" is available.
+/// # Returns
+///
+/// A module named `test_name`, containing the generated code.
+///
+/// # Example
+///
+/// ```
+/// use arroyo_sql_testing::full_pipeline_codegen;
+///
+/// full_pipeline_codegen!{
+///    "select_star",
+///   "SELECT * FROM nexmark",
+/// }
+/// ```
+#[proc_macro]
+pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
+    let pipeline_case = parse_macro_input!(input as PipelineCase);
+
+    let test_name = &pipeline_case.test_name.value();
+    let query_string = &pipeline_case.query;
+
+    let mut schema_provider = ArroyoSchemaProvider::new();
+
+    // Add a Nexmark source named "nexmark";
+    schema_provider.add_saved_source_with_type(
+        1,
+        "nexmark".to_string(),
+        arroyo_sql::schemas::nexmark_fields(),
+        Some("arroyo_types::nexmark::Event".to_string()),
+        SourceConfig::NexmarkSource {
+            event_rate: 10,
+            runtime: None,
+        },
+        SerializationMode::Json,
+    );
+    let (program, _) =
+        parse_and_get_program_sync(query_string.value(), schema_provider, SqlConfig::default())
+            .unwrap();
+
+    let mod_name: syn::Ident = parse_str(&test_name).unwrap();
+
+    let function = arroyo_controller::compiler::ProgramCompiler::make_graph_function(&program);
+    let other_defs: Vec<proc_macro2::TokenStream> = program
+        .other_defs
+        .iter()
+        .map(|t| parse_str(t).unwrap())
+        .collect();
+    quote!(mod #mod_name {
+        use petgraph::graph::DiGraph;
+        use arroyo_worker::operators::*;
+        use arroyo_worker::operators::sources::*;
+        use arroyo_worker::operators::sinks::*;
+        use arroyo_worker::operators::sinks;
+        use arroyo_worker::operators::joins::*;
+        use arroyo_worker::operators::windows::*;
+        use arroyo_worker::engine::{Program, SubtaskNode};
+        use arroyo_worker::{LogicalEdge, LogicalNode};
+        use chrono;
+        use std::time::SystemTime;
+        use std::str::FromStr;
+        use serde::{Deserialize, Serialize};
+        #function
+
+        #(#other_defs)*
+    })
+    .into()
+}
+
+struct PipelineCase {
+    test_name: LitStr,
+    query: LitStr,
+}
+
+impl Parse for PipelineCase {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let test_name = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let query = input.parse()?;
+        Ok(Self { test_name, query })
     }
 }

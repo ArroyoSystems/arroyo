@@ -358,7 +358,7 @@ impl Default for SqlConfig {
 
 pub async fn parse_and_get_program(
     query: &str,
-    mut schema_provider: ArroyoSchemaProvider,
+    schema_provider: ArroyoSchemaProvider,
     config: SqlConfig,
 ) -> Result<(Program, Vec<i64>)> {
     let query = query.to_string();
@@ -367,44 +367,50 @@ pub async fn parse_and_get_program(
         bail!("Query is empty");
     }
 
-    tokio::spawn(async move {
-        let mut sql_program_builder = SqlProgramBuilder {
-            schema_provider: &mut schema_provider,
-        };
-        let outputs = sql_program_builder.plan_query(&query)?;
-        let mut sql_pipeline_builder = SqlPipelineBuilder::new(sql_program_builder.schema_provider);
-        for output in outputs {
-            sql_pipeline_builder.insert_table(output)?;
-        }
-        let mut plan_graph = PlanGraph::new(config.clone());
-        let last_output = sql_pipeline_builder
-            .output_nodes
-            .last()
-            .ok_or_else(|| anyhow!("No output nodes"))?;
+    tokio::spawn(async move { parse_and_get_program_sync(query, schema_provider, config) })
+        .await
+        .map_err(|_| anyhow!("Something went wrong"))?
+}
 
-        // If the last output is not a sink, add the sink passed in.
-        if !matches!(last_output, SqlOperator::Sink(..)) {
-            let non_sink_output = sql_pipeline_builder.output_nodes.pop().unwrap();
-            let struct_def = non_sink_output.return_type();
-            let sink = SqlOperator::Sink(
-                "default_sink".to_string(),
-                SqlSink {
-                    id: None,
-                    struct_def,
-                    sink_config: config.sink.clone(),
-                },
-                Box::new(non_sink_output),
-            );
-            sql_pipeline_builder.output_nodes.push(sink);
-        }
+pub fn parse_and_get_program_sync(
+    query: String,
+    mut schema_provider: ArroyoSchemaProvider,
+    config: SqlConfig,
+) -> Result<(Program, Vec<i64>)> {
+    let mut sql_program_builder = SqlProgramBuilder {
+        schema_provider: &mut schema_provider,
+    };
+    let outputs = sql_program_builder.plan_query(&query)?;
+    let mut sql_pipeline_builder = SqlPipelineBuilder::new(sql_program_builder.schema_provider);
+    for output in outputs {
+        sql_pipeline_builder.insert_table(output)?;
+    }
+    let mut plan_graph = PlanGraph::new(config.clone());
+    let last_output = sql_pipeline_builder
+        .output_nodes
+        .last()
+        .ok_or_else(|| anyhow!("No output nodes"))?;
 
-        for output in sql_pipeline_builder.output_nodes.into_iter() {
-            plan_graph.add_sql_operator(output);
-        }
-        get_program(plan_graph, sql_program_builder.schema_provider.clone())
-    })
-    .await
-    .map_err(|_| anyhow!("Something went wrong"))?
+    // If the last output is not a sink, add the sink passed in.
+    if !matches!(last_output, SqlOperator::Sink(..)) {
+        let non_sink_output = sql_pipeline_builder.output_nodes.pop().unwrap();
+        let struct_def = non_sink_output.return_type();
+        let sink = SqlOperator::Sink(
+            "default_sink".to_string(),
+            SqlSink {
+                id: None,
+                struct_def,
+                sink_config: config.sink.clone(),
+            },
+            Box::new(non_sink_output),
+        );
+        sql_pipeline_builder.output_nodes.push(sink);
+    }
+
+    for output in sql_pipeline_builder.output_nodes.into_iter() {
+        plan_graph.add_sql_operator(output);
+    }
+    get_program(plan_graph, sql_program_builder.schema_provider.clone())
 }
 
 struct SqlProgramBuilder<'a> {

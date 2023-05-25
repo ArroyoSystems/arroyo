@@ -328,11 +328,36 @@ wasm-opt = false
         };
         info!("{}", self.program.dot());
 
-        let nodes: Vec<_> = self.program.graph.node_indices().map(|idx| {
-            let node = self.program.graph.node_weight(idx).unwrap();
+        let other_defs: Vec<TokenStream> = self
+            .program
+            .other_defs
+            .iter()
+            .map(|t| parse_str(t).unwrap())
+            .collect();
+
+        let make_graph_function = Self::make_graph_function(&self.program);
+
+        prettyplease::unparse(&parse_quote! {
+            #imports
+
+            #make_graph_function
+
+            pub fn main() {
+                let graph = make_graph();
+
+                arroyo_worker::WorkerServer::new(#name, #hash, graph).start().unwrap();
+            }
+
+            #(#other_defs )*
+        })
+    }
+
+    pub fn make_graph_function(program: &Program) -> syn::ItemFn {
+        let nodes: Vec<_> = program.graph.node_indices().map(|idx| {
+            let node = program.graph.node_weight(idx).unwrap();
             let description = format!("{:?}", node);
-            let input = self.program.graph.edges_directed(idx, Direction::Incoming).next();
-            let output = self.program.graph.edges_directed(idx, Direction::Outgoing).next();
+            let input = program.graph.edges_directed(idx, Direction::Incoming).next();
+            let output = program.graph.edges_directed(idx, Direction::Outgoing).next();
             let body = match &node.operator {
                 Operator::FileSource { dir, delay } => {
                     let dir = dir.to_string_lossy();
@@ -521,7 +546,7 @@ wasm-opt = false
                     }
                 }
                 Operator::WindowJoin { window } => {
-                    let mut inputs: Vec<_> = self.program.graph.edges_directed(idx, Direction::Incoming)
+                    let mut inputs: Vec<_> = program.graph.edges_directed(idx, Direction::Incoming)
                         .collect();
                     inputs.sort_by_key(|e| e.weight().typ.clone());
                     assert_eq!(2, inputs.len(), "WindowJoin should have 2 inputs, but has {}", inputs.len());
@@ -805,7 +830,7 @@ wasm-opt = false
                 }
                 }
                 Operator::JoinWithExpiration { left_expiration, right_expiration } => {
-                    let mut inputs: Vec<_> = self.program.graph.edges_directed(idx, Direction::Incoming)
+                    let mut inputs: Vec<_> = program.graph.edges_directed(idx, Direction::Incoming)
                         .collect();
                     inputs.sort_by_key(|e| e.weight().typ.clone());
                     assert_eq!(2, inputs.len(), "JoinWithExpiration should have 2 inputs, but has {}", inputs.len());
@@ -851,21 +876,16 @@ wasm-opt = false
             })
             .collect();
 
-        let edge_defs: Vec<_> = self
-            .program
+        let edge_defs: Vec<_> = program
             .graph
             .edge_indices()
             .map(|idx| {
-                let e = self.program.graph.edge_weight(idx).unwrap();
-                let (source, dest) = self.program.graph.edge_endpoints(idx).unwrap();
-                let source = format_ident!(
-                    "{}",
-                    self.program.graph.node_weight(source).unwrap().operator_id
-                );
-                let dest = format_ident!(
-                    "{}",
-                    self.program.graph.node_weight(dest).unwrap().operator_id
-                );
+                let e = program.graph.edge_weight(idx).unwrap();
+                let (source, dest) = program.graph.edge_endpoints(idx).unwrap();
+                let source =
+                    format_ident!("{}", program.graph.node_weight(source).unwrap().operator_id);
+                let dest =
+                    format_ident!("{}", program.graph.node_weight(dest).unwrap().operator_id);
                 let typ = match e.typ {
                     EdgeType::Forward => {
                         quote! { LogicalEdge::Forward }
@@ -884,16 +904,7 @@ wasm-opt = false
             })
             .collect();
 
-        let other_defs: Vec<TokenStream> = self
-            .program
-            .other_defs
-            .iter()
-            .map(|t| parse_str(t).unwrap())
-            .collect();
-
-        prettyplease::unparse(&parse_quote! {
-            #imports
-
+        parse_quote! {
             pub fn make_graph() -> DiGraph<LogicalNode, LogicalEdge> {
                 let mut graph: DiGraph<LogicalNode, LogicalEdge> = DiGraph::new();
                 #(#node_defs )*
@@ -902,15 +913,7 @@ wasm-opt = false
 
                 graph
             }
-
-            pub fn main() {
-                let graph = make_graph();
-
-                arroyo_worker::WorkerServer::new(#name, #hash, graph).start().unwrap();
-            }
-
-            #(#other_defs )*
-        })
+        }
     }
 
     fn compile_wasm_lib(&self) -> TokenStream {
