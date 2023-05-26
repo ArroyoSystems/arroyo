@@ -17,8 +17,10 @@ import {
 import * as util from '../lib/util';
 import OperatorCheckpoint from './OperatorCheckpoint';
 import { useCheckpointDetails } from '../lib/data_fetching';
+import { ApiClient } from '../main';
 
 export interface CheckpointsProps {
+  client: ApiClient;
   job: JobDetailsResp;
   checkpoints: Array<CheckpointOverview>;
 }
@@ -35,9 +37,9 @@ function formatDurationHMS(micros: number): string {
   )}`;
 }
 
-const Checkpoints: React.FC<CheckpointsProps> = ({ job, checkpoints }) => {
+const Checkpoints: React.FC<CheckpointsProps> = ({ client, job, checkpoints }) => {
   const [epoch, setEpoch] = useState<number | undefined>(undefined);
-  const { checkpoint } = useCheckpointDetails(job.jobStatus?.jobId, epoch);
+  const { checkpoint } = useCheckpointDetails(client, job.jobStatus?.jobId, epoch);
 
   let details =
     checkpoints.length > 0 ? (
