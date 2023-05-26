@@ -50,9 +50,9 @@ export function JobDetail({ client }: { client: ApiClient }) {
 
   let { id } = useParams();
 
-  const { job, jobError, updateJob } = useJob(id);
-  const { metrics } = useJobMetrics(id);
-  const { checkpoints } = useJobCheckpoints(id);
+  const { job, jobError, updateJob } = useJob(client, id);
+  const { metrics } = useJobMetrics(client, id);
+  const { checkpoints } = useJobCheckpoints(client, id);
 
   if (jobError) {
     if (jobError instanceof ConnectError && jobError.code === ConnectWebCode.NotFound) {
@@ -159,7 +159,9 @@ export function JobDetail({ client }: { client: ApiClient }) {
     );
 
     const checkpointsTab = (
-      <TabPanel>{<Checkpoints job={job} checkpoints={checkpoints?.checkpoints ?? []} />}</TabPanel>
+      <TabPanel>
+        {<Checkpoints client={client} job={job} checkpoints={checkpoints?.checkpoints ?? []} />}
+      </TabPanel>
     );
 
     const queryTab = (
