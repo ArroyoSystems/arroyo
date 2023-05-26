@@ -58,12 +58,11 @@ impl Projection {
         StructDef { name: None, fields }
     }
     pub fn to_truncated_syn_expression(&self, terms: usize) -> syn::Expr {
-        println!("self: {:?}, terms{:?}", self, terms);
         let assignments: Vec<_> = self
             .field_computations
             .iter()
             .enumerate()
-            .skip(self.field_computations.len() - terms)
+            .take(terms)
             .map(|(i, field)| {
                 let field_name = self.field_names[i].clone();
                 let name = field_name.name;
@@ -93,7 +92,7 @@ impl Projection {
             .field_computations
             .iter()
             .enumerate()
-            .skip(self.field_computations.len() - terms)
+            .take(terms)
             .map(|(i, computation)| {
                 let field_name = self.field_names[i].clone();
                 let field_type = computation.return_type();
@@ -330,7 +329,7 @@ impl TwoPhaseAggregateProjection {
             .map(|(i, field_computation)| {
                 let expr = field_computation.combine_bin_syn_expr();
                 let i: syn::Index = parse_str(&i.to_string()).unwrap();
-                parse_quote!({let current_bin = current_bin.#i;
+                parse_quote!({let current_bin = current_bin.#i.clone();
                     let new_bin = arg.#i.clone();  #expr})
             })
             .collect();
@@ -353,7 +352,7 @@ impl TwoPhaseAggregateProjection {
             .map(|(i, field_computation)| {
                 let expr = field_computation.bin_syn_expr();
                 let i: syn::Index = parse_str(&i.to_string()).unwrap();
-                parse_quote!({let current_bin = Some(current_bin.#i); #expr})
+                parse_quote!({let current_bin = Some(current_bin.#i.clone()); #expr})
             })
             .collect();
         let none_assignments: Vec<syn::Expr> = self

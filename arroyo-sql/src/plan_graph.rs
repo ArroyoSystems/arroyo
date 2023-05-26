@@ -434,11 +434,6 @@ impl PlanNode {
                 result_struct,
                 field_name: _,
             }) => {
-                let sort_tokens: Vec<_> = order_by
-                    .iter()
-                    .map(|sort_expression| sort_expression.to_syn_expr())
-                    .collect();
-
                 let window_field = result_struct.fields.last().unwrap().field_ident();
                 let result_struct_name = result_struct.get_type();
                 let mut field_assignments: Vec<_> = result_struct
@@ -463,8 +458,9 @@ impl PlanNode {
                     #(#field_assignments, )*
                 });
 
-                let sort = if !sort_tokens.is_empty() {
-                    Some(quote!(arg.sort_by_key(|arg| #(#sort_tokens,)*);))
+                let sort = if order_by.len() > 0 {
+                    let sort_tokens = SortExpression::sort_tuple_expression(order_by);
+                    Some(quote!(arg.sort_by_key(|arg| #sort_tokens);))
                 } else {
                     None
                 };
@@ -532,34 +528,30 @@ impl PlanNode {
                 let aggregate_expr = aggregating_projection.sliding_aggregation_syn_expression();
                 let mem_type = aggregating_projection.memory_type();
 
-                let sort_types: Vec<_> = order_by
-                    .iter()
-                    .map(|sort_expression| sort_expression.tuple_type())
-                    .collect();
-                let sort_key_type = quote!(#((#sort_types,))*).to_string();
+                let sort_tuple = SortExpression::sort_tuple_type(order_by);
+                let sort_key_type = quote!(#sort_tuple).to_string();
 
                 let partition_function = partition_projection.to_syn_expression();
-                let aggregate_projection_expr = converting_projection
-                    .to_truncated_syn_expression(aggregating_projection.field_names.len());
                 let projection_expr = converting_projection.to_syn_expression();
 
-                let sort_tokens: Vec<_> = order_by
-                    .iter()
-                    .map(|sort_expression| sort_expression.to_syn_expr())
-                    .collect();
-                let extractor = quote!(
-                    |key, arg| {
-                        let arg = &#aggregate_expr;
-                        let arg = #aggregate_projection_expr;
-                        #((#sort_tokens,))*
-                    }
-                )
-                .to_string();
+                let sort_tokens = SortExpression::sort_tuple_expression(order_by);
+
                 let aggregate_struct = aggregating_projection.output_struct();
                 let key_struct = group_by_projection.output_struct();
                 let merge_struct = SqlOperator::merge_struct_type(&key_struct, &aggregate_struct);
                 let merge_expr = group_by_kind.to_syn_expression(&key_struct, &aggregate_struct);
                 let merge_struct_ident = merge_struct.get_type();
+
+                let extractor = quote!(
+                    |key, arg| {
+                        let key = key.clone();
+                        let arg = #merge_struct_ident{key, aggregate: { #aggregate_expr}, timestamp: std::time::UNIX_EPOCH};
+                        let arg = #merge_expr;
+                        let arg = #projection_expr;
+
+                        #sort_tokens
+                    }
+                ).to_string();
 
                 let aggregator = quote!(|timestamp, key, aggregate_value|
                     {
@@ -594,11 +586,8 @@ impl PlanNode {
                 max_elements,
                 window_function,
             } => {
-                let sort_tokens: Vec<_> = window_function
-                    .order_by
-                    .iter()
-                    .map(|sort_expression| sort_expression.to_syn_expr())
-                    .collect();
+                let sort_expression =
+                    SortExpression::sort_tuple_expression(&window_function.order_by);
 
                 let window_field = window_function
                     .result_struct
@@ -631,7 +620,7 @@ impl PlanNode {
 
                 let extractor = quote!(
                     |arg| {
-                    #((#sort_tokens,))*
+                        #sort_expression
                     }
                 )
                 .to_string();
@@ -639,12 +628,8 @@ impl PlanNode {
                     |arg, i| #output_expression
                 )
                 .to_string();
-                let sort_types: Vec<_> = window_function
-                    .order_by
-                    .iter()
-                    .map(|sort_expression| sort_expression.tuple_type())
-                    .collect();
-                let partition_key_type = quote!(#((#sort_types,))*).to_string();
+                let sort_type = SortExpression::sort_tuple_type(&window_function.order_by);
+                let partition_key_type = quote!(#sort_type).to_string();
 
                 arroyo_datastream::Operator::TumblingTopN(TumblingTopN {
                     width: *width,

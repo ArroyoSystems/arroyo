@@ -1337,7 +1337,7 @@ impl SortExpression {
         })
     }
 
-    pub fn tuple_type(&self) -> syn::Type {
+    fn tuple_type(&self) -> syn::Type {
         let value_type = if self.value.return_type().is_float() {
             let t = self.value.return_type().return_type();
             parse_quote! { arroyo_worker::OrderedFloat<#t> }
@@ -1359,7 +1359,41 @@ impl SortExpression {
         }
     }
 
-    pub fn to_syn_expr(&self) -> syn::Expr {
+    pub fn sort_tuple_type(sort_expressions: &Vec<SortExpression>) -> syn::Type {
+        match sort_expressions.len() {
+            0 => parse_quote!(()),
+            1 => {
+                let singleton_type = sort_expressions[0].tuple_type();
+                parse_quote!((#singleton_type,))
+            }
+            _ => {
+                let tuple_types: Vec<syn::Type> = sort_expressions
+                    .iter()
+                    .map(|sort_expression| sort_expression.tuple_type())
+                    .collect();
+                parse_quote!((#(#tuple_types),*))
+            }
+        }
+    }
+
+    pub fn sort_tuple_expression(sort_expressions: &Vec<SortExpression>) -> syn::Expr {
+        match sort_expressions.len() {
+            0 => parse_quote!(()),
+            1 => {
+                let singleton_expr = sort_expressions[0].to_syn_expr();
+                parse_quote!((#singleton_expr,))
+            }
+            _ => {
+                let tuple_exprs: Vec<syn::Expr> = sort_expressions
+                    .iter()
+                    .map(|sort_expression| sort_expression.to_syn_expr())
+                    .collect();
+                parse_quote!((#(#tuple_exprs),*))
+            }
+        }
+    }
+
+    fn to_syn_expr(&self) -> syn::Expr {
         let value = if self.value.return_type().is_float() {
             Expression::WrapType(WrapTypeExpression::new(
                 "arroyo_worker::OrderedFloat",
