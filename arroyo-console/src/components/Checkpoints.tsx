@@ -15,9 +15,9 @@ import {
   UnorderedList,
 } from '@chakra-ui/react';
 import * as util from '../lib/util';
-import OperatorCheckpoint from './OperatorCheckpoint';
 import { useCheckpointDetails } from '../lib/data_fetching';
 import { ApiClient } from '../main';
+import CheckpointDetails from './CheckpointDetails';
 
 export interface CheckpointsProps {
   client: ApiClient;
@@ -78,49 +78,48 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ client, job, checkpoints }) =
       .flatMap(op => Object.values(op.tasks).map(t => (t.bytes == null ? 0 : Number(t.bytes))))
       .reduce((a, b) => a + b, 0);
 
+    const checkpointStats = (
+      <StatGroup width={718} border="1px solid #666" borderRadius="5px" marginTop={5} padding={3}>
+        <Stat>
+          <StatLabel>Started</StatLabel>
+          <StatNumber>
+            {new Intl.DateTimeFormat('en-us', {
+              dateStyle: undefined,
+              timeStyle: 'medium',
+            }).format(new Date(Number(checkpoint.overview?.startTime) / 1000))}
+          </StatNumber>
+        </Stat>
+        <Stat marginLeft={10}>
+          <StatLabel>Finished</StatLabel>
+          <StatNumber>
+            {checkpoint.overview?.finishTime != null
+              ? new Intl.DateTimeFormat('en-us', {
+                  dateStyle: undefined,
+                  timeStyle: 'medium',
+                }).format(new Date(Number(checkpoint.overview?.finishTime) / 1000))
+              : '-'}
+          </StatNumber>
+        </Stat>
+        <Stat marginLeft={10}>
+          <StatLabel>Duration</StatLabel>
+          <StatNumber>{formatDurationHMS(end - start)}</StatNumber>
+        </Stat>
+        <Stat marginLeft={10}>
+          <StatLabel>Total Size</StatLabel>
+          <StatNumber> {util.dataFormat(checkpointBytes)} </StatNumber>
+        </Stat>
+      </StatGroup>
+    );
+
     details = (
-      <Box>
+      <Flex flexDirection={'column'} flexGrow={1}>
         <Heading size="md">
           Checkpoint {epoch}
           <Badge marginLeft={2}>{checkpoint.overview?.backend}</Badge>
         </Heading>
-        <StatGroup width={718} border="1px solid #666" borderRadius="5px" marginTop={5} padding={3}>
-          <Stat>
-            <StatLabel>Started</StatLabel>
-            <StatNumber>
-              {new Intl.DateTimeFormat('en-us', {
-                dateStyle: undefined,
-                timeStyle: 'medium',
-              }).format(new Date(Number(checkpoint.overview?.startTime) / 1000))}
-            </StatNumber>
-          </Stat>
-          <Stat marginLeft={10}>
-            <StatLabel>Finished</StatLabel>
-            <StatNumber>
-              {checkpoint.overview?.finishTime != null
-                ? new Intl.DateTimeFormat('en-us', {
-                    dateStyle: undefined,
-                    timeStyle: 'medium',
-                  }).format(new Date(Number(checkpoint.overview?.finishTime) / 1000))
-                : '-'}
-            </StatNumber>
-          </Stat>
-          <Stat marginLeft={10}>
-            <StatLabel>Duration</StatLabel>
-            <StatNumber>{formatDurationHMS(end - start)}</StatNumber>
-          </Stat>
-          <Stat marginLeft={10}>
-            <StatLabel>Size</StatLabel>
-            <StatNumber> {util.dataFormat(checkpointBytes)} </StatNumber>
-          </Stat>
-        </StatGroup>
-
-        <Box marginTop={5}>
-          {ops?.map(op => (
-            <OperatorCheckpoint key={op.id} op={op} scale={scale} w={w} />
-          ))}
-        </Box>
-      </Box>
+        {checkpointStats}
+        <CheckpointDetails checkpoint={checkpoint} ops={ops} scale={scale} w={w} />
+      </Flex>
     );
   }
 
@@ -143,7 +142,7 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ client, job, checkpoints }) =
             })}
         </UnorderedList>
       </Box>
-      <Box>{details}</Box>
+      <Flex flexGrow={1}>{details}</Flex>
     </Flex>
   );
 };
