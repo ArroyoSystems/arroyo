@@ -1,15 +1,19 @@
 import { OperatorCheckpointDetail, TaskCheckpointEventType } from '../gen/api_pb';
 import React, { ReactNode, useState } from 'react';
-import { Box, Flex, Text, theme } from '@chakra-ui/react';
+import { Box, Flex, theme } from '@chakra-ui/react';
 import * as util from '../lib/util';
 
-export interface OperatorCheckpointProps {
+export interface OperatorCheckpointTimelineProps {
   op: { id: string; name: string; parallelism: number; checkpoint?: OperatorCheckpointDetail };
   scale: (x: number) => number;
   w: number;
 }
 
-const OperatorCheckpoint: React.FC<OperatorCheckpointProps> = ({ op, scale, w }) => {
+const OperatorCheckpointTimeline: React.FC<OperatorCheckpointTimelineProps> = ({
+  op,
+  scale,
+  w,
+}) => {
   const [expanded, setExpanded] = useState<boolean>(false);
 
   let now = new Date().getTime() * 1000;
@@ -54,16 +58,8 @@ const OperatorCheckpoint: React.FC<OperatorCheckpointProps> = ({ op, scale, w })
               let width = Math.max(scale(finishTime) - left, 1);
 
               inner = [
-                <Box
-                  h={1}
-                  className={className}
-                  position="relative"
-                  left={left}
-                  width={width}
-                ></Box>,
+                <Box h={1} className={className} position="relative" left={left} width={width} />,
               ];
-
-              //console.log(syncLeft, scale(now), alignmentLeft);
 
               inner.push(
                 <Box
@@ -98,38 +94,31 @@ const OperatorCheckpoint: React.FC<OperatorCheckpointProps> = ({ op, scale, w })
     );
   }
 
-  return (
-    <Flex
-      marginTop="10px"
-      textAlign="right"
-      className="operator-checkpoint"
-      onClick={() => setExpanded(!expanded)}
-    >
-      <Box width={200} marginRight="10px">
-        <Text
-          fontSize="sm"
-          textOverflow="ellipsis"
-          overflow="hidden"
-          whiteSpace="nowrap"
-          title={op.name}
-        >
-          {op.name}
-        </Text>
-      </Box>
-      <Box width={w + 8} padding={0} position="relative" backgroundColor="#333">
-        <Box
-          className={className}
-          title={util.durationFormat(finishTime - Number(op.checkpoint?.startTime))}
-          position="absolute"
-          margin={1}
-          height={3}
-          left={left}
-          width={width}
-        ></Box>
-        {tasks}
-      </Box>
-    </Flex>
+  const timeline = (
+    <>
+      <Flex
+        marginTop="10px"
+        textAlign="right"
+        className="operator-checkpoint"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <Box width={w + 8} height={10} padding={0} position="relative" backgroundColor="#333">
+          <Box
+            className={className}
+            title={util.durationFormat(finishTime - Number(op.checkpoint?.startTime))}
+            position="absolute"
+            margin={1}
+            height={3}
+            left={left}
+            width={width}
+          ></Box>
+          {tasks}
+        </Box>
+      </Flex>
+    </>
   );
+
+  return <>{timeline}</>;
 };
 
-export default OperatorCheckpoint;
+export default OperatorCheckpointTimeline;
