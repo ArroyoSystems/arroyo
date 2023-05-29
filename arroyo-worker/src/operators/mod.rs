@@ -158,27 +158,44 @@ mod test {
 #[derive(Encode, Decode, Copy, Clone, Debug, PartialEq)]
 pub struct PeriodicWatermarkGeneratorState {
     last_watermark_emitted_at: SystemTime,
-    max_timestamp: SystemTime,
+    max_watermark: SystemTime,
 }
 
 #[derive(StreamNode)]
 pub struct PeriodicWatermarkGenerator<K: Key, D: Data> {
     interval: Duration,
-    max_lateness: Duration,
+    watermark_function: Box<dyn Fn(&Record<K, D>) -> SystemTime + Send>,
     state_cache: PeriodicWatermarkGeneratorState,
-
     _t: PhantomData<(K, D)>,
 }
 
 #[process_fn(in_k=K, in_t=D, out_k=K, out_t=D)]
 impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
-    pub fn new(interval: Duration, max_lateness: Duration) -> PeriodicWatermarkGenerator<K, D> {
+    pub fn fixed_lateness(
+        interval: Duration,
+        max_lateness: Duration,
+    ) -> PeriodicWatermarkGenerator<K, D> {
         PeriodicWatermarkGenerator {
             interval,
-            max_lateness,
+            watermark_function: Box::new(move |record| record.timestamp - max_lateness),
             state_cache: PeriodicWatermarkGeneratorState {
                 last_watermark_emitted_at: SystemTime::UNIX_EPOCH,
-                max_timestamp: SystemTime::UNIX_EPOCH,
+                max_watermark: SystemTime::UNIX_EPOCH,
+            },
+            _t: PhantomData,
+        }
+    }
+
+    pub fn watermark_function(
+        interval: Duration,
+        watermark_function: Box<dyn Fn(&Record<K, D>) -> SystemTime + Send>,
+    ) -> Self {
+        PeriodicWatermarkGenerator {
+            interval,
+            watermark_function,
+            state_cache: PeriodicWatermarkGeneratorState {
+                last_watermark_emitted_at: SystemTime::UNIX_EPOCH,
+                max_watermark: SystemTime::UNIX_EPOCH,
             },
             _t: PhantomData,
         }
@@ -202,7 +219,7 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
             *(gs.get(&ctx.task_info.task_index)
                 .unwrap_or(&PeriodicWatermarkGeneratorState {
                     last_watermark_emitted_at: SystemTime::UNIX_EPOCH,
-                    max_timestamp: SystemTime::UNIX_EPOCH,
+                    max_watermark: SystemTime::UNIX_EPOCH,
                 }));
 
         self.state_cache = state;
@@ -218,14 +235,15 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
     async fn process_element(&mut self, record: &Record<K, D>, ctx: &mut Context<K, D>) {
         ctx.collector.collect(record.clone()).await;
 
-        self.state_cache.max_timestamp = self.state_cache.max_timestamp.max(record.timestamp);
+        let watermark = (self.watermark_function)(record);
+
+        self.state_cache.max_watermark = self.state_cache.max_watermark.max(watermark);
         if record
             .timestamp
             .duration_since(self.state_cache.last_watermark_emitted_at)
             .unwrap_or(Duration::ZERO)
             > self.interval
         {
-            let watermark = self.state_cache.max_timestamp - self.max_lateness;
             debug!(
                 "[{}] Emitting watermark {}",
                 ctx.task_info.task_index,

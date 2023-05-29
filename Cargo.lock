@@ -847,6 +847,7 @@ version = "0.2.0"
 dependencies = [
  "arroyo-controller",
  "arroyo-datastream",
+ "arroyo-rpc",
  "arroyo-sql",
  "proc-macro2",
  "quote",

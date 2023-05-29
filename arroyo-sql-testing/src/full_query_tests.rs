@@ -33,3 +33,21 @@ full_pipeline_codegen! {"query_5_join",
     ON
        AuctionBids.num = MaxBids.maxn
        and AuctionBids.window = MaxBids.window;"}
+
+full_pipeline_codegen! {"watermark_test",
+"CREATE TABLE person (
+  id bigint,
+  name TEXT,
+  email TEXT,
+  date_string text,
+  datetime datetime GENERATED ALWAYS AS (CAST(date_string as timestamp)),
+  watermark datetime GENERATED ALWAYS AS (CAST(date_string as timestamp) - interval '1 second')
+
+) WITH (
+  connection = 'local',
+  topic = 'person',
+  event_time_field = 'datetime',
+  watermark_field = 'watermark'
+);
+
+SELECT id, name, email FROM person;"}
