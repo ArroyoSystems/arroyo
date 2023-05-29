@@ -10,6 +10,7 @@ use arrow_schema::DataType;
 use arroyo_datastream::{Operator, WindowType};
 
 use datafusion_common::{DFField, ScalarValue};
+use datafusion_expr::expr::ScalarUDF;
 use datafusion_expr::{BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp};
 
 use quote::{format_ident, quote};
@@ -400,23 +401,36 @@ impl<'a> SqlPipelineBuilder<'a> {
                 self.insert_subquery_alias(subquery_alias)
             }
             LogicalPlan::Limit(_) => bail!("limit not currently supported"),
-            LogicalPlan::CreateExternalTable(_) => {
-                bail!("creating external tables is not currently supported")
-            }
-            LogicalPlan::CreateMemoryTable(create_memory_table) => {
-                bail!(
-                    "creating memory tables is not currently supported: {:?}, {:?}",
-                    create_memory_table.input,
-                    create_memory_table.primary_key
-                )
-            }
-            LogicalPlan::CreateView(_) => bail!("creating views is not currently supported"),
-            LogicalPlan::CreateCatalogSchema(_) => {
-                bail!("creating catalog schemas is not currently supported")
-            }
-            LogicalPlan::CreateCatalog(_) => bail!("creating catalogs is not currently supported"),
-            LogicalPlan::DropTable(_) => bail!("dropping tables is not currently supported"),
-            LogicalPlan::DropView(_) => bail!("dropping views is not currently supported"),
+            LogicalPlan::Ddl(ddl_statement) => match ddl_statement {
+                datafusion_expr::DdlStatement::CreateExternalTable(_) => {
+                    bail!("creating external tables is not currently supported")
+                }
+                datafusion_expr::DdlStatement::CreateMemoryTable(create_memory_table) => {
+                    bail!(
+                        "creating memory tables is not currently supported: {:?}, {:?}",
+                        create_memory_table.input,
+                        create_memory_table.primary_key
+                    )
+                }
+                datafusion_expr::DdlStatement::CreateView(_) => {
+                    bail!("creating views is not currently supported")
+                }
+                datafusion_expr::DdlStatement::CreateCatalogSchema(_) => {
+                    bail!("creating catalog schemas is not currently supported")
+                }
+                datafusion_expr::DdlStatement::CreateCatalog(_) => {
+                    bail!("creating catalogs is not currently supported")
+                }
+                datafusion_expr::DdlStatement::DropTable(_) => {
+                    bail!("dropping tables is not currently supported")
+                }
+                datafusion_expr::DdlStatement::DropView(_) => {
+                    bail!("dropping views is not currently supported")
+                }
+                datafusion_expr::DdlStatement::DropCatalogSchema(_) => {
+                    bail!("dropping catalog schemas is not currently supported")
+                }
+            },
             LogicalPlan::Values(_) => bail!("values are not currently supported"),
             LogicalPlan::Explain(_) => bail!("explain is not currently supported"),
             LogicalPlan::Analyze(_) => bail!("analyze is not currently supported"),
@@ -657,7 +671,9 @@ impl<'a> SqlPipelineBuilder<'a> {
 
     fn is_window(expression: &Expr) -> bool {
         match expression {
-            Expr::ScalarUDF { fun, args: _ } => matches!(fun.name.as_str(), "hop" | "tumble"),
+            Expr::ScalarUDF(ScalarUDF { fun, args: _ }) => {
+                matches!(fun.name.as_str(), "hop" | "tumble")
+            }
             Expr::Alias(exp, _) => Self::is_window(exp),
             _ => false,
         }
@@ -665,7 +681,7 @@ impl<'a> SqlPipelineBuilder<'a> {
 
     fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
         match expression {
-            Expr::ScalarUDF { fun, args } => match fun.name.as_str() {
+            Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
                 "hop" => {
                     if args.len() != 2 {
                         unreachable!();
