@@ -185,7 +185,7 @@ async fn server(pool: Pool) {
             .expect("Could not find index.html in asset dir (you may need to build the console sources)")
             .replace("{{API_ENDPOINT}}", &endpoint)
             .replace("{{CLUSTER_ID}}", &arroyo_server_common::get_cluster_id())
-            .replace("{{DISABLE_TELEMENTRY}}", if telemetry_enabled() { "false" } else { "true" })
+            .replace("{{DISABLE_TELEMETRY}}", if telemetry_enabled() { "false" } else { "true" })
     });
 
     let fallback = service_fn(|_: http::Request<_>| async move {
