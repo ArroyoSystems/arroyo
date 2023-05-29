@@ -810,6 +810,7 @@ pub enum PlanType {
         value: String,
     },
 }
+
 impl PlanType {
     fn as_syn_type(&self) -> syn::Type {
         match self {
@@ -991,11 +992,29 @@ impl PlanGraph {
                 .add_edge(current_index, timestamp_index, timestamp_edge);
             current_index = timestamp_index;
         }
-        let watermark_operator =
-            PlanOperator::Watermark(arroyo_datastream::WatermarkType::Periodic {
+        let watermark = if let Some(watermark_expression) = source_operator.watermark_column {
+            let expression = watermark_expression.to_syn_expression();
+            let null_checked_expression = if watermark_expression.nullable() {
+                parse_quote!(#expression.unwrap_or_else(|| std::time::SystemTime::now()))
+            } else {
+                expression
+            };
+
+            arroyo_datastream::WatermarkType::Expression {
+                period: Duration::from_secs(1),
+                expression: quote!({
+                   let arg = record.value.clone();
+                   #null_checked_expression
+                })
+                .to_string(),
+            }
+        } else {
+            arroyo_datastream::WatermarkType::FixedLateness {
                 period: Duration::from_secs(1),
                 max_lateness: Duration::from_secs(1),
-            });
+            }
+        };
+        let watermark_operator = PlanOperator::Watermark(watermark);
         let watermark_index = self.insert_operator(watermark_operator, current_type.clone());
         let watermark_edge = PlanEdge {
             edge_data_type: current_type,

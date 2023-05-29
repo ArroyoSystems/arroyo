@@ -65,7 +65,10 @@ COPY arroyo-sql-macro arroyo-sql-macro
 COPY arroyo-sql-testing arroyo-sql-testing
 COPY arroyo-controller arroyo-controller
 COPY arroyo-console arroyo-console
+COPY integ integ
 COPY docker/refinery.toml refinery.toml
+
+COPY .git .git
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
@@ -83,6 +86,8 @@ RUN service postgresql start && \
     service postgresql stop
 
 RUN bash -c "cd arroyo-console && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm build"
+
+RUN rm -rf .git
 
 WORKDIR /opt/arroyo/build
 

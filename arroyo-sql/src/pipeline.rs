@@ -51,6 +51,7 @@ pub struct SourceOperator {
     pub source: SqlSource,
     pub virtual_field_projection: Option<Projection>,
     pub timestamp_override: Option<Expression>,
+    pub watermark_column: Option<Expression>,
 }
 impl SourceOperator {
     fn return_type(&self) -> StructDef {
@@ -823,6 +824,7 @@ impl<'a> SqlPipelineBuilder<'a> {
                     source,
                     virtual_field_projection: None,
                     timestamp_override: None,
+                    watermark_column: None,
                 })
             }
             crate::Table::SavedSink {
@@ -910,11 +912,32 @@ impl<'a> SqlPipelineBuilder<'a> {
                 } else {
                     None
                 };
+                let watermark_column = if let Some(field_name) =
+                    connection_config.get("watermark_field")
+                {
+                    // check that a column exists and it is a timestamp
+                    let Some(event_column) = fields.iter().find_map(|f| match f {
+                        FieldSpec::StructField(struct_field) |
+                        FieldSpec::VirtualStructField(struct_field, _) =>
+                        if struct_field.name == *field_name
+                            && matches!(struct_field.data_type, TypeDef::DataType(DataType::Timestamp(..), _)) {
+                            Some(struct_field.clone())
+                            } else {
+                                None
+                            },
+                    }) else {
+                        bail!("watermark_field {} not found or not a timestamp", field_name)
+                    };
+                    Some(Expression::Column(ColumnExpression::new(event_column)))
+                } else {
+                    None
+                };
                 SqlOperator::Source(SourceOperator {
                     name: table_name,
                     source: physical_source,
                     virtual_field_projection,
                     timestamp_override,
+                    watermark_column,
                 })
             }
             crate::Table::TableFromQuery {
