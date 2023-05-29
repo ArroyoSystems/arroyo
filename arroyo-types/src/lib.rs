@@ -75,6 +75,16 @@ pub const K8S_WORKER_SLOTS_ENV: &str = "K8S_WORKER_SLOTS";
 pub const K8S_WORKER_VOLUMES_ENV: &str = "K8S_WORKER_VOLUMES";
 pub const K8S_WORKER_VOLUME_MOUNTS_ENV: &str = "K8S_WORKER_VOLUME_MOUNTS";
 
+// telemetry configuration
+pub const DISABLE_TELEMETRY_ENV: &str = "DISABLE_TELEMETRY";
+pub const POSTHOG_KEY: &str = "phc_ghJo7Aa9QOo4inoWFYZP7o2aKszllEUyH77QeFgznUe";
+pub fn telemetry_enabled() -> bool {
+    match env::var(DISABLE_TELEMETRY_ENV) {
+        Ok(val) => val != "true",
+        Err(_) => true,
+    }
+}
+
 pub fn string_config(var: &str, default: &str) -> String {
     env::var(var).unwrap_or_else(|_| default.to_string())
 }
