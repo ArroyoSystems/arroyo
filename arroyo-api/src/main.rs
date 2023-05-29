@@ -19,10 +19,10 @@ use arroyo_rpc::grpc::{
     },
     controller_grpc_client::ControllerGrpcClient,
 };
-use arroyo_server_common::start_admin_server;
+use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_types::{
-    grpc_port, ports, service_port, DatabaseConfig, API_ENDPOINT_ENV, ASSET_DIR_ENV,
-    CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
+    grpc_port, ports, service_port, telemetry_enabled, DatabaseConfig, API_ENDPOINT_ENV,
+    ASSET_DIR_ENV, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
 };
 use axum::body::Body;
 use axum::{response::IntoResponse, Json, Router};
@@ -32,6 +32,7 @@ use http::StatusCode;
 use once_cell::sync::Lazy;
 use prost::Message;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -47,7 +48,8 @@ use tower_http::{
     cors::{self, CorsLayer},
     services::ServeDir,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::jobs::get_job_details;
 use queries::api_queries;
@@ -120,6 +122,8 @@ struct AuthData {
 
 #[tokio::main]
 pub async fn main() {
+    let _guard = arroyo_server_common::init_logging("api");
+
     let config = DatabaseConfig::load();
     let mut cfg = deadpool_postgres::Config::new();
     cfg.dbname = Some(config.name);
@@ -132,7 +136,33 @@ pub async fn main() {
     });
     let pool = cfg
         .create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls)
-        .expect("Unable to connect to database");
+        .unwrap_or_else(|e| {
+            panic!(
+                "Unable to connect to database {:?}@{:?}:{:?}/{:?} {}",
+                cfg.user, cfg.host, cfg.port, cfg.dbname, e
+            )
+        });
+
+    match pool
+        .get()
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "Unable to create database connection for {:?}@{:?}:{:?}/{:?} {}",
+                cfg.user, cfg.host, cfg.port, cfg.dbname, e
+            )
+        })
+        .query_one("select id from cluster_info", &[])
+        .await
+    {
+        Ok(row) => {
+            let uuid: Uuid = row.get(0);
+            arroyo_server_common::set_cluster_id(&uuid.to_string());
+        }
+        Err(e) => {
+            debug!("Failed to get cluster info {:?}", e);
+        }
+    };
 
     server(pool).await;
 }
@@ -142,8 +172,6 @@ fn to_micros(dt: OffsetDateTime) -> u64 {
 }
 
 async fn server(pool: Pool) {
-    let _guard = arroyo_server_common::init_logging("api");
-
     let asset_dir = env::var(ASSET_DIR_ENV).unwrap_or_else(|_| "arroyo-console/dist".to_string());
 
     static INDEX_HTML: Lazy<String> = Lazy::new(|| {
@@ -156,6 +184,8 @@ async fn server(pool: Pool) {
             .join("index.html"))
             .expect("Could not find index.html in asset dir (you may need to build the console sources)")
             .replace("{{API_ENDPOINT}}", &endpoint)
+            .replace("{{CLUSTER_ID}}", &arroyo_server_common::get_cluster_id())
+            .replace("{{DISABLE_TELEMENTRY}}", if telemetry_enabled() { "false" } else { "true" })
     });
 
     let fallback = service_fn(|_: http::Request<_>| async move {
@@ -183,6 +213,8 @@ async fn server(pool: Pool) {
     let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
     let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
     info!("Starting http server on {:?}", addr);
+
+    log_event("service_startup", json!({"service": "api"}));
 
     tokio::spawn(async move {
         select! {
@@ -343,6 +375,7 @@ where
     E: core::fmt::Debug,
 {
     error!("Error while handling: {:?}", err);
+    log_event("api_error", json!({ "error": format!("{:?}", err) }));
     Status::internal("Something went wrong")
 }
 
@@ -547,6 +580,8 @@ impl ApiGrpc for ApiServer {
 
         transaction.commit().await.map_err(log_and_map)?;
 
+        log_event("pipeline_created", json!({"service": "api"}));
+
         Ok(Response::new(CreatePipelineResp {
             pipeline_id: format!("{}", id),
         }))
@@ -595,6 +630,8 @@ impl ApiGrpc for ApiServer {
 
         transaction.commit().await.map_err(log_and_map)?;
 
+        log_event("job_created", json!({"service": "api"}));
+
         Ok(Response::new(CreateJobResp { job_id: id }))
     }
 
@@ -612,6 +649,8 @@ impl ApiGrpc for ApiServer {
         request: Request<CreatePipelineReq>,
     ) -> Result<Response<CreateJobResp>, Status> {
         let (request, auth) = self.authenticate(request).await?;
+
+        log_event("pipeline_preview", json!({"service": "api"}));
         self.start_or_preview(request.into_inner(), true, auth)
             .await
     }
