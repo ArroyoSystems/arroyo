@@ -1,5 +1,5 @@
 #![allow(clippy::type_complexity)]
-use arroyo_types::admin_port;
+use arroyo_types::{admin_port, telemetry_enabled, POSTHOG_KEY};
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -8,11 +8,14 @@ use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Body;
 use lazy_static::lazy_static;
+use once_cell::sync::OnceCell;
 use prometheus::{register_int_counter, IntCounter, TextEncoder};
 #[cfg(not(target_os = "freebsd"))]
 use pyroscope::{pyroscope::PyroscopeAgentRunning, PyroscopeAgent};
 #[cfg(not(target_os = "freebsd"))]
 use pyroscope_pprofrs::{pprof_backend, PprofConfig};
+use reqwest::Client;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::{fs, io};
@@ -27,7 +30,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultOnFailure, TraceLayer};
 
 use tracing::metadata::LevelFilter;
-use tracing::{info, span, warn, Level};
+use tracing::{debug, info, span, warn, Level};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
@@ -35,8 +38,14 @@ use tracing_subscriber::Registry;
 
 use tracing_appender::non_blocking::WorkerGuard;
 
+pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
+pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
+pub const GIT_DESCRIBE: &str = env!("VERGEN_GIT_DESCRIBE");
+
 #[cfg(not(target_os = "freebsd"))]
 const PYROSCOPE_SERVER_ADDRESS_ENV: &str = "PYROSCOPE_SERVER_ADDRESS";
+
+static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
 pub fn init_logging(name: &str) -> Option<WorkerGuard> {
     let stdout_log = tracing_subscriber::fmt::layer()
@@ -92,6 +101,56 @@ pub fn init_logging(name: &str) -> Option<WorkerGuard> {
     guard
 }
 
+pub fn set_cluster_id(cluster_id: &str) {
+    CLUSTER_ID.set(cluster_id.to_string()).unwrap();
+}
+
+pub fn get_cluster_id() -> String {
+    CLUSTER_ID.get().map(|s| s.to_string()).unwrap()
+}
+
+pub fn log_event(name: &str, mut props: Value) {
+    static CLIENT: OnceCell<Client> = OnceCell::new();
+    let cluster_id = get_cluster_id();
+    if telemetry_enabled() {
+        let name = name.to_string();
+        tokio::task::spawn(async move {
+            let client = CLIENT.get_or_init(|| {
+                let client = Client::new();
+                client
+            });
+
+            if let Some(props) = props.as_object_mut() {
+                props.insert("distinct_id".to_string(), Value::String(cluster_id));
+                props.insert("git_sha".to_string(), Value::String(GIT_SHA.to_string()));
+                props.insert(
+                    "git_describe".to_string(),
+                    Value::String(GIT_DESCRIBE.to_string()),
+                );
+                props.insert(
+                    "build_timestamp".to_string(),
+                    Value::String(BUILD_TIMESTAMP.to_string()),
+                );
+            }
+
+            let obj = json!({
+                "api_key": POSTHOG_KEY,
+                "event": name,
+                "properties": props,
+            });
+
+            if let Err(e) = client
+                .post("https://events.arroyo.dev/capture")
+                .json(&obj)
+                .send()
+                .await
+            {
+                debug!("Failed to record event: {}", e);
+            }
+        });
+    }
+}
+
 struct AdminState {
     name: String,
 }
@@ -111,6 +170,16 @@ async fn metrics() -> Result<Bytes, StatusCode> {
         Ok(s) => Ok(Bytes::from(s)),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
+}
+
+async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
+    serde_json::to_string_pretty(&json!({
+        "service": state.name,
+        "git_sha": GIT_SHA,
+        "git_describe": GIT_DESCRIBE,
+        "build_timestamp": BUILD_TIMESTAMP,
+    }))
+    .unwrap()
 }
 
 async fn handle_error(_err: io::Error) -> impl IntoResponse {
@@ -133,6 +202,7 @@ pub fn start_admin_server(service: &str, default_port: u16, mut shutdown: Receiv
         .route("/status", get(status))
         .route("/name", get(root))
         .route("/metrics", get(metrics))
+        .route("/details", get(details))
         .nest_service("/", serve_dir.clone())
         .fallback_service(serve_dir)
         .with_state(state);
