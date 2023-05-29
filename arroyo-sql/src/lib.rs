@@ -446,6 +446,15 @@ impl<'a> SqlProgramBuilder<'a> {
             let name = name.to_string();
             let mut with_map = HashMap::new();
             for option in with_options {
+                if !matches!(
+                    option.name.value.to_lowercase().as_str(),
+                    "connection" | "topic" | "format" | "event_time_field" | "watermark_field"
+                ) {
+                    bail!(
+                        "Unsupported option {} for create table",
+                        option.name.value.to_lowercase()
+                    );
+                }
                 with_map.insert(
                     option.name.value.to_string(),
                     value_to_inner_string(&option.value)?,

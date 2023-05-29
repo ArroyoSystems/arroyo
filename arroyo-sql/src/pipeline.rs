@@ -1198,10 +1198,17 @@ impl<'a> SqlPipelineBuilder<'a> {
                     }
                     Table::MemoryTableWithConnectionConfig {
                         name,
-                        fields: _,
+                        fields,
                         connection,
                         connection_config,
                     } => {
+                        // bail if there are virtual fields
+                        if fields
+                            .iter()
+                            .any(|f: &FieldSpec| matches!(f, FieldSpec::VirtualStructField(..)))
+                        {
+                            bail!("can't insert into a table with virtual fields");
+                        }
                         let sql_operator = SqlOperator::Sink(
                             name.clone(),
                             SqlSink::try_new(
