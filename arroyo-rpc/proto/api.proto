@@ -168,6 +168,7 @@ message Operator {
     TumblingTopN tumbling_top_n = 19;
     SlidingAggregatingTopN sliding_aggregating_top_n = 20;
     JoinWithExpiration join_with_expiration = 21;
+    ExpressionWatermark expression_watermark = 23;
   }
 }
 
@@ -272,6 +273,11 @@ message ExpressionAggregator {
 message PeriodicWatermark {
   uint64 period_micros = 1;
   uint64 max_lateness_micros = 2;
+}
+
+message ExpressionWatermark {
+  uint64 period_micros = 1;
+  string expression = 2;
 }
 
 message KafkaSink {

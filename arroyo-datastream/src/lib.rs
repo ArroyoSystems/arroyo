@@ -127,9 +127,13 @@ impl Debug for WindowType {
 
 #[derive(Debug, Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
 pub enum WatermarkType {
-    Periodic {
+    FixedLateness {
         period: Duration,
         max_lateness: Duration,
+    },
+    Expression {
+        period: Duration,
+        expression: String,
     },
 }
 
@@ -1682,13 +1686,19 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::Aggregate(AggregateBehavior::Sum) => {
                 GrpcOperator::Aggregator(GrpcApi::Aggregator::SumAggregate.into())
             }
-            Operator::Watermark(WatermarkType::Periodic {
+            Operator::Watermark(WatermarkType::FixedLateness {
                 period,
                 max_lateness,
             }) => GrpcOperator::PeriodicWatermark(GrpcApi::PeriodicWatermark {
                 period_micros: period.as_micros() as u64,
                 max_lateness_micros: max_lateness.as_micros() as u64,
             }),
+            Operator::Watermark(WatermarkType::Expression { period, expression }) => {
+                GrpcOperator::ExpressionWatermark(GrpcApi::ExpressionWatermark {
+                    period_micros: period.as_micros() as u64,
+                    expression,
+                })
+            }
             Operator::GlobalKey => todo!(),
             Operator::ConsoleSink => GrpcOperator::BuiltinSink(GrpcApi::BuiltinSink::Log.into()),
             Operator::GrpcSink => GrpcOperator::BuiltinSink(GrpcApi::BuiltinSink::Web.into()),
@@ -2023,7 +2033,7 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     }
                 }
                 GrpcOperator::PeriodicWatermark(watermark) => {
-                    Operator::Watermark(WatermarkType::Periodic {
+                    Operator::Watermark(WatermarkType::FixedLateness {
                         period: Duration::from_micros(watermark.period_micros),
                         max_lateness: Duration::from_micros(watermark.max_lateness_micros),
                     })
@@ -2146,6 +2156,13 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     left_expiration: Duration::from_micros(left_expiration_micros),
                     right_expiration: Duration::from_micros(right_expiration_micros),
                 },
+                GrpcOperator::ExpressionWatermark(GrpcApi::ExpressionWatermark {
+                    period_micros,
+                    expression,
+                }) => Operator::Watermark(WatermarkType::Expression {
+                    period: Duration::from_micros(period_micros),
+                    expression,
+                }),
             },
             None => bail!("unset on operator {:?}", operator),
         };
