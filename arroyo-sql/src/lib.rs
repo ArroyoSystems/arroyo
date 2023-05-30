@@ -34,8 +34,9 @@ use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
 use datafusion_expr::{
-    AccumulatorFunctionImplementation, CreateMemoryTable, CreateView, DmlStatement, LogicalPlan,
-    ReturnTypeFunction, Signature, StateTypeFunction, TypeSignature, Volatility, WriteOp,
+    AccumulatorFunctionImplementation, CreateMemoryTable, CreateView, DdlStatement, DmlStatement,
+    LogicalPlan, ReturnTypeFunction, Signature, StateTypeFunction, TypeSignature, Volatility,
+    WriteOp,
 };
 use expressions::Expression;
 use external::SqlSink;
@@ -583,8 +584,12 @@ impl<'a> SqlProgramBuilder<'a> {
 
             match &optimized_plan {
                 // views and memory tables are the same now.
-                LogicalPlan::CreateView(CreateView { name, input, .. })
-                | LogicalPlan::CreateMemoryTable(CreateMemoryTable { name, input, .. }) => {
+                LogicalPlan::Ddl(DdlStatement::CreateView(CreateView { name, input, .. }))
+                | LogicalPlan::Ddl(DdlStatement::CreateMemoryTable(CreateMemoryTable {
+                    name,
+                    input,
+                    ..
+                })) => {
                     // Return a TableFromQuery
                     Ok(Table::TableFromQuery {
                         name: name.to_string(),

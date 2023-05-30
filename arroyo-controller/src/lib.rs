@@ -14,6 +14,7 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::grpc::{
     SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp,
 };
+use arroyo_server_common::log_event;
 use arroyo_types::{from_micros, ports, DatabaseConfig, NodeId, WorkerId};
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use lazy_static::lazy_static;
@@ -21,6 +22,7 @@ use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
 use prometheus::{register_gauge, Gauge};
 use regex::Regex;
+use serde_json::json;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -35,6 +37,7 @@ use tokio_postgres::NoTls;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 pub mod compiler;
 mod job_controller;
@@ -467,6 +470,30 @@ impl ControllerServer {
                 e
             );
         });
+
+        match pool
+            .get()
+            .await
+            .expect("Failed to connect to database")
+            .query_one("select id from cluster_info", &[])
+            .await
+        {
+            Ok(row) => {
+                let uuid: Uuid = row.get(0);
+                arroyo_server_common::set_cluster_id(&uuid.to_string());
+            }
+            Err(e) => {
+                debug!("Failed to get cluster info {:?}", e);
+            }
+        };
+
+        log_event(
+            "service_startup",
+            json!({
+                "service": "controller",
+                "scheduler": std::env::var("SCHEDULER").unwrap_or_else(|_| "process".to_string())
+            }),
+        );
 
         Self {
             scheduler,
