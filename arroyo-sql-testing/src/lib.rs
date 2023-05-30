@@ -1038,4 +1038,65 @@ mod tests {
         },
         String::from("ThoXXs")
     );
+
+    // test CASE statements
+    single_test_codegen!(
+        "match_case_statement_non_nullable",
+        "CASE WHEN non_nullable_i32 = 1 THEN 'one' WHEN non_nullable_i32 = 2 THEN 'two' ELSE 'other' END",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 1,
+            ..Default::default()
+        },
+        String::from("one")
+    );
+
+    single_test_codegen!(
+        "match_case_statement_nullable",
+        "CASE WHEN nullable_i32 = 1 THEN 'one' WHEN nullable_i32 = 2 THEN 'two' ELSE 'other' END",
+        arroyo_sql::TestStruct {
+            nullable_i32: Some(2),
+            ..Default::default()
+        },
+        String::from("two")
+    );
+
+    single_test_codegen!(
+        "match_case_statement_no_default",
+        "CASE WHEN non_nullable_i32 = 1 THEN 'one' WHEN non_nullable_i32 = 2 THEN 'two' END",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 3,
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "search_case_statement_non_nullable",
+        "CASE non_nullable_i32 when  1  THEN 'one' WHEN  2 THEN 'two' ELSE 'other' END",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 31,
+            ..Default::default()
+        },
+        String::from("other")
+    );
+
+    single_test_codegen!(
+        "seach_case_statement_no_default",
+        "CASE non_nullable_i32 when  1  THEN 'one' WHEN  2 THEN 'two' END",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 2,
+            ..Default::default()
+        },
+        Some(String::from("two"))
+    );
+
+    single_test_codegen!(
+        "search_case_statement_nullable",
+        "CASE nullable_i32 when  1  THEN  nullable_string WHEN  2 THEN 'two' ELSE 'other' END",
+        arroyo_sql::TestStruct {
+            nullable_i32: Some(2),
+            ..Default::default()
+        },
+        Some(String::from("two"))
+    );
 }
