@@ -36,6 +36,8 @@ COPY arroyo-controller arroyo-controller
 COPY arroyo-console arroyo-console
 COPY docker/refinery.toml refinery.toml
 
+COPY integ integ
+
 RUN service postgresql start && \
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \

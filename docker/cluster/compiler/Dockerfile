@@ -41,6 +41,8 @@ COPY arroyo-sql-testing src/arroyo-sql-testing
 COPY arroyo-controller src/arroyo-controller
 COPY arroyo-console src/arroyo-console
 
+COPY integ src/integ
+
 COPY Cargo.toml src/Cargo.toml
 COPY Cargo.lock src/Cargo.lock
 
