@@ -4,8 +4,8 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
 use arroyo_datastream::{Operator, Program, SerializationMode, SinkConfig, SourceConfig};
-use arroyo_rpc::grpc::api::Connection;
 use arroyo_rpc::grpc::api::connection::ConnectionType;
+use arroyo_rpc::grpc::api::Connection;
 use datafusion::optimizer::analyzer::Analyzer;
 use datafusion::optimizer::optimizer::Optimizer;
 use datafusion::optimizer::OptimizerContext;
@@ -611,34 +611,50 @@ impl<'a> SqlProgramBuilder<'a> {
     }
 }
 
-fn check_connection_arguments(connection: &Connection, with_map: &HashMap<String, String>) -> Result<()> {
+fn check_connection_arguments(
+    connection: &Connection,
+    with_map: &HashMap<String, String>,
+) -> Result<()> {
     match &connection.connection_type {
         Some(ConnectionType::Kafka(_)) => {
             for (key, value) in with_map {
                 if !matches!(
                     key.to_lowercase().as_str(),
-                    "connection" | "serialization_mode" | "event_time_field" | "watermark_field" | "topic"
+                    "connection"
+                        | "serialization_mode"
+                        | "event_time_field"
+                        | "watermark_field"
+                        | "topic"
                 ) {
                     bail!(
                         "Unsupported option {} = {} for kafka connection {}",
-                        key, value, connection.name
+                        key,
+                        value,
+                        connection.name
                     );
                 }
             }
-        },
+        }
         Some(ConnectionType::Http(_)) => {
             for (key, value) in with_map {
                 if !matches!(
                     key.to_lowercase().as_str(),
-                    "connection" | "serialization_mode" | "event_time_field" | "watermark_field" | "path" | "events"
+                    "connection"
+                        | "serialization_mode"
+                        | "event_time_field"
+                        | "watermark_field"
+                        | "path"
+                        | "events"
                 ) {
                     bail!(
                         "Unsupported option {} = {} for http connection {}",
-                        key, value, connection.name
+                        key,
+                        value,
+                        connection.name
                     );
                 }
             }
-        },
+        }
         Some(ConnectionType::Kinesis(_)) => bail!("kinesis connections aren't supported yet"),
         None => bail!("missing connection type"),
     }
