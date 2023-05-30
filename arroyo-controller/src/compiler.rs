@@ -527,13 +527,23 @@ wasm-opt = false
                     let in_t = parse_type(&input.unwrap().weight().value);
 
                     match watermark {
-                        WatermarkType::Periodic { period, max_lateness } => {
+                        WatermarkType::FixedLateness { period, max_lateness } => {
                             let period = duration_to_syn_expr(*period);
                             let max_lateness = duration_to_syn_expr(*max_lateness);
                             quote! {
                                 Box::new(
                                     PeriodicWatermarkGenerator::<#in_k, #in_t>::
-                                    new(#period,#max_lateness))
+                                    fixed_lateness(#period,#max_lateness))
+                            }
+                        }
+                        WatermarkType::Expression { period, expression } => {
+                            let expr: syn::Expr = parse_str(expression).unwrap();
+                            let watermark_function : syn::ExprClosure = parse_quote!(|record| {#expr});
+                            let period = duration_to_syn_expr(*period);
+                            quote! {
+                                Box::new(
+                                    PeriodicWatermarkGenerator::<#in_k, #in_t>::
+                                    watermark_function(#period, Box::new(#watermark_function)))
                             }
                         }
                     }

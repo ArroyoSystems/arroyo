@@ -504,7 +504,7 @@ fn convert_simple_data_type(sql_type: &SQLDataType) -> Result<DataType> {
                 Ok(DataType::Time64(TimeUnit::Nanosecond))
             } else {
                 // We dont support TIMETZ and TIME WITH TIME ZONE for now
-                bail!(format!("Unsupported SQL type {sql_type:?}"))
+                bail!(format!("Unsupported Timestamp SQL type {sql_type:?}"))
             }
         }
         SQLDataType::Numeric(exact_number_info) | SQLDataType::Decimal(exact_number_info) => {

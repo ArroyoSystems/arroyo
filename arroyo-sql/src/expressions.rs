@@ -12,7 +12,7 @@ use arrow_schema::Field;
 use datafusion_common::ScalarValue;
 use datafusion_expr::{
     aggregate_function,
-    expr::{AggregateFunction, Sort},
+    expr::{AggregateFunction, ScalarFunction, ScalarUDF, Sort},
     type_coercion::aggregates::{avg_return_type, sum_return_type},
     BinaryExpr, BuiltinScalarFunction, Expr, TryCast,
 };
@@ -287,6 +287,7 @@ impl<'a> ExpressionContext<'a> {
                 args,
                 distinct,
                 filter,
+                order_by,
             }) => {
                 if args.len() != 1 {
                     bail!("multiple aggregation parameters is not yet supported");
@@ -294,6 +295,9 @@ impl<'a> ExpressionContext<'a> {
 
                 if filter.is_some() {
                     bail!("filters in aggregations is not yet supported");
+                }
+                if order_by.is_some() {
+                    bail!("order by in aggregations is not yet supported");
                 }
 
                 Ok(AggregationExpression::new(
@@ -343,7 +347,7 @@ impl<'a> ExpressionContext<'a> {
                     data_type
                 )
             }
-            Expr::ScalarFunction { fun, args } => {
+            Expr::ScalarFunction(ScalarFunction { fun, args }) => {
                 let mut arg_expressions: Vec<_> = args
                     .iter()
                     .map(|arg| self.compile_expr(arg))
@@ -462,9 +466,12 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::Degrees => bail!("degrees not implemented yet"),
                     BuiltinScalarFunction::Pi => bail!("pi not implemented yet"),
                     BuiltinScalarFunction::Radians => bail!("radians not implemented yet"),
+                    BuiltinScalarFunction::Factorial => bail!("factorial not implemented yet"),
+                    BuiltinScalarFunction::Gcd => bail!("gcd not implemented yet"),
+                    BuiltinScalarFunction::Lcm => bail!("lcm not implemented yet"),
                 }
             }
-            Expr::ScalarUDF { fun, args } => match fun.name.as_str() {
+            Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
                 "get_first_json_object" => {
                     let json_string = Box::new(self.compile_expr(&args[0])?);
                     let path = Box::new(self.compile_expr(&args[1])?);
@@ -536,6 +543,7 @@ impl<'a> ExpressionContext<'a> {
                 args,
                 distinct: false,
                 filter: None,
+                order_by: None,
             }) => {
                 if args.len() != 1 {
                     bail!("unexpected arg length");
@@ -1028,6 +1036,7 @@ impl AggregationExpression {
                 args,
                 distinct,
                 filter: None,
+                order_by: None,
             }) => {
                 if args.len() != 1 {
                     bail!("unexpected arg length");

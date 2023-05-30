@@ -1,11 +1,13 @@
 use std::sync::RwLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fmt::Debug, sync::Arc};
 
 use arroyo_datastream::Program;
 use arroyo_rpc::grpc::api::PipelineProgram;
 
+use arroyo_server_common::log_event;
 use deadpool_postgres::Pool;
+use serde_json::json;
 use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -239,6 +241,7 @@ pub struct Context<'a> {
     rx: &'a mut Receiver<JobMessage>,
     retries_attempted: usize,
     job_controller: Option<JobController>,
+    last_transitioned_at: Instant,
 }
 
 impl<'a> Context<'a> {
@@ -311,11 +314,24 @@ async fn execute_state<'a>(
                 message = "state transition",
                 job_id = ctx.config.id,
                 from = state_name,
-                to = s.state.name()
+                to = s.state.name(),
+                duration_ms = ctx.last_transitioned_at.elapsed().as_millis()
+            );
+
+            log_event(
+                "state_transition",
+                json!({
+                    "service": "controller",
+                    "job_id": ctx.config.id,
+                    "from": state_name,
+                    "to": s.state.name(),
+                    "duration_ms": ctx.last_transitioned_at.elapsed().as_millis() as u64,
+                }),
             );
 
             (s.update_fn)(&mut ctx);
             ctx.retries_attempted = 0;
+            ctx.last_transitioned_at = Instant::now();
 
             Some(s.state)
         }
@@ -333,6 +349,17 @@ async fn execute_state<'a>(
                 state = state_name,
                 error_message = message,
                 error = format!("{:?}", source)
+            );
+            log_event(
+                "state_error",
+                json!({
+                    "service": "controller",
+                    "job_id": ctx.config.id,
+                    "state": state_name,
+                    "error_message": message,
+                    "error": format!("{:?}", source),
+                    "retries": 0,
+                }),
             );
             ctx.status.failure_message = Some(message);
             ctx.status.finish_time = Some(OffsetDateTime::now_utc());
@@ -353,6 +380,18 @@ async fn execute_state<'a>(
                 error = format!("{:?}", source),
                 retries,
             );
+            log_event(
+                "state_error",
+                json!({
+                    "service": "controller",
+                    "job_id": ctx.config.id,
+                    "state": state_name,
+                    "error_message": message,
+                    "error": format!("{:?}", source),
+                    "retries": retries,
+                }),
+            );
+
             tokio::time::sleep(Duration::from_millis(500)).await;
             ctx.retries_attempted += 1;
             Some(state)
@@ -403,6 +442,7 @@ pub async fn run_to_completion(
         rx: &mut rx,
         retries_attempted: 0,
         job_controller: None,
+        last_transitioned_at: Instant::now(),
     };
 
     loop {
