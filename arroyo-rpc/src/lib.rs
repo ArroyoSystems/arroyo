@@ -58,6 +58,12 @@ pub enum ControlResp {
         task_index: usize,
         error: String,
     },
+    Error {
+        operator_id: String,
+        task_index: usize,
+        message: String,
+        details: String,
+    },
 }
 
 pub struct FileAuthInterceptor {

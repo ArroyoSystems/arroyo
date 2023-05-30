@@ -12,7 +12,8 @@ use arroyo_rpc::grpc::{
     WorkerFinishedResp,
 };
 use arroyo_rpc::grpc::{
-    SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp,
+    SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
+    WorkerErrorRes,
 };
 use arroyo_server_common::log_event;
 use arroyo_types::{from_micros, ports, DatabaseConfig, NodeId, WorkerId};
@@ -47,6 +48,7 @@ mod states;
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
 use crate::schedulers::{nomad::NomadScheduler, NodeScheduler, ProcessScheduler, Scheduler};
+use types::public::LogLevel;
 use types::public::StopMode;
 
 pub const CHECKPOINTS_TO_KEEP: u32 = 5;
@@ -416,6 +418,31 @@ impl ControllerGrpc for ControllerServer {
             .push(tx);
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn worker_error(
+        &self,
+        request: Request<WorkerErrorReq>,
+    ) -> Result<Response<WorkerErrorRes>, Status> {
+        info!("Got worker error.");
+        let req = request.into_inner();
+        let client = self.db.get().await.unwrap();
+        match queries::controller_queries::create_job_log_message()
+            .bind(
+                &client,
+                &req.job_id,
+                &req.operator_id,
+                &(req.task_index as i64),
+                &LogLevel::error,
+                &req.message,
+                &req.details,
+            )
+            .one()
+            .await
+        {
+            Ok(_) => Ok(Response::new(WorkerErrorRes {})),
+            Err(err) => Err(Status::from_error(Box::new(err))),
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use crate::engine::Context;
 use crate::SourceFinishType;
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
-use arroyo_rpc::ControlMessage;
+use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::{Data, Record};
 use bincode::{Decode, Encode};
@@ -157,6 +157,13 @@ where
                                 }
                             }
                             Some(Err(e)) => {
+                                ctx.control_tx.send(
+                                    ControlResp::Error {
+                                        operator_id: ctx.task_info.operator_id.clone(),
+                                        task_index: ctx.task_info.task_index.clone(),
+                                        message: "Error while reading from EventSource".to_string(),
+                                        details: format!("{:?}", e)}
+                                ).await.unwrap();
                                 panic!("Error while reading from EventSource: {:?}", e);
                             }
                             None => {

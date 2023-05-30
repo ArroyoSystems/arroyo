@@ -154,6 +154,17 @@ message OutputData {
   bool done = 5;
 }
 
+message WorkerErrorReq {
+  string job_id = 1;
+  string operator_id = 2;
+  uint32 task_index = 3;
+  string message = 4;
+  string details = 5;
+}
+
+message WorkerErrorRes {
+}
+
 
 service ControllerGrpc {
   rpc RegisterNode(RegisterNodeReq) returns (RegisterNodeResp);
@@ -170,6 +181,7 @@ service ControllerGrpc {
   rpc WorkerFinished(WorkerFinishedReq) returns (WorkerFinishedResp);
 
   rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
+  rpc WorkerError(WorkerErrorReq) returns (WorkerErrorRes);
 }
 
 message ParquetStoreData {

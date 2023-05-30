@@ -21,7 +21,7 @@ use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{
     CheckpointMetadata, HeartbeatReq, TableDeleteBehavior, TableDescriptor, TableType,
     TableWriteBehavior, TaskAssignment, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
-    TaskFailedReq, TaskFinishedReq, TaskStartedReq,
+    TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerErrorReq,
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{
@@ -1132,6 +1132,21 @@ impl Engine {
                                             operator_id: operator_id.to_string(),
                                             operator_subtask: task_index as u64,
                                             error,
+                                        }
+                                    )).await.err()
+                                } else {
+                                    None
+                                }
+                            }
+                            Some(ControlResp::Error { operator_id, task_index, message, details}) => {
+                                if let Some(controller) = controller.as_mut() {
+                                    controller.worker_error(Request::new(
+                                        WorkerErrorReq {
+                                            job_id: job_id.clone(),
+                                            operator_id: operator_id,
+                                            task_index: task_index as u32,
+                                            message: message,
+                                            details: details
                                         }
                                     )).await.err()
                                 } else {
