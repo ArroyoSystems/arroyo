@@ -5,6 +5,7 @@ use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
 use arroyo_datastream::{Operator, Program, SerializationMode, SinkConfig, SourceConfig};
 use arroyo_rpc::grpc::api::Connection;
+use arroyo_rpc::grpc::api::connection::ConnectionType;
 use datafusion::optimizer::analyzer::Analyzer;
 use datafusion::optimizer::optimizer::Optimizer;
 use datafusion::optimizer::OptimizerContext;
@@ -446,15 +447,6 @@ impl<'a> SqlProgramBuilder<'a> {
             let name = name.to_string();
             let mut with_map = HashMap::new();
             for option in with_options {
-                if !matches!(
-                    option.name.value.to_lowercase().as_str(),
-                    "connection" | "topic" | "format" | "event_time_field" | "watermark_field"
-                ) {
-                    bail!(
-                        "Unsupported option {} for create table",
-                        option.name.value.to_lowercase()
-                    );
-                }
                 with_map.insert(
                     option.name.value.to_string(),
                     value_to_inner_string(&option.value)?,
@@ -560,6 +552,7 @@ impl<'a> SqlProgramBuilder<'a> {
                         .get(connection_name)
                         .ok_or_else(|| anyhow!("connection {} not found", connection_name))?
                         .clone();
+                    check_connection_arguments(&connection, &with_map)?;
                     Ok(Table::MemoryTableWithConnectionConfig {
                         name,
                         fields,
@@ -616,6 +609,40 @@ impl<'a> SqlProgramBuilder<'a> {
             }
         }
     }
+}
+
+fn check_connection_arguments(connection: &Connection, with_map: &HashMap<String, String>) -> Result<()> {
+    match &connection.connection_type {
+        Some(ConnectionType::Kafka(_)) => {
+            for (key, value) in with_map {
+                if !matches!(
+                    key.to_lowercase().as_str(),
+                    "connection" | "serialization_mode" | "event_time_field" | "watermark_field" | "topic"
+                ) {
+                    bail!(
+                        "Unsupported option {} = {} for kafka connection {}",
+                        key, value, connection.name
+                    );
+                }
+            }
+        },
+        Some(ConnectionType::Http(_)) => {
+            for (key, value) in with_map {
+                if !matches!(
+                    key.to_lowercase().as_str(),
+                    "connection" | "serialization_mode" | "event_time_field" | "watermark_field" | "path" | "events"
+                ) {
+                    bail!(
+                        "Unsupported option {} = {} for http connection {}",
+                        key, value, connection.name
+                    );
+                }
+            }
+        },
+        Some(ConnectionType::Kinesis(_)) => bail!("kinesis connections aren't supported yet"),
+        None => bail!("missing connection type"),
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
