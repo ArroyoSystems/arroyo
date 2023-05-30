@@ -2,7 +2,7 @@ use crate::engine::{Context, StreamNode};
 use crate::SourceFinishType;
 use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::TableDescriptor;
-use arroyo_rpc::{grpc::StopMode, ControlMessage};
+use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
@@ -15,7 +15,7 @@ use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::time::Duration;
 use tokio::select;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::operators::SerializationMode;
 
@@ -164,73 +164,110 @@ where
     }
 
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
-        let consumer = self.get_consumer(ctx).await.unwrap();
-
-        let rate_limiter = RateLimiter::direct(Quota::per_second(self.messages_per_second));
-        let mut offsets = HashMap::new();
-        loop {
-            select! {
-                message = consumer.recv() => {
-                    match message {
-                        Ok(msg) => {
-                            if let Some(v) = msg.payload() {
-                                ctx.collector.collect(Record {
-                                    timestamp: from_millis(msg.timestamp().to_millis().unwrap() as u64),
-                                    key: None,
-                                    value: self.serialization_mode.deserialize_slice(&v).unwrap(),
-                                }).await;
-                                offsets.insert(msg.partition(), msg.offset());
-                                rate_limiter.until_ready().await;
-                            }
-                        },
-                        Err(err) => {
-                            error!("encountered error {}", err)
-                        }
-                    }
-                }
-                control_message = ctx.control_rx.recv() => {
-                    match control_message {
-                        Some(ControlMessage::Checkpoint(c)) => {
-                            debug!("starting checkpointing {}", ctx.task_info.task_index);
-                            let mut topic_partitions = TopicPartitionList::new();
-                            let mut s = ctx.state.get_global_keyed_state('k').await;
-                            for (partition, offset) in &offsets {
-                                let partition2 = partition;
-                                s.insert(*partition, KafkaState {
-                                    partition: *partition2,
-                                    offset: *offset + 1,
-                                }).await;
-                                topic_partitions.add_partition_offset(
-                                    &self.topic, *partition, Offset::Offset(*offset)).unwrap();
-                            }
-
-                            if let Err(e) = consumer.commit(&topic_partitions, CommitMode::Async) {
-                                // This is just used for progress tracking for metrics, so it's not a fatal error if it
-                                // fails. The actual offset is stored in state.
-                                warn!("Failed to commit offset to Kafka {:?}", e);
-                            }
-                            if self.checkpoint(c, ctx).await {
-                                return SourceFinishType::Immediate;
-                            }
-                        },
-                        Some(ControlMessage::Stop { mode }) => {
-                            info!("Stopping kafka source: {:?}", mode);
-
-                            match mode {
-                                StopMode::Graceful => {
-                                    return SourceFinishType::Graceful;
-                                }
-                                StopMode::Immediate => {
-                                    return SourceFinishType::Immediate;
+        let consumer = self.get_consumer(ctx).await;
+        match consumer {
+            Ok(consumer) => {
+                let rate_limiter = RateLimiter::direct(Quota::per_second(self.messages_per_second));
+                let mut offsets = HashMap::new();
+                loop {
+                    select! {
+                        message = consumer.recv() => {
+                            match message {
+                                Ok(msg) => {
+                                    if let Some(v) = msg.payload() {
+                                        let deserialized = self.serialization_mode.deserialize_slice(&v);
+                                        match deserialized {
+                                            Ok(deserialized) => {
+                                                ctx.collector.collect(Record {
+                                                    timestamp: from_millis(msg.timestamp().to_millis().unwrap() as u64),
+                                                    key: None,
+                                                    value: deserialized,
+                                                }).await;
+                                            },
+                                            Err(err) => {
+                                                 ctx.control_tx.send(
+                                                    ControlResp::Error {
+                                                        operator_id: ctx.task_info.operator_id.clone(),
+                                                        task_index: ctx.task_info.task_index.clone(),
+                                                        message: "Error while deserializing Kafka message".to_string(),
+                                                        details: format!("{:?}", err)}
+                                                ).await.unwrap();
+                                                panic!("Error while deserializing Kafka message")
+                                            }
+                                        }
+                                        offsets.insert(msg.partition(), msg.offset());
+                                        rate_limiter.until_ready().await;
+                                    }
+                                },
+                                Err(err) => {
+                                    ctx.control_tx.send(
+                                        ControlResp::Error {
+                                            operator_id: ctx.task_info.operator_id.clone(),
+                                            task_index: ctx.task_info.task_index.clone(),
+                                            message: "Error while reading from Kafka".to_string(),
+                                            details: format!("{:?}", err)}
+                                    ).await.unwrap();
+                                    panic!("Error while reading from Kafka {}", err)
                                 }
                             }
                         }
-                        None => {
+                        control_message = ctx.control_rx.recv() => {
+                            match control_message {
+                                Some(ControlMessage::Checkpoint(c)) => {
+                                    debug!("starting checkpointing {}", ctx.task_info.task_index);
+                                    let mut topic_partitions = TopicPartitionList::new();
+                                    let mut s = ctx.state.get_global_keyed_state('k').await;
+                                    for (partition, offset) in &offsets {
+                                        let partition2 = partition;
+                                        s.insert(*partition, KafkaState {
+                                            partition: *partition2,
+                                            offset: *offset + 1,
+                                        }).await;
+                                        topic_partitions.add_partition_offset(
+                                            &self.topic, *partition, Offset::Offset(*offset)).unwrap();
+                                    }
+
+                                    if let Err(e) = consumer.commit(&topic_partitions, CommitMode::Async) {
+                                        // This is just used for progress tracking for metrics, so it's not a fatal error if it
+                                        // fails. The actual offset is stored in state.
+                                        warn!("Failed to commit offset to Kafka {:?}", e);
+                                    }
+                                    if self.checkpoint(c, ctx).await {
+                                        return SourceFinishType::Immediate;
+                                    }
+                                },
+                                Some(ControlMessage::Stop { mode }) => {
+                                    info!("Stopping kafka source: {:?}", mode);
+
+                                    match mode {
+                                        StopMode::Graceful => {
+                                            return SourceFinishType::Graceful;
+                                        }
+                                        StopMode::Immediate => {
+                                            return SourceFinishType::Immediate;
+                                        }
+                                    }
+                                }
+                                None => {
+
+                                }
+                            }
 
                         }
                     }
-
                 }
+            }
+            Err(err) => {
+                ctx.control_tx
+                    .send(ControlResp::Error {
+                        operator_id: ctx.task_info.operator_id.clone(),
+                        task_index: ctx.task_info.task_index.clone(),
+                        message: "Error while getting kafka consumer".to_string(),
+                        details: format!("{:?}", err),
+                    })
+                    .await
+                    .unwrap();
+                panic!("Error while getting kafka consumer")
             }
         }
     }
