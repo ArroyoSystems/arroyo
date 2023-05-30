@@ -34,8 +34,8 @@ async fn compile_sql<'e, E>(
     auth_data: &AuthData,
     tx: &E,
 ) -> Result<(Program, Vec<i64>, Vec<i64>), Status>
-where
-    E: GenericClient,
+    where
+        E: GenericClient,
 {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
@@ -104,12 +104,12 @@ where
             kafka_qps: Some(auth_data.org_metadata.kafka_qps),
         },
     )
-    .await
-    .with_context(|| "failed to generate SQL program")
-    .map_err(|err| {
-        warn!("{:?}", err);
-        Status::invalid_argument(format!("{}", err.root_cause()))
-    })?;
+        .await
+        .with_context(|| "failed to generate SQL program")
+        .map_err(|err| {
+            warn!("{:?}", err);
+            Status::invalid_argument(format!("{}", err.root_cause()))
+        })?;
 
     Ok((program, sources, used_sink_ids))
 }

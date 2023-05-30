@@ -21,7 +21,7 @@ pub fn optimize(graph: &mut DiGraph<StreamNode, StreamEdge>) {
 
 fn remove_in_place(graph: &mut DiGraph<StreamNode, StreamEdge>, node: NodeIndex) {
     let incoming = graph
-        .edges_directed(node, Direction::Incoming)
+        .edges_directed(node, Incoming)
         .next()
         .unwrap();
 
@@ -30,7 +30,7 @@ fn remove_in_place(graph: &mut DiGraph<StreamNode, StreamEdge>, node: NodeIndex)
     graph.remove_edge(incoming);
 
     let outgoing: Vec<_> = graph
-        .edges_directed(node, Direction::Outgoing)
+        .edges_directed(node, Outgoing)
         .map(|e| (e.id(), e.target().id()))
         .collect();
 
@@ -44,39 +44,43 @@ fn remove_in_place(graph: &mut DiGraph<StreamNode, StreamEdge>, node: NodeIndex)
 
 fn fuse_window_aggregation(graph: &mut DiGraph<StreamNode, StreamEdge>) {
     'outer: loop {
-        let sources: Vec<_> = graph.externals(Direction::Incoming).collect();
+        let sources: Vec<_> = graph.externals(Incoming).collect();
 
         for source in sources {
             let mut dfs = Dfs::new(&(*graph), source);
 
             while let Some(idx) = dfs.next(&(*graph)) {
                 let operator = graph.node_weight(idx).unwrap().operator.clone();
-                let mut ins = graph.edges_directed(idx, Direction::Incoming);
+                let mut ins = graph.edges_directed(idx, Incoming);
 
                 let in_degree = ins.clone().count();
                 let no_shuffles = ins.all(|e| e.weight().typ == EdgeType::Forward);
 
-                let mut ins = graph.edges_directed(idx, Direction::Incoming);
-                if no_shuffles && in_degree == 1 {
-                    let source_idx = ins.next().unwrap().source();
-                    let in_node = graph.node_weight_mut(source_idx).unwrap();
-                    if let Operator::Window { agg, .. } = &mut in_node.operator {
-                        if agg.is_none() {
-                            let new_agg = match &operator {
-                                Operator::Count => Some(WindowAgg::Count),
-                                Operator::Aggregate(AggregateBehavior::Min) => Some(WindowAgg::Min),
-                                Operator::Aggregate(AggregateBehavior::Max) => Some(WindowAgg::Max),
-                                Operator::Aggregate(AggregateBehavior::Sum) => Some(WindowAgg::Sum),
-                                _ => None,
-                            };
+                let mut ins = graph.edges_directed(idx, Incoming);
+                if !(no_shuffles && in_degree == 1) {
+                    continue;
+                }
 
-                            if let Some(new_agg) = new_agg {
-                                *agg = Some(new_agg);
-                                remove_in_place(graph, idx);
-                                // restart the loop if we change something
-                                continue 'outer;
-                            }
-                        }
+                let source_idx = ins.next().unwrap().source();
+                let in_node = graph.node_weight_mut(source_idx).unwrap();
+                if let Operator::Window { agg, .. } = &mut in_node.operator {
+                    if !agg.is_none() {
+                        continue;
+                    }
+
+                    let new_agg = match &operator {
+                        Operator::Count => Some(WindowAgg::Count),
+                        Operator::Aggregate(AggregateBehavior::Min) => Some(WindowAgg::Min),
+                        Operator::Aggregate(AggregateBehavior::Max) => Some(WindowAgg::Max),
+                        Operator::Aggregate(AggregateBehavior::Sum) => Some(WindowAgg::Sum),
+                        _ => None,
+                    };
+
+                    if let Some(new_agg) = new_agg {
+                        *agg = Some(new_agg);
+                        remove_in_place(graph, idx);
+                        // restart the loop if we change something
+                        continue 'outer;
                     }
                 }
             }
@@ -95,13 +99,13 @@ pub trait Optimizer {
 
     fn optimize_once(&self, graph: &mut DiGraph<StreamNode, StreamEdge>) -> bool {
         let mut to_fuse = vec![vec![]];
-        for source in graph.externals(Direction::Incoming) {
+        for source in graph.externals(Incoming) {
             let mut dfs = Dfs::new(&(*graph), source);
             let mut current_chain = vec![];
 
             while let Some(idx) = dfs.next(&(*graph)) {
                 let node = graph.node_weight(idx).unwrap();
-                let mut ins = graph.edges_directed(idx, Direction::Incoming);
+                let mut ins = graph.edges_directed(idx, Incoming);
 
                 let in_degree = ins.clone().count();
                 let no_shuffles = ins.all(|e| e.weight().typ == EdgeType::Forward);
@@ -241,8 +245,8 @@ impl FusedExpressionOperatorBuilder {
         let body = quote!(
         {#(#fused_body_tokens)*
             #return_value
-        })
-        .to_string();
+        }).to_string();
+
         let expr: syn::Expr = parse_str(&body).expect(&body);
         let expression = quote!(#expr).to_string();
         Operator::ExpressionOperator {
@@ -261,9 +265,9 @@ impl FusedExpressionOperatorBuilder {
     ) -> bool {
         let out_type = format!("arroyo_types::Record<{},{}>", edge.key, edge.value);
         match return_type {
-            ExpressionReturnType::Predicate => self.fuse_predicate(name, expression),
-            ExpressionReturnType::Record => self.fuse_map(name, expression, out_type),
-            ExpressionReturnType::OptionalRecord => {
+            Predicate => self.fuse_predicate(name, expression),
+            Record => self.fuse_map(name, expression, out_type),
+            OptionalRecord => {
                 self.fuse_option_map(name, expression, out_type)
             }
         }
@@ -395,6 +399,7 @@ impl Optimizer for FlatMapFusionOptimizer {
 }
 
 struct WasmFusionOptimizer {}
+
 impl Optimizer for WasmFusionOptimizer {
     fn can_optimize(&self, node: &StreamNode, _current_chain: &[StreamNode]) -> bool {
         matches!(&node.operator, Operator::FusedWasmUDFs { .. })
