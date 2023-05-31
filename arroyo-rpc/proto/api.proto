@@ -442,6 +442,29 @@ message JobGraph {
   repeated JobEdge edges = 2;
 }
 
+enum JobLogLevel {
+  INFO = 0;
+  WARN = 1;
+  ERROR = 2;
+}
+
+message OperatorErrorsReq {
+    string job_id = 1;
+}
+
+message JobLogMessage {
+  uint64 created_at = 1;
+  optional string operator_id = 2;
+  optional int64 task_index = 3;
+  JobLogLevel level = 4;
+  string message = 5;
+  string details = 6;
+}
+
+message OperatorErrorsRes {
+  repeated JobLogMessage messages = 1;
+}
+
 // checkpoints
 
 enum TaskCheckpointEventType {
@@ -858,6 +881,7 @@ service ApiGrpc {
   rpc GetJobDetails(JobDetailsReq) returns (JobDetailsResp);
   rpc GetCheckpoints(JobCheckpointsReq) returns (JobCheckpointsResp);
   rpc GetCheckpointDetail(CheckpointDetailsReq) returns (CheckpointDetailsResp);
+  rpc GetOperatorErrors(OperatorErrorsReq) returns (OperatorErrorsRes);
 
   rpc GetJobMetrics(JobMetricsReq) returns (JobMetricsResp);
 

@@ -138,3 +138,11 @@ export function getOperatorBackpressure(
 
   return recent.map(m => m.value).reduce((max, curr) => Math.max(max, curr));
 }
+
+export function formatDate(timestamp: bigint) {
+  const date = new Date(Number(timestamp));
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
