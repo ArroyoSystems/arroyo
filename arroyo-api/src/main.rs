@@ -14,8 +14,9 @@ use arroyo_rpc::grpc::{
         GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq,
         GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq,
         JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp,
-        OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, StopType, TestSchemaResp,
-        TestSourceMessage, UpdateJobReq, UpdateJobResp,
+        OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq,
+        PipelineGraphResp, StopType, TestSchemaResp, TestSourceMessage, UpdateJobReq,
+        UpdateJobResp,
     },
     controller_grpc_client::ControllerGrpcClient,
 };
@@ -56,6 +57,7 @@ use queries::api_queries;
 
 mod cloud;
 mod connections;
+mod job_log;
 mod jobs;
 mod json_schema;
 mod metrics;
@@ -787,6 +789,22 @@ impl ApiGrpc for ApiServer {
 
         jobs::delete_job(&request.into_inner().job_id, auth, &self.pool).await?;
         Ok(Response::new(DeleteJobResp {}))
+    }
+
+    async fn get_operator_errors(
+        &self,
+        request: Request<OperatorErrorsReq>,
+    ) -> Result<Response<OperatorErrorsRes>, Status> {
+        let (request, auth) = self.authenticate(request).await?;
+        let job_id = request.into_inner().job_id;
+        let client = self.client().await?;
+
+        // validate that the job exists and user can access it
+        let _ = jobs::get_job_details(&job_id, &auth, &client).await?;
+
+        let messages = job_log::get_operator_errors(&job_id, &client).await?;
+
+        Ok(Response::new(OperatorErrorsRes { messages }))
     }
 
     type SubscribeToOutputStream = ReceiverStream<Result<OutputData, Status>>;

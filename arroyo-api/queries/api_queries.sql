@@ -180,3 +180,15 @@ DELETE FROM pipelines WHERE pipelines.id = (
     INNER JOIN pipeline_definitions as pd ON job_configs.pipeline_definition = pd.id
     INNER JOIN pipelines ON pipelines.id = pd.pipeline_id
     WHERE job_configs.id = :job_id AND job_configs.organization_id = :organization_id);
+
+--! get_operator_errors
+SELECT jlm.job_id, jlm.operator_id, jlm.task_index, jlm.created_at, jlm.log_level, jlm.message, jlm.details
+FROM job_log_messages jlm
+INNER JOIN (
+    SELECT operator_id, task_index, MAX(created_at) AS max_created_at
+    FROM job_log_messages
+    WHERE job_id = :job_id
+    GROUP BY operator_id, task_index
+) jlm_max ON jlm.operator_id = jlm_max.operator_id AND jlm.task_index = jlm_max.task_index AND jlm.created_at = jlm_max.max_created_at
+WHERE jlm.job_id = :job_id
+  AND jlm.log_level = 'error';

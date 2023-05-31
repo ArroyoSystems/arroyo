@@ -3,6 +3,7 @@ import {
   JobCheckpointsReq,
   JobDetailsReq,
   JobMetricsReq,
+  OperatorErrorsReq,
   StopType,
 } from '../gen/api_pb';
 import { ApiClient } from '../main';
@@ -25,6 +26,10 @@ const jobCheckpointsKey = (jobId?: string) => {
 
 const checkpointDetailsKey = (jobId?: string, epoch?: number) => {
   return jobId ? { key: 'CheckpointDetails', jobId, epoch } : null;
+};
+
+const operatorErrorsKey = (jobId?: string) => {
+  return jobId ? { key: 'JobEvents', jobId } : null;
 };
 
 // JobDetailsReq
@@ -147,5 +152,31 @@ export const useCheckpointDetails = (client: ApiClient, jobId?: string, epoch?: 
 
   return {
     checkpoint: data,
+  };
+};
+
+// OperatorErrorsReq
+
+const OperatorErrorsFetcher = (client: ApiClient) => {
+  return async (params: { key: string; jobId: string }) => {
+    return await (
+      await (
+        await client
+      )()
+    ).getOperatorErrors(
+      new OperatorErrorsReq({
+        jobId: params.jobId,
+      })
+    );
+  };
+};
+
+export const useOperatorErrors = (client: ApiClient, jobId?: string) => {
+  const { data } = useSWR(operatorErrorsKey(jobId), OperatorErrorsFetcher(client), {
+    refreshInterval: 5000,
+  });
+
+  return {
+    operatorErrors: data,
   };
 };

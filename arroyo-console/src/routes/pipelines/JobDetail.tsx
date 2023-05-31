@@ -37,6 +37,7 @@ import JobNotFound from '../../components/JobNotFound';
 import Checkpoints from '../../components/Checkpoints';
 import { QuestionOutlineIcon, WarningIcon } from '@chakra-ui/icons';
 import Loading from '../../components/Loading';
+import OperatorErrors from '../../components/OperatorErrors';
 
 export function JobDetail({ client }: { client: ApiClient }) {
   const [activeOperator, setActiveOperator] = useState<string | undefined>(undefined);
@@ -184,6 +185,12 @@ export function JobDetail({ client }: { client: ApiClient }) {
       </TabPanel>
     );
 
+    const errorsTab = (
+      <TabPanel>
+        <OperatorErrors client={client} jobId={job.jobStatus.jobId} />
+      </TabPanel>
+    );
+
     inner = (
       <Flex direction={'column'} minH={0}>
         <Tabs display={'flex'} flexDirection={'column'} overflow={'scroll'}>
@@ -194,6 +201,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
               <Tab>Checkpoints</Tab>
               <Tab>Query</Tab>
               <Tab>UDFs</Tab>
+              <Tab>Errors</Tab>
             </TabList>
           </div>
           <TabPanels display={'flex'} flexDirection={'column'} flexGrow={1} overflowY={'scroll'}>
@@ -202,6 +210,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
             {checkpointsTab}
             {queryTab}
             {udfsTab}
+            {errorsTab}
           </TabPanels>
         </Tabs>
       </Flex>
