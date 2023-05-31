@@ -7,7 +7,6 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         platform:
@@ -18,10 +17,13 @@ jobs:
             mold_arch: x86_64
             proto_arch: x86_64
             prom_arch: amd64
+            runs_on: buildjet-4vcpu-ubuntu-2204
           - platform: linux/arm64
             mold_arch: aarch64
             proto_arch: aarch_64
             prom_arch: arm64
+            runs_on: buildjet-4vcpu-ubuntu-2204-arm
+    runs-on: ${{ matrix.runs_on }}
     steps:
       # Get the repository's code
       - name: Checkout
