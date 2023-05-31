@@ -60,6 +60,8 @@ spec:
               fieldPath: metadata.namespace
         - name: K8S_WORKER_NAME
           value: "{{ include "arroyo.fullname" . }}"
+        - name: K8S_IMAGE
+          value: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
         - name: K8S_WORKER_LABELS
           value: {{ include "arroyo.labels" . | quote }}
         - name: K8S_WORKER_ANNOTATIONS
