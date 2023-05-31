@@ -1,4 +1,15 @@
+use std::str::FromStr;
+
 use anyhow::Context;
+use cornucopia_async::GenericClient;
+use deadpool_postgres::Transaction;
+use petgraph::Direction;
+use prost::Message;
+use serde_json::Value;
+use tonic::Status;
+use tracing::log::info;
+use tracing::warn;
+
 use arroyo_datastream::{auth_config_to_hashmap, Operator, Program, SinkConfig};
 use arroyo_rpc::grpc::api::create_sql_job::Sink;
 use arroyo_rpc::grpc::api::sink::SinkType;
@@ -8,17 +19,6 @@ use arroyo_rpc::grpc::api::{
     SqlErrors, Udf, UdfLanguage,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
-
-use cornucopia_async::GenericClient;
-use deadpool_postgres::Transaction;
-use petgraph::Direction;
-use prost::Message;
-use serde_json::Value;
-use tracing::log::info;
-
-use std::str::FromStr;
-use tonic::Status;
-use tracing::warn;
 
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbPipeline;

@@ -1,4 +1,13 @@
+use std::fmt::{Display, Formatter};
+
 use arrow::datatypes::TimeUnit;
+use cornucopia_async::GenericClient;
+use deadpool_postgres::Pool;
+use http::StatusCode;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tonic::Status;
+use tracing::warn;
+
 use arroyo_datastream::{SerializationMode, SourceConfig};
 use arroyo_rpc::grpc::api::{
     self,
@@ -14,13 +23,6 @@ use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
-use cornucopia_async::GenericClient;
-use deadpool_postgres::Pool;
-use http::StatusCode;
-use std::fmt::{Display, Formatter};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tonic::Status;
-use tracing::warn;
 
 use crate::types::public::SchemaType;
 use crate::{
@@ -350,8 +352,8 @@ fn builtin_for_name(name: &str) -> Result<SourceSchema, String> {
 impl SourceSchema {
     pub fn try_from(name: &str, s: api::SourceSchema) -> Result<Self, String> {
         match s.schema.unwrap() {
-            api::source_schema::Schema::Builtin(name) => builtin_for_name(&name),
-            api::source_schema::Schema::JsonSchema(def) => {
+            Schema::Builtin(name) => builtin_for_name(&name),
+            Schema::JsonSchema(def) => {
                 let fields = json_schema::convert_json_schema(name, &def.json_schema)?;
                 Ok(SourceSchema {
                     format: SourceFormat::JsonSchema(def.json_schema),
@@ -359,7 +361,7 @@ impl SourceSchema {
                     kafka_schema: s.kafka_schema_registry,
                 })
             }
-            api::source_schema::Schema::JsonFields(def) => {
+            Schema::JsonFields(def) => {
                 let fields: Result<Vec<_>, String> =
                     def.fields.into_iter().map(|f| f.try_into()).collect();
                 Ok(SourceSchema {
@@ -369,9 +371,7 @@ impl SourceSchema {
                 })
             }
             Schema::RawJson(_) => Ok(raw_schema()),
-            api::source_schema::Schema::Protobuf(_) => {
-                Err("protobuf not supported yet".to_string())
-            }
+            Schema::Protobuf(_) => Err("protobuf not supported yet".to_string()),
         }
     }
 
@@ -396,23 +396,19 @@ impl TryFrom<&SourceSchema> for api::SourceSchema {
     fn try_from(s: &SourceSchema) -> Result<Self, Self::Error> {
         Ok(api::SourceSchema {
             schema: Some(match &s.format {
-                SourceFormat::Native(s) => api::source_schema::Schema::Builtin(s.clone()),
-                SourceFormat::JsonFields => {
-                    api::source_schema::Schema::JsonFields(api::JsonFieldDef {
-                        fields: s
-                            .fields
-                            .clone()
-                            .into_iter()
-                            .filter_map(|f| f.try_into().ok())
-                            .collect(),
-                    })
-                }
-                SourceFormat::JsonSchema(s) => {
-                    api::source_schema::Schema::JsonSchema(JsonSchemaDef {
-                        json_schema: s.clone(),
-                    })
-                }
-                SourceFormat::RawJson => api::source_schema::Schema::RawJson(api::RawJsonDef {}),
+                SourceFormat::Native(s) => Schema::Builtin(s.clone()),
+                SourceFormat::JsonFields => Schema::JsonFields(api::JsonFieldDef {
+                    fields: s
+                        .fields
+                        .clone()
+                        .into_iter()
+                        .filter_map(|f| f.try_into().ok())
+                        .collect(),
+                }),
+                SourceFormat::JsonSchema(s) => Schema::JsonSchema(JsonSchemaDef {
+                    json_schema: s.clone(),
+                }),
+                SourceFormat::RawJson => Schema::RawJson(api::RawJsonDef {}),
             }),
             kafka_schema_registry: s.kafka_schema,
         })
@@ -430,7 +426,7 @@ impl TryFrom<SourceDef> for Source {
     type Error = String;
 
     fn try_from(value: SourceDef) -> Result<Self, Self::Error> {
-        let schema = if let api::source_schema::Schema::Builtin(name) =
+        let schema = if let Schema::Builtin(name) =
             value.schema.as_ref().unwrap().schema.as_ref().unwrap()
         {
             builtin_for_name(name)?
@@ -496,7 +492,7 @@ pub(crate) async fn create_source(
     req: CreateSourceReq,
     auth: AuthData,
     pool: &Pool,
-) -> core::result::Result<(), Status> {
+) -> Result<(), Status> {
     let schema_name = format!("{}_schema", req.name);
 
     let mut c = pool.get().await.map_err(log_and_map)?;
@@ -518,13 +514,13 @@ pub(crate) async fn create_source(
         .or_else(|| {
             match req.type_oneof {
                 Some(create_source_req::TypeOneof::Impulse { .. }) => {
-                    Some(source_schema::Schema::Builtin("impulse".to_string()))
+                    Some(Schema::Builtin("impulse".to_string()))
                 }
                 Some(create_source_req::TypeOneof::Nexmark { .. }) => {
-                    Some(source_schema::Schema::Builtin("nexmark".to_string()))
+                    Some(Schema::Builtin("nexmark".to_string()))
                 }
                 Some(create_source_req::TypeOneof::Kafka { .. }) => {
-                    Some(source_schema::Schema::RawJson(RawJsonDef {}))
+                    Some(Schema::RawJson(RawJsonDef {}))
                 }
                 _ => None,
             }
@@ -539,25 +535,23 @@ pub(crate) async fn create_source(
         .schema
         .ok_or_else(|| required_field("schema.schema"))?
     {
-        source_schema::Schema::Builtin(name) => {
+        Schema::Builtin(name) => {
             builtin_for_name(&name).map_err(Status::invalid_argument)?;
             (SchemaType::builtin, serde_json::to_value(&name).unwrap())
         }
-        source_schema::Schema::JsonSchema(js) => {
+        Schema::JsonSchema(js) => {
             // try to convert the schema to ensure it's valid
             convert_json_schema(&req.name, &js.json_schema).map_err(Status::invalid_argument)?;
 
             // parse the schema into a value
             (SchemaType::json_schema, serde_json::to_value(&js).unwrap())
         }
-        source_schema::Schema::JsonFields(fields) => (
+        Schema::JsonFields(fields) => (
             SchemaType::json_fields,
             serde_json::to_value(fields).unwrap(),
         ),
-        source_schema::Schema::RawJson(_) => {
-            (SchemaType::raw_json, serde_json::to_value(()).unwrap())
-        }
-        source_schema::Schema::Protobuf(_) => todo!(),
+        Schema::RawJson(_) => (SchemaType::raw_json, serde_json::to_value(()).unwrap()),
+        Schema::Protobuf(_) => todo!(),
     };
 
     let schema_id = api_queries::create_schema()
@@ -771,7 +765,7 @@ pub(crate) async fn test_schema(req: CreateSourceReq) -> Result<Vec<String>, Sta
 
     match schema {
         Schema::JsonSchema(schema) => {
-            if let Err(e) = json_schema::convert_json_schema(&req.name, &schema.json_schema) {
+            if let Err(e) = convert_json_schema(&req.name, &schema.json_schema) {
                 Ok(vec![e])
             } else {
                 Ok(vec![])
@@ -962,7 +956,7 @@ pub(crate) async fn get_confluent_schema(
             )
         })?;
 
-    if let Err(e) = json_schema::convert_json_schema(&req.topic, schema) {
+    if let Err(e) = convert_json_schema(&req.topic, schema) {
         warn!(
             "Schema from schema registry is not valid: '{}': {}",
             schema, e
