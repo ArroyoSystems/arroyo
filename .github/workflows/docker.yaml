@@ -17,12 +17,12 @@ jobs:
             mold_arch: x86_64
             proto_arch: x86_64
             prom_arch: amd64
-            runs_on: buildjet-32vcpu-ubuntu-2204
+            runs_on: buildjet-8vcpu-ubuntu-2204
           - platform: linux/arm64
             mold_arch: aarch64
             proto_arch: aarch_64
             prom_arch: arm64
-            runs_on: buildjet-32vcpu-ubuntu-2204-arm
+            runs_on: buildjet-8vcpu-ubuntu-2204-arm
     runs-on: ${{ matrix.runs_on }}
     steps:
       # Get the repository's code
