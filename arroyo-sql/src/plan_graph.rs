@@ -19,8 +19,7 @@ use crate::{
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
     pipeline::{
-        AggregatingStrategy, JoinType, MethodCompiler, RecordTransform, SourceOperator,
-        SqlOperator, WindowFunction,
+        JoinType, MethodCompiler, RecordTransform, SourceOperator, SqlOperator, WindowFunction,
     },
     types::{StructDef, StructField, StructPair, TypeDef},
     ArroyoSchemaProvider, SqlConfig,
@@ -1057,9 +1056,7 @@ impl PlanGraph {
             edge_type: EdgeType::Forward,
         };
         self.graph.add_edge(input_index, key_index, key_edge);
-        let AggregatingStrategy::AggregateProjection(aggregate_projection) = aggregate.aggregating else {
-            panic!("two phase not supported here, make that after constructing the plan graph")
-        };
+        let aggregate_projection = aggregate.aggregating;
         let aggregate_struct = aggregate_projection.output_struct();
         let aggregate_operator = PlanOperator::WindowAggregate {
             window: aggregate.window,

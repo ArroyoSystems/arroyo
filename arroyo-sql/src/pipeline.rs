@@ -20,7 +20,7 @@ use crate::expressions::ExpressionContext;
 use crate::external::{SqlSink, SqlSource};
 use crate::{
     expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
-    operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
+    operators::{AggregateProjection, GroupByKind, Projection},
     types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
@@ -110,7 +110,7 @@ impl RecordTransform {
 pub struct AggregateOperator {
     pub key: Projection,
     pub window: WindowType,
-    pub aggregating: AggregatingStrategy,
+    pub aggregating: AggregateProjection,
     pub merge: GroupByKind,
 }
 
@@ -118,24 +118,6 @@ impl AggregateOperator {
     pub fn output_struct(&self) -> StructDef {
         self.merge
             .output_struct(&self.key.output_struct(), &self.aggregating.output_struct())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum AggregatingStrategy {
-    AggregateProjection(AggregateProjection),
-    TwoPhaseAggregateProjection(TwoPhaseAggregateProjection),
-}
-impl AggregatingStrategy {
-    fn output_struct(&self) -> StructDef {
-        match self {
-            AggregatingStrategy::AggregateProjection(aggregate_production) => {
-                aggregate_production.output_struct()
-            }
-            AggregatingStrategy::TwoPhaseAggregateProjection(two_phase) => {
-                two_phase.output_struct()
-            }
-        }
     }
 }
 
@@ -584,7 +566,6 @@ impl<'a> SqlPipelineBuilder<'a> {
             &aggregate.aggr_expr,
             aggregate_fields,
             &source.return_type(),
-            window.clone(),
         )?;
         let merge = self.window_field(&aggregate.group_expr, aggregate.schema.fields())?;
         Ok(SqlOperator::Aggregator(
@@ -1103,52 +1084,22 @@ impl<'a> SqlPipelineBuilder<'a> {
         aggr_expr: &[Expr],
         aggregate_fields: Vec<DFField>,
         input_struct: &StructDef,
-        window: WindowType,
-    ) -> Result<AggregatingStrategy> {
+    ) -> Result<AggregateProjection> {
         let mut ctx = self.ctx(input_struct);
 
         let field_names = aggregate_fields
             .iter()
             .map(|field| Column::convert(&field.qualified_column()))
             .collect();
-        let two_phase_field_computations = aggr_expr
-            .iter()
-            .map(|expr| ctx.as_two_phase_aggregation(expr))
-            .collect::<Result<Vec<_>>>();
-
-        match (two_phase_field_computations, window) {
-            (Ok(field_computations), WindowType::Tumbling { .. })
-            | (Ok(field_computations), WindowType::Instant) => {
-                return Ok(AggregatingStrategy::TwoPhaseAggregateProjection(
-                    TwoPhaseAggregateProjection {
-                        field_names,
-                        field_computations,
-                    },
-                ));
-            }
-            (Ok(field_computations), WindowType::Sliding { width, slide }) => {
-                if width.as_millis() % slide.as_millis() == 0 {
-                    return Ok(AggregatingStrategy::TwoPhaseAggregateProjection(
-                        TwoPhaseAggregateProjection {
-                            field_names,
-                            field_computations,
-                        },
-                    ));
-                }
-            }
-            _ => {}
-        }
 
         let field_computations = aggr_expr
             .iter()
             .map(|expr| AggregationExpression::try_from_expression(&mut ctx, expr))
             .collect::<Result<Vec<_>>>()?;
-        Ok(AggregatingStrategy::AggregateProjection(
-            AggregateProjection {
-                field_names,
-                field_computations,
-            },
-        ))
+        Ok(AggregateProjection {
+            field_names,
+            field_computations,
+        })
     }
 
     pub(crate) fn insert_table(&mut self, table: Table) -> Result<()> {

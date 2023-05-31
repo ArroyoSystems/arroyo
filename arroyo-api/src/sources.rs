@@ -14,7 +14,7 @@ use arroyo_rpc::grpc::api::{
     connection::ConnectionType,
     create_source_req::{self},
     source_def::SourceType,
-    source_schema::{self, Schema},
+    source_schema::Schema,
     ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
     EventSourceSourceConfig, EventSourceSourceDef, JsonSchemaDef, KafkaSourceConfig,
     KafkaSourceDef, RawJsonDef, SourceDef, SourceField, SourceMetadataResp, TestSourceMessage,
