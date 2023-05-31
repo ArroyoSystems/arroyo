@@ -50,7 +50,7 @@ jobs:
             type=semver,pattern={{major}}
             type=sha
           flavor: |
-            type=literal,value=${{ matrix.prom_arch }},prefix=${{ matrix.prom_arch }}-
+            prefix=${{ matrix.prom_arch }}-
       - name: Build and push
         uses: docker/build-push-action@v2
         with:
