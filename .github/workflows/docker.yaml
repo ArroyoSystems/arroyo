@@ -17,12 +17,12 @@ jobs:
             mold_arch: x86_64
             proto_arch: x86_64
             prom_arch: amd64
-            runs_on: buildjet-16vcpu-ubuntu-2204
+            runs_on: buildjet-32vcpu-ubuntu-2204
           - platform: linux/arm64
             mold_arch: aarch64
             proto_arch: aarch_64
             prom_arch: arm64
-            runs_on: buildjet-16vcpu-ubuntu-2204-arm
+            runs_on: buildjet-32vcpu-ubuntu-2204-arm
     runs-on: ${{ matrix.runs_on }}
     steps:
       # Get the repository's code
@@ -49,6 +49,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha
+          flavor: |
+            type=literal,value=${{ matrix.prom_arch }},prefix=${{ matrix.prom_arch }}-
       - name: Build and push
         uses: docker/build-push-action@v2
         with:
