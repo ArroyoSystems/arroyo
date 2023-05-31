@@ -143,7 +143,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
     );
 
     const outputsTab = (
-      <TabPanel>
+      <TabPanel w={'100%'}>
         {outputs.length == 0 ? (
           job?.jobGraph?.nodes.find(n => n.operator.includes('GrpcSink')) != null ? (
             <Button isLoading={subscribed} onClick={subscribe} width={150} size="sm">
@@ -165,7 +165,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
     );
 
     const queryTab = (
-      <TabPanel>
+      <TabPanel w={'100%'}>
         <Box>
           <CodeEditor query={job?.jobStatus?.definition!} readOnly={true} />
         </Box>
@@ -173,7 +173,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
     );
 
     const udfsTab = (
-      <TabPanel>
+      <TabPanel w={'100%'}>
         <Box>
           <CodeEditor
             query={(job?.jobStatus?.udfs || [{ definition: '' }])[0].definition}
@@ -185,22 +185,26 @@ export function JobDetail({ client }: { client: ApiClient }) {
     );
 
     inner = (
-      <Tabs h="100%">
-        <TabList>
-          <Tab>Operators</Tab>
-          <Tab>Outputs</Tab>
-          <Tab>Checkpoints</Tab>
-          <Tab>Query</Tab>
-          <Tab>UDFs</Tab>
-        </TabList>
-        <TabPanels h="100%">
-          {operatorsTab}
-          {outputsTab}
-          {checkpointsTab}
-          {queryTab}
-          {udfsTab}
-        </TabPanels>
-      </Tabs>
+      <Flex direction={'column'} minH={0}>
+        <Tabs display={'flex'} flexDirection={'column'} overflow={'scroll'}>
+          <div>
+            <TabList>
+              <Tab>Operators</Tab>
+              <Tab>Outputs</Tab>
+              <Tab>Checkpoints</Tab>
+              <Tab>Query</Tab>
+              <Tab>UDFs</Tab>
+            </TabList>
+          </div>
+          <TabPanels display={'flex'} flexDirection={'column'} flexGrow={1} overflowY={'scroll'}>
+            {operatorsTab}
+            {outputsTab}
+            {checkpointsTab}
+            {queryTab}
+            {udfsTab}
+          </TabPanels>
+        </Tabs>
+      </Flex>
     );
   }
 
@@ -238,7 +242,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
   }
 
   return (
-    <Box top={0} bottom={0} right={0} left={200} position="absolute" overflowY="hidden">
+    <Flex direction={'column'} height={'100vh'}>
       <Flex>
         <Box p={5}>
           <Text fontSize={20}>
@@ -255,6 +259,6 @@ export function JobDetail({ client }: { client: ApiClient }) {
       </Flex>
       {inner}
       {configModal}
-    </Box>
+    </Flex>
   );
 }

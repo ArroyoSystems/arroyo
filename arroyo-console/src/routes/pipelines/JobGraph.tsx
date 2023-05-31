@@ -99,7 +99,7 @@ export function PipelineGraph({
   });
 
   return (
-    <Box className="pipelineGraph">
+    <Box height={'70vh'} className="pipelineGraph">
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}>
         <Background />
       </ReactFlow>
