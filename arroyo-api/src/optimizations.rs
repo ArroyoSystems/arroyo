@@ -1,7 +1,3 @@
-use arroyo_datastream::{
-    AggregateBehavior, EdgeType, ExpressionReturnType, ExpressionReturnType::*, Operator,
-    StreamEdge, StreamNode, WindowAgg,
-};
 use petgraph::data::DataMap;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
@@ -12,6 +8,11 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{parse_str, Type};
 
+use arroyo_datastream::{
+    AggregateBehavior, EdgeType, ExpressionReturnType, ExpressionReturnType::*, Operator,
+    StreamEdge, StreamNode, WindowAgg,
+};
+
 pub fn optimize(graph: &mut DiGraph<StreamNode, StreamEdge>) {
     WasmFusionOptimizer {}.optimize(graph);
     fuse_window_aggregation(graph);
@@ -20,10 +21,7 @@ pub fn optimize(graph: &mut DiGraph<StreamNode, StreamEdge>) {
 }
 
 fn remove_in_place(graph: &mut DiGraph<StreamNode, StreamEdge>, node: NodeIndex) {
-    let incoming = graph
-        .edges_directed(node, Incoming)
-        .next()
-        .unwrap();
+    let incoming = graph.edges_directed(node, Incoming).next().unwrap();
 
     let parent = incoming.source().id();
     let incoming = incoming.id();
@@ -64,7 +62,7 @@ fn fuse_window_aggregation(graph: &mut DiGraph<StreamNode, StreamEdge>) {
                 let source_idx = ins.next().unwrap().source();
                 let in_node = graph.node_weight_mut(source_idx).unwrap();
                 if let Operator::Window { agg, .. } = &mut in_node.operator {
-                    if !agg.is_none() {
+                    if agg.is_some() {
                         continue;
                     }
 
@@ -245,7 +243,8 @@ impl FusedExpressionOperatorBuilder {
         let body = quote!(
         {#(#fused_body_tokens)*
             #return_value
-        }).to_string();
+        })
+        .to_string();
 
         let expr: syn::Expr = parse_str(&body).expect(&body);
         let expression = quote!(#expr).to_string();
@@ -267,9 +266,7 @@ impl FusedExpressionOperatorBuilder {
         match return_type {
             Predicate => self.fuse_predicate(name, expression),
             Record => self.fuse_map(name, expression, out_type),
-            OptionalRecord => {
-                self.fuse_option_map(name, expression, out_type)
-            }
+            OptionalRecord => self.fuse_option_map(name, expression, out_type),
         }
     }
 
@@ -434,8 +431,9 @@ impl Optimizer for WasmFusionOptimizer {
 mod tests {
     use std::{path::PathBuf, time::Duration};
 
-    use arroyo_datastream::{StreamEdge, StreamNode, WindowAgg};
     use petgraph::prelude::DiGraph;
+
+    use arroyo_datastream::{StreamEdge, StreamNode, WindowAgg};
 
     use super::fuse_window_aggregation;
 

@@ -1,4 +1,13 @@
+use std::fmt::{Display, Formatter};
+
 use arrow::datatypes::TimeUnit;
+use cornucopia_async::GenericClient;
+use deadpool_postgres::Pool;
+use http::StatusCode;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tonic::Status;
+use tracing::warn;
+
 use arroyo_datastream::{SerializationMode, SourceConfig};
 use arroyo_rpc::grpc::api::{
     self,
@@ -14,13 +23,6 @@ use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
-use cornucopia_async::GenericClient;
-use deadpool_postgres::Pool;
-use http::StatusCode;
-use std::fmt::{Display, Formatter};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tonic::Status;
-use tracing::warn;
 
 use crate::types::public::SchemaType;
 use crate::{
@@ -369,9 +371,7 @@ impl SourceSchema {
                 })
             }
             Schema::RawJson(_) => Ok(raw_schema()),
-            Schema::Protobuf(_) => {
-                Err("protobuf not supported yet".to_string())
-            }
+            Schema::Protobuf(_) => Err("protobuf not supported yet".to_string()),
         }
     }
 
@@ -397,21 +397,17 @@ impl TryFrom<&SourceSchema> for api::SourceSchema {
         Ok(api::SourceSchema {
             schema: Some(match &s.format {
                 SourceFormat::Native(s) => Schema::Builtin(s.clone()),
-                SourceFormat::JsonFields => {
-                    Schema::JsonFields(api::JsonFieldDef {
-                        fields: s
-                            .fields
-                            .clone()
-                            .into_iter()
-                            .filter_map(|f| f.try_into().ok())
-                            .collect(),
-                    })
-                }
-                SourceFormat::JsonSchema(s) => {
-                    Schema::JsonSchema(JsonSchemaDef {
-                        json_schema: s.clone(),
-                    })
-                }
+                SourceFormat::JsonFields => Schema::JsonFields(api::JsonFieldDef {
+                    fields: s
+                        .fields
+                        .clone()
+                        .into_iter()
+                        .filter_map(|f| f.try_into().ok())
+                        .collect(),
+                }),
+                SourceFormat::JsonSchema(s) => Schema::JsonSchema(JsonSchemaDef {
+                    json_schema: s.clone(),
+                }),
                 SourceFormat::RawJson => Schema::RawJson(api::RawJsonDef {}),
             }),
             kafka_schema_registry: s.kafka_schema,
@@ -554,9 +550,7 @@ pub(crate) async fn create_source(
             SchemaType::json_fields,
             serde_json::to_value(fields).unwrap(),
         ),
-        Schema::RawJson(_) => {
-            (SchemaType::raw_json, serde_json::to_value(()).unwrap())
-        }
+        Schema::RawJson(_) => (SchemaType::raw_json, serde_json::to_value(()).unwrap()),
         Schema::Protobuf(_) => todo!(),
     };
 
