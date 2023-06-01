@@ -3,6 +3,7 @@ WORKDIR /opt/arroyo
 
 ARG PROTO_ARCH
 ARG MOLD_ARCH
+ARG GIT_SHA
 
 RUN apt-get update && \
     apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl cmake clang wget && \
@@ -46,6 +47,8 @@ COPY integ src/integ
 COPY Cargo.toml src/Cargo.toml
 COPY Cargo.lock src/Cargo.lock
 
+# set git hash
+ENV VERGEN_GIT_SHA=$GIT_SHA
 # build the compiler service
 RUN cd src && cargo build --release -p arroyo-compiler-service && mv target/release/arroyo-compiler-service /usr/bin
 
