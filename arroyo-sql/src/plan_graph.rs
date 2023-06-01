@@ -457,7 +457,7 @@ impl PlanNode {
                     #(#field_assignments, )*
                 });
 
-                let sort = if order_by.len() > 0 {
+                let sort = if !order_by.is_empty() {
                     let sort_tokens = SortExpression::sort_tuple_expression(order_by);
                     Some(quote!(arg.sort_by_key(|arg| #sort_tokens);))
                 } else {

@@ -141,8 +141,7 @@ impl Scheduler for ProcessScheduler {
         for _ in 0..workers {
             let path = base_path.clone();
 
-            let slots_here =
-                (start_pipeline_req.slots as usize - slots_scheduled).min(SLOTS_PER_NODE);
+            let slots_here = (start_pipeline_req.slots - slots_scheduled).min(SLOTS_PER_NODE);
 
             let worker_id = self.worker_counter.fetch_add(1, Ordering::SeqCst);
 
@@ -320,7 +319,7 @@ impl NodeSchedulerState {
                 if status.last_heartbeat >= expiration_time {
                     None
                 } else {
-                    Some(node_id.clone())
+                    Some(*node_id)
                 }
             })
             .collect();
@@ -481,7 +480,7 @@ impl Scheduler for NodeScheduler {
         state.expire_nodes(Instant::now() - Duration::from_secs(30));
 
         let free_slots = state.nodes.values().map(|n| n.free_slots).sum::<usize>();
-        let slots = start_pipeline_req.slots as usize;
+        let slots = start_pipeline_req.slots;
         if slots > free_slots {
             return Err(SchedulerError::NotEnoughSlots {
                 slots_needed: slots - free_slots,

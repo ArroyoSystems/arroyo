@@ -737,7 +737,6 @@ impl<'a> SqlPipelineBuilder<'a> {
             })
             .collect::<Result<Vec<_>>>()?
             .into_iter()
-            .into_iter()
             .unzip();
 
         let left_key = Projection {

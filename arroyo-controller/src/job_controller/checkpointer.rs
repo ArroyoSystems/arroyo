@@ -273,7 +273,7 @@ impl CheckpointState {
                 .map(|s| (s.metadata.as_ref().unwrap()))
                 .filter(|metadata| metadata.has_state)
                 .flat_map(|metadata| metadata.backend_data.clone())
-                .filter_map(|backend_data| Self::backend_data_to_key(backend_data))
+                .filter_map(Self::backend_data_to_key)
                 .collect();
 
             let size = subtasks

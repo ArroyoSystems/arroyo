@@ -49,7 +49,7 @@ pub fn initcap(argument: String) -> String {
 pub fn left(s: String, n: i64) -> String {
     if n < 0 {
         s.chars()
-            .take(s.chars().count().saturating_sub(n.abs() as usize))
+            .take(s.chars().count().saturating_sub(n.unsigned_abs() as usize))
             .collect()
     } else {
         s.chars().take(n as usize).collect()
@@ -153,7 +153,7 @@ pub fn octet_length(s: String) -> i32 {
 
 pub fn right(s: String, n: i64) -> String {
     if n < 0 {
-        s.chars().skip(n.abs() as usize).collect()
+        s.chars().skip(n.unsigned_abs() as usize).collect()
     } else {
         s.chars()
             .rev()

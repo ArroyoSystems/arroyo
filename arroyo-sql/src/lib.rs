@@ -401,7 +401,7 @@ pub fn parse_and_get_program_sync(
             SqlSink {
                 id: None,
                 struct_def,
-                sink_config: config.sink.clone(),
+                sink_config: config.sink,
             },
             Box::new(non_sink_output),
         );
@@ -465,7 +465,7 @@ impl<'a> SqlProgramBuilder<'a> {
                     let struct_field = StructField {
                         name,
                         alias: None,
-                        data_type: TypeDef::DataType(data_type.clone(), nullable),
+                        data_type: TypeDef::DataType(data_type, nullable),
                     };
                     let generating_expression = column.options.iter().find_map(|option| {
                         if let ColumnOption::Generated {

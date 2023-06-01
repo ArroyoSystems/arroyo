@@ -103,13 +103,13 @@ impl BackingStore for ParquetBackend {
 
     async fn initialize_checkpoint(job_id: &str, epoch: u32, operators: &[&str]) -> Result<()> {
         let storage_client = StorageClient::new();
-        let path = base_path(&job_id, epoch);
+        let path = base_path(job_id, epoch);
 
         storage_client.initialize(&path).await?;
 
         for operator in operators {
             storage_client
-                .initialize(&operator_path(job_id, epoch, *operator))
+                .initialize(&operator_path(job_id, epoch, operator))
                 .await?;
         }
 
@@ -175,10 +175,12 @@ impl BackingStore for ParquetBackend {
         let operator_metadata =
             Self::load_operator_metadata(&task_info.job_id, &task_info.operator_id, metadata.epoch)
                 .await
-                .expect(&format!(
-                    "missing metadata for operator {}, epoch {}",
-                    task_info.operator_id, metadata.epoch
-                ));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing metadata for operator {}, epoch {}",
+                        task_info.operator_id, metadata.epoch
+                    )
+                });
         let mut current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> = HashMap::new();
         let tables: HashMap<char, TableDescriptor> = tables
             .into_iter()
@@ -403,11 +405,9 @@ impl ParquetBackend {
                     unreachable!("expect parquet backends")
                 };
                 let file = parquet_store.file.clone();
-                if !paths_to_keep.contains(&file) {
-                    if !deleted_paths.contains(&file) {
-                        deleted_paths.insert(file.clone());
-                        storage_client.remove(file).await?;
-                    }
+                if !paths_to_keep.contains(&file) && !deleted_paths.contains(&file) {
+                    deleted_paths.insert(file.clone());
+                    storage_client.remove(file).await?;
                 }
             }
         }
@@ -697,18 +697,16 @@ impl StorageClient {
         let region = env::var(S3_REGION_ENV).ok();
         let output_dir = env::var(OUTPUT_DIR_ENV).ok();
 
-        match (bucket.as_ref(), region.as_ref(), output_dir.as_ref()) {
-            (Some(bucket), Some(region), _) => match bucket.as_str() {
-                bucket => {
-                    let client = S3Client::new(Region::from_str(&region).unwrap());
-                    Self::S3 {
-                        client,
-                        region: region.clone(),
-                        bucket: bucket.to_owned(),
-                    }
+        match (bucket, region, output_dir) {
+            (Some(bucket), Some(region), _) => {
+                let client = S3Client::new(Region::from_str(&region).unwrap());
+                Self::S3 {
+                    client,
+                    region,
+                    bucket,
                 }
-            },
-            (_, _, Some(output_dir)) => Self::LocalDirectory(output_dir.clone()),
+            }
+            (_, _, Some(output_dir)) => Self::LocalDirectory(output_dir),
             _ => Self::LocalDirectory("/tmp/arroyo".to_string()),
         }
     }
@@ -727,7 +725,7 @@ impl StorageClient {
                     // allows the controller to modify the checkpoint files
                     .mode(0o6777)
                     .recursive(true)
-                    .create(&Path::new(directory).join(&key))
+                    .create(&Path::new(directory).join(key))
                     .await?;
             }
             StorageClient::S3 { .. } => {

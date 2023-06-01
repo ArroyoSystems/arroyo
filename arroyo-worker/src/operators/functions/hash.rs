@@ -5,7 +5,7 @@ pub fn md5(argument: Vec<u8>) -> String {
     let mut hasher = Md5::new();
     hasher.update(argument);
     let res = hasher.finalize();
-    hex::encode(&res)
+    hex::encode(res)
 }
 
 pub fn sha224(argument: Vec<u8>) -> Vec<u8> {

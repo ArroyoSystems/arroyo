@@ -147,7 +147,7 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
         parse_and_get_program_sync(query_string.value(), schema_provider, SqlConfig::default())
             .unwrap();
 
-    let mod_name: syn::Ident = parse_str(&test_name).unwrap();
+    let mod_name: syn::Ident = parse_str(test_name).unwrap();
 
     let function = arroyo_controller::compiler::ProgramCompiler::make_graph_function(&program);
     let other_defs: Vec<proc_macro2::TokenStream> = program

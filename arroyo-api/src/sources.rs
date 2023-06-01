@@ -300,7 +300,7 @@ impl TryFrom<SchemaField> for SourceField {
             SchemaFieldType::NamedStruct(_, fields) | SchemaFieldType::Struct(fields) => {
                 api::source_field_type::Type::Struct(api::StructType {
                     fields: fields
-                        .into_iter()
+                        .iter()
                         .filter_map(|f| f.clone().try_into().ok())
                         .collect(),
                 })

@@ -109,7 +109,7 @@ impl Scheduler for NomadScheduler {
         &self,
         start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError> {
-        let slots = start_pipeline_req.slots as usize;
+        let slots = start_pipeline_req.slots;
         let workers = (slots as f32 / SLOTS_PER_NOMAD_NODE as f32).ceil() as usize;
         let mut slots_scheduled = 0;
 

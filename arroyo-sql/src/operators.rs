@@ -1,3 +1,4 @@
+#![allow(clippy::comparison_chain)]
 use std::time::Duration;
 
 use crate::{
