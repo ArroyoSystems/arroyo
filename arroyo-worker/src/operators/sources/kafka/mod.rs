@@ -2,7 +2,7 @@ use crate::engine::{Context, StreamNode};
 use crate::SourceFinishType;
 use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::TableDescriptor;
-use arroyo_rpc::{grpc::StopMode, ControlMessage};
+use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::select;
 use tracing::{debug, error, info, warn};
 
-use crate::operators::SerializationMode;
+use crate::operators::{SerializationMode, UserError};
 
 #[cfg(test)]
 mod test;
@@ -96,7 +96,7 @@ where
         tables()
     }
 
-    async fn get_consumer(&mut self, ctx: &mut Context<(), T>) -> Result<StreamConsumer, ()> {
+    async fn get_consumer(&mut self, ctx: &mut Context<(), T>) -> anyhow::Result<StreamConsumer> {
         info!("Creating kafka consumer for {}", self.bootstrap_servers);
         let mut client_config = ClientConfig::new();
 
@@ -114,8 +114,7 @@ where
                     ctx.task_info.job_id, ctx.task_info.operator_id
                 ),
             )
-            .create()
-            .expect("Consumer creation failed");
+            .create()?;
 
         let mut s: GlobalKeyedState<i32, KafkaState, _> =
             ctx.state.get_global_keyed_state('k').await;
@@ -156,15 +155,37 @@ where
                 .collect()
         };
 
-        let topic_partitions = TopicPartitionList::from_topic_map(&our_partitions).unwrap();
+        let topic_partitions = TopicPartitionList::from_topic_map(&our_partitions)?;
 
-        consumer.assign(&topic_partitions).unwrap();
+        consumer.assign(&topic_partitions)?;
 
         Ok(consumer)
     }
 
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
-        let consumer = self.get_consumer(ctx).await.unwrap();
+        match self.run_int(ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.control_tx
+                    .send(ControlResp::Error {
+                        operator_id: ctx.task_info.operator_id.clone(),
+                        task_index: ctx.task_info.task_index,
+                        message: e.name.clone(),
+                        details: e.details.clone(),
+                    })
+                    .await
+                    .unwrap();
+
+                panic!("{}: {}", e.name, e.details);
+            }
+        }
+    }
+
+    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
+        let consumer = self
+            .get_consumer(ctx)
+            .await
+            .map_err(|e| UserError::new("Could not create Kafka consumer", format!("{:?}", e)))?;
 
         let rate_limiter = RateLimiter::direct(Quota::per_second(self.messages_per_second));
         let mut offsets = HashMap::new();
@@ -174,10 +195,14 @@ where
                     match message {
                         Ok(msg) => {
                             if let Some(v) = msg.payload() {
+                                let timestamp = msg.timestamp().to_millis()
+                                    .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
+                                        "The message read from Kafka did not contain a message timestamp"))?;
+
                                 ctx.collector.collect(Record {
-                                    timestamp: from_millis(msg.timestamp().to_millis().unwrap() as u64),
+                                    timestamp: from_millis(timestamp as u64),
                                     key: None,
-                                    value: self.serialization_mode.deserialize_slice(v).unwrap(),
+                                    value: self.serialization_mode.deserialize_slice(v)?,
                                 }).await;
                                 offsets.insert(msg.partition(), msg.offset());
                                 rate_limiter.until_ready().await;
@@ -210,7 +235,7 @@ where
                                 warn!("Failed to commit offset to Kafka {:?}", e);
                             }
                             if self.checkpoint(c, ctx).await {
-                                return SourceFinishType::Immediate;
+                                return Ok(SourceFinishType::Immediate);
                             }
                         },
                         Some(ControlMessage::Stop { mode }) => {
@@ -218,10 +243,10 @@ where
 
                             match mode {
                                 StopMode::Graceful => {
-                                    return SourceFinishType::Graceful;
+                                    return Ok(SourceFinishType::Graceful);
                                 }
                                 StopMode::Immediate => {
-                                    return SourceFinishType::Immediate;
+                                    return Ok(SourceFinishType::Immediate);
                                 }
                             }
                         }
