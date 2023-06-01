@@ -652,7 +652,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-sql-testing"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arroyo-sql",
  "arroyo-sql-macro",
