@@ -12,6 +12,7 @@ import {
   ButtonGroup,
   Flex,
   Spacer,
+  Spinner,
   Stack,
   Tab,
   TabList,
@@ -31,7 +32,12 @@ import { PipelineOutputs } from './JobOutputs';
 import { CodeEditor } from './SqlEditor';
 import PipelineConfigModal from './PipelineConfigModal';
 import { Code as ConnectWebCode, ConnectError } from '@bufbuild/connect-web';
-import { useJob, useJobCheckpoints, useJobMetrics } from '../../lib/data_fetching';
+import {
+  useJob,
+  useJobCheckpoints,
+  useJobMetrics,
+  useOperatorErrors,
+} from '../../lib/data_fetching';
 import OperatorDetail from '../../components/OperatorDetail';
 import JobNotFound from '../../components/JobNotFound';
 import Checkpoints from '../../components/Checkpoints';
@@ -54,6 +60,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
   const { job, jobError, updateJob } = useJob(client, id);
   const { metrics } = useJobMetrics(client, id);
   const { checkpoints } = useJobCheckpoints(client, id);
+  const { operatorErrors } = useOperatorErrors(client, id);
 
   if (jobError) {
     if (jobError instanceof ConnectError && jobError.code === ConnectWebCode.NotFound) {
@@ -187,33 +194,38 @@ export function JobDetail({ client }: { client: ApiClient }) {
 
     const errorsTab = (
       <TabPanel>
-        <OperatorErrors client={client} jobId={job.jobStatus.jobId} />
+        <OperatorErrors operatorErrors={operatorErrors} />
       </TabPanel>
     );
 
     inner = (
-      <Flex direction={'column'} minH={0}>
-        <Tabs display={'flex'} flexDirection={'column'} overflow={'scroll'}>
-          <div>
-            <TabList>
-              <Tab>Operators</Tab>
-              <Tab>Outputs</Tab>
-              <Tab>Checkpoints</Tab>
-              <Tab>Query</Tab>
-              <Tab>UDFs</Tab>
-              <Tab>Errors</Tab>
-            </TabList>
-          </div>
-          <TabPanels display={'flex'} flexDirection={'column'} flexGrow={1} overflowY={'scroll'}>
-            {operatorsTab}
-            {outputsTab}
-            {checkpointsTab}
-            {queryTab}
-            {udfsTab}
-            {errorsTab}
-          </TabPanels>
-        </Tabs>
-      </Flex>
+      <Tabs h={'100%'}>
+        <div>
+          <TabList>
+            <Tab>Operators</Tab>
+            <Tab>Outputs</Tab>
+            <Tab>Checkpoints</Tab>
+            <Tab>Query</Tab>
+            <Tab>UDFs</Tab>
+            <Tab>
+              Errors{' '}
+              {(operatorErrors?.messages?.length || 0) > 0 && (
+                <Badge ml={2} colorScheme="red" size={'xs'}>
+                  {operatorErrors!.messages.length}
+                </Badge>
+              )}
+            </Tab>
+          </TabList>
+        </div>
+        <TabPanels h={'100%'}>
+          {operatorsTab}
+          {outputsTab}
+          {checkpointsTab}
+          {queryTab}
+          {udfsTab}
+          {errorsTab}
+        </TabPanels>
+      </Tabs>
     );
   }
 
@@ -239,19 +251,18 @@ export function JobDetail({ client }: { client: ApiClient }) {
     actionButton = (
       <Button
         isDisabled={job.action == undefined}
-        isLoading={job.inProgress}
-        loadingText={job.actionText}
         onClick={async () => {
           await updateJobState(job.action!);
         }}
       >
+        {job.inProgress ? <Spinner size="xs" mr={2} /> : null}
         {job.actionText}
       </Button>
     );
   }
 
   return (
-    <Flex direction={'column'} height={'100vh'}>
+    <Box top={0} bottom={0} right={0} left={200} position="absolute" overflowY="hidden">
       <Flex>
         <Box p={5}>
           <Text fontSize={20}>
@@ -268,6 +279,6 @@ export function JobDetail({ client }: { client: ApiClient }) {
       </Flex>
       {inner}
       {configModal}
-    </Flex>
+    </Box>
   );
 }

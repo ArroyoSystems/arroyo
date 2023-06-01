@@ -140,7 +140,7 @@ export function getOperatorBackpressure(
 }
 
 export function formatDate(timestamp: bigint) {
-  const date = new Date(Number(timestamp));
+  const date = new Date(Number(timestamp / BigInt(1000)));
   return new Intl.DateTimeFormat('en', {
     dateStyle: 'short',
     timeStyle: 'short',

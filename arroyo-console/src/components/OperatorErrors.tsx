@@ -1,18 +1,14 @@
-import { useOperatorErrors } from '../lib/data_fetching';
-import { ApiClient } from '../main';
 import Loading from './Loading';
 import { Table, TableContainer, Tbody, Td, Th, Thead, Tr } from '@chakra-ui/react';
 import React from 'react';
 import { formatDate } from '../lib/util';
+import { OperatorErrorsRes } from '../gen/api_pb';
 
 export interface OperatorErrorsProps {
-  client: ApiClient;
-  jobId?: string;
+  operatorErrors?: OperatorErrorsRes;
 }
 
-const OperatorErrors: React.FC<OperatorErrorsProps> = ({ client, jobId }) => {
-  const { operatorErrors } = useOperatorErrors(client, jobId);
-
+const OperatorErrors: React.FC<OperatorErrorsProps> = ({ operatorErrors }) => {
   if (!operatorErrors) {
     return <Loading />;
   }
@@ -21,7 +17,7 @@ const OperatorErrors: React.FC<OperatorErrorsProps> = ({ client, jobId }) => {
     <Tbody>
       {operatorErrors.messages.map(m => {
         return (
-          <Tr>
+          <Tr key={String(m.createdAt)}>
             <Td>{formatDate(m.createdAt)}</Td>
             <Td>{m.operatorId}</Td>
             <Td>{m.taskIndex?.toString()}</Td>
@@ -34,8 +30,8 @@ const OperatorErrors: React.FC<OperatorErrorsProps> = ({ client, jobId }) => {
   );
 
   const table = (
-    <TableContainer width={'100%'} padding={5}>
-      <Table variant="striped">
+    <TableContainer padding={5}>
+      <Table variant="striped" w={'100%'}>
         <Thead>
           <Tr>
             <Th>Time</Th>
