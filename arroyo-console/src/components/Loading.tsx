@@ -1,4 +1,4 @@
-import { Spinner, VStack } from '@chakra-ui/react';
+import { Flex, Spinner } from '@chakra-ui/react';
 import React from 'react';
 
 export interface LoadingProps {
@@ -7,9 +7,9 @@ export interface LoadingProps {
 
 const Loading: React.FC<LoadingProps> = ({ size = 'xl' }) => {
   return (
-    <VStack justify={'center'} height={'75%'} spacing={30}>
-      <Spinner speed="0.65s" emptyColor="gray.200" color="blue.500" size={size} />
-    </VStack>
+    <Flex border={'blue.900'} borderWidth={'1px'} justify={'center'} height={'75%'} p={8}>
+      <Spinner speed="0.65s" emptyColor="gray.200" color="blue.900" size={size} />
+    </Flex>
   );
 };
 

@@ -71,7 +71,9 @@ pub(crate) async fn get_metrics(
                 "{}{{job_id=\"{}\",run_id=\"{}\"}}",
                 TX_QUEUE_REM, job_id, run_id
             );
-            format!("({} - {}) / {}", tx_queue_size, tx_queue_rem, tx_queue_size)
+            // add 1 to each value to account for uninitialized values (which report 0); this can happen when a task
+            // never reads any data
+            format!("1 - (({} + 1) / ({} + 1))", tx_queue_rem, tx_queue_size)
         }
 
         fn get_query(&self, job_id: &str, run_id: u64, rate: &str) -> String {

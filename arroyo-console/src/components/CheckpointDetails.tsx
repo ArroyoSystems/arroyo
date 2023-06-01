@@ -39,7 +39,7 @@ const CheckpointDetails: React.FC<CheckpointDetailsProps> = ({ checkpoint, ops, 
   const tableBody = (
     <Tbody>
       {ops?.map(op => {
-        const size = bytes(Object.values(op.checkpoint.tasks));
+        const size = bytes(Object.values(op.checkpoint?.tasks || []));
         const timeline = <OperatorCheckpointTimeline op={op} scale={scale} w={w} />;
         return row(op.name, timeline, size);
       })}

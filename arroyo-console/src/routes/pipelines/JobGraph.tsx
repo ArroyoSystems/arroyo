@@ -99,8 +99,13 @@ export function PipelineGraph({
   });
 
   return (
-    <Box height={'70vh'} className="pipelineGraph">
-      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}>
+    <Box className="pipelineGraph">
+      <ReactFlow
+        proOptions={{ hideAttribution: true }}
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+      >
         <Background />
       </ReactFlow>
     </Box>

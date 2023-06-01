@@ -124,9 +124,7 @@ where
         let has_state = !state.is_empty();
 
         let state: HashMap<i32, KafkaState> = state.iter().map(|s| (s.partition, **s)).collect();
-        let metadata = consumer
-            .fetch_metadata(Some(&self.topic), Duration::from_secs(30))
-            .expect("failed to fetch kafka metadata");
+        let metadata = consumer.fetch_metadata(Some(&self.topic), Duration::from_secs(30))?;
 
         info!("Fetched metadata for topic {}", self.topic);
 

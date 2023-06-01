@@ -651,6 +651,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-sql-testing"
+version = "0.2.0"
+dependencies = [
+ "arroyo-sql",
+ "arroyo-sql-macro",
+ "arroyo-types",
+ "arroyo-worker",
+ "bincode 2.0.0-rc.3",
+ "bincode_derive",
+ "chrono",
+ "hex",
+ "petgraph",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.15",
+]
+
+[[package]]
 name = "arroyo-state"
 version = "0.3.0"
 dependencies = [

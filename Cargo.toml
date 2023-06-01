@@ -11,7 +11,7 @@ members = [
     "arroyo-server-common",
     "arroyo-sql",
     "arroyo-sql-macro",
-    # "arroyo-sql-testing",
+    "arroyo-sql-testing",
     "arroyo-state",
     "arroyo-types",
     "arroyo-worker",

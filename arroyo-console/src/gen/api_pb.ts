@@ -277,6 +277,32 @@ proto3.util.setEnumType(EdgeType, "arroyo_api.EdgeType", [
 ]);
 
 /**
+ * @generated from enum arroyo_api.JobLogLevel
+ */
+export enum JobLogLevel {
+  /**
+   * @generated from enum value: INFO = 0;
+   */
+  INFO = 0,
+
+  /**
+   * @generated from enum value: WARN = 1;
+   */
+  WARN = 1,
+
+  /**
+   * @generated from enum value: ERROR = 2;
+   */
+  ERROR = 2,
+}
+// Retrieve enum metadata with: proto3.getEnumType(JobLogLevel)
+proto3.util.setEnumType(JobLogLevel, "arroyo_api.JobLogLevel", [
+  { no: 0, name: "INFO" },
+  { no: 1, name: "WARN" },
+  { no: 2, name: "ERROR" },
+]);
+
+/**
  * @generated from enum arroyo_api.TaskCheckpointEventType
  */
 export enum TaskCheckpointEventType {
@@ -1464,6 +1490,12 @@ export class Operator extends Message<Operator> {
      */
     value: JoinWithExpiration;
     case: "joinWithExpiration";
+  } | {
+    /**
+     * @generated from field: arroyo_api.ExpressionWatermark expression_watermark = 23;
+     */
+    value: ExpressionWatermark;
+    case: "expressionWatermark";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<Operator>) {
@@ -1495,6 +1527,7 @@ export class Operator extends Message<Operator> {
     { no: 19, name: "tumbling_top_n", kind: "message", T: TumblingTopN, oneof: "operator" },
     { no: 20, name: "sliding_aggregating_top_n", kind: "message", T: SlidingAggregatingTopN, oneof: "operator" },
     { no: 21, name: "join_with_expiration", kind: "message", T: JoinWithExpiration, oneof: "operator" },
+    { no: 23, name: "expression_watermark", kind: "message", T: ExpressionWatermark, oneof: "operator" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Operator {
@@ -1715,7 +1748,7 @@ export class EventSourceSource extends Message<EventSourceSource> {
     proto3.util.initPartial(data, this);
   }
 
-  static readonly runtime: typeof proto3 = proto3;
+  static readonly runtime = proto3;
   static readonly typeName = "arroyo_api.EventSourceSource";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "url", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -2169,6 +2202,49 @@ export class PeriodicWatermark extends Message<PeriodicWatermark> {
 
   static equals(a: PeriodicWatermark | PlainMessage<PeriodicWatermark> | undefined, b: PeriodicWatermark | PlainMessage<PeriodicWatermark> | undefined): boolean {
     return proto3.util.equals(PeriodicWatermark, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.ExpressionWatermark
+ */
+export class ExpressionWatermark extends Message<ExpressionWatermark> {
+  /**
+   * @generated from field: uint64 period_micros = 1;
+   */
+  periodMicros = protoInt64.zero;
+
+  /**
+   * @generated from field: string expression = 2;
+   */
+  expression = "";
+
+  constructor(data?: PartialMessage<ExpressionWatermark>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.ExpressionWatermark";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "period_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExpressionWatermark {
+    return new ExpressionWatermark().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ExpressionWatermark {
+    return new ExpressionWatermark().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ExpressionWatermark {
+    return new ExpressionWatermark().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ExpressionWatermark | PlainMessage<ExpressionWatermark> | undefined, b: ExpressionWatermark | PlainMessage<ExpressionWatermark> | undefined): boolean {
+    return proto3.util.equals(ExpressionWatermark, a, b);
   }
 }
 
@@ -3278,6 +3354,147 @@ export class JobGraph extends Message<JobGraph> {
 
   static equals(a: JobGraph | PlainMessage<JobGraph> | undefined, b: JobGraph | PlainMessage<JobGraph> | undefined): boolean {
     return proto3.util.equals(JobGraph, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.OperatorErrorsReq
+ */
+export class OperatorErrorsReq extends Message<OperatorErrorsReq> {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId = "";
+
+  constructor(data?: PartialMessage<OperatorErrorsReq>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.OperatorErrorsReq";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): OperatorErrorsReq {
+    return new OperatorErrorsReq().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): OperatorErrorsReq {
+    return new OperatorErrorsReq().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): OperatorErrorsReq {
+    return new OperatorErrorsReq().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: OperatorErrorsReq | PlainMessage<OperatorErrorsReq> | undefined, b: OperatorErrorsReq | PlainMessage<OperatorErrorsReq> | undefined): boolean {
+    return proto3.util.equals(OperatorErrorsReq, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.JobLogMessage
+ */
+export class JobLogMessage extends Message<JobLogMessage> {
+  /**
+   * @generated from field: uint64 created_at = 1;
+   */
+  createdAt = protoInt64.zero;
+
+  /**
+   * @generated from field: optional string operator_id = 2;
+   */
+  operatorId?: string;
+
+  /**
+   * @generated from field: optional int64 task_index = 3;
+   */
+  taskIndex?: bigint;
+
+  /**
+   * @generated from field: arroyo_api.JobLogLevel level = 4;
+   */
+  level = JobLogLevel.INFO;
+
+  /**
+   * @generated from field: string message = 5;
+   */
+  message = "";
+
+  /**
+   * @generated from field: string details = 6;
+   */
+  details = "";
+
+  constructor(data?: PartialMessage<JobLogMessage>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.JobLogMessage";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "created_at", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "operator_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 3, name: "task_index", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 4, name: "level", kind: "enum", T: proto3.getEnumType(JobLogLevel) },
+    { no: 5, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "details", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JobLogMessage {
+    return new JobLogMessage().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): JobLogMessage {
+    return new JobLogMessage().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): JobLogMessage {
+    return new JobLogMessage().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: JobLogMessage | PlainMessage<JobLogMessage> | undefined, b: JobLogMessage | PlainMessage<JobLogMessage> | undefined): boolean {
+    return proto3.util.equals(JobLogMessage, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.OperatorErrorsRes
+ */
+export class OperatorErrorsRes extends Message<OperatorErrorsRes> {
+  /**
+   * @generated from field: repeated arroyo_api.JobLogMessage messages = 1;
+   */
+  messages: JobLogMessage[] = [];
+
+  constructor(data?: PartialMessage<OperatorErrorsRes>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.OperatorErrorsRes";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "messages", kind: "message", T: JobLogMessage, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): OperatorErrorsRes {
+    return new OperatorErrorsRes().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): OperatorErrorsRes {
+    return new OperatorErrorsRes().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): OperatorErrorsRes {
+    return new OperatorErrorsRes().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: OperatorErrorsRes | PlainMessage<OperatorErrorsRes> | undefined, b: OperatorErrorsRes | PlainMessage<OperatorErrorsRes> | undefined): boolean {
+    return proto3.util.equals(OperatorErrorsRes, a, b);
   }
 }
 
@@ -5019,7 +5236,7 @@ export class EventSourceSourceConfig extends Message<EventSourceSourceConfig> {
     proto3.util.initPartial(data, this);
   }
 
-  static readonly runtime: typeof proto3 = proto3;
+  static readonly runtime = proto3;
   static readonly typeName = "arroyo_api.EventSourceSourceConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "connection", kind: "scalar", T: 9 /* ScalarType.STRING */ },

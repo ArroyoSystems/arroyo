@@ -34,6 +34,7 @@ import { DeleteJobReq, GetJobsReq, JobStatus } from '../../gen/api_pb';
 import React, { useEffect, useRef, useState } from 'react';
 import { FiCopy, FiXCircle } from 'react-icons/fi';
 import { ApiClient } from '../../main';
+import { formatDate } from '../../lib/util';
 
 interface ColumnDef {
   name: string;
@@ -84,10 +85,7 @@ const columns: Array<ColumnDef> = [
       if (s.startTime == null) {
         return '-';
       } else {
-        return new Intl.DateTimeFormat('en', {
-          dateStyle: 'short',
-          timeStyle: 'short',
-        }).format(new Date(Number(s.startTime) / 1000));
+        return formatDate(s.startTime);
       }
     },
   },

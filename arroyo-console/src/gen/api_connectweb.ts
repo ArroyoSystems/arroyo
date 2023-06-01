@@ -3,7 +3,7 @@
 /* eslint-disable */
 /* @ts-nocheck */
 
-import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq, DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSinksReq, GetSinksResp, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, SourceMetadataResp, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
+import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq, DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSinksReq, GetSinksResp, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, SourceMetadataResp, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
 import {MethodKind} from "@bufbuild/protobuf";
 
 /**
@@ -235,6 +235,15 @@ export const ApiGrpc = {
       name: "GetCheckpointDetail",
       I: CheckpointDetailsReq,
       O: CheckpointDetailsResp,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc arroyo_api.ApiGrpc.GetOperatorErrors
+     */
+    getOperatorErrors: {
+      name: "GetOperatorErrors",
+      I: OperatorErrorsReq,
+      O: OperatorErrorsRes,
       kind: MethodKind.Unary,
     },
     /**
