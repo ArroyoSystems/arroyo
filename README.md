@@ -23,6 +23,10 @@
     <img src="https://img.shields.io/github/commit-activity/m/ArroyoSystems/arroyo" alt="git commit activity" />
   </a>
   <img alt="CI" src="https://github.com/ArroyoSystems/arroyo/actions/workflows/ci.yml/badge.svg">
+
+  <a href="https://github.com/ArroyoSystems/arroyo/releases">
+    <img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/release/ArroyoSystems/arroyo?display_name=release">
+  </a>
 </h4>
 
 
@@ -67,17 +71,12 @@ There are already a number of existing streaming engines out there, including [A
 * _Designed for non-experts_: Arroyo cleanly separates the pipeline APIs from its internal implementation. You don't
     need to be a streaming expert to build real-time data pipelines.
 
-## Current state
-
-Arroyo is currently alpha. It is missing features and has known bugs. At this stage, it is likely to primarily be of
-interest to the Rust data processing community and contributors.
-
 ## Getting Started
 
 You can get started with a single node Arroyo cluster by running the following docker command:
 
 ```
-$ docker run -p 8000:8000 -p 8001:8001 ghcr.io/arroyosystems/arroyo-single:multi-arch
+$ docker run -p 8000:8000 -p 8001:8001 ghcr.io/arroyosystems/arroyo-single:latest
 ```
 
 Then, load the Web UI at http://localhost:8000.
