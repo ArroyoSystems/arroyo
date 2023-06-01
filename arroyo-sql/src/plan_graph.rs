@@ -576,8 +576,6 @@ impl PlanNode {
                         sort_key_type,
                         max_elements: *max_elements,
                     });
-                println!("sliding logical plan operator {:#?}", self);
-                println!("sliding physical plan operator {:#?}", operator);
                 operator
             }
             PlanOperator::TumblingTopN {
