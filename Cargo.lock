@@ -637,6 +637,7 @@ dependencies = [
  "quote",
  "regex",
  "serde",
+ "serde_json",
  "syn 1.0.109",
  "tokio",
 ]
@@ -707,7 +708,12 @@ dependencies = [
 name = "arroyo-types"
 version = "0.3.0"
 dependencies = [
+<<<<<<< HEAD
  "base64 0.21.2",
+=======
+ "anyhow",
+ "base64 0.21.0",
+>>>>>>> de0b4b3 (Draft version of date part and date extract)
  "bincode 2.0.0-rc.3",
  "serde",
  "serde_json",
@@ -5513,9 +5519,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.96"
+version = "1.0.97"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "057d394a50403bcac12672b2b18fb387ab6d289d957dab67dd201875391e52f1"
+checksum = "bdf3bf93142acad5821c99197022e170842cdbc1c30482b98750c688c640842a"
 dependencies = [
  "indexmap",
  "itoa",

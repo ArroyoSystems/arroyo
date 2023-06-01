@@ -2,6 +2,7 @@ mod full_query_tests;
 #[cfg(test)]
 mod tests {
     use arroyo_sql_macro::single_test_codegen;
+    use arroyo_types;
 
     // Casts
     single_test_codegen!(
@@ -1098,5 +1099,35 @@ mod tests {
             ..Default::default()
         },
         Some(String::from("two"))
+    );
+
+    single_test_codegen!(
+        "date_trunc",
+        "date_trunc(non_nullable_timestamp, 'month')",
+        arroyo_sql::TestStruct {
+            non_nullable_timestamp: arroyo_types::from_millis(1685659545809),
+            ..Default::default()
+        },
+        6
+    );
+
+    single_test_codegen!(
+        "date_part",
+        "date_part(non_nullable_timestamp, '(bar)(beque)')",
+        arroyo_sql::TestStruct {
+            non_nullable_timestamp: arroyo_types::from_millis(1685659545809),
+            ..Default::default()
+        },
+        "".to_string()
+    );
+
+    single_test_codegen!(
+        "extract",
+        "extract(non_nullable_timestamp, '(bar)(beque)')",
+        arroyo_sql::TestStruct {
+            non_nullable_timestamp: arroyo_types::from_millis(1685659545809),
+            ..Default::default()
+        },
+        "".to_string()
     );
 }
