@@ -78,6 +78,9 @@ RUN service postgresql start && \
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p arroyo-api/migrations
 
+# set git hash
+ENV VERGEN_GIT_SHA=$GIT_SHA
+
 # Build Arroyo
 RUN service postgresql start && \
     cargo build --release -p arroyo-compiler-service -p arroyo-controller -p arroyo-api && \
