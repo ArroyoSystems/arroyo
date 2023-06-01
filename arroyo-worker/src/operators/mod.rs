@@ -32,6 +32,20 @@ pub mod tumbling_aggregating_window;
 pub mod tumbling_top_n_window;
 pub mod windows;
 
+pub struct UserError {
+    name: String,
+    details: String,
+}
+
+impl UserError {
+    pub fn new(name: impl Into<String>, details: impl Into<String>) -> UserError {
+        UserError {
+            name: name.into(),
+            details: details.into(),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum SerializationMode {
     Json,
@@ -41,15 +55,16 @@ pub enum SerializationMode {
 }
 
 impl SerializationMode {
-    pub fn deserialize_slice<T: DeserializeOwned>(&self, msg: &[u8]) -> Result<T, String> {
+    pub fn deserialize_slice<T: DeserializeOwned>(&self, msg: &[u8]) -> Result<T, UserError> {
         match self {
             SerializationMode::Json => serde_json::from_slice(msg)
-                .map_err(|err| format!("Failed to deserialize message '{}' from json, with error {}",
-                String::from_utf8_lossy(msg), err)),
+                .map_err(|err|
+                    UserError::new("Deserialization error", format!("Failed to deserialize message '{}' from json, with error {}",
+                        String::from_utf8_lossy(msg), err))),
             SerializationMode::JsonSchemaRegistry => serde_json::from_slice(&msg[5..])
                 .map_err(|err|
-                    format!("Failed to deserialize message '{}' from confluent schema registry json, with error {}",
-                        String::from_utf8_lossy(msg), err)),
+                    UserError::new("Deserialization error", format!("Failed to deserialize message '{}' from confluent schema registry json, with error {}",
+                        String::from_utf8_lossy(msg), err))),
             SerializationMode::RawJson => {
                 let s = String::from_utf8_lossy(&msg);
                 let j = json! {
@@ -60,17 +75,20 @@ impl SerializationMode {
                 //  produce that value. However, without specialization I don't know how to get the compiler to emit
                 //  the optimized code that case.
                 serde_json::from_value(j)
-                    .map_err(|e| format!("Could not represent data as RawJson: {:?}", e))
+                    .map_err(|e| UserError::new("Deserialization error", format!("Could not represent data as RawJson: {:?}", e)))
             },
         }
     }
 
-    pub fn deserialize_str<T: DeserializeOwned>(&self, msg: &str) -> Result<T, String> {
+    pub fn deserialize_str<T: DeserializeOwned>(&self, msg: &str) -> Result<T, UserError> {
         match self {
             SerializationMode::Json => serde_json::from_str(msg).map_err(|err| {
-                format!(
-                    "Failed to deserialize message '{}' from json, with error {}",
-                    msg, err
+                UserError::new(
+                    "Deserialization error",
+                    format!(
+                        "Failed to deserialize message '{}' from json, with error {}",
+                        msg, err
+                    ),
                 )
             }),
             SerializationMode::JsonSchemaRegistry => {
@@ -84,8 +102,12 @@ impl SerializationMode {
                 // TODO: this is inefficient, because we know that T is RawJson in this case and can much more directly
                 //  produce that value. However, without specialization I don't know how to get the compiler to emit
                 //  the optimized code that case.
-                serde_json::from_value(j)
-                    .map_err(|e| format!("Could not represent data as RawJson: {:?}", e))
+                serde_json::from_value(j).map_err(|e| {
+                    UserError::new(
+                        "Deserialization error",
+                        format!("Could not represent data as RawJson: {:?}", e),
+                    )
+                })
             }
         }
     }
