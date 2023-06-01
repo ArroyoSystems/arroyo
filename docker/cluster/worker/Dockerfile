@@ -1,7 +1,12 @@
 FROM rust:1-slim-bookworm as builder
+ARG GIT_SHA
+
 WORKDIR /build_dir
 
 COPY docker/cluster/worker/copy_artifacts .
+
+# set git sha
+ENV VERGEN_GIT_SHA=$GIT_SHA
 RUN cargo build --release
 
 FROM debian:bookworm-slim as runner

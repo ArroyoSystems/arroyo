@@ -5,6 +5,7 @@ WORKDIR /opt/arroyo/src
 ARG MOLD_ARCH
 ARG PROTO_ARCH
 ARG PROM_ARCH
+ARG GIT_SHA
 
 RUN apt-get update
 RUN apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
@@ -77,6 +78,9 @@ RUN service postgresql start && \
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \
     refinery migrate -c refinery.toml -p arroyo-api/migrations
+
+# set git hash
+ENV VERGEN_GIT_SHA=$GIT_SHA
 
 # Build Arroyo
 RUN service postgresql start && \

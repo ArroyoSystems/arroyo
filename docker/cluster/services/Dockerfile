@@ -1,6 +1,7 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /app
 ARG PROTO_ARCH
+ARG GIT_SHA
 
 RUN apt-get update && \
     apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
@@ -38,6 +39,8 @@ COPY docker/refinery.toml refinery.toml
 
 COPY integ integ
 
+# set git hash
+ENV VERGEN_GIT_SHA=$GIT_SHA
 RUN service postgresql start && \
     sudo -u postgres psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;" && \
     sudo -u postgres createdb arroyo && \
