@@ -377,7 +377,7 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
             self.expirations.entry(timestamp).or_default().insert(key);
         } else {
             // If there are entries for this key, check if the new value is earlier than the earliest value.
-            let current_earliest = current_entries.first_key_value().unwrap().0.clone();
+            let current_earliest = *current_entries.first_key_value().unwrap().0;
             if timestamp < current_earliest {
                 // there definitely aren't any values at the new timestamp.
                 current_entries.insert(timestamp, vec![value]);

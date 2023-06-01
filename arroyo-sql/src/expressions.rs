@@ -1145,6 +1145,7 @@ impl CastExpression {
         }
     }
 
+    #[allow(clippy::if_same_then_else, clippy::needless_bool)]
     fn allowed_types(input_data_type: &DataType, output_data_type: &DataType) -> bool {
         // handle casts between strings and numerics.
         if (Self::is_numeric(input_data_type) || Self::is_string(input_data_type))
@@ -1154,9 +1155,8 @@ impl CastExpression {
         // handle date to string casts.
         } else if Self::is_date(input_data_type) && Self::is_string(output_data_type) {
             true
-        }
         // handle string to date casts.
-        else if Self::is_string(input_data_type) && Self::is_date(output_data_type) {
+        } else if Self::is_string(input_data_type) && Self::is_date(output_data_type) {
             true
         } else {
             false
@@ -2565,16 +2565,10 @@ impl CaseExpression {
                 // if there is a nullable default or it is missing, then it is nullable. Otherwise, it is not nullable
                 match default {
                     Some(default) => {
-                        if default.nullable() {
-                            true
-                        } else if pairs
-                            .iter()
-                            .any(|(_when_expr, then_expr)| then_expr.nullable())
-                        {
-                            true
-                        } else {
-                            false
-                        }
+                        default.nullable()
+                            || pairs
+                                .iter()
+                                .any(|(_when_expr, then_expr)| then_expr.nullable())
                     }
                     None => true,
                 }

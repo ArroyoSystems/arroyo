@@ -261,10 +261,10 @@ impl TypeDef {
 
     pub fn is_float(&self) -> bool {
         match self {
-            TypeDef::DataType(dt, _) => match dt {
-                DataType::Float16 | DataType::Float32 | DataType::Float64 => true,
-                _ => false,
-            },
+            TypeDef::DataType(dt, _) => matches!(
+                dt,
+                DataType::Float16 | DataType::Float32 | DataType::Float64
+            ),
             _ => false,
         }
     }

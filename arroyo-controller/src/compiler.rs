@@ -278,12 +278,12 @@ wasm-opt = false
         fs::create_dir_all(&dir)?;
 
         let cargo_path = dir.join("Cargo.toml");
-        fs::write(&cargo_path, cargo)?;
+        fs::write(cargo_path, cargo)?;
 
         let src = dir.join("src");
         fs::create_dir_all(&src)?;
         let src_file_path = src.join(src_file);
-        fs::write(&src_file_path, body)?;
+        fs::write(src_file_path, body)?;
         Ok(())
     }
 

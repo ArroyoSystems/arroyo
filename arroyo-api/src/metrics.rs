@@ -75,14 +75,13 @@ pub(crate) async fn get_metrics(
         }
 
         fn get_query(&self, job_id: &str, run_id: u64, rate: &str) -> String {
-            let query = match self {
+            match self {
                 BytesRecv => self.simple_query(BYTES_RECV, job_id, run_id, rate),
                 BytesSent => self.simple_query(BYTES_SENT, job_id, run_id, rate),
                 MessagesRecv => self.simple_query(MESSAGES_RECV, job_id, run_id, rate),
                 MessagesSent => self.simple_query(MESSAGES_SENT, job_id, run_id, rate),
                 Backpressure => self.backpressure_query(job_id, run_id),
-            };
-            return query;
+            }
         }
     }
 

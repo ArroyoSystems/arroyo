@@ -14,9 +14,9 @@ use arroyo_datastream::{auth_config_to_hashmap, Operator, Program, SinkConfig};
 use arroyo_rpc::grpc::api::create_sql_job::Sink;
 use arroyo_rpc::grpc::api::sink::SinkType;
 use arroyo_rpc::grpc::api::{
-    self, connection, create_pipeline_req, BuiltinSink, Connection, CreatePipelineReq,
-    CreateSqlJob, PipelineDef, PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError,
-    SqlErrors, Udf, UdfLanguage,
+    self, connection, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob,
+    PipelineDef, PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf,
+    UdfLanguage,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
@@ -56,8 +56,7 @@ where
         let s: Source = source.try_into().map_err(log_and_map)?;
         s.register(&mut schema_provider, auth_data);
     }
-    for connections in connections::get_connections(auth_data, tx).await? {
-        let connection: Connection = connections.try_into().map_err(log_and_map)?;
+    for connection in connections::get_connections(auth_data, tx).await? {
         schema_provider.add_connection(connection)
     }
 
@@ -219,7 +218,7 @@ pub(crate) async fn create_pipeline<'a>(
                 sql.udfs
                     .iter()
                     .map(|t| Udf {
-                        language: t.language.clone(),
+                        language: t.language,
                         definition: t.definition.clone(),
                     })
                     .collect(),
@@ -289,7 +288,7 @@ pub(crate) async fn create_pipeline<'a>(
             &pipeline_id,
             &version,
             &text,
-            &udfs.map(|t| serde_json::to_value(&t).unwrap()),
+            &udfs.map(|t| serde_json::to_value(t).unwrap()),
             &program,
         )
         .one()

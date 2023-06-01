@@ -111,13 +111,13 @@ impl SqlSource {
             ConnectionType::Http(http) => {
                 let mut path = connection_config.get("path").cloned().unwrap_or_default();
 
-                if path != "" && !path.starts_with("/") {
+                if !path.is_empty() && !path.starts_with('/') {
                     path = format!("/{}", path);
                 }
 
                 let events = connection_config
                     .get("events")
-                    .map(|e| e.split(",").map(|t| t.to_string()).collect())
+                    .map(|e| e.split(',').map(|t| t.to_string()).collect())
                     .unwrap_or_default();
 
                 Ok(SqlSource {

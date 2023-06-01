@@ -128,9 +128,8 @@ pub async fn start_service(service: CompileService) {
 
     let last_used = service.last_used.clone();
 
-    if let Some(idle_time) = std::env::var("IDLE_SHUTDOWN_MS")
-        .map(|t| Duration::from_millis(u64::from_str(&t).unwrap()))
-        .ok()
+    if let Ok(idle_time) =
+        std::env::var("IDLE_SHUTDOWN_MS").map(|t| Duration::from_millis(u64::from_str(&t).unwrap()))
     {
         tokio::spawn(async move {
             loop {
@@ -294,15 +293,12 @@ impl CompilerGrpc for CompileService {
 
         let req = request.into_inner();
 
-        self.compile(req)
-            .await
-            .map(|r| Response::new(r))
-            .map_err(|e| {
-                error!("Failed to compile: {:?}", e);
-                match e.kind() {
-                    ErrorKind::InvalidData => Status::unimplemented(e.to_string()),
-                    _ => Status::internal(e.to_string()),
-                }
-            })
+        self.compile(req).await.map(Response::new).map_err(|e| {
+            error!("Failed to compile: {:?}", e);
+            match e.kind() {
+                ErrorKind::InvalidData => Status::unimplemented(e.to_string()),
+                _ => Status::internal(e.to_string()),
+            }
+        })
     }
 }

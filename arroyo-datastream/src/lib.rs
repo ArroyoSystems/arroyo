@@ -724,7 +724,7 @@ impl Source<ImpulseEvent> for ImpulseSource {
 }
 
 pub fn auth_config_to_hashmap(config: Option<KafkaAuthConfig>) -> HashMap<String, String> {
-    match config.map(|config| config.auth_type).flatten() {
+    match config.and_then(|config| config.auth_type) {
         None | Some(AuthType::NoAuth(_)) => HashMap::default(),
         Some(AuthType::SaslAuth(sasl_auth)) => vec![
             ("security.protocol".to_owned(), sasl_auth.protocol),

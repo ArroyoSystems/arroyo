@@ -194,7 +194,7 @@ async fn server(pool: Pool) {
         Ok::<_, _>(res)
     });
 
-    let serve_dir = ServeDir::new(&asset_dir).not_found_service(fallback.clone());
+    let serve_dir = ServeDir::new(&asset_dir).not_found_service(fallback);
 
     // TODO: enable in development only!!!
     let cors = CorsLayer::new()

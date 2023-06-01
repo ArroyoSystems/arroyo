@@ -116,7 +116,7 @@ where
         }
 
         for (k, v) in &self.headers {
-            client = client.header(k, &v).unwrap();
+            client = client.header(k, v).unwrap();
         }
 
         let mut stream = client.build().stream();

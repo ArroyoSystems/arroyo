@@ -177,7 +177,7 @@ where
                                 ctx.collector.collect(Record {
                                     timestamp: from_millis(msg.timestamp().to_millis().unwrap() as u64),
                                     key: None,
-                                    value: self.serialization_mode.deserialize_slice(&v).unwrap(),
+                                    value: self.serialization_mode.deserialize_slice(v).unwrap(),
                                 }).await;
                                 offsets.insert(msg.partition(), msg.offset());
                                 rate_limiter.until_ready().await;
