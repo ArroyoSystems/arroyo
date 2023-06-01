@@ -1,0 +1,131 @@
+name: Docker Build
+
+on:
+  push:
+    branches:
+      - '*docker*'
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*' # Semver matching pattern with optional suffix
+
+permissions:
+  packages: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+        image_type:
+          - worker
+          - services
+          - compiler
+          - single
+        include:
+          - platform: linux/amd64
+            mold_arch: x86_64
+            proto_arch: x86_64
+            prom_arch: amd64
+            runs_on: buildjet-8vcpu-ubuntu-2204
+          - platform: linux/arm64
+            mold_arch: aarch64
+            proto_arch: aarch_64
+            prom_arch: arm64
+            runs_on: buildjet-8vcpu-ubuntu-2204-arm
+          - image_type: worker
+            dockerfile: docker/cluster/worker/Dockerfile
+          - image_type: services
+            dockerfile: docker/cluster/services/Dockerfile
+          - image_type: compiler
+            dockerfile: docker/cluster/compiler/Dockerfile
+          - image_type: single
+            dockerfile: docker/single/Dockerfile
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      # Get the repository's code
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker meta
+        id: arroyo-docker # you'll use this in the next step
+        uses: docker/metadata-action@v3
+        with:
+          images: |
+            ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+          flavor: |
+            prefix=${{ matrix.prom_arch }}-
+      - name: Set env
+        run: echo "GIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+      - name: Build and push
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            MOLD_ARCH=${{ matrix.mold_arch }}
+            PROTO_ARCH=${{ matrix.proto_arch }}
+            PROM_ARCH=${{ matrix.prom_arch }}
+            GIT_SHA=${{ env.GIT_SHA }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.arroyo-docker.outputs.tags }}
+          labels: ${{ steps.arroyo-docker.outputs.labels }}
+  manifest:
+    needs: build
+    strategy:
+      matrix:
+        image_type:
+          - worker
+          - services
+          - compiler
+          - single
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker meta
+        id: arroyo-docker # you'll use this in the next step
+        uses: docker/metadata-action@v3
+        with:
+          images: |
+            ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+      - name: Create and push Docker manifest
+        run: |
+          TAG=${{ steps.arroyo-docker.outputs.version }}
+          IMAGE=ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
+          docker manifest create   ${IMAGE}:${TAG} ${IMAGE}:arm64-${TAG} ${IMAGE}:amd64-${TAG}
+          docker manifest annotate ${IMAGE}:${TAG} ${IMAGE}:arm64-${TAG} --arch arm64
+          docker manifest annotate ${IMAGE}:${TAG} ${IMAGE}:amd64-${TAG} --arch amd64
+          docker manifest push     ${IMAGE}:${TAG}
