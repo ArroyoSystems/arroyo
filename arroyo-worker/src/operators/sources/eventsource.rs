@@ -11,9 +11,9 @@ use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::marker::PhantomData;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::select;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::operators::SerializationMode;
 
@@ -122,6 +122,9 @@ where
         let mut stream = client.build().stream();
         let events: HashSet<_> = self.events.iter().cloned().collect();
 
+        let mut last_reported_error = Instant::now();
+        let mut errors = 0;
+
         // since there's no way to partition across an event source, only read on the first task
         if ctx.task_info.task_index == 0 {
             loop {
@@ -145,7 +148,18 @@ where
                                                     }).await;
                                                 }
                                                 Err(e) => {
-                                                    warn!("Invalid message from EventSource: {:}", e);
+                                                    errors += 1;
+                                                    if last_reported_error.elapsed() > Duration::from_secs(30) {
+                                                        ctx.control_tx.send(
+                                                            ControlResp::Error {
+                                                                operator_id: ctx.task_info.operator_id.clone(),
+                                                                task_index: ctx.task_info.task_index.clone(),
+                                                                message: format!("{} x {}", e.name, errors),
+                                                                details: e.details,
+                                                        }).await.unwrap();
+                                                        errors = 0;
+                                                        last_reported_error = Instant::now();
+                                                    }
                                                 }
                                             }
 
@@ -160,7 +174,7 @@ where
                                 ctx.control_tx.send(
                                     ControlResp::Error {
                                         operator_id: ctx.task_info.operator_id.clone(),
-                                        task_index: ctx.task_info.task_index.clone(),
+                                        task_index: ctx.task_info.task_index,
                                         message: "Error while reading from EventSource".to_string(),
                                         details: format!("{:?}", e)}
                                 ).await.unwrap();
