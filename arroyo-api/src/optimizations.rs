@@ -3,7 +3,7 @@ use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::{Dfs, NodeRef};
-use petgraph::Direction::{self, Incoming, Outgoing};
+use petgraph::Direction::{Incoming, Outgoing};
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{parse_str, Type};
