@@ -69,8 +69,6 @@ COPY arroyo-console arroyo-console
 COPY integ integ
 COPY docker/refinery.toml refinery.toml
 
-COPY .git .git
-
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 
@@ -99,6 +97,7 @@ COPY docker/build_base pipeline/
 RUN cd pipeline && cargo build --release && cargo build --release
 RUN cd pipeline/wasm-fns && wasm-pack build
 COPY docker/single/supervisord.conf /opt/arroyo/src/docker/single/supervisord.conf
+COPY docker/single/entrypoint.sh /entrypoint.sh
 EXPOSE 8000 8001 9000 9190 9191
 RUN mkdir -p /tmp/arroyo/build
-CMD ["/usr/bin/supervisord", "-c", "/opt/arroyo/src/docker/single/supervisord.conf"]
+ENTRYPOINT ["/entrypoint.sh"]
