@@ -39,14 +39,17 @@ function formatDurationHMS(micros: number): string {
 
 const Checkpoints: React.FC<CheckpointsProps> = ({ client, job, checkpoints }) => {
   const [epoch, setEpoch] = useState<number | undefined>(undefined);
-  const { checkpoint } = useCheckpointDetails(client, job.jobStatus?.jobId, epoch);
+  const { checkpoint, checkpointLoading } = useCheckpointDetails(
+    client,
+    job.jobStatus?.jobId,
+    epoch
+  );
 
-  let details =
-    checkpoints.length > 0 ? (
-      <Text>Select checkpoint</Text>
-    ) : (
-      <Text textStyle="italic">No checkpoints</Text>
-    );
+  if (!checkpoints.length) {
+    return <Text textStyle="italic">No checkpoints</Text>;
+  }
+
+  let details = <Text>Select checkpoint</Text>;
 
   if (checkpoint != null) {
     let start = Number(checkpoint.overview?.startTime);

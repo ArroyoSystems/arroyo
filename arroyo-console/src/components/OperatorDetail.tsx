@@ -70,7 +70,7 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ operator_id, graph, met
     }
 
     return (
-      <Box className="operatorDetail" marginTop={10} border="1px solid #333" padding="10px">
+      <Box className="operatorDetail" marginTop={10} padding="10px">
         <HStack fontWeight="semibold">
           <Box>operator</Box>
           <Spacer />
