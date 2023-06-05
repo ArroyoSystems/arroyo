@@ -7,7 +7,7 @@ export interface LoadingProps {
 
 const Loading: React.FC<LoadingProps> = ({ size = 'xl' }) => {
   return (
-    <Flex border={'blue.900'} borderWidth={'1px'} justify={'center'} height={'75%'} p={8}>
+    <Flex justify={'center'} alignItems={'center'} height={'75%'} p={8}>
       <Spinner speed="0.65s" emptyColor="gray.200" color="blue.900" size={size} />
     </Flex>
   );

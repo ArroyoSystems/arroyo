@@ -1,14 +1,21 @@
 import {
+  BuiltinSink,
   CheckpointDetailsReq,
+  CreateUdf,
+  GetSinksReq,
+  GetSourcesReq,
   JobCheckpointsReq,
   JobDetailsReq,
   JobMetricsReq,
   OperatorErrorsReq,
+  PipelineGraphReq,
   StopType,
+  UdfLanguage,
 } from '../gen/api_pb';
 import { ApiClient } from '../main';
 import useSWR from 'swr';
 import { mutate as globalMutate } from 'swr';
+import { SinkOpt } from './types';
 
 // Keys
 
@@ -32,6 +39,18 @@ const operatorErrorsKey = (jobId?: string) => {
   return jobId ? { key: 'JobEvents', jobId } : null;
 };
 
+const pipelineGraphKey = (query?: string, udfInput?: string) => {
+  return query ? { key: 'PipelineGraph', query, udfInput } : null;
+};
+
+const sourcesKey = () => {
+  return { key: 'Sources' };
+};
+
+const sinksKey = () => {
+  return { key: 'Sinks' };
+};
+
 // JobDetailsReq
 
 const jobFetcher = (client: ApiClient) => {
@@ -50,7 +69,7 @@ const jobFetcher = (client: ApiClient) => {
 
 export const useJob = (client: ApiClient, jobId?: string) => {
   const { data, mutate, error } = useSWR(jobDetailsKey(jobId), jobFetcher(client), {
-    refreshInterval: 1000,
+    refreshInterval: 2000,
   });
 
   const updateJob = async (params: { parallelism?: number; stop?: StopType }) => {
@@ -71,6 +90,7 @@ export const useJob = (client: ApiClient, jobId?: string) => {
     job: data,
     jobError: error,
     updateJob,
+    refreshJob: mutate,
   };
 };
 
@@ -148,10 +168,14 @@ const checkpointDetailsFetcher = (client: ApiClient) => {
 };
 
 export const useCheckpointDetails = (client: ApiClient, jobId?: string, epoch?: number) => {
-  const { data } = useSWR(checkpointDetailsKey(jobId, epoch), checkpointDetailsFetcher(client));
+  const { data, isLoading } = useSWR(
+    checkpointDetailsKey(jobId, epoch),
+    checkpointDetailsFetcher(client)
+  );
 
   return {
     checkpoint: data,
+    checkpointLoading: isLoading,
   };
 };
 
@@ -178,5 +202,81 @@ export const useOperatorErrors = (client: ApiClient, jobId?: string) => {
 
   return {
     operatorErrors: data,
+  };
+};
+
+// PipelineGraphReq
+
+const PipelineGraphFetcher = (client: ApiClient) => {
+  return async (params: { key: string; query?: string; udfInput: string }) => {
+    return await (
+      await (
+        await client
+      )()
+    ).graphForPipeline(
+      new PipelineGraphReq({
+        query: params.query,
+        udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: params.udfInput })],
+      })
+    );
+  };
+};
+
+export const usePipelineGraph = (client: ApiClient, query?: string, udfInput?: string) => {
+  const { data } = useSWR(pipelineGraphKey(query, udfInput), PipelineGraphFetcher(client));
+
+  return {
+    pipelineGraph: data,
+  };
+};
+
+// GetSourcesReq
+
+const SourcesFetcher = (client: ApiClient) => {
+  return async (params: { key: string }) => {
+    return await (await (await client)()).getSources(new GetSourcesReq({}));
+  };
+};
+
+export const useSources = (client: ApiClient) => {
+  const { data, isLoading } = useSWR(sourcesKey(), SourcesFetcher(client));
+
+  return {
+    sources: data,
+    sourcesLoading: isLoading,
+  };
+};
+
+// GetSinksReq
+
+const SinksFetcher = (client: ApiClient) => {
+  return async (params: { key: string }) => {
+    return await (await (await client)()).getSinks(new GetSinksReq({}));
+  };
+};
+
+export const useSinks = (client: ApiClient) => {
+  const { data } = useSWR(sinksKey(), SinksFetcher(client));
+
+  let allSinks: Array<SinkOpt> = [
+    { name: 'Web', value: { case: 'builtin', value: BuiltinSink.Web } },
+    { name: 'Log', value: { case: 'builtin', value: BuiltinSink.Log } },
+    { name: 'Null', value: { case: 'builtin', value: BuiltinSink.Null } },
+  ];
+
+  if (data) {
+    data.sinks.forEach(sink => {
+      allSinks.push({
+        name: sink.name,
+        value: {
+          case: 'user',
+          value: sink.name,
+        },
+      });
+    });
+  }
+
+  return {
+    sinks: allSinks,
   };
 };

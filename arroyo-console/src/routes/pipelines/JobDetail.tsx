@@ -114,18 +114,18 @@ export function JobDetail({ client }: { client: ApiClient }) {
     }
 
     const operatorsTab = (
-      <TabPanel h="100%">
-        <Flex h="100%">
-          <Box flex="1">
-            <PipelineGraph
-              graph={job.jobGraph}
-              metrics={metrics}
-              setActiveOperator={setActiveOperator}
-              activeOperator={activeOperator}
-            />
-          </Box>
-          <Stack w="500px" className="pipelineInfo" spacing={2}>
-            {job?.jobStatus?.failureMessage ? (
+      <TabPanel display={'flex'} height={'100%'}>
+        <Flex flex="1" height={'100%'}>
+          <PipelineGraph
+            graph={job.jobGraph}
+            metrics={metrics}
+            setActiveOperator={setActiveOperator}
+            activeOperator={activeOperator}
+          />
+        </Flex>
+        <Stack w="500px" className="pipelineInfo" spacing={2} overflow={'scroll'}>
+          {job?.jobStatus?.failureMessage ? (
+            <Box>
               <Alert status="error" marginBottom={5}>
                 <Box>
                   <AlertTitle>Job Failed</AlertTitle>
@@ -134,19 +134,19 @@ export function JobDetail({ client }: { client: ApiClient }) {
                 <Spacer />
                 <AlertIcon alignSelf="flex-start" />
               </Alert>
-            ) : null}
+            </Box>
+          ) : null}
 
-            <Box className="field">
-              <Box className="fieldName">Name</Box>
-              <Box className="fieldValue">{job.jobStatus?.pipelineName}</Box>
-            </Box>
-            <Box className="field">
-              <Box className="fieldName">State</Box>
-              <Box className="fieldValue">{job.jobStatus?.state}</Box>
-            </Box>
-            {operatorDetail}
-          </Stack>
-        </Flex>
+          <Box className="field">
+            <Box className="fieldName">Name</Box>
+            <Box className="fieldValue">{job.jobStatus?.pipelineName}</Box>
+          </Box>
+          <Box className="field">
+            <Box className="fieldName">State</Box>
+            <Box className="fieldValue">{job.jobStatus?.state}</Box>
+          </Box>
+          {operatorDetail}
+        </Stack>
       </TabPanel>
     );
 
@@ -193,38 +193,38 @@ export function JobDetail({ client }: { client: ApiClient }) {
     );
 
     const errorsTab = (
-      <TabPanel>
+      <TabPanel padding={5}>
         <OperatorErrors operatorErrors={operatorErrors} />
       </TabPanel>
     );
 
     inner = (
-      <Tabs h={'100%'}>
-        <div>
-          <TabList>
-            <Tab>Operators</Tab>
-            <Tab>Outputs</Tab>
-            <Tab>Checkpoints</Tab>
-            <Tab>Query</Tab>
-            <Tab>UDFs</Tab>
-            <Tab>
-              Errors{' '}
-              {(operatorErrors?.messages?.length || 0) > 0 && (
-                <Badge ml={2} colorScheme="red" size={'xs'}>
-                  {operatorErrors!.messages.length}
-                </Badge>
-              )}
-            </Tab>
-          </TabList>
-        </div>
-        <TabPanels h={'100%'}>
-          {operatorsTab}
-          {outputsTab}
-          {checkpointsTab}
-          {queryTab}
-          {udfsTab}
-          {errorsTab}
-        </TabPanels>
+      <Tabs display={'Flex'} flexDirection={'column'} width={'100%'}>
+        <TabList>
+          <Tab>Operators</Tab>
+          <Tab>Outputs</Tab>
+          <Tab>Checkpoints</Tab>
+          <Tab>Query</Tab>
+          <Tab>UDFs</Tab>
+          <Tab>
+            Errors{' '}
+            {(operatorErrors?.messages?.length || 0) > 0 && (
+              <Badge ml={2} colorScheme="red" size={'xs'}>
+                {operatorErrors!.messages.length}
+              </Badge>
+            )}
+          </Tab>
+        </TabList>
+        <Flex minH={0} flex={1}>
+          <TabPanels>
+            {operatorsTab}
+            {outputsTab}
+            {checkpointsTab}
+            {queryTab}
+            {udfsTab}
+            {errorsTab}
+          </TabPanels>
+        </Flex>
       </Tabs>
     );
   }
@@ -261,24 +261,30 @@ export function JobDetail({ client }: { client: ApiClient }) {
     );
   }
 
+  const headerArea = (
+    <Flex>
+      <Box p={5}>
+        <Text fontSize={20}>
+          Pipeline {id} <Badge>{job?.jobStatus?.state}</Badge>
+        </Text>
+      </Box>
+      <Spacer />
+      <Box p={5}>
+        <ButtonGroup>
+          {editPipelineButton}
+          {actionButton}
+        </ButtonGroup>
+      </Box>
+    </Flex>
+  );
+
   return (
-    <Box top={0} bottom={0} right={0} left={200} position="absolute" overflowY="hidden">
-      <Flex>
-        <Box p={5}>
-          <Text fontSize={20}>
-            Pipeline {id} <Badge>{job?.jobStatus?.state}</Badge>
-          </Text>
-        </Box>
-        <Spacer />
-        <Box p={5}>
-          <ButtonGroup>
-            {editPipelineButton}
-            {actionButton}
-          </ButtonGroup>
-        </Box>
+    <Flex height={'100vh'} flexDirection={'column'}>
+      {headerArea}
+      <Flex flexGrow={1} minHeight={'0'}>
+        {inner}
       </Flex>
-      {inner}
       {configModal}
-    </Box>
+    </Flex>
   );
 }

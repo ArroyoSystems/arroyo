@@ -13,6 +13,10 @@ const OperatorErrors: React.FC<OperatorErrorsProps> = ({ operatorErrors }) => {
     return <Loading />;
   }
 
+  if (operatorErrors && operatorErrors.messages.length == 0) {
+    return <>No errors to display</>;
+  }
+
   const tableBody = (
     <Tbody>
       {operatorErrors.messages.map(m => {
@@ -29,8 +33,8 @@ const OperatorErrors: React.FC<OperatorErrorsProps> = ({ operatorErrors }) => {
     </Tbody>
   );
 
-  const table = (
-    <TableContainer padding={5}>
+  return (
+    <TableContainer>
       <Table variant="striped" w={'100%'}>
         <Thead>
           <Tr>
@@ -45,12 +49,6 @@ const OperatorErrors: React.FC<OperatorErrorsProps> = ({ operatorErrors }) => {
       </Table>
     </TableContainer>
   );
-
-  if (operatorErrors && operatorErrors.messages.length == 0) {
-    return <>No errors to display</>;
-  }
-
-  return <>{table}</>;
 };
 
 export default OperatorErrors;
