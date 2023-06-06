@@ -14,7 +14,11 @@ use tracing::{error, info, warn};
 use anyhow::anyhow;
 use arroyo_state::{parquet::StorageClient, BackingStore, StateBackend};
 
-use crate::{job_controller::JobController, queries::controller_queries};
+use crate::{
+    job_controller::JobController,
+    queries::controller_queries,
+    states::{compiling::Compiling, stop_if_desired_non_running},
+};
 use crate::{schedulers::SchedulerError, JobMessage};
 use crate::{
     schedulers::StartPipelineReq,
@@ -142,28 +146,18 @@ async fn handle_worker_connect<'a>(
     Ok(())
 }
 
-#[async_trait::async_trait]
-impl State for Scheduling {
-    fn name(&self) -> &'static str {
-        "Scheduling"
-    }
+enum Either<A, B> {
+    Left(A),
+    Right(B),
+}
 
-    async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
-        // clear out any existing workers for this job
-        if let Err(e) = ctx.scheduler.stop_workers(&ctx.config.id, None, true).await {
-            warn!(
-                message = "failed to clean cluster prior to scheduling",
-                job_id = ctx.config.id,
-                error = format!("{:?}", e)
-            )
-        }
-
-        ctx.program
-            .update_parallelism(&ctx.config.parallelism_overrides);
-
-        let slots_needed = slots_for_job(ctx.program);
-
-        // start workers
+impl Scheduling {
+    async fn start_workers<'a>(
+        self: Box<Self>,
+        ctx: &mut Context<'a>,
+        slots_needed: usize,
+    ) -> Result<Either<Transition, Box<Self>>, StateError> {
+        let start = Instant::now();
         loop {
             match ctx
                 .scheduler
@@ -187,6 +181,28 @@ impl State for Scheduling {
                         slots_for_job = slots_needed,
                         slots_needed = s
                     );
+                    if start.elapsed() > STARTUP_TIME {
+                        return Err(fatal(
+                            "could not get enough slots",
+                            anyhow!("scheduler error -- needed {} slots", slots_needed),
+                        ));
+                    }
+                }
+                Err(SchedulerError::CompilationNeeded) => {
+                    warn!(
+                        message = "pipeline binary not found",
+                        job_id = ctx.config.id,
+                        path = ctx.status.pipeline_path
+                    );
+
+                    ctx.status.pipeline_path = None;
+                    ctx.status.wasm_path = None;
+
+                    // TODO: this introduces the possiblility of an infinite loop, if compiling succeeds but for some
+                    //   reason we are not able to read the pipeline binary that it produces (e.g., we may have perms
+                    //   to write to S3, but not read). Addressing that will take a more sophisticated error handling
+                    //   system that is able to track errors across multiple states.
+                    return Ok(Either::Left(Transition::next(*self, Compiling {})));
                 }
                 Err(SchedulerError::Other(s)) => {
                     return Err(ctx.retryable(
@@ -200,6 +216,37 @@ impl State for Scheduling {
 
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
+
+        Ok(Either::Right(self))
+    }
+}
+
+#[async_trait::async_trait]
+impl State for Scheduling {
+    fn name(&self) -> &'static str {
+        "Scheduling"
+    }
+
+    async fn next(mut self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+        // clear out any existing workers for this job
+        if let Err(e) = ctx.scheduler.stop_workers(&ctx.config.id, None, true).await {
+            warn!(
+                message = "failed to clean cluster prior to scheduling",
+                job_id = ctx.config.id,
+                error = format!("{:?}", e)
+            )
+        }
+
+        ctx.program
+            .update_parallelism(&ctx.config.parallelism_overrides);
+
+        let slots_needed: usize = slots_for_job(ctx.program);
+        self = match self.start_workers(ctx, slots_needed).await? {
+            Either::Left(t) => {
+                return Ok(t);
+            }
+            Either::Right(s) => s,
+        };
 
         // wait for them to connect and make outbound RPC connections
         let mut workers = HashMap::new();
@@ -215,6 +262,9 @@ impl State for Scheduling {
             tokio::select! {
                 val = ctx.rx.recv() => {
                     match val {
+                        Some(JobMessage::ConfigUpdate(c)) => {
+                            stop_if_desired_non_running!(self, &c);
+                        }
                         Some(msg) => {
                             handle_worker_connect(msg, &mut workers, worker_connects.clone(), &mut handles, ctx).await?;
                         }
@@ -347,6 +397,9 @@ impl State for Scheduling {
                     ..
                 }) => {
                     started.insert((operator_id, operator_subtask));
+                }
+                Some(JobMessage::ConfigUpdate(c)) => {
+                    stop_if_desired_non_running!(self, &c);
                 }
                 Some(msg) => {
                     ctx.handle(msg)?;

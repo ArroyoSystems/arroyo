@@ -1,21 +1,17 @@
 use std::time::{Duration, Instant};
 
-use arroyo_rpc::grpc::{self};
-
 use time::OffsetDateTime;
 
 use tracing::error;
 
-use crate::states::fatal;
+use crate::states::finishing::Finishing;
 use crate::states::recovering::Recovering;
 use crate::states::rescaling::Rescaling;
+use crate::states::{fatal, stop_if_desired_running};
 use crate::JobMessage;
 use crate::{job_controller::ControllerProgress, states::StateError};
-use crate::{states::finishing::Finishing, types::public::StopMode};
 
-use super::{
-    checkpoint_stopping::CheckpointStopping, stopping::Stopping, Context, State, Transition,
-};
+use super::{Context, State, Transition};
 
 // after this amount of time, we consider the job to be healthy and reset the restarts counter
 const HEALTHY_DURATION: Duration = Duration::from_secs(2 * 60);
@@ -26,38 +22,6 @@ const RESTARTS_ALLOWED: usize = 10;
 #[derive(Debug)]
 pub struct Running {}
 
-macro_rules! stop_if_desired {
-    ($self: ident, $config: expr) => {
-        match $config.stop_mode {
-            StopMode::checkpoint => {
-                return Ok(Transition::next(*$self, CheckpointStopping {}));
-            }
-            StopMode::graceful => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: grpc::StopMode::Graceful,
-                    },
-                ));
-            }
-            StopMode::immediate => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: grpc::StopMode::Immediate,
-                    },
-                ));
-            }
-            StopMode::force => {
-                todo!("implement force stop mode")
-            }
-            StopMode::none => {
-                // do nothing
-            }
-        }
-    };
-}
-
 #[async_trait::async_trait]
 impl State for Running {
     fn name(&self) -> &'static str {
@@ -65,7 +29,7 @@ impl State for Running {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
-        stop_if_desired!(self, ctx.config);
+        stop_if_desired_running!(self, ctx.config);
 
         let running_start = Instant::now();
 
@@ -83,7 +47,7 @@ impl State for Running {
                 msg = ctx.rx.recv() => {
                     match msg {
                         Some(JobMessage::ConfigUpdate(c)) => {
-                            stop_if_desired!(self, &c);
+                            stop_if_desired_running!(self, &c);
 
                             let job_controller = ctx.job_controller.as_ref().unwrap();
                             for (op, p) in &c.parallelism_overrides {
@@ -152,7 +116,7 @@ impl State for Running {
                     return Ok(Transition::next(
                         *self,
                         Stopping {
-                            stop_mode: grpc::StopMode::Immediate,
+                            stop_mode: StopBehavior::StopJob(grpc::StopMode::Immediate),
                         },
                     ));
                 }
