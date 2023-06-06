@@ -1,7 +1,8 @@
+use tokio::sync::oneshot;
 use tracing::info;
 
-use crate::compiler::ProgramCompiler;
-use crate::states::StateError;
+use crate::states::{stop_if_desired_non_running, StateError};
+use crate::{compiler::ProgramCompiler, JobMessage};
 
 use super::{scheduling::Scheduling, Context, State, Transition};
 
@@ -35,15 +36,34 @@ impl State for Compiling {
             ctx.program.clone(),
         );
 
-        match pc.compile().await {
-            Ok(res) => {
-                ctx.status.pipeline_path = Some(res.pipeline_path);
-                ctx.status.wasm_path = Some(res.wasm_path);
-                Ok(Transition::next(*self, Scheduling {}))
+        let (tx, mut rx) = oneshot::channel();
+        tokio::task::spawn(async move {
+            tx.send(pc.compile().await).unwrap();
+        });
+        loop {
+            tokio::select! {
+                val = &mut rx => match val.unwrap() {
+                    Ok(res) => {
+                        ctx.status.pipeline_path = Some(res.pipeline_path);
+                        ctx.status.wasm_path = Some(res.wasm_path);
+                        return Ok(Transition::next(*self, Scheduling {}));
+                    }
+                    Err(e) => return Err(e
+                        .downcast::<StateError>()
+                        .unwrap_or_else(|e| ctx.retryable(self, "Query compilation failed", e, 10))),
+                },
+                msg = ctx.rx.recv() => match msg {
+                    Some(JobMessage::ConfigUpdate(c)) => {
+                        stop_if_desired_non_running!(self, &c);
+                    }
+                    Some(m) => {
+                        ctx.handle(m).unwrap();
+                    }
+                    None => {
+                        panic!("Job message channel closed: {}", ctx.config.id);
+                    }
+                }
             }
-            Err(e) => Err(e
-                .downcast::<StateError>()
-                .unwrap_or_else(|e| ctx.retryable(self, "Query compilation failed", e, 10))),
         }
     }
 }

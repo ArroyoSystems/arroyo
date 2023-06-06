@@ -164,6 +164,8 @@ impl TransitionTo<Compiling> for Created {}
 
 impl TransitionTo<Compiling> for Stopped {}
 
+impl TransitionTo<Compiling> for Scheduling {}
+
 impl TransitionTo<Scheduling> for Compiling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
@@ -187,6 +189,9 @@ impl TransitionTo<Running> for Scheduling {
 
 impl TransitionTo<CheckpointStopping> for Running {}
 impl TransitionTo<Stopping> for Running {}
+impl TransitionTo<Stopping> for Scheduling {}
+impl TransitionTo<Stopping> for Compiling {}
+impl TransitionTo<Stopping> for Rescaling {}
 impl TransitionTo<Finishing> for Running {}
 impl TransitionTo<Recovering> for Running {
     fn update_status(&self) -> TransitionFn {
@@ -204,7 +209,6 @@ impl TransitionTo<Scheduling> for Rescaling {
         })
     }
 }
-impl TransitionTo<Stopping> for Rescaling {}
 
 impl TransitionTo<Compiling> for Recovering {}
 
@@ -231,6 +235,86 @@ impl TransitionTo<Finished> for Finishing {
         Box::new(done_transition)
     }
 }
+
+// Macro to handle stopping behavior from a running state, where we want to
+// support checkpoint stopping
+macro_rules! stop_if_desired_running {
+    ($self: ident, $config: expr) => {
+        use crate::states::checkpoint_stopping::CheckpointStopping;
+        use crate::states::stopping::StopBehavior;
+        use crate::states::stopping::Stopping;
+        use crate::types::public::StopMode;
+        use arroyo_rpc::grpc;
+        match $config.stop_mode {
+            StopMode::checkpoint => {
+                return Ok(Transition::next(*$self, CheckpointStopping {}));
+            }
+            StopMode::graceful => {
+                return Ok(Transition::next(
+                    *$self,
+                    Stopping {
+                        stop_mode: StopBehavior::StopJob(grpc::StopMode::Graceful),
+                    },
+                ));
+            }
+            StopMode::immediate => {
+                return Ok(Transition::next(
+                    *$self,
+                    Stopping {
+                        stop_mode: StopBehavior::StopJob(grpc::StopMode::Immediate),
+                    },
+                ));
+            }
+            StopMode::force => {
+                return Ok(Transition::next(
+                    *$self,
+                    Stopping {
+                        stop_mode: StopBehavior::StopWorkers,
+                    },
+                ));
+            }
+            StopMode::none => {
+                // do nothing
+            }
+        }
+    };
+}
+
+// macro to handle stopping behavior from a state where the job is not current running
+// (like compiling / scheduling / etc.). in this case, there's nothing active to checkpoint
+// so we just move to stopping all cases
+macro_rules! stop_if_desired_non_running {
+    ($self: ident, $config: expr) => {
+        use crate::states::stopping::StopBehavior;
+        use crate::states::stopping::Stopping;
+        use crate::types::public::StopMode;
+        use arroyo_rpc::grpc;
+        match $config.stop_mode {
+            StopMode::checkpoint | StopMode::graceful | StopMode::immediate => {
+                return Ok(Transition::next(
+                    *$self,
+                    Stopping {
+                        stop_mode: StopBehavior::StopJob(grpc::StopMode::Immediate),
+                    },
+                ));
+            }
+            StopMode::force => {
+                return Ok(Transition::next(
+                    *$self,
+                    Stopping {
+                        stop_mode: StopBehavior::StopWorkers,
+                    },
+                ));
+            }
+            StopMode::none => {
+                // do nothing
+            }
+        }
+    };
+}
+
+pub(crate) use stop_if_desired_non_running;
+pub(crate) use stop_if_desired_running;
 
 pub struct Context<'a> {
     config: JobConfig,

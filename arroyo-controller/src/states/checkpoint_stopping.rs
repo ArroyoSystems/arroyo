@@ -2,7 +2,10 @@ use arroyo_rpc::grpc;
 
 use crate::{states::StateError, JobMessage};
 
-use super::{stopping::Stopping, Context, State, Stopped, Transition};
+use super::{
+    stopping::{StopBehavior, Stopping},
+    Context, State, Stopped, Transition,
+};
 
 #[derive(Debug)]
 pub struct CheckpointStopping {}
@@ -54,7 +57,7 @@ impl State for CheckpointStopping {
                             return Ok(Transition::next(
                                 *self,
                                 Stopping {
-                                    stop_mode: grpc::StopMode::Immediate,
+                                    stop_mode: StopBehavior::StopJob(grpc::StopMode::Immediate),
                                 },
                             ));
                         }

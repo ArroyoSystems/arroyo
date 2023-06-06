@@ -100,6 +100,13 @@ pub struct StartPipelineReq {
     pub env_vars: HashMap<String, String>,
 }
 
+async fn get_binaries(req: &StartPipelineReq) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
+    let pipeline = get_from_object_store(&req.pipeline_path).await?;
+    let wasm = get_from_object_store(&req.wasm_path).await?;
+
+    Ok((pipeline, wasm))
+}
+
 #[async_trait::async_trait]
 impl Scheduler for ProcessScheduler {
     async fn start_workers(
@@ -110,18 +117,16 @@ impl Scheduler for ProcessScheduler {
 
         let mut slots_scheduled = 0;
 
-        let pipeline = get_from_object_store(&start_pipeline_req.pipeline_path)
-            .await
-            .unwrap();
-        let wasm = get_from_object_store(&start_pipeline_req.wasm_path)
-            .await
-            .unwrap();
         let base_path = PathBuf::from_str(&format!(
             "/tmp/arroyo-process/{}",
             start_pipeline_req.job_id
         ))
         .unwrap();
         tokio::fs::create_dir_all(&base_path).await.unwrap();
+
+        let (pipeline, wasm) = get_binaries(&start_pipeline_req)
+            .await
+            .map_err(|_| SchedulerError::CompilationNeeded)?;
 
         let pipeline_path = base_path.join("pipeline");
 
@@ -337,6 +342,7 @@ pub struct NodeScheduler {
 pub enum SchedulerError {
     NotEnoughSlots { slots_needed: usize },
     Other(String),
+    CompilationNeeded,
 }
 
 impl NodeScheduler {
@@ -467,12 +473,9 @@ impl Scheduler for NodeScheduler {
         &self,
         start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError> {
-        let binary = get_from_object_store(&start_pipeline_req.pipeline_path)
+        let (binary, wasm) = get_binaries(&start_pipeline_req)
             .await
-            .unwrap();
-        let wasm = get_from_object_store(&start_pipeline_req.wasm_path)
-            .await
-            .unwrap();
+            .map_err(|_| SchedulerError::CompilationNeeded)?;
 
         // TODO: make this locking more fine-grained
         let mut state = self.state.lock().await;

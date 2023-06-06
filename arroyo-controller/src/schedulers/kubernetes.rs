@@ -70,7 +70,7 @@ impl KubernetesScheduler {
                         [
                             ("cpu".to_string(), serde_json::from_str("\"400m\"").unwrap()),
                             (
-                                "mem".to_string(),
+                                "memory".to_string(),
                                 serde_json::from_str("\"200Mi\"").unwrap(),
                             ),
                         ]

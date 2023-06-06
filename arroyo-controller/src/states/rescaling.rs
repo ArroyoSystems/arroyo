@@ -1,8 +1,6 @@
-use arroyo_rpc::grpc;
+use crate::{states::stop_if_desired_non_running, JobMessage};
 
-use crate::JobMessage;
-
-use super::{scheduling::Scheduling, stopping::Stopping, Context, State, StateError, Transition};
+use super::{scheduling::Scheduling, Context, State, StateError, Transition};
 
 #[derive(Debug)]
 pub struct Rescaling {}
@@ -49,22 +47,7 @@ impl State for Rescaling {
                     }
                 }
                 JobMessage::ConfigUpdate(c) => {
-                    match c.stop_mode {
-                        crate::types::public::StopMode::immediate => {
-                            return Ok(Transition::next(
-                                *self,
-                                Stopping {
-                                    stop_mode: grpc::StopMode::Immediate,
-                                },
-                            ));
-                        }
-                        crate::types::public::StopMode::force => {
-                            todo!("implement force stop mode");
-                        }
-                        _ => {
-                            // do nothing
-                        }
-                    }
+                    stop_if_desired_non_running!(self, &c);
                 }
                 _ => {
                     // ignore other messages
