@@ -74,6 +74,8 @@ spec:
         - name: K8S_WORKER_IMAGE_PULL_POLICY
           value: "{{ .Values.worker.image.pullPolicy }}"
         # TODO: image pull secret
+        - name: K8S_WORKER_SERVICE_ACCOUNT_NAME
+          value: "{{ template "arroyo.serviceAccountName" . }}"
         - name: K8S_WORKER_RESOURCES
           value: {{ .Values.worker.resources | toYaml | quote }}
         - name: K8S_WORKER_SLOTS
