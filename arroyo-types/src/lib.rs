@@ -66,7 +66,7 @@ pub const OUTPUT_DIR_ENV: &str = "OUTPUT_DIR";
 // kubernetes scheduler configuration
 pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
 pub const K8S_WORKER_NAME_ENV: &str = "K8S_WORKER_NAME";
-pub const K8S_WORKER_IMAGE_ENV: &str = "K8S_IMAGE";
+pub const K8S_WORKER_IMAGE_ENV: &str = "K8S_WORKER_IMAGE";
 pub const K8S_WORKER_IMAGE_PULL_POLICY_ENV: &str = "K8S_WORKER_IMAGE_PULL_POLICY";
 pub const K8S_WORKER_LABELS_ENV: &str = "K8S_WORKER_LABELS";
 pub const K8S_WORKER_ANNOTATIONS_ENV: &str = "K8S_WORKER_ANNOTATIONS";
