@@ -10,11 +10,11 @@ use tonic::Status;
 use tracing::log::info;
 use tracing::warn;
 
-use arroyo_datastream::{auth_config_to_hashmap, Operator, Program, SinkConfig};
+use arroyo_datastream::{Operator, Program, SinkConfig};
 use arroyo_rpc::grpc::api::create_sql_job::Sink;
 use arroyo_rpc::grpc::api::sink::SinkType;
 use arroyo_rpc::grpc::api::{
-    self, connection, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob,
+    self, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob,
     PipelineDef, PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf,
     UdfLanguage,
 };

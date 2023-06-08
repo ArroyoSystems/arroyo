@@ -641,20 +641,10 @@ impl PlanNode {
             },
             PlanOperator::Sink(_sink_name, sql_sink) => {
                 match &sql_sink.sink_config {
-                    arroyo_datastream::SinkConfig::Kafka {
-                        bootstrap_servers,
-                        topic,
-                        client_configs,
+                    arroyo_datastream::SinkConfig::Connection {
+                        connection, config
                     } => {
-                        arroyo_datastream::Operator::KafkaSink {
-                            topic: topic.clone(),
-                            // split by comma
-                            bootstrap_servers: bootstrap_servers
-                                .split(',')
-                                .map(|s| s.to_string())
-                                .collect(),
-                            client_configs: client_configs.clone(),
-                        }
+                        todo!()
                     }
                     arroyo_datastream::SinkConfig::Console => {
                         arroyo_datastream::Operator::ConsoleSink

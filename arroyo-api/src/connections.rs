@@ -1,6 +1,5 @@
 use arroyo_rpc::grpc::api::DeleteConnectionReq;
 use arroyo_rpc::grpc::api::{
-    connection::ConnectionType, create_connection_req::ConnectionType as ReqConnectionType,
     Connection, CreateConnectionReq, TestSourceMessage,
 };
 use cornucopia_async::GenericClient;
@@ -11,7 +10,6 @@ use crate::handle_delete;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnection;
 use crate::testers::HttpTester;
-use crate::types::public;
 use crate::{handle_db_error, log_and_map, required_field, testers::KafkaTester, AuthData};
 
 pub(crate) async fn create_connection(
@@ -19,22 +17,17 @@ pub(crate) async fn create_connection(
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<(), Status> {
-    let (typ, v) = match req
-        .connection_type
-        .ok_or_else(|| required_field("connection.connection_type"))?
-    {
-        ReqConnectionType::Kafka(k) => (
-            public::ConnectionType::kafka,
-            serde_json::to_value(k).map_err(log_and_map)?,
-        ),
-        ReqConnectionType::Kinesis(_) => {
-            return Err(Status::failed_precondition("Kinesis is not yet supported"));
+    match req.connection_type.as_str() {
+        "kafka" => {
+            // TODO: validate config
         }
-        ReqConnectionType::Http(c) => (
-            public::ConnectionType::http,
-            serde_json::to_value(c).map_err(log_and_map)?,
-        ),
-    };
+        "http" => {
+            todo!("http");
+        }
+        t => {
+            return Err(Status::invalid_argument(format!("Unknown connection type '{}'", t)));
+        }
+    }
 
     api_queries::create_connection()
         .bind(
@@ -42,8 +35,8 @@ pub(crate) async fn create_connection(
             &auth.organization_id,
             &auth.user_id,
             &req.name,
-            &typ,
-            &v,
+            &req.connection_type,
+            &serde_json::to_value(&req.config).unwrap(),
         )
         .await
         .map_err(|e| handle_db_error("connection", e))?;
@@ -55,17 +48,8 @@ impl From<DbConnection> for Connection {
     fn from(val: DbConnection) -> Self {
         Connection {
             name: val.name,
-            connection_type: Some(match val.r#type {
-                public::ConnectionType::kafka => {
-                    ConnectionType::Kafka(serde_json::from_value(val.config).unwrap())
-                }
-                public::ConnectionType::kinesis => {
-                    ConnectionType::Kinesis(serde_json::from_value(val.config).unwrap())
-                }
-                public::ConnectionType::http => {
-                    ConnectionType::Http(serde_json::from_value(val.config).unwrap())
-                }
-            }),
+            connection_type: val.name,
+            config: serde_json::to_string(&val.config).unwrap(),
             sources: val.source_count as i32,
             sinks: val.sink_count as i32,
         }
@@ -100,23 +84,24 @@ pub(crate) async fn get_connection<E: GenericClient>(
 }
 
 pub(crate) async fn test_connection(req: CreateConnectionReq) -> Result<TestSourceMessage, Status> {
-    let connection = req
-        .connection_type
-        .ok_or_else(|| required_field("connection_type"))?;
+    // let connection = req
+    //     .connection_type
+    //     .ok_or_else(|| required_field("connection_type"))?;
 
-    let (tx, _rx) = channel(8);
+    // let (tx, _rx) = channel(8);
 
-    match connection {
-        ReqConnectionType::Kafka(kafka) => Ok(KafkaTester::new(kafka, None, None, tx)
-            .test_connection()
-            .await),
-        ReqConnectionType::Http(http) => Ok((HttpTester { connection: &http }).test().await),
-        _ => Ok(TestSourceMessage {
-            error: false,
-            done: true,
-            message: "Testing not yet supported for this connection type".to_string(),
-        }),
-    }
+    // match connection {
+    //     ReqConnectionType::Kafka(kafka) => Ok(KafkaTester::new(kafka, None, None, tx)
+    //         .test_connection()
+    //         .await),
+    //     ReqConnectionType::Http(http) => Ok((HttpTester { connection: &http }).test().await),
+    //     _ => Ok(TestSourceMessage {
+    //         error: false,
+    //         done: true,
+    //         message: "Testing not yet supported for this connection type".to_string(),
+    //     }),
+    // }
+    todo!()
 }
 
 pub(crate) async fn delete_connection(

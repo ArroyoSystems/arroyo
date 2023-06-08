@@ -15,11 +15,10 @@ use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::grpc::api::create_pipeline_req::Config;
 use arroyo_rpc::grpc::api::impulse_source::Spec;
-use arroyo_rpc::grpc::api::kafka_auth_config::AuthType;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::source_def::SourceType;
 use arroyo_rpc::grpc::api::{
-    self as GrpcApi, ExpressionAggregator, Flatten, KafkaAuthConfig, ProgramEdge,
+    self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge, ConnectionSource, ConnectionSink,
 };
 use arroyo_types::nexmark::Event;
 use arroyo_types::{from_micros, string_to_map, to_micros, Data, GlobalKey, ImpulseEvent, Key};
@@ -306,19 +305,13 @@ pub enum Operator {
         spec: ImpulseSpec,
         total_events: Option<usize>,
     },
-    KafkaSource {
-        topic: String,
-        bootstrap_servers: Vec<String>,
-        offset_mode: OffsetMode,
-        kafka_input_format: SerializationMode,
-        messages_per_second: u32,
-        client_configs: HashMap<String, String>,
+    ConnectionSource {
+        connection: String,
+        config: String,
     },
-    EventSourceSource {
-        url: String,
-        headers: HashMap<String, String>,
-        events: Vec<String>,
-        serialization_mode: SerializationMode,
+    ConnectionSink {
+        connection: String,
+        config: String,
     },
     FusedWasmUDFs {
         name: String,
@@ -341,11 +334,6 @@ pub enum Operator {
     },
     WindowJoin {
         window: WindowType,
-    },
-    KafkaSink {
-        topic: String,
-        bootstrap_servers: Vec<String>,
-        client_configs: HashMap<String, String>,
     },
     NexmarkSource {
         first_event_rate: u64,
@@ -376,11 +364,6 @@ pub enum Operator {
 
 #[derive(Clone, Debug)]
 pub enum SourceConfig {
-    Kafka {
-        bootstrap_servers: String,
-        topic: String,
-        client_configs: HashMap<String, String>,
-    },
     Impulse {
         interval: Option<Duration>,
         events_per_second: f32,
@@ -394,24 +377,15 @@ pub enum SourceConfig {
         event_rate: u64,
         runtime: Option<Duration>,
     },
-    EventSourceSource {
-        url: String,
-        headers: HashMap<String, String>,
-        events: Vec<String>,
+    ConnectionSource {
+        connection: String,
+        config: String,
     },
 }
 
 impl From<SourceType> for SourceConfig {
     fn from(value: SourceType) -> Self {
         match value {
-            SourceType::Kafka(kafka) => {
-                let Some(connection) = kafka.connection else {panic!("require a connection on a KafkaSourceDef")};
-                SourceConfig::Kafka {
-                    bootstrap_servers: connection.bootstrap_servers,
-                    topic: kafka.topic,
-                    client_configs: auth_config_to_hashmap(connection.auth_config),
-                }
-            }
             SourceType::Impulse(impulse) => SourceConfig::Impulse {
                 interval: impulse
                     .interval_micros
@@ -427,18 +401,8 @@ impl From<SourceType> for SourceConfig {
                 event_rate: nexmark.events_per_second.into(),
                 runtime: nexmark.runtime_micros.map(Duration::from_micros),
             },
-            SourceType::EventSource(event) => {
-                let Some(connection) = event.connection else { panic!("eventsource requires a connection") };
-
-                SourceConfig::EventSourceSource {
-                    url: connection.url + &event.path,
-                    headers: string_to_map(&connection.headers).expect("Headers are invalid"),
-                    events: event
-                        .events
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .collect(),
-                }
+            SourceType::Connection(c) => {
+                SourceConfig::ConnectionSource { connection: c.connection, config: c.config }
             }
         }
     }
@@ -446,10 +410,9 @@ impl From<SourceType> for SourceConfig {
 
 #[derive(Clone, Debug)]
 pub enum SinkConfig {
-    Kafka {
-        bootstrap_servers: String,
-        topic: String,
-        client_configs: HashMap<String, String>,
+    Connection {
+        connection: String,
+        config: String,
     },
     Console,
     File {
@@ -491,10 +454,8 @@ impl Debug for Operator {
         match self {
             Operator::FileSource { dir, .. } => write!(f, "FileSource<{:?}>", dir),
             Operator::ImpulseSource { .. } => write!(f, "ImpulseSource"),
-            Operator::KafkaSource { topic, .. } => write!(f, "KafkaSource<{}>", topic),
-            Operator::EventSourceSource { url, .. } => {
-                write!(f, "EventSource<{}>", url)
-            }
+            Operator::ConnectionSource { connection, .. } => write!(f, "ConnectionSource<{}>", connection),
+            Operator::ConnectionSink { connection, .. } => write!(f, "ConnectionSink<{}>", connection),
             Operator::FusedWasmUDFs { udfs, .. } => {
                 if udfs.len() == 1 {
                     write_behavior(f, &udfs[0])
@@ -520,7 +481,6 @@ impl Debug for Operator {
             Operator::Watermark(_) => write!(f, "Watermark"),
             Operator::WindowJoin { window } => write!(f, "WindowJoin({:?})", window),
             Operator::NullSink => write!(f, "NullSink"),
-            Operator::KafkaSink { topic, .. } => write!(f, "KafkaSink<{}>", topic),
             Operator::NexmarkSource {
                 first_event_rate,
                 num_events,
@@ -719,64 +679,6 @@ impl Source<ImpulseEvent> for ImpulseSource {
             start_time: self.start_time,
             spec: ImpulseSpec::Delay(self.interval),
             total_events: None,
-        }
-    }
-}
-
-pub fn auth_config_to_hashmap(config: Option<KafkaAuthConfig>) -> HashMap<String, String> {
-    match config.and_then(|config| config.auth_type) {
-        None | Some(AuthType::NoAuth(_)) => HashMap::default(),
-        Some(AuthType::SaslAuth(sasl_auth)) => vec![
-            ("security.protocol".to_owned(), sasl_auth.protocol),
-            ("sasl.mechanism".to_owned(), sasl_auth.mechanism),
-            ("sasl.username".to_owned(), sasl_auth.username),
-            ("sasl.password".to_owned(), sasl_auth.password),
-        ]
-        .into_iter()
-        .collect(),
-    }
-}
-
-pub struct KafkaSource {
-    topic: String,
-    bootstrap_servers: Vec<String>,
-    offset_mode: OffsetMode,
-    messages_per_second: u32,
-}
-
-impl KafkaSource {
-    pub fn new(topic: &str, bootstrap_servers: Vec<&str>, offset_mode: OffsetMode) -> Self {
-        Self {
-            topic: topic.to_string(),
-            bootstrap_servers: bootstrap_servers.iter().map(|s| s.to_string()).collect(),
-            offset_mode,
-            messages_per_second: 10_000,
-        }
-    }
-
-    pub fn new_with_schema_registry(
-        topic: &str,
-        bootstrap_servers: Vec<&str>,
-        offset_mode: OffsetMode,
-    ) -> Self {
-        Self {
-            topic: topic.to_string(),
-            bootstrap_servers: bootstrap_servers.iter().map(|s| s.to_string()).collect(),
-            offset_mode,
-            messages_per_second: 10_000,
-        }
-    }
-}
-
-impl Source<Vec<u8>> for KafkaSource {
-    fn as_operator(&self) -> Operator {
-        Operator::KafkaSource {
-            topic: self.topic.clone(),
-            bootstrap_servers: self.bootstrap_servers.clone(),
-            offset_mode: self.offset_mode,
-            kafka_input_format: SerializationMode::Json,
-            messages_per_second: self.messages_per_second,
-            client_configs: HashMap::default(),
         }
     }
 }
@@ -1081,28 +983,6 @@ impl<K: Key, T: Data> KeyedSink<K, T> for KeyedFileSink<K, T> {
     }
 }
 
-pub struct KeyedKafkaSink {
-    topic: String,
-    bootstrap_servers: Vec<String>,
-}
-
-impl KeyedKafkaSink {
-    pub fn new(topic: String, bootstrap_servers: Vec<String>) -> KeyedKafkaSink {
-        KeyedKafkaSink {
-            topic,
-            bootstrap_servers,
-        }
-    }
-}
-impl KeyedSink<Vec<u8>, Vec<u8>> for KeyedKafkaSink {
-    fn as_operator(&self) -> Operator {
-        Operator::KafkaSink {
-            topic: self.topic.clone(),
-            bootstrap_servers: self.bootstrap_servers.clone(),
-            client_configs: HashMap::default(),
-        }
-    }
-}
 
 pub struct NullSink<K: Key, T: Data> {
     _t: PhantomData<(K, T)>,
@@ -1618,38 +1498,12 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 total_events: total_events.map(|total| total as u64),
                 spec: Some(spec.into()),
             }),
-            Operator::KafkaSource {
-                topic,
-                bootstrap_servers,
-                offset_mode,
-                kafka_input_format,
-                messages_per_second,
-                client_configs,
-            } => GrpcOperator::KafkaSource(GrpcApi::KafkaSource {
-                topic,
-                bootstrap_servers,
-                offset_mode: match offset_mode {
-                    OffsetMode::Earliest => GrpcApi::OffsetMode::Earliest.into(),
-                    OffsetMode::Latest => GrpcApi::OffsetMode::Latest.into(),
-                },
-                serialization_mode: {
-                    let grpc_enum: GrpcApi::SerializationMode = kafka_input_format.into();
-                    grpc_enum.into()
-                },
-                messages_per_second,
-                client_configs,
-            }),
-            Operator::EventSourceSource {
-                url,
-                headers,
-                events,
-                serialization_mode,
-            } => GrpcOperator::EventSourceSource(GrpcApi::EventSourceSource {
-                url,
-                headers,
-                events,
-                serialization_mode: GrpcApi::SerializationMode::from(serialization_mode).into(),
-            }),
+            Operator::ConnectionSource { connection, config } => {
+                GrpcOperator::ConnectionSource(GrpcApi::ConnectionSource { connection, config })
+            }
+            Operator::ConnectionSink { connection, config } => {
+                GrpcOperator::ConnectionSink(GrpcApi::ConnectionSink { connection, config })
+            }
             FusedWasmUDFs { name, udfs } => GrpcOperator::WasmUdfs(GrpcApi::WasmUdfs {
                 name,
                 wasm_functions: udfs.into_iter().map(|udf| udf.into()).collect(),
@@ -1708,15 +1562,6 @@ impl From<Operator> for GrpcApi::operator::Operator {
             }),
             Operator::WindowJoin { window } => GrpcOperator::WindowJoin(GrpcApi::Window {
                 window: Some(window.into()),
-            }),
-            Operator::KafkaSink {
-                topic,
-                bootstrap_servers,
-                client_configs,
-            } => GrpcOperator::KafkaSink(GrpcApi::KafkaSink {
-                topic,
-                bootstrap_servers,
-                client_configs,
             }),
             Operator::NexmarkSource {
                 first_event_rate,
@@ -1970,26 +1815,11 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         total_events: impulse_source.total_events.map(|events| events as usize),
                     }
                 }
-                GrpcOperator::KafkaSource(kafka_source) => {
-                    let offset_mode = kafka_source.offset_mode().into();
-                    let kafka_input_format = kafka_source.serialization_mode().into();
-                    Operator::KafkaSource {
-                        topic: kafka_source.topic,
-                        bootstrap_servers: kafka_source.bootstrap_servers,
-                        offset_mode,
-                        kafka_input_format,
-                        messages_per_second: kafka_source.messages_per_second,
-                        client_configs: kafka_source.client_configs,
-                    }
+                GrpcOperator::ConnectionSource(ConnectionSource { connection, config }) => {
+                    Operator::ConnectionSource { connection, config }
                 }
-                GrpcOperator::EventSourceSource(source) => {
-                    let serialization_mode = source.serialization_mode().into();
-                    Operator::EventSourceSource {
-                        url: source.url,
-                        headers: source.headers,
-                        events: source.events,
-                        serialization_mode,
-                    }
+                GrpcOperator::ConnectionSink(ConnectionSink { connection, config }) => {
+                    Operator::ConnectionSink { connection, config }
                 }
                 GrpcOperator::WasmUdfs(wasm_udfs) => Operator::FusedWasmUDFs {
                     name: wasm_udfs.name,
@@ -2052,11 +1882,6 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                 },
                 GrpcOperator::WindowJoin(window) => Operator::WindowJoin {
                     window: window.into(),
-                },
-                GrpcOperator::KafkaSink(kafka_sink) => Operator::KafkaSink {
-                    topic: kafka_sink.topic,
-                    bootstrap_servers: kafka_sink.bootstrap_servers,
-                    client_configs: kafka_sink.client_configs,
                 },
                 GrpcOperator::NexmarkSource(nexmark_source) => Operator::NexmarkSource {
                     first_event_rate: nexmark_source.first_event_rate,

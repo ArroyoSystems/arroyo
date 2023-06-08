@@ -149,8 +149,7 @@ message Operator {
   oneof operator {
     FileSource file_source = 1;
     ImpulseSource impulse_source = 2;
-    KafkaSource kafka_source = 3;
-    EventSourceSource event_source_source = 22;
+    ConnectionSource connection_source = 3;
     WasmUdfs wasm_udfs = 4;
     WindowOperator window = 5;
     Aggregator aggregator = 6;
@@ -158,7 +157,7 @@ message Operator {
     BuiltinSink builtin_sink = 8;
     FileSink file_sink = 9;
     Window window_join = 10;
-    KafkaSink kafka_sink = 11;
+    ConnectionSink connection_sink = 11;
     NexmarkSource nexmark_source = 12;
     ExpressionOperator expression_operator = 13;
     Flatten flatten = 14;
@@ -184,22 +183,6 @@ message ImpulseSource {
     uint64 micros_delay = 3;
     float event_qps = 4;
   }
-}
-
-message KafkaSource {
-  string topic = 1;
-  repeated string bootstrap_servers = 2;
-  OffsetMode offset_mode = 3;
-  SerializationMode serialization_mode = 4;
-  uint32 messages_per_second = 5;
-  map<string, string> client_configs = 6;
-}
-
-message EventSourceSource {
-  string url = 1;
-  map<string, string> headers = 2;
-  SerializationMode serialization_mode = 3;
-  repeated string events = 4;
 }
 
 enum SerializationMode {
@@ -278,12 +261,6 @@ message PeriodicWatermark {
 message ExpressionWatermark {
   uint64 period_micros = 1;
   string expression = 2;
-}
-
-message KafkaSink {
-  string topic = 1;
-  repeated string bootstrap_servers = 2;
-  map<string, string> client_configs = 3;
 }
 
 message FileSink {
@@ -551,41 +528,10 @@ message JobMetricsResp {
 }
 
 // connections
-message KafkaConnection {
-  string bootstrap_servers = 1;
-  KafkaAuthConfig auth_config = 2;
-}
-
-message KafkaAuthConfig {
-  oneof auth_type {
-    NoAuth no_auth = 1;
-    SaslAuth sasl_auth =2;
-  }
-}
-
-message NoAuth {}
-
-message SaslAuth {
-  string protocol = 1;
-  string mechanism = 2;
-  string username = 3;
-  string password = 4;
-}
-message KinesisConnection {
-}
-
-message HttpConnection {
-  string url = 1;
-  string headers = 2;
-}
-
 message Connection {
   string name = 1;
-  oneof connection_type {
-    KafkaConnection kafka = 2;
-    KinesisConnection kinesis = 3;
-    HttpConnection http = 6;
-  }
+  string connection_type = 2;
+  string config = 3;
 
   int32 sources = 4;
   int32 sinks = 5;
@@ -593,11 +539,8 @@ message Connection {
 
 message CreateConnectionReq {
   string name = 1;
-  oneof connection_type {
-    KafkaConnection kafka = 2;
-    KinesisConnection kinesis = 3;
-    HttpConnection http = 4;
-  }
+  string connection_type = 2;
+  string config = 3;
 }
 
 message CreateConnectionResp {
@@ -678,16 +621,6 @@ message SourceSchema {
  bool kafka_schema_registry = 7;
 }
 
-enum KafkaOffsetMode {
-  Earliest = 0;
-  Latest = 1;
-}
-
-message KafkaSourceConfig {
-  string topic = 1;
-  string connection = 2;
-}
-
 message ImpulseSourceConfig {
   optional uint32 interval_micros = 1;
   float events_per_second = 2;
@@ -704,17 +637,9 @@ message NexmarkSourceConfig {
   optional uint64 runtime_micros = 2;
 }
 
-message EventSourceSourceConfig {
+message ConnectionSource {
   string connection = 1;
-  string path = 2;
-  string events = 3;
-}
-
-message EventSourceSourceDef {
-  string connection_name = 1;
-  HttpConnection connection = 2;
-  string path = 3;
-  string events = 4;
+  string config = 2;
 }
 
 message CreateSourceReq {
@@ -723,39 +648,30 @@ message CreateSourceReq {
   SourceSchema schema = 2;
 
   oneof type_oneof {
-    KafkaSourceConfig kafka = 3;
     ImpulseSourceConfig impulse = 4;
     FileSourceConfig file = 5;
     NexmarkSourceConfig nexmark = 6;
-    EventSourceSourceConfig event_source = 7;
+    ConnectionSource connection = 7;
   }
 }
 
 message CreateSourceResp {
 }
 
-message KafkaSourceDef {
-  string connection_name = 1;
-  KafkaConnection connection = 2;
-  string topic = 3;
-}
-
 message SourceDef {
-  int64 id = 9;
-  string name = 1;
-  SourceSchema schema = 2;
-  optional string connection = 8;
-  int32 consumers = 10;
+  int64 id = 1;
+  string name = 2;
+  SourceSchema schema = 3;
+  int32 consumers = 4;
 
   oneof source_type {
-    KafkaSourceDef kafka = 3;
-    ImpulseSourceConfig impulse = 4;
-    FileSourceConfig file = 5;
-    NexmarkSourceConfig nexmark = 6;
-    EventSourceSourceDef event_source = 11;
+    ImpulseSourceConfig impulse = 5;
+    FileSourceConfig file = 6;
+    NexmarkSourceConfig nexmark = 7;
+    ConnectionSource connection = 8;
   }
 
-  repeated SourceField sql_fields = 7;
+  repeated SourceField sql_fields = 9;
 }
 
 message GetSourcesReq {}
@@ -796,16 +712,11 @@ message ConfluentSchemaResp {
 
 // sinks
 
-message KafkaSinkConfig {
-  string topic = 1;
-  string connection = 2;
-}
-
 message CreateSinkReq {
   string name = 1;
 
   oneof sink_type {
-    KafkaSinkConfig kafka = 2;
+    ConnectionSink connection = 2;
   }
 }
 
@@ -815,11 +726,16 @@ message CreateSinkResp {
 message GetSinksReq {
 }
 
+message ConnectionSink {
+  string connection = 1;
+  string config = 2;
+}
+
 message Sink {
   int64 id = 1;
   string name = 2;
   oneof sink_type {
-    KafkaSinkConfig kafka = 3;
+    ConnectionSink connection = 3;
   }
   int32 producers = 4;
 }

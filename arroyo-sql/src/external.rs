@@ -5,15 +5,12 @@ use std::time::SystemTime;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
-use arroyo_datastream::auth_config_to_hashmap;
 use arroyo_datastream::Operator;
 use arroyo_datastream::SerializationMode;
 use arroyo_datastream::SinkConfig;
 use arroyo_datastream::SourceConfig;
-use arroyo_datastream::{ImpulseSpec, OffsetMode};
-use arroyo_rpc::grpc::api::connection::ConnectionType;
+use arroyo_datastream::{ImpulseSpec};
 use arroyo_rpc::grpc::api::Connection;
-use arroyo_types::string_to_map;
 
 use crate::types::StructDef;
 use crate::SqlConfig;
@@ -29,18 +26,6 @@ pub struct SqlSource {
 impl SqlSource {
     pub(crate) fn get_operator(&self, sql_config: &SqlConfig) -> Operator {
         match self.source_config.clone() {
-            SourceConfig::Kafka {
-                bootstrap_servers,
-                topic,
-                client_configs,
-            } => Operator::KafkaSource {
-                topic,
-                bootstrap_servers: vec![bootstrap_servers],
-                offset_mode: OffsetMode::Latest,
-                kafka_input_format: self.serialization_mode,
-                messages_per_second: sql_config.kafka_qps.unwrap_or(10_000),
-                client_configs,
-            },
             SourceConfig::Impulse {
                 interval,
                 events_per_second,
@@ -63,16 +48,9 @@ impl SqlSource {
                 first_event_rate: event_rate,
                 num_events: runtime.map(|runtime| event_rate * runtime.as_secs()),
             },
-            SourceConfig::EventSourceSource {
-                url,
-                headers,
-                events,
-            } => Operator::EventSourceSource {
-                url,
-                headers,
-                events,
-                serialization_mode: self.serialization_mode,
-            },
+            SourceConfig::ConnectionSource { connection, config } => {
+                todo!()
+            }
         }
     }
 
@@ -88,52 +66,54 @@ impl SqlSource {
                 .map(|x| x.as_str()),
         );
 
-        match connection.connection_type.unwrap() {
-            ConnectionType::Kafka(kafka) => {
-                let topic = connection_config
-                    .get("topic")
-                    .cloned()
-                    .ok_or_else(|| anyhow!("Missing topic"))?;
-                Ok(SqlSource {
-                    id,
-                    struct_def,
-                    source_config: SourceConfig::Kafka {
-                        topic,
-                        bootstrap_servers: kafka.bootstrap_servers,
-                        client_configs: auth_config_to_hashmap(kafka.auth_config),
-                    },
-                    serialization_mode,
-                })
-            }
-            ConnectionType::Kinesis(_) => {
-                bail!("Kinesis connections are not yet supported")
-            }
-            ConnectionType::Http(http) => {
-                let mut path = connection_config.get("path").cloned().unwrap_or_default();
+        todo!()
 
-                if !path.is_empty() && !path.starts_with('/') {
-                    path = format!("/{}", path);
-                }
+        // match connection.connection_type.unwrap() {
+        //     ConnectionType::Kafka(kafka) => {
+        //         let topic = connection_config
+        //             .get("topic")
+        //             .cloned()
+        //             .ok_or_else(|| anyhow!("Missing topic"))?;
+        //         Ok(SqlSource {
+        //             id,
+        //             struct_def,
+        //             source_config: SourceConfig::Kafka {
+        //                 topic,
+        //                 bootstrap_servers: kafka.bootstrap_servers,
+        //                 client_configs: auth_config_to_hashmap(kafka.auth_config),
+        //             },
+        //             serialization_mode,
+        //         })
+        //     }
+        //     ConnectionType::Kinesis(_) => {
+        //         bail!("Kinesis connections are not yet supported")
+        //     }
+        //     ConnectionType::Http(http) => {
+        //         let mut path = connection_config.get("path").cloned().unwrap_or_default();
 
-                let events = connection_config
-                    .get("events")
-                    .map(|e| e.split(',').map(|t| t.to_string()).collect())
-                    .unwrap_or_default();
+        //         if !path.is_empty() && !path.starts_with('/') {
+        //             path = format!("/{}", path);
+        //         }
 
-                Ok(SqlSource {
-                    id,
-                    struct_def,
-                    source_config: SourceConfig::EventSourceSource {
-                        url: http.url + &path,
-                        headers: string_to_map(&http.headers)
-                            .ok_or_else(|| anyhow!("Headers are invalid, expected a comma-delimited set of
-                                header/value pairs, like `Content-Type: applicaiton/json,User-Agent:arroyo`"))?,
-                        events,
-                    },
-                    serialization_mode
-                })
-            }
-        }
+        //         let events = connection_config
+        //             .get("events")
+        //             .map(|e| e.split(',').map(|t| t.to_string()).collect())
+        //             .unwrap_or_default();
+
+        //         Ok(SqlSource {
+        //             id,
+        //             struct_def,
+        //             source_config: SourceConfig::EventSourceSource {
+        //                 url: http.url + &path,
+        //                 headers: string_to_map(&http.headers)
+        //                     .ok_or_else(|| anyhow!("Headers are invalid, expected a comma-delimited set of
+        //                         header/value pairs, like `Content-Type: applicaiton/json,User-Agent:arroyo`"))?,
+        //                 events,
+        //             },
+        //             serialization_mode
+        //         })
+        //     }
+        // }
     }
 }
 
@@ -151,22 +131,24 @@ impl SqlSink {
         connection: Connection,
         connection_config: HashMap<String, String>,
     ) -> Result<Self> {
-        let Some(ConnectionType::Kafka(kafka_config)) = connection.connection_type else {
-            bail!("Only Kafka sinks are supported")
-        };
-        let topic = Arc::new(connection_config)
-            .get("topic")
-            .cloned()
-            .ok_or_else(|| anyhow!("Missing topic"))?;
-        Ok(SqlSink {
-            id,
-            struct_def,
-            sink_config: SinkConfig::Kafka {
-                topic,
-                bootstrap_servers: kafka_config.bootstrap_servers,
-                client_configs: auth_config_to_hashmap(kafka_config.auth_config),
-            },
-        })
+        // let Some(ConnectionType::Kafka(kafka_config)) = connection.connection_type else {
+        //     bail!("Only Kafka sinks are supported")
+        // };
+        // let topic = Arc::new(connection_config)
+        //     .get("topic")
+        //     .cloned()
+        //     .ok_or_else(|| anyhow!("Missing topic"))?;
+        // Ok(SqlSink {
+        //     id,
+        //     struct_def,
+        //     sink_config: SinkConfig::Kafka {
+        //         topic,
+        //         bootstrap_servers: kafka_config.bootstrap_servers,
+        //         client_configs: auth_config_to_hashmap(kafka_config.auth_config),
+        //     },
+        // })
+
+        todo!()
     }
 }
 

@@ -66,6 +66,7 @@ mod pipelines;
 mod sinks;
 mod sources;
 mod testers;
+mod connectors;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
