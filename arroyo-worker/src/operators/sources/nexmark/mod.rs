@@ -6,7 +6,10 @@ use arroyo_rpc::ControlMessage;
 use arroyo_types::nexmark::*;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
-use rand::{distributions::Alphanumeric, rngs::SmallRng, seq::SliceRandom, Rng, SeedableRng};
+use rand::{
+    distributions::Alphanumeric, distributions::DistString, rngs::SmallRng, seq::SliceRandom, Rng,
+    SeedableRng,
+};
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::{sync::mpsc::error::TryRecvError, time::sleep};
@@ -374,11 +377,7 @@ impl GeneratorConfig {
 
     fn random_string(random: &mut SmallRng, max_length: u32) -> String {
         let size = random.gen_range(MIN_STRING_LENGTH..max_length);
-        random
-            .sample_iter(&Alphanumeric)
-            .take(size as usize)
-            .map(char::from)
-            .collect()
+        Alphanumeric.sample_string(random, size as usize)
     }
 
     fn next_extra_string(
@@ -390,11 +389,7 @@ impl GeneratorConfig {
             return String::new();
         }
         let size = desired_average_size - current_size;
-        random
-            .sample_iter(&Alphanumeric)
-            .take(size)
-            .map(char::from)
-            .collect()
+        Alphanumeric.sample_string(random, size)
     }
 
     pub fn next_auction(
