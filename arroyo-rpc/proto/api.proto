@@ -2,6 +2,25 @@ syntax = "proto3";
 
 package arroyo_api;
 
+import "google/api/annotations.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+
+option go_package = "github.com/ArroyoSystems/arroyo/arroyo-rpc";
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Arroyo RESTful API";
+    version: "1.0";
+  };
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+  tags: {
+    name: "connections"
+  }
+};
+
 // Job management
 
 enum BuiltinSink {
@@ -849,8 +868,15 @@ message OutputData {
   string value = 4;
 }
 
+
+
 service ApiGrpc {
-  rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp);
+  rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp) {
+    option (google.api.http) = {
+      post: "/v1/connections"
+      body: "*"
+    };
+  };
   rpc TestConnection(CreateConnectionReq) returns (TestSourceMessage);
   rpc GetConnections(GetConnectionsReq) returns (GetConnectionsResp);
   rpc DeleteConnection(DeleteConnectionReq) returns (DeleteConnectionResp);

@@ -1,0 +1,13 @@
+version: v1
+plugins:
+  - plugin: go
+    out: rest
+    opt: paths=source_relative
+  - plugin: go-grpc
+    out: rest
+    opt: paths=source_relative
+  - plugin: grpc-gateway
+    out: rest
+    opt: paths=source_relative
+  - plugin: openapiv2
+    out: rest/openapiv2

@@ -1,0 +1,8 @@
+version: v1
+name: buf.build/ArroyoSystems/arroyo
+deps:
+  - buf.build/googleapis/googleapis
+  - buf.build/grpc-ecosystem/grpc-gateway
+build:
+  excludes:
+    - proto/google

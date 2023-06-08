@@ -1,0 +1,1136 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Arroyo RESTful API",
+    "version": "1.0"
+  },
+  "tags": [
+    {
+      "name": "ApiGrpc"
+    },
+    {
+      "name": "connections"
+    }
+  ],
+  "schemes": [
+    "https"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/connections": {
+      "post": {
+        "operationId": "ApiGrpc_CreateConnection",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/arroyo_apiCreateConnectionResp"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/arroyo_apiCreateConnectionReq"
+            }
+          }
+        ],
+        "tags": [
+          "ApiGrpc"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "JobMetricsRespOperatorMetrics": {
+      "type": "object",
+      "properties": {
+        "subtasks": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/arroyo_apiSubtaskMetrics"
+          }
+        }
+      }
+    },
+    "arroyo_apiBuiltinSink": {
+      "type": "string",
+      "enum": [
+        "Null",
+        "Web",
+        "Log"
+      ],
+      "default": "Null"
+    },
+    "arroyo_apiCheckpointDetailsResp": {
+      "type": "object",
+      "properties": {
+        "overview": {
+          "$ref": "#/definitions/arroyo_apiCheckpointOverview"
+        },
+        "operators": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/arroyo_apiOperatorCheckpointDetail"
+          }
+        }
+      }
+    },
+    "arroyo_apiCheckpointOverview": {
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "finishTime": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "arroyo_apiConfluentSchemaResp": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiConnection": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kafka": {
+          "$ref": "#/definitions/arroyo_apiKafkaConnection"
+        },
+        "kinesis": {
+          "$ref": "#/definitions/arroyo_apiKinesisConnection"
+        },
+        "http": {
+          "$ref": "#/definitions/arroyo_apiHttpConnection"
+        },
+        "sources": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "sinks": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "arroyo_apiCreateConnectionReq": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kafka": {
+          "$ref": "#/definitions/arroyo_apiKafkaConnection"
+        },
+        "kinesis": {
+          "$ref": "#/definitions/arroyo_apiKinesisConnection"
+        },
+        "http": {
+          "$ref": "#/definitions/arroyo_apiHttpConnection"
+        }
+      }
+    },
+    "arroyo_apiCreateConnectionResp": {
+      "type": "object"
+    },
+    "arroyo_apiCreateJobResp": {
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiCreatePipelineResp": {
+      "type": "object",
+      "properties": {
+        "pipelineId": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiCreateSinkResp": {
+      "type": "object"
+    },
+    "arroyo_apiCreateSourceResp": {
+      "type": "object"
+    },
+    "arroyo_apiCreateSqlJob": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "parallelism": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "udfs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiCreateUdf"
+          }
+        },
+        "builtin": {
+          "$ref": "#/definitions/arroyo_apiBuiltinSink"
+        },
+        "user": {
+          "type": "string"
+        },
+        "preview": {
+          "type": "boolean"
+        }
+      }
+    },
+    "arroyo_apiCreateUdf": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "$ref": "#/definitions/arroyo_apiUdfLanguage"
+        },
+        "definition": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiDeleteConnectionResp": {
+      "type": "object"
+    },
+    "arroyo_apiDeleteJobResp": {
+      "type": "object"
+    },
+    "arroyo_apiDeleteSinkResp": {
+      "type": "object"
+    },
+    "arroyo_apiDeleteSourceResp": {
+      "type": "object"
+    },
+    "arroyo_apiEventSourceSourceConfig": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "events": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiEventSourceSourceDef": {
+      "type": "object",
+      "properties": {
+        "connectionName": {
+          "type": "string"
+        },
+        "connection": {
+          "$ref": "#/definitions/arroyo_apiHttpConnection"
+        },
+        "path": {
+          "type": "string"
+        },
+        "events": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiFileSourceConfig": {
+      "type": "object",
+      "properties": {
+        "directory": {
+          "type": "string"
+        },
+        "intervalMs": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "arroyo_apiGetConnectionsResp": {
+      "type": "object",
+      "properties": {
+        "connections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiConnection"
+          }
+        }
+      }
+    },
+    "arroyo_apiGetJobsResp": {
+      "type": "object",
+      "properties": {
+        "jobs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiJobStatus"
+          }
+        }
+      }
+    },
+    "arroyo_apiGetSinksResp": {
+      "type": "object",
+      "properties": {
+        "sinks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiSink"
+          }
+        }
+      }
+    },
+    "arroyo_apiGetSourcesResp": {
+      "type": "object",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiSourceDef"
+          }
+        }
+      }
+    },
+    "arroyo_apiHttpConnection": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiImpulseSourceConfig": {
+      "type": "object",
+      "properties": {
+        "intervalMicros": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "eventsPerSecond": {
+          "type": "number",
+          "format": "float"
+        },
+        "totalMessages": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "arroyo_apiJobCheckpointsResp": {
+      "type": "object",
+      "properties": {
+        "checkpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiCheckpointOverview"
+          }
+        }
+      }
+    },
+    "arroyo_apiJobDetailsResp": {
+      "type": "object",
+      "properties": {
+        "jobStatus": {
+          "$ref": "#/definitions/arroyo_apiJobStatus"
+        },
+        "jobGraph": {
+          "$ref": "#/definitions/arroyo_apiJobGraph"
+        },
+        "action": {
+          "$ref": "#/definitions/arroyo_apiStopType",
+          "description": "the value that should be set against stop_mode if one is available",
+          "title": "these fields determine the behavior and appearance of the button that controls the pipeline"
+        },
+        "actionText": {
+          "type": "string",
+          "title": "the text of the button to take the action"
+        },
+        "inProgress": {
+          "type": "boolean",
+          "title": "whether the button should be represented as a loading"
+        }
+      }
+    },
+    "arroyo_apiJobEdge": {
+      "type": "object",
+      "properties": {
+        "srcId": {
+          "type": "string"
+        },
+        "destId": {
+          "type": "string"
+        },
+        "keyType": {
+          "type": "string"
+        },
+        "valueType": {
+          "type": "string"
+        },
+        "edgeType": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiJobGraph": {
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiJobNode"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiJobEdge"
+          }
+        }
+      }
+    },
+    "arroyo_apiJobLogLevel": {
+      "type": "string",
+      "enum": [
+        "INFO",
+        "WARN",
+        "ERROR"
+      ],
+      "default": "INFO"
+    },
+    "arroyo_apiJobLogMessage": {
+      "type": "object",
+      "properties": {
+        "createdAt": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "operatorId": {
+          "type": "string"
+        },
+        "taskIndex": {
+          "type": "string",
+          "format": "int64"
+        },
+        "level": {
+          "$ref": "#/definitions/arroyo_apiJobLogLevel"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiJobMetricsResp": {
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "endTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/JobMetricsRespOperatorMetrics"
+          }
+        }
+      }
+    },
+    "arroyo_apiJobNode": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        },
+        "operator": {
+          "type": "string"
+        },
+        "parallelism": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "arroyo_apiJobStatus": {
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string"
+        },
+        "pipelineName": {
+          "type": "string"
+        },
+        "runningDesired": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "definitionId": {
+          "type": "string"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "finishTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "tasks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "definition": {
+          "type": "string"
+        },
+        "udfs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiUdf"
+          }
+        },
+        "failureMessage": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiJsonFieldDef": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiSourceField"
+          }
+        }
+      }
+    },
+    "arroyo_apiJsonSchemaDef": {
+      "type": "object",
+      "properties": {
+        "jsonSchema": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiKafkaAuthConfig": {
+      "type": "object",
+      "properties": {
+        "noAuth": {
+          "$ref": "#/definitions/arroyo_apiNoAuth"
+        },
+        "saslAuth": {
+          "$ref": "#/definitions/arroyo_apiSaslAuth"
+        }
+      }
+    },
+    "arroyo_apiKafkaConnection": {
+      "type": "object",
+      "properties": {
+        "bootstrapServers": {
+          "type": "string"
+        },
+        "authConfig": {
+          "$ref": "#/definitions/arroyo_apiKafkaAuthConfig"
+        }
+      },
+      "title": "connections"
+    },
+    "arroyo_apiKafkaSinkConfig": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string"
+        },
+        "connection": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiKafkaSourceConfig": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string"
+        },
+        "connection": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiKafkaSourceDef": {
+      "type": "object",
+      "properties": {
+        "connectionName": {
+          "type": "string"
+        },
+        "connection": {
+          "$ref": "#/definitions/arroyo_apiKafkaConnection"
+        },
+        "topic": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiKinesisConnection": {
+      "type": "object"
+    },
+    "arroyo_apiMetric": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "value": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "arroyo_apiNexmarkSourceConfig": {
+      "type": "object",
+      "properties": {
+        "eventsPerSecond": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "runtimeMicros": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "arroyo_apiNoAuth": {
+      "type": "object"
+    },
+    "arroyo_apiOperatorCheckpointDetail": {
+      "type": "object",
+      "properties": {
+        "operatorId": {
+          "type": "string"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "finishTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "hasState": {
+          "type": "boolean"
+        },
+        "tasks": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/arroyo_apiTaskCheckpointDetail"
+          }
+        }
+      }
+    },
+    "arroyo_apiOperatorErrorsRes": {
+      "type": "object",
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiJobLogMessage"
+          }
+        }
+      }
+    },
+    "arroyo_apiOutputData": {
+      "type": "object",
+      "properties": {
+        "operatorId": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiPipelineDef": {
+      "type": "object",
+      "properties": {
+        "pipelineId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "definition": {
+          "type": "string"
+        },
+        "udfs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiUdf"
+          }
+        },
+        "jobGraph": {
+          "$ref": "#/definitions/arroyo_apiJobGraph"
+        }
+      }
+    },
+    "arroyo_apiPipelineGraphResp": {
+      "type": "object",
+      "properties": {
+        "jobGraph": {
+          "$ref": "#/definitions/arroyo_apiJobGraph"
+        },
+        "errors": {
+          "$ref": "#/definitions/arroyo_apiSqlErrors"
+        }
+      }
+    },
+    "arroyo_apiPrimitiveType": {
+      "type": "string",
+      "enum": [
+        "Int32",
+        "Int64",
+        "UInt32",
+        "UInt64",
+        "F32",
+        "F64",
+        "Bool",
+        "String",
+        "Bytes",
+        "UnixMillis"
+      ],
+      "default": "Int32"
+    },
+    "arroyo_apiProtobufSchemaDef": {
+      "type": "object",
+      "properties": {
+        "protobufSchema": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiRawJsonDef": {
+      "type": "object"
+    },
+    "arroyo_apiSaslAuth": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "string"
+        },
+        "mechanism": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiSink": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kafka": {
+          "$ref": "#/definitions/arroyo_apiKafkaSinkConfig"
+        },
+        "producers": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "arroyo_apiSourceDef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "int64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "schema": {
+          "$ref": "#/definitions/arroyo_apiSourceSchema"
+        },
+        "connection": {
+          "type": "string"
+        },
+        "consumers": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "kafka": {
+          "$ref": "#/definitions/arroyo_apiKafkaSourceDef"
+        },
+        "impulse": {
+          "$ref": "#/definitions/arroyo_apiImpulseSourceConfig"
+        },
+        "file": {
+          "$ref": "#/definitions/arroyo_apiFileSourceConfig"
+        },
+        "nexmark": {
+          "$ref": "#/definitions/arroyo_apiNexmarkSourceConfig"
+        },
+        "eventSource": {
+          "$ref": "#/definitions/arroyo_apiEventSourceSourceDef"
+        },
+        "sqlFields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiSourceField"
+          }
+        }
+      }
+    },
+    "arroyo_apiSourceField": {
+      "type": "object",
+      "properties": {
+        "fieldName": {
+          "type": "string"
+        },
+        "fieldType": {
+          "$ref": "#/definitions/arroyo_apiSourceFieldType"
+        },
+        "nullable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "arroyo_apiSourceFieldType": {
+      "type": "object",
+      "properties": {
+        "primitive": {
+          "$ref": "#/definitions/arroyo_apiPrimitiveType"
+        },
+        "struct": {
+          "$ref": "#/definitions/arroyo_apiStructType"
+        },
+        "sqlName": {
+          "type": "string",
+          "title": "include a sql name if the type is PrimitiveType"
+        }
+      }
+    },
+    "arroyo_apiSourceMetadataResp": {
+      "type": "object",
+      "properties": {
+        "partitions": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "arroyo_apiSourceSchema": {
+      "type": "object",
+      "properties": {
+        "builtin": {
+          "type": "string"
+        },
+        "jsonSchema": {
+          "$ref": "#/definitions/arroyo_apiJsonSchemaDef"
+        },
+        "jsonFields": {
+          "$ref": "#/definitions/arroyo_apiJsonFieldDef"
+        },
+        "protobuf": {
+          "$ref": "#/definitions/arroyo_apiProtobufSchemaDef"
+        },
+        "rawJson": {
+          "$ref": "#/definitions/arroyo_apiRawJsonDef"
+        },
+        "kafkaSchemaRegistry": {
+          "type": "boolean"
+        }
+      }
+    },
+    "arroyo_apiSqlError": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiSqlErrors": {
+      "type": "object",
+      "properties": {
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiSqlError"
+          }
+        }
+      }
+    },
+    "arroyo_apiStopType": {
+      "type": "string",
+      "enum": [
+        "None",
+        "Checkpoint",
+        "Graceful",
+        "Immediate",
+        "Force"
+      ],
+      "default": "None"
+    },
+    "arroyo_apiStructType": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiSourceField"
+          }
+        }
+      }
+    },
+    "arroyo_apiSubtaskMetrics": {
+      "type": "object",
+      "properties": {
+        "bytesRecv": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiMetric"
+          }
+        },
+        "bytesSent": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiMetric"
+          }
+        },
+        "messagesRecv": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiMetric"
+          }
+        },
+        "messagesSent": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiMetric"
+          }
+        },
+        "backpressure": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiMetric"
+          }
+        }
+      }
+    },
+    "arroyo_apiTaskCheckpointDetail": {
+      "type": "object",
+      "properties": {
+        "subtaskIndex": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "finishTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "bytes": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_apiTaskCheckpointEvent"
+          }
+        }
+      }
+    },
+    "arroyo_apiTaskCheckpointEvent": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "eventType": {
+          "$ref": "#/definitions/arroyo_apiTaskCheckpointEventType"
+        }
+      }
+    },
+    "arroyo_apiTaskCheckpointEventType": {
+      "type": "string",
+      "enum": [
+        "ALIGNMENT_STARTED",
+        "CHECKPOINT_STARTED",
+        "CHECKPOINT_OPERATOR_FINISHED",
+        "CHECKPOINT_SYNC_FINISHED"
+      ],
+      "default": "ALIGNMENT_STARTED"
+    },
+    "arroyo_apiTestSchemaResp": {
+      "type": "object",
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "arroyo_apiTestSourceMessage": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "boolean"
+        },
+        "done": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiUdf": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "$ref": "#/definitions/arroyo_apiUdfLanguage"
+        },
+        "definition": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_apiUdfLanguage": {
+      "type": "string",
+      "enum": [
+        "Rust"
+      ],
+      "default": "Rust"
+    },
+    "arroyo_apiUpdateJobResp": {
+      "type": "object"
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    }
+  }
+}

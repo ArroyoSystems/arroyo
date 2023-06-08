@@ -1,0 +1,372 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "proto/rpc.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "ControllerGrpc"
+    },
+    {
+      "name": "WorkerGrpc"
+    },
+    {
+      "name": "NodeGrpc"
+    },
+    {
+      "name": "CompilerGrpc"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {},
+  "definitions": {
+    "arroyo_rpcBackendData": {
+      "type": "object",
+      "properties": {
+        "parquetStore": {
+          "$ref": "#/definitions/arroyo_rpcParquetStoreData"
+        }
+      }
+    },
+    "arroyo_rpcCheckpointResp": {
+      "type": "object"
+    },
+    "arroyo_rpcCompileQueryResp": {
+      "type": "object",
+      "properties": {
+        "pipelinePath": {
+          "type": "string"
+        },
+        "wasmFnsPath": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_rpcGetWorkersResp": {
+      "type": "object",
+      "properties": {
+        "statuses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_rpcWorkerStatus"
+          }
+        }
+      }
+    },
+    "arroyo_rpcHeartbeatNodeResp": {
+      "type": "object"
+    },
+    "arroyo_rpcHeartbeatResp": {
+      "type": "object"
+    },
+    "arroyo_rpcJobFinishedResp": {
+      "type": "object"
+    },
+    "arroyo_rpcOutputData": {
+      "type": "object",
+      "properties": {
+        "operatorId": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "done": {
+          "type": "boolean"
+        }
+      }
+    },
+    "arroyo_rpcParquetStoreData": {
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "file": {
+          "type": "string"
+        },
+        "table": {
+          "type": "string"
+        },
+        "minRoutingKey": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "maxRoutingKey": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "maxTimestampMicros": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "arroyo_rpcRegisterNodeResp": {
+      "type": "object"
+    },
+    "arroyo_rpcRegisterWorkerResp": {
+      "type": "object"
+    },
+    "arroyo_rpcSinkDataResp": {
+      "type": "object"
+    },
+    "arroyo_rpcStartExecutionResp": {
+      "type": "object"
+    },
+    "arroyo_rpcStartWorkerResp": {
+      "type": "object",
+      "properties": {
+        "workerId": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "arroyo_rpcStopExecutionResp": {
+      "type": "object"
+    },
+    "arroyo_rpcStopMode": {
+      "type": "string",
+      "enum": [
+        "GRACEFUL",
+        "IMMEDIATE"
+      ],
+      "default": "GRACEFUL",
+      "title": "- GRACEFUL: The stop message flows through the dataflow like a checkpoint, causing every node to stop at a consistent point\n - IMMEDIATE: All tasks will stop immediately"
+    },
+    "arroyo_rpcStopWorkerResp": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/arroyo_rpcStopWorkerStatus"
+        }
+      }
+    },
+    "arroyo_rpcStopWorkerStatus": {
+      "type": "string",
+      "enum": [
+        "PLACEHOLDER",
+        "STOPPED",
+        "STOP_FAILED",
+        "NOT_FOUND"
+      ],
+      "default": "PLACEHOLDER"
+    },
+    "arroyo_rpcSubtaskCheckpointMetadata": {
+      "type": "object",
+      "properties": {
+        "subtaskIndex": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "startTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "finishTime": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "watermark": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "hasState": {
+          "type": "boolean"
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_rpcTableDescriptor"
+          }
+        },
+        "bytes": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "backendData": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/arroyo_rpcBackendData"
+          }
+        }
+      }
+    },
+    "arroyo_rpcTableDeleteBehavior": {
+      "type": "string",
+      "enum": [
+        "None",
+        "NoReadsBeforeWatermark"
+      ],
+      "default": "None",
+      "title": "- NoReadsBeforeWatermark: For a timestamped table, guarantees that we do not read\ndata before our watermark (which can then be cleaned up in compaction)"
+    },
+    "arroyo_rpcTableDescriptor": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "must be a single byte"
+        },
+        "description": {
+          "type": "string"
+        },
+        "tableType": {
+          "$ref": "#/definitions/arroyo_rpcTableType"
+        },
+        "deleteBehavior": {
+          "$ref": "#/definitions/arroyo_rpcTableDeleteBehavior"
+        },
+        "retentionMicros": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "writeBehavior": {
+          "$ref": "#/definitions/arroyo_rpcTableWriteBehavior"
+        }
+      }
+    },
+    "arroyo_rpcTableType": {
+      "type": "string",
+      "enum": [
+        "Global",
+        "TimeKeyMap",
+        "KeyTimeMultiMap"
+      ],
+      "default": "Global",
+      "title": "- Global: Data is shared between all subtasks; basic key-value map\n - TimeKeyMap: Memory key structure: [timestamp][dataflow_key]-\u003e value\nbyte key structure: [dataflow_key][timestamp] -\u003e value\n - KeyTimeMultiMap: Memory key structure: [dataflow_key][timestamp] -\u003e value+\nbyte key structure: [dataflow_key][timestamp][incrementing_long] -\u003e value"
+    },
+    "arroyo_rpcTableWriteBehavior": {
+      "type": "string",
+      "enum": [
+        "DefaultWrites",
+        "NoWritesBeforeWatermark"
+      ],
+      "default": "DefaultWrites"
+    },
+    "arroyo_rpcTaskAssignment": {
+      "type": "object",
+      "properties": {
+        "operatorId": {
+          "type": "string"
+        },
+        "operatorSubtask": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "workerId": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "workerAddr": {
+          "type": "string"
+        }
+      }
+    },
+    "arroyo_rpcTaskCheckpointCompletedResp": {
+      "type": "object"
+    },
+    "arroyo_rpcTaskCheckpointEventResp": {
+      "type": "object"
+    },
+    "arroyo_rpcTaskCheckpointEventType": {
+      "type": "string",
+      "enum": [
+        "STARTED_ALIGNMENT",
+        "STARTED_CHECKPOINTING",
+        "FINISHED_OPERATOR_SETUP",
+        "FINISHED_SYNC"
+      ],
+      "default": "STARTED_ALIGNMENT",
+      "title": "- STARTED_ALIGNMENT: got first barrier, waiting for alignment\n - STARTED_CHECKPOINTING: started checkpointing\n - FINISHED_OPERATOR_SETUP: operator finished setup\n - FINISHED_SYNC: finished the synchronous part of checkpointing"
+    },
+    "arroyo_rpcTaskFailedResp": {
+      "type": "object"
+    },
+    "arroyo_rpcTaskFinishedResp": {
+      "type": "object"
+    },
+    "arroyo_rpcTaskStartedResp": {
+      "type": "object"
+    },
+    "arroyo_rpcWorkerErrorRes": {
+      "type": "object"
+    },
+    "arroyo_rpcWorkerFinishedResp": {
+      "type": "object"
+    },
+    "arroyo_rpcWorkerResources": {
+      "type": "object",
+      "properties": {
+        "slots": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "arroyo_rpcWorkerStatus": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "slots": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    }
+  }
+}
