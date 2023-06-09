@@ -74,6 +74,7 @@ fn to_schema_type(
     type_name: String,
     td: TypeDetails,
 ) -> Option<(SchemaFieldType, bool)> {
+    println!("{}", type_name);
     match td {
         TypeDetails::Enum(_) => {
             warn!("Enums are not currently supported; ignoring {}", type_name);
@@ -120,18 +121,47 @@ fn to_schema_type(
                 "i64" => Primitive(Int64),
                 "f32" => Primitive(F32),
                 "f64" => Primitive(F64),
+                "chrono::DateTime<chrono::offset::Utc>" => Primitive(UnixMillis),
                 _ => {
-                    warn!("Unhandled primitive in json-schema: {}", t);
+                    println!("Unhandled primitive in json-schema: {}", t);
                     return None;
                 }
             };
             Some((primitive, false))
         }
         TypeDetails::String => Some((SchemaFieldType::Primitive(PrimitiveType::String), false)),
-        _ => {
-            warn!("Unhandled field type in json-schema {:?}", type_name);
+        TypeDetails::Newtype(t) => {
+            let t = type_space.get_type(&t.subtype()).unwrap();
+            to_schema_type(type_space, source_name, t.name(), t.details())
+        },
+        TypeDetails::Array(..) => {
+            warn!("Arrays are not currently supported");
             None
         }
+        TypeDetails::Map(..) => {
+            warn!("Maps are not currently supported");
+            None
+        }
+        TypeDetails::Set(_) => {
+            warn!("Sets are not currently supported");
+            None
+        }
+        TypeDetails::Box(_) => {
+            warn!("Boxes are not currently supported");
+            None
+        }
+        TypeDetails::Tuple(_) => {
+            warn!("Tuples are not currently supported");
+            None
+        }
+        TypeDetails::Unit => {
+            warn!("The unit type is not currently supported");
+            None
+        }
+        TypeDetails::Vec(_) => {
+            warn!("The vec type is not currently supported");
+            None
+        },
     }
 }
 
@@ -141,108 +171,141 @@ mod test {
 
     #[test]
     fn test() {
-        convert_json_schema(
+        let s = convert_json_schema(
             "nexmark",
-            r#"
-            {
-                "$schema": "https://json-schema.org/draft/2019-09/schema",
-                "$id": "http://example.com/example.json",
-                "type": "object",
-                "default": {},
-                "title": "Root Schema",
-                "properties": {
-                    "auction": { "$ref": "\\#/definitions/Auction" },
-                    "bid": { "$ref": "\\#/definitions/Bid" }
-                },
-                "definitions": {
-                    "Auction": {
-                        "type": "object",
-                        "default": {},
-                        "required": [
-                            "id",
-                            "itemName",
-                            "description",
-                            "initialBid",
-                            "reserve",
-                            "dateTime",
-                            "expires",
-                            "seller",
-                            "category",
-                            "extra"
-                        ],
-                        "properties": {
-                            "id": {
-                                "type": "integer"
-                            },
-                            "itemName": {
-                                "type": "string"
-                            },
-                            "description": {
-                                "type": "string"
-                            },
-                            "initialBid": {
-                                "type": "integer"
-                            },
-                            "reserve": {
-                                "type": "integer"
-                            },
-                            "dateTime": {
-                                "type": "number"
-                            },
-                            "expires": {
-                                "type": "number"
-                            },
-                            "seller": {
-                                "type": "integer"
-                            },
-                            "category": {
-                                "type": "integer"
-                            },
-                            "extra": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "Bid": {
-                        "type": "object",
-                        "default": {},
-                        "required": [
-                            "auction",
-                            "bidder",
-                            "price",
-                            "channel",
-                            "url",
-                            "dateTime",
-                            "extra"
-                        ],
-                        "properties": {
-                            "auction": {
-                                "type": "integer"
-                            },
-                            "bidder": {
-                                "type": "integer"
-                            },
-                            "price": {
-                                "type": "integer"
-                            },
-                            "channel": {
-                                "type": "string"
-                            },
-                            "url": {
-                                "type": "string"
-                            },
-                            "dateTime": {
-                                "type": "number"
-                            },
-                            "extra": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-            "#,
+            r##"
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "CloudEvents Specification JSON Schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Identifies the event.",
+      "$ref": "#/definitions/iddef",
+      "examples": [
+        "A234-1234-1234"
+      ]
+    },
+    "source": {
+      "description": "Identifies the context in which an event happened.",
+      "$ref": "#/definitions/sourcedef",
+      "examples" : [
+        "https://github.com/cloudevents",
+        "mailto:cncf-wg-serverless@lists.cncf.io",
+        "urn:uuid:6e8bc430-9c3a-11d9-9669-0800200c9a66",
+        "cloudevents/spec/pull/123",
+        "/sensors/tn-1234567/alerts",
+        "1-555-123-4567"
+      ]
+    },
+    "specversion": {
+      "description": "The version of the CloudEvents specification which the event uses.",
+      "$ref": "#/definitions/specversiondef",
+      "examples": [
+        "1.0"
+      ]
+    },
+    "type": {
+      "description": "Describes the type of event related to the originating occurrence.",
+      "$ref": "#/definitions/typedef",
+      "examples" : [
+        "com.github.pull_request.opened",
+        "com.example.object.deleted.v2"
+      ]
+    },
+    "datacontenttype": {
+      "description": "Content type of the data value. Must adhere to RFC 2046 format.",
+      "$ref": "#/definitions/datacontenttypedef",
+      "examples": [
+        "text/xml",
+        "application/json",
+        "image/png",
+        "multipart/form-data"
+      ]
+    },
+    "dataschema": {
+      "description": "Identifies the schema that data adheres to.",
+      "$ref": "#/definitions/dataschemadef"
+    },
+    "subject": {
+      "description": "Describes the subject of the event in the context of the event producer (identified by source).",
+      "$ref": "#/definitions/subjectdef",
+      "examples": [
+        "mynewfile.jpg"
+      ]
+    },
+    "time": {
+      "description": "Timestamp of when the occurrence happened. Must adhere to RFC 3339.",
+      "$ref": "#/definitions/timedef",
+      "examples": [
+        "2018-04-05T17:31:00Z"
+      ]
+    },
+    "data": {
+      "description": "The event payload.",
+      "$ref": "#/definitions/datadef",
+      "examples": [
+        "<much wow=\"xml\"/>"
+      ]
+    },
+    "data_base64": {
+      "description": "Base64 encoded event payload. Must adhere to RFC4648.",
+      "$ref": "#/definitions/data_base64def",
+      "examples": [
+        "Zm9vYg=="
+      ]
+    }
+  },
+  "required": ["id", "source", "specversion", "type"],
+  "definitions": {
+    "iddef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourcedef": {
+      "type": "string",
+      "format": "uri-reference",
+      "minLength": 1
+    },
+    "specversiondef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "typedef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "datacontenttypedef": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "dataschemadef": {
+      "type": ["string", "null"],
+      "format": "uri",
+      "minLength": 1
+    },
+    "subjectdef": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "timedef": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "minLength": 1
+    },
+    "datadef": {
+      "type": ["object", "string", "number", "array", "boolean", "null"]
+    },
+    "data_base64def": {
+      "type": ["string", "null"],
+      "contentEncoding": "base64"
+    }
+  }
+}
+            "##,
         )
         .unwrap();
+
+    println!("shcema fields: {:?}", s);
     }
 }

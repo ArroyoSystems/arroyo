@@ -455,7 +455,8 @@ impl Source {
             },
             SourceFormat::JsonFields => None,
             SourceFormat::JsonSchema(_) => {
-                Some(format!("{}::{}", self.name, json_schema::ROOT_NAME))
+                None
+                //Some(format!("{}::{}", self.name, json_schema::ROOT_NAME))
             }
             SourceFormat::RawJson => Some("arroyo_types::RawJson".to_string()),
         };
@@ -468,7 +469,7 @@ impl Source {
         };
 
         if let Some(defs) = defs {
-            provider.add_defs(&self.name, defs);
+            // provider.add_defs(&self.name, defs);
         }
 
         provider.add_saved_source_with_type(
