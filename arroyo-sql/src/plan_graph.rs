@@ -5,17 +5,18 @@ use std::{
 
 use arrow_schema::DataType;
 use arroyo_datastream::{
-    EdgeType, ExpressionReturnType, Operator, Program, SlidingAggregatingTopN,
-    SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN, TumblingWindowAggregator,
-    WatermarkType, WindowAgg, WindowType,
+    EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, Program, SerializationMode,
+    SlidingAggregatingTopN, SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN,
+    TumblingWindowAggregator, WatermarkType, WindowAgg, WindowType,
 };
+
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::quote;
 use syn::{parse_quote, parse_str};
 
 use crate::{
     expressions::SortExpression,
-    external::{SqlSink, SqlSource},
+    external::{SinkUpdateType, SqlSink, SqlSource},
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
     pipeline::{
@@ -36,6 +37,11 @@ pub enum PlanOperator {
     WindowAggregate {
         window: WindowType,
         projection: AggregateProjection,
+    },
+    NonWindowAggregate {
+        input_is_update: bool,
+        expiration: Duration,
+        projection: TwoPhaseAggregateProjection,
     },
     WindowMerge {
         key_struct: StructDef,
@@ -84,6 +90,8 @@ pub enum PlanOperator {
     },
     // for external nodes, mainly sinks.
     StreamOperator(String, Operator),
+    ToDebezium,
+    FromDebezium,
     Sink(String, SqlSink),
 }
 
@@ -102,6 +110,7 @@ pub struct FusedRecordTransform {
     pub output_types: Vec<PlanType>,
     pub expression_return_type: ExpressionReturnType,
 }
+
 impl FusedRecordTransform {
     fn to_operator(&self) -> Operator {
         match self.expression_return_type {
@@ -113,10 +122,12 @@ impl FusedRecordTransform {
 
     fn to_predicate_operator(&self) -> Operator {
         let mut predicates = Vec::new();
+        let mut names = Vec::new();
         for expression in &self.expressions {
             let RecordTransform::Filter(predicate)= expression else {
                 panic!("FusedRecordTransform.to_predicate_operator() called on non-predicate expression");
             };
+            names.push("filter");
             predicates.push(predicate.to_syn_expression());
         }
         let predicate: syn::Expr = parse_quote!( {
@@ -124,7 +135,7 @@ impl FusedRecordTransform {
             #(#predicates)&&*
         });
         Operator::ExpressionOperator {
-            name: "fused".to_string(),
+            name: format!("sql_fused<{}>", names.join(",")),
             expression: quote!(#predicate).to_string(),
             return_type: ExpressionReturnType::Predicate,
         }
@@ -132,11 +143,13 @@ impl FusedRecordTransform {
 
     fn to_record_operator(&self) -> Operator {
         let mut record_expressions: Vec<syn::Stmt> = Vec::new();
+        let mut names = Vec::new();
         for i in 0..self.expressions.len() {
             let expression = &self.expressions[i];
             let output_type = &self.output_types[i];
             match expression {
                 RecordTransform::ValueProjection(projection) => {
+                    names.push("value_project");
                     let expr = projection.to_syn_expression();
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
@@ -151,6 +164,7 @@ impl FusedRecordTransform {
                     ));
                 }
                 RecordTransform::KeyProjection(projection) => {
+                    names.push("key_project");
                     let expr = projection.to_syn_expression();
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
@@ -165,13 +179,19 @@ impl FusedRecordTransform {
                     ));
                 }
                 RecordTransform::TimestampAssignment(timestamp_expression) => {
+                    names.push("timestamp_assignment");
                     let expr = timestamp_expression.to_syn_expression();
                     let record_type = output_type.record_type();
+                    let unwrap_tokens = if timestamp_expression.nullable() {
+                        Some(quote!(.expect("require a non-null timestamp")))
+                    } else {
+                        None
+                    };
                     record_expressions.push(parse_quote!(
 
                             let record: #record_type = { let arg = &record.value;
                                 arroyo_types::Record {
-                                timestamp: #expr,
+                                timestamp: #expr #unwrap_tokens,
                                 key: record.key.clone(),
                                 value: record.value.clone()
                         }
@@ -186,19 +206,22 @@ impl FusedRecordTransform {
             record
         });
         Operator::ExpressionOperator {
-            name: "fused".to_string(),
+            name: format!("sql_fused<{}>", names.join(",")),
             expression: quote!(#combined).to_string(),
             return_type: ExpressionReturnType::Record,
         }
     }
 
     fn to_optional_record_operator(&self) -> Operator {
+        let mut names = Vec::new();
         let mut record_expressions: Vec<syn::Stmt> = Vec::new();
         for i in 0..self.expressions.len() {
             let expression = &self.expressions[i];
             let output_type = &self.output_types[i];
-            match expression {
-                RecordTransform::ValueProjection(projection) => {
+            let is_updating = matches!(output_type, PlanType::Updating(_));
+            match (expression, is_updating) {
+                (RecordTransform::ValueProjection(projection), false) => {
+                    names.push("value_project");
                     let expr = projection.to_syn_expression();
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
@@ -212,7 +235,22 @@ impl FusedRecordTransform {
                     };
                     ));
                 }
-                RecordTransform::KeyProjection(projection) => {
+                (RecordTransform::ValueProjection(projection), true) => {
+                    names.push("updating_value_project");
+                    let expr = projection.to_syn_expression();
+                    let record_type = output_type.record_type();
+                    record_expressions.push(parse_quote!(
+                            let record: #record_type = { let arg = &record.value;
+                                arroyo_types::Record {
+                                timestamp: record.timestamp,
+                                key: None,
+                                value: arg.map(|arg| #expr)?
+                        }
+                    };
+                    ));
+                }
+                (RecordTransform::KeyProjection(projection), false) => {
+                    names.push("key_project");
                     let expr = projection.to_syn_expression();
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
@@ -226,28 +264,60 @@ impl FusedRecordTransform {
                     };
                     ));
                 }
-                RecordTransform::Filter(predicate) => {
+                (RecordTransform::Filter(predicate), false) => {
+                    names.push("filter");
                     let expr = predicate.to_syn_expression();
+                    let unwrap = if predicate.nullable() {
+                        quote!(.unwrap_or(false))
+                    } else {
+                        quote!()
+                    };
                     record_expressions.push(parse_quote!(
-                        if !{let arg = &record.value;#expr} {
+                        if !{let arg = &record.value;#expr #unwrap} {
                             return None;
                         }
                     ));
                 }
-                RecordTransform::TimestampAssignment(timestamp_expression) => {
+                (RecordTransform::Filter(predicate), true) => {
+                    names.push("updating_filter");
+                    let expr = predicate.to_syn_expression();
+                    let record_type = output_type.record_type();
+                    let unwrap = if predicate.nullable() {
+                        quote!(.unwrap_or(false))
+                    } else {
+                        quote!()
+                    };
+                    record_expressions.push(parse_quote!(
+                            let record: #record_type = { let arg = &record.value;
+                                arroyo_types::Record {
+                                timestamp: record.timestamp,
+                                key: record.key.clone(),
+                                value: arg.filter(|arg| #expr #unwrap)?
+                        }
+                    };
+                        ));
+                }
+                (RecordTransform::TimestampAssignment(timestamp_expression), false) => {
+                    names.push("timestamp_assignment");
                     let expr = timestamp_expression.to_syn_expression();
+                    let unwrap_tokens = if timestamp_expression.nullable() {
+                        Some(quote!(.expect("require a non-null timestamp")))
+                    } else {
+                        None
+                    };
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
 
                             let record: #record_type = { let arg = &record.value;
                                 arroyo_types::Record {
-                                timestamp: #expr,
+                                timestamp: #expr #unwrap_tokens,
                                 key: record.key.clone(),
                                 value: record.value.clone()
                         }
                     };
                     ));
                 }
+                _ => unimplemented!(),
             }
         }
         let combined: syn::Expr = parse_quote!({
@@ -279,6 +349,25 @@ impl PlanNode {
         }
     }
 
+    fn from_record_transform(record_transform: RecordTransform, input_node: &PlanNode) -> Self {
+        let input_type = &input_node.output_type;
+        let output_type = match &record_transform {
+            RecordTransform::ValueProjection(value_projection) => {
+                input_type.with_value(value_projection.output_struct())
+            }
+            RecordTransform::KeyProjection(key_projection) => {
+                input_type.with_key(key_projection.output_struct())
+            }
+            RecordTransform::TimestampAssignment(_) | RecordTransform::Filter(_) => {
+                input_type.clone()
+            }
+        };
+        PlanNode {
+            operator: PlanOperator::RecordTransform(record_transform),
+            output_type,
+        }
+    }
+
     fn prefix(&self) -> String {
         match &self.operator {
             PlanOperator::Source(name, _) => name.to_string(),
@@ -305,6 +394,9 @@ impl PlanNode {
             PlanOperator::SlidingAggregatingTopN { .. } => "sliding_aggregating_top_n".to_string(),
             PlanOperator::TumblingTopN { .. } => "tumbling_top_n".to_string(),
             PlanOperator::Sink(name, _) => format!("sink_{}", name),
+            PlanOperator::ToDebezium => "to_debezium".to_string(),
+            PlanOperator::FromDebezium => "from_debezium".to_string(),
+            PlanOperator::NonWindowAggregate { .. } => "non_window_aggregate".to_string(),
         }
     }
 
@@ -312,7 +404,9 @@ impl PlanNode {
         match &self.operator {
             PlanOperator::Source(_name, source) => source.get_operator(sql_config),
             PlanOperator::Watermark(watermark) => Operator::Watermark(watermark.clone()),
-            PlanOperator::RecordTransform(record_transform) => record_transform.as_operator(),
+            PlanOperator::RecordTransform(record_transform) => {
+                record_transform.as_operator(self.output_type.is_updating())
+            }
             PlanOperator::WindowAggregate { window, projection } => {
                 let aggregate_expr = projection.to_syn_expression();
                 arroyo_datastream::Operator::Window {
@@ -333,24 +427,48 @@ impl PlanNode {
                 let merge_expr = group_by_kind.to_syn_expression(key_struct, value_struct);
                 let merge_struct_type =
                     SqlOperator::merge_struct_type(key_struct, value_struct).get_type();
-                let expression: syn::Expr = parse_quote!(
-                    {
-                        let aggregate = record.value.clone();
-                        let key = record.key.clone().unwrap();
-                        let timestamp = record.timestamp.clone();
-                        let arg = #merge_struct_type { key, aggregate , timestamp};
-                        let value = #merge_expr;
-                        arroyo_types::Record {
-                            timestamp: record.timestamp,
-                            key: None,
-                            value,
+                if self.output_type.is_updating() {
+                    let expression: syn::Expr = parse_quote!(
+                        {
+                            let value = record.value.map(|value| {
+                                let aggregate = value.clone();
+                                let key = record.key.clone().unwrap();
+                                let timestamp = record.timestamp.clone();
+                                let arg = #merge_struct_type { key, aggregate , timestamp};
+                                #merge_expr
+                            })?;
+                            Some(arroyo_types::Record {
+                                timestamp: record.timestamp,
+                                key: None,
+                                value,
+                            })
                         }
+                    );
+                    Operator::ExpressionOperator {
+                        name: "merge".to_string(),
+                        expression: quote!(#expression).to_string(),
+                        return_type: arroyo_datastream::ExpressionReturnType::OptionalRecord,
                     }
-                );
-                Operator::ExpressionOperator {
-                    name: "aggregation".to_string(),
-                    expression: quote!(#expression).to_string(),
-                    return_type: arroyo_datastream::ExpressionReturnType::Record,
+                } else {
+                    let expression: syn::Expr = parse_quote!(
+                        {
+                            let aggregate = record.value.clone();
+                            let key = record.key.clone().unwrap();
+                            let timestamp = record.timestamp.clone();
+                            let arg = #merge_struct_type { key, aggregate , timestamp};
+                            let value = #merge_expr;
+                            arroyo_types::Record {
+                                timestamp: record.timestamp,
+                                key: None,
+                                value,
+                            }
+                        }
+                    );
+                    Operator::ExpressionOperator {
+                        name: "merge".to_string(),
+                        expression: quote!(#expression).to_string(),
+                        return_type: arroyo_datastream::ExpressionReturnType::Record,
+                    }
                 }
             }
             PlanOperator::TumblingWindowTwoPhaseAggregator {
@@ -395,10 +513,11 @@ impl PlanNode {
             PlanOperator::JoinWithExpiration {
                 left_expiration,
                 right_expiration,
-                join_type: _,
+                join_type,
             } => Operator::JoinWithExpiration {
                 left_expiration: *left_expiration,
                 right_expiration: *right_expiration,
+                join_type: join_type.clone().into(),
             },
             PlanOperator::JoinListMerge(join_type, struct_pair) => {
                 let merge_struct =
@@ -418,13 +537,22 @@ impl PlanNode {
                     join_type.join_struct_type(&struct_pair.left, &struct_pair.right);
                 let merge_expr =
                     join_type.merge_syn_expression(&struct_pair.left, &struct_pair.right);
-                assert!(*join_type == JoinType::Inner);
-                MethodCompiler::merge_pair_operator(
-                    "join_merge",
-                    merge_struct.get_type(),
-                    merge_expr,
-                )
-                .unwrap()
+                match join_type {
+                    JoinType::Inner => MethodCompiler::merge_pair_operator(
+                        "join_merge",
+                        merge_struct.get_type(),
+                        merge_expr,
+                    )
+                    .unwrap(),
+                    JoinType::Left | JoinType::Right | JoinType::Full => {
+                        MethodCompiler::merge_pair_updating_operator(
+                            "updating_join_merge",
+                            merge_struct.get_type(),
+                            merge_expr,
+                        )
+                        .unwrap()
+                    }
+                }
             }
             PlanOperator::WindowFunction(WindowFunctionOperator {
                 window_function,
@@ -560,23 +688,21 @@ impl PlanNode {
                         #projection_expr
                     }
                 ).to_string();
-                let operator =
-                    arroyo_datastream::Operator::SlidingAggregatingTopN(SlidingAggregatingTopN {
-                        width: *width,
-                        slide: *slide,
-                        bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
-                        in_memory_add: quote!(|current, bin_value| {#in_memory_add}).to_string(),
-                        in_memory_remove: quote!(|current, bin_value| {#in_memory_remove})
-                            .to_string(),
-                        partitioning_func: quote!(|arg| {#partition_function}).to_string(),
-                        extractor,
-                        aggregator,
-                        bin_type: quote!(#bin_type).to_string(),
-                        mem_type: quote!(#mem_type).to_string(),
-                        sort_key_type,
-                        max_elements: *max_elements,
-                    });
-                operator
+
+                arroyo_datastream::Operator::SlidingAggregatingTopN(SlidingAggregatingTopN {
+                    width: *width,
+                    slide: *slide,
+                    bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
+                    in_memory_add: quote!(|current, bin_value| {#in_memory_add}).to_string(),
+                    in_memory_remove: quote!(|current, bin_value| {#in_memory_remove}).to_string(),
+                    partitioning_func: quote!(|arg| {#partition_function}).to_string(),
+                    extractor,
+                    aggregator,
+                    bin_type: quote!(#bin_type).to_string(),
+                    mem_type: quote!(#mem_type).to_string(),
+                    sort_key_type,
+                    max_elements: *max_elements,
+                })
             }
             PlanOperator::TumblingTopN {
                 width,
@@ -668,6 +794,87 @@ impl PlanNode {
                     arroyo_datastream::SinkConfig::Null => arroyo_datastream::Operator::NullSink,
                 }
             }
+            PlanOperator::ToDebezium => arroyo_datastream::Operator::ExpressionOperator {
+                name: "to_debezium".into(),
+                expression: quote!({
+                    arroyo_types::Record {
+                        timestamp: record.timestamp,
+                        key: None,
+                        value: record.value.clone().into(),
+                    }
+                })
+                .to_string(),
+                return_type: ExpressionReturnType::Record,
+            },
+            PlanOperator::FromDebezium => arroyo_datastream::Operator::ExpressionOperator {
+                name: "from_debezium".into(),
+                expression: quote!({
+                    arroyo_types::Record {
+                        timestamp: record.timestamp,
+                        key: None,
+                        value: record.value.clone().into(),
+                    }
+                })
+                .to_string(),
+                return_type: ExpressionReturnType::Record,
+            },
+            PlanOperator::NonWindowAggregate {
+                input_is_update,
+                projection,
+                expiration,
+            } => {
+                if *input_is_update {
+                    let sliding = projection.sliding_aggregation_syn_expression();
+                    let bin_merger = projection.bin_merger_syn_expression();
+                    let bin_type = projection.bin_type();
+                    let memory_type = projection.memory_type();
+                    let memory_add = projection.memory_add_syn_expression();
+                    let memory_remove = projection.memory_remove_syn_expression();
+
+                    arroyo_datastream::Operator::NonWindowAggregator(NonWindowAggregator {
+                        expiration: *expiration,
+                        aggregator: quote!(|arg| {#sliding}).to_string(),
+                        bin_merger: quote!(|arg, current| {
+                            let current_bin: Option<#bin_type> = None;
+                            let updating_bin = arg.map(|arg| #bin_merger);
+                            if let Some(updating_bin) = updating_bin {
+                                match updating_bin {
+                                    arroyo_types::UpdatingData::Retract(retract) => {
+                                        let bin_value = retract;
+                                        let current = current.expect(&format!("retracting means there should be state for {:?}", retract)).clone();
+                                        #memory_remove
+                                    },
+                                    arroyo_types::UpdatingData::Update { old, new } => {
+                                        let current = current.expect("retracting means there should be state").clone();
+                                        let bin_value = old;
+                                        let current = #memory_remove;
+                                        let bin_value = new;
+                                        Some(#memory_add)
+                                    },
+                                    arroyo_types::UpdatingData::Append(append) => {
+                                        let bin_value = append;
+                                        let current = current.cloned();
+                                        Some(#memory_add)
+                                    }
+                                }
+                            } else {
+                                None
+                            }
+                        }).to_string(),
+                        bin_type: quote!(#memory_type).to_string(),
+                    })
+                } else {
+                    let aggregate_expr = projection.tumbling_aggregation_syn_expression();
+                    let bin_merger = projection.bin_merger_syn_expression();
+                    let bin_type = projection.bin_type();
+                    arroyo_datastream::Operator::NonWindowAggregator(NonWindowAggregator {
+                        expiration: *expiration,
+                        aggregator: quote!(|arg| {#aggregate_expr}).to_string(),
+                        bin_merger: quote!(|arg, current_bin| {Some(#bin_merger)}).to_string(),
+                        bin_type: quote!(#bin_type).to_string(),
+                    })
+                }
+            }
         }
     }
 
@@ -724,6 +931,13 @@ impl PlanNode {
                 );
                 output_types.extend(merge_struct.all_structs());
             }
+            PlanOperator::NonWindowAggregate {
+                input_is_update: _,
+                expiration: _,
+                projection,
+            } => {
+                output_types.extend(projection.output_struct().all_structs());
+            }
 
             _ => {}
         }
@@ -733,55 +947,7 @@ impl PlanNode {
 
 #[derive(Debug, Clone)]
 pub struct PlanEdge {
-    pub edge_data_type: PlanType,
     pub edge_type: EdgeType,
-}
-impl PlanEdge {
-    fn into_stream_edge(&self) -> StreamEdge {
-        match &self.edge_data_type {
-            PlanType::Unkeyed(value_struct) => {
-                StreamEdge::unkeyed_edge(value_struct.struct_name(), self.edge_type.clone())
-            }
-            PlanType::Keyed { key, value } => StreamEdge::keyed_edge(
-                key.struct_name(),
-                value.struct_name(),
-                self.edge_type.clone(),
-            ),
-            PlanType::KeyedPair {
-                key,
-                left_value,
-                right_value,
-            } => StreamEdge::keyed_edge(
-                key.struct_name(),
-                format!(
-                    "({},{})",
-                    left_value.struct_name(),
-                    right_value.struct_name()
-                ),
-                self.edge_type.clone(),
-            ),
-            PlanType::KeyedListPair {
-                key,
-                left_value,
-                right_value,
-            } => StreamEdge::keyed_edge(
-                key.struct_name(),
-                format!(
-                    "(Vec<{}>,Vec<{}>)",
-                    left_value.struct_name(),
-                    right_value.struct_name()
-                ),
-                self.edge_type.clone(),
-            ),
-            PlanType::KeyedLiteralTypeValue { key, value } => {
-                StreamEdge::keyed_edge(key.struct_name(), value.clone(), self.edge_type.clone())
-            }
-            PlanType::UnkeyedList(value_struct) => StreamEdge::unkeyed_edge(
-                format!("Vec<{}>", value_struct.struct_name()),
-                self.edge_type.clone(),
-            ),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -796,6 +962,7 @@ pub enum PlanType {
         key: StructDef,
         left_value: StructDef,
         right_value: StructDef,
+        join_type: JoinType,
     },
     KeyedListPair {
         key: StructDef,
@@ -803,9 +970,10 @@ pub enum PlanType {
         right_value: StructDef,
     },
     KeyedLiteralTypeValue {
-        key: StructDef,
+        key: Option<StructDef>,
         value: String,
     },
+    Updating(Box<PlanType>),
 }
 
 impl PlanType {
@@ -816,10 +984,22 @@ impl PlanType {
                 key: _,
                 left_value,
                 right_value,
+                join_type,
             } => {
                 let left_type = left_value.get_type();
                 let right_type = right_value.get_type();
-                parse_quote!((#left_type,#right_type))
+                match join_type {
+                    JoinType::Inner => parse_quote!((#left_type,#right_type)),
+                    JoinType::Left => {
+                        parse_quote!(arroyo_types::UpdatingData<(#left_type,Option<#right_type>)>)
+                    }
+                    JoinType::Right => {
+                        parse_quote!(arroyo_types::UpdatingData<(Option<#left_type>,#right_type)>)
+                    }
+                    JoinType::Full => {
+                        parse_quote!(arroyo_types::UpdatingData<(Option<#left_type>,Option<#right_type>)>)
+                    }
+                }
             }
             PlanType::KeyedListPair {
                 key: _,
@@ -835,16 +1015,26 @@ impl PlanType {
                 let value_type = value.get_type();
                 parse_quote!(Vec<#value_type>)
             }
+            PlanType::Updating(inner_type) => {
+                let inner_type = inner_type.as_syn_type();
+                parse_quote!(arroyo_types::UpdatingData<#inner_type>)
+            }
         }
     }
 
     fn key_type(&self) -> syn::Type {
         match self {
-            PlanType::Unkeyed(_) | PlanType::UnkeyedList(_) => parse_quote!(()),
+            PlanType::Unkeyed(_)
+            | PlanType::UnkeyedList(_)
+            | PlanType::KeyedLiteralTypeValue {
+                key: None,
+                value: _,
+            } => parse_quote!(()),
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
-            | PlanType::KeyedLiteralTypeValue { key, .. }
+            | PlanType::KeyedLiteralTypeValue { key: Some(key), .. }
             | PlanType::KeyedListPair { key, .. } => key.get_type(),
+            PlanType::Updating(inner) => inner.key_type(),
         }
     }
 
@@ -856,11 +1046,17 @@ impl PlanType {
 
     fn get_key_struct_names(&self) -> Vec<String> {
         match self {
-            PlanType::Unkeyed(_) | PlanType::UnkeyedList(_) => vec![],
+            PlanType::Unkeyed(_)
+            | PlanType::UnkeyedList(_)
+            | PlanType::KeyedLiteralTypeValue {
+                key: None,
+                value: _,
+            } => vec![],
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
-            | PlanType::KeyedLiteralTypeValue { key, .. }
+            | PlanType::KeyedLiteralTypeValue { key: Some(key), .. }
             | PlanType::KeyedListPair { key, .. } => key.all_names(),
+            PlanType::Updating(inner) => inner.get_key_struct_names(),
         }
     }
 
@@ -878,6 +1074,7 @@ impl PlanType {
                 key,
                 left_value,
                 right_value,
+                join_type: _,
             }
             | PlanType::KeyedListPair {
                 key,
@@ -889,10 +1086,84 @@ impl PlanType {
                 result.extend(right_value.all_structs());
                 result.into_iter().collect()
             }
-            PlanType::KeyedLiteralTypeValue { key, value: _ } => {
-                key.all_structs().into_iter().collect()
-            }
+            PlanType::KeyedLiteralTypeValue { key, value: _ } => match key {
+                Some(key) => key.all_structs().into_iter().collect(),
+                None => HashSet::new(),
+            },
+            PlanType::Updating(inner) => inner.get_all_types(),
         }
+    }
+
+    fn get_stream_edge(&self, edge_type: EdgeType) -> StreamEdge {
+        let key_type = self.key_type();
+        let value_type = self.as_syn_type();
+        let key = quote!(#key_type).to_string();
+        let value = quote!(#value_type).to_string();
+        StreamEdge {
+            key,
+            value,
+            typ: edge_type,
+        }
+    }
+
+    fn with_key(&self, key: StructDef) -> Self {
+        match self {
+            PlanType::Unkeyed(value) | PlanType::Keyed { key: _, value } => PlanType::Keyed {
+                key,
+                value: value.clone(),
+            },
+            PlanType::UnkeyedList(_) => unreachable!(),
+            PlanType::KeyedPair {
+                key: _,
+                left_value,
+                right_value,
+                join_type,
+            } => PlanType::KeyedPair {
+                key,
+                left_value: left_value.clone(),
+                right_value: right_value.clone(),
+                join_type: join_type.clone(),
+            },
+            PlanType::KeyedListPair {
+                key: _,
+                left_value,
+                right_value,
+            } => PlanType::KeyedListPair {
+                key,
+                left_value: left_value.clone(),
+                right_value: right_value.clone(),
+            },
+            PlanType::KeyedLiteralTypeValue { key: _, value } => PlanType::KeyedLiteralTypeValue {
+                key: Some(key),
+                value: value.clone(),
+            },
+            PlanType::Updating(inner) => PlanType::Updating(Box::new(inner.with_key(key))),
+        }
+    }
+
+    fn with_value(&self, value: StructDef) -> PlanType {
+        match self {
+            PlanType::Unkeyed(_) => PlanType::Unkeyed(value),
+            PlanType::UnkeyedList(_) => PlanType::UnkeyedList(value),
+            PlanType::Keyed { key: _, value: _ } => PlanType::Unkeyed(value),
+            PlanType::KeyedPair {
+                key: _,
+                left_value: _,
+                right_value: _,
+                join_type: _,
+            } => unreachable!(),
+            PlanType::KeyedListPair {
+                key: _,
+                left_value: _,
+                right_value: _,
+            } => unreachable!(),
+            PlanType::KeyedLiteralTypeValue { key: _, value: _ } => unreachable!(),
+            PlanType::Updating(inner) => PlanType::Updating(Box::new(inner.with_value(value))),
+        }
+    }
+
+    pub(crate) fn is_updating(&self) -> bool {
+        matches!(self, PlanType::Updating(_))
     }
 }
 
@@ -946,6 +1217,32 @@ impl PlanGraph {
         }
     }
 
+    fn add_debezium_source(&mut self, source_operator: &SourceOperator) -> NodeIndex {
+        let value_type = source_operator.source.struct_def.get_type();
+        let debezium_type = PlanType::KeyedLiteralTypeValue {
+            key: None,
+            value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+        };
+        let source_node = self.insert_operator(
+            PlanOperator::Source(source_operator.name.clone(), source_operator.source.clone()),
+            debezium_type,
+        );
+
+        let debezium_edge = PlanEdge {
+            edge_type: EdgeType::Forward,
+        };
+
+        let from_debezium_node = self.insert_operator(
+            PlanOperator::FromDebezium,
+            PlanType::Updating(Box::new(PlanType::Unkeyed(
+                source_operator.source.struct_def.clone(),
+            ))),
+        );
+        self.graph
+            .add_edge(source_node, from_debezium_node, debezium_edge);
+        from_debezium_node
+    }
+
     fn add_sql_source(&mut self, source_operator: SourceOperator) -> NodeIndex {
         if let Some(node_index) = self.sources.get(&source_operator.name) {
             return *node_index;
@@ -953,25 +1250,25 @@ impl PlanGraph {
         if let Some(source_id) = source_operator.source.id {
             self.saved_sources_used.push(source_id);
         }
-        let mut current_type = PlanType::Unkeyed(source_operator.source.struct_def.clone());
-        let mut current_index = self.insert_operator(
-            PlanOperator::Source(source_operator.name.clone(), source_operator.source.clone()),
-            current_type.clone(),
-        );
+        let mut current_index = match source_operator.source.serialization_mode {
+            SerializationMode::DebeziumJson => self.add_debezium_source(&source_operator),
+            _ => self.insert_operator(
+                PlanOperator::Source(source_operator.name.clone(), source_operator.source.clone()),
+                PlanType::Unkeyed(source_operator.source.struct_def.clone()),
+            ),
+        };
         if let Some(virtual_projection) = source_operator.virtual_field_projection {
             let virtual_plan_type = PlanType::Unkeyed(virtual_projection.output_struct());
             let virtual_index = self.insert_operator(
                 PlanOperator::RecordTransform(RecordTransform::ValueProjection(virtual_projection)),
-                virtual_plan_type.clone(),
+                virtual_plan_type,
             );
             let virtual_edge = PlanEdge {
-                edge_data_type: current_type.clone(),
                 edge_type: EdgeType::Forward,
             };
             self.graph
                 .add_edge(current_index, virtual_index, virtual_edge);
             current_index = virtual_index;
-            current_type = virtual_plan_type;
         }
 
         if let Some(timestamp_expression) = source_operator.timestamp_override {
@@ -979,10 +1276,9 @@ impl PlanGraph {
                 PlanOperator::RecordTransform(RecordTransform::TimestampAssignment(
                     timestamp_expression,
                 )),
-                current_type.clone(),
+                self.get_plan_node(current_index).output_type.clone(),
             );
             let timestamp_edge = PlanEdge {
-                edge_data_type: current_type.clone(),
                 edge_type: EdgeType::Forward,
             };
             self.graph
@@ -1012,9 +1308,11 @@ impl PlanGraph {
             }
         };
         let watermark_operator = PlanOperator::Watermark(watermark);
-        let watermark_index = self.insert_operator(watermark_operator, current_type.clone());
+        let watermark_index = self.insert_operator(
+            watermark_operator,
+            self.get_plan_node(current_index).output_type.clone(),
+        );
         let watermark_edge = PlanEdge {
-            edge_data_type: current_type,
             edge_type: EdgeType::Forward,
         };
         self.graph
@@ -1036,21 +1334,22 @@ impl PlanGraph {
         input: Box<SqlOperator>,
         aggregate: crate::pipeline::AggregateOperator,
     ) -> NodeIndex {
-        let input_type = input.return_type();
+        if !input.has_window() && matches!(aggregate.window, WindowType::Instant) {
+            return self.add_updating_aggregator(input, aggregate);
+        }
+        let input_index = self.add_sql_operator(*input);
+
         let output_type = aggregate.output_struct();
         let key_struct = aggregate.key.output_struct();
-        let input_index = self.add_sql_operator(*input);
         let key_operator =
             PlanOperator::RecordTransform(RecordTransform::KeyProjection(aggregate.key));
         let key_index = self.insert_operator(
             key_operator,
-            PlanType::Keyed {
-                key: key_struct.clone(),
-                value: input_type.clone(),
-            },
+            self.get_plan_node(input_index)
+                .output_type
+                .with_key(key_struct.clone()),
         );
         let key_edge = PlanEdge {
-            edge_data_type: PlanType::Unkeyed(input_type.clone()),
             edge_type: EdgeType::Forward,
         };
         self.graph.add_edge(input_index, key_index, key_edge);
@@ -1068,31 +1367,23 @@ impl PlanGraph {
             },
         );
         let aggregate_edge = PlanEdge {
-            edge_data_type: PlanType::Keyed {
-                key: key_struct.clone(),
-                value: input_type,
-            },
             edge_type: EdgeType::Shuffle,
         };
         self.graph
             .add_edge(key_index, aggregate_index, aggregate_edge);
         let merge_node = PlanOperator::WindowMerge {
             key_struct: key_struct.clone(),
-            value_struct: aggregate_struct.clone(),
+            value_struct: aggregate_struct,
             group_by_kind: aggregate.merge,
         };
         let merge_index = self.insert_operator(
             merge_node,
             PlanType::Keyed {
-                key: key_struct.clone(),
+                key: key_struct,
                 value: output_type,
             },
         );
         let merge_edge = PlanEdge {
-            edge_data_type: PlanType::Keyed {
-                key: key_struct,
-                value: aggregate_struct,
-            },
             edge_type: EdgeType::Forward,
         };
         self.graph
@@ -1138,11 +1429,9 @@ impl PlanGraph {
         );
 
         let left_key_edge = PlanEdge {
-            edge_data_type: PlanType::Unkeyed(left_type.clone()),
             edge_type: EdgeType::Forward,
         };
         let right_key_edge = PlanEdge {
-            edge_data_type: PlanType::Unkeyed(right_type.clone()),
             edge_type: EdgeType::Forward,
         };
 
@@ -1182,24 +1471,16 @@ impl PlanGraph {
     ) -> NodeIndex {
         let join_node = PlanOperator::InstantJoin;
         let join_node_output_type = PlanType::KeyedListPair {
-            key: key_struct.clone(),
+            key: key_struct,
             left_value: left_struct.clone(),
             right_value: right_struct.clone(),
         };
-        let join_node_index = self.insert_operator(join_node, join_node_output_type.clone());
+        let join_node_index = self.insert_operator(join_node, join_node_output_type);
 
         let left_join_edge = PlanEdge {
-            edge_data_type: PlanType::Keyed {
-                key: key_struct.clone(),
-                value: left_struct.clone(),
-            },
             edge_type: EdgeType::ShuffleJoin(0),
         };
         let right_join_edge = PlanEdge {
-            edge_data_type: PlanType::Keyed {
-                key: key_struct,
-                value: right_struct.clone(),
-            },
             edge_type: EdgeType::ShuffleJoin(1),
         };
         self.graph
@@ -1219,7 +1500,6 @@ impl PlanGraph {
             self.insert_operator(merge_operator, PlanType::UnkeyedList(merge_type.clone()));
 
         let merge_edge = PlanEdge {
-            edge_data_type: join_node_output_type,
             edge_type: EdgeType::Forward,
         };
 
@@ -1227,10 +1507,8 @@ impl PlanGraph {
             .add_edge(join_node_index, merge_index, merge_edge);
 
         let flatten_operator = PlanOperator::Flatten;
-        let flatten_index =
-            self.insert_operator(flatten_operator, PlanType::Unkeyed(merge_type.clone()));
+        let flatten_index = self.insert_operator(flatten_operator, PlanType::Unkeyed(merge_type));
         let flatten_edge = PlanEdge {
-            edge_data_type: PlanType::UnkeyedList(merge_type),
             edge_type: EdgeType::Forward,
         };
         self.graph
@@ -1250,27 +1528,20 @@ impl PlanGraph {
         let join_node = PlanOperator::JoinWithExpiration {
             left_expiration: Duration::from_secs(24 * 60 * 60),
             right_expiration: Duration::from_secs(24 * 60 * 60),
-            join_type: JoinType::Inner,
+            join_type: join_type.clone(),
         };
         let join_node_output_type = PlanType::KeyedPair {
             key: key_struct.clone(),
             left_value: left_struct.clone(),
             right_value: right_struct.clone(),
+            join_type: join_type.clone(),
         };
-        let join_node_index = self.insert_operator(join_node, join_node_output_type.clone());
+        let join_node_index = self.insert_operator(join_node, join_node_output_type);
 
         let left_join_edge = PlanEdge {
-            edge_data_type: PlanType::Keyed {
-                key: key_struct.clone(),
-                value: left_struct.clone(),
-            },
             edge_type: EdgeType::ShuffleJoin(0),
         };
         let right_join_edge = PlanEdge {
-            edge_data_type: PlanType::Keyed {
-                key: key_struct,
-                value: right_struct.clone(),
-            },
             edge_type: EdgeType::ShuffleJoin(1),
         };
         self.graph
@@ -1280,16 +1551,24 @@ impl PlanGraph {
 
         let merge_type = join_type.output_struct(&left_struct, &right_struct);
         let merge_operator = PlanOperator::JoinPairMerge(
-            join_type,
+            join_type.clone(),
             StructPair {
                 left: left_struct,
                 right: right_struct,
             },
         );
-        let merge_index = self.insert_operator(merge_operator, PlanType::Unkeyed(merge_type));
+        let merge_output_type = match join_type {
+            JoinType::Inner => PlanType::Unkeyed(merge_type),
+            JoinType::Left | JoinType::Right | JoinType::Full => {
+                PlanType::Updating(Box::new(PlanType::Keyed {
+                    key: key_struct,
+                    value: merge_type,
+                }))
+            }
+        };
+        let merge_index = self.insert_operator(merge_operator, merge_output_type);
 
         let merge_edge = PlanEdge {
-            edge_data_type: join_node_output_type,
             edge_type: EdgeType::Forward,
         };
 
@@ -1320,11 +1599,10 @@ impl PlanGraph {
             partition_key_node,
             PlanType::Keyed {
                 key: partition_struct.clone(),
-                value: input_type.clone(),
+                value: input_type,
             },
         );
         let partition_key_edge = PlanEdge {
-            edge_data_type: PlanType::Unkeyed(input_type.clone()),
             edge_type: EdgeType::Forward,
         };
 
@@ -1341,15 +1619,11 @@ impl PlanGraph {
         let window_function_index = self.insert_operator(
             window_function_node,
             PlanType::Keyed {
-                key: partition_struct.clone(),
+                key: partition_struct,
                 value: result_type.clone(),
             },
         );
         let window_function_edge = PlanEdge {
-            edge_data_type: PlanType::Keyed {
-                key: partition_struct.clone(),
-                value: input_type,
-            },
             edge_type: EdgeType::Shuffle,
         };
         self.graph.add_edge(
@@ -1363,10 +1637,6 @@ impl PlanGraph {
             window_function_index,
             unkey_index,
             PlanEdge {
-                edge_data_type: PlanType::Keyed {
-                    key: partition_struct,
-                    value: result_type.clone(),
-                },
                 edge_type: EdgeType::Forward,
             },
         );
@@ -1378,17 +1648,20 @@ impl PlanGraph {
         input: Box<SqlOperator>,
         transform: RecordTransform,
     ) -> NodeIndex {
-        let input_type = input.return_type();
-        let return_type = transform.output_struct(input_type.clone());
         let input_index = self.add_sql_operator(*input);
-        let plan_node = PlanOperator::RecordTransform(transform);
-        let plan_node_index = self.insert_operator(plan_node, PlanType::Unkeyed(return_type));
+
+        let plan_node = PlanNode::from_record_transform(transform, self.get_plan_node(input_index));
+
+        let plan_node_index = self.graph.add_node(plan_node);
         let edge = PlanEdge {
-            edge_data_type: PlanType::Unkeyed(input_type),
             edge_type: EdgeType::Forward,
         };
         self.graph.add_edge(input_index, plan_node_index, edge);
         plan_node_index
+    }
+
+    fn get_plan_node(&self, node_index: NodeIndex) -> &PlanNode {
+        self.graph.node_weight(node_index).unwrap()
     }
 
     fn add_sql_sink(
@@ -1397,17 +1670,126 @@ impl PlanGraph {
         sql_sink: crate::external::SqlSink,
         input: Box<SqlOperator>,
     ) -> NodeIndex {
-        let input_type = input.return_type();
         let input_index = self.add_sql_operator(*input);
-        let plan_node = PlanOperator::Sink(name, sql_sink);
-        let plan_node_index =
-            self.insert_operator(plan_node, PlanType::Unkeyed(input_type.clone()));
-        let edge = PlanEdge {
-            edge_data_type: PlanType::Unkeyed(input_type),
+        let input_node = self.get_plan_node(input_index);
+        if let PlanType::Updating(inner) = &input_node.output_type {
+            let value_type = inner.as_syn_type();
+            let debezium_type = PlanType::KeyedLiteralTypeValue {
+                key: None,
+                value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+            };
+            let debezium_index =
+                self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
+
+            let edge = PlanEdge {
+                edge_type: EdgeType::Forward,
+            };
+            self.graph.add_edge(input_index, debezium_index, edge);
+
+            let plan_node = PlanOperator::Sink(name, sql_sink);
+            let plan_node_index = self.insert_operator(plan_node, debezium_type);
+
+            let debezium_edge = PlanEdge {
+                edge_type: EdgeType::Forward,
+            };
+
+            self.graph
+                .add_edge(debezium_index, plan_node_index, debezium_edge);
+            plan_node_index
+        } else if matches!(sql_sink.updating_type, SinkUpdateType::Force) {
+            let value_type = input_node.output_type.as_syn_type();
+            let debezium_type = PlanType::KeyedLiteralTypeValue {
+                key: None,
+                value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+            };
+            let debezium_index =
+                self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
+            let edge = PlanEdge {
+                edge_type: EdgeType::Forward,
+            };
+            self.graph.add_edge(input_index, debezium_index, edge);
+
+            let plan_node = PlanOperator::Sink(name, sql_sink);
+            let plan_node_index = self.insert_operator(plan_node, debezium_type);
+
+            let debezium_edge = PlanEdge {
+                edge_type: EdgeType::Forward,
+            };
+
+            self.graph
+                .add_edge(debezium_index, plan_node_index, debezium_edge);
+            plan_node_index
+        } else {
+            let plan_node = PlanOperator::Sink(name, sql_sink);
+            let plan_node_index = self.insert_operator(plan_node, input_node.output_type.clone());
+            let edge = PlanEdge {
+                edge_type: EdgeType::Forward,
+            };
+            self.graph.add_edge(input_index, plan_node_index, edge);
+            plan_node_index
+        }
+    }
+
+    fn add_updating_aggregator(
+        &mut self,
+        input: Box<SqlOperator>,
+        aggregate: crate::pipeline::AggregateOperator,
+    ) -> NodeIndex {
+        let input_index = self.add_sql_operator(*input);
+
+        let input_node = self.get_plan_node(input_index);
+        let input_updating = input_node.output_type.is_updating();
+
+        let output_type = aggregate.output_struct();
+        let key_struct = aggregate.key.output_struct();
+        let key_operator =
+            PlanOperator::RecordTransform(RecordTransform::KeyProjection(aggregate.key));
+        let key_index = self.insert_operator(
+            key_operator,
+            self.get_plan_node(input_index)
+                .output_type
+                .with_key(key_struct.clone()),
+        );
+        let key_edge = PlanEdge {
             edge_type: EdgeType::Forward,
         };
-        self.graph.add_edge(input_index, plan_node_index, edge);
-        plan_node_index
+        self.graph.add_edge(input_index, key_index, key_edge);
+        let aggregate_projection = aggregate.aggregating;
+        let aggregate_struct = aggregate_projection.output_struct();
+        let aggregate_operator = PlanOperator::NonWindowAggregate {
+            input_is_update: input_updating,
+            expiration: Duration::from_secs(60 * 60 * 24),
+            projection: aggregate_projection.try_into().unwrap(),
+        };
+
+        let aggregate_index = self.insert_operator(
+            aggregate_operator,
+            PlanType::Updating(Box::new(PlanType::Keyed {
+                key: key_struct.clone(),
+                value: aggregate_struct.clone(),
+            })),
+        );
+        let aggregate_edge = PlanEdge {
+            edge_type: EdgeType::Shuffle,
+        };
+        self.graph
+            .add_edge(key_index, aggregate_index, aggregate_edge);
+        let merge_node = PlanOperator::WindowMerge {
+            key_struct,
+            value_struct: aggregate_struct,
+            group_by_kind: aggregate.merge,
+        };
+        let merge_index = self.insert_operator(
+            merge_node,
+            PlanType::Updating(Box::new(PlanType::Unkeyed(output_type))),
+        );
+        let merge_edge = PlanEdge {
+            edge_type: EdgeType::Forward,
+        };
+        self.graph
+            .add_edge(aggregate_index, merge_index, merge_edge);
+
+        merge_index
     }
 }
 
@@ -1415,7 +1797,13 @@ impl From<PlanGraph> for DiGraph<StreamNode, StreamEdge> {
     fn from(val: PlanGraph) -> Self {
         val.graph.map(
             |index: NodeIndex, node| node.into_stream_node(index.index(), &val.sql_config),
-            |_index, edge| edge.into_stream_edge(),
+            |index, edge| {
+                let source_index = val.graph.edge_endpoints(index).unwrap().0;
+                let source_node = val.graph.node_weight(source_index).unwrap();
+                source_node
+                    .output_type
+                    .get_stream_edge(edge.edge_type.clone())
+            },
         )
     }
 }

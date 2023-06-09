@@ -106,6 +106,7 @@ pub fn nexmark_schema() -> SourceSchema {
                     vec![
                         SchemaField::new("id", Primitive(Int64)),
                         SchemaField::new("description", Primitive(String)),
+                        SchemaField::new("item_name", Primitive(String)),
                         SchemaField::new("initial_bid", Primitive(Int64)),
                         SchemaField::new("reserve", Primitive(Int64)),
                         SchemaField::new("datetime", Primitive(UnixMillis)),

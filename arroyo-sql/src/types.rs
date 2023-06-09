@@ -211,7 +211,7 @@ impl TryFrom<&Type> for TypeDef {
         match typ {
             Type::Path(pat) => {
                 let last = pat.path.segments.last().unwrap();
-                if last.ident.to_string() == "Option" {
+                if last.ident == "Option" {
                     let AngleBracketed(args) = &last.arguments else {
                         return Err(())
                     };

@@ -426,6 +426,13 @@ pub fn non_nullable_min_heap_aggregate<T: Ord + Clone>(memory: BTreeMap<T, usize
         .unwrap()
 }
 
+pub fn non_nullable_max_heap_aggregate<T: Ord + Clone>(memory: &BTreeMap<T, usize>) -> T {
+    memory
+        .last_key_value()
+        .map(|(key, _value)| key.clone())
+        .unwrap()
+}
+
 pub fn nullable_average_add<T: Add<Output = T>>(
     current: Option<(i64, i64, Option<(i64, T)>)>,
     bin_value: Option<(i64, T)>,
