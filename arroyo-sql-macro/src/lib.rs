@@ -1,5 +1,5 @@
 use arroyo_datastream::{SerializationMode, SourceConfig};
-use arroyo_rpc::grpc::api::{Connection, KafkaAuthConfig, KafkaConnection};
+use arroyo_rpc::grpc::api::{Connection};
 use arroyo_sql::{
     get_test_expression, parse_and_get_program_sync, ArroyoSchemaProvider, SqlConfig,
 };
@@ -128,21 +128,21 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
         },
         SerializationMode::Json,
     );
-    schema_provider.add_connection(Connection {
-        name: "local".to_string(),
-        sources: 0,
-        sinks: 0,
-        connection_type: Some(arroyo_rpc::grpc::api::connection::ConnectionType::Kafka(
-            KafkaConnection {
-                bootstrap_servers: "localhost:9090".to_string(),
-                auth_config: Some(KafkaAuthConfig {
-                    auth_type: Some(arroyo_rpc::grpc::api::kafka_auth_config::AuthType::NoAuth(
-                        arroyo_rpc::grpc::api::NoAuth {},
-                    )),
-                }),
-            },
-        )),
-    });
+    // schema_provider.add_connection(Connection {
+    //     name: "local".to_string(),
+    //     sources: 0,
+    //     sinks: 0,
+    //     connection_type: Some(arroyo_rpc::grpc::api::connection::ConnectionType::Kafka(
+    //         KafkaConnection {
+    //             bootstrap_servers: "localhost:9090".to_string(),
+    //             auth_config: Some(KafkaAuthConfig {
+    //                 auth_type: Some(arroyo_rpc::grpc::api::kafka_auth_config::AuthType::NoAuth(
+    //                     arroyo_rpc::grpc::api::NoAuth {},
+    //                 )),
+    //             }),
+    //         },
+    //     )),
+    // });
     let (program, _) =
         parse_and_get_program_sync(query_string.value(), schema_provider, SqlConfig::default())
             .unwrap();

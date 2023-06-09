@@ -71,26 +71,27 @@ where
             BuiltinSink::Log => SinkConfig::Console,
         },
         Sink::User(name) => {
-            let sink = sinks.into_iter().find(|s| s.name == *name).ok_or_else(|| {
-                Status::failed_precondition(format!("No sink with name '{}'", name))
-            })?;
+        //     let sink: api::Sink = sinks.into_iter().find(|s| s.name == *name).ok_or_else(|| {
+        //         Status::failed_precondition(format!("No sink with name '{}'", name))
+        //     })?;
 
-            used_sink_ids.push(sink.id);
+        //     used_sink_ids.push(sink.id);
 
-            match sink.sink_type.unwrap() {
-                SinkType::Kafka(k) => {
-                    let connection =
-                        connections::get_connection(auth_data, &k.connection, tx).await?;
-                    let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
-                        panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
-                    };
-                    SinkConfig::Kafka {
-                        bootstrap_servers: kafka.bootstrap_servers.clone(),
-                        topic: k.topic,
-                        client_configs: auth_config_to_hashmap(kafka.auth_config),
-                    }
-                }
-            }
+        //     match sink.sink_type.unwrap() {
+        //         SinkType::Kafka(k) => {
+        //             let connection =
+        //                 connections::get_connection(auth_data, &k.connection, tx).await?;
+        //             let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
+        //                 panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
+        //             };
+        //             SinkConfig::Kafka {
+        //                 bootstrap_servers: kafka.bootstrap_servers.clone(),
+        //                 topic: k.topic,
+        //                 client_configs: auth_config_to_hashmap(kafka.auth_config),
+        //             }
+        //         }
+        //     }
+                todo!()
         }
     };
 
@@ -136,30 +137,30 @@ async fn set_default_parallelism(_auth: &AuthData, program: &mut Program) -> Res
 
                 (eps / 50_000.0).round() as usize
             }
-            Operator::KafkaSource { .. } => {
-                // for now, just use a default parallelism of 1 for kafka until we have autoscaling
-                1
+            // Operator::KafkaSource { .. } => {
+            //     // for now, just use a default parallelism of 1 for kafka until we have autoscaling
+            //     1
 
-                // let (tx, _) = channel(1);
-                // let kafka = KafkaTester::new(
-                //     KafkaConnection {
-                //         bootstrap_servers: bootstrap_servers.join(","),
-                //     },
-                //     Some(topic.clone()),
-                //     None,
-                //     tx,
-                // );
+            //     // let (tx, _) = channel(1);
+            //     // let kafka = KafkaTester::new(
+            //     //     KafkaConnection {
+            //     //         bootstrap_servers: bootstrap_servers.join(","),
+            //     //     },
+            //     //     Some(topic.clone()),
+            //     //     None,
+            //     //     tx,
+            //     // );
 
-                // kafka
-                //     .topic_metadata()
-                //     .await?
-                //     .partitions
-                //     .min(auth.org_metadata.max_parallelism as usize)
-            }
+            //     // kafka
+            //     //     .topic_metadata()
+            //     //     .await?
+            //     //     .partitions
+            //     //     .min(auth.org_metadata.max_parallelism as usize)
+            // }
             Operator::NexmarkSource {
                 first_event_rate, ..
             } => (*first_event_rate as f32 / 50_000.0).round() as usize,
-            Operator::EventSourceSource { .. } => 1,
+            Operator::ConnectionSource { .. } => todo!(),
             op => panic!("Found non-source in a source position in graph: {:?}", op),
         });
     }
@@ -250,7 +251,7 @@ pub(crate) async fn create_pipeline<'a>(
         set_parallelism(&mut program, 1);
         for node in program.graph.node_weights_mut() {
             // if it is a kafka sink or file sink, switch to null
-            if let Operator::KafkaSink { .. } | Operator::FileSink { .. } = node.operator {
+            if let Operator::ConnectionSink { .. } | Operator::FileSink { .. } = node.operator {
                 node.operator = Operator::GrpcSink;
             }
         }

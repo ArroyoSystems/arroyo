@@ -26,6 +26,15 @@ WHERE connections.organization_id = :organization_id AND connections.name = :nam
 GROUP BY connections.id
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
+--! get_connection_by_id: DbConnection()
+SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config,
+    (SELECT count(*) as source_count FROM sources where sources.connection_id = connections.id) as source_count,
+    (SELECT count(*) as sink_count FROM sinks where sinks.connection_id = connections.id) as sink_count
+FROM connections
+WHERE connections.organization_id = :organization_id AND connections.id = :id
+GROUP BY connections.id
+ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
+
 --! delete_connection
 DELETE FROM connections
 WHERE organization_id = :organization_id AND name = :name;
@@ -36,6 +45,24 @@ WHERE organization_id = :organization_id AND name = :name;
 INSERT INTO schemas (organization_id, created_by, name, kafka_schema_registry, type, config)
 VALUES (:organization_id, :created_by, :name, :kafka_schema_registry, :type, :config) RETURNING id;
 
+
+------- connection tables -------------
+--! create_connection_table
+INSERT INTO connection_tables
+(organization_id, created_by, name, type, connection_id, config, schema)
+VALUES (:organization_id, :created_by, :name, :type, :connection_id, :config, :schema);
+
+--! get_connection_tables
+SELECT connection_tables.id as id,
+    connection_tables.name as name,
+    connection_tables.type as type,
+    connection_tables.config as config,
+    connection_tables.schema as schema,
+    connections.type as connection_type,
+    connections.config as connection_config
+FROM connection_tables
+JOIN connections ON connections.id = connection_tables.connection_id
+WHERE connection_tables.organization_id = :organization_id;
 
 ----------- sources --------------------
 

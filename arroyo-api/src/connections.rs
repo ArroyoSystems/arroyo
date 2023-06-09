@@ -6,27 +6,23 @@ use cornucopia_async::GenericClient;
 use tokio::sync::mpsc::channel;
 use tonic::Status;
 
+use crate::connectors::connector_for_type;
 use crate::handle_delete;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnection;
-use crate::testers::HttpTester;
-use crate::{handle_db_error, log_and_map, required_field, testers::KafkaTester, AuthData};
+use crate::{handle_db_error, log_and_map, required_field, AuthData};
 
 pub(crate) async fn create_connection(
     req: CreateConnectionReq,
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<(), Status> {
-    match req.connection_type.as_str() {
-        "kafka" => {
-            // TODO: validate config
-        }
-        "http" => {
-            todo!("http");
-        }
-        t => {
-            return Err(Status::invalid_argument(format!("Unknown connection type '{}'", t)));
-        }
+    {
+        let connector = connector_for_type(&req.connection_type)
+            .ok_or_else(|| Status::invalid_argument(format!("Unknown connection type '{}'", req.connection_type)))?;
+
+        (*connector).validate_schema(&req.config)
+            .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
     }
 
     api_queries::create_connection()
@@ -48,7 +44,7 @@ impl From<DbConnection> for Connection {
     fn from(val: DbConnection) -> Self {
         Connection {
             name: val.name,
-            connection_type: val.name,
+            connection_type: val.r#type,
             config: serde_json::to_string(&val.config).unwrap(),
             sources: val.source_count as i32,
             sinks: val.sink_count as i32,

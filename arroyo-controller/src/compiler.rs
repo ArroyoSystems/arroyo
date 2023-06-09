@@ -395,35 +395,41 @@ wasm-opt = false
                         ))
                     }
                 }
-                Operator::KafkaSource { topic, bootstrap_servers, offset_mode, kafka_input_format, messages_per_second, client_configs } => {
-                    let offset_mode = format!("{:?}", offset_mode);
-                    let offset_mode = format_ident!("{}", offset_mode);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let bootstrap_servers = bootstrap_servers.join(",");
-                    let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
+                // Operator::KafkaSource { topic, bootstrap_servers, offset_mode, kafka_input_format, messages_per_second, client_configs } => {
+                //     let offset_mode = format!("{:?}", offset_mode);
+                //     let offset_mode = format_ident!("{}", offset_mode);
+                //     let out_t = parse_type(&output.unwrap().weight().value);
+                //     let bootstrap_servers = bootstrap_servers.join(",");
+                //     let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
 
-                    quote! {
-                        Box::new(sources::kafka::KafkaSourceFunc::<#out_t>::new(
-                            #bootstrap_servers,
-                            #topic,
-                            sources::kafka::OffsetMode::#offset_mode,
-                            #kafka_input_format,
-                            #messages_per_second,
-                            vec![#(#client_configs),*]))
-                    }
+                //     quote! {
+                //         Box::new(sources::kafka::KafkaSourceFunc::<#out_t>::new(
+                //             #bootstrap_servers,
+                //             #topic,
+                //             sources::kafka::OffsetMode::#offset_mode,
+                //             #kafka_input_format,
+                //             #messages_per_second,
+                //             vec![#(#client_configs),*]))
+                //     }
+                // }
+                // Operator::EventSourceSource { url, headers, events, serialization_mode } => {
+                //     let out_t = parse_type(&output.unwrap().weight().value);
+                //     let headers = headers.iter().map(|(k, v)| quote!((#k, #v))).collect::<Vec<_>>();
+                //     let headers = quote!{ vec![#(#headers),*] };
+                //     let events = events.iter().map(|v| quote!(#v)).collect::<Vec<_>>();
+                //     quote! {
+                //         Box::new(eventsource::EventSourceSourceFunc::<#out_t>::new(
+                //             #url,
+                //             #headers,
+                //             vec![#(#events),*],
+                //             #serialization_mode,))
+                //     }
+                // }
+                Operator::ConnectionSource { connection, config } => {
+                    todo!()
                 }
-                Operator::EventSourceSource { url, headers, events, serialization_mode } => {
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let headers = headers.iter().map(|(k, v)| quote!((#k, #v))).collect::<Vec<_>>();
-                    let headers = quote!{ vec![#(#headers),*] };
-                    let events = events.iter().map(|v| quote!(#v)).collect::<Vec<_>>();
-                    quote! {
-                        Box::new(eventsource::EventSourceSourceFunc::<#out_t>::new(
-                            #url,
-                            #headers,
-                            vec![#(#events),*],
-                            #serialization_mode,))
-                    }
+                Operator::ConnectionSink { connection, config } => {
+                    todo!()
                 }
                 Operator::FusedWasmUDFs { name, udfs: _ } => {
                     let in_k = parse_type(&input.unwrap().weight().key);
@@ -590,19 +596,19 @@ wasm-opt = false
                         }
                     }
                 }
-                Operator::KafkaSink { topic, bootstrap_servers, client_configs } => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
+                // Operator::KafkaSink { topic, bootstrap_servers, client_configs } => {
+                //     let in_k = parse_type(&input.unwrap().weight().key);
+                //     let in_t = parse_type(&input.unwrap().weight().value);
 
-                    let bootstrap_servers = bootstrap_servers.join(",");
-                    let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
-                    quote! {
-                        Box::new(sinks::kafka::KafkaSinkFunc::<#in_k, #in_t>::new(
-                            #bootstrap_servers,
-                            #topic,
-                        vec![#(#client_configs ),*]))
-                    }
-                }
+                //     let bootstrap_servers = bootstrap_servers.join(",");
+                //     let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
+                //     quote! {
+                //         Box::new(sinks::kafka::KafkaSinkFunc::<#in_k, #in_t>::new(
+                //             #bootstrap_servers,
+                //             #topic,
+                //         vec![#(#client_configs ),*]))
+                //     }
+                // }
                 Operator::NexmarkSource{first_event_rate, num_events}  => {
                     match *num_events {
                         Some(events) => {

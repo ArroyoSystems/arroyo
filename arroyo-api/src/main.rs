@@ -2,7 +2,7 @@ use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
     DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq,
     DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetSinksReq, GetSinksResp, PipelineProgram,
-    SourceMetadataResp,
+    SourceMetadataResp, CreateConnectionTableReq, CreateConnectionTableResp,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -55,6 +55,7 @@ use uuid::Uuid;
 use crate::jobs::get_job_details;
 use queries::api_queries;
 
+mod connectors;
 mod cloud;
 mod connections;
 mod job_log;
@@ -65,8 +66,7 @@ mod optimizations;
 mod pipelines;
 mod sinks;
 mod sources;
-mod testers;
-mod connectors;
+mod connection_tables;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -453,6 +453,20 @@ impl ApiGrpc for ApiServer {
 
         Ok(Response::new(DeleteConnectionResp {}))
     }
+
+    // connection tables
+    async fn create_connection_table(
+        &self,
+        request: Request<CreateConnectionTableReq>,
+    ) -> Result<Response<CreateConnectionTableResp>, Status> {
+        let (request, auth) = self.authenticate(request).await?;
+
+        connection_tables::create(request.into_inner(), auth, &self.pool).await?;
+
+        Ok(Response::new(CreateConnectionTableResp {}))
+    }
+
+
 
     // sources
     async fn create_source(

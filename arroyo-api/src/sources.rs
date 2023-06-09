@@ -11,13 +11,12 @@ use tracing::warn;
 use arroyo_datastream::{SerializationMode, SourceConfig};
 use arroyo_rpc::grpc::api::{
     self,
-    connection::ConnectionType,
     create_source_req::{self},
     source_def::SourceType,
     source_schema::Schema,
     ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
-    EventSourceSourceConfig, EventSourceSourceDef, JsonSchemaDef, KafkaSourceConfig,
-    KafkaSourceDef, RawJsonDef, SourceDef, SourceField, SourceMetadataResp, TestSourceMessage,
+    JsonSchemaDef,
+    RawJsonDef, SourceDef, SourceField, SourceMetadataResp, TestSourceMessage,
 };
 use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
@@ -32,10 +31,9 @@ use crate::{
     log_and_map,
     queries::api_queries,
     required_field,
-    testers::KafkaTester,
     AuthData,
 };
-use crate::{handle_delete, types::public};
+use crate::{handle_delete};
 
 pub fn impulse_schema() -> SourceSchema {
     SourceSchema {
@@ -519,7 +517,8 @@ pub(crate) async fn create_source(
                 Some(create_source_req::TypeOneof::Nexmark { .. }) => {
                     Some(Schema::Builtin("nexmark".to_string()))
                 }
-                Some(create_source_req::TypeOneof::Kafka { .. }) => {
+                Some(create_source_req::TypeOneof::Connection { .. }) => {
+                    // TODO: is this correct?
                     Some(Schema::RawJson(RawJsonDef {}))
                 }
                 _ => None,
@@ -571,51 +570,20 @@ pub(crate) async fn create_source(
     // insert source
     let (source_type, config, connection_id) =
         match req.type_oneof.ok_or_else(|| required_field("type"))? {
-            create_source_req::TypeOneof::Kafka(kafka) => {
+            create_source_req::TypeOneof::Connection(req) => {
                 let connection = connections
                     .iter()
-                    .find(|c| c.name == kafka.connection)
+                    .find(|c| c.name == req.connection)
                     .ok_or_else(|| {
                         Status::failed_precondition(format!(
                             "Could not find connection with name '{}'",
-                            kafka.connection
+                            req.connection
                         ))
                     })?;
 
-                if connection.r#type != public::ConnectionType::kafka {
-                    return Err(Status::invalid_argument(format!(
-                        "Connection '{}' is not a kafka cluster",
-                        kafka.connection
-                    )));
-                }
-
                 (
-                    public::SourceType::kafka,
-                    serde_json::to_value(&kafka).unwrap(),
-                    Some(connection.id),
-                )
-            }
-            create_source_req::TypeOneof::EventSource(event) => {
-                let connection = connections
-                    .iter()
-                    .find(|c| c.name == event.connection)
-                    .ok_or_else(|| {
-                        Status::failed_precondition(format!(
-                            "Could not find connection with name '{}'",
-                            event.connection
-                        ))
-                    })?;
-
-                if connection.r#type != public::ConnectionType::http {
-                    return Err(Status::invalid_argument(format!(
-                        "Connection '{}' is not an HTTP endpoint",
-                        event.connection
-                    )));
-                }
-
-                (
-                    public::SourceType::event_source,
-                    serde_json::to_value(&event).unwrap(),
+                    connection.r#type.clone(),
+                    serde_json::to_value(&req.config).unwrap(),
                     Some(connection.id),
                 )
             }
@@ -625,7 +593,7 @@ pub(crate) async fn create_source(
                 }
 
                 (
-                    public::SourceType::impulse,
+                    "impulse".to_string(),
                     serde_json::to_value(impulse).unwrap(),
                     None,
                 )
@@ -639,7 +607,7 @@ pub(crate) async fn create_source(
                 }
 
                 (
-                    public::SourceType::nexmark,
+                    "nexmark".to_string(),
                     serde_json::to_value(nexmark).unwrap(),
                     None,
                 )
@@ -697,43 +665,18 @@ pub(crate) async fn get_sources<E: GenericClient>(
 
             let ss = SourceSchema::try_from(&rec.source_name, source_schema.clone()).unwrap();
 
-            let source_type = match rec.source_type {
-                public::SourceType::nexmark => {
+            let source_type = match rec.source_type.as_str() {
+                "nexmark" => {
                     SourceType::Nexmark(serde_json::from_value(rec.source_config.unwrap()).unwrap())
                 }
-                public::SourceType::impulse => {
+                "impulse" => {
                     SourceType::Impulse(serde_json::from_value(rec.source_config.unwrap()).unwrap())
                 }
-                public::SourceType::file => {
+                "file" => {
                     SourceType::File(serde_json::from_value(rec.source_config.unwrap()).unwrap())
                 }
-                public::SourceType::kafka => {
-                    let config: KafkaSourceConfig =
-                        serde_json::from_value(rec.source_config.unwrap()).unwrap();
-                    assert_eq!(rec.connection_type.unwrap(), public::ConnectionType::kafka);
-                    SourceType::Kafka(KafkaSourceDef {
-                        connection_name: rec.connection_name.as_ref().unwrap().clone(),
-                        connection: serde_json::from_value(
-                            rec.connection_config.as_ref().unwrap().clone(),
-                        )
-                        .unwrap(),
-                        topic: config.topic,
-                    })
-                }
-                public::SourceType::event_source => {
-                    let config: EventSourceSourceConfig =
-                        serde_json::from_value(rec.source_config.unwrap()).unwrap();
-                    assert_eq!(rec.connection_type.unwrap(), public::ConnectionType::http);
-
-                    SourceType::EventSource(EventSourceSourceDef {
-                        connection_name: rec.connection_name.as_ref().unwrap().clone(),
-                        connection: serde_json::from_value(
-                            rec.connection_config.as_ref().unwrap().clone(),
-                        )
-                        .unwrap(),
-                        path: config.path,
-                        events: config.events,
-                    })
+                _ => {
+                    todo!()
                 }
             };
 
@@ -741,7 +684,6 @@ pub(crate) async fn get_sources<E: GenericClient>(
                 id: rec.source_id,
                 name: rec.source_name,
                 schema: Some(source_schema),
-                connection: rec.connection_name,
                 consumers: rec.consumer_count as i32,
                 sql_fields: ss
                     .fields()
@@ -778,36 +720,6 @@ pub(crate) async fn test_schema(req: CreateSourceReq) -> Result<Vec<String>, Sta
     }
 }
 
-fn get_kafka_tester(
-    config: &KafkaSourceConfig,
-    schema: Option<Schema>,
-    connections: Vec<Connection>,
-    tx: Sender<Result<TestSourceMessage, Status>>,
-) -> Result<KafkaTester, Status> {
-    let connection = connections
-        .into_iter()
-        .find(|c| c.name == config.connection)
-        .ok_or_else(|| {
-            Status::invalid_argument(format!(
-                "Invalid kafka definition: no connection with name {}",
-                config.connection
-            ))
-        })?;
-
-    if let Some(ConnectionType::Kafka(conn)) = connection.connection_type {
-        Ok(KafkaTester::new(
-            conn,
-            Some(config.topic.clone()),
-            schema,
-            tx,
-        ))
-    } else {
-        Err(Status::invalid_argument(format!(
-            "Configured connection '{}' is not a Kafka connection",
-            config.connection
-        )))
-    }
-}
 
 pub(crate) async fn get_source_metadata(
     req: CreateSourceReq,
@@ -817,12 +729,9 @@ pub(crate) async fn get_source_metadata(
     let connections = get_connections(&auth, client).await?;
 
     let partitions = match req.type_oneof.ok_or_else(|| required_field("type"))? {
-        create_source_req::TypeOneof::Kafka(kafka) => {
-            let (tx, _rx) = channel(8);
-            let tester = get_kafka_tester(&kafka, None, connections, tx)?;
-            tester.topic_metadata().await?.partitions
+        create_source_req::TypeOneof::Connection(c) => {
+            todo!()
         }
-        create_source_req::TypeOneof::EventSource(_) => 1,
         create_source_req::TypeOneof::Impulse(_) => 1,
         create_source_req::TypeOneof::File(_) => 1,
         create_source_req::TypeOneof::Nexmark(_) => 1,
@@ -851,8 +760,8 @@ pub(crate) async fn test_source(
     let connections = get_connections(&auth, client).await?;
 
     match source {
-        create_source_req::TypeOneof::Kafka(kafka) => {
-            get_kafka_tester(&kafka, Some(schema), connections, tx)?.start();
+        create_source_req::TypeOneof::Connection(c) => {
+            todo!()
         }
         _ => {
             if tx

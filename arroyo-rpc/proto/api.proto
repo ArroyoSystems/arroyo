@@ -560,6 +560,23 @@ message DeleteConnectionReq {
 message DeleteConnectionResp {
 }
 
+enum TableType {
+  SOURCE = 0;
+  SINK = 1;
+}
+
+// Connection tables
+message CreateConnectionTableReq {
+  string name = 1;
+  string connection_id = 2;
+  TableType type = 3;
+  string config = 4;
+  string schema = 5;
+}
+
+message CreateConnectionTableResp {
+}
+
 // Sources
 
 message JsonSchemaDef {
@@ -710,6 +727,7 @@ message ConfluentSchemaResp {
   string schema = 1;
 }
 
+
 // sinks
 
 message CreateSinkReq {
@@ -770,6 +788,8 @@ service ApiGrpc {
   rpc TestConnection(CreateConnectionReq) returns (TestSourceMessage);
   rpc GetConnections(GetConnectionsReq) returns (GetConnectionsResp);
   rpc DeleteConnection(DeleteConnectionReq) returns (DeleteConnectionResp);
+
+  rpc CreateConnectionTable(CreateConnectionTableReq) returns (CreateConnectionTableResp);
 
   rpc CreateSource(CreateSourceReq) returns (CreateSourceResp);
   rpc GetSources(GetSourcesReq) returns (GetSourcesResp);

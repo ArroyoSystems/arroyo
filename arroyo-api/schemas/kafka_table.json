@@ -1,0 +1,34 @@
+{
+    "type": "object",
+    "title": "KafkaTable",
+    "properties": {
+        "topic": {
+            "type": "string",
+            "description": "The Kafka topic to use for this table"
+        },
+        "type": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Source",
+                    "properties": {
+                        "offset": {
+                            "type": "string",
+                            "description": "The offset to start reading from"
+                        }
+                    }
+                },
+                {
+                    "type": "object",
+                    "title": "Sink",
+                    "properties": {
+                    }
+                }
+            ]
+        }
+    },
+    "required": [
+        "topic",
+        "type"
+    ]
+}
