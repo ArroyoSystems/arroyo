@@ -2443,7 +2443,7 @@ impl WrapTypeExpression {
         let arg = self.arg.to_syn_expression();
 
         if self.arg.nullable() {
-            parse_quote!(#arg.map(|f| #path(f)))
+            parse_quote!(#arg.map_over_inner(|f| #path(f)))
         } else {
             parse_quote!(#path(#arg))
         }

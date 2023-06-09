@@ -398,11 +398,7 @@ pub fn parse_and_get_program_sync(
         let struct_def = non_sink_output.return_type();
         let sink = SqlOperator::Sink(
             "default_sink".to_string(),
-            SqlSink {
-                id: None,
-                struct_def,
-                sink_config: config.sink,
-            },
+            SqlSink::new_from_sink_config(struct_def, config.sink),
             Box::new(non_sink_output),
         );
         sql_pipeline_builder.output_nodes.push(sink);

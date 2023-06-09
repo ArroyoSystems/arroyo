@@ -61,3 +61,50 @@ SELECT * FROM (
 SELECT bidder, COUNT( distinct auction) as distinct_auctions
 FROM bids B1
 GROUP BY bidder, HOP(INTERVAL '3 second', INTERVAL '10' minute)) WHERE distinct_auctions > 2"}
+full_pipeline_codegen! {"right_join",
+"SELECT *
+FROM (SELECT bid.auction as auction, bid.price as price
+FROM nexmark WHERE bid is not null) bids
+
+RIGHT JOIN (SELECT auction.id as id, auction.initial_bid as initial_bid
+FROM nexmark where auction is not null) auctions on bids.auction = auctions.id;"}
+
+full_pipeline_codegen! {"debezium_source", "CREATE table debezium_source (
+  bids_auction int,
+  price int,
+  auctions_id int,
+  initial_bid int
+) WITH (
+  connection = 'local',
+  topic = 'updating',
+  serialization_mode = 'debezium_json'
+);
+
+SELECT * FROM debezium_source"}
+
+full_pipeline_codegen! {"forced_debezium_sink", "
+CREATE TABLE kafka_raw_sink (
+  sum bigint,
+) WITH (
+  connection = 'local',
+  topic = 'raw_sink',
+  serialization_mode = 'debezium_json'
+);
+INSERT INTO kafka_raw_sink
+SELECT bid.price FROM nexmark;
+"}
+
+full_pipeline_codegen! {"filter_on_updating_aggregates", "
+SELECT auction  / 2 as half_auction
+FROM (
+SELECT auction FROM (
+SELECT count(*) as bids, bid.auction as auction from nexmark where bid is not null
+GROUP BY 2
+) WHERE bids > 1 and bids < 10
+)
+WHERE auction % 2 = 0"}
+
+full_pipeline_codegen! {"sum_of_sums_updating",
+"SELECT bids, count(*) as occurrences FROM (
+  SELECT count(*) as bids, bid.auction as auction FROM nexmark where bid is not null group by 2)
+GROUP BY 1"}
