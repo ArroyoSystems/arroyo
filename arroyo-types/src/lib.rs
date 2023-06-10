@@ -270,6 +270,7 @@ impl<K: Key, T: Data> Record<K, T> {
     }
 }
 
+
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct TaskInfo {
     pub job_id: String,

@@ -14,18 +14,20 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::ControlMessage;
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    from_millis, grpc_port, ports, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, grpc_port, ports, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV, from_nanos,
 };
+use chrono::{Utc, DateTime};
 use engine::RunningEngine;
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
 use rand::Rng;
+use serde::{Deserializer, Deserialize};
 use std::fmt::{Debug, Display, Formatter};
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
@@ -48,6 +50,33 @@ lazy_static! {
     pub static ref LOCAL_CONTROLLER_ADDR: String =
         format!("http://localhost:{}", ports::CONTROLLER_GRPC);
 }
+
+// A custom deserializer for json, that takes a json::Value and reserializes it as a string
+// where it can then be accessed using SQL JSON functions -- this is currently a bit inefficient
+// since we need an owned string.
+pub fn deserialize_raw_json<'de, D>(f: D) -> Result<String, D::Error> where D: Deserializer<'de> {
+    let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
+    Ok(raw.to_string())
+}
+
+pub fn deserialize_raw_json_opt<'de, D>(f: D) -> Result<Option<String>, D::Error> where D: Deserializer<'de> {
+    let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
+    Ok(Some(raw.to_string()))
+}
+
+
+// Custom deserializer for fields encoded as RFC3339 date time strings, relying on Chrono's deserialization
+// capabilities (note we can't use chrono directly, because all times in SQL land needs to be SystemTime right now)
+pub fn deserialize_rfc3339_datetime<'de, D>(f: D) -> Result<SystemTime, D::Error> where D: Deserializer<'de> {
+    let raw: chrono::DateTime<Utc> = DateTime::deserialize(f)?;
+    Ok(from_nanos(raw.timestamp_nanos() as u128))
+}
+
+pub fn deserialize_rfc3339_datetime_opt<'de, D>(f: D) -> Result<Option<SystemTime>, D::Error> where D: Deserializer<'de> {
+    let raw: chrono::DateTime<Utc> = DateTime::deserialize(f)?;
+    Ok(Some(from_nanos(raw.timestamp_nanos() as u128)))
+}
+
 
 pub static TIMER_TABLE: char = '[';
 
@@ -82,6 +111,7 @@ impl Display for LogicalEdge {
         }
     }
 }
+
 
 #[derive(Clone)]
 pub struct LogicalNode {
