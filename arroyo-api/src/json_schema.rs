@@ -1,10 +1,13 @@
-use std::{collections::hash_map::DefaultHasher, hash::{Hash, Hasher}};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
+use quote::{format_ident, quote};
 use schemars::schema::{RootSchema, Schema};
-use syn::{Type, parse_str};
+use syn::{parse_str, Type};
 use tracing::log::warn;
 use typify::{TypeDetails, TypeSpace, TypeSpaceSettings};
-use quote::{quote, format_ident};
 
 use crate::sources::{PrimitiveType, SchemaField, SchemaFieldType};
 
@@ -27,8 +30,7 @@ fn get_type_space(schema: &str) -> Result<TypeSpace, String> {
             .with_derive("bincode::Decode".to_string())
             .with_derive("PartialEq".to_string())
             .with_derive("PartialOrd".to_string())
-            .with_struct_builder(true)
-
+            .with_struct_builder(true),
     );
     type_space.add_ref_types(root_schema.definitions).unwrap();
     type_space
@@ -218,9 +220,12 @@ fn to_schema_type(
         TypeDetails::Newtype(t) => {
             let t = type_space.get_type(&t.subtype()).unwrap();
             to_schema_type(type_space, source_name, t.name(), t.details())
-        },
+        }
         _ => {
-            warn!("Unhandled JSON schema type for field {}, converting to raw json", type_name);
+            warn!(
+                "Unhandled JSON schema type for field {}, converting to raw json",
+                type_name
+            );
             Some((SchemaFieldType::Primitive(PrimitiveType::Json), false))
         }
     }

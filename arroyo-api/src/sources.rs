@@ -241,10 +241,7 @@ impl From<&SchemaField> for StructField {
         use SchemaFieldType::*;
         use TypeDef::DataType;
         let data_type = match &sf.typ {
-            Primitive(t) => DataType(
-                t.to_arrow(),
-                sf.nullable,
-            ),
+            Primitive(t) => DataType(t.to_arrow(), sf.nullable),
             NamedStruct(name, fields) => TypeDef::StructDef(
                 StructDef {
                     name: Some(name.clone()),
