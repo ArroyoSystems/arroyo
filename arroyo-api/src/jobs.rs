@@ -13,7 +13,8 @@ use tonic::Status;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
 
-use crate::{log_and_map, pipelines, queries::api_queries, to_micros, types::public, AuthData};
+use crate::{log_and_map, pipelines, queries::api_queries, to_micros, types::public};
+use crate::api_server::{AuthData};
 
 fn gen_id() -> String {
     rand::thread_rng()

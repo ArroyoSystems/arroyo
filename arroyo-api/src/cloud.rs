@@ -1,4 +1,4 @@
-use crate::{AuthData, OrgMetadata};
+use crate::api_server::{AuthData, OrgMetadata};
 use cornucopia_async::GenericClient;
 use tonic::{Request, Status};
 

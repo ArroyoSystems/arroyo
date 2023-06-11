@@ -12,7 +12,9 @@ use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnection;
 use crate::testers::HttpTester;
 use crate::types::public;
-use crate::{handle_db_error, log_and_map, required_field, testers::KafkaTester, AuthData};
+use crate::{handle_db_error, log_and_map, required_field, testers::KafkaTester};
+use crate::api_server::{AuthData};
+
 
 pub(crate) async fn create_connection(
     req: CreateConnectionReq,

@@ -33,8 +33,8 @@ use crate::{
     queries::api_queries,
     required_field,
     testers::KafkaTester,
-    AuthData,
 };
+use crate::api_server::{AuthData};
 use crate::{handle_delete, types::public};
 
 pub fn impulse_schema() -> SourceSchema {

@@ -13,7 +13,8 @@ use once_cell::sync::Lazy;
 use prometheus_http_query::Client;
 use tonic::Status;
 
-use crate::{jobs, AuthData};
+use crate::{jobs};
+use crate::api_server::{AuthData};
 
 const METRICS_GRANULARITY_SECS: f64 = 5.0;
 
