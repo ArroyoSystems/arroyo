@@ -367,6 +367,10 @@ impl ApiServer {
         let job_id = jobs::create_job(create_job, auth, &transaction).await?;
 
         transaction.commit().await.map_err(log_and_map)?;
+        log_event(
+            "job_created",
+            json!({"service": "api", "is_preview": preview, "job_id": job_id}),
+        );
 
         Ok(Response::new(CreateJobResp { job_id }))
     }
