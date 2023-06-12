@@ -5,8 +5,8 @@ use arroyo_types::{
     string_config, u32_config, WorkerId, ADMIN_PORT_ENV, CONTROLLER_ADDR_ENV, GRPC_PORT_ENV,
     JOB_ID_ENV, K8S_NAMESPACE_ENV, K8S_WORKER_ANNOTATIONS_ENV, K8S_WORKER_IMAGE_ENV,
     K8S_WORKER_IMAGE_PULL_POLICY_ENV, K8S_WORKER_LABELS_ENV, K8S_WORKER_NAME_ENV,
-    K8S_WORKER_RESOURCES_ENV, K8S_WORKER_SLOTS_ENV, K8S_WORKER_VOLUMES_ENV,
-    K8S_WORKER_VOLUME_MOUNTS_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV,
+    K8S_WORKER_RESOURCES_ENV, K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV, K8S_WORKER_SLOTS_ENV,
+    K8S_WORKER_VOLUMES_ENV, K8S_WORKER_VOLUME_MOUNTS_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV,
 };
 use async_trait::async_trait;
 use k8s_openapi::api::apps::v1::ReplicaSet;
@@ -33,6 +33,7 @@ pub struct KubernetesScheduler {
     annotations: BTreeMap<String, String>,
     image: String,
     image_pull_policy: String,
+    service_account_name: String,
     resources: ResourceRequirements,
     slots_per_pod: u32,
     volumes: Vec<Volume>,
@@ -61,6 +62,7 @@ impl KubernetesScheduler {
             labels: yaml_config(K8S_WORKER_LABELS_ENV, BTreeMap::new()),
             annotations: yaml_config(K8S_WORKER_ANNOTATIONS_ENV, BTreeMap::new()),
             image_pull_policy: string_config(K8S_WORKER_IMAGE_PULL_POLICY_ENV, "IfNotPresent"),
+            service_account_name: string_config(K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV, "default"),
             resources: yaml_config(
                 K8S_WORKER_RESOURCES_ENV,
                 ResourceRequirements {
@@ -202,7 +204,8 @@ impl Scheduler for KubernetesScheduler {
                                 "env": env,
                                 "volumeMounts": self.volume_mounts
                             }
-                        ]
+                        ],
+                        "serviceAccountName": self.service_account_name,
                     }
                 }
             }
