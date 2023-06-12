@@ -49,9 +49,7 @@ k8s-openapi = { version = "0.18.0", features = ["v1_26"], optional = true }
 serde_yaml = {version = "0.9", optional = true}
 
 # json-schema support
-typify = "0.0.10"
 serde_json = "1.0"
-schemars = "0.8"
 
 # logging
 tracing = "0.1"
