@@ -5,11 +5,11 @@ use std::time::SystemTime;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
+use arroyo_datastream::ImpulseSpec;
 use arroyo_datastream::Operator;
 use arroyo_datastream::SerializationMode;
 use arroyo_datastream::SinkConfig;
 use arroyo_datastream::SourceConfig;
-use arroyo_datastream::{ImpulseSpec};
 use arroyo_rpc::grpc::api::Connection;
 
 use crate::types::StructDef;
@@ -19,41 +19,11 @@ use crate::SqlConfig;
 pub struct SqlSource {
     pub id: Option<i64>,
     pub struct_def: StructDef,
-    pub source_config: SourceConfig,
+    pub operator: Operator,
     pub serialization_mode: SerializationMode,
 }
 
 impl SqlSource {
-    pub(crate) fn get_operator(&self, sql_config: &SqlConfig) -> Operator {
-        match self.source_config.clone() {
-            SourceConfig::Impulse {
-                interval,
-                events_per_second,
-                total_events,
-            } => Operator::ImpulseSource {
-                start_time: SystemTime::now(),
-                spec: interval
-                    .map(ImpulseSpec::Delay)
-                    .unwrap_or(ImpulseSpec::EventsPerSecond(events_per_second)),
-                total_events,
-            },
-            SourceConfig::FileSource {
-                directory: _,
-                interval: _,
-            } => unimplemented!("file source not exposed in SQL"),
-            SourceConfig::NexmarkSource {
-                event_rate,
-                runtime,
-            } => Operator::NexmarkSource {
-                first_event_rate: event_rate,
-                num_events: runtime.map(|runtime| event_rate * runtime.as_secs()),
-            },
-            SourceConfig::ConnectionSource { connection, config } => {
-                todo!()
-            }
-        }
-    }
-
     pub fn try_new(
         id: Option<i64>,
         struct_def: StructDef,
@@ -68,7 +38,7 @@ impl SqlSource {
 
         todo!()
 
-        // match connection.connection_type.unwrap() {
+        // match s.connection_type.unwrap() {
         //     ConnectionType::Kafka(kafka) => {
         //         let topic = connection_config
         //             .get("topic")

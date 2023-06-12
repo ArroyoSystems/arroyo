@@ -12,19 +12,19 @@ use tracing::warn;
 
 use arroyo_datastream::{Operator, Program, SinkConfig};
 use arroyo_rpc::grpc::api::create_sql_job::Sink;
-use arroyo_rpc::grpc::api::sink::SinkType;
 use arroyo_rpc::grpc::api::{
-    self, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob,
-    PipelineDef, PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf,
-    UdfLanguage,
+    self, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob, PipelineDef,
+    PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf, UdfLanguage,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
+use crate::connection_tables;
+use crate::connectors::connector_for_type;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbPipeline;
 use crate::types::public::PipelineType;
 use crate::{
-    connections, handle_db_error, log_and_map, optimizations, required_field, sinks,
+    connections, handle_db_error, log_and_map, optimizations, required_field,
     sources::{self, Source},
     AuthData,
 };
@@ -60,7 +60,24 @@ where
         schema_provider.add_connection(connection)
     }
 
-    let sinks = sinks::get_sinks(auth_data, tx).await?;
+    for table in connection_tables::get(auth_data, tx).await? {
+        let Some(connector) = connector_for_type(&table.connection_type) else {
+            warn!("Saved table found with unknown connector {}", table.connection_type);
+            continue;
+        };
+
+        println!("{:?}", table);
+
+        connector
+            .register(
+                &table.name,
+                &table.connection_config,
+                &table.config,
+                table.schema,
+                &mut schema_provider,
+            )
+            .map_err(log_and_map)?;
+    }
 
     let mut used_sink_ids = vec![];
 
@@ -71,27 +88,27 @@ where
             BuiltinSink::Log => SinkConfig::Console,
         },
         Sink::User(name) => {
-        //     let sink: api::Sink = sinks.into_iter().find(|s| s.name == *name).ok_or_else(|| {
-        //         Status::failed_precondition(format!("No sink with name '{}'", name))
-        //     })?;
+            //     let sink: api::Sink = sinks.into_iter().find(|s| s.name == *name).ok_or_else(|| {
+            //         Status::failed_precondition(format!("No sink with name '{}'", name))
+            //     })?;
 
-        //     used_sink_ids.push(sink.id);
+            //     used_sink_ids.push(sink.id);
 
-        //     match sink.sink_type.unwrap() {
-        //         SinkType::Kafka(k) => {
-        //             let connection =
-        //                 connections::get_connection(auth_data, &k.connection, tx).await?;
-        //             let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
-        //                 panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
-        //             };
-        //             SinkConfig::Kafka {
-        //                 bootstrap_servers: kafka.bootstrap_servers.clone(),
-        //                 topic: k.topic,
-        //                 client_configs: auth_config_to_hashmap(kafka.auth_config),
-        //             }
-        //         }
-        //     }
-                todo!()
+            //     match sink.sink_type.unwrap() {
+            //         SinkType::Kafka(k) => {
+            //             let connection =
+            //                 connections::get_connection(auth_data, &k.connection, tx).await?;
+            //             let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
+            //                 panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
+            //             };
+            //             SinkConfig::Kafka {
+            //                 bootstrap_servers: kafka.bootstrap_servers.clone(),
+            //                 topic: k.topic,
+            //                 client_configs: auth_config_to_hashmap(kafka.auth_config),
+            //             }
+            //         }
+            //     }
+            todo!()
         }
     };
 
@@ -160,7 +177,7 @@ async fn set_default_parallelism(_auth: &AuthData, program: &mut Program) -> Res
             Operator::NexmarkSource {
                 first_event_rate, ..
             } => (*first_event_rate as f32 / 50_000.0).round() as usize,
-            Operator::ConnectionSource { .. } => todo!(),
+            Operator::ConnectorSource { .. } => todo!(),
             op => panic!("Found non-source in a source position in graph: {:?}", op),
         });
     }
@@ -250,8 +267,8 @@ pub(crate) async fn create_pipeline<'a>(
     if is_preview {
         set_parallelism(&mut program, 1);
         for node in program.graph.node_weights_mut() {
-            // if it is a kafka sink or file sink, switch to null
-            if let Operator::ConnectionSink { .. } | Operator::FileSink { .. } = node.operator {
+            // if it is a connector sink or file sink, switch to null
+            if let Operator::ConnectorSink { .. } | Operator::FileSink { .. } = node.operator {
                 node.operator = Operator::GrpcSink;
             }
         }

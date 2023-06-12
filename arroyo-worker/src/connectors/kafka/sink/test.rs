@@ -2,7 +2,6 @@
 use std::time::{Duration, SystemTime};
 
 use crate::engine::{Context, OutQueue};
-use crate::operators::sinks::kafka::KafkaSinkFunc;
 use arroyo_types::CheckpointBarrier;
 use arroyo_types::*;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
@@ -10,6 +9,8 @@ use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::producer::Producer;
 use rdkafka::{ClientConfig, Message};
 use tokio::sync::mpsc::channel;
+
+use super::KafkaSinkFunc;
 
 pub struct KafkaTopicTester {
     topic: String,

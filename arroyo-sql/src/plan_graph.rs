@@ -310,7 +310,7 @@ impl PlanNode {
 
     fn to_operator(&self, sql_config: &SqlConfig) -> Operator {
         match &self.operator {
-            PlanOperator::Source(_name, source) => source.get_operator(sql_config),
+            PlanOperator::Source(_name, source) => source.operator.clone(),
             PlanOperator::Watermark(watermark) => Operator::Watermark(watermark.clone()),
             PlanOperator::RecordTransform(record_transform) => record_transform.as_operator(),
             PlanOperator::WindowAggregate { window, projection } => {
@@ -639,25 +639,16 @@ impl PlanNode {
             PlanOperator::Flatten => arroyo_datastream::Operator::FlattenOperator {
                 name: "flatten".into(),
             },
-            PlanOperator::Sink(_sink_name, sql_sink) => {
-                match &sql_sink.sink_config {
-                    arroyo_datastream::SinkConfig::Connection {
-                        connection, config
-                    } => {
-                        todo!()
+            PlanOperator::Sink(_sink_name, sql_sink) => match &sql_sink.sink_config {
+                arroyo_datastream::SinkConfig::Console => arroyo_datastream::Operator::ConsoleSink,
+                arroyo_datastream::SinkConfig::File { directory } => {
+                    arroyo_datastream::Operator::FileSink {
+                        dir: directory.into(),
                     }
-                    arroyo_datastream::SinkConfig::Console => {
-                        arroyo_datastream::Operator::ConsoleSink
-                    }
-                    arroyo_datastream::SinkConfig::File { directory } => {
-                        arroyo_datastream::Operator::FileSink {
-                            dir: directory.into(),
-                        }
-                    }
-                    arroyo_datastream::SinkConfig::Grpc => arroyo_datastream::Operator::GrpcSink,
-                    arroyo_datastream::SinkConfig::Null => arroyo_datastream::Operator::NullSink,
                 }
-            }
+                arroyo_datastream::SinkConfig::Grpc => arroyo_datastream::Operator::GrpcSink,
+                arroyo_datastream::SinkConfig::Null => arroyo_datastream::Operator::NullSink,
+            },
         }
     }
 

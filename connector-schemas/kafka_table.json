@@ -12,11 +12,18 @@
                     "type": "object",
                     "title": "Source",
                     "properties": {
+                        "source": {
+                            "type": "boolean",
+                            "enum": [true]
+                        },
                         "offset": {
                             "type": "string",
                             "description": "The offset to start reading from"
                         }
-                    }
+                    },
+                    "required": [
+                        "source"
+                    ]
                 },
                 {
                     "type": "object",

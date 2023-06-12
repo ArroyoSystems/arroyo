@@ -33,8 +33,8 @@ pub mod tumbling_top_n_window;
 pub mod windows;
 
 pub struct UserError {
-    name: String,
-    details: String,
+    pub name: String,
+    pub details: String,
 }
 
 impl UserError {

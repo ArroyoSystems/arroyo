@@ -1,8 +1,8 @@
 use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
-    DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq,
-    DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetSinksReq, GetSinksResp, PipelineProgram,
-    SourceMetadataResp, CreateConnectionTableReq, CreateConnectionTableResp,
+    CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
+    DeleteJobReq, DeleteJobResp, DeleteSourceReq, DeleteSourceResp, PipelineProgram,
+    SourceMetadataResp,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -10,13 +10,12 @@ use arroyo_rpc::grpc::{
         api_grpc_server::{ApiGrpc, ApiGrpcServer},
         CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp,
         CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq,
-        CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp,
-        GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq,
-        GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq,
-        JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp,
-        OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq,
-        PipelineGraphResp, StopType, TestSchemaResp, TestSourceMessage, UpdateJobReq,
-        UpdateJobResp,
+        CreatePipelineResp, CreateSourceReq, CreateSourceResp, GetConnectionsReq,
+        GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSourcesReq, GetSourcesResp,
+        GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq,
+        JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes,
+        OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, StopType, TestSchemaResp,
+        TestSourceMessage, UpdateJobReq, UpdateJobResp,
     },
     controller_grpc_client::ControllerGrpcClient,
 };
@@ -55,18 +54,17 @@ use uuid::Uuid;
 use crate::jobs::get_job_details;
 use queries::api_queries;
 
-mod connectors;
 mod cloud;
+mod connection_tables;
 mod connections;
+mod connectors;
 mod job_log;
 mod jobs;
 mod json_schema;
 mod metrics;
 mod optimizations;
 mod pipelines;
-mod sinks;
 mod sources;
-mod connection_tables;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -466,8 +464,6 @@ impl ApiGrpc for ApiServer {
         Ok(Response::new(CreateConnectionTableResp {}))
     }
 
-
-
     // sources
     async fn create_source(
         &self,
@@ -547,40 +543,6 @@ impl ApiGrpc for ApiServer {
 
         let rx = sources::test_source(request.into_inner(), auth, &self.client().await?).await?;
         Ok(Response::new(ReceiverStream::new(rx)))
-    }
-
-    // sinks
-    async fn create_sink(
-        &self,
-        request: Request<CreateSinkReq>,
-    ) -> Result<Response<CreateSinkResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        sinks::create_sink(request.into_inner(), auth, &self.pool).await?;
-
-        Ok(Response::new(CreateSinkResp {}))
-    }
-
-    async fn get_sinks(
-        &self,
-        request: Request<GetSinksReq>,
-    ) -> Result<Response<GetSinksResp>, Status> {
-        let (_, auth) = self.authenticate(request).await?;
-
-        Ok(Response::new(GetSinksResp {
-            sinks: sinks::get_sinks(&auth, &self.client().await?).await?,
-        }))
-    }
-
-    async fn delete_sink(
-        &self,
-        request: Request<DeleteSinkReq>,
-    ) -> Result<Response<DeleteSinkResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        sinks::delete_sink(request.into_inner(), auth, &self.client().await?).await?;
-
-        Ok(Response::new(DeleteSinkResp {}))
     }
 
     // pipelines

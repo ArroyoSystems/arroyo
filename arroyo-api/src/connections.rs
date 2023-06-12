@@ -1,7 +1,5 @@
 use arroyo_rpc::grpc::api::DeleteConnectionReq;
-use arroyo_rpc::grpc::api::{
-    Connection, CreateConnectionReq, TestSourceMessage,
-};
+use arroyo_rpc::grpc::api::{Connection, CreateConnectionReq, TestSourceMessage};
 use cornucopia_async::GenericClient;
 use tokio::sync::mpsc::channel;
 use tonic::Status;
@@ -18,12 +16,16 @@ pub(crate) async fn create_connection(
     client: &impl GenericClient,
 ) -> Result<(), Status> {
     {
-        let connector = connector_for_type(&req.connection_type)
-            .ok_or_else(|| Status::invalid_argument(format!("Unknown connection type '{}'", req.connection_type)))?;
+        let connector = connector_for_type(&req.connection_type).ok_or_else(|| {
+            Status::invalid_argument(format!("Unknown connection type '{}'", req.connection_type))
+        })?;
 
-        (*connector).validate_schema(&req.config)
+        (*connector)
+            .validate_schema(&req.config)
             .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
     }
+
+    let config: serde_json::Value = serde_json::from_str(&req.config).unwrap();
 
     api_queries::create_connection()
         .bind(
@@ -32,7 +34,7 @@ pub(crate) async fn create_connection(
             &auth.user_id,
             &req.name,
             &req.connection_type,
-            &serde_json::to_value(&req.config).unwrap(),
+            &serde_json::to_value(&config).unwrap(),
         )
         .await
         .map_err(|e| handle_db_error("connection", e))?;
@@ -44,7 +46,7 @@ impl From<DbConnection> for Connection {
     fn from(val: DbConnection) -> Self {
         Connection {
             name: val.name,
-            connection_type: val.r#type,
+            connector: val.r#type,
             config: serde_json::to_string(&val.config).unwrap(),
             sources: val.source_count as i32,
             sinks: val.sink_count as i32,

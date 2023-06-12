@@ -1,13 +1,13 @@
 #![allow(clippy::comparison_chain)]
 use std::collections::HashMap;
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use std::unreachable;
 
 use anyhow::Result;
 use anyhow::{anyhow, bail};
 use arrow_schema::DataType;
-use arroyo_datastream::{Operator, WindowType};
+use arroyo_datastream::{ConnectorOp, ImpulseSpec, Operator, SourceConfig, WindowType};
 
 use datafusion_common::{DFField, ScalarValue};
 use datafusion_expr::expr::ScalarUDF;
@@ -445,14 +445,26 @@ impl<'a> SqlPipelineBuilder<'a> {
                 )
             })?;
         match insert_table {
-            crate::Table::SavedSource {
-                name: _,
-                id: _,
-                fields: _,
-                type_name: _,
-                source_config: _,
-                serialization_mode: _,
-            } => bail!("inserting into saved sources is not currently supported"),
+            crate::Table::SavedSource { .. } => {
+                bail!("inserting into saved sources is not currently supported")
+            }
+            crate::Table::ConnectorTable {
+                name,
+                connector_type,
+                fields,
+                type_name,
+                operator,
+                config,
+                description,
+                serialization_mode,
+            } => match connector_type {
+                crate::ConnectorType::Sink => {
+                    todo!()
+                }
+                crate::ConnectorType::Source => {
+                    bail!("Inserting into a source is not supported")
+                }
+            },
             crate::Table::SavedSink {
                 name,
                 id,
@@ -796,11 +808,73 @@ impl<'a> SqlPipelineBuilder<'a> {
                         name: type_name.clone(),
                         fields: fields.clone(),
                     },
-                    source_config: source_config.clone(),
+                    operator: match source_config {
+                        SourceConfig::Impulse {
+                            interval,
+                            events_per_second,
+                            total_events,
+                        } => Operator::ImpulseSource {
+                            start_time: SystemTime::now(),
+                            spec: interval
+                                .map(ImpulseSpec::Delay)
+                                .unwrap_or(ImpulseSpec::EventsPerSecond(*events_per_second)),
+                            total_events: *total_events,
+                        },
+                        SourceConfig::FileSource {
+                            directory: _,
+                            interval: _,
+                        } => unimplemented!("file source not exposed in SQL"),
+                        SourceConfig::NexmarkSource {
+                            event_rate,
+                            runtime,
+                        } => Operator::NexmarkSource {
+                            first_event_rate: *event_rate,
+                            num_events: runtime.map(|runtime| event_rate * runtime.as_secs()),
+                        },
+                    },
                     serialization_mode: *serialization_mode,
                 };
                 SqlOperator::Source(SourceOperator {
                     name: table_name,
+                    source,
+                    virtual_field_projection: None,
+                    timestamp_override: None,
+                    watermark_column: None,
+                })
+            }
+            crate::Table::ConnectorTable {
+                name,
+                connector_type,
+                fields,
+                type_name,
+                operator,
+                config,
+                description,
+                serialization_mode,
+            } => {
+                match connector_type {
+                    crate::ConnectorType::Source => {}
+                    crate::ConnectorType::Sink => {
+                        bail!("cannot read from sink")
+                    }
+                };
+
+                let source = SqlSource {
+                    id: None,
+                    struct_def: StructDef {
+                        name: type_name.clone(),
+                        fields: fields.clone(),
+                    },
+                    operator: Operator::ConnectorSource(ConnectorOp {
+                        operator: operator.clone(),
+                        config: config.clone(),
+                        description: description.clone(),
+                    }),
+                    serialization_mode: *serialization_mode,
+                };
+
+                SqlOperator::Source(SourceOperator {
+                    name: name.clone(),
                     source,
                     virtual_field_projection: None,
                     timestamp_override: None,
@@ -1103,26 +1177,11 @@ impl<'a> SqlPipelineBuilder<'a> {
 
     pub(crate) fn insert_table(&mut self, table: Table) -> Result<()> {
         match table {
-            Table::SavedSource {
-                name: _,
-                id: _,
-                fields: _,
-                type_name: _,
-                source_config: _,
-                serialization_mode: _,
-            } => todo!(),
-            Table::SavedSink {
-                name: _,
-                id: _,
-                sink_config: _,
-            } => todo!(),
-            Table::MemoryTable { name: _, fields: _ } => todo!(),
-            Table::MemoryTableWithConnectionConfig {
-                name: _,
-                fields: _,
-                connection: _,
-                connection_config: _,
-            } => todo!(),
+            Table::SavedSource { .. } => todo!(),
+            Table::SavedSink { .. } => todo!(),
+            Table::MemoryTable { .. } => todo!(),
+            Table::MemoryTableWithConnectionConfig { .. } => todo!(),
+            Table::ConnectorTable { .. } => todo!(),
             Table::TableFromQuery {
                 name: _,
                 logical_plan: _,
@@ -1136,14 +1195,8 @@ impl<'a> SqlPipelineBuilder<'a> {
                     anyhow!("Could not find sink {} in schema provider", sink_name)
                 })?;
                 match sink {
-                    Table::SavedSource {
-                        name: _,
-                        id: _,
-                        fields: _,
-                        type_name: _,
-                        source_config: _,
-                        serialization_mode: _,
-                    } => bail!("can't insert into a saved source"),
+                    Table::SavedSource { .. } => bail!("can't insert into a saved source"),
+                    Table::ConnectorTable { .. } => todo!(),
                     Table::SavedSink {
                         name,
                         id,

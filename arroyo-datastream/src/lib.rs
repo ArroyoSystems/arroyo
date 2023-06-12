@@ -17,11 +17,9 @@ use arroyo_rpc::grpc::api::create_pipeline_req::Config;
 use arroyo_rpc::grpc::api::impulse_source::Spec;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::source_def::SourceType;
-use arroyo_rpc::grpc::api::{
-    self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge, ConnectionSource, ConnectionSink,
-};
+use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
 use arroyo_types::nexmark::Event;
-use arroyo_types::{from_micros, string_to_map, to_micros, Data, GlobalKey, ImpulseEvent, Key};
+use arroyo_types::{from_micros, to_micros, Data, GlobalKey, ImpulseEvent, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -295,6 +293,36 @@ impl From<GrpcApi::SerializationMode> for SerializationMode {
 }
 
 #[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
+pub struct ConnectorOp {
+    // path of the operator that this will compile into (like `crate::sources::kafka::KafkaSource`)
+    pub operator: String,
+    // json-encoded config for the operator
+    pub config: String,
+    // description to be rendered in the pipeline graph
+    pub description: String,
+}
+
+impl From<GrpcApi::ConnectorOp> for ConnectorOp {
+    fn from(c: GrpcApi::ConnectorOp) -> Self {
+        ConnectorOp {
+            operator: c.operator,
+            config: c.config,
+            description: c.description,
+        }
+    }
+}
+
+impl From<ConnectorOp> for GrpcApi::ConnectorOp {
+    fn from(c: ConnectorOp) -> Self {
+        GrpcApi::ConnectorOp {
+            operator: c.operator,
+            config: c.config,
+            description: c.description,
+        }
+    }
+}
+
+#[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
 pub enum Operator {
     FileSource {
         dir: PathBuf,
@@ -305,14 +333,8 @@ pub enum Operator {
         spec: ImpulseSpec,
         total_events: Option<usize>,
     },
-    ConnectionSource {
-        connection: String,
-        config: String,
-    },
-    ConnectionSink {
-        connection: String,
-        config: String,
-    },
+    ConnectorSource(ConnectorOp),
+    ConnectorSink(ConnectorOp),
     FusedWasmUDFs {
         name: String,
         udfs: Vec<WasmUDF>,
@@ -377,10 +399,6 @@ pub enum SourceConfig {
         event_rate: u64,
         runtime: Option<Duration>,
     },
-    ConnectionSource {
-        connection: String,
-        config: String,
-    },
 }
 
 impl From<SourceType> for SourceConfig {
@@ -401,23 +419,14 @@ impl From<SourceType> for SourceConfig {
                 event_rate: nexmark.events_per_second.into(),
                 runtime: nexmark.runtime_micros.map(Duration::from_micros),
             },
-            SourceType::Connection(c) => {
-                SourceConfig::ConnectionSource { connection: c.connection, config: c.config }
-            }
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum SinkConfig {
-    Connection {
-        connection: String,
-        config: String,
-    },
     Console,
-    File {
-        directory: String,
-    },
+    File { directory: String },
     Grpc,
     Null,
 }
@@ -454,8 +463,9 @@ impl Debug for Operator {
         match self {
             Operator::FileSource { dir, .. } => write!(f, "FileSource<{:?}>", dir),
             Operator::ImpulseSource { .. } => write!(f, "ImpulseSource"),
-            Operator::ConnectionSource { connection, .. } => write!(f, "ConnectionSource<{}>", connection),
-            Operator::ConnectionSink { connection, .. } => write!(f, "ConnectionSink<{}>", connection),
+            Operator::ConnectorSource(c) | Operator::ConnectorSink(c) => {
+                write!(f, "{}", c.description)
+            }
             Operator::FusedWasmUDFs { udfs, .. } => {
                 if udfs.len() == 1 {
                     write_behavior(f, &udfs[0])
@@ -983,7 +993,6 @@ impl<K: Key, T: Data> KeyedSink<K, T> for KeyedFileSink<K, T> {
     }
 }
 
-
 pub struct NullSink<K: Key, T: Data> {
     _t: PhantomData<(K, T)>,
 }
@@ -1498,12 +1507,8 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 total_events: total_events.map(|total| total as u64),
                 spec: Some(spec.into()),
             }),
-            Operator::ConnectionSource { connection, config } => {
-                GrpcOperator::ConnectionSource(GrpcApi::ConnectionSource { connection, config })
-            }
-            Operator::ConnectionSink { connection, config } => {
-                GrpcOperator::ConnectionSink(GrpcApi::ConnectionSink { connection, config })
-            }
+            Operator::ConnectorSource(c) => GrpcOperator::ConnectorSource(c.into()),
+            Operator::ConnectorSink(c) => GrpcOperator::ConnectorSink(c.into()),
             FusedWasmUDFs { name, udfs } => GrpcOperator::WasmUdfs(GrpcApi::WasmUdfs {
                 name,
                 wasm_functions: udfs.into_iter().map(|udf| udf.into()).collect(),
@@ -1815,12 +1820,8 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         total_events: impulse_source.total_events.map(|events| events as usize),
                     }
                 }
-                GrpcOperator::ConnectionSource(ConnectionSource { connection, config }) => {
-                    Operator::ConnectionSource { connection, config }
-                }
-                GrpcOperator::ConnectionSink(ConnectionSink { connection, config }) => {
-                    Operator::ConnectionSink { connection, config }
-                }
+                GrpcOperator::ConnectorSource(c) => Operator::ConnectorSource(c.into()),
+                GrpcOperator::ConnectorSink(c) => Operator::ConnectorSink(c.into()),
                 GrpcOperator::WasmUdfs(wasm_udfs) => Operator::FusedWasmUDFs {
                     name: wasm_udfs.name,
                     udfs: wasm_udfs

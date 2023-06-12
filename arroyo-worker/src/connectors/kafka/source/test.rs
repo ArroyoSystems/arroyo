@@ -2,9 +2,8 @@ use arroyo_state::{BackingStore, StateBackend};
 use rand::Rng;
 use std::time::{Duration, SystemTime};
 
+use crate::connectors::kafka::source;
 use crate::engine::{Context, OutQueue, QueueItem};
-use crate::operators::sources::kafka;
-use crate::operators::sources::kafka::{KafkaSourceFunc, OffsetMode};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
 use arroyo_types::{to_micros, CheckpointBarrier, Message, TaskInfo};
@@ -13,6 +12,8 @@ use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+
+use super::{KafkaSourceFunc, OffsetMode};
 
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode, Serialize, Deserialize, PartialEq)]
 struct TestData {
@@ -62,7 +63,7 @@ impl KafkaTopicTester {
             &self.server,
             &self.topic,
             OffsetMode::Earliest,
-            kafka::SerializationMode::Json,
+            source::SerializationMode::Json,
             100,
             vec![],
         );
@@ -86,7 +87,7 @@ impl KafkaTopicTester {
             command_tx,
             1,
             vec![vec![OutQueue::new(data_tx, false)]],
-            kafka::tables(),
+            source::tables(),
         )
         .await;
 
@@ -227,7 +228,7 @@ async fn test_kafka() {
         min_watermark: Some(0),
         max_watermark: Some(0),
         has_state: true,
-        tables: kafka::tables(),
+        tables: source::tables(),
         backend_data: checkpoint_completed.subtask_metadata.backend_data,
         bytes: checkpoint_completed.subtask_metadata.bytes,
     })

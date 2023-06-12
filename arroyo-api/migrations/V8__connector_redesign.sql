@@ -1,6 +1,9 @@
 ALTER TABLE connections
 ALTER COLUMN type TYPE TEXT using type::text;
 
+ALTER TABLE sources
+ALTER COLUMN type TYPE TEXT using type::text;
+
 CREATE TABLE connection_tables (
     id BIGSERIAL PRIMARY KEY,
     organization_id VARCHAR NOT NULL,

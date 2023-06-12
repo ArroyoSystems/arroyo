@@ -15,14 +15,14 @@ use arroyo_rpc::grpc::api::{
     source_def::SourceType,
     source_schema::Schema,
     ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
-    JsonSchemaDef,
-    RawJsonDef, SourceDef, SourceField, SourceMetadataResp, TestSourceMessage,
+    JsonSchemaDef, RawJsonDef, SourceDef, SourceField, SourceMetadataResp, TestSourceMessage,
 };
 use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
 
+use crate::handle_delete;
 use crate::types::public::SchemaType;
 use crate::{
     connections::get_connections,
@@ -30,10 +30,8 @@ use crate::{
     json_schema::{self, convert_json_schema},
     log_and_map,
     queries::api_queries,
-    required_field,
-    AuthData,
+    required_field, AuthData,
 };
-use crate::{handle_delete};
 
 pub fn impulse_schema() -> SourceSchema {
     SourceSchema {
@@ -352,7 +350,8 @@ impl SourceSchema {
         match s.schema.unwrap() {
             Schema::Builtin(name) => builtin_for_name(&name),
             Schema::JsonSchema(def) => {
-                let fields = json_schema::convert_json_schema(name, &def.json_schema)?;
+                let fields: Vec<SchemaField> =
+                    json_schema::convert_json_schema(name, &def.json_schema)?;
                 Ok(SourceSchema {
                     format: SourceFormat::JsonSchema(def.json_schema),
                     fields,
@@ -458,7 +457,7 @@ impl Source {
             SourceFormat::RawJson => Some("arroyo_types::RawJson".to_string()),
         };
 
-        let defs = match &self.schema.format {
+        let defs: Option<String> = match &self.schema.format {
             SourceFormat::Native(_) => None,
             SourceFormat::JsonFields => None,
             SourceFormat::JsonSchema(s) => Some(json_schema::get_defs(&self.name, s).unwrap()),
@@ -517,10 +516,6 @@ pub(crate) async fn create_source(
                 Some(create_source_req::TypeOneof::Nexmark { .. }) => {
                     Some(Schema::Builtin("nexmark".to_string()))
                 }
-                Some(create_source_req::TypeOneof::Connection { .. }) => {
-                    // TODO: is this correct?
-                    Some(Schema::RawJson(RawJsonDef {}))
-                }
                 _ => None,
             }
             .map(|s| api::SourceSchema {
@@ -570,23 +565,6 @@ pub(crate) async fn create_source(
     // insert source
     let (source_type, config, connection_id) =
         match req.type_oneof.ok_or_else(|| required_field("type"))? {
-            create_source_req::TypeOneof::Connection(req) => {
-                let connection = connections
-                    .iter()
-                    .find(|c| c.name == req.connection)
-                    .ok_or_else(|| {
-                        Status::failed_precondition(format!(
-                            "Could not find connection with name '{}'",
-                            req.connection
-                        ))
-                    })?;
-
-                (
-                    connection.r#type.clone(),
-                    serde_json::to_value(&req.config).unwrap(),
-                    Some(connection.id),
-                )
-            }
             create_source_req::TypeOneof::Impulse(impulse) => {
                 if impulse.events_per_second > auth.org_metadata.max_impulse_qps as f32 {
                     return rate_limit_error("impulse", auth.org_metadata.max_impulse_qps as usize);
@@ -720,7 +698,6 @@ pub(crate) async fn test_schema(req: CreateSourceReq) -> Result<Vec<String>, Sta
     }
 }
 
-
 pub(crate) async fn get_source_metadata(
     req: CreateSourceReq,
     auth: AuthData,
@@ -729,9 +706,6 @@ pub(crate) async fn get_source_metadata(
     let connections = get_connections(&auth, client).await?;
 
     let partitions = match req.type_oneof.ok_or_else(|| required_field("type"))? {
-        create_source_req::TypeOneof::Connection(c) => {
-            todo!()
-        }
         create_source_req::TypeOneof::Impulse(_) => 1,
         create_source_req::TypeOneof::File(_) => 1,
         create_source_req::TypeOneof::Nexmark(_) => 1,
@@ -760,9 +734,6 @@ pub(crate) async fn test_source(
     let connections = get_connections(&auth, client).await?;
 
     match source {
-        create_source_req::TypeOneof::Connection(c) => {
-            todo!()
-        }
         _ => {
             if tx
                 .send(Ok(TestSourceMessage {

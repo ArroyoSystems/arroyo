@@ -313,6 +313,7 @@ wasm-opt = false
             #![allow(warnings)]
             use petgraph::graph::DiGraph;
             use arroyo_worker::operators::*;
+            use arroyo_worker::connectors;
             use arroyo_worker::operators::sources::*;
             use arroyo_worker::operators::sinks::*;
             use arroyo_worker::operators::sinks;
@@ -425,11 +426,25 @@ wasm-opt = false
                 //             #serialization_mode,))
                 //     }
                 // }
-                Operator::ConnectionSource { connection, config } => {
-                    todo!()
+                Operator::ConnectorSource(c)  => {
+                    let out_k = parse_type(&output.unwrap().weight().key);
+                    let out_t = parse_type(&output.unwrap().weight().value);
+
+                    let strukt = parse_type(&c.operator);
+                    let config = &c.config;
+                    quote! {
+                        Box::new(#strukt::<#out_k, #out_t>::from_config(#config))
+                    }
                 }
-                Operator::ConnectionSink { connection, config } => {
-                    todo!()
+                Operator::ConnectorSink(c)  => {
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+
+                    let strukt = parse_type(&c.operator);
+                    let config = &c.config;
+                    quote! {
+                        Box::new(#strukt::<#in_k, #in_t>::from_config(#config))
+                    }
                 }
                 Operator::FusedWasmUDFs { name, udfs: _ } => {
                     let in_k = parse_type(&input.unwrap().weight().key);
@@ -596,19 +611,6 @@ wasm-opt = false
                         }
                     }
                 }
-                // Operator::KafkaSink { topic, bootstrap_servers, client_configs } => {
-                //     let in_k = parse_type(&input.unwrap().weight().key);
-                //     let in_t = parse_type(&input.unwrap().weight().value);
-
-                //     let bootstrap_servers = bootstrap_servers.join(",");
-                //     let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
-                //     quote! {
-                //         Box::new(sinks::kafka::KafkaSinkFunc::<#in_k, #in_t>::new(
-                //             #bootstrap_servers,
-                //             #topic,
-                //         vec![#(#client_configs ),*]))
-                //     }
-                // }
                 Operator::NexmarkSource{first_event_rate, num_events}  => {
                     match *num_events {
                         Some(events) => {

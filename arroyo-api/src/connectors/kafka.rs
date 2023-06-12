@@ -1,14 +1,13 @@
+use arroyo_sql::{ArroyoSchemaProvider, ConnectorType};
+use serde::{Deserialize, Serialize};
 use typify::import_types;
-use serde::{Serialize, Deserialize};
 
 use std::{
     str::FromStr,
     time::{Duration, Instant},
 };
 
-use arroyo_rpc::grpc::api::{
-    source_schema::Schema, TestSourceMessage,
-};
+use arroyo_rpc::grpc::api::{source_schema::Schema, SourceSchema, TestSourceMessage};
 use arroyo_types::string_to_map;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use rdkafka::{
@@ -22,22 +21,17 @@ use tracing::{error, info, warn};
 
 use crate::required_field;
 
-use super::Connector;
+use super::{
+    schema_defs, schema_fields, schema_type, serialization_mode, Connector, OperatorConfig,
+};
 
+const CONFIG_SCHEMA: &str = include_str!("../../../connector-schemas/kafka_config.json");
 
-const CONFIG_SCHEMA: &str = include_str!("../../schemas/kafka_config.json");
+import_types!(schema = "../connector-schemas/kafka_config.json",);
 
+import_types!(schema = "../connector-schemas/kafka_table.json");
 
-import_types!(
-    schema = "schemas/kafka_config.json",
-);
-
-import_types!(
-    schema = "schemas/kafka_table.json"
-);
-
-pub struct KafkaConnector {
-}
+pub struct KafkaConnector {}
 
 impl Connector for KafkaConnector {
     type ConfigT = KafkaConfig;
@@ -47,7 +41,49 @@ impl Connector for KafkaConnector {
         "kafka"
     }
 
+    fn register(
+        &self,
+        name: &str,
+        config: KafkaConfig,
+        table: KafkaTable,
+        schema: Option<SourceSchema>,
+        provider: &mut ArroyoSchemaProvider,
+    ) {
+        let (typ, operator, desc) = match table.type_ {
+            KafkaTableType::Source(_) => (
+                ConnectorType::Source,
+                "connectors::kafka::source::KafkaSourceFunc",
+                format!("KafkaSource<{}>", table.topic),
+            ),
+            KafkaTableType::Sink(_) => (
+                ConnectorType::Sink,
+                "connectors::kafka::sink::KafkaSinkFunc",
+                format!("KafkaSink<{}>", table.topic),
+            ),
+        };
 
+        let config = OperatorConfig {
+            connection: serde_json::to_value(config).unwrap(),
+            table: serde_json::to_value(table).unwrap(),
+            rate_limit: None,
+            serialization_mode: serialization_mode(schema.as_ref().unwrap()),
+        };
+
+        if let Some(defs) = schema_defs(name, schema.as_ref().unwrap()) {
+            provider.add_defs(name, defs);
+        }
+
+        provider.add_connector_table(
+            name.to_string(),
+            typ,
+            schema_fields(name, schema.as_ref().unwrap()).unwrap(),
+            schema_type(name, schema.as_ref().unwrap()),
+            operator.to_string(),
+            serde_json::to_string(&config).unwrap(),
+            desc,
+            serialization_mode(schema.as_ref().unwrap()).into(),
+        );
+    }
 }
 
 // pub fn auth_config_to_hashmap(config: Option<KafkaAuthConfig>) -> HashMap<String, String> {
@@ -63,7 +99,6 @@ impl Connector for KafkaConnector {
 //         .collect(),
 //     }
 // }
-
 
 /*
 pub struct KafkaSource {

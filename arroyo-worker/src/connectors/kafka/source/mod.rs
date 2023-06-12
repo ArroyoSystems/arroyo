@@ -1,3 +1,4 @@
+use crate::connectors::{OperatorConfig, OperatorConfigSerializationMode};
 use crate::engine::{Context, StreamNode};
 use crate::SourceFinishType;
 use arroyo_macro::source_fn;
@@ -19,6 +20,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::operators::{SerializationMode, UserError};
 
+use super::{KafkaConfig, KafkaTable, KafkaTableType};
+
 #[cfg(test)]
 mod test;
 
@@ -38,8 +41,9 @@ impl OffsetMode {
 }
 
 #[derive(StreamNode, Clone)]
-pub struct KafkaSourceFunc<T>
+pub struct KafkaSourceFunc<K, T>
 where
+    K: DeserializeOwned + Data,
     T: DeserializeOwned + Data,
 {
     topic: String,
@@ -48,7 +52,7 @@ where
     serialization_mode: SerializationMode,
     client_configs: HashMap<String, String>,
     messages_per_second: NonZeroU32,
-    _t: PhantomData<T>,
+    _t: PhantomData<(K, T)>,
 }
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -62,8 +66,9 @@ pub fn tables() -> Vec<TableDescriptor> {
 }
 
 #[source_fn(out_k = (), out_t = T)]
-impl<T> KafkaSourceFunc<T>
+impl<K, T> KafkaSourceFunc<K, T>
 where
+    K: DeserializeOwned + Data,
     T: DeserializeOwned + Data,
 {
     pub fn new(
@@ -84,6 +89,45 @@ where
                 .map(|(key, value)| (key.to_string(), value.to_string()))
                 .collect(),
             messages_per_second: NonZeroU32::new(messages_per_second).unwrap(),
+            _t: PhantomData,
+        }
+    }
+
+    pub fn from_config(config: &str) -> Self {
+        let config: OperatorConfig =
+            serde_json::from_str(config).expect("Invalid config for KafkaSource");
+        let connection: KafkaConfig = serde_json::from_value(config.connection)
+            .expect("Invalid connection config for KafkaSource");
+        let table: KafkaTable =
+            serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
+        let KafkaTableType::Source{ offset, .. } = &table.type_ else {
+            panic!("found non-source kafka config in source operator");
+        };
+
+        let offset_mode = match offset {
+            Some(s) => match s.as_str() {
+                "earliest" => OffsetMode::Earliest,
+                "latest" => OffsetMode::Latest,
+                _ => panic!("invalid offset mode {}", s),
+            },
+            None => OffsetMode::Latest,
+        };
+
+        let mut client_configs = HashMap::new();
+
+        Self {
+            topic: table.topic,
+            bootstrap_servers: connection.bootstrap_servers.join(","),
+            offset_mode,
+            serialization_mode: match config.serialization_mode {
+                OperatorConfigSerializationMode::Json => SerializationMode::Json,
+                OperatorConfigSerializationMode::JsonSchemaRegistry => {
+                    SerializationMode::JsonSchemaRegistry
+                }
+                OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
+            },
+            client_configs,
+            messages_per_second: NonZeroU32::new(100000).unwrap(),
             _t: PhantomData,
         }
     }

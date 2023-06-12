@@ -16,8 +16,6 @@ use serde::Serialize;
 use tonic::transport::Channel;
 use tracing::info;
 
-pub mod kafka;
-
 #[derive(StreamNode)]
 pub struct FileSink<K: Key, T: Data> {
     output_dir: PathBuf,

@@ -150,6 +150,32 @@ impl ArroyoSchemaProvider {
         self.connections.insert(connection.name.clone(), connection);
     }
 
+    pub fn add_connector_table(
+        &mut self,
+        name: String,
+        connector_type: ConnectorType,
+        fields: Vec<StructField>,
+        type_name: Option<String>,
+        operator: String,
+        config: String,
+        description: String,
+        serialization_mode: SerializationMode,
+    ) {
+        self.tables.insert(
+            name.clone(),
+            Table::ConnectorTable {
+                name,
+                connector_type,
+                fields,
+                type_name,
+                operator,
+                config,
+                description,
+                serialization_mode,
+            },
+        );
+    }
+
     pub fn add_saved_source_with_type(
         &mut self,
         id: i64,
@@ -620,6 +646,12 @@ pub enum FieldSpec {
     VirtualStructField(StructField, Expression),
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum ConnectorType {
+    Source,
+    Sink,
+}
+
 #[derive(Debug, Clone)]
 pub enum Table {
     SavedSource {
@@ -628,6 +660,16 @@ pub enum Table {
         fields: Vec<StructField>,
         type_name: Option<String>,
         source_config: SourceConfig,
+        serialization_mode: SerializationMode,
+    },
+    ConnectorTable {
+        name: String,
+        connector_type: ConnectorType,
+        fields: Vec<StructField>,
+        type_name: Option<String>,
+        operator: String,
+        config: String,
+        description: String,
         serialization_mode: SerializationMode,
     },
     SavedSink {
@@ -661,11 +703,12 @@ pub enum Table {
 impl Table {
     fn name(&self) -> Option<String> {
         match self {
-            Table::SavedSource { name, .. } => Some(name.clone()),
-            Table::SavedSink { name, .. } => Some(name.clone()),
-            Table::MemoryTable { name, .. } => Some(name.clone()),
-            Table::MemoryTableWithConnectionConfig { name, .. } => Some(name.clone()),
-            Table::TableFromQuery { name, .. } => Some(name.clone()),
+            Table::SavedSource { name, .. }
+            | Table::SavedSink { name, .. }
+            | Table::MemoryTable { name, .. }
+            | Table::MemoryTableWithConnectionConfig { name, .. }
+            | Table::TableFromQuery { name, .. }
+            | Table::ConnectorTable { name, .. } => Some(name.clone()),
             Table::InsertQuery { .. } | Table::Anonymous { .. } => None,
         }
     }
@@ -681,7 +724,9 @@ impl Table {
                     }
                 })
                 .collect::<Result<Vec<_>>>(),
-            Table::MemoryTable { fields, .. } | Table::SavedSource { fields, .. } => fields
+            Table::MemoryTable { fields, .. }
+            | Table::SavedSource { fields, .. }
+            | Table::ConnectorTable { fields, .. } => fields
                 .iter()
                 .map(|field| {
                     let field: Field = field.clone().into();

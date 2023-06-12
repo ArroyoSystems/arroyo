@@ -149,7 +149,8 @@ message Operator {
   oneof operator {
     FileSource file_source = 1;
     ImpulseSource impulse_source = 2;
-    ConnectionSource connection_source = 3;
+    ConnectorOp connector_source = 3;
+    ConnectorOp connector_sink = 22;
     WasmUdfs wasm_udfs = 4;
     WindowOperator window = 5;
     Aggregator aggregator = 6;
@@ -157,7 +158,6 @@ message Operator {
     BuiltinSink builtin_sink = 8;
     FileSink file_sink = 9;
     Window window_join = 10;
-    ConnectionSink connection_sink = 11;
     NexmarkSource nexmark_source = 12;
     ExpressionOperator expression_operator = 13;
     Flatten flatten = 14;
@@ -530,7 +530,7 @@ message JobMetricsResp {
 // connections
 message Connection {
   string name = 1;
-  string connection_type = 2;
+  string connector = 2;
   string config = 3;
 
   int32 sources = 4;
@@ -571,10 +571,21 @@ message CreateConnectionTableReq {
   string connection_id = 2;
   TableType type = 3;
   string config = 4;
-  string schema = 5;
+  optional SourceSchema schema = 5;
 }
 
 message CreateConnectionTableResp {
+}
+
+message ConnectionTable {
+  string name = 1;
+  string connection_id = 2;
+  string connection_name = 3;
+  string connection_type = 4;
+  string connection_config = 5;
+  TableType type = 6;
+  string config = 7;
+  optional SourceSchema schema = 8;
 }
 
 // Sources
@@ -654,9 +665,10 @@ message NexmarkSourceConfig {
   optional uint64 runtime_micros = 2;
 }
 
-message ConnectionSource {
-  string connection = 1;
+message ConnectorOp {
+  string operator = 1;
   string config = 2;
+  string description = 3;
 }
 
 message CreateSourceReq {
@@ -668,7 +680,6 @@ message CreateSourceReq {
     ImpulseSourceConfig impulse = 4;
     FileSourceConfig file = 5;
     NexmarkSourceConfig nexmark = 6;
-    ConnectionSource connection = 7;
   }
 }
 
@@ -685,7 +696,6 @@ message SourceDef {
     ImpulseSourceConfig impulse = 5;
     FileSourceConfig file = 6;
     NexmarkSourceConfig nexmark = 7;
-    ConnectionSource connection = 8;
   }
 
   repeated SourceField sql_fields = 9;
@@ -728,48 +738,6 @@ message ConfluentSchemaResp {
 }
 
 
-// sinks
-
-message CreateSinkReq {
-  string name = 1;
-
-  oneof sink_type {
-    ConnectionSink connection = 2;
-  }
-}
-
-message CreateSinkResp {
-}
-
-message GetSinksReq {
-}
-
-message ConnectionSink {
-  string connection = 1;
-  string config = 2;
-}
-
-message Sink {
-  int64 id = 1;
-  string name = 2;
-  oneof sink_type {
-    ConnectionSink connection = 3;
-  }
-  int32 producers = 4;
-}
-
-message GetSinksResp {
-  repeated Sink sinks = 1;
-}
-
-message DeleteSinkReq {
-  string name = 1;
-}
-
-message DeleteSinkResp {
-
-}
-
 // outputs
 
 message GrpcOutputSubscription {
@@ -794,10 +762,6 @@ service ApiGrpc {
   rpc CreateSource(CreateSourceReq) returns (CreateSourceResp);
   rpc GetSources(GetSourcesReq) returns (GetSourcesResp);
   rpc DeleteSource(DeleteSourceReq) returns (DeleteSourceResp);
-
-  rpc CreateSink(CreateSinkReq) returns (CreateSinkResp);
-  rpc GetSinks(GetSinksReq) returns (GetSinksResp);
-  rpc DeleteSink(DeleteSinkReq) returns (DeleteSinkResp);
 
   rpc GetConfluentSchema(ConfluentSchemaReq) returns (ConfluentSchemaResp);
   rpc GetSourceMetadata(CreateSourceReq) returns (SourceMetadataResp);
