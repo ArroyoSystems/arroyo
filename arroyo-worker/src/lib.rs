@@ -72,7 +72,8 @@ where
 }
 
 // Custom deserializer for fields encoded as RFC3339 date time strings, relying on Chrono's deserialization
-// capabilities (note we can't use chrono directly, because all times in SQL land needs to be SystemTime right now)
+// capabilities (note we can't use chrono::DateTime as the field type currently, because all times in SQL-land
+// currently need to be SystemTime)
 pub fn deserialize_rfc3339_datetime<'de, D>(f: D) -> Result<SystemTime, D::Error>
 where
     D: Deserializer<'de>,
