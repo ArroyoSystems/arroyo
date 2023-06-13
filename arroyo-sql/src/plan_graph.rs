@@ -887,7 +887,7 @@ impl PlanNode {
                         // first value should just be update_type, others a copy of the field.
                         |(i, field)| {
                             let field_name: syn::Ident =
-                                parse_str(&field.qualified_name()).unwrap();
+                                parse_str(&field.field_name()).unwrap();
                             if i == 0 {
                                 quote!(#field_name)
                             } else {
