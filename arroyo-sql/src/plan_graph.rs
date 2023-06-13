@@ -9,8 +9,8 @@ use arroyo_datastream::{
     SlidingAggregatingTopN, SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN,
     TumblingWindowAggregator, WatermarkType, WindowAgg, WindowType,
 };
-
 use petgraph::graph::{DiGraph, NodeIndex};
+use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{parse_quote, parse_str};
 
@@ -92,6 +92,7 @@ pub enum PlanOperator {
     StreamOperator(String, Operator),
     ToDebezium,
     FromDebezium,
+    FlattenUpdate,
     Sink(String, SqlSink),
 }
 
@@ -397,6 +398,7 @@ impl PlanNode {
             PlanOperator::ToDebezium => "to_debezium".to_string(),
             PlanOperator::FromDebezium => "from_debezium".to_string(),
             PlanOperator::NonWindowAggregate { .. } => "non_window_aggregate".to_string(),
+            PlanOperator::FlattenUpdate => "flatten_update".to_string(),
         }
     }
 
@@ -874,6 +876,55 @@ impl PlanNode {
                         bin_type: quote!(#bin_type).to_string(),
                     })
                 }
+            }
+            PlanOperator::FlattenUpdate => {
+                let PlanType::UnkeyedList(inner) = &self.output_type else {unreachable!()};
+                let assignments: Vec<TokenStream> = inner
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(
+                        // first value should just be update_type, others a copy of the field.
+                        |(i, field)| {
+                            let field_name: syn::Ident =
+                                parse_str(&field.qualified_name()).unwrap();
+                            if i == 0 {
+                                quote!(#field_name)
+                            } else {
+                                quote!(#field_name: arg.#field_name.clone())
+                            }
+                        },
+                    )
+                    .collect();
+                // expression for the new struct
+                let struct_type = inner.get_type();
+                let struct_expression = quote!(#struct_type { #(#assignments),* });
+                MethodCompiler::value_map_operator(
+                    "flatten_update",
+                    parse_quote!(
+                        match arg {
+                            arroyo_types::UpdatingData::Retract(retract) => {
+                                let arg = retract;
+                                let update_type = "retract".to_string();
+                                vec![#struct_expression]
+                            },
+                            arroyo_types::UpdatingData::Update { old, new } => {
+                                let arg = old;
+                                let update_type = "update-retract".to_string();
+                                let old_value = {#struct_expression};
+                                let arg = new;
+                                let update_type = "update-append".to_string();
+                                let new_value = {#struct_expression};
+                                vec![old_value, new_value]
+                            },
+                            arroyo_types::UpdatingData::Append(append) => {
+                                let arg = append;
+                                let update_type = "append".to_string();
+                                vec![#struct_expression]
+                            }
+                        }
+                    ),
+                )
             }
         }
     }
@@ -1673,29 +1724,83 @@ impl PlanGraph {
         let input_index = self.add_sql_operator(*input);
         let input_node = self.get_plan_node(input_index);
         if let PlanType::Updating(inner) = &input_node.output_type {
-            let value_type = inner.as_syn_type();
-            let debezium_type = PlanType::KeyedLiteralTypeValue {
-                key: None,
-                value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
-            };
-            let debezium_index =
-                self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
+            match sql_sink.sink_config {
+                arroyo_datastream::SinkConfig::Kafka { .. } => {
+                    let value_type = inner.as_syn_type();
+                    let debezium_type = PlanType::KeyedLiteralTypeValue {
+                        key: None,
+                        value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+                    };
+                    let debezium_index =
+                        self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
 
-            let edge = PlanEdge {
-                edge_type: EdgeType::Forward,
-            };
-            self.graph.add_edge(input_index, debezium_index, edge);
+                    let edge = PlanEdge {
+                        edge_type: EdgeType::Forward,
+                    };
+                    self.graph.add_edge(input_index, debezium_index, edge);
 
-            let plan_node = PlanOperator::Sink(name, sql_sink);
-            let plan_node_index = self.insert_operator(plan_node, debezium_type);
+                    let plan_node = PlanOperator::Sink(name, sql_sink);
+                    let plan_node_index = self.insert_operator(plan_node, debezium_type);
 
-            let debezium_edge = PlanEdge {
-                edge_type: EdgeType::Forward,
-            };
+                    let debezium_edge = PlanEdge {
+                        edge_type: EdgeType::Forward,
+                    };
 
-            self.graph
-                .add_edge(debezium_index, plan_node_index, debezium_edge);
-            plan_node_index
+                    self.graph
+                        .add_edge(debezium_index, plan_node_index, debezium_edge);
+                    plan_node_index
+                }
+                // These are implicit sinks, so convert it into an easy-to-read format.
+                arroyo_datastream::SinkConfig::Console
+                | arroyo_datastream::SinkConfig::Grpc
+                | arroyo_datastream::SinkConfig::Null => {
+                    let mut input_struct = match inner.as_ref() {
+                        PlanType::Unkeyed(inner)
+                        | PlanType::Keyed {
+                            key: _,
+                            value: inner,
+                        } => inner,
+                        _ => unreachable!("Sink input is always a record type"),
+                    }
+                    .clone();
+                    let flatten_update_operator = PlanOperator::FlattenUpdate;
+                    input_struct.fields.insert(
+                        0,
+                        StructField {
+                            name: "update_type".to_string(),
+                            alias: None,
+                            data_type: TypeDef::DataType(DataType::Utf8, false),
+                        },
+                    );
+                    let flatten_update_index = self.insert_operator(
+                        flatten_update_operator,
+                        PlanType::UnkeyedList(input_struct.clone()),
+                    );
+                    let edge = PlanEdge {
+                        edge_type: EdgeType::Forward,
+                    };
+                    self.graph.add_edge(input_index, flatten_update_index, edge);
+
+                    let flatten_index = self.insert_operator(
+                        PlanOperator::Flatten,
+                        PlanType::Unkeyed(input_struct.clone()),
+                    );
+                    let edge = PlanEdge {
+                        edge_type: EdgeType::Forward,
+                    };
+                    self.graph
+                        .add_edge(flatten_update_index, flatten_index, edge);
+                    let plan_node = PlanOperator::Sink(name, sql_sink);
+                    let plan_node_index =
+                        self.insert_operator(plan_node, PlanType::Unkeyed(input_struct));
+                    let edge = PlanEdge {
+                        edge_type: EdgeType::Forward,
+                    };
+                    self.graph.add_edge(flatten_index, plan_node_index, edge);
+                    plan_node_index
+                }
+                arroyo_datastream::SinkConfig::File { directory } => unimplemented!(),
+            }
         } else if matches!(sql_sink.updating_type, SinkUpdateType::Force) {
             let value_type = input_node.output_type.as_syn_type();
             let debezium_type = PlanType::KeyedLiteralTypeValue {

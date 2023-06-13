@@ -1315,7 +1315,7 @@ impl<'a> SqlPipelineBuilder<'a> {
 pub struct MethodCompiler {}
 
 impl MethodCompiler {
-    fn value_map_operator(name: impl ToString, map_expr: syn::Expr) -> Operator {
+    pub fn value_map_operator(name: impl ToString, map_expr: syn::Expr) -> Operator {
         let expression = quote!(
                 {
                     let arg = &record.value;
