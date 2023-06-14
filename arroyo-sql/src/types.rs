@@ -376,6 +376,20 @@ impl StructField {
     fn def(&self) -> TokenStream {
         let name: Ident = self.field_ident();
         let type_string = self.get_type();
+        // special case time fields
+        if let TypeDef::DataType(DataType::Timestamp(_, _), nullable) = self.data_type {
+            if nullable {
+                return quote!(
+                #[serde(default)]
+                #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime_opt")]
+                pub #name: #type_string
+                );
+            } else {
+                return quote!(
+                #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime")]
+                pub #name: #type_string);
+            }
+        }
         quote!(pub #name: #type_string)
     }
 
