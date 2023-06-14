@@ -88,7 +88,7 @@ jobs:
       - name: Integ
         run: |
           mkdir /tmp/arroyo-integ
-          OUTPUT_DIR=/tmp/arroyo-integ DEBUG=true target/debug/integ
+          DISABLE_TELEMETRY=true OUTPUT_DIR=/tmp/arroyo-integ DEBUG=true target/debug/integ
   build-console:
     runs-on: ubuntu-latest
     steps:
