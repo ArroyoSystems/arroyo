@@ -86,8 +86,8 @@ pub fn deserialize_rfc3339_datetime_opt<'de, D>(f: D) -> Result<Option<SystemTim
 where
     D: Deserializer<'de>,
 {
-    let raw: chrono::DateTime<Utc> = DateTime::deserialize(f)?;
-    Ok(Some(from_nanos(raw.timestamp_nanos() as u128)))
+    let raw = Option::<DateTime<Utc>>::deserialize(f)?;
+    Ok(raw.map(|raw| from_nanos(raw.timestamp_nanos() as u128)))
 }
 
 pub static TIMER_TABLE: char = '[';
