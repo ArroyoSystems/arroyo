@@ -1,5 +1,46 @@
-use arroyo_rpc::grpc::api::TestSourceMessage;
+use arroyo_rpc::grpc::{api::TestSourceMessage, self};
 use http::{HeaderMap, HeaderName, HeaderValue};
+
+use super::Connector;
+
+pub struct SSEConnector {
+}
+
+impl Connector for SSEConnector {
+    type ConfigT = ();
+
+    type TableT = ();
+
+    fn name(&self) -> &'static str {
+        "sse"
+    }
+
+    fn metadata(&self) -> grpc::api::Connector {
+        grpc::api::Connector {
+            id: "sse".to_string(),
+            name: "Server-Sent Events".to_string(),
+            icon: "FaGlobeAmericas".to_string(),
+            description: "Connect to a SSE/EventSource server".to_string(),
+            enabled: true,
+            source: true,
+            sink: false,
+            custom_schemas: true,
+            connection_config: None,
+            table_config: "{}".to_string(),
+        }
+    }
+
+    fn register(
+        &self,
+        name: &str,
+        config: Self::ConfigT,
+        table: Self::TableT,
+        schema: Option<arroyo_rpc::grpc::api::SourceSchema>,
+        schema_provider: &mut arroyo_sql::ArroyoSchemaProvider,
+    ) {
+        todo!()
+    }
+}
 
 // pub struct HttpTester<'a> {
 //     pub connection: &'a HttpConnection,

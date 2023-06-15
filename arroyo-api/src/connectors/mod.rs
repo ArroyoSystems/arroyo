@@ -1,12 +1,14 @@
+use std::{collections::HashMap, vec};
+
 use arroyo_datastream::SerializationMode;
-use arroyo_rpc::grpc::api::SourceSchema;
+use arroyo_rpc::grpc::{api::SourceSchema, self};
 use arroyo_sql::{types::StructField, ArroyoSchemaProvider};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use typify::import_types;
 
 use crate::{
     json_schema,
-    sources::{raw_schema, SchemaField},
+    sources::{raw_schema, SchemaField}, connectors::http::SSEConnector,
 };
 
 use self::kafka::KafkaConnector;
@@ -30,6 +32,8 @@ pub trait Connector {
         serde_json::from_str(s)
     }
 
+    fn metadata(&self) -> grpc::api::Connector;
+
     fn register(
         &self,
         name: &str,
@@ -42,6 +46,8 @@ pub trait Connector {
 
 pub trait ErasedConnector {
     fn name(&self) -> &'static str;
+
+    fn metadata(&self) -> grpc::api::Connector;
 
     fn validate_schema(&self, s: &str) -> Result<(), serde_json::Error>;
 
@@ -60,6 +66,10 @@ pub trait ErasedConnector {
 impl<C: Connector> ErasedConnector for C {
     fn name(&self) -> &'static str {
         self.name()
+    }
+
+    fn metadata(&self) -> grpc::api::Connector {
+        self.metadata()
     }
 
     fn validate_schema(&self, s: &str) -> Result<(), serde_json::Error> {
@@ -91,11 +101,15 @@ impl<C: Connector> ErasedConnector for C {
 }
 
 pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
-    match t {
-        "kafka" => Some(Box::new(KafkaConnector {})),
-        "http" => todo!(),
-        _ => None,
-    }
+    connectors().remove(t)
+}
+
+pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
+    let mut m: HashMap<&'static str, Box<dyn ErasedConnector>>  = HashMap::new();
+    m.insert("kafka", Box::new(KafkaConnector {}));
+    m.insert("sse", Box::new(SSEConnector {}));
+
+    m
 }
 
 #[derive(Debug, Serialize, Deserialize)]

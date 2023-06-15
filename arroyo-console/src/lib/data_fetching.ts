@@ -2,7 +2,8 @@ import {
   BuiltinSink,
   CheckpointDetailsReq,
   CreateUdf,
-  GetSinksReq,
+  GetConnectionsReq,
+  GetConnectorsReq,
   GetSourcesReq,
   JobCheckpointsReq,
   JobDetailsReq,
@@ -18,6 +19,14 @@ import { mutate as globalMutate } from 'swr';
 import { SinkOpt } from './types';
 
 // Keys
+
+const connectorsKey = () => {
+  return { key: 'Connectors' };
+};
+
+const connectionsKey = () => {
+  return { key: 'Connections' };
+}
 
 const jobDetailsKey = (jobId?: string) => {
   return jobId ? { key: 'Job', jobId } : null;
@@ -49,6 +58,43 @@ const sourcesKey = () => {
 
 const sinksKey = () => {
   return { key: 'Sinks' };
+};
+
+// Connectors
+const connectorsFetcher = (client: ApiClient) => {
+  return async () => {
+    return await (
+      await client()
+    ).getConnectors(new GetConnectorsReq({}));
+  }
+}
+
+export const useConnectors = (client: ApiClient) => {
+  const { data, isLoading } = useSWR(connectorsKey(), connectorsFetcher(client));
+
+  return {
+    connectors: data,
+    connectorsLoading: isLoading,
+  };
+};
+
+// Connections
+const connectionsFetcher = (client: ApiClient) => {
+  return async () => {
+    return (await (
+      await client()
+    ).getConnections(new GetConnectionsReq({}))).connections;
+  }
+}
+
+export const useConnections = (client: ApiClient) => {
+  const { data, isLoading, mutate } = useSWR(connectionsKey(), connectionsFetcher(client));
+
+  return {
+    connections: data,
+    connectionsLoading: isLoading,
+    mutateConnections: mutate,
+  };
 };
 
 // JobDetailsReq
@@ -249,32 +295,13 @@ export const useSources = (client: ApiClient) => {
 
 // GetSinksReq
 
-const SinksFetcher = (client: ApiClient) => {
-  return async (params: { key: string }) => {
-    return await (await (await client)()).getSinks(new GetSinksReq({}));
-  };
-};
-
 export const useSinks = (client: ApiClient) => {
-  const { data } = useSWR(sinksKey(), SinksFetcher(client));
-
   let allSinks: Array<SinkOpt> = [
     { name: 'Web', value: { case: 'builtin', value: BuiltinSink.Web } },
     { name: 'Log', value: { case: 'builtin', value: BuiltinSink.Log } },
     { name: 'Null', value: { case: 'builtin', value: BuiltinSink.Null } },
   ];
 
-  if (data) {
-    data.sinks.forEach(sink => {
-      allSinks.push({
-        name: sink.name,
-        value: {
-          case: 'user',
-          value: sink.name,
-        },
-      });
-    });
-  }
 
   return {
     sinks: allSinks,

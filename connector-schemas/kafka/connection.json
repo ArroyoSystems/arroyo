@@ -3,18 +3,21 @@
     "title": "KafkaConfig",
     "properties": {
         "bootstrapServers": {
-            "type": "array",
-            "items": {
-                "type": "string"
-            },
-            "description": "Kafka brokers to connect to"
+            "type": "string",
+            "title": "Bootstrap Servers",
+            "description": "Comma-separated list of Kafka servers to connect to",
+            "examples": ["broker-1:9092,broker-2:9092"],
+            "pattern": "^(([\\w\\.\\-]+:\\d+),)*([\\w\\.\\-]+:\\d+)$"
         },
         "authentication": {
+            "type": "object",
             "oneOf": [
                 {
                     "type": "object",
                     "title": "None",
-                    "properties": {}
+                    "properties": {
+                    },
+                    "additionalProperties": false
                 },
                 {
                     "type": "object",
@@ -42,7 +45,8 @@
                             "type": "string",
                             "description": "The password to use for SASL authentication"
                         }
-                    }
+                    },
+                    "additionalProperties": false
                 }
             ]
         }

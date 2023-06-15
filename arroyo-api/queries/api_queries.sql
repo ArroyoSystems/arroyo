@@ -7,32 +7,25 @@ WHERE api_key = :api_key;
 ----------- connections ----------------
 --! create_connection
 INSERT INTO connections (organization_id, created_by, name, type, config)
-VALUES (:organization_id, :created_by, :name, :type, :config);
+VALUES (:organization_id, :created_by, :name, :type, :config)
+RETURNING id;
 
 --! get_connections : DbConnection()
-SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config,
-    (SELECT count(*) as source_count FROM sources where sources.connection_id = connections.id) as source_count,
-    (SELECT count(*) as sink_count FROM sinks where sinks.connection_id = connections.id) as sink_count
+SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config
 FROM connections
 WHERE connections.organization_id = :organization_id
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
 --! get_connection : DbConnection()
-SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config,
-    (SELECT count(*) as source_count FROM sources where sources.connection_id = connections.id) as source_count,
-    (SELECT count(*) as sink_count FROM sinks where sinks.connection_id = connections.id) as sink_count
+SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config
 FROM connections
 WHERE connections.organization_id = :organization_id AND connections.name = :name
-GROUP BY connections.id
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
 --! get_connection_by_id: DbConnection()
-SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config,
-    (SELECT count(*) as source_count FROM sources where sources.connection_id = connections.id) as source_count,
-    (SELECT count(*) as sink_count FROM sinks where sinks.connection_id = connections.id) as sink_count
+SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config
 FROM connections
 WHERE connections.organization_id = :organization_id AND connections.id = :id
-GROUP BY connections.id
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
 --! delete_connection
@@ -47,7 +40,7 @@ VALUES (:organization_id, :created_by, :name, :kafka_schema_registry, :type, :co
 
 
 ------- connection tables -------------
---! create_connection_table(schema?)
+--! create_connection_table(connection_id?, schema?)
 INSERT INTO connection_tables
 (organization_id, created_by, name, type, connection_id, config, schema)
 VALUES (:organization_id, :created_by, :name, :type, :connection_id, :config, :schema);

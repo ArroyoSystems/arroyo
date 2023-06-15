@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use arroyo_rpc::grpc::api::{source_schema::Schema, SourceSchema, TestSourceMessage};
+use arroyo_rpc::grpc::{api::{source_schema::Schema, SourceSchema, TestSourceMessage}, self};
 use arroyo_types::string_to_map;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use rdkafka::{
@@ -25,11 +25,11 @@ use super::{
     schema_defs, schema_fields, schema_type, serialization_mode, Connector, OperatorConfig,
 };
 
-const CONFIG_SCHEMA: &str = include_str!("../../../connector-schemas/kafka_config.json");
+const CONFIG_SCHEMA: &str = include_str!("../../../connector-schemas/kafka/connection.json");
+const TABLE_SCHEMA: &str = include_str!("../../../connector-schemas/kafka/table.json");
 
-import_types!(schema = "../connector-schemas/kafka_config.json",);
-
-import_types!(schema = "../connector-schemas/kafka_table.json");
+import_types!(schema = "../connector-schemas/kafka/connection.json",);
+import_types!(schema = "../connector-schemas/kafka/table.json");
 
 pub struct KafkaConnector {}
 
@@ -41,6 +41,21 @@ impl Connector for KafkaConnector {
         "kafka"
     }
 
+    fn metadata(&self) -> grpc::api::Connector {
+        grpc::api::Connector {
+            id: "kafka".to_string(),
+            name: "Kafka".to_string(),
+            icon: "SiApachekafka".to_string(),
+            description: "Confluent Cloud, Amazon MSK, or self-hosted".to_string(),
+            enabled: true,
+            source: true,
+            sink: true,
+            custom_schemas: true,
+            connection_config: Some(CONFIG_SCHEMA.to_string()),
+            table_config: TABLE_SCHEMA.to_string(),
+        }
+    }
+
     fn register(
         &self,
         name: &str,
@@ -50,12 +65,12 @@ impl Connector for KafkaConnector {
         provider: &mut ArroyoSchemaProvider,
     ) {
         let (typ, operator, desc) = match table.type_ {
-            KafkaTableType::Source(_) => (
+            TableType::Source(_) => (
                 ConnectorType::Source,
                 "connectors::kafka::source::KafkaSourceFunc",
                 format!("KafkaSource<{}>", table.topic),
             ),
-            KafkaTableType::Sink(_) => (
+            TableType::Sink(_) => (
                 ConnectorType::Sink,
                 "connectors::kafka::sink::KafkaSinkFunc",
                 format!("KafkaSink<{}>", table.topic),
@@ -84,6 +99,7 @@ impl Connector for KafkaConnector {
             serialization_mode(schema.as_ref().unwrap()).into(),
         );
     }
+
 }
 
 // pub fn auth_config_to_hashmap(config: Option<KafkaAuthConfig>) -> HashMap<String, String> {

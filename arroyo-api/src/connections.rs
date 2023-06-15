@@ -1,4 +1,4 @@
-use arroyo_rpc::grpc::api::DeleteConnectionReq;
+use arroyo_rpc::grpc::api::{DeleteConnectionReq, CreateConnectionResp, GetConnectorsResp};
 use arroyo_rpc::grpc::api::{Connection, CreateConnectionReq, TestSourceMessage};
 use cornucopia_async::GenericClient;
 use tokio::sync::mpsc::channel;
@@ -14,10 +14,10 @@ pub(crate) async fn create_connection(
     req: CreateConnectionReq,
     auth: AuthData,
     client: &impl GenericClient,
-) -> Result<(), Status> {
+) -> Result<CreateConnectionResp, Status> {
     {
-        let connector = connector_for_type(&req.connection_type).ok_or_else(|| {
-            Status::invalid_argument(format!("Unknown connection type '{}'", req.connection_type))
+        let connector = connector_for_type(&req.connector).ok_or_else(|| {
+            Status::invalid_argument(format!("Unknown connection type '{}'", req.connector))
         })?;
 
         (*connector)
@@ -27,29 +27,38 @@ pub(crate) async fn create_connection(
 
     let config: serde_json::Value = serde_json::from_str(&req.config).unwrap();
 
-    api_queries::create_connection()
+    let id = api_queries::create_connection()
         .bind(
             client,
             &auth.organization_id,
             &auth.user_id,
             &req.name,
-            &req.connection_type,
+            &req.connector,
             &serde_json::to_value(&config).unwrap(),
         )
+        .one()
         .await
         .map_err(|e| handle_db_error("connection", e))?;
 
-    Ok(())
+
+
+    Ok(CreateConnectionResp {
+        connection: Some(Connection {
+            id: id.to_string(),
+            name: req.name,
+            connector: req.connector,
+            config: serde_json::to_string(&config).unwrap(),
+        }),
+    })
 }
 
 impl From<DbConnection> for Connection {
     fn from(val: DbConnection) -> Self {
         Connection {
+            id: val.id.to_string(),
             name: val.name,
             connector: val.r#type,
-            config: serde_json::to_string(&val.config).unwrap(),
-            sources: val.source_count as i32,
-            sinks: val.sink_count as i32,
+            config: serde_json::to_string(&val.config).unwrap()
         }
     }
 }

@@ -428,6 +428,7 @@ dependencies = [
  "rand_chacha",
  "rdkafka",
  "refinery",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",

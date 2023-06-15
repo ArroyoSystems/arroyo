@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, VStack, Text, Icon } from '@chakra-ui/react';
-import { CiFaceFrown } from 'react-icons/all';
+import { CiFaceFrown } from 'react-icons/ci';
 
 const PageNotFound: React.FC = ({}) => {
   return (

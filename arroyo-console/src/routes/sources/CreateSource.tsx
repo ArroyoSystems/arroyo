@@ -37,10 +37,8 @@ import { GiMetronome } from 'react-icons/gi';
 import {
   Connection,
   CreateSourceReq,
-  EventSourceSourceConfig,
   GetConnectionsReq,
   ImpulseSourceConfig,
-  KafkaSourceConfig,
   NexmarkSourceConfig,
 } from '../../gen/api_pb';
 import { ConfigureSource } from './ConfigureSource';
@@ -297,22 +295,10 @@ export function CreateSource({ client }: { client: ApiClient }) {
 
 const sourceTypes = [
   {
-    name: 'kafka',
-    icon: SiApachekafka,
-    description: 'Confluent Cloud, EKS, or self-hosted Kafka',
-    initialState: new KafkaSourceConfig({}),
-  },
-  {
     name: 'kinesis',
     icon: FaStream,
     description: 'AWS Kinesis stream (coming soon)',
     disabled: true,
-  },
-  {
-    name: 'eventSource',
-    icon: FaSync,
-    description: '(also known as Server-Sent Events)',
-    initialState: new EventSourceSourceConfig({}),
   },
   {
     name: 'nexmark',

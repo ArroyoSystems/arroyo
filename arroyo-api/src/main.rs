@@ -2,7 +2,7 @@ use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
     CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
     DeleteJobReq, DeleteJobResp, DeleteSourceReq, DeleteSourceResp, PipelineProgram,
-    SourceMetadataResp,
+    SourceMetadataResp, GetConnectorsReq, GetConnectorsResp,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -408,15 +408,29 @@ fn handle_delete(name: &str, users: &str, err: tokio_postgres::Error) -> Status 
 #[tonic::async_trait]
 impl ApiGrpc for ApiServer {
     // connections
+    async fn get_connectors(
+        &self,
+        request: Request<GetConnectorsReq>,
+    ) -> Result<Response<GetConnectorsResp>, Status> {
+        let (_request, _auth) = self.authenticate(request).await?;
+
+        let connectors = connectors::connectors().values()
+            .map(|c| c.metadata())
+            .collect();
+
+        Ok(Response::new(GetConnectorsResp { connectors }))
+    }
+
+
     async fn create_connection(
         &self,
         request: Request<CreateConnectionReq>,
     ) -> Result<Response<CreateConnectionResp>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 
-        connections::create_connection(request.into_inner(), auth, &self.client().await?).await?;
+        let resp = connections::create_connection(request.into_inner(), auth, &self.client().await?).await?;
 
-        Ok(Response::new(CreateConnectionResp {}))
+        Ok(Response::new(resp))
     }
 
     async fn test_connection(

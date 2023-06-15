@@ -5,7 +5,7 @@ use deadpool_postgres::Pool;
 use tonic::Status;
 
 use crate::{
-    connections, connectors, handle_db_error, log_and_map, queries::api_queries, AuthData,
+    connectors, handle_db_error, log_and_map, queries::api_queries, AuthData,
 };
 
 pub(crate) async fn create(
@@ -21,33 +21,39 @@ pub(crate) async fn create(
         .await
         .map_err(log_and_map)?;
 
-    let connection_id: i64 = req.connection_id.parse().map_err(|_| {
-        Status::failed_precondition(format!("No connection with id '{}'", req.connection_id))
-    })?;
+    let connection_id =
+        if let Some(connection_id) = &req.connection_id {
+            let connection_id: i64 = connection_id.parse().map_err(|_| {
+                Status::failed_precondition(format!("No connection with id '{}'", connection_id))
+            })?;
 
-    let connection = api_queries::get_connection_by_id()
-        .bind(&transaction, &auth.organization_id, &connection_id)
-        .opt()
-        .await
-        .map_err(log_and_map)?
-        .ok_or_else(|| {
-            Status::failed_precondition(format!("No connection with id '{}'", req.connection_id))
-        })?;
+            let connection = api_queries::get_connection_by_id()
+                .bind(&transaction, &auth.organization_id, &connection_id)
+                .opt()
+                .await
+                .map_err(log_and_map)?
+                .ok_or_else(|| {
+                    Status::failed_precondition(format!("No connection with id '{}'", connection_id))
+                })?;
 
-    {
-        let connector = connectors::connector_for_type(&connection.r#type)
-            .ok_or_else(|| {
-                anyhow!(
-                    "connector not found for stored connection with type '{}'",
-                    connection.r#type
-                )
-            })
-            .map_err(log_and_map)?;
+            {
+                let connector = connectors::connector_for_type(&connection.r#type)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "connector not found for stored connection with type '{}'",
+                            connection.r#type
+                        )
+                    })
+                    .map_err(log_and_map)?;
 
-        connector
-            .validate_table(&req.config)
-            .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
-    }
+                connector
+                    .validate_table(&req.config)
+                    .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
+            };
+            Some(connection_id)
+        } else {
+            None
+        };
 
     let config: serde_json::Value = serde_json::from_str(&req.config).unwrap();
     let schema: Option<serde_json::Value> = req

@@ -528,22 +528,43 @@ message JobMetricsResp {
 }
 
 // connections
-message Connection {
-  string name = 1;
-  string connector = 2;
-  string config = 3;
+message GetConnectorsReq {
+}
 
-  int32 sources = 4;
-  int32 sinks = 5;
+message Connector {
+  string id = 1;
+  string name = 2;
+  string icon = 3;
+  string description = 4;
+  bool enabled = 5;
+  bool source = 6;
+  bool sink = 7;
+  bool custom_schemas = 8;
+
+  optional string connection_config = 9;
+  string table_config = 10;
+}
+
+message GetConnectorsResp {
+  repeated Connector connectors = 1;
+}
+
+
+message Connection {
+  string id = 1;
+  string name = 2;
+  string connector = 3;
+  string config = 4;
 }
 
 message CreateConnectionReq {
   string name = 1;
-  string connection_type = 2;
+  string connector = 2;
   string config = 3;
 }
 
 message CreateConnectionResp {
+  Connection connection = 1;
 }
 
 message GetConnectionsReq {
@@ -568,7 +589,7 @@ enum TableType {
 // Connection tables
 message CreateConnectionTableReq {
   string name = 1;
-  string connection_id = 2;
+  optional string connection_id = 2;
   TableType type = 3;
   string config = 4;
   optional SourceSchema schema = 5;
@@ -752,6 +773,7 @@ message OutputData {
 }
 
 service ApiGrpc {
+  rpc GetConnectors(GetConnectorsReq) returns (GetConnectorsResp);
   rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp);
   rpc TestConnection(CreateConnectionReq) returns (TestSourceMessage);
   rpc GetConnections(GetConnectionsReq) returns (GetConnectionsResp);

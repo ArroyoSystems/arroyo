@@ -3,7 +3,7 @@
 /* eslint-disable */
 /* @ts-nocheck */
 
-import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq, DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSinksReq, GetSinksResp, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, SourceMetadataResp, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
+import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateConnectionTableReq, CreateConnectionTableResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetConnectorsReq, GetConnectorsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, SourceMetadataResp, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
 import {MethodKind} from "@bufbuild/protobuf";
 
 /**
@@ -12,6 +12,15 @@ import {MethodKind} from "@bufbuild/protobuf";
 export const ApiGrpc = {
   typeName: "arroyo_api.ApiGrpc",
   methods: {
+    /**
+     * @generated from rpc arroyo_api.ApiGrpc.GetConnectors
+     */
+    getConnectors: {
+      name: "GetConnectors",
+      I: GetConnectorsReq,
+      O: GetConnectorsResp,
+      kind: MethodKind.Unary,
+    },
     /**
      * @generated from rpc arroyo_api.ApiGrpc.CreateConnection
      */
@@ -49,6 +58,15 @@ export const ApiGrpc = {
       kind: MethodKind.Unary,
     },
     /**
+     * @generated from rpc arroyo_api.ApiGrpc.CreateConnectionTable
+     */
+    createConnectionTable: {
+      name: "CreateConnectionTable",
+      I: CreateConnectionTableReq,
+      O: CreateConnectionTableResp,
+      kind: MethodKind.Unary,
+    },
+    /**
      * @generated from rpc arroyo_api.ApiGrpc.CreateSource
      */
     createSource: {
@@ -73,33 +91,6 @@ export const ApiGrpc = {
       name: "DeleteSource",
       I: DeleteSourceReq,
       O: DeleteSourceResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.CreateSink
-     */
-    createSink: {
-      name: "CreateSink",
-      I: CreateSinkReq,
-      O: CreateSinkResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.GetSinks
-     */
-    getSinks: {
-      name: "GetSinks",
-      I: GetSinksReq,
-      O: GetSinksResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.DeleteSink
-     */
-    deleteSink: {
-      name: "DeleteSink",
-      I: DeleteSinkReq,
-      O: DeleteSinkResp,
       kind: MethodKind.Unary,
     },
     /**
