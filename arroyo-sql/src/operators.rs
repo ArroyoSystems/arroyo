@@ -200,6 +200,12 @@ impl AggregateProjection {
     fn return_type(&self) -> TypeDef {
         TypeDef::StructDef(self.output_struct(), false)
     }
+
+    pub(crate) fn supports_two_phase(&self) -> bool {
+        self.field_computations
+            .iter()
+            .all(|computation| computation.allows_two_phase())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +216,7 @@ pub enum GroupByKind {
         column: Column,
         window_type: WindowType,
     },
+    Updating,
 }
 
 impl GroupByKind {
@@ -243,7 +250,7 @@ impl GroupByKind {
                     .collect();
                 StructDef { name: None, fields }
             }
-            GroupByKind::Basic => {
+            GroupByKind::Basic | GroupByKind::Updating => {
                 let fields = (0..(key_fields + aggregate_fields))
                     .map(|i| {
                         if i < key_fields {
@@ -291,12 +298,22 @@ impl GroupByKind {
                         end_time: arg.timestamp + std::time::Duration::from_nanos(1)}));
         }
         let return_type = return_struct.get_type();
-        parse_quote!(
+        let struct_expression = parse_quote!(
             #return_type {
                     #(#assignments)
                     ,*
                 }
-        )
+        );
+        if matches!(self, GroupByKind::Updating) {
+            parse_quote!(
+                arg.aggregate.map(|subfield| {
+                    let arg =
+                    #struct_expression
+                })
+            )
+        } else {
+            struct_expression
+        }
     }
 }
 

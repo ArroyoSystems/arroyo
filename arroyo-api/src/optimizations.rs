@@ -232,7 +232,7 @@ impl FusedExpressionOperatorBuilder {
     }
 
     fn get_operator(self) -> Operator {
-        let name = format!("fused<{}>", self.names.join(","));
+        let name = format!("api_fused<{}>", self.names.join(","));
         let fused_body_tokens = self.body;
         let return_type = self.current_return_type.unwrap();
         let return_value = match return_type {
