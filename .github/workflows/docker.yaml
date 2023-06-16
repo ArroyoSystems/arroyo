@@ -131,6 +131,7 @@ jobs:
           docker manifest annotate ${IMAGE}:${TAG} ${IMAGE}:amd64-${TAG} --arch amd64
           docker manifest push     ${IMAGE}:${TAG}
       - name: Push latest to tip tag.
+        if: github.ref == 'refs/heads/master'
         run: |
           TAG=${{ steps.arroyo-docker.outputs.version }}
           IMAGE=ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
