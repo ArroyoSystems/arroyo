@@ -26,8 +26,9 @@ use crate::types::public::PipelineType;
 use crate::{
     connections, handle_db_error, log_and_map, optimizations, required_field, sinks,
     sources::{self, Source},
-    AuthData,
 };
+use crate::api_server::{AuthData};
+
 
 async fn compile_sql<'e, E>(
     sql: &CreateSqlJob,

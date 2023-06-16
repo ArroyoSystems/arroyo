@@ -7,7 +7,8 @@ use arroyo_rpc::grpc::api::{create_sink_req, sink, CreateSinkReq, DeleteSinkReq,
 use crate::handle_delete;
 use crate::types::public;
 use crate::types::public::SinkType;
-use crate::{handle_db_error, log_and_map, queries::api_queries, required_field, AuthData};
+use crate::{handle_db_error, log_and_map, queries::api_queries, required_field};
+use crate::api_server::{AuthData};
 
 pub(crate) async fn create_sink(
     req: CreateSinkReq,
