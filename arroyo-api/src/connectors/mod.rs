@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use arroyo_datastream::SerializationMode;
 use arroyo_rpc::grpc::{
     self,
-    api::{ConnectionSchema, SourceSchema, TestSourceMessage},
+    api::{ConnectionSchema, SourceSchema, TestSourceMessage, TableType},
 };
 use arroyo_sql::ArroyoSchemaProvider;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -20,13 +20,13 @@ pub mod kafka;
 
 import_types!(schema = "../connector-schemas/common.json",);
 
-pub trait Connector {
+pub trait Connector: Send {
     type ConfigT: DeserializeOwned + Serialize;
     type TableT: DeserializeOwned + Serialize;
 
     fn name(&self) -> &'static str;
 
-    fn parse_schema(&self, s: &str) -> Result<Self::ConfigT, serde_json::Error> {
+    fn parse_config(&self, s: &str) -> Result<Self::ConfigT, serde_json::Error> {
         serde_json::from_str(s)
     }
 
@@ -36,12 +36,14 @@ pub trait Connector {
 
     fn metadata(&self) -> grpc::api::Connector;
 
+    fn table_type(&self, config: Self::ConfigT, table: Self::TableT) -> TableType;
+
     fn test(
         &self,
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
-        schema: Option<ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
         tx: Sender<Result<TestSourceMessage, Status>>,
     );
 
@@ -50,26 +52,28 @@ pub trait Connector {
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
-        schema: Option<ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
         schema_provider: &mut ArroyoSchemaProvider,
     );
 }
 
-pub trait ErasedConnector {
+pub trait ErasedConnector: Send {
     fn name(&self) -> &'static str;
 
     fn metadata(&self) -> grpc::api::Connector;
 
-    fn validate_schema(&self, s: &str) -> Result<(), serde_json::Error>;
+    fn validate_config(&self, s: &str) -> Result<(), serde_json::Error>;
 
     fn validate_table(&self, s: &str) -> Result<(), serde_json::Error>;
+
+    fn table_type(&self, config: &str, table: &str) -> Result<TableType, serde_json::Error>;
 
     fn test(
         &self,
         name: &str,
         config: &str,
         table: &str,
-        schema: Option<ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
         tx: Sender<Result<TestSourceMessage, Status>>,
     ) -> Result<(), serde_json::Error>;
 
@@ -78,7 +82,7 @@ pub trait ErasedConnector {
         name: &str,
         config: &str,
         table: &str,
-        schema: Option<ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
         schema_provider: &mut ArroyoSchemaProvider,
     ) -> Result<(), serde_json::Error>;
 }
@@ -92,12 +96,16 @@ impl<C: Connector> ErasedConnector for C {
         self.metadata()
     }
 
-    fn validate_schema(&self, s: &str) -> Result<(), serde_json::Error> {
-        self.parse_schema(s).map(|_| ())
+    fn validate_config(&self, s: &str) -> Result<(), serde_json::Error> {
+        self.parse_config(s).map(|_| ())
     }
 
     fn validate_table(&self, s: &str) -> Result<(), serde_json::Error> {
         self.parse_table(s).map(|_| ())
+    }
+
+    fn table_type(&self, config: &str, table: &str) -> Result<TableType, serde_json::Error> {
+        Ok(self.table_type(self.parse_config(config)?, self.parse_table(table)?))
     }
 
     fn test(
@@ -105,12 +113,12 @@ impl<C: Connector> ErasedConnector for C {
         name: &str,
         config: &str,
         table: &str,
-        schema: Option<ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
         tx: Sender<Result<TestSourceMessage, Status>>,
     ) -> Result<(), serde_json::Error> {
         self.test(
             name,
-            self.parse_schema(config)?,
+            self.parse_config(config)?,
             self.parse_table(table)?,
             schema,
             tx,
@@ -124,12 +132,12 @@ impl<C: Connector> ErasedConnector for C {
         name: &str,
         config: &str,
         table: &str,
-        schema: Option<ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
         schema_provider: &mut ArroyoSchemaProvider,
     ) -> Result<(), serde_json::Error> {
         self.register(
             name,
-            self.parse_schema(config)?,
+            self.parse_config(config)?,
             self.parse_table(table)?,
             schema,
             schema_provider,

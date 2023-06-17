@@ -90,7 +90,7 @@ const ClusterEditor = ({
           {connections
             .filter(c => c.connector == connector)
             .map(c => (
-              <option key={c.id} value={c.name}>
+              <option key={c.id} value={c.id}>
                 {c.name}
               </option>
             ))}
@@ -162,7 +162,7 @@ export const ConfigureConnection = ({
             onSubmit();
           }}
           error={null}
-          button={connector!.customSchemas ? 'Next' : 'Create'}
+          button={'Next'}
         />
       </Stack>
     </Stack>

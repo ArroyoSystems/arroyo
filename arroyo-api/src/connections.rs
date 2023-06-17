@@ -21,7 +21,7 @@ pub(crate) async fn create_connection(
         })?;
 
         (*connector)
-            .validate_schema(&req.config)
+            .validate_config(&req.config)
             .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
     }
 

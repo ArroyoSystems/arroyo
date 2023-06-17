@@ -471,9 +471,9 @@ impl ApiGrpc for ApiServer {
     // connection tables
     type TestConnectionTableStream = ReceiverStream<Result<TestSourceMessage, Status>>;
 
-    async fn test_Connection_table(
+    async fn test_connection_table(
         &self,
-        request: Request<CreateSourceReq>,
+        request: Request<CreateConnectionTableReq>,
     ) -> Result<Response<Self::TestConnectionTableStream>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 

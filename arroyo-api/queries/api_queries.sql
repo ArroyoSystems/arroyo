@@ -42,8 +42,8 @@ VALUES (:organization_id, :created_by, :name, :kafka_schema_registry, :type, :co
 ------- connection tables -------------
 --! create_connection_table(connection_id?, schema?)
 INSERT INTO connection_tables
-(organization_id, created_by, name, type, connection_id, config, schema)
-VALUES (:organization_id, :created_by, :name, :type, :connection_id, :config, :schema);
+(organization_id, created_by, name, type, connector, connection_id, config, schema)
+VALUES (:organization_id, :created_by, :name, :type, :connector, :connection_id, :config, :schema);
 
 --! get_connection_tables: (schema?)
 SELECT connection_tables.id as id,

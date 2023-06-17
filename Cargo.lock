@@ -726,6 +726,7 @@ dependencies = [
  "rdkafka",
  "rdkafka-sys",
  "regex",
+ "regress 0.6.0",
  "serde",
  "serde_json",
  "serde_json_path",

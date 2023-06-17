@@ -589,10 +589,10 @@ enum TableType {
 // Connection tables
 message CreateConnectionTableReq {
   string name = 1;
-  optional string connection_id = 2;
-  TableType type = 3;
-  string config = 4;
-  optional ConnectionSchema schema = 5;
+  string connector = 2;
+  optional string connection_id = 3;
+  string config = 5;
+  optional ConnectionSchema schema = 6;
 }
 
 message CreateConnectionTableResp {
@@ -804,7 +804,7 @@ message OutputData {
 service ApiGrpc {
   rpc GetConnectors(GetConnectorsReq) returns (GetConnectorsResp);
   rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp);
-  rpc TestConnection(CreateConnectionReq) returns (stream TestSourceMessage);
+  rpc TestConnection(CreateConnectionReq) returns (TestSourceMessage);
   rpc GetConnections(GetConnectionsReq) returns (GetConnectionsResp);
   rpc DeleteConnection(DeleteConnectionReq) returns (DeleteConnectionResp);
 

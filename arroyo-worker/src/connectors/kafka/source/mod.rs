@@ -20,25 +20,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::operators::{SerializationMode, UserError};
 
-use super::{KafkaConfig, KafkaTable, KafkaTableType};
+use super::{KafkaConfig, KafkaTable, TableType};
 
 #[cfg(test)]
 mod test;
-
-#[derive(Copy, Clone, Debug)]
-pub enum OffsetMode {
-    Earliest,
-    Latest,
-}
-
-impl OffsetMode {
-    fn get_offset(&self) -> Offset {
-        match self {
-            OffsetMode::Earliest => Offset::Beginning,
-            OffsetMode::Latest => Offset::End,
-        }
-    }
-}
 
 #[derive(StreamNode, Clone)]
 pub struct KafkaSourceFunc<K, T>
@@ -48,7 +33,7 @@ where
 {
     topic: String,
     bootstrap_servers: String,
-    offset_mode: OffsetMode,
+    offset_mode: super::SourceOffset,
     serialization_mode: SerializationMode,
     client_configs: HashMap<String, String>,
     messages_per_second: NonZeroU32,
@@ -74,7 +59,7 @@ where
     pub fn new(
         servers: &str,
         topic: &str,
-        offset_mode: OffsetMode,
+        offset_mode: super::SourceOffset,
         serialization_mode: SerializationMode,
         messages_per_second: u32,
         client_configs: Vec<(&str, &str)>,
@@ -100,25 +85,32 @@ where
             .expect("Invalid connection config for KafkaSource");
         let table: KafkaTable =
             serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let KafkaTableType::Source{ offset, .. } = &table.type_ else {
+        let TableType::Source{ offset, .. } = &table.type_ else {
             panic!("found non-source kafka config in source operator");
         };
 
-        let offset_mode = match offset {
-            Some(s) => match s.as_str() {
-                "earliest" => OffsetMode::Earliest,
-                "latest" => OffsetMode::Latest,
-                _ => panic!("invalid offset mode {}", s),
-            },
-            None => OffsetMode::Latest,
-        };
 
         let mut client_configs = HashMap::new();
 
+        match connection.authentication {
+            super::KafkaConfigAuthentication::None {  } => {},
+            super::KafkaConfigAuthentication::Sasl {
+                mechanism,
+                password,
+                protocol,
+                username } =>
+                {
+                    client_configs.insert("sasl.mechanism".to_string(), mechanism);
+                    client_configs.insert("security.protocol".to_string(), protocol);
+                    client_configs.insert("sasl.username".to_string(), username);
+                    client_configs.insert("sasl.password".to_string(), password);
+                }
+        };
+
         Self {
             topic: table.topic,
-            bootstrap_servers: connection.bootstrap_servers.join(","),
-            offset_mode,
+            bootstrap_servers: connection.bootstrap_servers.to_string(),
+            offset_mode: *offset,
             serialization_mode: match config.serialization_mode {
                 OperatorConfigSerializationMode::Json => SerializationMode::Json,
                 OperatorConfigSerializationMode::JsonSchemaRegistry => {

@@ -33,10 +33,25 @@ impl Connector for SSEConnector {
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
-        schema: Option<ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
         schema_provider: &mut arroyo_sql::ArroyoSchemaProvider,
     ) {
         todo!()
+    }
+
+    fn test(
+        &self,
+        name: &str,
+        config: Self::ConfigT,
+        table: Self::TableT,
+        schema: Option<&ConnectionSchema>,
+        tx: tokio::sync::mpsc::Sender<Result<grpc::api::TestSourceMessage, tonic::Status>>,
+    ) {
+        todo!()
+    }
+
+    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> grpc::api::TableType {
+        return grpc::api::TableType::Source;
     }
 }
 

@@ -4421,22 +4421,27 @@ export class CreateConnectionTableReq extends Message<CreateConnectionTableReq> 
   name = "";
 
   /**
-   * @generated from field: optional string connection_id = 2;
+   * @generated from field: string connector = 2;
+   */
+  connector = "";
+
+  /**
+   * @generated from field: optional string connection_id = 3;
    */
   connectionId?: string;
 
   /**
-   * @generated from field: arroyo_api.TableType type = 3;
+   * @generated from field: arroyo_api.TableType type = 4;
    */
   type = TableType.SOURCE;
 
   /**
-   * @generated from field: string config = 4;
+   * @generated from field: string config = 5;
    */
   config = "";
 
   /**
-   * @generated from field: optional arroyo_api.ConnectionSchema schema = 5;
+   * @generated from field: optional arroyo_api.ConnectionSchema schema = 6;
    */
   schema?: ConnectionSchema;
 
@@ -4449,10 +4454,11 @@ export class CreateConnectionTableReq extends Message<CreateConnectionTableReq> 
   static readonly typeName = "arroyo_api.CreateConnectionTableReq";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "connection_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 3, name: "type", kind: "enum", T: proto3.getEnumType(TableType) },
-    { no: 4, name: "config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "schema", kind: "message", T: ConnectionSchema, opt: true },
+    { no: 2, name: "connector", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "connection_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 4, name: "type", kind: "enum", T: proto3.getEnumType(TableType) },
+    { no: 5, name: "config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "schema", kind: "message", T: ConnectionSchema, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateConnectionTableReq {

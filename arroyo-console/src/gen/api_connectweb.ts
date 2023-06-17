@@ -67,6 +67,15 @@ export const ApiGrpc = {
       kind: MethodKind.Unary,
     },
     /**
+     * @generated from rpc arroyo_api.ApiGrpc.TestConnectionTable
+     */
+    testConnectionTable: {
+      name: "TestConnectionTable",
+      I: CreateConnectionTableReq,
+      O: TestSourceMessage,
+      kind: MethodKind.ServerStreaming,
+    },
+    /**
      * @generated from rpc arroyo_api.ApiGrpc.CreateSource
      */
     createSource: {
@@ -119,15 +128,6 @@ export const ApiGrpc = {
       I: TestSchemaReq,
       O: TestSchemaResp,
       kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.TestSource
-     */
-    testSource: {
-      name: "TestSource",
-      I: CreateSourceReq,
-      O: TestSourceMessage,
-      kind: MethodKind.ServerStreaming,
     },
     /**
      * @generated from rpc arroyo_api.ApiGrpc.CreatePipeline

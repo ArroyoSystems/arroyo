@@ -73,7 +73,7 @@ where
                 &table.name,
                 &table.connection_config,
                 &table.config,
-                table.schema,
+                table.schema.as_ref(),
                 &mut schema_provider,
             )
             .map_err(log_and_map)?;

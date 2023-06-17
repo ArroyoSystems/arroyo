@@ -9,15 +9,65 @@ use tokio::sync::mpsc::{channel, Receiver};
 use tonic::Status;
 
 use crate::{
-    connectors, handle_db_error,
+    connectors::{self, ErasedConnector}, handle_db_error,
     json_schema::{self, convert_json_schema},
     log_and_map,
     queries::api_queries,
     required_field, AuthData,
 };
 
+async fn get_and_validate_connector<E: GenericClient>(req: &CreateConnectionTableReq, auth: &AuthData, c: &E)
+    -> Result<(Box<dyn ErasedConnector>, Option<i64>, String, Option<ConnectionSchema>), Status> {
+    let connector = connectors::connector_for_type(&req.connector)
+        .ok_or_else(|| {
+            anyhow!(
+                "Unknown connector '{}'",
+                req.connector,
+            )
+        })
+        .map_err(log_and_map)?;
+
+
+    let (connection_id, config) = if let Some(connection_id) = &req.connection_id {
+        let connection_id: i64 = connection_id.parse().map_err(|_| {
+            Status::failed_precondition(format!("No connection with id '{}'", connection_id))
+        })?;
+
+        let connection = api_queries::get_connection_by_id()
+            .bind(c, &auth.organization_id, &connection_id)
+            .opt()
+            .await
+            .map_err(log_and_map)?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("No connection with id '{}'", connection_id))
+            })?;
+
+        if connection.r#type != req.connector {
+            return Err(Status::failed_precondition(format!(
+                "Stored connection has a different connector than requested (found {}, expected {})",
+                    connection.r#type, req.connector)));
+        }
+
+        (Some(connection_id), serde_json::to_string(&connection.config).unwrap())
+    } else {
+        (None, "".to_string())
+    };
+
+    connector.validate_table(&req.config).map_err(|e| {
+        Status::invalid_argument(&format!("Failed to parse config: {:?}", e))
+    })?;
+
+    let schema = if let Some(schema) = &req.schema {
+        Some(expand_schema(&req.name, schema)?)
+    } else {
+        None
+    };
+
+    Ok((connector, connection_id, config, schema))
+}
+
 pub(crate) async fn create(
-    mut req: CreateConnectionTableReq,
+    req: CreateConnectionTableReq,
     auth: AuthData,
     pool: &Pool,
 ) -> Result<(), Status> {
@@ -29,49 +79,17 @@ pub(crate) async fn create(
         .await
         .map_err(log_and_map)?;
 
-    let connection_id = if let Some(connection_id) = &req.connection_id {
-        let connection_id: i64 = connection_id.parse().map_err(|_| {
-            Status::failed_precondition(format!("No connection with id '{}'", connection_id))
-        })?;
 
-        let connection = api_queries::get_connection_by_id()
-            .bind(&transaction, &auth.organization_id, &connection_id)
-            .opt()
-            .await
-            .map_err(log_and_map)?
-            .ok_or_else(|| {
-                Status::failed_precondition(format!("No connection with id '{}'", connection_id))
-            })?;
+    let (connector, connection_id, config, schema) =
+        get_and_validate_connector(&req, &auth, &transaction).await?;
 
-        {
-            let connector = connectors::connector_for_type(&connection.r#type)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "connector not found for stored connection with type '{}'",
-                        connection.r#type
-                    )
-                })
-                .map_err(log_and_map)?;
+    let table_type = connector.table_type(&config, &req.config).unwrap();
 
-            connector.validate_table(&req.config).map_err(|e| {
-                Status::invalid_argument(&format!("Failed to parse config: {:?}", e))
-            })?;
-        };
-        Some(connection_id)
-    } else {
-        None
-    };
+    let table_config: serde_json::Value = serde_json::from_str(&req.config).unwrap();
 
-    let config: serde_json::Value = serde_json::from_str(&req.config).unwrap();
-
-    if let Some(schema) = &mut req.schema {
-        expand_schema(&req.name, schema)?;
-    }
-
-    let schema: Option<serde_json::Value> = req
-        .schema
-        .as_ref()
+    let schema: Option<serde_json::Value> = schema
         .map(|s| serde_json::to_value(s).unwrap());
+
 
     api_queries::create_connection_table()
         .bind(
@@ -79,9 +97,10 @@ pub(crate) async fn create(
             &auth.organization_id,
             &auth.user_id,
             &req.name,
-            &req.r#type().as_str_name(),
+            &table_type.as_str_name(),
+            &req.connector,
             &connection_id,
-            &config,
+            &table_config,
             &schema,
         )
         .await
@@ -96,7 +115,15 @@ pub(crate) async fn test(
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<Receiver<Result<TestSourceMessage, Status>>, Status> {
-    todo!();
+    let (connector, connection_id, config, schema) =
+        get_and_validate_connector(&req, &auth, client).await?;
+
+    let (tx, rx) = channel(8);
+
+    connector.test(&req.name, &config, &req.config, schema.as_ref(), tx)
+        .map_err(|e| Status::invalid_argument(format!("Failed to parse config or schema: {:?}", e)))?;
+
+    Ok(rx)
 }
 
 pub(crate) async fn get<C: GenericClient>(
@@ -149,7 +176,9 @@ pub(crate) async fn test_schema(req: TestSchemaReq) -> Result<Vec<String>, Statu
 
 // attempts to fill in the SQL schema from a schema object that may just have a json-schema or
 // other source schema. schemas stored in the database should always be expanded first.
-pub(crate) fn expand_schema(name: &str, schema: &mut ConnectionSchema) -> Result<(), Status> {
+pub(crate) fn expand_schema(name: &str, schema: &ConnectionSchema) -> Result<ConnectionSchema, Status> {
+    let mut schema = schema.clone();
+
     if let Some(d) = &schema.definition {
         let fields = match d {
             Definition::JsonSchema(json) => json_schema::convert_json_schema(name, &json)
@@ -173,5 +202,5 @@ pub(crate) fn expand_schema(name: &str, schema: &mut ConnectionSchema) -> Result
             .map_err(|e| Status::failed_precondition(format!("Failed to convert schema: {}", e)))?;
     }
 
-    Ok(())
+    Ok(schema)
 }
