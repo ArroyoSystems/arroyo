@@ -17,6 +17,7 @@ CREATE TABLE connection_tables (
     type TEXT NOT NULL, -- currently one of source or sink
     connection_id BIGINT REFERENCES connections(id),
     config JSONB,
+    -- json-serialized ConnectionSchema
     schema JSONB,
 
     UNIQUE (organization_id, name)

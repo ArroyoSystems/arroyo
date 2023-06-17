@@ -7,7 +7,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use arroyo_rpc::grpc::{api::{source_schema::Schema, SourceSchema, TestSourceMessage}, self};
+use arroyo_rpc::grpc::{
+    self,
+    api::{source_schema::Schema, ConnectionSchema, SourceSchema, TestSourceMessage},
+};
 use arroyo_types::string_to_map;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use rdkafka::{
@@ -21,9 +24,7 @@ use tracing::{error, info, warn};
 
 use crate::required_field;
 
-use super::{
-    schema_defs, schema_fields, schema_type, serialization_mode, Connector, OperatorConfig,
-};
+use super::{schema_defs, schema_type, serialization_mode, Connector, OperatorConfig};
 
 const CONFIG_SCHEMA: &str = include_str!("../../../connector-schemas/kafka/connection.json");
 const TABLE_SCHEMA: &str = include_str!("../../../connector-schemas/kafka/table.json");
@@ -61,7 +62,7 @@ impl Connector for KafkaConnector {
         name: &str,
         config: KafkaConfig,
         table: KafkaTable,
-        schema: Option<SourceSchema>,
+        schema: Option<ConnectionSchema>,
         provider: &mut ArroyoSchemaProvider,
     ) {
         let (typ, operator, desc) = match table.type_ {
@@ -91,7 +92,13 @@ impl Connector for KafkaConnector {
         provider.add_connector_table(
             name.to_string(),
             typ,
-            schema_fields(name, schema.as_ref().unwrap()).unwrap(),
+            schema
+                .as_ref()
+                .unwrap()
+                .fields
+                .iter()
+                .map(|t| t.clone().into())
+                .collect(),
             schema_type(name, schema.as_ref().unwrap()),
             operator.to_string(),
             serde_json::to_string(&config).unwrap(),
@@ -99,7 +106,6 @@ impl Connector for KafkaConnector {
             serialization_mode(schema.as_ref().unwrap()).into(),
         );
     }
-
 }
 
 // pub fn auth_config_to_hashmap(config: Option<KafkaAuthConfig>) -> HashMap<String, String> {

@@ -399,6 +399,7 @@ dependencies = [
  "anyhow",
  "argon2",
  "arrow",
+ "arrow-schema",
  "arroyo-datastream",
  "arroyo-rpc",
  "arroyo-server-common",

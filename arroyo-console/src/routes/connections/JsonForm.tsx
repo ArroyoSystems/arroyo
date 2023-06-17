@@ -199,25 +199,27 @@ export function FormInner({
 export function JsonForm({
   schema,
   onSubmit,
+  initial = {},
+  hasName,
   error,
   button = "Create",
 }: {
   schema: JSONSchema7;
   onSubmit: (values: any) => Promise<void>;
+  initial?: any;
+  hasName?: boolean;
   error: string | null;
-  button: string;
+  button?: string;
 }) {
   const ajv = useMemo(() => new Ajv(), [schema]);
 
   const formik = useFormik({
-    initialValues: {
-      name: '',
-    },
+    initialValues: initial,
     onSubmit,
     validate: values => {
       const errors: any = {};
 
-      if (!values.name || values.name.length == 0) {
+      if (hasName && (!values.name || values.name.length == 0)) {
         errors.name = 'Name is required';
       }
 
@@ -237,17 +239,17 @@ export function JsonForm({
 
   return (
     <form onSubmit={formik.handleSubmit}>
-      <FormControl isRequired={true} pb={8}>
-        <FormLabel>Connection Name</FormLabel>
+      {hasName && <FormControl isRequired={true} pb={8}>
+        <FormLabel>Name</FormLabel>
         <Input
           name="name"
           type="text"
-          placeholder="Connection Name"
-          value={formik.values.name}
+          placeholder={`my-${schema.title?.toLowerCase()}`}
+          value={formik.values.name || ''}
           onChange={formik.handleChange}
         />
-        <FormHelperText>Enter a name to identify this connection</FormHelperText>
-      </FormControl>
+        <FormHelperText>Enter a name to identify this {schema.title || "object"}</FormHelperText>
+      </FormControl>}
 
       <FormInner
         schema={schema}

@@ -1,15 +1,17 @@
-use std::{collections::HashMap, vec};
+use std::collections::HashMap;
 
 use arroyo_datastream::SerializationMode;
-use arroyo_rpc::grpc::{api::SourceSchema, self};
-use arroyo_sql::{types::StructField, ArroyoSchemaProvider};
+use arroyo_rpc::grpc::{
+    self,
+    api::{ConnectionSchema, SourceSchema, TestSourceMessage},
+};
+use arroyo_sql::ArroyoSchemaProvider;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
+use tonic::Status;
 use typify::import_types;
 
-use crate::{
-    json_schema,
-    sources::{raw_schema, SchemaField}, connectors::http::SSEConnector,
-};
+use crate::{connectors::http::SSEConnector, json_schema};
 
 use self::kafka::KafkaConnector;
 
@@ -34,12 +36,21 @@ pub trait Connector {
 
     fn metadata(&self) -> grpc::api::Connector;
 
+    fn test(
+        &self,
+        name: &str,
+        config: Self::ConfigT,
+        table: Self::TableT,
+        schema: Option<ConnectionSchema>,
+        tx: Sender<Result<TestSourceMessage, Status>>,
+    );
+
     fn register(
         &self,
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
-        schema: Option<SourceSchema>,
+        schema: Option<ConnectionSchema>,
         schema_provider: &mut ArroyoSchemaProvider,
     );
 }
@@ -53,12 +64,21 @@ pub trait ErasedConnector {
 
     fn validate_table(&self, s: &str) -> Result<(), serde_json::Error>;
 
+    fn test(
+        &self,
+        name: &str,
+        config: &str,
+        table: &str,
+        schema: Option<ConnectionSchema>,
+        tx: Sender<Result<TestSourceMessage, Status>>,
+    ) -> Result<(), serde_json::Error>;
+
     fn register(
         &self,
         name: &str,
         config: &str,
         table: &str,
-        schema: Option<SourceSchema>,
+        schema: Option<ConnectionSchema>,
         schema_provider: &mut ArroyoSchemaProvider,
     ) -> Result<(), serde_json::Error>;
 }
@@ -80,17 +100,36 @@ impl<C: Connector> ErasedConnector for C {
         self.parse_table(s).map(|_| ())
     }
 
+    fn test(
+        &self,
+        name: &str,
+        config: &str,
+        table: &str,
+        schema: Option<ConnectionSchema>,
+        tx: Sender<Result<TestSourceMessage, Status>>,
+    ) -> Result<(), serde_json::Error> {
+        self.test(
+            name,
+            self.parse_schema(config)?,
+            self.parse_table(table)?,
+            schema,
+            tx,
+        );
+
+        Ok(())
+    }
+
     fn register(
         &self,
         name: &str,
         config: &str,
         table: &str,
-        schema: Option<SourceSchema>,
+        schema: Option<ConnectionSchema>,
         schema_provider: &mut ArroyoSchemaProvider,
     ) -> Result<(), serde_json::Error> {
         self.register(
             name,
-            self.parse_schema(config).unwrap(),
+            self.parse_schema(config)?,
             self.parse_table(table)?,
             schema,
             schema_provider,
@@ -105,7 +144,7 @@ pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
 }
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
-    let mut m: HashMap<&'static str, Box<dyn ErasedConnector>>  = HashMap::new();
+    let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
     m.insert("kafka", Box::new(KafkaConnector {}));
     m.insert("sse", Box::new(SSEConnector {}));
 
@@ -140,24 +179,29 @@ pub struct Schema {
     options: SchemaOptions,
 }
 
-pub fn serialization_mode(schema: &SourceSchema) -> OperatorConfigSerializationMode {
-    match &schema.schema {
-        Some(s) => match s {
-            arroyo_rpc::grpc::api::source_schema::Schema::Builtin(_) => todo!(),
-            arroyo_rpc::grpc::api::source_schema::Schema::JsonSchema(_)
-            | arroyo_rpc::grpc::api::source_schema::Schema::JsonFields(_) => {
-                if schema.kafka_schema_registry {
-                    OperatorConfigSerializationMode::JsonSchemaRegistry
-                } else {
-                    OperatorConfigSerializationMode::Json
-                }
+pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializationMode {
+    let confluent = schema
+        .format_options
+        .as_ref()
+        .filter(|t| t.confluent_schema_registry)
+        .is_some();
+    match &schema.format() {
+        grpc::api::Format::Json => {
+            if confluent {
+                OperatorConfigSerializationMode::JsonSchemaRegistry
+            } else {
+                OperatorConfigSerializationMode::Json
             }
-            arroyo_rpc::grpc::api::source_schema::Schema::Protobuf(_) => todo!(),
-            arroyo_rpc::grpc::api::source_schema::Schema::RawJson(_) => {
-                OperatorConfigSerializationMode::RawJson
+        }
+        grpc::api::Format::Protobuf => todo!(),
+        grpc::api::Format::Avro => todo!(),
+        grpc::api::Format::RawString => {
+            if confluent {
+                OperatorConfigSerializationMode::JsonSchemaRegistry
+            } else {
+                OperatorConfigSerializationMode::Json
             }
-        },
-        None => todo!(),
+        }
     }
 }
 
@@ -173,53 +217,24 @@ impl From<OperatorConfigSerializationMode> for SerializationMode {
     }
 }
 
-pub fn schema_fields(name: &str, schema: &SourceSchema) -> anyhow::Result<Vec<StructField>> {
-    use arroyo_rpc::grpc::api::source_schema;
-    match schema.schema.as_ref().unwrap() {
-        source_schema::Schema::Builtin(_) => todo!(),
-        source_schema::Schema::JsonSchema(j) => {
-            Ok(json_schema::convert_json_schema(name, &j.json_schema)
-                .map_err(|e| anyhow::anyhow!("Failed to use json schema: {}", e))?
-                .iter()
-                .map(|f| f.into())
-                .collect())
+pub fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
+    schema.definition.as_ref().map(|d| match d {
+        grpc::api::connection_schema::Definition::JsonSchema(_) => {
+            format!("{}::{}", name, json_schema::ROOT_NAME)
         }
-        source_schema::Schema::JsonFields(def) => {
-            let fs: Result<Vec<SchemaField>, String> =
-                def.fields.iter().map(|t| t.clone().try_into()).collect();
-            let fs = fs.map_err(|e| anyhow::anyhow!("Failed to convert schema fields: {}", e))?;
-
-            Ok(fs.iter().map(|f| f.into()).collect())
-        }
-        source_schema::Schema::Protobuf(_) => todo!(),
-        source_schema::Schema::RawJson(_) => {
-            Ok(raw_schema().fields().iter().map(|t| t.into()).collect())
-        }
-    }
+        grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
+        grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
+        grpc::api::connection_schema::Definition::RawSchema(_) => todo!(),
+    })
 }
 
-pub fn schema_type(name: &str, schema: &SourceSchema) -> Option<String> {
-    match schema.schema.as_ref().unwrap() {
-        arroyo_rpc::grpc::api::source_schema::Schema::Builtin(_) => todo!(),
-        arroyo_rpc::grpc::api::source_schema::Schema::JsonSchema(_) => {
-            Some(format!("{}::{}", name, json_schema::ROOT_NAME))
+pub fn schema_defs(name: &str, schema: &ConnectionSchema) -> Option<String> {
+    schema.definition.as_ref().map(|d| match d {
+        grpc::api::connection_schema::Definition::JsonSchema(s) => {
+            json_schema::get_defs(&name, &s).unwrap()
         }
-        arroyo_rpc::grpc::api::source_schema::Schema::JsonFields(_) => None,
-        arroyo_rpc::grpc::api::source_schema::Schema::Protobuf(_) => todo!(),
-        arroyo_rpc::grpc::api::source_schema::Schema::RawJson(_) => {
-            Some("arroyo_types::RawJson".to_string())
-        }
-    }
-}
-
-pub fn schema_defs(name: &str, schema: &SourceSchema) -> Option<String> {
-    match schema.schema.as_ref().unwrap() {
-        arroyo_rpc::grpc::api::source_schema::Schema::Builtin(_) => todo!(),
-        arroyo_rpc::grpc::api::source_schema::Schema::JsonSchema(s) => {
-            Some(json_schema::get_defs(&name, &s.json_schema).unwrap())
-        }
-        arroyo_rpc::grpc::api::source_schema::Schema::JsonFields(_) => None,
-        arroyo_rpc::grpc::api::source_schema::Schema::Protobuf(_) => None,
-        arroyo_rpc::grpc::api::source_schema::Schema::RawJson(_) => None,
-    }
+        grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
+        grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
+        grpc::api::connection_schema::Definition::RawSchema(_) => todo!(),
+    })
 }

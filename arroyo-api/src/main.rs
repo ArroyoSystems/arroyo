@@ -1,8 +1,8 @@
 use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
     CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
-    DeleteJobReq, DeleteJobResp, DeleteSourceReq, DeleteSourceResp, PipelineProgram,
-    SourceMetadataResp, GetConnectorsReq, GetConnectorsResp,
+    DeleteJobReq, DeleteJobResp, DeleteSourceReq, DeleteSourceResp, GetConnectorsReq,
+    GetConnectorsResp, PipelineProgram, SourceMetadataResp, TestSchemaReq,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -414,13 +414,13 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<GetConnectorsResp>, Status> {
         let (_request, _auth) = self.authenticate(request).await?;
 
-        let connectors = connectors::connectors().values()
+        let connectors = connectors::connectors()
+            .values()
             .map(|c| c.metadata())
             .collect();
 
         Ok(Response::new(GetConnectorsResp { connectors }))
     }
-
 
     async fn create_connection(
         &self,
@@ -428,7 +428,9 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<CreateConnectionResp>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 
-        let resp = connections::create_connection(request.into_inner(), auth, &self.client().await?).await?;
+        let resp =
+            connections::create_connection(request.into_inner(), auth, &self.client().await?)
+                .await?;
 
         Ok(Response::new(resp))
     }
@@ -467,6 +469,18 @@ impl ApiGrpc for ApiServer {
     }
 
     // connection tables
+    type TestConnectionTableStream = ReceiverStream<Result<TestSourceMessage, Status>>;
+
+    async fn test_Connection_table(
+        &self,
+        request: Request<CreateSourceReq>,
+    ) -> Result<Response<Self::TestConnectionTableStream>, Status> {
+        let (request, auth) = self.authenticate(request).await?;
+
+        let rx = connection_tables::test(request.into_inner(), auth, &self.client().await?).await?;
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
     async fn create_connection_table(
         &self,
         request: Request<CreateConnectionTableReq>,
@@ -525,11 +539,11 @@ impl ApiGrpc for ApiServer {
 
     async fn test_schema(
         &self,
-        request: Request<CreateSourceReq>,
+        request: Request<TestSchemaReq>,
     ) -> Result<Response<TestSchemaResp>, Status> {
         let (request, _auth) = self.authenticate(request).await?;
 
-        let errors = sources::test_schema(request.into_inner()).await?;
+        let errors = connection_tables::test_schema(request.into_inner()).await?;
         Ok(Response::new(TestSchemaResp {
             valid: errors.is_empty(),
             errors,
@@ -545,18 +559,6 @@ impl ApiGrpc for ApiServer {
         Ok(Response::new(
             sources::get_source_metadata(request.into_inner(), auth, &self.client().await?).await?,
         ))
-    }
-
-    type TestSourceStream = ReceiverStream<Result<TestSourceMessage, Status>>;
-
-    async fn test_source(
-        &self,
-        request: Request<CreateSourceReq>,
-    ) -> Result<Response<Self::TestSourceStream>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        let rx = sources::test_source(request.into_inner(), auth, &self.client().await?).await?;
-        Ok(Response::new(ReceiverStream::new(rx)))
     }
 
     // pipelines

@@ -131,21 +131,6 @@ pub enum PrimitiveType {
     UnixMillis,
 }
 
-fn primitive_to_sql(primitive_type: &PrimitiveType) -> &'static str {
-    match primitive_type {
-        PrimitiveType::Int32 => "INTEGER",
-        PrimitiveType::Int64 => "BIGINT",
-        PrimitiveType::UInt32 => "INTEGER UNSIGNED",
-        PrimitiveType::UInt64 => "BIGINT UNSIGNED",
-        PrimitiveType::F32 => "FLOAT",
-        PrimitiveType::F64 => "DOUBLE",
-        PrimitiveType::Bool => "BOOLEAN",
-        PrimitiveType::String => "TEXT",
-        PrimitiveType::Bytes => "BINARY",
-        PrimitiveType::UnixMillis => "TIMESTAMP",
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum SchemaFieldType {
     Primitive(PrimitiveType),
@@ -261,6 +246,7 @@ impl TryFrom<SourceField> for SchemaField {
                         api::PrimitiveType::String => PrimitiveType::String,
                         api::PrimitiveType::Bytes => PrimitiveType::Bytes,
                         api::PrimitiveType::UnixMillis => PrimitiveType::UnixMillis,
+                        api::PrimitiveType::UnixMicros => todo!(),
                     },
                 ),
                 api::source_field_type::Type::Struct(s) => SchemaFieldType::Struct(
@@ -304,7 +290,7 @@ impl TryFrom<SchemaField> for SourceField {
         };
 
         let sql_name = match value.typ {
-            SchemaFieldType::Primitive(p) => Some(String::from(primitive_to_sql(&p))),
+            SchemaFieldType::Primitive(p) => todo!(),
             SchemaFieldType::Struct(..) => None,
             SchemaFieldType::NamedStruct(..) => None,
         };
@@ -347,29 +333,7 @@ fn builtin_for_name(name: &str) -> Result<SourceSchema, String> {
 
 impl SourceSchema {
     pub fn try_from(name: &str, s: api::SourceSchema) -> Result<Self, String> {
-        match s.schema.unwrap() {
-            Schema::Builtin(name) => builtin_for_name(&name),
-            Schema::JsonSchema(def) => {
-                let fields: Vec<SchemaField> =
-                    json_schema::convert_json_schema(name, &def.json_schema)?;
-                Ok(SourceSchema {
-                    format: SourceFormat::JsonSchema(def.json_schema),
-                    fields,
-                    kafka_schema: s.kafka_schema_registry,
-                })
-            }
-            Schema::JsonFields(def) => {
-                let fields: Result<Vec<_>, String> =
-                    def.fields.into_iter().map(|f| f.try_into()).collect();
-                Ok(SourceSchema {
-                    format: SourceFormat::JsonFields,
-                    fields: fields?,
-                    kafka_schema: s.kafka_schema_registry,
-                })
-            }
-            Schema::RawJson(_) => Ok(raw_schema()),
-            Schema::Protobuf(_) => Err("protobuf not supported yet".to_string()),
-        }
+        todo!()
     }
 
     pub fn fields(&self) -> Vec<SchemaField> {
@@ -676,28 +640,6 @@ pub(crate) async fn get_sources<E: GenericClient>(
     Ok(defs)
 }
 
-pub(crate) async fn test_schema(req: CreateSourceReq) -> Result<Vec<String>, Status> {
-    let schema = req
-        .schema
-        .ok_or_else(|| required_field("schema"))?
-        .schema
-        .ok_or_else(|| required_field("schema.schema"))?;
-
-    match schema {
-        Schema::JsonSchema(schema) => {
-            if let Err(e) = convert_json_schema(&req.name, &schema.json_schema) {
-                Ok(vec![e])
-            } else {
-                Ok(vec![])
-            }
-        }
-        _ => {
-            // TODO: add testing for other schema types
-            Ok(vec![])
-        }
-    }
-}
-
 pub(crate) async fn get_source_metadata(
     req: CreateSourceReq,
     auth: AuthData,
@@ -714,42 +656,6 @@ pub(crate) async fn get_source_metadata(
     Ok(SourceMetadataResp {
         partitions: partitions as u32,
     })
-}
-
-pub(crate) async fn test_source(
-    req: CreateSourceReq,
-    auth: AuthData,
-    client: &impl GenericClient,
-) -> Result<Receiver<Result<TestSourceMessage, Status>>, Status> {
-    let (tx, rx) = channel(8);
-
-    let source = req.type_oneof.ok_or_else(|| required_field("type"))?;
-
-    let schema = req
-        .schema
-        .ok_or_else(|| required_field("schema"))?
-        .schema
-        .ok_or_else(|| required_field("schema.schema"))?;
-
-    let connections = get_connections(&auth, client).await?;
-
-    match source {
-        _ => {
-            if tx
-                .send(Ok(TestSourceMessage {
-                    error: false,
-                    done: true,
-                    message: "Source and schema are valid".to_string(),
-                }))
-                .await
-                .is_err()
-            {
-                warn!("Test API rx closed when sending message");
-            };
-        }
-    }
-
-    Ok(rx)
 }
 
 pub(crate) async fn delete_source(

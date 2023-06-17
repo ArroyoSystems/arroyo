@@ -1,10 +1,8 @@
-use arroyo_rpc::grpc::{api::TestSourceMessage, self};
-use http::{HeaderMap, HeaderName, HeaderValue};
+use arroyo_rpc::grpc::{self, api::ConnectionSchema};
 
 use super::Connector;
 
-pub struct SSEConnector {
-}
+pub struct SSEConnector {}
 
 impl Connector for SSEConnector {
     type ConfigT = ();
@@ -35,7 +33,7 @@ impl Connector for SSEConnector {
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
-        schema: Option<arroyo_rpc::grpc::api::SourceSchema>,
+        schema: Option<ConnectionSchema>,
         schema_provider: &mut arroyo_sql::ArroyoSchemaProvider,
     ) {
         todo!()

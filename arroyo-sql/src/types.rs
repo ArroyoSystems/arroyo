@@ -13,6 +13,9 @@ use arrow::{
     datatypes::{Field, IntervalDayTimeType},
 };
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
+use arroyo_rpc::grpc::api::{
+    source_field_type, PrimitiveType, SourceField, SourceFieldType, StructType,
+};
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
 use datafusion_common::ScalarValue;
@@ -237,6 +240,14 @@ impl TypeDef {
             TypeDef::DataType(_, optional) => *optional,
         }
     }
+
+    pub fn to_optional(self) -> Self {
+        match self {
+            TypeDef::StructDef(t, _) => TypeDef::StructDef(t, true),
+            TypeDef::DataType(t, _) => TypeDef::DataType(t, true),
+        }
+    }
+
     // TODO: rename this
     pub fn return_type(&self) -> Type {
         if self.is_optional() {
@@ -544,5 +555,104 @@ pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> R
         )
     } else {
         Ok(DataType::Decimal128(precision, scale))
+    }
+}
+
+fn primitive_to_sql(primitive_type: PrimitiveType) -> &'static str {
+    match primitive_type {
+        PrimitiveType::Int32 => "INTEGER",
+        PrimitiveType::Int64 => "BIGINT",
+        PrimitiveType::UInt32 => "INTEGER UNSIGNED",
+        PrimitiveType::UInt64 => "BIGINT UNSIGNED",
+        PrimitiveType::F32 => "FLOAT",
+        PrimitiveType::F64 => "DOUBLE",
+        PrimitiveType::Bool => "BOOLEAN",
+        PrimitiveType::String => "TEXT",
+        PrimitiveType::Bytes => "BINARY",
+        PrimitiveType::UnixMillis | PrimitiveType::UnixMicros => "TIMESTAMP",
+    }
+}
+
+impl TryFrom<StructField> for SourceField {
+    type Error = String;
+
+    fn try_from(f: StructField) -> Result<Self, Self::Error> {
+        let field_name = f.name();
+        let nullable = f.nullable();
+        let field_type = match f.data_type {
+            TypeDef::StructDef(StructDef { fields, .. }, _) => {
+                let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
+
+                let t = source_field_type::Type::Struct(StructType { fields: fields? });
+
+                SourceFieldType {
+                    sql_name: None,
+                    r#type: Some(t),
+                }
+            }
+            TypeDef::DataType(dt, _) => {
+                let pt = match dt {
+                    DataType::Boolean => Ok(PrimitiveType::Bool),
+                    DataType::Int32 => Ok(PrimitiveType::Int32),
+                    DataType::Int64 => Ok(PrimitiveType::Int64),
+                    DataType::UInt32 => Ok(PrimitiveType::UInt32),
+                    DataType::UInt64 => Ok(PrimitiveType::UInt64),
+                    DataType::Float32 => Ok(PrimitiveType::F32),
+                    DataType::Float64 => Ok(PrimitiveType::F64),
+                    DataType::Binary | DataType::LargeBinary => Ok(PrimitiveType::Bytes),
+                    DataType::Timestamp(TimeUnit::Millisecond, _) => Ok(PrimitiveType::UnixMillis),
+                    DataType::Timestamp(TimeUnit::Microsecond, _) => Ok(PrimitiveType::UnixMicros),
+                    DataType::Utf8 => Ok(PrimitiveType::String),
+                    dt => Err(format!("Unsupported data type {:?}", dt)),
+                }?;
+
+                SourceFieldType {
+                    r#type: Some(source_field_type::Type::Primitive(pt.into())),
+                    sql_name: Some(primitive_to_sql(pt).to_string()),
+                }
+            }
+        };
+
+        Ok(SourceField {
+            field_name,
+            field_type: Some(field_type),
+            nullable,
+        })
+    }
+}
+
+impl From<SourceField> for StructField {
+    fn from(f: SourceField) -> Self {
+        let t = match f.field_type.unwrap().r#type.unwrap() {
+            source_field_type::Type::Primitive(pt) => TypeDef::DataType(
+                match PrimitiveType::from_i32(pt).unwrap() {
+                    PrimitiveType::Int32 => DataType::Int32,
+                    PrimitiveType::Int64 => DataType::Int64,
+                    PrimitiveType::UInt32 => DataType::UInt32,
+                    PrimitiveType::UInt64 => DataType::Int64,
+                    PrimitiveType::F32 => DataType::Float32,
+                    PrimitiveType::F64 => DataType::Float64,
+                    PrimitiveType::Bool => DataType::Boolean,
+                    PrimitiveType::String => DataType::Utf8,
+                    PrimitiveType::Bytes => DataType::Binary,
+                    PrimitiveType::UnixMillis => DataType::Timestamp(TimeUnit::Millisecond, None),
+                    PrimitiveType::UnixMicros => DataType::Timestamp(TimeUnit::Microsecond, None),
+                },
+                f.nullable,
+            ),
+            source_field_type::Type::Struct(s) => TypeDef::StructDef(
+                StructDef {
+                    fields: s.fields.into_iter().map(|t| t.into()).collect(),
+                    name: None,
+                },
+                f.nullable,
+            ),
+        };
+
+        StructField {
+            name: f.field_name,
+            alias: None,
+            data_type: t,
+        }
     }
 }

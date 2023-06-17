@@ -1,5 +1,5 @@
-use arroyo_rpc::grpc::api::{DeleteConnectionReq, CreateConnectionResp, GetConnectorsResp};
 use arroyo_rpc::grpc::api::{Connection, CreateConnectionReq, TestSourceMessage};
+use arroyo_rpc::grpc::api::{CreateConnectionResp, DeleteConnectionReq, GetConnectorsResp};
 use cornucopia_async::GenericClient;
 use tokio::sync::mpsc::channel;
 use tonic::Status;
@@ -40,8 +40,6 @@ pub(crate) async fn create_connection(
         .await
         .map_err(|e| handle_db_error("connection", e))?;
 
-
-
     Ok(CreateConnectionResp {
         connection: Some(Connection {
             id: id.to_string(),
@@ -58,7 +56,7 @@ impl From<DbConnection> for Connection {
             id: val.id.to_string(),
             name: val.name,
             connector: val.r#type,
-            config: serde_json::to_string(&val.config).unwrap()
+            config: serde_json::to_string(&val.config).unwrap(),
         }
     }
 }

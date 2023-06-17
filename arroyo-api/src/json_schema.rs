@@ -1,8 +1,8 @@
+use arrow_schema::DataType;
+use arroyo_sql::types::{StructDef, StructField, TypeDef};
 use schemars::schema::{RootSchema, Schema};
 use tracing::log::warn;
 use typify::{TypeDetails, TypeSpace, TypeSpaceSettings};
-
-use crate::sources::{PrimitiveType, SchemaField, SchemaFieldType};
 
 pub const ROOT_NAME: &str = "ArroyoJsonRoot";
 
@@ -33,7 +33,7 @@ fn get_type_space(schema: &str) -> Result<TypeSpace, String> {
     Ok(type_space)
 }
 
-pub fn convert_json_schema(source_name: &str, schema: &str) -> Result<Vec<SchemaField>, String> {
+pub fn convert_json_schema(name: &str, schema: &str) -> Result<Vec<StructField>, String> {
     let type_space = get_type_space(schema)?;
 
     let s = type_space
@@ -45,12 +45,15 @@ pub fn convert_json_schema(source_name: &str, schema: &str) -> Result<Vec<Schema
                 false
             }
         })
-        .ok_or_else(|| format!("No top-level struct in json schema {}", source_name))?;
+        .ok_or_else(|| format!("No top-level struct in json schema {}", name))?;
 
-    if let SchemaFieldType::NamedStruct(_, fields) =
-        to_schema_type(&type_space, source_name, s.name(), s.details())
-            .unwrap()
-            .0
+    if let TypeDef::StructDef(
+        StructDef {
+            name: Some(name),
+            fields,
+        },
+        _,
+    ) = to_schema_type(&type_space, name, s.name(), s.details()).unwrap()
     {
         Ok(fields)
     } else {
@@ -73,7 +76,7 @@ fn to_schema_type(
     source_name: &str,
     type_name: String,
     td: TypeDetails,
-) -> Option<(SchemaFieldType, bool)> {
+) -> Option<TypeDef> {
     match td {
         TypeDetails::Enum(_) => {
             warn!("Enums are not currently supported; ignoring {}", type_name);
@@ -83,51 +86,51 @@ fn to_schema_type(
             let mut fields = vec![];
             for (n, p) in s.properties() {
                 let field_type = type_space.get_type(&p).unwrap();
-                if let Some((t, nullable)) = to_schema_type(
+                if let Some(t) = to_schema_type(
                     type_space,
                     source_name,
                     field_type.name(),
                     field_type.details(),
                 ) {
-                    fields.push(SchemaField {
+                    fields.push(StructField {
                         name: n.to_string(),
-                        typ: t,
-                        nullable,
+                        data_type: t,
+                        alias: None,
                     });
                 }
             }
 
-            Some((
-                SchemaFieldType::NamedStruct(format!("{}::{}", source_name, type_name), fields),
+            Some(TypeDef::StructDef(
+                StructDef {
+                    name: Some(format!("{}::{}", source_name, type_name)),
+                    fields,
+                },
                 false,
             ))
         }
         TypeDetails::Option(opt) => {
             let t = type_space.get_type(&opt).unwrap();
-            Some((
-                to_schema_type(type_space, source_name, t.name(), t.details())?.0,
-                true,
-            ))
+            Some(to_schema_type(type_space, source_name, t.name(), t.details())?.to_optional())
         }
         TypeDetails::Builtin(t) => {
-            use PrimitiveType::*;
-            use SchemaFieldType::*;
-            let primitive = match t {
-                "bool" => Primitive(Bool),
-                "u32" => Primitive(UInt32),
-                "u64" => Primitive(UInt64),
-                "i32" => Primitive(Int32),
-                "i64" => Primitive(Int64),
-                "f32" => Primitive(F32),
-                "f64" => Primitive(F64),
+            use DataType::*;
+
+            let data_type = match t {
+                "bool" => Boolean,
+                "u32" => UInt32,
+                "u64" => UInt64,
+                "i32" => Int32,
+                "i64" => Int64,
+                "f32" => Float32,
+                "f64" => Float64,
                 _ => {
                     warn!("Unhandled primitive in json-schema: {}", t);
                     return None;
                 }
             };
-            Some((primitive, false))
+            Some(TypeDef::DataType(data_type, false))
         }
-        TypeDetails::String => Some((SchemaFieldType::Primitive(PrimitiveType::String), false)),
+        TypeDetails::String => Some(TypeDef::DataType(DataType::Utf8, false)),
         _ => {
             warn!("Unhandled field type in json-schema {:?}", type_name);
             None

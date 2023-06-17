@@ -592,7 +592,7 @@ message CreateConnectionTableReq {
   optional string connection_id = 2;
   TableType type = 3;
   string config = 4;
-  optional SourceSchema schema = 5;
+  optional ConnectionSchema schema = 5;
 }
 
 message CreateConnectionTableResp {
@@ -606,7 +606,7 @@ message ConnectionTable {
   string connection_config = 5;
   TableType type = 6;
   string config = 7;
-  optional SourceSchema schema = 8;
+  optional ConnectionSchema schema = 8;
 }
 
 // Sources
@@ -636,6 +636,7 @@ enum PrimitiveType {
   String = 7;
   Bytes = 8;
   UnixMillis = 9;
+  UnixMicros = 10;
 }
 
 message StructType {
@@ -656,6 +657,30 @@ message SourceField {
   string field_name = 1;
   SourceFieldType field_type = 2;
   bool nullable = 3;
+}
+
+enum Format {
+  Json = 0;
+  Protobuf = 1;
+  Avro = 2;
+  RawString = 3;
+}
+
+message FormatOptions {
+  bool confluent_schema_registry = 1;
+}
+
+message ConnectionSchema {
+  Format format = 1;
+  FormatOptions format_options = 2;
+  repeated SourceField fields = 3;
+
+  oneof definition {
+    string json_schema = 4;
+    string protobuf_schema = 5;
+    string avro_schema = 6;
+    string raw_schema = 7;
+  }
 }
 
 message SourceSchema {
@@ -733,6 +758,10 @@ message DeleteSourceReq {
 message DeleteSourceResp {
 }
 
+message TestSchemaReq {
+  ConnectionSchema schema = 1;
+}
+
 message TestSchemaResp {
   bool valid = 1;
   repeated string errors = 2;
@@ -775,11 +804,12 @@ message OutputData {
 service ApiGrpc {
   rpc GetConnectors(GetConnectorsReq) returns (GetConnectorsResp);
   rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp);
-  rpc TestConnection(CreateConnectionReq) returns (TestSourceMessage);
+  rpc TestConnection(CreateConnectionReq) returns (stream TestSourceMessage);
   rpc GetConnections(GetConnectionsReq) returns (GetConnectionsResp);
   rpc DeleteConnection(DeleteConnectionReq) returns (DeleteConnectionResp);
 
   rpc CreateConnectionTable(CreateConnectionTableReq) returns (CreateConnectionTableResp);
+  rpc TestConnectionTable(CreateConnectionTableReq) returns (stream TestSourceMessage);
 
   rpc CreateSource(CreateSourceReq) returns (CreateSourceResp);
   rpc GetSources(GetSourcesReq) returns (GetSourcesResp);
@@ -787,8 +817,7 @@ service ApiGrpc {
 
   rpc GetConfluentSchema(ConfluentSchemaReq) returns (ConfluentSchemaResp);
   rpc GetSourceMetadata(CreateSourceReq) returns (SourceMetadataResp);
-  rpc TestSchema(CreateSourceReq) returns (TestSchemaResp);
-  rpc TestSource(CreateSourceReq) returns (stream TestSourceMessage);
+  rpc TestSchema(TestSchemaReq) returns (TestSchemaResp);
 
   rpc CreatePipeline(CreatePipelineReq) returns (CreatePipelineResp);
   rpc GraphForPipeline(PipelineGraphReq) returns (PipelineGraphResp);

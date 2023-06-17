@@ -407,6 +407,11 @@ export enum PrimitiveType {
    * @generated from enum value: UnixMillis = 9;
    */
   UnixMillis = 9,
+
+  /**
+   * @generated from enum value: UnixMicros = 10;
+   */
+  UnixMicros = 10,
 }
 // Retrieve enum metadata with: proto3.getEnumType(PrimitiveType)
 proto3.util.setEnumType(PrimitiveType, "arroyo_api.PrimitiveType", [
@@ -420,6 +425,39 @@ proto3.util.setEnumType(PrimitiveType, "arroyo_api.PrimitiveType", [
   { no: 7, name: "String" },
   { no: 8, name: "Bytes" },
   { no: 9, name: "UnixMillis" },
+  { no: 10, name: "UnixMicros" },
+]);
+
+/**
+ * @generated from enum arroyo_api.Format
+ */
+export enum Format {
+  /**
+   * @generated from enum value: Json = 0;
+   */
+  Json = 0,
+
+  /**
+   * @generated from enum value: Protobuf = 1;
+   */
+  Protobuf = 1,
+
+  /**
+   * @generated from enum value: Avro = 2;
+   */
+  Avro = 2,
+
+  /**
+   * @generated from enum value: RawString = 3;
+   */
+  RawString = 3,
+}
+// Retrieve enum metadata with: proto3.getEnumType(Format)
+proto3.util.setEnumType(Format, "arroyo_api.Format", [
+  { no: 0, name: "Json" },
+  { no: 1, name: "Protobuf" },
+  { no: 2, name: "Avro" },
+  { no: 3, name: "RawString" },
 ]);
 
 /**
@@ -4383,9 +4421,9 @@ export class CreateConnectionTableReq extends Message<CreateConnectionTableReq> 
   name = "";
 
   /**
-   * @generated from field: string connection_id = 2;
+   * @generated from field: optional string connection_id = 2;
    */
-  connectionId = "";
+  connectionId?: string;
 
   /**
    * @generated from field: arroyo_api.TableType type = 3;
@@ -4398,9 +4436,9 @@ export class CreateConnectionTableReq extends Message<CreateConnectionTableReq> 
   config = "";
 
   /**
-   * @generated from field: optional arroyo_api.SourceSchema schema = 5;
+   * @generated from field: optional arroyo_api.ConnectionSchema schema = 5;
    */
-  schema?: SourceSchema;
+  schema?: ConnectionSchema;
 
   constructor(data?: PartialMessage<CreateConnectionTableReq>) {
     super();
@@ -4411,10 +4449,10 @@ export class CreateConnectionTableReq extends Message<CreateConnectionTableReq> 
   static readonly typeName = "arroyo_api.CreateConnectionTableReq";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "connection_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "connection_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 3, name: "type", kind: "enum", T: proto3.getEnumType(TableType) },
     { no: 4, name: "config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "schema", kind: "message", T: SourceSchema, opt: true },
+    { no: 5, name: "schema", kind: "message", T: ConnectionSchema, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateConnectionTableReq {
@@ -4505,9 +4543,9 @@ export class ConnectionTable extends Message<ConnectionTable> {
   config = "";
 
   /**
-   * @generated from field: optional arroyo_api.SourceSchema schema = 8;
+   * @generated from field: optional arroyo_api.ConnectionSchema schema = 8;
    */
-  schema?: SourceSchema;
+  schema?: ConnectionSchema;
 
   constructor(data?: PartialMessage<ConnectionTable>) {
     super();
@@ -4524,7 +4562,7 @@ export class ConnectionTable extends Message<ConnectionTable> {
     { no: 5, name: "connection_config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "type", kind: "enum", T: proto3.getEnumType(TableType) },
     { no: 7, name: "config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 8, name: "schema", kind: "message", T: SourceSchema, opt: true },
+    { no: 8, name: "schema", kind: "message", T: ConnectionSchema, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConnectionTable {
@@ -4827,6 +4865,125 @@ export class SourceField extends Message<SourceField> {
 
   static equals(a: SourceField | PlainMessage<SourceField> | undefined, b: SourceField | PlainMessage<SourceField> | undefined): boolean {
     return proto3.util.equals(SourceField, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.FormatOptions
+ */
+export class FormatOptions extends Message<FormatOptions> {
+  /**
+   * @generated from field: bool confluent_schema_registry = 1;
+   */
+  confluentSchemaRegistry = false;
+
+  constructor(data?: PartialMessage<FormatOptions>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.FormatOptions";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "confluent_schema_registry", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FormatOptions {
+    return new FormatOptions().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FormatOptions {
+    return new FormatOptions().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FormatOptions {
+    return new FormatOptions().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: FormatOptions | PlainMessage<FormatOptions> | undefined, b: FormatOptions | PlainMessage<FormatOptions> | undefined): boolean {
+    return proto3.util.equals(FormatOptions, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.ConnectionSchema
+ */
+export class ConnectionSchema extends Message<ConnectionSchema> {
+  /**
+   * @generated from field: arroyo_api.Format format = 1;
+   */
+  format = Format.Json;
+
+  /**
+   * @generated from field: arroyo_api.FormatOptions format_options = 2;
+   */
+  formatOptions?: FormatOptions;
+
+  /**
+   * @generated from field: repeated arroyo_api.SourceField fields = 3;
+   */
+  fields: SourceField[] = [];
+
+  /**
+   * @generated from oneof arroyo_api.ConnectionSchema.definition
+   */
+  definition: {
+    /**
+     * @generated from field: string json_schema = 4;
+     */
+    value: string;
+    case: "jsonSchema";
+  } | {
+    /**
+     * @generated from field: string protobuf_schema = 5;
+     */
+    value: string;
+    case: "protobufSchema";
+  } | {
+    /**
+     * @generated from field: string avro_schema = 6;
+     */
+    value: string;
+    case: "avroSchema";
+  } | {
+    /**
+     * @generated from field: string raw_schema = 7;
+     */
+    value: string;
+    case: "rawSchema";
+  } | { case: undefined; value?: undefined } = { case: undefined };
+
+  constructor(data?: PartialMessage<ConnectionSchema>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.ConnectionSchema";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "format", kind: "enum", T: proto3.getEnumType(Format) },
+    { no: 2, name: "format_options", kind: "message", T: FormatOptions },
+    { no: 3, name: "fields", kind: "message", T: SourceField, repeated: true },
+    { no: 4, name: "json_schema", kind: "scalar", T: 9 /* ScalarType.STRING */, oneof: "definition" },
+    { no: 5, name: "protobuf_schema", kind: "scalar", T: 9 /* ScalarType.STRING */, oneof: "definition" },
+    { no: 6, name: "avro_schema", kind: "scalar", T: 9 /* ScalarType.STRING */, oneof: "definition" },
+    { no: 7, name: "raw_schema", kind: "scalar", T: 9 /* ScalarType.STRING */, oneof: "definition" },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConnectionSchema {
+    return new ConnectionSchema().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ConnectionSchema {
+    return new ConnectionSchema().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ConnectionSchema {
+    return new ConnectionSchema().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ConnectionSchema | PlainMessage<ConnectionSchema> | undefined, b: ConnectionSchema | PlainMessage<ConnectionSchema> | undefined): boolean {
+    return proto3.util.equals(ConnectionSchema, a, b);
   }
 }
 
@@ -5411,6 +5568,43 @@ export class DeleteSourceResp extends Message<DeleteSourceResp> {
 
   static equals(a: DeleteSourceResp | PlainMessage<DeleteSourceResp> | undefined, b: DeleteSourceResp | PlainMessage<DeleteSourceResp> | undefined): boolean {
     return proto3.util.equals(DeleteSourceResp, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.TestSchemaReq
+ */
+export class TestSchemaReq extends Message<TestSchemaReq> {
+  /**
+   * @generated from field: arroyo_api.ConnectionSchema schema = 1;
+   */
+  schema?: ConnectionSchema;
+
+  constructor(data?: PartialMessage<TestSchemaReq>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.TestSchemaReq";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "schema", kind: "message", T: ConnectionSchema },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestSchemaReq {
+    return new TestSchemaReq().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TestSchemaReq {
+    return new TestSchemaReq().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TestSchemaReq {
+    return new TestSchemaReq().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TestSchemaReq | PlainMessage<TestSchemaReq> | undefined, b: TestSchemaReq | PlainMessage<TestSchemaReq> | undefined): boolean {
+    return proto3.util.equals(TestSchemaReq, a, b);
   }
 }
 
