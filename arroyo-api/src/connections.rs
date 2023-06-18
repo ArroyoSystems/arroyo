@@ -4,41 +4,84 @@ use arroyo_rpc::grpc::api::{
     Connection, CreateConnectionReq, TestSourceMessage,
 };
 use cornucopia_async::GenericClient;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::channel;
 use tonic::Status;
+use utoipa::ToSchema;
 
-use crate::handle_delete;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnection;
+use crate::rest::{log_and_map_rest, ErrorResp};
 use crate::testers::HttpTester;
 use crate::types::public;
-use crate::{handle_db_error, log_and_map, required_field, testers::KafkaTester, AuthData};
+use crate::{handle_db_error_rest, handle_delete, AuthData};
+use crate::{log_and_map, required_field, testers::KafkaTester};
+
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HttpConnection {
+    #[schema(example = "https://mstdn.social/api")]
+    url: String,
+    #[schema(example = "Content-Type: application/json")]
+    headers: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SaslAuth {
+    protocol: String,
+    mechanism: String,
+    username: String,
+    password: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KafkaAuthConfig {
+    sasl_auth: Option<SaslAuth>,
+}
+
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KafkaConnection {
+    bootstrap_servers: String,
+    auth_config: KafkaAuthConfig,
+}
+
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ConnectionTypes {
+    Http(HttpConnection),
+    Kafka(KafkaConnection),
+}
+
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PostConnections {
+    #[schema(example = "mstdn")]
+    name: String,
+    config: ConnectionTypes,
+}
 
 pub(crate) async fn create_connection(
-    req: CreateConnectionReq,
+    req: PostConnections,
     auth: AuthData,
-    client: &impl GenericClient,
-) -> Result<(), Status> {
-    let (typ, v) = match req
-        .connection_type
-        .ok_or_else(|| required_field("connection.connection_type"))?
-    {
-        ReqConnectionType::Kafka(k) => (
-            public::ConnectionType::kafka,
-            serde_json::to_value(k).map_err(log_and_map)?,
-        ),
-        ReqConnectionType::Kinesis(_) => {
-            return Err(Status::failed_precondition("Kinesis is not yet supported"));
-        }
-        ReqConnectionType::Http(c) => (
+    client: impl GenericClient,
+) -> Result<(), ErrorResp> {
+    let (typ, v) = match req.config {
+        ConnectionTypes::Http(c) => (
             public::ConnectionType::http,
-            serde_json::to_value(c).map_err(log_and_map)?,
+            serde_json::to_value(c).map_err(log_and_map_rest)?,
+        ),
+        ConnectionTypes::Kafka(c) => (
+            public::ConnectionType::kafka,
+            serde_json::to_value(c).map_err(log_and_map_rest)?,
         ),
     };
 
     api_queries::create_connection()
         .bind(
-            client,
+            &client,
             &auth.organization_id,
             &auth.user_id,
             &req.name,
@@ -46,7 +89,7 @@ pub(crate) async fn create_connection(
             &v,
         )
         .await
-        .map_err(|e| handle_db_error("connection", e))?;
+        .map_err(|e| handle_db_error_rest("connection", e))?;
 
     Ok(())
 }

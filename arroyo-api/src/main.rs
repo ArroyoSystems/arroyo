@@ -53,6 +53,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::jobs::get_job_details;
+use crate::rest::{log_and_map_rest, ErrorResp};
 use queries::api_queries;
 
 mod cloud;
@@ -63,6 +64,7 @@ mod json_schema;
 mod metrics;
 mod optimizations;
 mod pipelines;
+mod rest;
 mod sinks;
 mod sources;
 mod testers;
@@ -208,7 +210,7 @@ async fn server(pool: Pool) {
         .fallback_service(serve_dir)
         .layer(cors);
 
-    let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
+    let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
     start_admin_server("api", ports::API_ADMIN, shutdown_rx.resubscribe());
 
@@ -218,13 +220,14 @@ async fn server(pool: Pool) {
 
     log_event("service_startup", json!({"service": "api"}));
 
+    let mut rest_shutdown_rx = shutdown_rx.resubscribe();
     tokio::spawn(async move {
         select! {
             result = axum::Server::bind(&addr)
             .serve(app.into_make_service()) => {
                 result.unwrap();
             }
-            _ = shutdown_rx.recv() => {
+            _ = rest_shutdown_rx.recv() => {
 
             }
         }
@@ -238,10 +241,27 @@ async fn server(pool: Pool) {
     let controller_addr = std::env::var(CONTROLLER_ADDR_ENV)
         .unwrap_or_else(|_| format!("http://localhost:{}", ports::CONTROLLER_GRPC));
 
+    let api_server_pool = pool.clone();
     let server = ApiServer {
-        pool,
+        pool: api_server_pool,
         controller_addr,
     };
+
+    let rest_addr = format!("0.0.0.0:{}", 8003).parse().unwrap();
+    let app = rest::create_rest_app(pool);
+    let mut receiver2 = shutdown_rx.resubscribe();
+
+    info!("Starting rest api server on {:?}", rest_addr);
+    tokio::spawn(async move {
+        select! {
+            result = axum::Server::bind(&rest_addr)
+            .serve(app.into_make_service()) => {
+                result.unwrap();
+            }
+            _ = receiver2.recv() => {
+            }
+        }
+    });
 
     let addr = format!("0.0.0.0:{}", grpc_port("api", ports::API_GRPC))
         .parse()
@@ -397,6 +417,21 @@ fn handle_db_error(name: &str, err: tokio_postgres::Error) -> Status {
     log_and_map(err)
 }
 
+fn handle_db_error_rest(name: &str, err: tokio_postgres::Error) -> ErrorResp {
+    if let Some(db) = &err.as_db_error() {
+        if *db.code() == SqlState::UNIQUE_VIOLATION {
+            // TODO improve error message
+            warn!("SQL error: {}", db.message());
+            return ErrorResp {
+                status_code: StatusCode::BAD_REQUEST,
+                message: format!("A {} with that name already exists", name),
+            };
+        }
+    }
+
+    log_and_map_rest(err)
+}
+
 fn handle_delete(name: &str, users: &str, err: tokio_postgres::Error) -> Status {
     if let Some(db) = &err.as_db_error() {
         if *db.code() == SqlState::FOREIGN_KEY_VIOLATION {
@@ -415,13 +450,11 @@ impl ApiGrpc for ApiServer {
     // connections
     async fn create_connection(
         &self,
-        request: Request<CreateConnectionReq>,
+        _request: Request<CreateConnectionReq>,
     ) -> Result<Response<CreateConnectionResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        connections::create_connection(request.into_inner(), auth, &self.client().await?).await?;
-
-        Ok(Response::new(CreateConnectionResp {}))
+        Err(Status::unimplemented(
+            "This feature has been moved ot the REST API",
+        ))
     }
 
     async fn test_connection(
