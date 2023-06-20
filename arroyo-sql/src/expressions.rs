@@ -1167,7 +1167,11 @@ impl CastExpression {
         // handle string to date casts.
         } else if Self::is_string(input_data_type) && Self::is_date(output_data_type) {
             true
-        } else {
+        // handle timestamp casts 
+        } else if Self::is_date(input_data_type) && Self::is_date(output_data_type) {
+            true
+        }
+        else {
             false
         }
     }
@@ -2629,16 +2633,18 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for DateTimeFunction {
         let mut args = value.1;
         match (args.len(), func) {
             (2, BuiltinScalarFunction::DatePart) => {
-                let first_argument = Box::new(args.remove(0));
-                let second_arg = args.remove(0);
-                let date_part = convert_expression_to::<DatePart>(second_arg,"date_part")?;
-                Ok(DateTimeFunction::DatePart(first_argument, Box::new(date_part)))
+                let arg1 = args.remove(0);
+                let arg2 = Box::new(args.remove(0));
+                let date_part = convert_expression_to::<DatePart>(arg1,"date_part")?;
+                print!("Motherfucker converted");
+                Ok(DateTimeFunction::DatePart(arg2, Box::new(date_part)))
             },
             (2, BuiltinScalarFunction::DateTrunc) => {
-                let first_argument = Box::new(args.remove(0));
-                let second_arg = args.remove(0);
-                let date_trunc_precision = convert_expression_to::<DateTruncPrecision>(second_arg,"date_trunc")?;
-                Ok(DateTimeFunction::DateTrunc(first_argument, Box::new(date_trunc_precision)))
+                let arg1 = args.remove(0);
+                let arg2 = Box::new(args.remove(0));
+                let date_trunc_precision = convert_expression_to::<DateTruncPrecision>(arg1,"date_trunc")?;
+                print!("Motherfucker converted");
+                Ok(DateTimeFunction::DateTrunc(arg2, Box::new(date_trunc_precision)))
             },
             (_, func) => bail!("function {} with args {:?} not supported", func, args),
         }

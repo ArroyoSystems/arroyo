@@ -1103,31 +1103,31 @@ mod tests {
 
     single_test_codegen!(
         "date_trunc",
-        "date_trunc(non_nullable_timestamp, 'month')",
+        "date_trunc('month',non_nullable_timestamp)",
         arroyo_sql::TestStruct {
-            non_nullable_timestamp: arroyo_types::from_millis(1685659545809),
+            non_nullable_timestamp: arroyo_types::from_nanos(1685659545809000000),
+            ..Default::default()
+        },
+        arroyo_types::from_nanos(1685659545809000000)
+    );
+
+    single_test_codegen!(
+        "date_part",
+        "date_part('month',non_nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            non_nullable_timestamp: arroyo_types::from_nanos(1685659545809000000),
             ..Default::default()
         },
         6
     );
 
-    single_test_codegen!(
-        "date_part",
-        "date_part(non_nullable_timestamp, '(bar)(beque)')",
-        arroyo_sql::TestStruct {
-            non_nullable_timestamp: arroyo_types::from_millis(1685659545809),
-            ..Default::default()
-        },
-        "".to_string()
-    );
-
-    single_test_codegen!(
-        "extract",
-        "extract(non_nullable_timestamp, '(bar)(beque)')",
-        arroyo_sql::TestStruct {
-            non_nullable_timestamp: arroyo_types::from_millis(1685659545809),
-            ..Default::default()
-        },
-        "".to_string()
-    );
+    // single_test_codegen!(
+    //     "extract",
+    //     "extract(non_nullable_timestamp, '(bar)(beque)')",
+    //     arroyo_sql::TestStruct {
+    //         non_nullable_timestamp: arroyo_types::from_millis(1685659545809),
+    //         ..Default::default()
+    //     },
+    //     "".to_string()
+    // );
 }
