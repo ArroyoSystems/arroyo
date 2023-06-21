@@ -1,5 +1,3 @@
-use std::{fmt::Debug, sync::Arc};
-
 use crate::{
     operators::TwoPhaseAggregation,
     pipeline::SortDirection,
@@ -8,7 +6,8 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Ok, Result};
 use arrow::datatypes::DataType;
-use arrow_schema::Field;
+use arrow_schema::{Field, TimeUnit};
+use arroyo_types::{DatePart, DateTruncPrecision};
 use datafusion_common::ScalarValue;
 use datafusion_expr::{
     aggregate_function,
@@ -19,6 +18,7 @@ use datafusion_expr::{
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use regex::Regex;
+use std::{fmt::Debug, sync::Arc};
 use syn::{parse_quote, parse_str, Ident, Path};
 
 #[derive(Debug, Clone)]
@@ -35,6 +35,7 @@ pub enum Expression {
     Aggregation(AggregationExpression),
     Cast(CastExpression),
     Numeric(NumericExpression),
+    Date(DateTimeFunction),
     String(StringFunction),
     Hash(HashExpression),
     DataStructure(DataStructureFunction),
@@ -73,6 +74,7 @@ impl Expression {
             Expression::RustUdf(t) => t.to_syn_expression(),
             Expression::WrapType(t) => t.to_syn_expression(),
             Expression::Case(case_expression) => case_expression.to_syn_expression(),
+            Expression::Date(datetime_expr) => datetime_expr.to_syn_expression(),
         }
     }
 
@@ -104,6 +106,7 @@ impl Expression {
             Expression::Aggregation(aggregation_expression) => aggregation_expression.return_type(),
             Expression::Cast(cast_expression) => cast_expression.return_type(),
             Expression::Numeric(numeric_expression) => numeric_expression.return_type(),
+            Expression::Date(date_function) => date_function.return_type(),
             Expression::String(string_function) => string_function.return_type(),
             Expression::Hash(hash_expression) => hash_expression.return_type(),
             Expression::DataStructure(data_structure_expression) => {
@@ -437,9 +440,8 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::Struct | BuiltinScalarFunction::ArrowTypeof => {
                         bail!("data structure function {:?} not implemented", fun)
                     }
-                    BuiltinScalarFunction::DatePart
-                    | BuiltinScalarFunction::DateTrunc
-                    | BuiltinScalarFunction::ToTimestamp
+
+                    BuiltinScalarFunction::ToTimestamp
                     | BuiltinScalarFunction::ToTimestampMillis
                     | BuiltinScalarFunction::ToTimestampMicros
                     | BuiltinScalarFunction::ToTimestampSeconds
@@ -469,6 +471,11 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::Factorial => bail!("factorial not implemented yet"),
                     BuiltinScalarFunction::Gcd => bail!("gcd not implemented yet"),
                     BuiltinScalarFunction::Lcm => bail!("lcm not implemented yet"),
+                    BuiltinScalarFunction::DatePart | BuiltinScalarFunction::DateTrunc => {
+                        let date_function: DateTimeFunction =
+                            (fun.clone(), arg_expressions).try_into()?;
+                        Ok(Expression::Date(date_function))
+                    }
                 }
             }
             Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
@@ -1157,6 +1164,9 @@ impl CastExpression {
             true
         // handle string to date casts.
         } else if Self::is_string(input_data_type) && Self::is_date(output_data_type) {
+            true
+        // handle timestamp casts
+        } else if Self::is_date(input_data_type) && Self::is_date(output_data_type) {
             true
         } else {
             false
@@ -2589,6 +2599,122 @@ impl CaseExpression {
             } => {
                 // guaranteed to have at least one pair.
                 pairs[0].1.return_type().with_nullity(self.nullable())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum DateTimeFunction {
+    DateTrunc(Box<Expression>, Box<DateTruncPrecision>),
+    DatePart(Box<Expression>, Box<DatePart>),
+}
+
+fn extract_literal_string(expr: Expression) -> Result<String, anyhow::Error> {
+    let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(literal_string))}) = expr else {
+        bail!("Can only convert a literal into a string")
+    };
+    Ok(literal_string.as_str().to_string())
+}
+
+impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for DateTimeFunction {
+    type Error = anyhow::Error;
+
+    fn try_from(
+        value: (BuiltinScalarFunction, Vec<Expression>),
+    ) -> std::result::Result<Self, Self::Error> {
+        let func = value.0;
+        let mut args = value.1;
+        match (args.len(), func) {
+            (2, BuiltinScalarFunction::DatePart) => {
+                let arg1 = args.remove(0);
+                let arg2 = Box::new(args.remove(0));
+                let date_part = extract_literal_string(arg1)?
+                    .as_str()
+                    .try_into()
+                    .map_err(anyhow::Error::msg)?;
+                Ok(DateTimeFunction::DatePart(arg2, Box::new(date_part)))
+            }
+            (2, BuiltinScalarFunction::DateTrunc) => {
+                let arg1 = args.remove(0);
+                let arg2 = Box::new(args.remove(0));
+                let date_trunc_precision = extract_literal_string(arg1)?
+                    .as_str()
+                    .try_into()
+                    .map_err(anyhow::Error::msg)?;
+                Ok(DateTimeFunction::DateTrunc(
+                    arg2,
+                    Box::new(date_trunc_precision),
+                ))
+            }
+            (_, func) => bail!("function {} with args {:?} not supported", func, args),
+        }
+    }
+}
+
+impl DateTimeFunction {
+    fn non_null_function_invocation(&self) -> syn::Expr {
+        match self {
+            DateTimeFunction::DateTrunc(_, _) => {
+                parse_quote!(arroyo_worker::operators::functions::datetime::date_trunc(
+                    arg1, arg2
+                ))
+            }
+            DateTimeFunction::DatePart(_, _) => {
+                parse_quote!(arroyo_worker::operators::functions::datetime::date_part(
+                    arg1, arg2
+                ))
+            }
+        }
+    }
+
+    fn to_syn_expression(&self) -> syn::Expr {
+        let function = self.non_null_function_invocation();
+        let (null_arg, expr1, expr2): (bool, syn::Expr, syn::Expr) = match self {
+            DateTimeFunction::DatePart(arg1, arg2) => {
+                let arg2 = format!("arroyo_types::DatePart::{:?}", arg2);
+                (
+                    arg1.nullable(),
+                    arg1.to_syn_expression(),
+                    parse_str(&arg2).unwrap(),
+                )
+            }
+            DateTimeFunction::DateTrunc(arg1, arg2) => {
+                let arg2 = format!("arroyo_types::DateTruncPrecision::{:?}", arg2);
+                (
+                    arg1.nullable(),
+                    arg1.to_syn_expression(),
+                    parse_str(&arg2).unwrap(),
+                )
+            }
+        };
+        match null_arg {
+            true => parse_quote!({
+                use arroyo_types::{DatePart, DateTruncPrecision};
+                if let Some(arg1) = #expr1 {
+                    let arg2 = #expr2;
+                    Some(#function)
+                } else {
+                    None
+                }
+            }),
+            false => parse_quote!({
+                use arroyo_types::{DatePart, DateTruncPrecision};
+                let arg1 = #expr1;
+                let arg2 = #expr2;
+                #function
+            }),
+        }
+    }
+
+    fn return_type(&self) -> TypeDef {
+        match self {
+            DateTimeFunction::DateTrunc(arg, _) => TypeDef::DataType(
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                arg.nullable(),
+            ),
+            DateTimeFunction::DatePart(arg, _) => {
+                TypeDef::DataType(DataType::UInt32, arg.nullable())
             }
         }
     }
