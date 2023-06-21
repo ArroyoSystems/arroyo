@@ -18,7 +18,6 @@ use datafusion_expr::{
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use regex::Regex;
-use serde_json;
 use std::{fmt::Debug, sync::Arc};
 use syn::{parse_quote, parse_str, Ident, Path};
 
@@ -2611,17 +2610,11 @@ pub enum DateTimeFunction {
     DatePart(Box<Expression>, Box<DatePart>),
 }
 
-fn convert_expression_to<T>(expr: Expression, expr_name: &str) -> Result<T, anyhow::Error>
-where
-    T: for<'a> TryFrom<&'a str, Error = String>,
-{
+fn extract_literal_string(expr: Expression) -> Result<String, anyhow::Error> {
     let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(literal_string))}) = expr else {
-        bail!(format!("Can only convert a literal into {}",expr_name))
+        bail!("Can only convert a literal into a string")
     };
-    literal_string
-        .as_str()
-        .try_into()
-        .map_err(anyhow::Error::msg)
+    Ok(literal_string.as_str().to_string())
 }
 
 impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for DateTimeFunction {
@@ -2636,14 +2629,19 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for DateTimeFunction {
             (2, BuiltinScalarFunction::DatePart) => {
                 let arg1 = args.remove(0);
                 let arg2 = Box::new(args.remove(0));
-                let date_part = convert_expression_to::<DatePart>(arg1, "date_part")?;
+                let date_part = extract_literal_string(arg1)?
+                    .as_str()
+                    .try_into()
+                    .map_err(anyhow::Error::msg)?;
                 Ok(DateTimeFunction::DatePart(arg2, Box::new(date_part)))
             }
             (2, BuiltinScalarFunction::DateTrunc) => {
                 let arg1 = args.remove(0);
                 let arg2 = Box::new(args.remove(0));
-                let date_trunc_precision =
-                    convert_expression_to::<DateTruncPrecision>(arg1, "date_trunc")?;
+                let date_trunc_precision = extract_literal_string(arg1)?
+                    .as_str()
+                    .try_into()
+                    .map_err(anyhow::Error::msg)?;
                 Ok(DateTimeFunction::DateTrunc(
                     arg2,
                     Box::new(date_trunc_precision),
@@ -2672,7 +2670,7 @@ impl DateTimeFunction {
 
     fn to_syn_expression(&self) -> syn::Expr {
         let function = self.non_null_function_invocation();
-        let (expr1, expr2) : (syn::Expr, syn::Expr) = match self {
+        let (expr1, expr2): (syn::Expr, syn::Expr) = match self {
             DateTimeFunction::DatePart(arg1, arg2) => {
                 let arg2 = format!("arroyo_types::DatePart::{:?}", arg2);
                 (arg1.to_syn_expression(), parse_str(&arg2).unwrap())
@@ -2693,10 +2691,13 @@ impl DateTimeFunction {
 
     fn return_type(&self) -> TypeDef {
         match self {
-            DateTimeFunction::DateTrunc(arg, _) => {
-                TypeDef::DataType(DataType::Timestamp(TimeUnit::Nanosecond, None), arg.nullable())
+            DateTimeFunction::DateTrunc(arg, _) => TypeDef::DataType(
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                arg.nullable(),
+            ),
+            DateTimeFunction::DatePart(arg, _) => {
+                TypeDef::DataType(DataType::UInt32, arg.nullable())
             }
-            DateTimeFunction::DatePart(arg, _) => TypeDef::DataType(DataType::UInt32, arg.nullable())
         }
     }
 }
