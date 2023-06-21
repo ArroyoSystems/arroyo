@@ -1,12 +1,16 @@
 use anyhow::anyhow;
+use arrow_schema::DataType;
 use arroyo_rpc::grpc::api::{
     connection_schema::Definition, ConnectionSchema, ConnectionTable, CreateConnectionTableReq,
-    SourceField, TableType, TestSchemaReq, TestSourceMessage,
+    SourceField, TableType, TestSchemaReq, TestSourceMessage, ConfluentSchemaReq, ConfluentSchemaResp,
 };
+use arroyo_sql::types::{StructField, TypeDef};
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Pool;
+use http::StatusCode;
 use tokio::sync::mpsc::{channel, Receiver};
 use tonic::Status;
+use tracing::warn;
 
 use crate::{
     connectors::{self, ErasedConnector}, handle_db_error,
@@ -193,7 +197,10 @@ pub(crate) fn expand_schema(name: &str, schema: &ConnectionSchema) -> Result<Con
                     "Avro schemas are not yet supported",
                 ))
             }
-            Definition::RawSchema(_) => todo!(),
+            Definition::RawSchema(_) => vec![
+                StructField { name: "value".to_string(), alias: None, data_type:
+                TypeDef::DataType(DataType::Utf8, false) }
+            ],
         };
 
         let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
@@ -203,4 +210,94 @@ pub(crate) fn expand_schema(name: &str, schema: &ConnectionSchema) -> Result<Con
     }
 
     Ok(schema)
+}
+
+
+pub(crate) async fn get_confluent_schema(
+    req: ConfluentSchemaReq,
+) -> Result<ConfluentSchemaResp, Status> {
+    // TODO: ensure only external URLs can be hit
+    let url = format!(
+        "{}/subjects/{}-value/versions/latest",
+        req.endpoint, req.topic
+    );
+    let resp = reqwest::get(url)
+        .await
+        .map_err(|e| {
+            warn!("Got error response from schema registry: {:?}", e);
+            match e.status() {
+                Some(StatusCode::NOT_FOUND) => Status::failed_precondition(format!(
+                    "Could not find value schema for topic '{}'",
+                    req.topic
+                )),
+                Some(code) => {
+                    Status::failed_precondition(format!("Schema registry returned error: {}", code))
+                }
+                None => {
+                    warn!(
+                        "Unknown error connecting to schema registry {}: {:?}",
+                        req.endpoint, e
+                    );
+                    Status::failed_precondition(format!(
+                        "Could not connect to Schema Registry at {}: unknown error",
+                        req.endpoint
+                    ))
+                }
+            }
+        })?;
+
+    if !resp.status().is_success() {
+        return Err(Status::failed_precondition(format!(
+            "Received an error status code from the provided endpoint: {} {}", resp.status().as_u16(),
+            resp.bytes().await.map(|bs| String::from_utf8_lossy(&bs).to_string())
+                .unwrap_or_else(|_| "<failed to read body>".to_string()))));
+    }
+
+    let value: serde_json::Value = resp.json()
+        .await
+        .map_err(|e| {
+            warn!("Invalid json from schema registry: {:?}", e);
+            Status::failed_precondition("Schema registry returned invalid JSON".to_string())
+        })?;
+
+    let schema_type = value
+        .get("schemaType")
+        .ok_or_else(|| {
+            Status::failed_precondition("The JSON returned from this endpoint was \
+            unexpected. Please confirm that the URL is correct.")
+        })?
+        .as_str();
+
+    if schema_type != Some("JSON") {
+        return Err(Status::failed_precondition(
+            "Only JSON is supported currently",
+        ));
+    }
+
+    let schema = value
+        .get("schema")
+        .ok_or_else(|| {
+            Status::failed_precondition("Missing 'schema' field in schema registry response")
+        })?
+        .as_str()
+        .ok_or_else(|| {
+            Status::failed_precondition(
+                "'schema' field in schema registry response is not a string",
+            )
+        })?;
+
+    if let Err(e) = convert_json_schema(&req.topic, schema) {
+        warn!(
+            "Schema from schema registry is not valid: '{}': {}",
+            schema, e
+        );
+        return Err(Status::failed_precondition(format!(
+            "Schema is not a valid json schema: {}",
+            e
+        )));
+    }
+
+    Ok(ConfluentSchemaResp {
+        schema: schema.to_string(),
+    })
 }

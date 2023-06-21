@@ -1,4 +1,4 @@
-import { Box, Button, FormControl, FormLabel, Select, Stack, StepStatus } from '@chakra-ui/react';
+import { Box, Button, Code, FormControl, FormLabel, Link, Select, Stack, StepStatus, Text } from '@chakra-ui/react';
 import React, { Dispatch, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { ApiClient } from '../../main';
@@ -32,39 +32,67 @@ const JsonEditor = ({
       editor = <JsonSchemaEditor state={state} setState={setState} next={next} client={client} />;
     }
   } else if (state.schema?.definition.case === 'rawSchema') {
-    editor = <Box>Raw schema</Box>;
+    editor = (
+      <Stack spacing={4} maxW={'lg'}>
+        <Text>
+          Connection tables configured with an unstructured JSON schema have a single{' '}
+          <Code>value</Code> column with the JSON value, which can be accessed using SQL{' '}
+          <Link href="https://doc.arroyo.dev/sql/scalar-functions#json-functions">
+            JSON functions
+          </Link>
+          .
+        </Text>
+
+        <Button onClick={next}>Continue</Button>
+      </Stack>
+    );
   };
 
   const onChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     switch (e.target.value) {
       case 'jsonSchema':
         setState({
-            ...state,
-            schema: new ConnectionSchema({
-              ...state.schema,
-              definition: { case: "jsonSchema", value: "" }
-          }) });
+          ...state,
+          schema: new ConnectionSchema({
+            ...state.schema,
+            definition: { case: 'jsonSchema', value: '' },
+          }),
+        });
         break;
       case 'confluentSchemaRegistry':
         setState({
-            ...state,
-            schema: new ConnectionSchema({
-              ...state.schema,
-              definition: { case: "jsonSchema", value: "" },
-              formatOptions: new FormatOptions({
-                confluentSchemaRegistry: true,
-              })
-          }) });
+          ...state,
+          schema: new ConnectionSchema({
+            ...state.schema,
+            definition: { case: 'jsonSchema', value: '' },
+            formatOptions: new FormatOptions({
+              confluentSchemaRegistry: true,
+            }),
+          }),
+        });
         break;
-      case 'unstructured':
+      case 'rawSchema':
         setState({
-            ...state,
-            schema: new ConnectionSchema({
-              ...state.schema,
-              definition: { case: "rawSchema", value: "value" }
-          }) });
+          ...state,
+          schema: new ConnectionSchema({
+            ...state.schema,
+            definition: { case: 'rawSchema', value: 'value' },
+          }),
+        });
         break;
     }
+  };
+
+  let value;
+  switch (state.schema?.definition.case) {
+    case 'jsonSchema':
+      value = state.schema!.formatOptions?.confluentSchemaRegistry ? 'confluentSchemaRegistry' : 'jsonSchema';
+      break;
+    case 'rawSchema':
+      value = 'rawSchema';
+      break;
+    default:
+      null
   };
 
   return (
@@ -74,11 +102,11 @@ const JsonEditor = ({
         <Select
           maxW={'lg'}
           placeholder="Select schema type"
-          value={state.schema?.definition.case}
+          value={value}
           onChange={onChange}
         >
           <option value="jsonSchema">Json Schema</option>
-          <option value="unstructured">Unstructured JSON</option>
+          <option value="rawSchema">Unstructured JSON</option>
           {connector.id === 'kafka' && (
             <option value="confluentSchemaRegistry">Confluent Schema Registry</option>
           )}
@@ -89,6 +117,27 @@ const JsonEditor = ({
     </Stack>
   );
 };
+
+const RawStringEditor = ({
+  next,
+}: {
+  next: () => void;
+}) => {
+  return (
+    <Stack spacing={4} maxW='md'>
+      <Text>
+        When using the raw string format, values read from the source are interpreted as UTF-8
+        encoded strings.
+      </Text>
+
+      <Text>
+        Raw string connection tables have a single <Code>value</Code> column with the value.
+      </Text>
+
+      <Button onClick={next}>Continue</Button>
+    </Stack>
+  );
+}
 
 export const DefineSchema = ({
   connector,
@@ -112,7 +161,7 @@ export const DefineSchema = ({
     {
       name: 'Raw String',
       value: Format.RawString,
-      el: <Box>Raw</Box>,
+      el: <RawStringEditor next={next} />,
     },
     {
       name: 'Protobuf (coming soon)',

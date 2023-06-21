@@ -27,6 +27,7 @@ import { DefineSchema } from './DefineSchema';
 import { ConnectionTester } from './ConnectionTester';
 
 export type CreateConnectionState = {
+  name: string | undefined;
   connectionId: string | null;
   table: any;
   schema: ConnectionSchema | null;
@@ -40,6 +41,7 @@ export const ConnectionCreator = ({
   connector: Connector;
 }) => {
   const [state, setState] = useState<CreateConnectionState>({
+    name: undefined,
     connectionId: null,
     table: null,
     schema: null,
@@ -78,13 +80,12 @@ export const ConnectionCreator = ({
        />
     },
     {
-      title: 'Test' ,
+      title: 'Create' ,
       el: <ConnectionTester
         client={client}
         connector={connector}
         state={state}
         setState={setState}
-        next={() => {}}
         />
     },
   ];

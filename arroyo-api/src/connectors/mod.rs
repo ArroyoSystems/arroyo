@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, vec};
 
 use arroyo_datastream::SerializationMode;
 use arroyo_rpc::grpc::{
@@ -226,23 +226,30 @@ impl From<OperatorConfigSerializationMode> for SerializationMode {
 }
 
 pub fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
-    schema.definition.as_ref().map(|d| match d {
+    let def = schema.definition.as_ref()?;
+    match def {
         grpc::api::connection_schema::Definition::JsonSchema(_) => {
-            format!("{}::{}", name, json_schema::ROOT_NAME)
+            Some(format!("{}::{}", name, json_schema::ROOT_NAME))
         }
         grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
         grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::RawSchema(_) => todo!(),
-    })
+        grpc::api::connection_schema::Definition::RawSchema(_) => {
+            Some("arroyo_types::RawJson".to_string())
+        },
+    }
 }
 
 pub fn schema_defs(name: &str, schema: &ConnectionSchema) -> Option<String> {
-    schema.definition.as_ref().map(|d| match d {
+    let def = schema.definition.as_ref()?;
+
+    match def {
         grpc::api::connection_schema::Definition::JsonSchema(s) => {
-            json_schema::get_defs(&name, &s).unwrap()
+            Some(json_schema::get_defs(&name, &s).unwrap())
         }
         grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
         grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::RawSchema(_) => todo!(),
-    })
+        grpc::api::connection_schema::Definition::RawSchema(_) => {
+            None
+        },
+    }
 }

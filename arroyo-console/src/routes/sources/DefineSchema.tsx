@@ -17,7 +17,6 @@ import { Dispatch, useEffect, useRef, useState } from 'react';
 import {
   ConfluentSchemaReq,
   CreateSourceReq,
-  KafkaSourceConfig,
   SourceSchema,
 } from '../../gen/api_pb';
 import { RadioCard, RadioCardGroup } from '../../lib/RadioGroup';

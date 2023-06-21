@@ -15,18 +15,18 @@ import {
   Input,
   Stack,
 } from '@chakra-ui/react';
-import { ConfluentSchemaReq, SourceSchema } from '../../gen/api_pb';
+import { ConfluentSchemaReq, ConnectionSchema, FormatOptions, SourceSchema } from '../../gen/api_pb';
 
 export function ConfluentSchemaEditor({
   state,
   setState,
   client,
-  setReady,
+  next,
 }: {
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
   client: ApiClient;
-  setReady: Dispatch<boolean>;
+  next: () => void;
 }) {
   const [host, setHost] = useState<string>('');
   const [schema, setSchema] = useState<string | null>(null);
@@ -52,13 +52,15 @@ export function ConfluentSchemaEditor({
 
       setState({
         ...state,
-        schema: new SourceSchema({
-          kafkaSchemaRegistry: true,
-          schema: { case: 'jsonSchema', value: { jsonSchema: resp.schema } },
+        schema: new ConnectionSchema({
+          ...state.schema,
+          definition: { case: "jsonSchema", value: resp.schema },
+          formatOptions: new FormatOptions({
+            confluentSchemaRegistry: true,
+          })
         }),
       });
 
-      setReady(true);
     } catch (e) {
       if (e instanceof ConnectError) {
         setError(e.rawMessage);
@@ -97,22 +99,28 @@ export function ConfluentSchemaEditor({
     <Stack spacing={4} maxW="lg">
       <FormControl>
         <FormLabel>Schema Registry Endpoint</FormLabel>
-        <Input type="text" placeholder='http://localhost:8081' value={host} onChange={e => setHost(e.target.value)} />
+        <Input
+          type="text"
+          placeholder="http://localhost:8081"
+          value={host}
+          onChange={e => setHost(e.target.value)}
+        />
         <FormHelperText>Provide the endpoint for your Confluent Schema Registry</FormHelperText>
       </FormControl>
 
       {errorBox}
 
-      <Button
-        variant="primary"
-        isDisabled={host == ''}
-        isLoading={loading}
-        onClick={fetchSchema}
-      >
+      <Button variant="primary" isDisabled={host == ''} isLoading={loading} onClick={fetchSchema}>
         Fetch Schema
       </Button>
 
       {successBox}
+
+      { schema != null && (
+        <Button colorScheme='green' onClick={() => next()}>
+          Continue
+        </Button>
+      ) }
     </Stack>
   );
 }

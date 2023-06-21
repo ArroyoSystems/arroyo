@@ -47,25 +47,8 @@ const icons = {
 
 const columns: Array<ColumnDef> = [
   {
-    name: 'type',
-    accessor: s => (
-      <Stack direction="row">
-        <Icon boxSize="5" as={icons[s.connectionType.case!]} />
-        <Text>{s.connectionType.case!}</Text>
-      </Stack>
-    ),
-  },
-  {
     name: 'name',
     accessor: s => <Text>{s.name}</Text>,
-  },
-  {
-    name: 'config',
-    accessor: s => (
-      <Box maxW={400} whiteSpace="pre-wrap">
-        <Code>{JSON.stringify(s.connectionType.value!, null, 2)}</Code>
-      </Box>
-    ),
   },
   {
     name: 'sources',

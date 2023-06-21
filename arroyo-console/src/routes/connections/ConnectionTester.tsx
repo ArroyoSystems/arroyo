@@ -1,20 +1,20 @@
 import { Dispatch, useRef, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { ApiClient } from '../../main';
-import { Alert, AlertDescription, AlertDialog, AlertDialogBody, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogOverlay, AlertIcon, Box, Button, Spinner, Stack, StackDivider, Text, useDisclosure } from '@chakra-ui/react';
+import { Alert, AlertDescription, AlertDialog, AlertDialogBody, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogOverlay, AlertIcon, AlertTitle, Box, Button, FormControl, FormHelperText, FormLabel, Heading, Input, Spinner, Stack, StackDivider, Text, useDisclosure } from '@chakra-ui/react';
 import { Connector, CreateConnectionReq, CreateConnectionTableReq, TestSourceMessage } from '../../gen/api_pb';
+import { ConnectError } from '@bufbuild/connect-web';
+import { useNavigate } from 'react-router-dom';
 
 export function ConnectionTester({
   connector,
   state,
   setState,
-  next,
   client,
 }: {
   connector: Connector;
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
-  next: () => void;
   client: ApiClient;
 }) {
 
@@ -22,12 +22,15 @@ export function ConnectionTester({
   const [messages, setMessages] = useState<Array<TestSourceMessage> | null>(null);
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = useRef<any>();
+  const [touched, setTouched] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const done = messages != null && messages.length > 0 && messages[messages?.length - 1].done;
   const errored = messages != null && messages.find(m => m.error) != null;
 
   const createRequest = new CreateConnectionTableReq({
-    name: "__test_connection",
+    name: state.name,
     connector: connector.id,
     connectionId: state.connectionId || undefined,
     config: JSON.stringify(state.table),
@@ -48,14 +51,29 @@ export function ConnectionTester({
       } catch (e) {
         console.log('Request failed', e);
       }
+      setTesting(false);
     }
   };
 
-  const onClickContinue = () => {
+  const submit = async () => {
+      setError(null);
+      try {
+        await(await client()).createConnectionTable(createRequest);
+        navigate('/connections');
+      } catch (e) {
+        if (e instanceof ConnectError) {
+          setError(e.rawMessage);
+        } else {
+          setError('Something went wrong... try again');
+        }
+      }
+  }
+
+  const onClickContinue = async () => {
     if (errored) {
       onOpen();
     } else {
-      next();
+      submit();
     }
   };
 
@@ -84,46 +102,85 @@ export function ConnectionTester({
 
 
   return (
-    <Stack spacing={4}>
-      <Text>Before creating the connection, we can validate that it is configured properly.</Text>
+    <>
+      {error && (
+        <Alert status="error">
+            <AlertIcon />
+            <AlertTitle>Failed to create connection</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      <Stack spacing={8} maxW={'md'}>
+        <FormControl>
+          <FormLabel>Connection Name</FormLabel>
+          <Input
+            isInvalid={touched && state.name == ''}
+            type="text"
+            value={state.name}
+            onChange={v => {
+              setTouched(true);
+              setState({ ...state, name: v.target.value });
+            }}
+          />
+          <FormHelperText>
+            The connection will used in SQL using this name; it must be a {'\u00A0'}
+            <dfn title="Names must start with a letter or _, contain only letters, numbers, and _s, and have fewer than 63 characters">
+              valid SQL table name
+            </dfn>
+          </FormHelperText>
+        </FormControl>
 
-      {!done ? (
+        <Text>Before creating the connection, we can validate that it is configured properly.</Text>
+
         <Button variant="primary" isDisabled={testing} onClick={onClickTest}>
           Test Connection
         </Button>
-      ) : (
-        <Button colorScheme={errored ? 'red' : 'green'} onClick={onClickContinue}>
-          Continue
-        </Button>
-      )}
 
-      {messageBox}
+        {messageBox}
 
-      <Box>{testing && !done ? <Spinner /> : null}</Box>
+        {testing && !done && (
+          <Box>
+            <Spinner />
+          </Box>
+        )}
 
-      <AlertDialog isOpen={isOpen} leastDestructiveRef={cancelRef} onClose={onClose}>
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              Validation failed
-            </AlertDialogHeader>
+        {done && (
+          <Button colorScheme={errored ? 'red' : 'green'} onClick={onClickContinue}>
+            Create
+          </Button>
+        )}
 
-            <AlertDialogBody>
-              We were not able to validate that the connection is correctly configured. You may continue
-              creating it, but may encounter issues when using it in a query.
-            </AlertDialogBody>
+        <AlertDialog isOpen={isOpen} leastDestructiveRef={cancelRef} onClose={onClose}>
+          <AlertDialogOverlay>
+            <AlertDialogContent>
+              <AlertDialogHeader fontSize="lg" fontWeight="bold">
+                Validation failed
+              </AlertDialogHeader>
 
-            <AlertDialogFooter>
-              <Button ref={cancelRef} onClick={onClose}>
-                Go Back
-              </Button>
-              <Button colorScheme="red" onClick={() => next()} ml={3}>
-                Continue
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
-    </Stack>
+              <AlertDialogBody>
+                We were not able to validate that the connection is correctly configured. You may
+                continue creating it, but may encounter issues when using it in a query.
+              </AlertDialogBody>
+
+              <AlertDialogFooter>
+                <Button ref={cancelRef} onClick={onClose}>
+                  Go Back
+                </Button>
+                <Button
+                  colorScheme="red"
+                  onClick={() => {
+                    onClose();
+                    submit();
+                  }}
+                  ml={3}
+                >
+                  Create
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialogOverlay>
+        </AlertDialog>
+      </Stack>
+    </>
   );
 }

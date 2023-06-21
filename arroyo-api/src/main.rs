@@ -533,7 +533,7 @@ impl ApiGrpc for ApiServer {
         let (request, _) = self.authenticate(request).await?;
 
         Ok(Response::new(
-            sources::get_confluent_schema(request.into_inner()).await?,
+            connection_tables::get_confluent_schema(request.into_inner()).await?,
         ))
     }
 

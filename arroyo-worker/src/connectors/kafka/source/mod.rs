@@ -90,7 +90,7 @@ where
         };
 
 
-        let mut client_configs = HashMap::new();
+        let mut client_configs: HashMap<String, String> = HashMap::new();
 
         match connection.authentication {
             super::KafkaConfigAuthentication::None {  } => {},

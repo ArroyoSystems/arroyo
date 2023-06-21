@@ -128,7 +128,8 @@ export function FormInner({
                     key={key}
                     title={property.title || key}
                     description={property.description}
-                    options={property.enum.map(value => ({ value, label: value }))}
+                    placeholder='Select an option'
+                    options={property.enum.map(value => ({ value: value!.toString(), label: value!.toString() }))}
                     value={values[key]}
                     onChange={onChange}
                   />
@@ -163,6 +164,7 @@ export function FormInner({
                     <Stack p={4}>
                       <SelectWidget
                         path={typeKey}
+                        placeholder="Select an option"
                         description={property.description}
                         options={property.oneOf.map(oneOf => ({
                           // @ts-ignore
@@ -174,7 +176,7 @@ export function FormInner({
                         onChange={onChange}
                       />
 
-                      <Box p={4}>
+                      { value != undefined && <Box p={4}>
                         <FormInner
                           path={key}
                           // @ts-ignore
@@ -183,7 +185,7 @@ export function FormInner({
                           onChange={onChange}
                           values={values[key] || {}}
                         />
-                      </Box>
+                      </Box> }
                     </Stack>
                   </fieldset>
                 );
