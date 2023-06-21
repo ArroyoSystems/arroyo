@@ -2682,9 +2682,12 @@ impl DateTimeFunction {
         };
         parse_quote!({
                 use arroyo_types::{DatePart, DateTruncPrecision};
-                let arg1 = #expr1;
-                let arg2 = #expr2;
-                #function
+                if let Some(arg1) = #expr1 {
+                    let arg2 = #expr2;
+                    Some(#function)
+                } else {
+                    None
+                }
             }
         )
     }
