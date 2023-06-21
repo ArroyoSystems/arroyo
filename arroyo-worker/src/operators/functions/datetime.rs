@@ -85,7 +85,7 @@ mod test {
     use std::{collections::HashMap, time::SystemTime};
 
     lazy_static! {
-        static ref DATE_PART_TESTCASES: HashMap<DatePart,u32> = {
+        static ref DATE_PART_TESTCASES: HashMap<DatePart, u32> = {
             let mut m = HashMap::new();
             m.insert(DatePart::Year, 2023);
             m.insert(DatePart::Month, 6);
@@ -101,7 +101,7 @@ mod test {
             m.insert(DatePart::DayOfYear, 161);
             m
         };
-        static ref DATE_TRUNC_TESTCASES: HashMap<DateTruncPrecision,&'static str> = {
+        static ref DATE_TRUNC_TESTCASES: HashMap<DateTruncPrecision, &'static str> = {
             let mut m = HashMap::new();
             m.insert(DateTruncPrecision::Year, "2023-01-01T00:00:00Z");
             m.insert(DateTruncPrecision::Quarter, "2023-04-01T00:00:00Z");
@@ -113,11 +113,11 @@ mod test {
             m.insert(DateTruncPrecision::Second, "2023-06-10T00:48:10Z");
             m
         };
-        static ref REFERENCE_DATETIME:SystemTime = {
-            let date_fixed_offset = DateTime::parse_from_rfc3339("2023-06-10T00:48:10.284546794Z").expect("Failed to parse date and time");
+        static ref REFERENCE_DATETIME: SystemTime = {
+            let date_fixed_offset = DateTime::parse_from_rfc3339("2023-06-10T00:48:10.284546794Z")
+                .expect("Failed to parse date and time");
             date_fixed_offset.into()
         };
-
     }
 
     #[test]

@@ -1130,14 +1130,4 @@ mod tests {
         },
         6
     );
-
-    // single_test_codegen!(
-    //     "extract",
-    //     "extract(non_nullable_timestamp, '(bar)(beque)')",
-    //     arroyo_sql::TestStruct {
-    //         non_nullable_timestamp: arroyo_types::from_millis(1685659545809),
-    //         ..Default::default()
-    //     },
-    //     "".to_string()
-    // );
 }

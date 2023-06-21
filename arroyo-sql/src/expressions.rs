@@ -1,4 +1,3 @@
-use std::{fmt::Debug, sync::Arc};
 use crate::{
     operators::TwoPhaseAggregation,
     pipeline::SortDirection,
@@ -20,6 +19,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use regex::Regex;
 use serde_json;
+use std::{fmt::Debug, sync::Arc};
 use syn::{parse_quote, parse_str, Ident, Path};
 
 #[derive(Debug, Clone)]
@@ -75,9 +75,8 @@ impl Expression {
             Expression::RustUdf(t) => t.to_syn_expression(),
             Expression::WrapType(t) => t.to_syn_expression(),
             Expression::Case(case_expression) => case_expression.to_syn_expression(),
-            Expression::Date(datetime_expr) =>  datetime_expr.to_syn_expression(),
+            Expression::Date(datetime_expr) => datetime_expr.to_syn_expression(),
         }
-    
     }
 
     fn syn_expression_with_nullity(&self, nullity: bool) -> syn::Expr {
@@ -108,7 +107,7 @@ impl Expression {
             Expression::Aggregation(aggregation_expression) => aggregation_expression.return_type(),
             Expression::Cast(cast_expression) => cast_expression.return_type(),
             Expression::Numeric(numeric_expression) => numeric_expression.return_type(),
-            Expression::Date(date_function) =>  date_function.return_type(),
+            Expression::Date(date_function) => date_function.return_type(),
             Expression::String(string_function) => string_function.return_type(),
             Expression::Hash(hash_expression) => hash_expression.return_type(),
             Expression::DataStructure(data_structure_expression) => {
@@ -442,8 +441,8 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::Struct | BuiltinScalarFunction::ArrowTypeof => {
                         bail!("data structure function {:?} not implemented", fun)
                     }
-   
-                    | BuiltinScalarFunction::ToTimestamp
+
+                    BuiltinScalarFunction::ToTimestamp
                     | BuiltinScalarFunction::ToTimestampMillis
                     | BuiltinScalarFunction::ToTimestampMicros
                     | BuiltinScalarFunction::ToTimestampSeconds
@@ -473,11 +472,11 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::Factorial => bail!("factorial not implemented yet"),
                     BuiltinScalarFunction::Gcd => bail!("gcd not implemented yet"),
                     BuiltinScalarFunction::Lcm => bail!("lcm not implemented yet"),
-                    BuiltinScalarFunction::DatePart | BuiltinScalarFunction::DateTrunc  => {
-                        let date_function: DateTimeFunction =(fun.clone(), arg_expressions).try_into()?;
+                    BuiltinScalarFunction::DatePart | BuiltinScalarFunction::DateTrunc => {
+                        let date_function: DateTimeFunction =
+                            (fun.clone(), arg_expressions).try_into()?;
                         Ok(Expression::Date(date_function))
                     }
-    
                 }
             }
             Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
@@ -1167,11 +1166,10 @@ impl CastExpression {
         // handle string to date casts.
         } else if Self::is_string(input_data_type) && Self::is_date(output_data_type) {
             true
-        // handle timestamp casts 
+        // handle timestamp casts
         } else if Self::is_date(input_data_type) && Self::is_date(output_data_type) {
             true
-        }
-        else {
+        } else {
             false
         }
     }
@@ -2614,51 +2612,56 @@ pub enum DateTimeFunction {
     Extract(Box<Expression>, Box<DatePart>),
 }
 
-
-fn convert_expression_to<T>(expr:Expression, expr_name:&str) -> Result<T, anyhow::Error> 
-where T: for<'a> TryFrom<&'a str, Error = String>
+fn convert_expression_to<T>(expr: Expression, expr_name: &str) -> Result<T, anyhow::Error>
+where
+    T: for<'a> TryFrom<&'a str, Error = String>,
 {
     let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(literal_string))}) = expr else {
         bail!(format!("Can only convert a literal into {}",expr_name))
     };
-    literal_string.as_str().try_into().map_err(anyhow::Error::msg)
+    literal_string
+        .as_str()
+        .try_into()
+        .map_err(anyhow::Error::msg)
 }
 
 impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for DateTimeFunction {
     type Error = anyhow::Error;
 
-
-    fn try_from(value: (BuiltinScalarFunction, Vec<Expression>)) -> std::result::Result<Self, Self::Error> {
+    fn try_from(
+        value: (BuiltinScalarFunction, Vec<Expression>),
+    ) -> std::result::Result<Self, Self::Error> {
         let func = value.0;
         let mut args = value.1;
         match (args.len(), func) {
             (2, BuiltinScalarFunction::DatePart) => {
                 let arg1 = args.remove(0);
                 let arg2 = Box::new(args.remove(0));
-                let date_part = convert_expression_to::<DatePart>(arg1,"date_part")?;
+                let date_part = convert_expression_to::<DatePart>(arg1, "date_part")?;
                 Ok(DateTimeFunction::DatePart(arg2, Box::new(date_part)))
-            },
+            }
             (2, BuiltinScalarFunction::DateTrunc) => {
                 let arg1 = args.remove(0);
                 let arg2 = Box::new(args.remove(0));
-                let date_trunc_precision = convert_expression_to::<DateTruncPrecision>(arg1,"date_trunc")?;
-                Ok(DateTimeFunction::DateTrunc(arg2, Box::new(date_trunc_precision)))
-            },
+                let date_trunc_precision =
+                    convert_expression_to::<DateTruncPrecision>(arg1, "date_trunc")?;
+                Ok(DateTimeFunction::DateTrunc(
+                    arg2,
+                    Box::new(date_trunc_precision),
+                ))
+            }
             (_, func) => bail!("function {} with args {:?} not supported", func, args),
         }
     }
 }
 
-fn enum_to_syn<T: serde::Serialize +  std::fmt::Debug>(t: &T, prefix: &str) -> syn::Expr {
+fn enum_to_syn<T: serde::Serialize + std::fmt::Debug>(t: &T, prefix: &str) -> syn::Expr {
     let s = serde_json::to_string(t).unwrap();
-    let s = format!("{}::{}", prefix, &s[1..s.len()-1]); // Remove the quotation marks
+    let s = format!("{}::{}", prefix, &s[1..s.len() - 1]); // Remove the quotation marks
     syn::parse_str(&s).unwrap()
 }
 
-
 impl DateTimeFunction {
-
-
     fn non_null_function_invocation(&self) -> syn::Expr {
         match self {
             DateTimeFunction::DateTrunc(_, _) => {
@@ -2679,19 +2682,16 @@ impl DateTimeFunction {
         }
     }
 
-    
-
     fn to_syn_expression(&self) -> syn::Expr {
         let function = self.non_null_function_invocation();
         let (expr1, expr2) = match self {
-            DateTimeFunction::DatePart(arg1, arg2)
-            | DateTimeFunction::Extract(arg1, arg2) => {
-                (arg1.to_syn_expression(), enum_to_syn(arg2,"DatePart"))
-            },
-            DateTimeFunction::DateTrunc(arg1, arg2) => {
-               (arg1.to_syn_expression(),enum_to_syn(arg2,"DateTruncPrecision"))
-                
+            DateTimeFunction::DatePart(arg1, arg2) | DateTimeFunction::Extract(arg1, arg2) => {
+                (arg1.to_syn_expression(), enum_to_syn(arg2, "DatePart"))
             }
+            DateTimeFunction::DateTrunc(arg1, arg2) => (
+                arg1.to_syn_expression(),
+                enum_to_syn(arg2, "DateTruncPrecision"),
+            ),
         };
         parse_quote!({
                 use arroyo_types::{DatePart, DateTruncPrecision};

@@ -9,7 +9,6 @@ use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
 pub struct Window {
     pub start_time: SystemTime,
@@ -706,4 +705,3 @@ impl TryFrom<&str> for DateTruncPrecision {
         }
     }
 }
-
