@@ -2,6 +2,7 @@ import {
   BuiltinSink,
   CheckpointDetailsReq,
   CreateUdf,
+  GetConnectionTablesReq,
   GetConnectionsReq,
   GetConnectorsReq,
   GetSourcesReq,
@@ -26,6 +27,10 @@ const connectorsKey = () => {
 
 const connectionsKey = () => {
   return { key: 'Connections' };
+}
+
+const connectionTablesKey = () => {
+  return { key: 'ConnectionTables' };
 }
 
 const jobDetailsKey = (jobId?: string) => {
@@ -96,6 +101,33 @@ export const useConnections = (client: ApiClient) => {
     mutateConnections: mutate,
   };
 };
+
+
+// ConnectionTables
+const connectionTablesFetcher = (client: ApiClient) => {
+  return async (params: { connectionId: string }) => {
+    return (await (
+      await client()
+    ).getConnectionTables(new GetConnectionTablesReq({}))).tables;
+  }
+}
+
+export const useConnectionTables = (client: ApiClient) => {
+  const { data, isLoading } = useSWR(
+    connectionTablesKey(),
+    connectionTablesFetcher(client),
+    {
+      refreshInterval: 5000,
+    }
+  );
+
+  return {
+    connectionTables: data,
+    connectionTablesLoading: isLoading,
+  }
+}
+
+
 
 // JobDetailsReq
 
@@ -275,7 +307,6 @@ export const usePipelineGraph = (client: ApiClient, query?: string, udfInput?: s
     pipelineGraph: data,
   };
 };
-
 
 // GetSourcesReq
 

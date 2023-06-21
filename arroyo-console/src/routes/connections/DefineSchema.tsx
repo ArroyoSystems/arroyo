@@ -155,22 +155,22 @@ export const DefineSchema = ({
   const formats = [
     {
       name: 'JSON',
-      value: Format.Json,
+      value: Format.JsonFormat,
       el: <JsonEditor connector={connector} state={state} setState={setState} client={client} next={next} />,
     },
     {
       name: 'Raw String',
-      value: Format.RawString,
+      value: Format.RawStringFormat,
       el: <RawStringEditor next={next} />,
     },
     {
       name: 'Protobuf (coming soon)',
-      value: Format.Protobuf,
+      value: Format.ProtobufFormat,
       disabled: true,
     },
     {
       name: 'Avro (coming soon)',
-      value: Format.Avro,
+      value: Format.AvroFormat,
       disabled: true,
     },
   ];
@@ -182,10 +182,15 @@ export const DefineSchema = ({
         <Select
           maxW={'lg'}
           placeholder="Select format"
-          value={Number(state.schema?.format)}
-          onChange={e => setState({ ...state, schema: new ConnectionSchema({
-            format: parseInt(e.target.value) as Format
-          })})}
+          value={state.schema?.format}
+          onChange={e =>
+            setState({
+              ...state,
+              schema: new ConnectionSchema({
+                format: parseInt(e.target.value) as Format,
+              }),
+            })
+          }
         >
           {formats.map(f => (
             <option key={f.value} value={f.value} disabled={f.disabled}>

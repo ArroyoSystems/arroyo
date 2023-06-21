@@ -8,7 +8,7 @@ import {
   Flex,
   Text,
 } from '@chakra-ui/react';
-import { SourceDef, SourceField } from '../../gen/api_pb';
+import { ConnectionTable, SourceDef, SourceField } from '../../gen/api_pb';
 
 function CatalogField({ field, nesting }: { field: SourceField; nesting: number }) {
   switch (field.fieldType!.type.case) {
@@ -41,24 +41,24 @@ function CatalogField({ field, nesting }: { field: SourceField; nesting: number 
   }
 }
 
-export function Catalog({ sources }: { sources: Array<SourceDef> }) {
+export function Catalog({ tables }: { tables: Array<ConnectionTable> }) {
   return (
     <Accordion allowMultiple defaultIndex={[]}>
-      {sources.map(source => {
+      {tables.map(table => {
         return (
-          <AccordionItem key={source.name} fontSize="xs" pb={4}>
+          <AccordionItem key={table.name} fontSize="xs" pb={4} borderWidth={0}>
             <Box>
               <AccordionButton padding={0}>
                 <Box fontWeight="bold" as="span" flex="1" textAlign="left">
                   <Text fontSize="xs" pb={2}>
-                    {source.name}
+                    {table.name}
                   </Text>
                 </Box>
                 <AccordionIcon />
               </AccordionButton>
             </Box>
             <AccordionPanel padding={0} pl={3}>
-              {source.sqlFields.map(f => (
+              {table.schema!.fields.map(f => (
                 <CatalogField key={f.fieldName} field={f} nesting={0} />
               ))}
             </AccordionPanel>

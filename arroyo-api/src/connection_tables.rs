@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use arrow_schema::DataType;
 use arroyo_rpc::grpc::api::{
     connection_schema::Definition, ConnectionSchema, ConnectionTable, CreateConnectionTableReq,
-    SourceField, TableType, TestSchemaReq, TestSourceMessage, ConfluentSchemaReq, ConfluentSchemaResp,
+    TableType, TestSchemaReq, TestSourceMessage, ConfluentSchemaReq, ConfluentSchemaResp, Connection,
 };
 use arroyo_sql::types::{StructField, TypeDef};
 use cornucopia_async::GenericClient;
@@ -16,7 +16,7 @@ use crate::{
     connectors::{self, ErasedConnector}, handle_db_error,
     json_schema::{self, convert_json_schema},
     log_and_map,
-    queries::api_queries,
+    queries::api_queries::{self, GetConnectionTables},
     required_field, AuthData,
 };
 
@@ -130,6 +130,15 @@ pub(crate) async fn test(
     Ok(rx)
 }
 
+fn get_connection(c: &GetConnectionTables) -> Option<Connection> {
+    Some(Connection {
+        id: format!("{}", c.connection_id?),
+        name: c.connection_name.as_ref()?.clone(),
+        connector: c.connection_type.as_ref()?.clone(),
+        config: serde_json::to_string(&c.connection_config.as_ref()?).unwrap(),
+    })
+}
+
 pub(crate) async fn get<C: GenericClient>(
     auth: &AuthData,
     client: &C,
@@ -142,15 +151,16 @@ pub(crate) async fn get<C: GenericClient>(
 
     Ok(tables
         .into_iter()
-        .map(|t| ConnectionTable {
-            name: t.name,
-            connection_id: format!("{}", t.connection_id),
-            connection_name: t.connection_name,
-            connection_type: t.connection_type,
-            connection_config: serde_json::to_string(&t.connection_config).unwrap(),
-            r#type: TableType::from_str_name(&t.r#type).unwrap() as i32,
-            config: serde_json::to_string(&t.config).unwrap(),
-            schema: t.schema.map(|v| serde_json::from_value(v).unwrap()),
+        .map(|t| {
+            let connection = get_connection(&t);
+            ConnectionTable {
+                name: t.name,
+                connection,
+                connector: t.connector,
+                table_type: TableType::from_str_name(&t.table_type).unwrap() as i32,
+                config: serde_json::to_string(&t.config).unwrap(),
+                schema: Some(serde_json::from_value(t.schema).unwrap()),
+            }
         })
         .collect())
 }

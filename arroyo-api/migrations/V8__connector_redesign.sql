@@ -14,7 +14,7 @@ CREATE TABLE connection_tables (
     deleted_at TIMESTAMPTZ,
 
     name TEXT NOT NULL,
-    type TEXT NOT NULL, -- currently one of source or sink
+    table_type TEXT NOT NULL, -- currently one of source or sink
     connector TEXT NOT NULL,
     connection_id BIGINT REFERENCES connections(id),
     config JSONB,

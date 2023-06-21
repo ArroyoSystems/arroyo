@@ -4,15 +4,12 @@ import './index.css';
 import { extendTheme, ThemeConfig } from '@chakra-ui/react';
 import { theme as proTheme } from '@chakra-ui/pro-theme';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
-import { Sources } from './routes/sources/Sources';
 import { JobsIndex } from './routes/pipelines/JobsIndex';
 import { ApiGrpc } from './gen/api_connectweb';
 import { PromiseClient } from '@bufbuild/connect-web';
 import { JobDetail } from './routes/pipelines/JobDetail';
-import { OldCreatePipeline } from './routes/pipelines/OldCreatePipeline';
 import '@fontsource/inter/variable.css';
 import { Home } from './routes/home/Home';
-import { CreateSource } from './routes/sources/CreateSource';
 import { Connections } from './routes/connections/Connections';
 import { CreatePipeline } from './routes/pipelines/CreatePipeline';
 
@@ -53,24 +50,12 @@ export function Router(): JSX.Element {
       element: <CreateConnection client={client} />,
     },
     {
-      path: 'sources',
-      element: <Sources client={client} />,
-    },
-    {
-      path: 'sources/new',
-      element: <CreateSource client={client} />,
-    },
-    {
       path: 'jobs',
       element: <JobsIndex client={client} />,
     },
     {
       path: 'pipelines/new',
       element: <CreatePipeline client={client} />,
-    },
-    {
-      path: 'pipelines/newOldEditor',
-      element: <OldCreatePipeline client={client} />,
     },
     {
       path: 'jobs/:id',

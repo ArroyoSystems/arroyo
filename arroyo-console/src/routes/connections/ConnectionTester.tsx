@@ -23,22 +23,27 @@ export function ConnectionTester({
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = useRef<any>();
   const [touched, setTouched] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{title: string, body: string} | null>(null);
   const navigate = useNavigate();
 
   const done = messages != null && messages.length > 0 && messages[messages?.length - 1].done;
   const errored = messages != null && messages.find(m => m.error) != null;
 
+  let config = JSON.parse(JSON.stringify(state.table));
+  delete config.__meta;
+
   const createRequest = new CreateConnectionTableReq({
     name: state.name,
     connector: connector.id,
     connectionId: state.connectionId || undefined,
-    config: JSON.stringify(state.table),
+    config: JSON.stringify(config),
     schema: state.schema || undefined,
   })
 
   const onClickTest = async () => {
     setTesting(true);
+    setError(null);
+    console.log('config', state);
     if (!testing) {
       try {
         let m: Array<TestSourceMessage> = [];
@@ -49,7 +54,11 @@ export function ConnectionTester({
           await new Promise(r => setTimeout(r, 300));
         }
       } catch (e) {
-        console.log('Request failed', e);
+        if (e instanceof ConnectError) {
+          setError({title: "Failed to test connection", body: e.rawMessage});
+        } else {
+          setError({title: "Failed to test connection", body: 'Something went wrong... try again'});
+        }
       }
       setTesting(false);
     }
@@ -62,9 +71,9 @@ export function ConnectionTester({
         navigate('/connections');
       } catch (e) {
         if (e instanceof ConnectError) {
-          setError(e.rawMessage);
+          setError({title: "Failed to create connection", body: e.rawMessage});
         } else {
-          setError('Something went wrong... try again');
+          setError({title: "Failed to create connection", body: 'Something went wrong... try again'});
         }
       }
   }
@@ -106,8 +115,8 @@ export function ConnectionTester({
       {error && (
         <Alert status="error">
             <AlertIcon />
-            <AlertTitle>Failed to create connection</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertTitle>{error.title}</AlertTitle>
+            <AlertDescription>{error.body}</AlertDescription>
         </Alert>
       )}
       <Stack spacing={8} maxW={'md'}>
@@ -116,7 +125,7 @@ export function ConnectionTester({
           <Input
             isInvalid={touched && state.name == ''}
             type="text"
-            value={state.name}
+            value={state.name || ''}
             onChange={v => {
               setTouched(true);
               setState({ ...state, name: v.target.value });

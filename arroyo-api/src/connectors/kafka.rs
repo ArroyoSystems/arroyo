@@ -262,33 +262,37 @@ impl KafkaTester {
                 .map_err(|e| format!("Failed to subscribe to topic '{}': {:?}", topic, e))?;
         }
 
-        self.info("Waiting for messsages").await;
+        if let TableType::Source { .. } = self.table.type_ {
+            self.info("Waiting for messsages").await;
 
-        let start = Instant::now();
-        let timeout = Duration::from_secs(30);
-        while start.elapsed() < timeout {
-            match client.poll(Duration::ZERO) {
-                Some(Ok(message)) => {
-                    self.info("Received message from Kafka").await;
-                    self.test_schema(message)?;
-                    return Ok(());
+            let start = Instant::now();
+            let timeout = Duration::from_secs(30);
+            while start.elapsed() < timeout {
+                match client.poll(Duration::ZERO) {
+                    Some(Ok(message)) => {
+                        self.info("Received message from Kafka").await;
+                        self.test_schema(message)?;
+                        return Ok(());
+                    }
+                    Some(Err(e)) => {
+                        warn!("Error while reading from kafka in test: {:?}", e);
+                        return Err(format!("Error while reading messages from Kafka: {}", e));
+                    }
+                    None => {
+                        // wait
+                    }
                 }
-                Some(Err(e)) => {
-                    warn!("Error while reading from kafka in source test: {:?}", e);
-                    return Err(format!("Error while reading messages from Kafka: {}", e));
-                }
-                None => {
-                    // wait
-                }
+
+                tokio::time::sleep(Duration::from_millis(500)).await;
             }
 
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            return Err(format!(
+                "No messages received from Kafka within {} seconds",
+                timeout.as_secs()
+            ));
         }
 
-        Err(format!(
-            "No messages received from Kafka within {} seconds",
-            timeout.as_secs()
-        ))
+        Ok(())
     }
 
     fn test_schema(&self, _: BorrowedMessage) -> Result<(), String> {
@@ -341,7 +345,7 @@ impl KafkaTester {
                 self.send(TestSourceMessage {
                     error: false,
                     done: true,
-                    message: "Source and schema are valid".to_string(),
+                    message: "Connection is valid".to_string(),
                 })
                 .await;
             }

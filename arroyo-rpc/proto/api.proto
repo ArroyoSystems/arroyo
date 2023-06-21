@@ -629,13 +629,18 @@ message CreateConnectionTableResp {
 
 message ConnectionTable {
   string name = 1;
-  string connection_id = 2;
-  string connection_name = 3;
-  string connection_type = 4;
-  string connection_config = 5;
-  TableType type = 6;
-  string config = 7;
-  optional ConnectionSchema schema = 8;
+  string connector = 2;
+  optional Connection connection  = 3;
+  TableType table_type = 4;
+  string config = 5;
+  ConnectionSchema schema = 6;
+}
+
+message GetConnectionTablesReq {
+}
+
+message GetConnectionTablesResp {
+  repeated ConnectionTable tables = 1;
 }
 
 // Sources
@@ -841,6 +846,7 @@ service ApiGrpc {
 
   rpc CreateConnectionTable(CreateConnectionTableReq) returns (CreateConnectionTableResp);
   rpc TestConnectionTable(CreateConnectionTableReq) returns (stream TestSourceMessage);
+  rpc GetConnectionTables(GetConnectionTablesReq) returns (GetConnectionTablesResp);
 
   rpc CreateSource(CreateSourceReq) returns (CreateSourceResp);
   rpc GetSources(GetSourcesReq) returns (GetSourcesResp);

@@ -121,7 +121,7 @@ pub(crate) async fn delete_connection(
 
     if deleted == 0 {
         return Err(Status::not_found(format!(
-            "Not connection with name {}",
+            "No connection with name {}",
             req.name
         )));
     }

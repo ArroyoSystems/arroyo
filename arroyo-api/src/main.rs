@@ -2,7 +2,7 @@ use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
     CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
     DeleteJobReq, DeleteJobResp, DeleteSourceReq, DeleteSourceResp, GetConnectorsReq,
-    GetConnectorsResp, PipelineProgram, SourceMetadataResp, TestSchemaReq,
+    GetConnectorsResp, PipelineProgram, SourceMetadataResp, TestSchemaReq, GetConnectionTablesReq, GetConnectionTablesResp,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -494,6 +494,18 @@ impl ApiGrpc for ApiServer {
         connection_tables::create(request.into_inner(), auth, &self.pool).await?;
 
         Ok(Response::new(CreateConnectionTableResp {}))
+    }
+
+    async fn get_connection_tables(
+        &self,
+        request: Request<GetConnectionTablesReq>,
+    ) -> Result<Response<GetConnectionTablesResp>, Status> {
+        let (request, auth) = self.authenticate(request).await?;
+
+        let tables = connection_tables::get(&auth, &self.client().await?).await?;
+        Ok(Response::new(GetConnectionTablesResp {
+            tables
+        }))
     }
 
     // sources

@@ -61,17 +61,15 @@ where
     }
 
     for table in connection_tables::get(auth_data, tx).await? {
-        let Some(connector) = connector_for_type(&table.connection_type) else {
-            warn!("Saved table found with unknown connector {}", table.connection_type);
+        let Some(connector) = connector_for_type(&table.connector) else {
+            warn!("Saved table found with unknown connector {}", table.connector);
             continue;
         };
-
-        println!("{:?}", table);
 
         connector
             .register(
                 &table.name,
-                &table.connection_config,
+                &table.connection.map(|c| c.config.clone()).unwrap_or_else(|| "{}".to_string()),
                 &table.config,
                 table.schema.as_ref(),
                 &mut schema_provider,

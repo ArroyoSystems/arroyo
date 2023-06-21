@@ -19,6 +19,7 @@ import {
 } from '@chakra-ui/react';
 import React from 'react';
 import { SinkOpt, SqlOptions } from '../lib/types';
+import { ConnectionTable } from '../gen/api_pb';
 
 export interface StartPipelineModalProps {
   isOpen: boolean;
@@ -26,7 +27,6 @@ export interface StartPipelineModalProps {
   startError: string | null;
   options: SqlOptions;
   setOptions: (s: SqlOptions) => void;
-  sinks: Array<SinkOpt>;
   start: () => void;
 }
 
@@ -36,7 +36,6 @@ const StartPipelineModal: React.FC<StartPipelineModalProps> = ({
   startError,
   options,
   setOptions,
-  sinks,
   start,
 }) => {
   return (
@@ -63,27 +62,6 @@ const StartPipelineModal: React.FC<StartPipelineModalProps> = ({
               />
               <FormHelperText>Give this pipeline a name to help you identify it</FormHelperText>
             </FormControl>
-            <FormControl>
-              <FormLabel>Sink</FormLabel>
-              <Select
-                variant="filled"
-                value={options.sink}
-                onChange={v =>
-                  setOptions({
-                    ...options,
-                    sink: v.target.value ? Number(v.target.value) : undefined,
-                  })
-                }
-                placeholder="Select sink"
-              >
-                {sinks.map((s, i) => (
-                  <option key={s.name} value={i}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-              <FormHelperText>Choose where the outputs of the pipeline will go</FormHelperText>
-            </FormControl>
           </Stack>
         </ModalBody>
 
@@ -94,7 +72,7 @@ const StartPipelineModal: React.FC<StartPipelineModalProps> = ({
           <Button
             variant="primary"
             onClick={start}
-            isDisabled={options.name == '' || options.parallelism == null || options.sink == null}
+            isDisabled={options.name == '' || options.parallelism == null}
           >
             Start
           </Button>
