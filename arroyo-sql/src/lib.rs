@@ -9,7 +9,7 @@ use datafusion::optimizer::analyzer::Analyzer;
 use datafusion::optimizer::optimizer::Optimizer;
 use datafusion::optimizer::OptimizerContext;
 use datafusion::physical_plan::functions::make_scalar_function;
-
+use std::panic;
 mod expressions;
 pub mod external;
 mod operators;
@@ -887,9 +887,10 @@ pub fn get_test_expression(
         schema_provider: &schema_provider,
         input_struct: &struct_def,
     };
+    
 
     let generating_expression = ctx.compile_expr(&projection.expr[0]).unwrap();
-
+    
     generate_test_code(
         test_name,
         &generating_expression,

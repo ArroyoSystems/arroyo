@@ -1,5 +1,4 @@
 use std::{fmt::Debug, sync::Arc};
-
 use crate::{
     operators::TwoPhaseAggregation,
     pipeline::SortDirection,
@@ -76,8 +75,9 @@ impl Expression {
             Expression::RustUdf(t) => t.to_syn_expression(),
             Expression::WrapType(t) => t.to_syn_expression(),
             Expression::Case(case_expression) => case_expression.to_syn_expression(),
-            Expression::Date(datetime_expr) => datetime_expr.to_syn_expression(),
+            Expression::Date(datetime_expr) =>  datetime_expr.to_syn_expression(),
         }
+    
     }
 
     fn syn_expression_with_nullity(&self, nullity: bool) -> syn::Expr {
@@ -2636,23 +2636,20 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for DateTimeFunction {
                 let arg1 = args.remove(0);
                 let arg2 = Box::new(args.remove(0));
                 let date_part = convert_expression_to::<DatePart>(arg1,"date_part")?;
-                print!("Motherfucker converted");
                 Ok(DateTimeFunction::DatePart(arg2, Box::new(date_part)))
             },
             (2, BuiltinScalarFunction::DateTrunc) => {
                 let arg1 = args.remove(0);
                 let arg2 = Box::new(args.remove(0));
                 let date_trunc_precision = convert_expression_to::<DateTruncPrecision>(arg1,"date_trunc")?;
-                print!("Motherfucker converted");
                 Ok(DateTimeFunction::DateTrunc(arg2, Box::new(date_trunc_precision)))
             },
             (_, func) => bail!("function {} with args {:?} not supported", func, args),
         }
-     
     }
 }
 
-fn enum_to_syn<T: serde::Serialize>(t: &T, prefix: &str) -> syn::Expr {
+fn enum_to_syn<T: serde::Serialize +  std::fmt::Debug>(t: &T, prefix: &str) -> syn::Expr {
     let s = serde_json::to_string(t).unwrap();
     let s = format!("{}::{}", prefix, &s[1..s.len()-1]); // Remove the quotation marks
     syn::parse_str(&s).unwrap()
@@ -2666,12 +2663,12 @@ impl DateTimeFunction {
         match self {
             DateTimeFunction::DateTrunc(_, _) => {
                 parse_quote!(arroyo_worker::operators::functions::datetime::date_trunc(
-                    arg1, arg2,
+                    arg1, arg2
                 ))
             }
             DateTimeFunction::DatePart(_, _) => {
                 parse_quote!(arroyo_worker::operators::functions::datetime::date_part(
-                    arg1, arg2,
+                    arg1, arg2
                 ))
             }
             DateTimeFunction::Extract(_, _) => {
@@ -2696,12 +2693,13 @@ impl DateTimeFunction {
                 
             }
         };
-        parse_quote!(
+        parse_quote!({
+                use arroyo_types::{DatePart, DateTruncPrecision};
                 let arg1 = #expr1;
                 let arg2 = #expr2;
                 #function
-        )        
-        
+            }
+        )
     }
 
     fn return_type(&self) -> TypeDef {

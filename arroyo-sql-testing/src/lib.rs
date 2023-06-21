@@ -1108,12 +1108,22 @@ mod tests {
             non_nullable_timestamp: arroyo_types::from_nanos(1685659545809000000),
             ..Default::default()
         },
-        arroyo_types::from_nanos(1685659545809000000)
+        arroyo_types::from_millis(1685577600000)
     );
 
     single_test_codegen!(
         "date_part",
         "date_part('month',non_nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            non_nullable_timestamp: arroyo_types::from_nanos(1685659545809000000),
+            ..Default::default()
+        },
+        6
+    );
+
+    single_test_codegen!(
+        "extract",
+        "extract(MONTH from non_nullable_timestamp)",
         arroyo_sql::TestStruct {
             non_nullable_timestamp: arroyo_types::from_nanos(1685659545809000000),
             ..Default::default()
