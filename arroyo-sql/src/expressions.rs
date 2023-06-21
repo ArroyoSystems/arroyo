@@ -2654,12 +2654,6 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for DateTimeFunction {
     }
 }
 
-fn enum_to_syn<T: serde::Serialize + std::fmt::Debug>(t: &T, prefix: &str) -> syn::Expr {
-    let s = serde_json::to_string(t).unwrap();
-    let s = format!("{}::{}", prefix, &s[1..s.len() - 1]); // Remove the quotation marks
-    syn::parse_str(&s).unwrap()
-}
-
 impl DateTimeFunction {
     fn non_null_function_invocation(&self) -> syn::Expr {
         match self {
@@ -2678,14 +2672,15 @@ impl DateTimeFunction {
 
     fn to_syn_expression(&self) -> syn::Expr {
         let function = self.non_null_function_invocation();
-        let (expr1, expr2) = match self {
+        let (expr1, expr2) : (syn::Expr, syn::Expr) = match self {
             DateTimeFunction::DatePart(arg1, arg2) => {
-                (arg1.to_syn_expression(), enum_to_syn(arg2, "DatePart"))
+                let arg2 = format!("arroyo_types::DatePart::{:?}", arg2);
+                (arg1.to_syn_expression(), parse_str(&arg2).unwrap())
             }
-            DateTimeFunction::DateTrunc(arg1, arg2) => (
-                arg1.to_syn_expression(),
-                enum_to_syn(arg2, "DateTruncPrecision"),
-            ),
+            DateTimeFunction::DateTrunc(arg1, arg2) => {
+                let arg2 = format!("arroyo_types::DateTruncPrecision::{:?}", arg2);
+                (arg1.to_syn_expression(), parse_str(&arg2).unwrap())
+            }
         };
         parse_quote!({
                 use arroyo_types::{DatePart, DateTruncPrecision};
@@ -2698,10 +2693,10 @@ impl DateTimeFunction {
 
     fn return_type(&self) -> TypeDef {
         match self {
-            DateTimeFunction::DateTrunc(_, _) => {
-                TypeDef::DataType(DataType::Timestamp(TimeUnit::Microsecond, None), false)
+            DateTimeFunction::DateTrunc(arg, _) => {
+                TypeDef::DataType(DataType::Timestamp(TimeUnit::Nanosecond, None), arg.nullable())
             }
-            DateTimeFunction::DatePart(_, _) => TypeDef::DataType(DataType::UInt32, false),
+            DateTimeFunction::DatePart(arg, _) => TypeDef::DataType(DataType::UInt32, arg.nullable())
         }
     }
 }
