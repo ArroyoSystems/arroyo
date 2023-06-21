@@ -73,10 +73,6 @@ pub fn date_part(argument: SystemTime, part: DatePart) -> u32 {
     }
 }
 
-pub fn extract(argument: SystemTime, field: DatePart) -> u32 {
-    date_part(argument, field)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -136,18 +132,6 @@ mod test {
         for (key, value) in &*DATE_PART_TESTCASES {
             assert_eq!(
                 date_part(*REFERENCE_DATETIME, *key),
-                *value,
-                "Wrong result for {:?}",
-                key
-            )
-        }
-    }
-
-    #[test]
-    fn test_extract_is_correct() {
-        for (key, value) in &*DATE_PART_TESTCASES {
-            assert_eq!(
-                extract(*REFERENCE_DATETIME, *key),
                 *value,
                 "Wrong result for {:?}",
                 key

@@ -2609,7 +2609,6 @@ impl CaseExpression {
 pub enum DateTimeFunction {
     DateTrunc(Box<Expression>, Box<DateTruncPrecision>),
     DatePart(Box<Expression>, Box<DatePart>),
-    Extract(Box<Expression>, Box<DatePart>),
 }
 
 fn convert_expression_to<T>(expr: Expression, expr_name: &str) -> Result<T, anyhow::Error>
@@ -2674,18 +2673,13 @@ impl DateTimeFunction {
                     arg1, arg2
                 ))
             }
-            DateTimeFunction::Extract(_, _) => {
-                parse_quote!(arroyo_worker::operators::functions::datetime::extract(
-                    arg1, arg2,
-                ))
-            }
         }
     }
 
     fn to_syn_expression(&self) -> syn::Expr {
         let function = self.non_null_function_invocation();
         let (expr1, expr2) = match self {
-            DateTimeFunction::DatePart(arg1, arg2) | DateTimeFunction::Extract(arg1, arg2) => {
+            DateTimeFunction::DatePart(arg1, arg2) => {
                 (arg1.to_syn_expression(), enum_to_syn(arg2, "DatePart"))
             }
             DateTimeFunction::DateTrunc(arg1, arg2) => (
@@ -2707,9 +2701,7 @@ impl DateTimeFunction {
             DateTimeFunction::DateTrunc(_, _) => {
                 TypeDef::DataType(DataType::Timestamp(TimeUnit::Microsecond, None), false)
             }
-            DateTimeFunction::DatePart(_, _) | DateTimeFunction::Extract(_, _) => {
-                TypeDef::DataType(DataType::UInt32, false)
-            }
+            DateTimeFunction::DatePart(_, _) => TypeDef::DataType(DataType::UInt32, false),
         }
     }
 }
