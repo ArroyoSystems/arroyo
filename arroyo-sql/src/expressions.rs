@@ -2670,17 +2670,26 @@ impl DateTimeFunction {
 
     fn to_syn_expression(&self) -> syn::Expr {
         let function = self.non_null_function_invocation();
-        let (expr1, expr2): (syn::Expr, syn::Expr) = match self {
+        let (null_arg, expr1, expr2): (bool, syn::Expr, syn::Expr) = match self {
             DateTimeFunction::DatePart(arg1, arg2) => {
                 let arg2 = format!("arroyo_types::DatePart::{:?}", arg2);
-                (arg1.to_syn_expression(), parse_str(&arg2).unwrap())
+                (
+                    arg1.nullable(),
+                    arg1.to_syn_expression(),
+                    parse_str(&arg2).unwrap(),
+                )
             }
             DateTimeFunction::DateTrunc(arg1, arg2) => {
                 let arg2 = format!("arroyo_types::DateTruncPrecision::{:?}", arg2);
-                (arg1.to_syn_expression(), parse_str(&arg2).unwrap())
+                (
+                    arg1.nullable(),
+                    arg1.to_syn_expression(),
+                    parse_str(&arg2).unwrap(),
+                )
             }
         };
-        parse_quote!({
+        match null_arg {
+            true => parse_quote!({
                 use arroyo_types::{DatePart, DateTruncPrecision};
                 if let Some(arg1) = #expr1 {
                     let arg2 = #expr2;
@@ -2688,8 +2697,14 @@ impl DateTimeFunction {
                 } else {
                     None
                 }
-            }
-        )
+            }),
+            false => parse_quote!({
+                use arroyo_types::{DatePart, DateTruncPrecision};
+                let arg1 = #expr1;
+                let arg2 = #expr2;
+                #function
+            }),
+        }
     }
 
     fn return_type(&self) -> TypeDef {
