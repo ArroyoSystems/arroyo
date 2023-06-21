@@ -16,7 +16,7 @@ use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEF
 use arroyo_rpc::grpc::api::{
     source_field_type, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
-use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
+use datafusion::{sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo}, parquet::format::DateType};
 
 use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
@@ -134,7 +134,32 @@ pub struct StructField {
     pub name: String,
     pub alias: Option<String>,
     pub data_type: TypeDef,
+    pub renamed_from: Option<String>,
+    pub original_type: Option<String>
 }
+
+impl StructField {
+    pub fn new(name: String, alias: Option<String>, data_type: TypeDef) -> Self {
+        Self {
+            name,
+            alias,
+            data_type,
+            renamed_from: None,
+            original_type: None,
+        }
+    }
+
+    pub fn with_rename(name: String, alias: Option<String>, data_type: TypeDef, renamed_from: Option<String>, original_type: Option<String>)  -> Self {
+        Self {
+            name,
+            alias,
+            data_type,
+            renamed_from,
+            original_type,
+        }
+    }
+}
+
 
 /* this returns a duration with the same length as the postgres interval. */
 pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration {
@@ -214,7 +239,7 @@ impl TryFrom<&Type> for TypeDef {
         match typ {
             Type::Path(pat) => {
                 let last = pat.path.segments.last().unwrap();
-                if last.ident.to_string() == "Option" {
+                if last.ident == "Option" {
                     let AngleBracketed(args) = &last.arguments else {
                         return Err(())
                     };
@@ -387,6 +412,20 @@ impl StructField {
     fn def(&self) -> TokenStream {
         let name: Ident = self.field_ident();
         let type_string = self.get_type();
+        // special case time fields
+        if let TypeDef::DataType(DataType::Timestamp(_, _), nullable) = self.data_type {
+            if nullable {
+                return quote!(
+                #[serde(default)]
+                #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime_opt")]
+                pub #name: #type_string
+                );
+            } else {
+                return quote!(
+                #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime")]
+                pub #name: #type_string);
+            }
+        }
         quote!(pub #name: #type_string)
     }
 
@@ -404,7 +443,7 @@ impl StructField {
         parse_str(&type_string).unwrap()
     }
 
-    pub(crate) fn data_type_name(data_type: &DataType) -> String {
+    pub fn data_type_name(data_type: &DataType) -> String {
         match data_type {
             DataType::Null => todo!(),
             DataType::Boolean => "bool".to_string(),
@@ -456,11 +495,11 @@ impl StructField {
     }
 
     pub fn as_nullable(&self) -> Self {
-        StructField {
-            name: self.name.clone(),
-            alias: self.alias.clone(),
-            data_type: self.data_type.as_nullable(),
-        }
+        StructField::new(
+            self.name.clone(),
+            self.alias.clone(),
+            self.data_type.as_nullable(),
+        )
     }
 
     pub(crate) fn nullable(&self) -> bool {
@@ -569,7 +608,8 @@ fn primitive_to_sql(primitive_type: PrimitiveType) -> &'static str {
         PrimitiveType::Bool => "BOOLEAN",
         PrimitiveType::String => "TEXT",
         PrimitiveType::Bytes => "BINARY",
-        PrimitiveType::UnixMillis | PrimitiveType::UnixMicros => "TIMESTAMP",
+        PrimitiveType::UnixMillis | PrimitiveType::UnixMicros | PrimitiveType::DateTime => "TIMESTAMP",
+        PrimitiveType::Json => "JSONB",
     }
 }
 
@@ -637,6 +677,8 @@ impl From<SourceField> for StructField {
                     PrimitiveType::Bytes => DataType::Binary,
                     PrimitiveType::UnixMillis => DataType::Timestamp(TimeUnit::Millisecond, None),
                     PrimitiveType::UnixMicros => DataType::Timestamp(TimeUnit::Microsecond, None),
+                    PrimitiveType::DateTime => DataType::Timestamp(TimeUnit::Microsecond, None),
+                    PrimitiveType::Json => DataType::Utf8,
                 },
                 f.nullable,
             ),
@@ -649,10 +691,10 @@ impl From<SourceField> for StructField {
             ),
         };
 
-        StructField {
-            name: f.field_name,
-            alias: None,
-            data_type: t,
-        }
+        StructField::new(
+            f.field_name,
+            None,
+            t,
+        )
     }
 }

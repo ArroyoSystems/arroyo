@@ -194,16 +194,16 @@ pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializat
         .filter(|t| t.confluent_schema_registry)
         .is_some();
     match &schema.format() {
-        grpc::api::Format::Json => {
+        grpc::api::Format::JsonFormat => {
             if confluent {
                 OperatorConfigSerializationMode::JsonSchemaRegistry
             } else {
                 OperatorConfigSerializationMode::Json
             }
         }
-        grpc::api::Format::Protobuf => todo!(),
-        grpc::api::Format::Avro => todo!(),
-        grpc::api::Format::RawString => {
+        grpc::api::Format::ProtobufFormat => todo!(),
+        grpc::api::Format::AvroFormat => todo!(),
+        grpc::api::Format::RawStringFormat => {
             if confluent {
                 OperatorConfigSerializationMode::JsonSchemaRegistry
             } else {

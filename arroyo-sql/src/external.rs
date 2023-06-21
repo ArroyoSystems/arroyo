@@ -92,10 +92,47 @@ pub struct SqlSink {
     pub id: Option<i64>,
     pub struct_def: StructDef,
     pub sink_config: SinkConfig,
+    pub updating_type: SinkUpdateType,
+}
+
+#[derive(Clone, Debug)]
+pub enum SinkUpdateType {
+    Allow,
+    Disallow,
+    Force,
 }
 
 impl SqlSink {
-    pub fn try_new(
+    pub fn new_from_sink_config(struct_def: StructDef, sink_config: SinkConfig) -> Self {
+        let updating_type = match &sink_config {
+            // SinkConfig::Kafka {
+            //     bootstrap_servers: _,
+            //     topic: _,
+            //     client_configs,
+            // } => {
+            //     if SerializationMode::from_config_value(
+            //         client_configs.get("serialization_mode").map(|x| x.as_str()),
+            //     )
+            //     .is_updating()
+            //     {
+            //         SinkUpdateType::Force
+            //     } else {
+            //         SinkUpdateType::Disallow
+            //     }
+            // }
+            SinkConfig::Console
+            | SinkConfig::File { directory: _ }
+            | SinkConfig::Grpc
+            | SinkConfig::Null => SinkUpdateType::Allow,
+        };
+        Self {
+            id: None,
+            struct_def,
+            sink_config,
+            updating_type,
+        }
+    }
+    pub fn try_new_from_connection(
         id: Option<i64>,
         struct_def: StructDef,
         connection: Connection,
@@ -104,6 +141,17 @@ impl SqlSink {
         // let Some(ConnectionType::Kafka(kafka_config)) = connection.connection_type else {
         //     bail!("Only Kafka sinks are supported")
         // };
+        // let serialization_mode = SerializationMode::from_config_value(
+        //     connection_config
+        //         .get("serialization_mode")
+        //         .map(|x| x.as_str()),
+        // );
+        // let updating_type = if serialization_mode.is_updating() {
+        //     SinkUpdateType::Force
+        // } else {
+        //     SinkUpdateType::Disallow
+        // };
+
         // let topic = Arc::new(connection_config)
         //     .get("topic")
         //     .cloned()
@@ -116,6 +164,7 @@ impl SqlSink {
         //         bootstrap_servers: kafka_config.bootstrap_servers,
         //         client_configs: auth_config_to_hashmap(kafka_config.auth_config),
         //     },
+        //     updating_type,
         // })
 
         todo!()

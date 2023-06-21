@@ -15,6 +15,7 @@ pub struct TumblingAggregatingWindowFunc<K: Key, T: Data, BinA: Data, OutT: Data
     state: TumblingWindowState,
     _t: PhantomData<K>,
 }
+
 #[derive(Debug)]
 enum TumblingWindowState {
     // We haven't received any data.

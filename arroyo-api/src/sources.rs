@@ -102,6 +102,7 @@ pub fn nexmark_schema() -> SourceSchema {
                     vec![
                         SchemaField::new("id", Primitive(Int64)),
                         SchemaField::new("description", Primitive(String)),
+                        SchemaField::new("item_name", Primitive(String)),
                         SchemaField::new("initial_bid", Primitive(Int64)),
                         SchemaField::new("reserve", Primitive(Int64)),
                         SchemaField::new("datetime", Primitive(UnixMillis)),
@@ -129,6 +130,61 @@ pub enum PrimitiveType {
     String,
     Bytes,
     UnixMillis,
+    Json,
+    DateTime,
+}
+
+impl PrimitiveType {
+    pub fn to_sql(&self) -> &'static str {
+        match self {
+            PrimitiveType::Int32 => "INTEGER",
+            PrimitiveType::Int64 => "BIGINT",
+            PrimitiveType::UInt32 => "INTEGER UNSIGNED",
+            PrimitiveType::UInt64 => "BIGINT UNSIGNED",
+            PrimitiveType::F32 => "FLOAT",
+            PrimitiveType::F64 => "DOUBLE",
+            PrimitiveType::Bool => "BOOLEAN",
+            PrimitiveType::String => "TEXT",
+            PrimitiveType::Bytes => "BINARY",
+            PrimitiveType::DateTime => "TIMESTAMP",
+            PrimitiveType::UnixMillis => "TIMESTAMP",
+            PrimitiveType::Json => "JSON",
+        }
+    }
+
+    pub fn to_arrow(&self) -> arrow::datatypes::DataType {
+        use PrimitiveType::*;
+
+        match self {
+            Int32 => arrow::datatypes::DataType::Int32,
+            Int64 => arrow::datatypes::DataType::Int64,
+            UInt32 => arrow::datatypes::DataType::UInt32,
+            UInt64 => arrow::datatypes::DataType::UInt64,
+            F32 => arrow::datatypes::DataType::Float32,
+            F64 => arrow::datatypes::DataType::Float64,
+            Bool => arrow::datatypes::DataType::Boolean,
+            String | Json => arrow::datatypes::DataType::Utf8,
+            Bytes => arrow::datatypes::DataType::Binary,
+            UnixMillis | DateTime => {
+                arrow::datatypes::DataType::Timestamp(TimeUnit::Millisecond, None)
+            }
+        }
+    }
+
+    pub fn to_rust(&self) -> &'static str {
+        match self {
+            PrimitiveType::Int32 => "i32",
+            PrimitiveType::Int64 => "i64",
+            PrimitiveType::UInt32 => "u32",
+            PrimitiveType::UInt64 => "u64",
+            PrimitiveType::F32 => "f32",
+            PrimitiveType::F64 => "f64",
+            PrimitiveType::Bool => "bool",
+            PrimitiveType::String | PrimitiveType::Json => "String",
+            PrimitiveType::Bytes => "Vec<u8>",
+            PrimitiveType::UnixMillis | PrimitiveType::DateTime => "std::time::SystemTime",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -152,6 +208,7 @@ impl Display for SchemaFieldType {
 #[derive(Clone, Debug)]
 pub struct SchemaField {
     pub name: String,
+    pub renamed_from: Option<String>,
     pub typ: SchemaFieldType,
     pub nullable: bool,
 }
@@ -160,6 +217,7 @@ impl SchemaField {
     fn new(name: impl Into<String>, typ: SchemaFieldType) -> Self {
         Self {
             name: name.into(),
+            renamed_from: None,
             typ,
             nullable: false,
         }
@@ -168,6 +226,7 @@ impl SchemaField {
     fn nullable(name: impl Into<String>, typ: SchemaFieldType) -> Self {
         Self {
             name: name.into(),
+            renamed_from: None,
             typ,
             nullable: true,
         }
@@ -176,27 +235,10 @@ impl SchemaField {
 
 impl From<&SchemaField> for StructField {
     fn from(sf: &SchemaField) -> Self {
-        use PrimitiveType::*;
         use SchemaFieldType::*;
         use TypeDef::DataType;
         let data_type = match &sf.typ {
-            Primitive(t) => DataType(
-                match t {
-                    Int32 => arrow::datatypes::DataType::Int32,
-                    Int64 => arrow::datatypes::DataType::Int64,
-                    UInt32 => arrow::datatypes::DataType::UInt32,
-                    UInt64 => arrow::datatypes::DataType::UInt64,
-                    F32 => arrow::datatypes::DataType::Float32,
-                    F64 => arrow::datatypes::DataType::Float64,
-                    Bool => arrow::datatypes::DataType::Boolean,
-                    String => arrow::datatypes::DataType::Utf8,
-                    Bytes => arrow::datatypes::DataType::Binary,
-                    UnixMillis => {
-                        arrow::datatypes::DataType::Timestamp(TimeUnit::Millisecond, None)
-                    }
-                },
-                sf.nullable,
-            ),
+            Primitive(t) => DataType(t.to_arrow(), sf.nullable),
             NamedStruct(name, fields) => TypeDef::StructDef(
                 StructDef {
                     name: Some(name.clone()),
@@ -212,11 +254,11 @@ impl From<&SchemaField> for StructField {
                 sf.nullable,
             ),
         };
-        StructField {
-            name: sf.name.clone(),
+        StructField::new(
+            sf.name.clone(),
+            None,
             data_type,
-            alias: None,
-        }
+        )
     }
 }
 
@@ -226,6 +268,7 @@ impl TryFrom<SourceField> for SchemaField {
     fn try_from(f: SourceField) -> Result<Self, Self::Error> {
         Ok(Self {
             name: f.field_name,
+            renamed_from: None,
             typ: match f
                 .field_type
                 .ok_or_else(|| "field type is not set".to_string())?
@@ -247,6 +290,8 @@ impl TryFrom<SourceField> for SchemaField {
                         api::PrimitiveType::Bytes => PrimitiveType::Bytes,
                         api::PrimitiveType::UnixMillis => PrimitiveType::UnixMillis,
                         api::PrimitiveType::UnixMicros => todo!(),
+                        api::PrimitiveType::DateTime => PrimitiveType::DateTime,
+                        api::PrimitiveType::Json => PrimitiveType::Json,
                     },
                 ),
                 api::source_field_type::Type::Struct(s) => SchemaFieldType::Struct(
@@ -277,6 +322,8 @@ impl TryFrom<SchemaField> for SourceField {
                 PrimitiveType::String => api::PrimitiveType::String,
                 PrimitiveType::Bytes => api::PrimitiveType::Bytes,
                 PrimitiveType::UnixMillis => api::PrimitiveType::UnixMillis,
+                PrimitiveType::Json => api::PrimitiveType::Json,
+                PrimitiveType::DateTime => api::PrimitiveType::DateTime,
             }
                 as i32),
             SchemaFieldType::NamedStruct(_, fields) | SchemaFieldType::Struct(fields) => {
@@ -290,7 +337,7 @@ impl TryFrom<SchemaField> for SourceField {
         };
 
         let sql_name = match value.typ {
-            SchemaFieldType::Primitive(p) => todo!(),
+            SchemaFieldType::Primitive(p) => Some(p.to_sql().to_string()),
             SchemaFieldType::Struct(..) => None,
             SchemaFieldType::NamedStruct(..) => None,
         };

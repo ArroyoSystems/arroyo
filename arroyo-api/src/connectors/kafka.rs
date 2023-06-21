@@ -61,12 +61,12 @@ impl Connector for KafkaConnector {
         provider: &mut ArroyoSchemaProvider,
     ) {
         let (typ, operator, desc) = match table.type_ {
-            TableType::Source(_) => (
+            TableType::Source { .. } => (
                 ConnectorType::Source,
                 "connectors::kafka::source::KafkaSourceFunc",
                 format!("KafkaSource<{}>", table.topic),
             ),
-            TableType::Sink(_) => (
+            TableType::Sink { .. } => (
                 ConnectorType::Sink,
                 "connectors::kafka::sink::KafkaSinkFunc",
                 format!("KafkaSink<{}>", table.topic),
@@ -121,8 +121,8 @@ impl Connector for KafkaConnector {
 
     fn table_type(&self, config: Self::ConfigT, table: Self::TableT) -> grpc::api::TableType {
         match table.type_ {
-            TableType::Source(_) => grpc::api::TableType::Source,
-            TableType::Sink(_) => grpc::api::TableType::Sink,
+            TableType::Source { .. } => grpc::api::TableType::Source,
+            TableType::Sink { .. } => grpc::api::TableType::Sink,
         }
     }
 }
@@ -148,13 +148,13 @@ impl KafkaTester {
             .set("group.id", "arroyo-kafka-source-tester");
 
         match &self.connection.authentication {
-            KafkaConfigAuthentication::None(_) => {},
-            KafkaConfigAuthentication::Sasl(Sasl {
+            KafkaConfigAuthentication::None { } => {},
+            KafkaConfigAuthentication::Sasl {
                 mechanism,
                 password,
                 protocol,
                 username,
-            }) => {
+            } => {
                 client_config.set("sasl.mechanism", mechanism);
                 client_config.set("security.protocol", protocol);
                 client_config.set("sasl.username", username);

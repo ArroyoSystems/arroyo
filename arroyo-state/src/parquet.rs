@@ -350,7 +350,7 @@ impl BackingStore for ParquetBackend {
             .await
     }
 
-    async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)> {
+    async fn get_global_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)> {
         let Some(files) = self.current_files.get(&table) else {
             return vec![];
         };
@@ -362,6 +362,26 @@ impl BackingStore for ParquetBackend {
                 .await
                 .unwrap_or_else(|| panic!("unable to find file {} in checkpoint", file.file));
             for (_timestamp, key, value) in self.triples_from_parquet_bytes(bytes, &(0..=u64::MAX))
+            {
+                state_map.insert(key, value);
+            }
+        }
+        state_map.into_iter().collect()
+    }
+
+    async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)> {
+        let Some(files) = self.current_files.get(&table) else {
+            return vec![];
+        };
+        let mut state_map = HashMap::new();
+        for file in files.values().flatten() {
+            let bytes = self
+                .storage_client
+                .get_bytes(&file.file)
+                .await
+                .unwrap_or_else(|| panic!("unable to find file {} in checkpoint", file.file));
+            for (_timestamp, key, value) in
+                self.triples_from_parquet_bytes(bytes, &self.task_info.key_range)
             {
                 state_map.insert(key, value);
             }

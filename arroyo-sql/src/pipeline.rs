@@ -7,7 +7,7 @@ use std::unreachable;
 use anyhow::Result;
 use anyhow::{anyhow, bail};
 use arrow_schema::DataType;
-use arroyo_datastream::{ConnectorOp, ImpulseSpec, Operator, SourceConfig, WindowType};
+use arroyo_datastream::{ConnectorOp, ImpulseSpec, Operator, SourceConfig, SerializationMode, WindowType};
 
 use datafusion_common::{DFField, ScalarValue};
 use datafusion_expr::expr::ScalarUDF;
@@ -17,7 +17,7 @@ use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
 
 use crate::expressions::ExpressionContext;
-use crate::external::{SqlSink, SqlSource};
+use crate::external::{SinkUpdateType, SqlSink, SqlSource};
 use crate::{
     expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
     operators::{AggregateProjection, GroupByKind, Projection},
@@ -72,20 +72,40 @@ impl RecordTransform {
         }
     }
 
-    pub fn as_operator(&self) -> Operator {
+    pub fn as_operator(&self, is_updating: bool) -> Operator {
         match self {
             RecordTransform::ValueProjection(projection) => {
                 let map_method = projection.to_syn_expression();
-                MethodCompiler::value_map_operator("value_map", map_method)
+                if is_updating {
+                    MethodCompiler::updating_value_map_operator("updating_value_map", map_method)
+                } else {
+                    MethodCompiler::value_map_operator("value_map", map_method)
+                }
             }
             RecordTransform::KeyProjection(projection) => {
-                MethodCompiler::key_map_operator("key_map", projection.to_syn_expression())
+                if is_updating {
+                    let key_expr = projection.to_syn_expression();
+                    let expr: syn::ExprClosure = parse_quote!(|arg| {#key_expr});
+                    Operator::UpdatingKeyOperator {
+                        name: "key_map".into(),
+                        expression: quote!(#expr).to_string(),
+                    }
+                } else {
+                    MethodCompiler::key_map_operator("key_map", projection.to_syn_expression())
+                }
             }
-            RecordTransform::Filter(expression) => MethodCompiler::filter_operator(
-                "filter",
-                expression.to_syn_expression(),
-                expression.nullable(),
-            ),
+            RecordTransform::Filter(expression) => {
+                let filter_method = expression.to_syn_expression();
+                if is_updating {
+                    MethodCompiler::updating_filter_operator(
+                        "updating_filter",
+                        filter_method,
+                        expression.nullable(),
+                    )
+                } else {
+                    MethodCompiler::filter_operator("filter", filter_method, expression.nullable())
+                }
+            }
             RecordTransform::TimestampAssignment(timestamp_expression) => {
                 MethodCompiler::timestamp_assigning_operator(
                     "timestamp",
@@ -160,6 +180,17 @@ pub enum JoinType {
     Full,
 }
 
+impl From<JoinType> for arroyo_types::JoinType {
+    fn from(value: JoinType) -> Self {
+        match value {
+            JoinType::Inner => arroyo_types::JoinType::Inner,
+            JoinType::Left => arroyo_types::JoinType::Left,
+            JoinType::Right => arroyo_types::JoinType::Right,
+            JoinType::Full => arroyo_types::JoinType::Full,
+        }
+    }
+}
+
 impl TryFrom<datafusion_expr::JoinType> for JoinType {
     type Error = anyhow::Error;
 
@@ -205,16 +236,16 @@ impl JoinType {
         StructDef {
             name: None,
             fields: vec![
-                StructField {
-                    name: "left".to_string(),
-                    alias: None,
-                    data_type: TypeDef::StructDef(left_struct.clone(), self.left_nullable()),
-                },
-                StructField {
-                    name: "right".to_string(),
-                    alias: None,
-                    data_type: TypeDef::StructDef(right_struct.clone(), self.right_nullable()),
-                },
+                StructField::new(
+                    "left".to_string(),
+                    None,
+                    TypeDef::StructDef(left_struct.clone(), self.left_nullable()),
+                ),
+                StructField::new(
+                    "right".to_string(),
+                    None,
+                    TypeDef::StructDef(right_struct.clone(), self.right_nullable()),
+                ),
             ],
         }
     }
@@ -290,11 +321,11 @@ impl SqlOperator {
                 .output_struct(&left.return_type(), &right.return_type()),
             SqlOperator::Window(input, window) => {
                 let mut input_struct = input.return_type();
-                input_struct.fields.push(StructField {
-                    name: window.field_name.clone(),
-                    alias: None,
-                    data_type: TypeDef::DataType(DataType::UInt64, false),
-                });
+                input_struct.fields.push(StructField::new(
+                    window.field_name.clone(),
+                    None,
+                    TypeDef::DataType(DataType::UInt64, false),
+                ));
                 input_struct
             }
             SqlOperator::RecordTransform(input, record_transform) => {
@@ -309,24 +340,24 @@ impl SqlOperator {
         StructDef {
             name: None,
             fields: vec![
-                StructField {
-                    name: "key".to_string(),
-                    alias: None,
-                    data_type: TypeDef::StructDef(key_struct.clone(), false),
-                },
-                StructField {
-                    name: "aggregate".to_string(),
-                    alias: None,
-                    data_type: TypeDef::StructDef(aggregate_struct.clone(), false),
-                },
-                StructField {
-                    name: "timestamp".to_string(),
-                    alias: None,
-                    data_type: TypeDef::DataType(
+                StructField::new(
+                    "key".to_string(),
+                    None,
+                    TypeDef::StructDef(key_struct.clone(), false),
+                ),
+                StructField::new(
+                    "aggregate".to_string(),
+                    None,
+                    TypeDef::StructDef(aggregate_struct.clone(), false),
+                ),
+                StructField::new(
+                    "timestamp".to_string(),
+                    None,
+                    TypeDef::DataType(
                         DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None),
                         false,
                     ),
-                },
+                ),
             ],
         }
     }
@@ -334,12 +365,39 @@ impl SqlOperator {
     pub fn has_window(&self) -> bool {
         match self {
             SqlOperator::Source(_) => false,
-            SqlOperator::Aggregator(_, _) => true,
+            SqlOperator::Aggregator(input, aggregator) => {
+                !matches!(aggregator.window, WindowType::Instant) || input.has_window()
+            }
             SqlOperator::JoinOperator(left, right, _) => left.has_window() || right.has_window(),
             SqlOperator::Window(_, _) => true,
             SqlOperator::RecordTransform(input, _) => input.has_window(),
             SqlOperator::Sink(_, _, input) => input.has_window(),
             SqlOperator::NamedTable(_, input) => input.has_window(),
+        }
+    }
+
+    pub fn is_updating(&self) -> bool {
+        match self {
+            SqlOperator::Source(source) => {
+                source.source.serialization_mode == SerializationMode::DebeziumJson
+            }
+            SqlOperator::Aggregator(input, aggregate_operator) => {
+                input.is_updating()
+                    || (!input.has_window() && aggregate_operator.window == WindowType::Instant)
+            }
+            SqlOperator::JoinOperator(left, right, join_operator) => {
+                // the join will be updating if one of the sides is updating or if a non-window side is nullable.
+                left.is_updating()
+                    || right.is_updating()
+                    || (!left.has_window() && join_operator.join_type.left_nullable())
+                    || (!right.has_window() && join_operator.join_type.right_nullable())
+            }
+            SqlOperator::Window(input, sql_window_operator) => {
+                input.is_updating() || sql_window_operator.window == WindowType::Instant
+            }
+            SqlOperator::RecordTransform(input, _) => input.is_updating(),
+            SqlOperator::Sink(_, _, input) => input.is_updating(),
+            SqlOperator::NamedTable(_, table_operator) => table_operator.is_updating(),
         }
     }
 }
@@ -469,15 +527,21 @@ impl<'a> SqlPipelineBuilder<'a> {
                 name,
                 id,
                 sink_config,
-            } => Ok(SqlOperator::Sink(
-                name.clone(),
-                SqlSink {
-                    id: Some(*id),
-                    struct_def: input.return_type(),
-                    sink_config: sink_config.clone(),
-                },
-                Box::new(input),
-            )),
+            } => {
+                if input.is_updating() {
+                    bail!("inserting updating tables into saved sinks is not currently supported");
+                }
+                Ok(SqlOperator::Sink(
+                    name.clone(),
+                    SqlSink {
+                        id: Some(*id),
+                        struct_def: input.return_type(),
+                        sink_config: sink_config.clone(),
+                        updating_type: crate::external::SinkUpdateType::Disallow,
+                    },
+                    Box::new(input),
+                ))
+            }
             crate::Table::MemoryTable { name, fields: _ } => {
                 Ok(SqlOperator::NamedTable(name.clone(), Box::new(input)))
             }
@@ -507,7 +571,6 @@ impl<'a> SqlPipelineBuilder<'a> {
         let struct_def = input.return_type();
         let ctx = self.ctx(&struct_def);
         let predicate = ctx.compile_expr(&filter.predicate)?;
-        // TODO: this should probably happen through a more principled optimization pass.
         Ok(SqlOperator::RecordTransform(
             Box::new(input),
             RecordTransform::Filter(predicate),
@@ -579,6 +642,12 @@ impl<'a> SqlPipelineBuilder<'a> {
             aggregate_fields,
             &source.return_type(),
         )?;
+        if !source.has_window()
+            && matches!(window, WindowType::Instant)
+            && !aggregating.supports_two_phase()
+        {
+            bail!("updating aggregates only support two phase aggregations. Currently count distinct is not supported");
+        }
         let merge = self.window_field(&aggregate.group_expr, aggregate.schema.fields())?;
         Ok(SqlOperator::Aggregator(
             Box::new(source),
@@ -715,6 +784,9 @@ impl<'a> SqlPipelineBuilder<'a> {
     fn insert_join(&mut self, join: &datafusion_expr::logical_plan::Join) -> Result<SqlOperator> {
         let left_input = self.insert_sql_plan(&join.left)?;
         let right_input = self.insert_sql_plan(&join.right)?;
+        if left_input.is_updating() || right_input.is_updating() {
+            bail!("don't support joins with updating inputs");
+        }
         match join.join_constraint {
             JoinConstraint::On => {}
             JoinConstraint::Using => bail!("don't support 'using' in joins"),
@@ -724,11 +796,6 @@ impl<'a> SqlPipelineBuilder<'a> {
         match (left_input.has_window(), right_input.has_window()) {
             (true, false) | (false, true) => {
                 bail!("windowing join mismatch. both sides must either have or not have windows")
-            }
-            (false, false) => {
-                if join_type != JoinType::Inner {
-                    bail!("non-inner join over windows not supported")
-                }
             }
             _ => {}
         }
@@ -918,6 +985,11 @@ impl<'a> SqlPipelineBuilder<'a> {
                     connection.clone(),
                     connection_config,
                 )?;
+                let is_update =
+                    physical_source.serialization_mode == SerializationMode::DebeziumJson;
+                if is_update && has_virtual_fields {
+                    bail!("can't read from a source with virtual fields and update mode.")
+                }
                 // check for virtual fields
                 let virtual_field_projection = if has_virtual_fields {
                     let (field_names, field_computations) = fields
@@ -949,6 +1021,9 @@ impl<'a> SqlPipelineBuilder<'a> {
                 let timestamp_override = if let Some(field_name) =
                     connection_config.get("event_time_field")
                 {
+                    if is_update {
+                        bail!("can't use event_time_field with update mode.")
+                    }
                     // check that a column exists and it is a timestamp
                     let Some(event_column) = fields.iter().find_map(|f| match f {
                         FieldSpec::StructField(struct_field) |
@@ -1102,6 +1177,10 @@ impl<'a> SqlPipelineBuilder<'a> {
                     let field_name = window.schema.field_names().last().cloned().unwrap();
                     let window = self.window(&w.partition_by)?;
 
+                    if !input.has_window() && window == WindowType::Instant {
+                        bail!("window functions have to be partitioned by a time window")
+                    }
+
                     return Ok(SqlOperator::Window(
                         Box::new(input),
                         SqlWindowOperator {
@@ -1191,6 +1270,7 @@ impl<'a> SqlPipelineBuilder<'a> {
                 logical_plan,
             } => {
                 let input = self.insert_sql_plan(&logical_plan)?;
+                let input_is_updating = input.is_updating();
                 let sink = self.schema_provider.get_table(&sink_name).ok_or_else(|| {
                     anyhow!("Could not find sink {} in schema provider", sink_name)
                 })?;
@@ -1202,12 +1282,16 @@ impl<'a> SqlPipelineBuilder<'a> {
                         id,
                         sink_config,
                     } => {
+                        if input_is_updating {
+                            bail!("can't insert into a saved sink from an updating query");
+                        }
                         let sql_operator = SqlOperator::Sink(
                             name.clone(),
                             SqlSink {
                                 id: Some(*id),
                                 struct_def: input.return_type(),
                                 sink_config: sink_config.clone(),
+                                updating_type: crate::external::SinkUpdateType::Disallow,
                             },
                             Box::new(input),
                         );
@@ -1244,16 +1328,20 @@ impl<'a> SqlPipelineBuilder<'a> {
                         connection,
                         connection_config,
                     } => {
-                        let sql_operator = SqlOperator::Sink(
-                            name.clone(),
-                            SqlSink::try_new(
-                                None,
-                                input.return_type(),
-                                connection.clone(),
-                                connection_config.clone(),
-                            )?,
-                            Box::new(input),
-                        );
+                        let sql_sink = SqlSink::try_new_from_connection(
+                            None,
+                            input.return_type(),
+                            connection.clone(),
+                            connection_config.clone(),
+                        )?;
+                        if input_is_updating
+                            && matches!(sql_sink.updating_type, SinkUpdateType::Disallow)
+                        {
+                            bail!("can't insert into a non-updating table from an updating query");
+                        };
+
+                        let sql_operator =
+                            SqlOperator::Sink(name.clone(), sql_sink, Box::new(input));
                         self.output_nodes.push(sql_operator);
                     }
                     Table::TableFromQuery {
@@ -1345,6 +1433,34 @@ impl MethodCompiler {
         }
     }
 
+    pub fn updating_filter_operator(
+        name: impl ToString,
+        filter_expr: syn::Expr,
+        expression_nullable: bool,
+    ) -> Operator {
+        let unwrap = if expression_nullable {
+            quote!(.unwrap_or(false))
+        } else {
+            quote!()
+        };
+        let expression: syn::Expr = parse_quote!(
+            {
+                let arg = &record.value;
+                let value = arg.filter(|arg| #filter_expr #unwrap)?;
+                Some(arroyo_types::Record {
+                    timestamp: record.timestamp,
+                    key: record.key.clone(),
+                    value
+                })
+            }
+        );
+        Operator::ExpressionOperator {
+            name: name.to_string(),
+            expression: quote!(#expression).to_string(),
+            return_type: arroyo_datastream::ExpressionReturnType::OptionalRecord,
+        }
+    }
+
     pub fn timestamp_assigning_operator(
         name: impl ToString,
         timestamp_expr: syn::Expr,
@@ -1394,6 +1510,24 @@ impl MethodCompiler {
             name: name.to_string(),
             expression: quote!(#expression).to_string(),
             return_type: arroyo_datastream::ExpressionReturnType::Record,
+        })
+    }
+
+    pub fn merge_pair_updating_operator(
+        name: impl ToString,
+        merge_struct_name: Type,
+        merge_expr: syn::Expr,
+    ) -> Result<Operator> {
+        let expression: syn::Expr = parse_quote!({
+            let arg = #merge_struct_name {
+                left: arg.0.clone(),
+                right: arg.1.clone()
+            };
+              Some(#merge_expr)
+        });
+        Ok(Operator::UpdatingOperator {
+            name: name.to_string(),
+            expression: quote!(#expression).to_string(),
         })
     }
 
@@ -1523,5 +1657,23 @@ impl MethodCompiler {
             expression,
             return_type: arroyo_datastream::ExpressionReturnType::Record,
         })
+    }
+
+    fn updating_value_map_operator(name: &str, map_expr: syn::Expr) -> Operator {
+        let expression = quote!(
+        {
+            let arg = &record.value;
+            let value = arg.map_over_inner(|arg| #map_expr)?;
+            Some(arroyo_types::Record {
+            timestamp: record.timestamp,
+            key: None,
+            value
+        })
+        });
+        Operator::ExpressionOperator {
+            name: name.to_string(),
+            expression: expression.to_string(),
+            return_type: arroyo_datastream::ExpressionReturnType::OptionalRecord,
+        }
     }
 }

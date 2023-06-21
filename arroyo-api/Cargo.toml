@@ -48,7 +48,7 @@ tracing = "0.1"
 anyhow = "1.0.70"
 
 # json-schema support
-typify = "0.0.11"
+typify = "0.0.13"
 schemars = "0.8"
 
 # metric querying

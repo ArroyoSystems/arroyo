@@ -19,7 +19,9 @@ use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::source_def::SourceType;
 use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
 use arroyo_types::nexmark::Event;
-use arroyo_types::{from_micros, to_micros, Data, GlobalKey, ImpulseEvent, Key};
+use arroyo_types::{
+    from_micros, to_micros, Data, GlobalKey, ImpulseEvent, JoinType, Key,
+};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -233,7 +235,18 @@ pub struct SlidingAggregatingTopN {
     pub max_elements: usize,
 }
 
-#[derive(Copy, Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NonWindowAggregator {
+    pub expiration: Duration,
+    // fn(&BinA) -> OutT
+    pub aggregator: String,
+    // fn(&T, Option<&BinA>) -> Option<BinA>
+    pub bin_merger: String,
+    // BinA
+    pub bin_type: String,
+}
+
+#[derive(Copy, Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq)]
 pub enum ImpulseSpec {
     Delay(Duration),
     EventsPerSecond(f32),
@@ -245,6 +258,7 @@ pub enum SerializationMode {
     // https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#wire-format
     JsonSchemaRegistry,
     RawJson,
+    DebeziumJson,
 }
 impl SerializationMode {
     pub fn from_has_registry_flag(has_registry: bool) -> Self {
@@ -259,8 +273,13 @@ impl SerializationMode {
             Some("json") => Self::Json,
             Some("json_schema_registry") => Self::JsonSchemaRegistry,
             Some("raw_json") => Self::RawJson,
+            Some("debezium_json") => Self::DebeziumJson,
             _ => Self::Json,
         }
+    }
+
+    pub fn is_updating(&self) -> bool {
+        matches!(self, Self::DebeziumJson)
     }
 }
 
@@ -275,6 +294,9 @@ impl ToTokens for SerializationMode {
             }
             SerializationMode::RawJson => {
                 quote::quote!(arroyo_worker::operators::SerializationMode::RawJson)
+            }
+            SerializationMode::DebeziumJson => {
+                quote::quote!(arroyo_worker::operators::SerializationMode::Json)
             }
         };
 
@@ -381,6 +403,16 @@ pub enum Operator {
     JoinWithExpiration {
         left_expiration: Duration,
         right_expiration: Duration,
+        join_type: JoinType,
+    },
+    UpdatingOperator {
+        name: String,
+        expression: String,
+    },
+    NonWindowAggregator(NonWindowAggregator),
+    UpdatingKeyOperator {
+        name: String,
+        expression: String,
     },
 }
 
@@ -557,11 +589,21 @@ impl Debug for Operator {
             Operator::JoinWithExpiration {
                 left_expiration,
                 right_expiration,
+                join_type,
             } => write!(
                 f,
-                "JoinWithExpiration<left_expire: {:?}, right_expire: {:?}>",
-                left_expiration, right_expiration
+                "JoinWithExpiration<left_expire: {:?}, right_expire: {:?}, join_type: {:?}>",
+                left_expiration, right_expiration, join_type
             ),
+            Operator::UpdatingOperator {
+                name,
+                expression: _,
+            } => write!(f, "updating<{}>", name,),
+            Operator::NonWindowAggregator(_) => write!(f, "NonWindowAggregator"),
+            Operator::UpdatingKeyOperator {
+                name,
+                expression: _,
+            } => write!(f, "updating_key<{}>", name),
         }
     }
 }
@@ -1667,10 +1709,35 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::JoinWithExpiration {
                 left_expiration,
                 right_expiration,
+                join_type,
             } => GrpcOperator::JoinWithExpiration(GrpcApi::JoinWithExpiration {
                 left_expiration_micros: left_expiration.as_micros() as u64,
                 right_expiration_micros: right_expiration.as_micros() as u64,
+                join_type: match join_type {
+                    JoinType::Inner => GrpcApi::JoinType::Inner,
+                    JoinType::Left => GrpcApi::JoinType::Left,
+                    JoinType::Right => GrpcApi::JoinType::Right,
+                    JoinType::Full => GrpcApi::JoinType::Full,
+                }
+                .into(),
             }),
+            Operator::UpdatingOperator { name, expression } => {
+                GrpcOperator::UpdatingOperator(GrpcApi::UpdatingOperator { name, expression })
+            }
+            Operator::NonWindowAggregator(NonWindowAggregator {
+                expiration,
+                aggregator,
+                bin_merger,
+                bin_type,
+            }) => GrpcOperator::NonWindowAggregator(GrpcApi::NonWindowAggregator {
+                expiration_micros: expiration.as_micros() as u64,
+                aggregator,
+                bin_merger,
+                bin_type,
+            }),
+            Operator::UpdatingKeyOperator { name, expression } => {
+                GrpcOperator::UpdatingKeyOperator(GrpcApi::UpdatingKeyOperator { name, expression })
+            }
         }
     }
 }
@@ -1690,6 +1757,7 @@ impl From<SerializationMode> for GrpcApi::SerializationMode {
             SerializationMode::Json => GrpcApi::SerializationMode::Json,
             SerializationMode::JsonSchemaRegistry => GrpcApi::SerializationMode::JsonSchemaRegistry,
             SerializationMode::RawJson => GrpcApi::SerializationMode::Raw,
+            SerializationMode::DebeziumJson => GrpcApi::SerializationMode::Json,
         }
     }
 }
@@ -1978,9 +2046,17 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                 GrpcOperator::JoinWithExpiration(GrpcApi::JoinWithExpiration {
                     left_expiration_micros,
                     right_expiration_micros,
+                    join_type,
                 }) => Operator::JoinWithExpiration {
                     left_expiration: Duration::from_micros(left_expiration_micros),
                     right_expiration: Duration::from_micros(right_expiration_micros),
+                    join_type: match GrpcApi::JoinType::from_i32(join_type) {
+                        Some(GrpcApi::JoinType::Inner) => JoinType::Inner,
+                        Some(GrpcApi::JoinType::Left) => JoinType::Left,
+                        Some(GrpcApi::JoinType::Right) => JoinType::Right,
+                        Some(GrpcApi::JoinType::Full) => JoinType::Full,
+                        None => JoinType::Inner,
+                    },
                 },
                 GrpcOperator::ExpressionWatermark(GrpcApi::ExpressionWatermark {
                     period_micros,
@@ -1989,6 +2065,24 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     period: Duration::from_micros(period_micros),
                     expression,
                 }),
+                GrpcOperator::UpdatingOperator(GrpcApi::UpdatingOperator { name, expression }) => {
+                    Operator::UpdatingOperator { name, expression }
+                }
+                GrpcOperator::NonWindowAggregator(GrpcApi::NonWindowAggregator {
+                    expiration_micros,
+                    aggregator,
+                    bin_merger,
+                    bin_type,
+                }) => Operator::NonWindowAggregator(NonWindowAggregator {
+                    expiration: Duration::from_micros(expiration_micros),
+                    aggregator,
+                    bin_merger,
+                    bin_type,
+                }),
+                GrpcOperator::UpdatingKeyOperator(GrpcApi::UpdatingKeyOperator {
+                    name,
+                    expression,
+                }) => Operator::UpdatingKeyOperator { name, expression },
             },
             None => bail!("unset on operator {:?}", operator),
         };

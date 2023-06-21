@@ -1,7 +1,7 @@
 use crate::states::fatal;
 use anyhow::{anyhow, Result};
 use arroyo_datastream::{
-    AggregateBehavior, EdgeType, Operator, Program, SlidingAggregatingTopN,
+    AggregateBehavior, EdgeType, NonWindowAggregator, Operator, Program, SlidingAggregatingTopN,
     SlidingWindowAggregator, TumblingTopN, TumblingWindowAggregator, WasmBehavior, WatermarkType,
     WindowType,
 };
@@ -662,7 +662,7 @@ wasm-opt = false
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_k = parse_type(&output.unwrap().weight().key);
                     let out_t = parse_type(&output.unwrap().weight().value);
-                    let func: syn::ExprClosure = parse_str(&quote!(|record, _| {#expr}).to_string()).unwrap();
+                    let func: syn::ExprClosure = parse_quote!(|record, _| {#expr});
                     match return_type {
                         arroyo_datastream::ExpressionReturnType::Predicate => {
                             quote! {
@@ -847,7 +847,7 @@ wasm-opt = false
                         #max_elements))
                 }
                 }
-                Operator::JoinWithExpiration { left_expiration, right_expiration } => {
+                Operator::JoinWithExpiration { left_expiration, right_expiration, join_type } => {
                     let mut inputs: Vec<_> = program.graph.edges_directed(idx, Direction::Incoming)
                         .collect();
                     inputs.sort_by_key(|e| e.weight().typ.clone());
@@ -859,10 +859,63 @@ wasm-opt = false
                     let in_t2 = parse_type(&inputs[1].weight().value);
                     let left_expiration = duration_to_syn_expr(*left_expiration);
                     let right_expiration = duration_to_syn_expr(*right_expiration);
+                    match join_type {
+                        arroyo_types::JoinType::Inner => quote!{
+                            Box::new(arroyo_worker::operators::join_with_expiration::
+                                inner_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
+                        },
+                        arroyo_types::JoinType::Left => quote!{
+                            Box::new(arroyo_worker::operators::join_with_expiration::
+                                left_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
+                        },
+                        arroyo_types::JoinType::Right => quote!{
+                            Box::new(arroyo_worker::operators::join_with_expiration::
+                                right_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
+                        },
+                        arroyo_types::JoinType::Full => quote!{
+                            Box::new(arroyo_worker::operators::join_with_expiration::
+                                full_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
+                        },
+                    }
+                },
+                Operator::UpdatingOperator { name, expression } => {
+                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+                    let out_t = parse_type(&output.unwrap().weight().value);
+                    let func: syn::ExprClosure = parse_quote!(|arg| {
+                        #expr});
                     quote!{
-                        Box::new(arroyo_worker::operators::join_with_expiration::
-                            JoinWithExpiration::<#in_k, #in_t1, #in_t2>::
-                        new(#left_expiration, #right_expiration))
+                        Box::new(arroyo_worker::operators::OptionMapOperator::<#in_k, #in_t, #in_k, #out_t>::
+                            updating_operator(#name.to_string(), #func))
+                    }
+                },
+                Operator::NonWindowAggregator(NonWindowAggregator { expiration, aggregator, bin_merger, bin_type }) => {
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+                    let updating_out_t = parse_type(&output.unwrap().weight().value);
+                    let out_t = extract_container_type("UpdatingData", &updating_out_t).unwrap();
+                    let bin_t = parse_type(bin_type);
+                    let expiration = duration_to_syn_expr(*expiration);
+                    let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
+                    let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
+                    quote!{
+                        Box::new(arroyo_worker::operators::updating_aggregate::
+                            UpdatingAggregateOperator::<#in_k, #in_t, #bin_t, #out_t>::
+                        new(#expiration,
+                            #aggregator,
+                            #bin_merger))
+                    }
+                },
+                Operator::UpdatingKeyOperator { name, expression } => {
+                    let updating_in_t = parse_type(&input.unwrap().weight().value);
+                    let in_t = extract_container_type("UpdatingData", &updating_in_t).unwrap();
+                    let out_k = parse_type(&output.unwrap().weight().key);
+                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    quote! {
+                        Box::new(arroyo_worker::operators::
+                            KeyMapUpdatingOperator::<#in_t, #out_k>::
+                        new(#name.to_string(), #expr))
                     }
                 },
             };

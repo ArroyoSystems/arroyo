@@ -198,8 +198,7 @@ pub(crate) fn expand_schema(name: &str, schema: &ConnectionSchema) -> Result<Con
                 ))
             }
             Definition::RawSchema(_) => vec![
-                StructField { name: "value".to_string(), alias: None, data_type:
-                TypeDef::DataType(DataType::Utf8, false) }
+                StructField::new("value".to_string(), None, TypeDef::DataType(DataType::Utf8, false))
             ],
         };
 

@@ -397,7 +397,7 @@ fn impl_stream_node_type(
             #i => {
                 let message = match item {
                     crate::engine::QueueItem::Data(datum) => {
-                        *datum.downcast().unwrap()
+                        *datum.downcast().expect(&format!("failed to downcast data in {}", self.name()))
                     }
                     crate::engine::QueueItem::Bytes(bs) => {
                         ctx.counters

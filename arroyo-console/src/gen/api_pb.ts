@@ -219,6 +219,38 @@ proto3.util.setEnumType(ExpressionReturnType, "arroyo_api.ExpressionReturnType",
 ]);
 
 /**
+ * @generated from enum arroyo_api.JoinType
+ */
+export enum JoinType {
+  /**
+   * @generated from enum value: INNER = 0;
+   */
+  INNER = 0,
+
+  /**
+   * @generated from enum value: LEFT = 1;
+   */
+  LEFT = 1,
+
+  /**
+   * @generated from enum value: RIGHT = 2;
+   */
+  RIGHT = 2,
+
+  /**
+   * @generated from enum value: FULL = 3;
+   */
+  FULL = 3,
+}
+// Retrieve enum metadata with: proto3.getEnumType(JoinType)
+proto3.util.setEnumType(JoinType, "arroyo_api.JoinType", [
+  { no: 0, name: "INNER" },
+  { no: 1, name: "LEFT" },
+  { no: 2, name: "RIGHT" },
+  { no: 3, name: "FULL" },
+]);
+
+/**
  * @generated from enum arroyo_api.OffsetMode
  */
 export enum OffsetMode {
@@ -409,9 +441,19 @@ export enum PrimitiveType {
   UnixMillis = 9,
 
   /**
-   * @generated from enum value: UnixMicros = 10;
+   * @generated from enum value: UnixMicros = 12;
    */
-  UnixMicros = 10,
+  UnixMicros = 12,
+
+  /**
+   * @generated from enum value: DateTime = 10;
+   */
+  DateTime = 10,
+
+  /**
+   * @generated from enum value: Json = 11;
+   */
+  Json = 11,
 }
 // Retrieve enum metadata with: proto3.getEnumType(PrimitiveType)
 proto3.util.setEnumType(PrimitiveType, "arroyo_api.PrimitiveType", [
@@ -425,7 +467,9 @@ proto3.util.setEnumType(PrimitiveType, "arroyo_api.PrimitiveType", [
   { no: 7, name: "String" },
   { no: 8, name: "Bytes" },
   { no: 9, name: "UnixMillis" },
-  { no: 10, name: "UnixMicros" },
+  { no: 12, name: "UnixMicros" },
+  { no: 10, name: "DateTime" },
+  { no: 11, name: "Json" },
 ]);
 
 /**
@@ -433,31 +477,31 @@ proto3.util.setEnumType(PrimitiveType, "arroyo_api.PrimitiveType", [
  */
 export enum Format {
   /**
-   * @generated from enum value: Json = 0;
+   * @generated from enum value: JsonFormat = 0;
    */
-  Json = 0,
+  JsonFormat = 0,
 
   /**
-   * @generated from enum value: Protobuf = 1;
+   * @generated from enum value: ProtobufFormat = 1;
    */
-  Protobuf = 1,
+  ProtobufFormat = 1,
 
   /**
-   * @generated from enum value: Avro = 2;
+   * @generated from enum value: AvroFormat = 2;
    */
-  Avro = 2,
+  AvroFormat = 2,
 
   /**
-   * @generated from enum value: RawString = 3;
+   * @generated from enum value: RawStringFormat = 3;
    */
-  RawString = 3,
+  RawStringFormat = 3,
 }
 // Retrieve enum metadata with: proto3.getEnumType(Format)
 proto3.util.setEnumType(Format, "arroyo_api.Format", [
-  { no: 0, name: "Json" },
-  { no: 1, name: "Protobuf" },
-  { no: 2, name: "Avro" },
-  { no: 3, name: "RawString" },
+  { no: 0, name: "JsonFormat" },
+  { no: 1, name: "ProtobufFormat" },
+  { no: 2, name: "AvroFormat" },
+  { no: 3, name: "RawStringFormat" },
 ]);
 
 /**
@@ -1528,6 +1572,24 @@ export class Operator extends Message<Operator> {
      */
     value: ExpressionWatermark;
     case: "expressionWatermark";
+  } | {
+    /**
+     * @generated from field: arroyo_api.UpdatingOperator updating_operator = 24;
+     */
+    value: UpdatingOperator;
+    case: "updatingOperator";
+  } | {
+    /**
+     * @generated from field: arroyo_api.NonWindowAggregator non_window_aggregator = 25;
+     */
+    value: NonWindowAggregator;
+    case: "nonWindowAggregator";
+  } | {
+    /**
+     * @generated from field: arroyo_api.UpdatingKeyOperator updating_key_operator = 26;
+     */
+    value: UpdatingKeyOperator;
+    case: "updatingKeyOperator";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<Operator>) {
@@ -1559,6 +1621,9 @@ export class Operator extends Message<Operator> {
     { no: 20, name: "sliding_aggregating_top_n", kind: "message", T: SlidingAggregatingTopN, oneof: "operator" },
     { no: 21, name: "join_with_expiration", kind: "message", T: JoinWithExpiration, oneof: "operator" },
     { no: 23, name: "expression_watermark", kind: "message", T: ExpressionWatermark, oneof: "operator" },
+    { no: 24, name: "updating_operator", kind: "message", T: UpdatingOperator, oneof: "operator" },
+    { no: 25, name: "non_window_aggregator", kind: "message", T: NonWindowAggregator, oneof: "operator" },
+    { no: 26, name: "updating_key_operator", kind: "message", T: UpdatingKeyOperator, oneof: "operator" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Operator {
@@ -2684,6 +2749,11 @@ export class JoinWithExpiration extends Message<JoinWithExpiration> {
    */
   rightExpirationMicros = protoInt64.zero;
 
+  /**
+   * @generated from field: arroyo_api.JoinType join_type = 3;
+   */
+  joinType = JoinType.INNER;
+
   constructor(data?: PartialMessage<JoinWithExpiration>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2694,6 +2764,7 @@ export class JoinWithExpiration extends Message<JoinWithExpiration> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "left_expiration_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 2, name: "right_expiration_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "join_type", kind: "enum", T: proto3.getEnumType(JoinType) },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JoinWithExpiration {
@@ -2710,6 +2781,147 @@ export class JoinWithExpiration extends Message<JoinWithExpiration> {
 
   static equals(a: JoinWithExpiration | PlainMessage<JoinWithExpiration> | undefined, b: JoinWithExpiration | PlainMessage<JoinWithExpiration> | undefined): boolean {
     return proto3.util.equals(JoinWithExpiration, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.UpdatingOperator
+ */
+export class UpdatingOperator extends Message<UpdatingOperator> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string expression = 2;
+   */
+  expression = "";
+
+  constructor(data?: PartialMessage<UpdatingOperator>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.UpdatingOperator";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UpdatingOperator {
+    return new UpdatingOperator().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UpdatingOperator {
+    return new UpdatingOperator().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UpdatingOperator {
+    return new UpdatingOperator().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: UpdatingOperator | PlainMessage<UpdatingOperator> | undefined, b: UpdatingOperator | PlainMessage<UpdatingOperator> | undefined): boolean {
+    return proto3.util.equals(UpdatingOperator, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.NonWindowAggregator
+ */
+export class NonWindowAggregator extends Message<NonWindowAggregator> {
+  /**
+   * @generated from field: uint64 expiration_micros = 1;
+   */
+  expirationMicros = protoInt64.zero;
+
+  /**
+   * @generated from field: string aggregator = 2;
+   */
+  aggregator = "";
+
+  /**
+   * @generated from field: string bin_merger = 3;
+   */
+  binMerger = "";
+
+  /**
+   * @generated from field: string bin_type = 4;
+   */
+  binType = "";
+
+  constructor(data?: PartialMessage<NonWindowAggregator>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.NonWindowAggregator";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expiration_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "aggregator", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "bin_merger", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "bin_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NonWindowAggregator {
+    return new NonWindowAggregator().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): NonWindowAggregator {
+    return new NonWindowAggregator().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): NonWindowAggregator {
+    return new NonWindowAggregator().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: NonWindowAggregator | PlainMessage<NonWindowAggregator> | undefined, b: NonWindowAggregator | PlainMessage<NonWindowAggregator> | undefined): boolean {
+    return proto3.util.equals(NonWindowAggregator, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.UpdatingKeyOperator
+ */
+export class UpdatingKeyOperator extends Message<UpdatingKeyOperator> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string expression = 2;
+   */
+  expression = "";
+
+  constructor(data?: PartialMessage<UpdatingKeyOperator>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.UpdatingKeyOperator";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UpdatingKeyOperator {
+    return new UpdatingKeyOperator().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UpdatingKeyOperator {
+    return new UpdatingKeyOperator().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UpdatingKeyOperator {
+    return new UpdatingKeyOperator().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: UpdatingKeyOperator | PlainMessage<UpdatingKeyOperator> | undefined, b: UpdatingKeyOperator | PlainMessage<UpdatingKeyOperator> | undefined): boolean {
+    return proto3.util.equals(UpdatingKeyOperator, a, b);
   }
 }
 
@@ -4431,11 +4643,6 @@ export class CreateConnectionTableReq extends Message<CreateConnectionTableReq> 
   connectionId?: string;
 
   /**
-   * @generated from field: arroyo_api.TableType type = 4;
-   */
-  type = TableType.SOURCE;
-
-  /**
    * @generated from field: string config = 5;
    */
   config = "";
@@ -4456,7 +4663,6 @@ export class CreateConnectionTableReq extends Message<CreateConnectionTableReq> 
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "connector", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "connection_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 4, name: "type", kind: "enum", T: proto3.getEnumType(TableType) },
     { no: 5, name: "config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "schema", kind: "message", T: ConnectionSchema, opt: true },
   ]);
@@ -4918,7 +5124,7 @@ export class ConnectionSchema extends Message<ConnectionSchema> {
   /**
    * @generated from field: arroyo_api.Format format = 1;
    */
-  format = Format.Json;
+  format = Format.JsonFormat;
 
   /**
    * @generated from field: arroyo_api.FormatOptions format_options = 2;

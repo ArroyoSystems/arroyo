@@ -168,6 +168,9 @@ message Operator {
     SlidingAggregatingTopN sliding_aggregating_top_n = 20;
     JoinWithExpiration join_with_expiration = 21;
     ExpressionWatermark expression_watermark = 23;
+    UpdatingOperator updating_operator = 24;
+    NonWindowAggregator non_window_aggregator = 25;
+    UpdatingKeyOperator updating_key_operator = 26;
   }
 }
 
@@ -332,12 +335,38 @@ message SlidingAggregatingTopN {
 message JoinWithExpiration {
   uint64 left_expiration_micros = 1;
   uint64 right_expiration_micros = 2;
+  JoinType join_type = 3;
 }
+
+message UpdatingOperator {
+  string name = 1;
+  string expression = 2;
+}
+
+message NonWindowAggregator {
+  uint64 expiration_micros = 1;
+  string aggregator = 2;
+  string bin_merger = 3;
+  string bin_type = 4;
+}
+
+message UpdatingKeyOperator {
+  string name = 1;
+  string expression = 2;
+}
+
 enum ExpressionReturnType {
   UNUSED_ERT = 0;
   PREDICATE = 1;
   RECORD = 2;
   OPTIONAL_RECORD = 3;
+}
+
+enum JoinType {
+  INNER = 0;
+  LEFT = 1;
+  RIGHT = 2;
+  FULL = 3;
 }
 
 enum OffsetMode {
@@ -636,7 +665,9 @@ enum PrimitiveType {
   String = 7;
   Bytes = 8;
   UnixMillis = 9;
-  UnixMicros = 10;
+  UnixMicros = 12;
+  DateTime = 10;
+  Json = 11;
 }
 
 message StructType {
@@ -660,10 +691,10 @@ message SourceField {
 }
 
 enum Format {
-  Json = 0;
-  Protobuf = 1;
-  Avro = 2;
-  RawString = 3;
+  JsonFormat = 0;
+  ProtobufFormat = 1;
+  AvroFormat = 2;
+  RawStringFormat = 3;
 }
 
 message FormatOptions {

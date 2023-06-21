@@ -424,11 +424,7 @@ pub fn parse_and_get_program_sync(
         let struct_def = non_sink_output.return_type();
         let sink = SqlOperator::Sink(
             "default_sink".to_string(),
-            SqlSink {
-                id: None,
-                struct_def,
-                sink_config: config.sink,
-            },
+            SqlSink::new_from_sink_config(struct_def, config.sink),
             Box::new(non_sink_output),
         );
         sql_pipeline_builder.output_nodes.push(sink);
@@ -488,11 +484,10 @@ impl<'a> SqlProgramBuilder<'a> {
                         .options
                         .iter()
                         .any(|option| matches!(option.option, ColumnOption::NotNull));
-                    let struct_field = StructField {
+                    let struct_field = StructField::new(
                         name,
-                        alias: None,
-                        data_type: TypeDef::DataType(data_type, nullable),
-                    };
+                        None,
+                        TypeDef::DataType(data_type, nullable));
                     let generating_expression = column.options.iter().find_map(|option| {
                         if let ColumnOption::Generated {
                             generated_as: _,
@@ -800,92 +795,91 @@ fn test_struct_def() -> StructDef {
     StructDef {
         name: Some("TestStruct".to_string()),
         fields: vec![
-            StructField {
-                name: "non_nullable_i32".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Int32, false),
-            },
-            StructField {
-                name: "nullable_i32".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Int32, true),
-            },
-            StructField {
-                name: "non_nullable_bool".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Boolean, false),
-            },
-            StructField {
-                name: "nullable_bool".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Boolean, true),
-            },
-            StructField {
-                name: "non_nullable_f32".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Float32, false),
-            },
-            StructField {
-                name: "nullable_f32".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Float32, true),
-            },
-            StructField {
-                name: "non_nullable_f64".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Float64, false),
-            },
-            StructField {
-                name: "nullable_f64".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Float64, true),
-            },
-            StructField {
-                name: "non_nullable_i64".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Int64, false),
-            },
-            StructField {
-                name: "nullable_i64".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Int64, true),
-            },
-            StructField {
-                name: "non_nullable_string".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Utf8, false),
-            },
-            StructField {
-                name: "nullable_string".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Utf8, true),
-            },
-            StructField {
-                name: "non_nullable_timestamp".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(
+            StructField::new(
+                "non_nullable_i32".to_string(),
+                None,
+                TypeDef::DataType(DataType::Int32, false)),
+            StructField::new(
+                "nullable_i32".to_string(),
+                None,
+                TypeDef::DataType(DataType::Int32, true),
+            ),
+            StructField::new(
+                "non_nullable_bool".to_string(),
+                None,
+                TypeDef::DataType(DataType::Boolean, false),
+            ),
+            StructField::new(
+                "nullable_bool".to_string(),
+                None,
+                TypeDef::DataType(DataType::Boolean, true),
+            ),
+            StructField::new(
+                "non_nullable_f32".to_string(),
+                None,
+                TypeDef::DataType(DataType::Float32, false),
+            ),
+            StructField::new(
+                "nullable_f32".to_string(),
+                None,
+                TypeDef::DataType(DataType::Float32, true),
+            ),
+            StructField::new(
+                "non_nullable_f64".to_string(),
+                None,
+                TypeDef::DataType(DataType::Float64, false),
+            ),
+            StructField::new(
+                "nullable_f64".to_string(),
+                None,
+                TypeDef::DataType(DataType::Float64, true),
+            ),
+            StructField::new(
+                "non_nullable_i64".to_string(),
+                None,
+                TypeDef::DataType(DataType::Int64, false),
+            ),
+            StructField::new(
+                "nullable_i64".to_string(),
+                None,
+                TypeDef::DataType(DataType::Int64, true),
+            ),
+            StructField::new(
+                "non_nullable_string".to_string(),
+                None,
+                TypeDef::DataType(DataType::Utf8, false),
+            ),
+            StructField::new(
+                "nullable_string".to_string(),
+                None,
+                TypeDef::DataType(DataType::Utf8, true),
+            ),
+            StructField::new(
+                "non_nullable_timestamp".to_string(),
+                None,
+                TypeDef::DataType(
                     DataType::Timestamp(TimeUnit::Microsecond, None),
                     false,
                 ),
-            },
-            StructField {
-                name: "nullable_timestamp".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(
+            ),
+            StructField::new(
+                "nullable_timestamp".to_string(),
+                None,
+                TypeDef::DataType(
                     DataType::Timestamp(TimeUnit::Microsecond, None),
                     true,
                 ),
-            },
-            StructField {
-                name: "non_nullable_bytes".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Binary, false),
-            },
-            StructField {
-                name: "nullable_bytes".to_string(),
-                alias: None,
-                data_type: TypeDef::DataType(DataType::Binary, true),
-            },
+            ),
+            StructField::new(
+                "non_nullable_bytes".to_string(),
+                None,
+                TypeDef::DataType(DataType::Binary, false),
+            ),
+            StructField::new(
+                "nullable_bytes".to_string(),
+                None,
+                TypeDef::DataType(DataType::Binary, true),
+            ),
         ],
     }
 }

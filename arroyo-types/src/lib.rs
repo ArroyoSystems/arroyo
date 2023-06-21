@@ -68,6 +68,7 @@ pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
 pub const K8S_WORKER_NAME_ENV: &str = "K8S_WORKER_NAME";
 pub const K8S_WORKER_IMAGE_ENV: &str = "K8S_WORKER_IMAGE";
 pub const K8S_WORKER_IMAGE_PULL_POLICY_ENV: &str = "K8S_WORKER_IMAGE_PULL_POLICY";
+pub const K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV: &str = "K8S_WORKER_SERVICE_ACCOUNT_NAME";
 pub const K8S_WORKER_LABELS_ENV: &str = "K8S_WORKER_LABELS";
 pub const K8S_WORKER_ANNOTATIONS_ENV: &str = "K8S_WORKER_ANNOTATIONS";
 pub const K8S_WORKER_RESOURCES_ENV: &str = "K8S_WORKER_RESOURCES";
@@ -239,6 +240,176 @@ pub struct Record<K: Key, T: Data> {
     pub timestamp: SystemTime,
     pub key: Option<K>,
     pub value: T,
+}
+
+#[derive(Debug, Clone, Encode, Decode, PartialEq, Serialize, Deserialize)]
+pub enum UpdatingData<T: Data> {
+    Retract(T),
+    Update { old: T, new: T },
+    Append(T),
+}
+
+#[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Debezium<T: Data> {
+    before: Option<T>,
+    after: Option<T>,
+    op: DebeziumOp,
+}
+
+//Debezium ops with single character serialization
+#[derive(Clone, Encode, Decode, Debug, PartialEq)]
+pub enum DebeziumOp {
+    Create,
+    Update,
+    Delete,
+}
+
+impl<'de> Deserialize<'de> for DebeziumOp {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "c" => Ok(DebeziumOp::Create),
+            "u" => Ok(DebeziumOp::Update),
+            "d" => Ok(DebeziumOp::Delete),
+            _ => Err(serde::de::Error::custom(format!(
+                "Invalid DebeziumOp {}",
+                s
+            ))),
+        }
+    }
+}
+
+impl Serialize for DebeziumOp {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            DebeziumOp::Create => serializer.serialize_str("c"),
+            DebeziumOp::Update => serializer.serialize_str("u"),
+            DebeziumOp::Delete => serializer.serialize_str("d"),
+        }
+    }
+}
+
+impl<T: Data> UpdatingData<T> {
+    // Applies a function to the inner data,
+    // returning the result unless the Update becomes a no-op.
+    pub fn map_over_inner<F, R: Data>(&self, f: F) -> Option<UpdatingData<R>>
+    where
+        F: Fn(&T) -> R,
+    {
+        match self {
+            UpdatingData::Retract(before) => Some(UpdatingData::Retract(f(before))),
+            UpdatingData::Update { old, new } => {
+                let old = f(old);
+                let new = f(new);
+                if old == new {
+                    None
+                } else {
+                    Some(UpdatingData::Update { old, new })
+                }
+            }
+            UpdatingData::Append(after) => Some(UpdatingData::Append(f(after))),
+        }
+    }
+
+    // Applies a filter to the inner data,
+    // returning None if no inner data passes the filter.
+    pub fn filter<F>(&self, f: F) -> Option<UpdatingData<T>>
+    where
+        F: Fn(&T) -> bool,
+    {
+        match self {
+            UpdatingData::Retract(before) => {
+                if f(before) {
+                    Some(UpdatingData::Retract(before.clone()))
+                } else {
+                    None
+                }
+            }
+            UpdatingData::Update { old, new } => {
+                let old_passes = f(old);
+                let new_passes = f(new);
+                match (old_passes, new_passes) {
+                    (true, true) => Some(UpdatingData::Update {
+                        old: old.clone(),
+                        new: new.clone(),
+                    }),
+                    (true, false) => Some(UpdatingData::Retract(old.clone())),
+                    (false, true) => Some(UpdatingData::Append(new.clone())),
+                    (false, false) => None,
+                }
+            }
+            UpdatingData::Append(after) => {
+                if f(after) {
+                    Some(UpdatingData::Append(after.clone()))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+impl<T: Data> From<UpdatingData<T>> for Debezium<T> {
+    fn from(value: UpdatingData<T>) -> Self {
+        match value {
+            UpdatingData::Retract(before) => Debezium {
+                before: Some(before),
+                after: None,
+                op: DebeziumOp::Delete,
+            },
+            UpdatingData::Update { old, new } => Debezium {
+                before: Some(old),
+                after: Some(new),
+                op: DebeziumOp::Update,
+            },
+            UpdatingData::Append(after) => Debezium {
+                before: None,
+                after: Some(after),
+                op: DebeziumOp::Create,
+            },
+        }
+    }
+}
+
+impl<T: Data> From<T> for Debezium<T> {
+    fn from(value: T) -> Self {
+        Debezium {
+            before: None,
+            after: Some(value),
+            op: DebeziumOp::Create,
+        }
+    }
+}
+
+impl<T: Data> From<Debezium<T>> for UpdatingData<T> {
+    fn from(value: Debezium<T>) -> Self {
+        match value.op {
+            DebeziumOp::Delete => UpdatingData::Retract(value.before.unwrap()),
+            DebeziumOp::Update => UpdatingData::Update {
+                old: value.before.unwrap(),
+                new: value.after.unwrap(),
+            },
+            DebeziumOp::Create => UpdatingData::Append(value.after.unwrap()),
+        }
+    }
+}
+
+#[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
+pub enum JoinType {
+    /// Inner Join
+    Inner,
+    /// Left Join
+    Left,
+    /// Right Join
+    Right,
+    /// Full Join
+    Full,
 }
 
 unsafe impl<K: Key, T: Data> Sync for Record<K, T> {}

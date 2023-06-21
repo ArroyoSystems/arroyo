@@ -10,7 +10,7 @@ use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_types::{
     from_millis, to_millis, CheckpointBarrier, Data, GlobalKey, Key, Message, Record, TaskInfo,
-    Window,
+    UpdatingData, Window,
 };
 use bincode::{config, Decode, Encode};
 use serde::de::DeserializeOwned;
@@ -30,6 +30,7 @@ pub mod sliding_top_n_aggregating_window;
 pub mod sources;
 pub mod tumbling_aggregating_window;
 pub mod tumbling_top_n_window;
+pub mod updating_aggregate;
 pub mod windows;
 
 pub struct UserError {
@@ -66,7 +67,7 @@ impl SerializationMode {
                     UserError::new("Deserialization error", format!("Failed to deserialize message '{}' from confluent schema registry json, with error {}",
                         String::from_utf8_lossy(msg), err))),
             SerializationMode::RawJson => {
-                let s = String::from_utf8_lossy(&msg);
+                let s = String::from_utf8_lossy(msg);
                 let j = json! {
                     { "value": s }
                 };
@@ -644,6 +645,127 @@ impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> OptionMapOperator<InKey, In
         let option = (self.map_fn)(record, &ctx.task_info);
         if let Some(record) = option {
             ctx.collector.collect(record).await;
+        }
+    }
+}
+
+impl<K: Key, InT: Data, OutT: Data> OptionMapOperator<K, UpdatingData<InT>, K, UpdatingData<OutT>> {
+    pub fn updating_operator(name: String, map_fn: fn(&InT) -> Option<OutT>) -> Self {
+        Self {
+            name,
+            map_fn: Box::new(move |record, _task_info| {
+                let output_value = updating_data_map_function(&record.value, map_fn);
+                output_value.map(|value| Record {
+                    timestamp: record.timestamp,
+                    key: record.key.clone(),
+                    value,
+                })
+            }),
+        }
+    }
+}
+
+#[derive(StreamNode)]
+pub struct KeyMapUpdatingOperator<T: Data, OutKey: Key> {
+    pub name: String,
+    pub map_fn: Box<dyn Fn(&T) -> OutKey + Send>,
+}
+
+#[process_fn(in_k = (), in_t = UpdatingData<T>, out_k = OutKey, out_t = UpdatingData<T>)]
+impl<T: Data, OutKey: Key> KeyMapUpdatingOperator<T, OutKey> {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn new(name: String, map_fn: fn(&T) -> OutKey) -> Self {
+        Self {
+            name,
+            map_fn: Box::new(map_fn),
+        }
+    }
+
+    async fn process_element(
+        &mut self,
+        record: &Record<(), UpdatingData<T>>,
+        ctx: &mut Context<OutKey, UpdatingData<T>>,
+    ) {
+        let records = match &record.value {
+            UpdatingData::Retract(retract) => {
+                vec![Record {
+                    timestamp: record.timestamp,
+                    key: Some((self.map_fn)(retract)),
+                    value: UpdatingData::Retract(retract.clone()),
+                }]
+            }
+            UpdatingData::Update { old, new } => {
+                let old_key = (self.map_fn)(old);
+                let new_key = (self.map_fn)(new);
+                if old_key == new_key {
+                    vec![Record {
+                        timestamp: record.timestamp,
+                        key: Some(old_key),
+                        value: UpdatingData::Update {
+                            old: old.clone(),
+                            new: new.clone(),
+                        },
+                    }]
+                } else {
+                    let old_record = Record {
+                        timestamp: record.timestamp,
+                        key: Some(old_key),
+                        value: UpdatingData::Retract(old.clone()),
+                    };
+                    let new_record = Record {
+                        timestamp: record.timestamp,
+                        key: Some(new_key),
+                        value: UpdatingData::Append(new.clone()),
+                    };
+                    vec![old_record, new_record]
+                }
+            }
+            UpdatingData::Append(append) => {
+                vec![Record {
+                    timestamp: record.timestamp,
+                    key: Some((self.map_fn)(append)),
+                    value: UpdatingData::Append(append.clone()),
+                }]
+            }
+        };
+        for record in records {
+            ctx.collector.collect(record).await;
+        }
+    }
+}
+
+// general function for handling UpdatingData in an OptionMapOperator
+pub fn updating_data_map_function<InT: Data, OutT: Data>(
+    update: &UpdatingData<InT>,
+    map_fn: fn(&InT) -> Option<OutT>,
+) -> Option<UpdatingData<OutT>> {
+    match update {
+        UpdatingData::Retract(data) => {
+            let data = map_fn(data);
+            data.map(UpdatingData::Retract)
+        }
+        UpdatingData::Update { old, new } => {
+            let old = map_fn(old);
+            let new = map_fn(new);
+            match (old, new) {
+                (None, None) => None,
+                (None, Some(new)) => Some(UpdatingData::Append(new)),
+                (Some(old), None) => Some(UpdatingData::Retract(old)),
+                (Some(old), Some(new)) => {
+                    if old == new {
+                        None
+                    } else {
+                        Some(UpdatingData::Update { old, new })
+                    }
+                }
+            }
+        }
+        UpdatingData::Append(data) => {
+            let data = map_fn(data);
+            data.map(UpdatingData::Append)
         }
     }
 }

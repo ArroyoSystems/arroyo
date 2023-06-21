@@ -29,7 +29,6 @@ pub trait Optimizer {
         &mut self,
         node_index: NodeIndex,
         node: PlanNode,
-        outgoing_edge: PlanEdge,
         graph: &mut DiGraph<PlanNode, PlanEdge>,
     ) -> bool;
 
@@ -45,7 +44,7 @@ pub trait Optimizer {
             let mut dfs = Dfs::new(&(*graph), source);
 
             while let Some(idx) = dfs.next(&(*graph)) {
-                let _node = graph.node_weight(idx).unwrap();
+                let node = graph.node_weight(idx).unwrap().clone();
                 let ins = graph.edges_directed(idx, Direction::Incoming);
 
                 let in_degree = ins.clone().count();
@@ -54,11 +53,13 @@ pub trait Optimizer {
                 }
                 // if the out degree is terminal, don't try to optimize it
                 if graph.edges_directed(idx, Direction::Outgoing).count() == 0 {
+                    if self.try_finish_optimization(graph) {
+                        return true;
+                    }
                     self.clear();
                     continue;
                 }
-                let (node, outgoing_edge) = get_node_edge_pair(graph, idx);
-                if self.add_node(idx, node, outgoing_edge, graph) {
+                if self.add_node(idx, node, graph) {
                     return true;
                 }
             }
@@ -73,13 +74,6 @@ pub trait Optimizer {
 
     fn try_finish_optimization(&mut self, graph: &mut DiGraph<PlanNode, PlanEdge>) -> bool;
 }
-
-fn get_node_edge_pair(graph: &DiGraph<PlanNode, PlanEdge>, idx: NodeIndex) -> (PlanNode, PlanEdge) {
-    let node = graph.node_weight(idx).unwrap();
-    let edge = graph.edges_directed(idx, Outgoing).last().unwrap().weight();
-    (node.clone(), edge.clone())
-}
-
 fn replace_run(
     graph: &mut DiGraph<PlanNode, PlanEdge>,
     run: &Vec<NodeIndex>,
@@ -136,6 +130,9 @@ impl Optimizer for ExpressionFusionOptimizer {
     fn try_finish_optimization(&mut self, graph: &mut DiGraph<PlanNode, PlanEdge>) -> bool {
         if self.run.is_empty() {
             false
+        } else if self.run.len() == 1 {
+            self.clear();
+            false
         } else {
             replace_run(graph, &self.run, self.builder.get_node().unwrap(), vec![]);
             true
@@ -146,11 +143,22 @@ impl Optimizer for ExpressionFusionOptimizer {
         &mut self,
         _node_index: NodeIndex,
         node: PlanNode,
-        outgoing_edge: PlanEdge,
         graph: &mut DiGraph<PlanNode, PlanEdge>,
     ) -> bool {
         if matches!(&node.operator, PlanOperator::RecordTransform { .. }) {
-            self.builder.fuse_node(&node, &outgoing_edge);
+            if matches!(
+                &node.operator,
+                PlanOperator::RecordTransform(RecordTransform::KeyProjection { .. })
+            ) && node.output_type.is_updating()
+            {
+                if !self.run.is_empty() {
+                    return self.try_finish_optimization(graph);
+                } else {
+                    return false;
+                }
+            }
+            self.builder.fuse_node(&node);
+            self.run.push(_node_index);
             false
         } else if !self.run.is_empty() {
             self.try_finish_optimization(graph)
@@ -167,7 +175,11 @@ struct FusedExpressionOperatorBuilder {
 }
 
 impl FusedExpressionOperatorBuilder {
-    fn add_filter(&mut self) {
+    fn add_filter(&mut self, is_updating: bool) {
+        if is_updating {
+            self.expression_return_type = Some(OptionalRecord);
+            return;
+        }
         match self.expression_return_type {
             Some(ExpressionReturnType::Predicate) | None => {
                 self.expression_return_type = Some(Predicate)
@@ -175,14 +187,18 @@ impl FusedExpressionOperatorBuilder {
             _ => self.expression_return_type = Some(OptionalRecord),
         }
     }
-    fn add_projection(&mut self) {
+    fn add_projection(&mut self, is_updating: bool) {
+        if is_updating {
+            self.expression_return_type = Some(OptionalRecord);
+            return;
+        }
         match self.expression_return_type {
             Some(ExpressionReturnType::Record) | None => self.expression_return_type = Some(Record),
             _ => self.expression_return_type = Some(OptionalRecord),
         }
     }
 
-    fn fuse_node(&mut self, node: &PlanNode, _edge: &PlanEdge) -> bool {
+    fn fuse_node(&mut self, node: &PlanNode) -> bool {
         match &node.operator {
             PlanOperator::RecordTransform(record_transform) => {
                 self.sequence.push(record_transform.clone());
@@ -190,8 +206,10 @@ impl FusedExpressionOperatorBuilder {
                 match record_transform {
                     RecordTransform::ValueProjection(_)
                     | RecordTransform::KeyProjection(_)
-                    | RecordTransform::TimestampAssignment(_) => self.add_projection(),
-                    RecordTransform::Filter(_) => self.add_filter(),
+                    | RecordTransform::TimestampAssignment(_) => {
+                        self.add_projection(node.output_type.is_updating())
+                    }
+                    RecordTransform::Filter(_) => self.add_filter(node.output_type.is_updating()),
                 }
                 true
             }
@@ -225,7 +243,6 @@ impl Optimizer for TwoPhaseOptimization {
         &mut self,
         node_index: NodeIndex,
         node: PlanNode,
-        outgoing_edge: PlanEdge,
         graph: &mut DiGraph<PlanNode, PlanEdge>,
     ) -> bool {
         let PlanOperator::WindowAggregate { window, projection } = node.operator else { return false };
@@ -255,7 +272,7 @@ impl Optimizer for TwoPhaseOptimization {
         let current_weight = graph.node_weight_mut(node_index).unwrap();
         *current_weight = PlanNode {
             operator,
-            output_type: outgoing_edge.edge_data_type,
+            output_type: node.output_type.clone(),
         };
         true
     }
@@ -276,7 +293,6 @@ struct WindowTopNOptimization {
     window_function_operator: Option<WindowFunctionOperator>,
     projection: Option<Projection>,
     nodes: Vec<NodeIndex>,
-    outgoing_edges: Vec<PlanEdge>,
     search_target: SearchTarget,
 }
 #[derive(Default, Debug)]
@@ -297,7 +313,6 @@ impl Optimizer for WindowTopNOptimization {
         &mut self,
         node_index: NodeIndex,
         node: PlanNode,
-        outgoing_edge: PlanEdge,
         graph: &mut DiGraph<PlanNode, PlanEdge>,
     ) -> bool {
         match self.search_target {
@@ -307,7 +322,6 @@ impl Optimizer for WindowTopNOptimization {
                 {
                     self.aggregate_key = Some(projection);
                     self.nodes.push(node_index);
-                    self.outgoing_edges.push(outgoing_edge);
                     self.search_target = SearchTarget::WindowAggregate;
                 }
             }
@@ -315,7 +329,6 @@ impl Optimizer for WindowTopNOptimization {
                 if let PlanOperator::WindowAggregate { window, projection } = node.operator {
                     self.window_aggregate = Some((window, projection));
                     self.nodes.push(node_index);
-                    self.outgoing_edges.push(outgoing_edge);
                     self.search_target = SearchTarget::GroupByKind;
                 } else {
                     self.clear();
@@ -325,7 +338,6 @@ impl Optimizer for WindowTopNOptimization {
                 if let PlanOperator::WindowMerge { group_by_kind, .. } = node.operator {
                     self.merge = Some(group_by_kind);
                     self.nodes.push(node_index);
-                    self.outgoing_edges.push(outgoing_edge);
                     self.search_target = SearchTarget::PartitionProjection;
                 } else {
                     self.clear()
@@ -337,7 +349,6 @@ impl Optimizer for WindowTopNOptimization {
                 {
                     self.projection = Some(projection);
                     self.nodes.push(node_index);
-                    self.outgoing_edges.push(outgoing_edge);
                     self.search_target = SearchTarget::PartitionKeyProjection;
                 } else {
                     self.clear()
@@ -350,7 +361,6 @@ impl Optimizer for WindowTopNOptimization {
                 {
                     self.partition_projection = Some(partition_projection);
                     self.nodes.push(node_index);
-                    self.outgoing_edges.push(outgoing_edge);
                     self.search_target = SearchTarget::WindowFunctionOperator;
                 } else {
                     self.clear()
@@ -361,7 +371,6 @@ impl Optimizer for WindowTopNOptimization {
                     let _field_name = window_function_operator.field_name.clone();
                     self.window_function_operator = Some(window_function_operator);
                     self.nodes.push(node_index);
-                    self.outgoing_edges.push(outgoing_edge);
                     self.search_target = SearchTarget::Unkey;
                 } else {
                     self.clear()
@@ -370,7 +379,6 @@ impl Optimizer for WindowTopNOptimization {
             SearchTarget::Unkey => {
                 if let PlanOperator::Unkey = node.operator {
                     self.nodes.push(node_index);
-                    self.outgoing_edges.push(outgoing_edge);
                     self.search_target = SearchTarget::Limit;
                 } else {
                     self.clear()
@@ -380,7 +388,7 @@ impl Optimizer for WindowTopNOptimization {
                 if let PlanOperator::RecordTransform(RecordTransform::Filter(filter)) =
                     node.operator
                 {
-                    let  PlanType::Unkeyed(input_type) = outgoing_edge.edge_data_type else {
+                    let  PlanType::Unkeyed(input_type) = node.output_type.clone() else {
                         unreachable!("Filter must have unkeyed output type")
                     };
                     let field_name = &self.window_function_operator.as_ref().unwrap().field_name;
@@ -393,7 +401,11 @@ impl Optimizer for WindowTopNOptimization {
                         );
                         let key_node = PlanNode {
                             operator: key_operator,
-                            output_type: self.outgoing_edges[0].edge_data_type.clone(),
+                            output_type: graph
+                                .node_weight(self.nodes[0])
+                                .unwrap()
+                                .output_type
+                                .clone(),
                         };
                         let new_node = key_node;
                         let mut additional_nodes = vec![];
@@ -420,16 +432,14 @@ impl Optimizer for WindowTopNOptimization {
                         let tumbling_local_node = PlanNode {
                             operator: tumbling_local_operator,
                             output_type: PlanType::KeyedLiteralTypeValue {
-                                key: key_projection.output_struct(),
+                                key: Some(key_projection.output_struct()),
                                 value: quote!(#bin_type).to_string(),
                             },
                         };
                         let tumbling_incoming_edge = PlanEdge {
-                            edge_data_type: new_node.output_type.clone(),
                             edge_type: EdgeType::Forward,
                         };
-                        additional_nodes
-                            .push((tumbling_incoming_edge, tumbling_local_node.clone()));
+                        additional_nodes.push((tumbling_incoming_edge, tumbling_local_node));
 
                         let window_function_operator =
                             self.window_function_operator.take().unwrap();
@@ -437,7 +447,6 @@ impl Optimizer for WindowTopNOptimization {
                         let converting_projection = self.projection.take().unwrap();
 
                         let sliding_incoming_edge = PlanEdge {
-                            edge_data_type: tumbling_local_node.output_type,
                             edge_type: EdgeType::Shuffle,
                         };
 
@@ -463,10 +472,8 @@ impl Optimizer for WindowTopNOptimization {
                             },
                         };
 
-                        additional_nodes.push((
-                            sliding_incoming_edge,
-                            sliding_aggregating_top_n_node.clone(),
-                        ));
+                        additional_nodes
+                            .push((sliding_incoming_edge, sliding_aggregating_top_n_node));
 
                         let tumbling_top_n_operator = PlanOperator::TumblingTopN {
                             width: Duration::ZERO,
@@ -483,12 +490,10 @@ impl Optimizer for WindowTopNOptimization {
                         };
 
                         let tumbling_top_n_incoming_edge = PlanEdge {
-                            edge_data_type: sliding_aggregating_top_n_node.output_type,
                             edge_type: EdgeType::Shuffle,
                         };
 
-                        additional_nodes
-                            .push((tumbling_top_n_incoming_edge, tumbling_top_n_node.clone()));
+                        additional_nodes.push((tumbling_top_n_incoming_edge, tumbling_top_n_node));
 
                         let unkey_operator = PlanOperator::Unkey;
                         let unkey_node = PlanNode {
@@ -497,7 +502,6 @@ impl Optimizer for WindowTopNOptimization {
                         };
 
                         let unkey_incoming_edge = PlanEdge {
-                            edge_data_type: tumbling_top_n_node.output_type,
                             edge_type: EdgeType::Forward,
                         };
 
@@ -516,7 +520,6 @@ impl Optimizer for WindowTopNOptimization {
 
     fn clear(&mut self) {
         self.nodes.clear();
-        self.outgoing_edges.clear();
         self.aggregate_key = None;
         self.window_aggregate = None;
         self.window_function_operator = None;

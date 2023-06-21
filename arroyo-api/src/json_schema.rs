@@ -1,6 +1,13 @@
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
+
+use quote::{format_ident, quote};
 use arrow_schema::DataType;
 use arroyo_sql::types::{StructDef, StructField, TypeDef};
 use schemars::schema::{RootSchema, Schema};
+use syn::{parse_str, Type};
 use tracing::log::warn;
 use typify::{TypeDetails, TypeSpace, TypeSpaceSettings};
 
@@ -53,7 +60,7 @@ pub fn convert_json_schema(name: &str, schema: &str) -> Result<Vec<StructField>,
             fields,
         },
         _,
-    ) = to_schema_type(&type_space, name, s.name(), s.details()).unwrap()
+    ) = to_schema_type(&type_space, name, s.name(), s.details()).unwrap().0
     {
         Ok(fields)
     } else {
@@ -62,12 +69,91 @@ pub fn convert_json_schema(name: &str, schema: &str) -> Result<Vec<StructField>,
 }
 
 pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
-    let type_space = get_type_space(schema)?;
+    fn add_defs(name: &str, fields: &Vec<StructField>, defs: &mut Vec<String>) {
+        let struct_fields: Vec<_> = fields.iter().map(|f| {
+            let mut serde_opts = vec![];
+            if let Some(opt) = match (&f.data_type, f.original_type.as_ref().map(|s| s.as_str())) {
+                (TypeDef::DataType(DataType::Utf8, nullable), Some("json")) => {
+                    if *nullable {
+                        Some(quote!{
+                            #[serde(default)]
+                            #[serde(deserialize_with = "arroyo_worker::deserialize_raw_json_opt")]
+                        })
+                    } else {
+                        Some(quote! {
+                            #[serde(deserialize_with = "arroyo_worker::deserialize_raw_json")]
+                        })
+                    }
+                },
+                (TypeDef::DataType(DataType::Timestamp(_, _), nullable), Some("datetime")) => {
+                    if *nullable {
+                        Some(quote!{
+                            #[serde(default)]
+                            #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime_opt")]
+                        })
+                    } else {
+                        Some(quote! {
+                            #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime")]
+                        })
+                    }
+
+                },
+                _ => None
+            } {
+                serde_opts.push(opt);
+            };
+
+            if let Some(rename) = &f.renamed_from {
+                serde_opts.push(quote!(#[serde(rename = #rename)]));
+            }
+
+            let name = format_ident!("{}", f.name);
+            let typ = match &f.data_type {
+                TypeDef::DataType(dt, _) => StructField::data_type_name(dt),
+                TypeDef::StructDef(sd, _) => {
+                    let mut s = DefaultHasher::new();
+                    name.hash(&mut s);
+                    let struct_name = format!("generated_struct_{}", s.finish());
+                    add_defs(&struct_name, &sd.fields, defs);
+
+                    struct_name
+                },
+            };
+
+            let typ: Type = parse_str(&typ).unwrap();
+
+            let typ = if f.data_type.is_optional() {
+                quote! { Option<#typ> }
+            } else {
+                quote! { #typ }
+            };
+
+            quote! {
+                #(#serde_opts) *
+                pub #name: #typ
+            }
+        }).collect();
+
+        let name = format_ident!("{}", name);
+        defs.push(quote!{
+            #[derive(Clone, Debug, bincode::Encode, bincode::Decode, PartialEq,  PartialOrd, serde::Serialize, serde::Deserialize)]
+            pub struct #name {
+                #(#struct_fields)
+                ,*
+            }
+        }.to_string());
+    }
+
+    let fields = convert_json_schema(source_name, schema)?;
+
+    let mut defs: Vec<String> = vec![];
+
+    add_defs(ROOT_NAME, &fields, &mut defs);
 
     Ok(format!(
         "mod {} {{\nuse crate::*;\n{}\n}}",
         source_name,
-        type_space.to_stream()
+        defs.join("\n")
     ))
 }
 
@@ -76,64 +162,71 @@ fn to_schema_type(
     source_name: &str,
     type_name: String,
     td: TypeDetails,
-) -> Option<TypeDef> {
+) -> Option<(TypeDef, Option<String>)> {
     match td {
-        TypeDetails::Enum(_) => {
-            warn!("Enums are not currently supported; ignoring {}", type_name);
-            None
-        }
         TypeDetails::Struct(s) => {
             let mut fields = vec![];
-            for (n, p) in s.properties() {
-                let field_type = type_space.get_type(&p).unwrap();
-                if let Some(t) = to_schema_type(
+            for info in s.properties_info() {
+                let field_type = type_space.get_type(&info.type_id).unwrap();
+                if let Some((t, original)) = to_schema_type(
                     type_space,
                     source_name,
                     field_type.name(),
                     field_type.details(),
                 ) {
-                    fields.push(StructField {
-                        name: n.to_string(),
-                        data_type: t,
-                        alias: None,
-                    });
+                    fields.push(StructField::with_rename(
+                        info.name.to_string(),
+                        None,
+                        t,
+                        info.rename.map(|t| t.to_string()),
+                        original,
+                    ));
                 }
             }
 
-            Some(TypeDef::StructDef(
+            Some((TypeDef::StructDef(
                 StructDef {
                     name: Some(format!("{}::{}", source_name, type_name)),
                     fields,
                 },
                 false,
-            ))
+            ), None))
         }
         TypeDetails::Option(opt) => {
             let t = type_space.get_type(&opt).unwrap();
-            Some(to_schema_type(type_space, source_name, t.name(), t.details())?.to_optional())
+            let (dt, original) = to_schema_type(type_space, source_name, t.name(), t.details())?;
+            Some((dt.to_optional(), original))
         }
         TypeDetails::Builtin(t) => {
             use DataType::*;
 
-            let data_type = match t {
-                "bool" => Boolean,
-                "u32" => UInt32,
-                "u64" => UInt64,
-                "i32" => Int32,
-                "i64" => Int64,
-                "f32" => Float32,
-                "f64" => Float64,
+            let (data_type, original) = match t {
+                "bool" => (Boolean, None),
+                "u32" => (UInt32, None),
+                "u64" => (UInt64, None),
+                "i32" => (Int32, None),
+                "i64" => (Int64, None),
+                "f32" => (Float32, None),
+                "f64" => (Float64, None),
+                "chrono::DateTime<chrono::offset::Utc>" => (Timestamp(arrow_schema::TimeUnit::Microsecond, None), Some("datetime".to_string())),
                 _ => {
                     warn!("Unhandled primitive in json-schema: {}", t);
                     return None;
                 }
             };
-            Some(TypeDef::DataType(data_type, false))
+            Some((TypeDef::DataType(data_type, false), original))
         }
-        TypeDetails::String => Some(TypeDef::DataType(DataType::Utf8, false)),
+        TypeDetails::String => Some((TypeDef::DataType(DataType::Utf8, false), None)),
+        TypeDetails::Newtype(t) => {
+            let t = type_space.get_type(&t.subtype()).unwrap();
+            to_schema_type(type_space, source_name, t.name(), t.details())
+        },
         _ => {
-            warn!("Unhandled field type in json-schema {:?}", type_name);
-            None
+            warn!(
+                "Unhandled JSON schema type for field {}, converting to raw json",
+                type_name
+            );
+            Some((TypeDef::DataType(DataType::Utf8, false), Some("json".to_string())))
         }
     }
 }
@@ -146,16 +239,15 @@ mod test {
     fn test() {
         convert_json_schema(
             "nexmark",
-            r#"
+            r##"
             {
                 "$schema": "https://json-schema.org/draft/2019-09/schema",
-                "$id": "http://example.com/example.json",
                 "type": "object",
                 "default": {},
                 "title": "Root Schema",
                 "properties": {
-                    "auction": { "$ref": "\\#/definitions/Auction" },
-                    "bid": { "$ref": "\\#/definitions/Bid" }
+                    "auction": { "$ref": "#/definitions/Auction" },
+                    "bid": { "$ref": "#/definitions/Bid" }
                 },
                 "definitions": {
                     "Auction": {
@@ -244,7 +336,7 @@ mod test {
                     }
                 }
             }
-            "#,
+            "##,
         )
         .unwrap();
     }

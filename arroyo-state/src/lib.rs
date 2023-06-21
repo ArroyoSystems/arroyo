@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, SystemTime};
 use tables::{
-    GlobalKeyedState, GlobalKeyedStateCache, KeyTimeMultiMap, KeyTimeMultiMapCache, TimeKeyMap,
-    TimeKeyMapCache,
+    GlobalKeyedState, GlobalKeyedStateCache, KeyTimeMultiMap, KeyTimeMultiMapCache, KeyedState,
+    KeyedStateCache, TimeKeyMap, TimeKeyMapCache,
 };
 use tokio::sync::mpsc::Sender;
 
@@ -117,6 +117,7 @@ pub trait BackingStore {
 
     async fn write_key_value<K: Key, V: Data>(&mut self, table: char, key: &mut K, value: &mut V);
 
+    async fn get_global_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
     async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
 }
 
@@ -275,6 +276,31 @@ impl<S: BackingStore> StateStore<S> {
             )
         });
         GlobalKeyedState::new(table, &mut self.backend, cache)
+    }
+
+    pub async fn get_key_state<K: Key, V: Data>(&mut self, table: char) -> KeyedState<K, V, S> {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
+            let cache: Box<dyn Any + Send> = match &self.restore_from {
+                Some(_restore_from) => {
+                    let cache =
+                        KeyedStateCache::<K, V>::from_checkpoint(&self.backend, table).await;
+                    Box::new(cache)
+                }
+                None => Box::<tables::KeyedStateCache<K, V>>::default(),
+            };
+            e.insert(cache);
+        }
+
+        let cache = self.caches.get_mut(&table).unwrap();
+        let cache: &mut KeyedStateCache<K, V> = cache.downcast_mut().unwrap_or_else(|| {
+            panic!(
+                "Failed to get table {} with key {} and value {}",
+                table,
+                std::any::type_name::<K>(),
+                std::any::type_name::<V>()
+            )
+        });
+        KeyedState::new(table, &mut self.backend, cache)
     }
 
     pub async fn checkpoint(&mut self, barrier: CheckpointBarrier, watermark: Option<SystemTime>) {
