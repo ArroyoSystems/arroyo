@@ -32,7 +32,7 @@ async fn compile_sql<'e, E>(
     sql: &CreateSqlJob,
     auth_data: &AuthData,
     tx: &E,
-) -> Result<(Program, Vec<i64>, Vec<i64>), Status>
+) -> Result<(Program, Vec<i64>), Status>
 where
     E: GenericClient,
 {
@@ -73,40 +73,7 @@ where
             .map_err(log_and_map)?;
     }
 
-    let mut used_sink_ids = vec![];
-
-    // let sink = match sql.sink.as_ref().ok_or_else(|| required_field("sink"))? {
-    //     Sink::Builtin(builtin) => match BuiltinSink::from_i32(*builtin).unwrap() {
-    //         BuiltinSink::Null => SinkConfig::Null,
-    //         BuiltinSink::Web => SinkConfig::Grpc,
-    //         BuiltinSink::Log => SinkConfig::Console,
-    //     },
-    //     Sink::User(name) => {
-    //         //     let sink: api::Sink = sinks.into_iter().find(|s| s.name == *name).ok_or_else(|| {
-    //         //         Status::failed_precondition(format!("No sink with name '{}'", name))
-    //         //     })?;
-
-    //         //     used_sink_ids.push(sink.id);
-
-    //         //     match sink.sink_type.unwrap() {
-    //         //         SinkType::Kafka(k) => {
-    //         //             let connection =
-    //         //                 connections::get_connection(auth_data, &k.connection, tx).await?;
-    //         //             let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
-    //         //                 panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
-    //         //             };
-    //         //             SinkConfig::Kafka {
-    //         //                 bootstrap_servers: kafka.bootstrap_servers.clone(),
-    //         //                 topic: k.topic,
-    //         //                 client_configs: auth_config_to_hashmap(kafka.auth_config),
-    //         //             }
-    //         //         }
-    //         //     }
-    //         todo!()
-    //     }
-    // };
-
-    let (program, sources) = arroyo_sql::parse_and_get_program(
+    let (program, connections) = arroyo_sql::parse_and_get_program(
         &sql.query,
         schema_provider,
         SqlConfig {
@@ -120,7 +87,7 @@ where
         Status::invalid_argument(format!("{}", err.root_cause()))
     })?;
 
-    Ok((program, sources, used_sink_ids))
+    Ok((program, connections))
 }
 
 fn set_parallelism(program: &mut Program, parallelism: usize) {
@@ -186,9 +153,8 @@ pub(crate) async fn create_pipeline<'a>(
 ) -> Result<i64, Status> {
     let pipeline_type;
     let mut program;
-    let sources;
-    let sinks;
-    let text;
+    let connections;
+        let text;
     let compute_parallelism;
     let udfs: Option<Vec<Udf>>;
     let is_preview;
@@ -205,8 +171,7 @@ pub(crate) async fn create_pipeline<'a>(
                 .map_err(log_and_map)?
                 .try_into()
                 .map_err(log_and_map)?;
-            sources = vec![];
-            sinks = vec![];
+            connections = vec![];
             text = None;
             udfs = None;
             compute_parallelism = false;
@@ -222,7 +187,7 @@ pub(crate) async fn create_pipeline<'a>(
             }
 
             pipeline_type = PipelineType::sql;
-            (program, sources, sinks) = compile_sql(&sql, &auth, tx).await?;
+            (program, connections) = compile_sql(&sql, &auth, tx).await?;
             text = Some(sql.query);
             udfs = Some(
                 sql.udfs
@@ -306,18 +271,12 @@ pub(crate) async fn create_pipeline<'a>(
         .map_err(log_and_map)?;
 
     if !is_preview {
-        for source in sources {
-            api_queries::add_pipeline_source()
-                .bind(tx, &pipeline_id, &source)
-                .await
-                .map_err(log_and_map)?;
-        }
-
-        for sink in sinks {
-            api_queries::add_pipeline_sink()
-                .bind(tx, &pipeline_id, &sink)
-                .await
-                .map_err(log_and_map)?;
+        for connection in connections {
+            todo!()
+            // api_queries::add_pipeline_sink()
+            //     .bind(tx, &pipeline_id, &sink)
+            //     .await
+            //     .map_err(log_and_map)?;
         }
     }
 
@@ -379,7 +338,7 @@ pub(crate) async fn sql_graph(
     };
 
     match compile_sql(&sql, &auth, client).await {
-        Ok((mut program, _, _)) => {
+        Ok((mut program, _)) => {
             optimizations::optimize(&mut program.graph);
             Ok(PipelineGraphResp {
                 result: Some(api::pipeline_graph_resp::Result::JobGraph(
