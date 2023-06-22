@@ -2,6 +2,7 @@ mod full_query_tests;
 #[cfg(test)]
 mod tests {
     use arroyo_sql_macro::single_test_codegen;
+    use arroyo_types;
 
     // Casts
     single_test_codegen!(
@@ -1098,5 +1099,92 @@ mod tests {
             ..Default::default()
         },
         Some(String::from("two"))
+    );
+
+    single_test_codegen!(
+        "date_trunc",
+        "date_trunc('month',nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            nullable_timestamp: Some(arroyo_types::from_nanos(1685659545809000000)),
+            ..Default::default()
+        },
+        Some(arroyo_types::from_millis(1685577600000))
+    );
+
+    single_test_codegen!(
+        "date_part",
+        "date_part('month',nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            nullable_timestamp: Some(arroyo_types::from_nanos(1685659545809000000)),
+            ..Default::default()
+        },
+        Some(6)
+    );
+
+    single_test_codegen!(
+        "extract",
+        "extract(MONTH from nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            nullable_timestamp: Some(arroyo_types::from_nanos(1685659545809000000)),
+            ..Default::default()
+        },
+        Some(6)
+    );
+
+    single_test_codegen!(
+        "date_trunc_non_nullable",
+        "date_trunc('month',non_nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            non_nullable_timestamp: arroyo_types::from_nanos(1685659545809000000),
+            ..Default::default()
+        },
+        arroyo_types::from_millis(1685577600000)
+    );
+
+    single_test_codegen!(
+        "date_part_non_nullable",
+        "date_part('month',non_nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            non_nullable_timestamp: arroyo_types::from_nanos(1685659545809000000),
+            ..Default::default()
+        },
+        6
+    );
+
+    single_test_codegen!(
+        "extract_non_nullable",
+        "extract(MONTH from non_nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            non_nullable_timestamp: arroyo_types::from_nanos(1685659545809000000),
+            ..Default::default()
+        },
+        6
+    );
+
+    single_test_codegen!(
+        "date_trunc_nullable",
+        "date_trunc('month',nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "date_part_nullable",
+        "date_part('month',nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "extract_nullable",
+        "extract(MONTH from nullable_timestamp)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        None
     );
 }
