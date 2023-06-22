@@ -765,19 +765,8 @@ impl PlanNode {
             PlanOperator::Flatten => arroyo_datastream::Operator::FlattenOperator {
                 name: "flatten".into(),
             },
-            PlanOperator::Sink(_sink_name, sql_sink) => {
-                match &sql_sink.sink_config {
-                    arroyo_datastream::SinkConfig::Console => {
-                        arroyo_datastream::Operator::ConsoleSink
-                    }
-                    arroyo_datastream::SinkConfig::File { directory } => {
-                        arroyo_datastream::Operator::FileSink {
-                            dir: directory.into(),
-                        }
-                    }
-                    arroyo_datastream::SinkConfig::Grpc => arroyo_datastream::Operator::GrpcSink,
-                    arroyo_datastream::SinkConfig::Null => arroyo_datastream::Operator::NullSink,
-                }
+            PlanOperator::Sink(_, sql_sink) => {
+                sql_sink.operator.clone()
             }
             PlanOperator::ToDebezium => arroyo_datastream::Operator::ExpressionOperator {
                 name: "to_debezium".into(),

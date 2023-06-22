@@ -1,9 +1,9 @@
-use std::{collections::HashMap, vec};
+use std::{collections::HashMap};
 
 use arroyo_datastream::SerializationMode;
 use arroyo_rpc::grpc::{
     self,
-    api::{ConnectionSchema, SourceSchema, TestSourceMessage, TableType},
+    api::{ConnectionSchema, TestSourceMessage, TableType},
 };
 use arroyo_sql::ArroyoSchemaProvider;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -49,6 +49,7 @@ pub trait Connector: Send {
 
     fn register(
         &self,
+        id: i64,
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
@@ -79,6 +80,7 @@ pub trait ErasedConnector: Send {
 
     fn register(
         &self,
+        id: i64,
         name: &str,
         config: &str,
         table: &str,
@@ -129,6 +131,7 @@ impl<C: Connector> ErasedConnector for C {
 
     fn register(
         &self,
+        id: i64,
         name: &str,
         config: &str,
         table: &str,
@@ -136,6 +139,7 @@ impl<C: Connector> ErasedConnector for C {
         schema_provider: &mut ArroyoSchemaProvider,
     ) -> Result<(), serde_json::Error> {
         self.register(
+            id,
             name,
             self.parse_config(config)?,
             self.parse_table(table)?,

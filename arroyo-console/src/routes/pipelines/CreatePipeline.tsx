@@ -255,9 +255,9 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
 
   const catalogType = (name: string, tables: Array<ConnectionTable>) => {
     return (
-      <Stack border={'1px solid'} borderColor={'gray.600'} p={4}>
+      <Stack p={4}>
         <Text fontSize={'md'} pt={2} pb={4} fontWeight={'bold'}>
-          {name}s
+          {name.toUpperCase()}S
         </Text>
         <Stack spacing={4}>
           {sources.length == 0 ? (
@@ -277,13 +277,13 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   };
 
   let catalog = (
-    <Stack width={300} background="gray.900" p={2} spacing={2} pt={8} borderRight={"1px solid"}
+    <Stack width={300} background="gray.900" p={2} spacing={2} pt={4} borderRight={"1px solid"}
       borderColor={"gray.500"}>
       {catalogType('Source', sources)}
       {catalogType('Sink', sinks)}
 
       <Spacer />
-      <Box p={4} borderTop={'1px solid'}>
+      <Box p={4} borderTop={'1px solid'} borderColor={"gray.500"}>
         Write SQL to create a streaming pipeline.
         See the <Link to={'http://doc.arroyo.dev/sql'}>SQL docs</Link> for details
         on Arroyo SQL.

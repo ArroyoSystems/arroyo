@@ -10,7 +10,7 @@ use tonic::Status;
 use tracing::log::info;
 use tracing::warn;
 
-use arroyo_datastream::{Operator, Program, SinkConfig};
+use arroyo_datastream::{Operator, Program};
 use arroyo_rpc::grpc::api::create_sql_job::Sink;
 use arroyo_rpc::grpc::api::{
     self, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob, PipelineDef,
@@ -25,7 +25,6 @@ use crate::queries::api_queries::DbPipeline;
 use crate::types::public::PipelineType;
 use crate::{
     connections, handle_db_error, log_and_map, optimizations, required_field,
-    sources::{self, Source},
     AuthData,
 };
 
@@ -52,10 +51,6 @@ where
         }
     }
 
-    for source in sources::get_sources(auth_data, tx).await? {
-        let s: Source = source.try_into().map_err(log_and_map)?;
-        s.register(&mut schema_provider, auth_data);
-    }
     for connection in connections::get_connections(auth_data, tx).await? {
         schema_provider.add_connection(connection)
     }
@@ -68,6 +63,7 @@ where
 
         connector
             .register(
+                table.id,
                 &table.name,
                 &table.connection.map(|c| c.config.clone()).unwrap_or_else(|| "{}".to_string()),
                 &table.config,
@@ -79,44 +75,42 @@ where
 
     let mut used_sink_ids = vec![];
 
-    let sink = match sql.sink.as_ref().ok_or_else(|| required_field("sink"))? {
-        Sink::Builtin(builtin) => match BuiltinSink::from_i32(*builtin).unwrap() {
-            BuiltinSink::Null => SinkConfig::Null,
-            BuiltinSink::Web => SinkConfig::Grpc,
-            BuiltinSink::Log => SinkConfig::Console,
-        },
-        Sink::User(name) => {
-            //     let sink: api::Sink = sinks.into_iter().find(|s| s.name == *name).ok_or_else(|| {
-            //         Status::failed_precondition(format!("No sink with name '{}'", name))
-            //     })?;
+    // let sink = match sql.sink.as_ref().ok_or_else(|| required_field("sink"))? {
+    //     Sink::Builtin(builtin) => match BuiltinSink::from_i32(*builtin).unwrap() {
+    //         BuiltinSink::Null => SinkConfig::Null,
+    //         BuiltinSink::Web => SinkConfig::Grpc,
+    //         BuiltinSink::Log => SinkConfig::Console,
+    //     },
+    //     Sink::User(name) => {
+    //         //     let sink: api::Sink = sinks.into_iter().find(|s| s.name == *name).ok_or_else(|| {
+    //         //         Status::failed_precondition(format!("No sink with name '{}'", name))
+    //         //     })?;
 
-            //     used_sink_ids.push(sink.id);
+    //         //     used_sink_ids.push(sink.id);
 
-            //     match sink.sink_type.unwrap() {
-            //         SinkType::Kafka(k) => {
-            //             let connection =
-            //                 connections::get_connection(auth_data, &k.connection, tx).await?;
-            //             let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
-            //                 panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
-            //             };
-            //             SinkConfig::Kafka {
-            //                 bootstrap_servers: kafka.bootstrap_servers.clone(),
-            //                 topic: k.topic,
-            //                 client_configs: auth_config_to_hashmap(kafka.auth_config),
-            //             }
-            //         }
-            //     }
-            todo!()
-        }
-    };
+    //         //     match sink.sink_type.unwrap() {
+    //         //         SinkType::Kafka(k) => {
+    //         //             let connection =
+    //         //                 connections::get_connection(auth_data, &k.connection, tx).await?;
+    //         //             let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
+    //         //                 panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
+    //         //             };
+    //         //             SinkConfig::Kafka {
+    //         //                 bootstrap_servers: kafka.bootstrap_servers.clone(),
+    //         //                 topic: k.topic,
+    //         //                 client_configs: auth_config_to_hashmap(kafka.auth_config),
+    //         //             }
+    //         //         }
+    //         //     }
+    //         todo!()
+    //     }
+    // };
 
     let (program, sources) = arroyo_sql::parse_and_get_program(
         &sql.query,
         schema_provider,
         SqlConfig {
             default_parallelism: sql.parallelism as usize,
-            sink,
-            kafka_qps: Some(auth_data.org_metadata.kafka_qps),
         },
     )
     .await

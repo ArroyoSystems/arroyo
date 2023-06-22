@@ -139,32 +139,33 @@ async fn test_table_alias() {
 
 fn get_test_schema_provider() -> ArroyoSchemaProvider {
     let mut schema_provider = ArroyoSchemaProvider::new();
-    schema_provider.add_saved_source_with_type(
-        1,
-        "nexmark".to_string(),
-        test_schema(),
-        Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
-        arroyo_datastream::SourceConfig::NexmarkSource {
-            event_rate: 10,
-            runtime: Some(Duration::from_secs(10)),
-        },
-        SerializationMode::Json,
-    );
-    schema_provider.add_connection(Connection {
-        name: "local".to_string(),
-        sources: 0,
-        sinks: 0,
-        connection_type: Some(arroyo_rpc::grpc::api::connection::ConnectionType::Kafka(
-            KafkaConnection {
-                bootstrap_servers: "localhost:9090".to_string(),
-                auth_config: Some(KafkaAuthConfig {
-                    auth_type: Some(arroyo_rpc::grpc::api::kafka_auth_config::AuthType::NoAuth(
-                        arroyo_rpc::grpc::api::NoAuth {},
-                    )),
-                }),
-            },
-        )),
-    });
+    todo!();
+    // schema_provider.add_saved_source_with_type(
+    //     1,
+    //     "nexmark".to_string(),
+    //     test_schema(),
+    //     Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
+    //     arroyo_datastream::SourceConfig::NexmarkSource {
+    //         event_rate: 10,
+    //         runtime: Some(Duration::from_secs(10)),
+    //     },
+    //     SerializationMode::Json,
+    // );
+    // schema_provider.add_connection(Connection {
+    //     name: "local".to_string(),
+    //     sources: 0,
+    //     sinks: 0,
+    //     connection_type: Some(arroyo_rpc::grpc::api::connection::ConnectionType::Kafka(
+    //         KafkaConnection {
+    //             bootstrap_servers: "localhost:9090".to_string(),
+    //             auth_config: Some(KafkaAuthConfig {
+    //                 auth_type: Some(arroyo_rpc::grpc::api::kafka_auth_config::AuthType::NoAuth(
+    //                     arroyo_rpc::grpc::api::NoAuth {},
+    //                 )),
+    //             }),
+    //         },
+    //     )),
+    // });
     schema_provider
 }
 
@@ -234,20 +235,22 @@ async fn test_udf() {
         .add_rust_udf("fn my_sqr(x: u64) -> u64 { x * x }")
         .unwrap();
 
-    schema_provider.add_saved_source_with_type(
-        1,
-        "nexmark".to_string(),
-        test_schema(),
-        Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
-        arroyo_datastream::SourceConfig::NexmarkSource {
-            event_rate: 10,
-            runtime: Some(Duration::from_secs(10)),
-        },
-        SerializationMode::Json,
-    );
 
-    let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
-    parse_and_get_program(sql, schema_provider, SqlConfig::default())
-        .await
-        .unwrap();
+    todo!()
+    // schema_provider.add_saved_source_with_type(
+    //     1,
+    //     "nexmark".to_string(),
+    //     test_schema(),
+    //     Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
+    //     arroyo_datastream::SourceConfig::NexmarkSource {
+    //         event_rate: 10,
+    //         runtime: Some(Duration::from_secs(10)),
+    //     },
+    //     SerializationMode::Json,
+    // );
+
+    // let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
+    // parse_and_get_program(sql, schema_provider, SqlConfig::default())
+    //     .await
+    //     .unwrap();
 }

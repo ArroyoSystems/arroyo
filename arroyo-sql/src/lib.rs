@@ -3,7 +3,7 @@ use anyhow::{anyhow, bail, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
-use arroyo_datastream::{Operator, Program, SerializationMode, SinkConfig, SourceConfig};
+use arroyo_datastream::{Operator, Program, SerializationMode};
 use arroyo_rpc::grpc::api::Connection;
 use datafusion::optimizer::analyzer::Analyzer;
 use datafusion::optimizer::optimizer::Optimizer;
@@ -18,6 +18,7 @@ mod pipeline;
 mod plan_graph;
 pub mod schemas;
 pub mod types;
+mod tables;
 
 use datafusion::prelude::create_udf;
 
@@ -38,10 +39,10 @@ use datafusion_expr::{
     WriteOp,
 };
 use expressions::Expression;
-use external::SqlSink;
 use pipeline::{SqlOperator, SqlPipelineBuilder};
 use plan_graph::{get_program, PlanGraph};
 use schemas::window_arrow_struct;
+use tables::{Table, ConnectorTable};
 
 use crate::expressions::ExpressionContext;
 use crate::types::{convert_data_type, StructDef, StructField, TypeDef};
@@ -58,6 +59,12 @@ pub struct UdfDef {
     args: Vec<TypeDef>,
     ret: TypeDef,
     def: String,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ConnectorType {
+    Source,
+    Sink,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -150,8 +157,10 @@ impl ArroyoSchemaProvider {
         self.connections.insert(connection.name.clone(), connection);
     }
 
+
     pub fn add_connector_table(
         &mut self,
+        id: i64,
         name: String,
         connector_type: ConnectorType,
         fields: Vec<StructField>,
@@ -163,7 +172,8 @@ impl ArroyoSchemaProvider {
     ) {
         self.tables.insert(
             name.clone(),
-            Table::ConnectorTable {
+            Table::ConnectorTable(ConnectorTable {
+                id,
                 name,
                 connector_type,
                 fields,
@@ -172,29 +182,9 @@ impl ArroyoSchemaProvider {
                 config,
                 description,
                 serialization_mode,
-            },
-        );
-    }
-
-    pub fn add_saved_source_with_type(
-        &mut self,
-        id: i64,
-        name: String,
-        fields: Vec<StructField>,
-        type_name: Option<String>,
-        source_config: SourceConfig,
-        serialization_mode: SerializationMode,
-    ) {
-        self.tables.insert(
-            name.clone(),
-            Table::SavedSource {
-                name,
-                id,
-                fields,
-                type_name,
-                source_config,
-                serialization_mode,
-            },
+                event_time_field: None,
+                watermark_field: None,
+            }),
         );
     }
 
@@ -359,26 +349,16 @@ impl ContextProvider for ArroyoSchemaProvider {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct SqlSource {
-    pub id: Option<i64>,
-    pub struct_def: StructDef,
-    pub operator: Operator,
-}
 
 #[derive(Clone, Debug)]
 pub struct SqlConfig {
     pub default_parallelism: usize,
-    pub sink: SinkConfig,
-    pub kafka_qps: Option<u32>,
 }
 
 impl Default for SqlConfig {
     fn default() -> Self {
         Self {
             default_parallelism: 4,
-            sink: SinkConfig::Grpc,
-            kafka_qps: None,
         }
     }
 }
@@ -410,24 +390,14 @@ pub fn parse_and_get_program_sync(
     let outputs = sql_program_builder.plan_query(&query)?;
     let mut sql_pipeline_builder = SqlPipelineBuilder::new(sql_program_builder.schema_provider);
     for output in outputs {
-        sql_pipeline_builder.insert_table(output)?;
+        //sql_pipeline_builder.insert_table(output)?;
+        todo!()
     }
     let mut plan_graph = PlanGraph::new(config.clone());
-    let last_output = sql_pipeline_builder
-        .output_nodes
-        .last()
-        .ok_or_else(|| anyhow!("No output nodes"))?;
 
-    // If the last output is not a sink, add the sink passed in.
-    if !matches!(last_output, SqlOperator::Sink(..)) {
-        let non_sink_output = sql_pipeline_builder.output_nodes.pop().unwrap();
-        let struct_def = non_sink_output.return_type();
-        let sink = SqlOperator::Sink(
-            "default_sink".to_string(),
-            SqlSink::new_from_sink_config(struct_def, config.sink),
-            Box::new(non_sink_output),
-        );
-        sql_pipeline_builder.output_nodes.push(sink);
+    // If there isn't a sink, throw an error
+    if !sql_pipeline_builder.output_nodes.iter().any(|n| matches!(n, SqlOperator::Sink(..))) {
+        bail!("Pipeline must include at least one sink node");
     }
 
     for output in sql_pipeline_builder.output_nodes.into_iter() {
@@ -466,130 +436,134 @@ impl<'a> SqlProgramBuilder<'a> {
             ..
         } = statement
         {
-            let name = name.to_string();
-            let mut with_map = HashMap::new();
-            for option in with_options {
-                with_map.insert(
-                    option.name.value.to_string(),
-                    value_to_inner_string(&option.value)?,
-                );
-            }
+        //     let name = name.to_string();
+        //     let mut with_map = HashMap::new();
+        //     for option in with_options {
+        //         with_map.insert(
+        //             option.name.value.to_string(),
+        //             value_to_inner_string(&option.value)?,
+        //         );
+        //     }
 
-            let struct_field_tuple = columns
-                .iter()
-                .map(|column| {
-                    let name = column.name.value.to_string();
-                    let data_type = convert_data_type(&column.data_type)?;
-                    let nullable = !column
-                        .options
-                        .iter()
-                        .any(|option| matches!(option.option, ColumnOption::NotNull));
-                    let struct_field = StructField::new(
-                        name,
-                        None,
-                        TypeDef::DataType(data_type, nullable));
-                    let generating_expression = column.options.iter().find_map(|option| {
-                        if let ColumnOption::Generated {
-                            generated_as: _,
-                            sequence_options: _,
-                            generation_expr,
-                        } = &option.option
-                        {
-                            generation_expr.clone()
-                        } else {
-                            None
-                        }
-                    });
-                    Ok((struct_field, generating_expression))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            // if there are virtual fields, need to do some additional work
-            let has_virtual_fields = struct_field_tuple
-                .iter()
-                .any(|(_, generating_expression)| generating_expression.is_some());
-            let fields: Vec<FieldSpec> = if has_virtual_fields {
-                let physical_struct = StructDef {
-                    name: None,
-                    fields: struct_field_tuple
-                        .iter()
-                        .filter_map(
-                            |(field, generating_expression)| match generating_expression {
-                                Some(_) => None,
-                                None => Some(field.clone()),
-                            },
-                        )
-                        .collect(),
-                };
-                let physical_schema = DFSchema::new_with_metadata(
-                    physical_struct
-                        .fields
-                        .iter()
-                        .map(|f| {
-                            let TypeDef::DataType(data_type, nullable ) = f.data_type.clone() else {
-                    bail!("expect data type for generated column")
-                };
-                            Ok(DFField::new_unqualified(&f.name, data_type, nullable))
-                        })
-                        .collect::<Result<Vec<_>>>()?,
-                    HashMap::new(),
-                )?;
-                let expression_context = ExpressionContext {
-                    input_struct: &physical_struct,
-                    schema_provider: self.schema_provider,
-                };
-                struct_field_tuple
-                    .into_iter()
-                    .map(|(struct_field, generating_expression)| {
-                        match generating_expression {
-                            Some(generating_expression) => {
-                                // TODO: Implement automatic type coercion here, as we have elsewhere.
-                                // It is done by calling the Analyzer which inserts CAST operators where necessary.
+        //     let struct_field_tuple = columns
+        //         .iter()
+        //         .map(|column| {
+        //             let name = column.name.value.to_string();
+        //             let data_type = convert_data_type(&column.data_type)?;
+        //             let nullable = !column
+        //                 .options
+        //                 .iter()
+        //                 .any(|option| matches!(option.option, ColumnOption::NotNull));
+        //             let struct_field = StructField::new(
+        //                 name,
+        //                 None,
+        //                 TypeDef::DataType(data_type, nullable));
+        //             let generating_expression = column.options.iter().find_map(|option| {
+        //                 if let ColumnOption::Generated {
+        //                     generated_as: _,
+        //                     sequence_options: _,
+        //                     generation_expr,
+        //                 } = &option.option
+        //                 {
+        //                     generation_expr.clone()
+        //                 } else {
+        //                     None
+        //                 }
+        //             });
+        //             Ok((struct_field, generating_expression))
+        //         })
+        //         .collect::<Result<Vec<_>>>()?;
+        //     // if there are virtual fields, need to do some additional work
+        //     let has_virtual_fields = struct_field_tuple
+        //         .iter()
+        //         .any(|(_, generating_expression)| generating_expression.is_some());
+        //     let fields: Vec<FieldSpec> = if has_virtual_fields {
+        //         let physical_struct = StructDef {
+        //             name: None,
+        //             fields: struct_field_tuple
+        //                 .iter()
+        //                 .filter_map(
+        //                     |(field, generating_expression)| match generating_expression {
+        //                         Some(_) => None,
+        //                         None => Some(field.clone()),
+        //                     },
+        //                 )
+        //                 .collect(),
+        //         };
+        //         let physical_schema = DFSchema::new_with_metadata(
+        //             physical_struct
+        //                 .fields
+        //                 .iter()
+        //                 .map(|f| {
+        //                     let TypeDef::DataType(data_type, nullable ) = f.data_type.clone() else {
+        //             bail!("expect data type for generated column")
+        //         };
+        //                     Ok(DFField::new_unqualified(&f.name, data_type, nullable))
+        //                 })
+        //                 .collect::<Result<Vec<_>>>()?,
+        //             HashMap::new(),
+        //         )?;
+        //         let expression_context = ExpressionContext {
+        //             input_struct: &physical_struct,
+        //             schema_provider: self.schema_provider,
+        //         };
+        //         struct_field_tuple
+        //             .into_iter()
+        //             .map(|(struct_field, generating_expression)| {
+        //                 match generating_expression {
+        //                     Some(generating_expression) => {
+        //                         // TODO: Implement automatic type coercion here, as we have elsewhere.
+        //                         // It is done by calling the Analyzer which inserts CAST operators where necessary.
 
-                                let df_expr = sql_to_rel.sql_to_expr(
-                                    generating_expression,
-                                    &physical_schema,
-                                    &mut PlannerContext::default(),
-                                )?;
-                                let expr = expression_context.compile_expr(&df_expr)?;
-                                Ok(FieldSpec::VirtualStructField(struct_field, expr))
-                            }
-                            None => Ok(FieldSpec::StructField(struct_field)),
-                        }
-                    })
-                    .collect::<Result<Vec<_>>>()?
-            } else {
-                struct_field_tuple
-                    .into_iter()
-                    .map(|(struct_field, _)| Ok(FieldSpec::StructField(struct_field)))
-                    .collect::<Result<Vec<_>>>()?
-            };
+        //                         let df_expr = sql_to_rel.sql_to_expr(
+        //                             generating_expression,
+        //                             &physical_schema,
+        //                             &mut PlannerContext::default(),
+        //                         )?;
+        //                         let expr = expression_context.compile_expr(&df_expr)?;
+        //                         Ok(FieldSpec::VirtualStructField(struct_field, expr))
+        //                     }
+        //                     None => Ok(FieldSpec::StructField(struct_field)),
+        //                 }
+        //             })
+        //             .collect::<Result<Vec<_>>>()?
+        //     } else {
+        //         struct_field_tuple
+        //             .into_iter()
+        //             .map(|(struct_field, _)| Ok(FieldSpec::StructField(struct_field)))
+        //             .collect::<Result<Vec<_>>>()?
+        //     };
 
-            let connection_name = with_map.get("connection");
-            match connection_name {
-                Some(connection_name) => {
-                    let connection = self
-                        .schema_provider
-                        .connections
-                        .get(connection_name)
-                        .ok_or_else(|| anyhow!("connection {} not found", connection_name))?
-                        .clone();
-                    Ok(Table::MemoryTableWithConnectionConfig {
-                        name,
-                        fields,
-                        connection,
-                        connection_config: with_map,
-                    })
-                }
-                None => {
-                    let fields = fields
-                        .into_iter()
-                        .map(|field| match field {
-                            FieldSpec::StructField(struct_field) => Ok(struct_field),
-                            FieldSpec::VirtualStructField(..) => bail!("Virtual fields are not supported in memory tables. Just write a query"),
-                        }).collect::<Result<Vec<_>>>()?;
-                    Ok(Table::MemoryTable { name, fields })
-                }
-            }
+        //     let connection_name = with_map.get("connection");
+        //     match connection_name {
+        //         Some(connection_name) => {
+        //             let connection = self
+        //                 .schema_provider
+        //                 .connections
+        //                 .get(connection_name)
+        //                 .ok_or_else(|| anyhow!("connection {} not found", connection_name))?
+        //                 .clone();
+        //             Ok(Table::MemoryTableWithConnectionConfig {
+        //                 name,
+        //                 fields,
+        //                 connection,
+        //                 connection_config: with_map,
+        //             })
+        //         }
+        //         None => {
+        //             let fields = fields
+        //                 .into_iter()
+        //                 .map(|field| match field {
+        //                     FieldSpec::StructField(struct_field) => Ok(struct_field),
+        //                     FieldSpec::VirtualStructField(..) => bail!("Virtual fields are not supported in memory tables. Just write a query"),
+        //                 }).collect::<Result<Vec<_>>>()?;
+        //             Ok(Table::MemoryTable {
+        //                 name,
+        //                 fields,
+        //             })
+        //         }
+        //     }
+            todo!()
         } else {
             let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 
@@ -635,118 +609,6 @@ impl<'a> SqlProgramBuilder<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum FieldSpec {
-    StructField(StructField),
-    VirtualStructField(StructField, Expression),
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum ConnectorType {
-    Source,
-    Sink,
-}
-
-#[derive(Debug, Clone)]
-pub enum Table {
-    SavedSource {
-        name: String,
-        id: i64,
-        fields: Vec<StructField>,
-        type_name: Option<String>,
-        source_config: SourceConfig,
-        serialization_mode: SerializationMode,
-    },
-    ConnectorTable {
-        name: String,
-        connector_type: ConnectorType,
-        fields: Vec<StructField>,
-        type_name: Option<String>,
-        operator: String,
-        config: String,
-        description: String,
-        serialization_mode: SerializationMode,
-    },
-    SavedSink {
-        name: String,
-        id: i64,
-        sink_config: SinkConfig,
-    },
-    MemoryTable {
-        name: String,
-        fields: Vec<StructField>,
-    },
-    MemoryTableWithConnectionConfig {
-        name: String,
-        fields: Vec<FieldSpec>,
-        connection: Connection,
-        connection_config: HashMap<String, String>,
-    },
-    TableFromQuery {
-        name: String,
-        logical_plan: LogicalPlan,
-    },
-    InsertQuery {
-        sink_name: String,
-        logical_plan: LogicalPlan,
-    },
-    Anonymous {
-        logical_plan: LogicalPlan,
-    },
-}
-
-impl Table {
-    fn name(&self) -> Option<String> {
-        match self {
-            Table::SavedSource { name, .. }
-            | Table::SavedSink { name, .. }
-            | Table::MemoryTable { name, .. }
-            | Table::MemoryTableWithConnectionConfig { name, .. }
-            | Table::TableFromQuery { name, .. }
-            | Table::ConnectorTable { name, .. } => Some(name.clone()),
-            Table::InsertQuery { .. } | Table::Anonymous { .. } => None,
-        }
-    }
-
-    fn get_fields(&self) -> Result<Vec<Field>> {
-        match self {
-            Table::MemoryTableWithConnectionConfig { fields, .. } => fields
-                .iter()
-                .map(|field| match field {
-                    FieldSpec::StructField(struct_field) => Ok(struct_field.clone().into()),
-                    FieldSpec::VirtualStructField(struct_field, _) => {
-                        Ok(struct_field.clone().into())
-                    }
-                })
-                .collect::<Result<Vec<_>>>(),
-            Table::MemoryTable { fields, .. }
-            | Table::SavedSource { fields, .. }
-            | Table::ConnectorTable { fields, .. } => fields
-                .iter()
-                .map(|field| {
-                    let field: Field = field.clone().into();
-                    Ok(field)
-                })
-                .collect::<Result<Vec<_>>>(),
-            Table::SavedSink {
-                name: _,
-                id: _,
-                sink_config: _,
-            } => bail!("saved sinks don't have fields"),
-            Table::TableFromQuery { logical_plan, .. }
-            | Table::InsertQuery { logical_plan, .. }
-            | Table::Anonymous { logical_plan } => logical_plan
-                .schema()
-                .fields()
-                .iter()
-                .map(|field| {
-                    let field: Field = (**field.field()).clone();
-                    Ok(field)
-                })
-                .collect::<Result<Vec<_>>>(),
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct TestStruct {
@@ -908,17 +770,18 @@ pub fn get_test_expression(
     let struct_def = test_struct_def();
 
     let mut schema_provider = ArroyoSchemaProvider::new();
-    schema_provider.add_saved_source_with_type(
-        1,
-        "test_source".to_string(),
-        struct_def.fields.clone(),
-        struct_def.name.clone(),
-        SourceConfig::NexmarkSource {
-            event_rate: 10,
-            runtime: None,
-        },
-        SerializationMode::Json,
-    );
+    // schema_provider.add_connector_table(
+    //     "test_source".to_string(),
+    //     "nexmark".to_string(),
+    //     struct_def.fields.clone(),
+    //     struct_def.name.clone(),
+    //     SourceConfig::NexmarkSource {
+    //         event_rate: 10,
+    //         runtime: None,
+    //     },
+    //     SerializationMode::Json,
+    // );
+
     let mut plan = SqlProgramBuilder {
         schema_provider: &mut schema_provider,
     }
@@ -938,5 +801,7 @@ pub fn get_test_expression(
         &generating_expression,
         input_value,
         expected_result,
-    )
+    );
+
+    todo!()
 }

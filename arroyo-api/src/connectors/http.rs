@@ -30,6 +30,7 @@ impl Connector for SSEConnector {
 
     fn register(
         &self,
+        id: i64,
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,

@@ -54,6 +54,7 @@ impl Connector for KafkaConnector {
 
     fn register(
         &self,
+        id: i64,
         name: &str,
         config: KafkaConfig,
         table: KafkaTable,
@@ -85,6 +86,7 @@ impl Connector for KafkaConnector {
         }
 
         provider.add_connector_table(
+            id,
             name.to_string(),
             typ,
             schema

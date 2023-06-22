@@ -13,7 +13,7 @@ use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use super::{KafkaSourceFunc, OffsetMode};
+use super::{KafkaSourceFunc};
 
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode, Serialize, Deserialize, PartialEq)]
 struct TestData {
@@ -62,7 +62,7 @@ impl KafkaTopicTester {
         let mut kafka = KafkaSourceFunc::new(
             &self.server,
             &self.topic,
-            OffsetMode::Earliest,
+            crate::connectors::kafka::SourceOffset::Earliest,
             source::SerializationMode::Json,
             100,
             vec![],

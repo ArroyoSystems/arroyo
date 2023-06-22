@@ -16,7 +16,6 @@ use std::time::{Duration, SystemTime};
 use arroyo_rpc::grpc::api::create_pipeline_req::Config;
 use arroyo_rpc::grpc::api::impulse_source::Spec;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
-use arroyo_rpc::grpc::api::source_def::SourceType;
 use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
 use arroyo_types::nexmark::Event;
 use arroyo_types::{
@@ -414,53 +413,6 @@ pub enum Operator {
         name: String,
         expression: String,
     },
-}
-
-#[derive(Clone, Debug)]
-pub enum SourceConfig {
-    Impulse {
-        interval: Option<Duration>,
-        events_per_second: f32,
-        total_events: Option<usize>,
-    },
-    FileSource {
-        directory: String,
-        interval: Duration,
-    },
-    NexmarkSource {
-        event_rate: u64,
-        runtime: Option<Duration>,
-    },
-}
-
-impl From<SourceType> for SourceConfig {
-    fn from(value: SourceType) -> Self {
-        match value {
-            SourceType::Impulse(impulse) => SourceConfig::Impulse {
-                interval: impulse
-                    .interval_micros
-                    .map(|ms| Duration::from_micros(ms.into())),
-                events_per_second: impulse.events_per_second,
-                total_events: impulse.total_messages.map(|t| t as usize),
-            },
-            SourceType::File(file) => SourceConfig::FileSource {
-                directory: file.directory,
-                interval: Duration::from_millis(file.interval_ms as u64),
-            },
-            SourceType::Nexmark(nexmark) => SourceConfig::NexmarkSource {
-                event_rate: nexmark.events_per_second.into(),
-                runtime: nexmark.runtime_micros.map(Duration::from_micros),
-            },
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum SinkConfig {
-    Console,
-    File { directory: String },
-    Grpc,
-    Null,
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]

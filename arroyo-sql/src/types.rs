@@ -25,12 +25,14 @@ use regex::Regex;
 use syn::PathArguments::AngleBracketed;
 use syn::{parse_quote, parse_str, GenericArgument, Type};
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+use crate::expressions::Expression;
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructDef {
     pub name: Option<String>,
     pub fields: Vec<StructField>,
 }
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructPair {
     pub left: StructDef,
     pub right: StructDef,
@@ -129,13 +131,14 @@ impl StructDef {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructField {
     pub name: String,
     pub alias: Option<String>,
     pub data_type: TypeDef,
     pub renamed_from: Option<String>,
-    pub original_type: Option<String>
+    pub original_type: Option<String>,
+    pub expression: Option<Box<Expression>>,
 }
 
 impl StructField {
@@ -146,6 +149,7 @@ impl StructField {
             data_type,
             renamed_from: None,
             original_type: None,
+            expression: None,
         }
     }
 
@@ -156,6 +160,18 @@ impl StructField {
             data_type,
             renamed_from,
             original_type,
+            expression: None,
+        }
+    }
+
+    pub fn generated_by(name: String, alias: Option<String>, data_type: TypeDef, expression: Expression) -> Self {
+        Self {
+            name,
+            alias,
+            data_type,
+            renamed_from: None,
+            original_type: None,
+            expression: Some(Box::new(expression)),
         }
     }
 }
@@ -201,7 +217,7 @@ impl From<StructField> for Field {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum TypeDef {
     StructDef(StructDef, bool),
     DataType(DataType, bool),

@@ -154,6 +154,7 @@ pub(crate) async fn get<C: GenericClient>(
         .map(|t| {
             let connection = get_connection(&t);
             ConnectionTable {
+                id: t.id,
                 name: t.name,
                 connection,
                 connector: t.connector,

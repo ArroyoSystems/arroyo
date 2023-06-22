@@ -1,8 +1,8 @@
 use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
     CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
-    DeleteJobReq, DeleteJobResp, DeleteSourceReq, DeleteSourceResp, GetConnectorsReq,
-    GetConnectorsResp, PipelineProgram, SourceMetadataResp, TestSchemaReq, GetConnectionTablesReq, GetConnectionTablesResp,
+    DeleteJobReq, DeleteJobResp, GetConnectorsReq,
+    GetConnectorsResp, PipelineProgram, GetConnectionTablesReq, GetConnectionTablesResp,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -10,11 +10,11 @@ use arroyo_rpc::grpc::{
         api_grpc_server::{ApiGrpc, ApiGrpcServer},
         CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp,
         CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq,
-        CreatePipelineResp, CreateSourceReq, CreateSourceResp, GetConnectionsReq,
-        GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSourcesReq, GetSourcesResp,
+        CreatePipelineResp,  GetConnectionsReq,
+        GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq,
         GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq,
         JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes,
-        OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, StopType, TestSchemaResp,
+        OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, StopType,
         TestSourceMessage, UpdateJobReq, UpdateJobResp,
     },
     controller_grpc_client::ControllerGrpcClient,
@@ -64,7 +64,6 @@ mod json_schema;
 mod metrics;
 mod optimizations;
 mod pipelines;
-mod sources;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -508,40 +507,6 @@ impl ApiGrpc for ApiServer {
         }))
     }
 
-    // sources
-    async fn create_source(
-        &self,
-        request: Request<CreateSourceReq>,
-    ) -> Result<Response<CreateSourceResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        sources::create_source(request.into_inner(), auth, &self.pool).await?;
-
-        Ok(Response::new(CreateSourceResp {}))
-    }
-
-    async fn get_sources(
-        &self,
-        request: Request<GetSourcesReq>,
-    ) -> Result<Response<GetSourcesResp>, Status> {
-        let (_, auth) = self.authenticate(request).await?;
-
-        Ok(Response::new(GetSourcesResp {
-            sources: sources::get_sources(&auth, &self.client().await?).await?,
-        }))
-    }
-
-    async fn delete_source(
-        &self,
-        request: Request<DeleteSourceReq>,
-    ) -> Result<Response<DeleteSourceResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        sources::delete_source(request.into_inner(), auth, &self.client().await?).await?;
-
-        Ok(Response::new(DeleteSourceResp {}))
-    }
-
     async fn get_confluent_schema(
         &self,
         request: Request<ConfluentSchemaReq>,
@@ -550,30 +515,6 @@ impl ApiGrpc for ApiServer {
 
         Ok(Response::new(
             connection_tables::get_confluent_schema(request.into_inner()).await?,
-        ))
-    }
-
-    async fn test_schema(
-        &self,
-        request: Request<TestSchemaReq>,
-    ) -> Result<Response<TestSchemaResp>, Status> {
-        let (request, _auth) = self.authenticate(request).await?;
-
-        let errors = connection_tables::test_schema(request.into_inner()).await?;
-        Ok(Response::new(TestSchemaResp {
-            valid: errors.is_empty(),
-            errors,
-        }))
-    }
-
-    async fn get_source_metadata(
-        &self,
-        request: Request<CreateSourceReq>,
-    ) -> Result<Response<SourceMetadataResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        Ok(Response::new(
-            sources::get_source_metadata(request.into_inner(), auth, &self.client().await?).await?,
         ))
     }
 

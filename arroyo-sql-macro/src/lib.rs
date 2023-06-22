@@ -1,5 +1,5 @@
-use arroyo_datastream::{SerializationMode, SourceConfig};
-use arroyo_rpc::grpc::api::Connection;
+use arroyo_datastream::{SerializationMode};
+
 use arroyo_sql::{
     get_test_expression, parse_and_get_program_sync, ArroyoSchemaProvider, SqlConfig,
 };
@@ -116,18 +116,19 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
 
     let mut schema_provider = ArroyoSchemaProvider::new();
 
+    todo!();
     // Add a Nexmark source named "nexmark";
-    schema_provider.add_saved_source_with_type(
-        1,
-        "nexmark".to_string(),
-        arroyo_sql::schemas::nexmark_fields(),
-        Some("arroyo_types::nexmark::Event".to_string()),
-        SourceConfig::NexmarkSource {
-            event_rate: 10,
-            runtime: None,
-        },
-        SerializationMode::Json,
-    );
+    // schema_provider.add_saved_source_with_type(
+    //     1,
+    //     "nexmark".to_string(),
+    //     arroyo_sql::schemas::nexmark_fields(),
+    //     Some("arroyo_types::nexmark::Event".to_string()),
+    //     SourceConfig::NexmarkSource {
+    //         event_rate: 10,
+    //         runtime: None,
+    //     },
+    //     SerializationMode::Json,
+    // );
     // schema_provider.add_connection(Connection {
     //     name: "local".to_string(),
     //     sources: 0,

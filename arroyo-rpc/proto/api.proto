@@ -628,12 +628,13 @@ message CreateConnectionTableResp {
 }
 
 message ConnectionTable {
-  string name = 1;
-  string connector = 2;
-  optional Connection connection  = 3;
-  TableType table_type = 4;
-  string config = 5;
-  ConnectionSchema schema = 6;
+  int64 id = 1;
+  string name = 2;
+  string connector = 3;
+  optional Connection connection  = 4;
+  TableType table_type = 5;
+  string config = 6;
+  ConnectionSchema schema = 7;
 }
 
 message GetConnectionTablesReq {
@@ -644,20 +645,6 @@ message GetConnectionTablesResp {
 }
 
 // Sources
-
-message JsonSchemaDef {
-  string json_schema = 1;
-}
-
-message JsonFieldDef {
-  repeated SourceField fields = 1;
-}
-
-message ProtobufSchemaDef {
-  string protobuf_schema = 1;
-}
-
-message RawJsonDef {}
 
 enum PrimitiveType {
   Int32 = 0;
@@ -718,80 +705,10 @@ message ConnectionSchema {
     string raw_schema = 7;
   }
 }
-
-message SourceSchema {
-  oneof schema {
-    string builtin = 2;
-    JsonSchemaDef json_schema = 3;
-    JsonFieldDef json_fields = 4;
-    ProtobufSchemaDef protobuf = 5;
-    RawJsonDef raw_json = 6;
-  }
-
- bool kafka_schema_registry = 7;
-}
-
-message ImpulseSourceConfig {
-  optional uint32 interval_micros = 1;
-  float events_per_second = 2;
-  optional uint32 total_messages = 3;
-}
-
-message FileSourceConfig {
-  string directory = 1;
-  uint32 interval_ms = 2;
-}
-
-message NexmarkSourceConfig {
-  uint32 events_per_second = 1;
-  optional uint64 runtime_micros = 2;
-}
-
 message ConnectorOp {
   string operator = 1;
   string config = 2;
   string description = 3;
-}
-
-message CreateSourceReq {
-  string name = 1;
-
-  SourceSchema schema = 2;
-
-  oneof type_oneof {
-    ImpulseSourceConfig impulse = 4;
-    FileSourceConfig file = 5;
-    NexmarkSourceConfig nexmark = 6;
-  }
-}
-
-message CreateSourceResp {
-}
-
-message SourceDef {
-  int64 id = 1;
-  string name = 2;
-  SourceSchema schema = 3;
-  int32 consumers = 4;
-
-  oneof source_type {
-    ImpulseSourceConfig impulse = 5;
-    FileSourceConfig file = 6;
-    NexmarkSourceConfig nexmark = 7;
-  }
-
-  repeated SourceField sql_fields = 9;
-}
-
-message GetSourcesReq {}
-message GetSourcesResp {
-  repeated SourceDef sources = 1;
-}
-
-message DeleteSourceReq {
-  string name = 1;
-}
-message DeleteSourceResp {
 }
 
 message TestSchemaReq {
@@ -808,11 +725,6 @@ message TestSourceMessage {
   bool done = 2;
   string message = 3;
 }
-
-message SourceMetadataResp {
-  uint32 partitions = 1;
-}
-
 
 message ConfluentSchemaReq {
   string endpoint = 1;
@@ -848,13 +760,7 @@ service ApiGrpc {
   rpc TestConnectionTable(CreateConnectionTableReq) returns (stream TestSourceMessage);
   rpc GetConnectionTables(GetConnectionTablesReq) returns (GetConnectionTablesResp);
 
-  rpc CreateSource(CreateSourceReq) returns (CreateSourceResp);
-  rpc GetSources(GetSourcesReq) returns (GetSourcesResp);
-  rpc DeleteSource(DeleteSourceReq) returns (DeleteSourceResp);
-
   rpc GetConfluentSchema(ConfluentSchemaReq) returns (ConfluentSchemaResp);
-  rpc GetSourceMetadata(CreateSourceReq) returns (SourceMetadataResp);
-  rpc TestSchema(TestSchemaReq) returns (TestSchemaResp);
 
   rpc CreatePipeline(CreatePipelineReq) returns (CreatePipelineResp);
   rpc GraphForPipeline(PipelineGraphReq) returns (PipelineGraphResp);
