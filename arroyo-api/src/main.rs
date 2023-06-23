@@ -1,3 +1,4 @@
+use arroyo_connectors::connectors;
 use ::time::OffsetDateTime;
 use arroyo_rpc::grpc::api::{
     CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
@@ -57,10 +58,8 @@ use queries::api_queries;
 mod cloud;
 mod connection_tables;
 mod connections;
-mod connectors;
 mod job_log;
 mod jobs;
-mod json_schema;
 mod metrics;
 mod optimizations;
 mod pipelines;
@@ -417,7 +416,7 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<GetConnectorsResp>, Status> {
         let (_request, _auth) = self.authenticate(request).await?;
 
-        let connectors = connectors::connectors()
+        let connectors = connectors()
             .values()
             .map(|c| c.metadata())
             .collect();
@@ -499,7 +498,7 @@ impl ApiGrpc for ApiServer {
         &self,
         request: Request<GetConnectionTablesReq>,
     ) -> Result<Response<GetConnectionTablesResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
+        let (_, auth) = self.authenticate(request).await?;
 
         let tables = connection_tables::get(&auth, &self.client().await?).await?;
         Ok(Response::new(GetConnectionTablesResp {
@@ -768,12 +767,13 @@ impl ApiGrpc for ApiServer {
         let job_id = request.into_inner().job_id;
         // validate that the job exists, the user has access, and the graph has a GrpcSink
         let details = get_job_details(&job_id, &auth, &self.client().await?).await?;
+
         if !details
             .job_graph
             .unwrap()
             .nodes
             .iter()
-            .any(|n| n.operator.contains("GrpcSink"))
+            .any(|n| n.operator.contains("WebSink"))
         {
             // TODO: make this check more robust
             return Err(Status::invalid_argument(format!(

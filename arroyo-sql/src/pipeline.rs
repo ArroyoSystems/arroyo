@@ -1,13 +1,13 @@
 #![allow(clippy::comparison_chain)]
 use std::collections::HashMap;
 
-use std::time::{Duration, SystemTime};
+use std::time::{Duration};
 use std::unreachable;
 
 use anyhow::Result;
 use anyhow::{anyhow, bail};
 use arrow_schema::DataType;
-use arroyo_datastream::{ConnectorOp, ImpulseSpec, Operator, SerializationMode, WindowType};
+use arroyo_datastream::{Operator, WindowType};
 
 use datafusion_common::{DFField, ScalarValue};
 use datafusion_expr::expr::ScalarUDF;
@@ -17,7 +17,8 @@ use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
 
 use crate::expressions::ExpressionContext;
-use crate::external::{SinkUpdateType, SqlSink, SqlSource};
+use crate::external::{SqlSink, SqlSource, ProcessingMode};
+use crate::tables::{Insert, Table};
 use crate::{
     expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
     operators::{AggregateProjection, GroupByKind, Projection},
@@ -378,7 +379,7 @@ impl SqlOperator {
     pub fn is_updating(&self) -> bool {
         match self {
             SqlOperator::Source(source) => {
-                source.source.serialization_mode == SerializationMode::DebeziumJson
+                source.source.processing_mode == ProcessingMode::Update
             }
             SqlOperator::Aggregator(input, aggregate_operator) => {
                 input.is_updating()
@@ -405,7 +406,7 @@ impl SqlOperator {
 pub struct SqlPipelineBuilder<'a> {
     pub schema_provider: &'a ArroyoSchemaProvider,
     pub planned_tables: HashMap<String, SqlOperator>,
-    pub output_nodes: Vec<SqlOperator>,
+    pub insert_nodes: Vec<SqlOperator>,
 }
 
 impl<'a> SqlPipelineBuilder<'a> {
@@ -413,7 +414,7 @@ impl<'a> SqlPipelineBuilder<'a> {
         SqlPipelineBuilder {
             schema_provider,
             planned_tables: HashMap::new(),
-            output_nodes: vec![],
+            insert_nodes: vec![],
         }
     }
 
@@ -975,114 +976,58 @@ impl<'a> SqlPipelineBuilder<'a> {
         })
     }
 
-//     pub(crate) fn insert_table(&mut self, table: Table) -> Result<()> {
-//         match table {
-//             Table::SavedSource { .. } => todo!(),
-//             Table::SavedSink { .. } => todo!(),
-//             Table::MemoryTable { .. } => todo!(),
-//             Table::MemoryTableWithConnectionConfig { .. } => todo!(),
-//             Table::ConnectorTable { .. } => todo!(),
-//             Table::TableFromQuery {
-//                 name: _,
-//                 logical_plan: _,
-//             } => todo!(),
-//             Table::InsertQuery {
-//                 sink_name,
-//                 logical_plan,
-//             } => {
-//                 let input = self.insert_sql_plan(&logical_plan)?;
-//                 let input_is_updating = input.is_updating();
-//                 let sink = self.schema_provider.get_table(&sink_name).ok_or_else(|| {
-//                     anyhow!("Could not find sink {} in schema provider", sink_name)
-//                 })?;
-//                 match sink {
-//                     Table::SavedSource { .. } => bail!("can't insert into a saved source"),
-//                     Table::ConnectorTable { .. } => todo!(),
-//                     Table::SavedSink {
-//                         name,
-//                         id,
-//                         sink_config,
-//                     } => {
-//                         if input_is_updating {
-//                             bail!("can't insert into a saved sink from an updating query");
-//                         }
-//                         let sql_operator = SqlOperator::Sink(
-//                             name.clone(),
-//                             SqlSink {
-//                                 id: Some(*id),
-//                                 struct_def: input.return_type(),
-//                                 sink_config: sink_config.clone(),
-//                                 updating_type: crate::external::SinkUpdateType::Disallow,
-//                             },
-//                             Box::new(input),
-//                         );
-//                         self.output_nodes.push(sql_operator);
-//                     }
-//                     Table::MemoryTable { name, fields } => {
-//                         if self.planned_tables.contains_key(name) {
-//                             bail!("can't insert into {} twice", name);
-//                         }
-//                         let input_struct = input.return_type();
-//                         // insert into is done column-wise, and DataFusion will have already coerced all the types.
-//                         let mapping = RecordTransform::ValueProjection(Projection {
-//                             field_names: fields
-//                                 .iter()
-//                                 .map(|f| Column {
-//                                     relation: None,
-//                                     name: f.name.clone(),
-//                                 })
-//                                 .collect(),
-//                             field_computations: input_struct
-//                                 .fields
-//                                 .iter()
-//                                 .map(|f| Expression::Column(ColumnExpression::new(f.clone())))
-//                                 .collect(),
-//                         });
-//                         self.planned_tables.insert(
-//                             name.clone(),
-//                             SqlOperator::RecordTransform(Box::new(input), mapping),
-//                         );
-//                     }
-//                     Table::MemoryTableWithConnectionConfig {
-//                         name,
-//                         fields: _,
-//                         connection,
-//                         connection_config,
-//                     } => {
-//                         let sql_sink = SqlSink::try_new_from_connection(
-//                             None,
-//                             input.return_type(),
-//                             connection.clone(),
-//                             connection_config.clone(),
-//                         )?;
-//                         if input_is_updating
-//                             && matches!(sql_sink.updating_type, SinkUpdateType::Disallow)
-//                         {
-//                             bail!("can't insert into a non-updating table from an updating query");
-//                         };
-
-//                         let sql_operator =
-//                             SqlOperator::Sink(name.clone(), sql_sink, Box::new(input));
-//                         self.output_nodes.push(sql_operator);
-//                     }
-//                     Table::TableFromQuery {
-//                         name: _,
-//                         logical_plan: _,
-//                     } => todo!(),
-//                     Table::InsertQuery {
-//                         sink_name: _,
-//                         logical_plan: _,
-//                     } => todo!(),
-//                     Table::Anonymous { logical_plan: _ } => todo!(),
-//                 }
-//             }
-//             Table::Anonymous { logical_plan } => {
-//                 let operator = self.insert_sql_plan(&logical_plan)?;
-//                 self.output_nodes.push(operator);
-//             }
-//         }
-//         Ok(())
-//     }
+    pub(crate) fn add_insert(&mut self, insert: Insert) -> Result<()> {
+        match insert {
+            Insert::InsertQuery {
+                sink_name,
+                logical_plan,
+            } => {
+                let input = self.insert_sql_plan(&logical_plan)?;
+                let sink = self.schema_provider.get_table(&sink_name).ok_or_else(|| {
+                    anyhow!("Could not find sink {} in schema provider", sink_name)
+                })?;
+                match sink {
+                    Table::MemoryTable { name, fields } => {
+                        if self.planned_tables.contains_key(name) {
+                            bail!("can't insert into {} twice", name);
+                        }
+                        let input_struct = input.return_type();
+                        // insert into is done column-wise, and DataFusion will have already coerced all the types.
+                        let mapping = RecordTransform::ValueProjection(Projection {
+                            field_names: fields
+                                .iter()
+                                .map(|f| Column {
+                                    relation: None,
+                                    name: f.name.clone(),
+                                })
+                                .collect(),
+                            field_computations: input_struct
+                                .fields
+                                .iter()
+                                .map(|f| Expression::Column(ColumnExpression::new(f.clone())))
+                                .collect(),
+                        });
+                        self.planned_tables.insert(
+                            name.clone(),
+                            SqlOperator::RecordTransform(Box::new(input), mapping),
+                        );
+                    }
+                    Table::ConnectorTable(c) => {
+                        self.insert_nodes.push(c.as_sql_sink(input)?);
+                    }
+                    Table::TableFromQuery {
+                        name: _,
+                        logical_plan: _,
+                    } => todo!(),
+                }
+            }
+            Insert::Anonymous { logical_plan } => {
+                let operator = self.insert_sql_plan(&logical_plan)?;
+                self.insert_nodes.push(operator);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]

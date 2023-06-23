@@ -93,12 +93,12 @@ where
         let mut client_configs: HashMap<String, String> = HashMap::new();
 
         match connection.authentication {
-            super::KafkaConfigAuthentication::None {  } => {},
-            super::KafkaConfigAuthentication::Sasl {
+            None | Some(super::KafkaConfigAuthentication::None {  }) => {},
+            Some(super::KafkaConfigAuthentication::Sasl {
                 mechanism,
                 password,
                 protocol,
-                username } =>
+                username }) =>
                 {
                     client_configs.insert("sasl.mechanism".to_string(), mechanism);
                     client_configs.insert("security.protocol".to_string(), protocol);
@@ -117,6 +117,7 @@ where
                     SerializationMode::JsonSchemaRegistry
                 }
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
+                OperatorConfigSerializationMode::DebeziumJson => todo!(),
             },
             client_configs,
             messages_per_second: NonZeroU32::new(100000).unwrap(),

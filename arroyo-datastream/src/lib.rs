@@ -8,18 +8,16 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hasher;
 use std::marker::PhantomData;
 use std::ops::Add;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::grpc::api::create_pipeline_req::Config;
-use arroyo_rpc::grpc::api::impulse_source::Spec;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
 use arroyo_types::nexmark::Event;
 use arroyo_types::{
-    from_micros, to_micros, Data, GlobalKey, ImpulseEvent, JoinType, Key,
+    Data, GlobalKey, JoinType, Key,
 };
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -35,7 +33,7 @@ use prost::Message;
 
 use crate::Operator::FusedWasmUDFs;
 use arroyo_rpc::grpc::api::{
-    Aggregator, BuiltinSink, CreateJobReq, CreatePipelineReq, JobEdge, JobGraph, JobNode,
+    Aggregator, CreateJobReq, CreatePipelineReq, JobEdge, JobGraph, JobNode,
     PipelineProgram, ProgramNode, StopType, UpdateJobReq, WasmFunction,
 };
 use petgraph::{Direction, Graph};
@@ -323,6 +321,16 @@ pub struct ConnectorOp {
     pub description: String,
 }
 
+impl ConnectorOp {
+    pub fn web_sink() -> Self {
+        ConnectorOp {
+            operator: "GrpcSink".to_string(),
+            config: "{}".to_string(),
+            description: "WebSink".to_string(),
+        }
+    }
+}
+
 impl From<GrpcApi::ConnectorOp> for ConnectorOp {
     fn from(c: GrpcApi::ConnectorOp) -> Self {
         ConnectorOp {
@@ -345,15 +353,6 @@ impl From<ConnectorOp> for GrpcApi::ConnectorOp {
 
 #[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
 pub enum Operator {
-    FileSource {
-        dir: PathBuf,
-        delay: Duration,
-    },
-    ImpulseSource {
-        start_time: SystemTime,
-        spec: ImpulseSpec,
-        total_events: Option<usize>,
-    },
     ConnectorSource(ConnectorOp),
     ConnectorSink(ConnectorOp),
     FusedWasmUDFs {
@@ -369,18 +368,8 @@ pub enum Operator {
     Aggregate(AggregateBehavior),
     Watermark(WatermarkType),
     GlobalKey,
-    ConsoleSink,
-    GrpcSink,
-    NullSink,
-    FileSink {
-        dir: PathBuf,
-    },
     WindowJoin {
         window: WindowType,
-    },
-    NexmarkSource {
-        first_event_rate: u64,
-        num_events: Option<u64>,
     },
     ExpressionOperator {
         name: String,
@@ -445,8 +434,6 @@ impl Debug for Operator {
         }
 
         match self {
-            Operator::FileSource { dir, .. } => write!(f, "FileSource<{:?}>", dir),
-            Operator::ImpulseSource { .. } => write!(f, "ImpulseSource"),
             Operator::ConnectorSource(c) | Operator::ConnectorSink(c) => {
                 write!(f, "{}", c.description)
             }
@@ -469,28 +456,8 @@ impl Debug for Operator {
             Operator::Aggregate(b) => write!(f, "{:?}", b),
             Operator::Count => write!(f, "Count"),
             Operator::Window { typ, agg, .. } => write!(f, "{:?}->{:?}", typ, agg),
-            Operator::ConsoleSink => write!(f, "ConsoleSink"),
-            Operator::GrpcSink => write!(f, "GrpcSink"),
-            Operator::FileSink { .. } => write!(f, "FileSink"),
             Operator::Watermark(_) => write!(f, "Watermark"),
             Operator::WindowJoin { window } => write!(f, "WindowJoin({:?})", window),
-            Operator::NullSink => write!(f, "NullSink"),
-            Operator::NexmarkSource {
-                first_event_rate,
-                num_events,
-            } => match num_events {
-                Some(events) => {
-                    write!(
-                        f,
-                        "BoundedNexmarkSource<qps: {}, total_runtime: {}s>",
-                        first_event_rate,
-                        events / first_event_rate
-                    )
-                }
-                None => {
-                    write!(f, "UnboundedNexmarkSource<qps: {}>", first_event_rate)
-                }
-            },
             Operator::GlobalKey => write!(f, "GlobalKey"),
             Operator::FlattenOperator { name } => write!(f, "flatten<{}>", name),
             Operator::ExpressionOperator {
@@ -560,20 +527,6 @@ impl Debug for Operator {
     }
 }
 
-pub struct NexmarkSource {
-    pub first_event_rate: u64,
-    pub num_events: Option<u64>,
-}
-
-impl Source<Event> for NexmarkSource {
-    fn as_operator(&self) -> Operator {
-        Operator::NexmarkSource {
-            first_event_rate: self.first_event_rate,
-            num_events: self.num_events,
-        }
-    }
-}
-
 #[derive(Clone, Encode, Decode, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct StreamNode {
     pub operator_id: String,
@@ -636,56 +589,6 @@ pub trait Source<T: Data> {
     fn as_operator(&self) -> Operator;
 }
 
-pub struct FileSource {
-    dir: PathBuf,
-    delay: Duration,
-}
-
-impl FileSource {
-    pub fn from_dir(dir: PathBuf, delay: Duration) -> FileSource {
-        FileSource { dir, delay }
-    }
-}
-
-impl Source<String> for FileSource {
-    fn as_operator(&self) -> Operator {
-        Operator::FileSource {
-            dir: self.dir.clone(),
-            delay: self.delay,
-        }
-    }
-}
-
-pub struct ImpulseSource {
-    start_time: SystemTime,
-    interval: Duration,
-}
-
-impl ImpulseSource {
-    pub fn with_interval(interval: Duration) -> ImpulseSource {
-        ImpulseSource {
-            start_time: SystemTime::now(),
-            interval,
-        }
-    }
-
-    pub fn with_interval_and_start(interval: Duration, start_time: SystemTime) -> ImpulseSource {
-        ImpulseSource {
-            start_time,
-            interval,
-        }
-    }
-}
-
-impl Source<ImpulseEvent> for ImpulseSource {
-    fn as_operator(&self) -> Operator {
-        Operator::ImpulseSource {
-            start_time: self.start_time,
-            spec: ImpulseSpec::Delay(self.interval),
-            total_events: None,
-        }
-    }
-}
 
 pub struct Stream<T> {
     _t: PhantomData<T>,
@@ -931,76 +834,6 @@ impl<K: Key, T: Data> KeyedWindowFun<K, T> for InstantWindow<K, T> {
 
 pub trait KeyedSink<K: Key, T: Data> {
     fn as_operator(&self) -> Operator;
-}
-
-pub struct KeyedConsoleSink<K: Key, T: Data> {
-    _t: PhantomData<(K, T)>,
-}
-
-impl<K: Key, T: Data> KeyedConsoleSink<K, T> {
-    pub fn new() -> KeyedConsoleSink<K, T> {
-        KeyedConsoleSink { _t: PhantomData }
-    }
-}
-
-impl<K: Key, T: Data> KeyedSink<K, T> for KeyedConsoleSink<K, T> {
-    fn as_operator(&self) -> Operator {
-        Operator::ConsoleSink
-    }
-}
-
-pub struct KeyedGrpcSink<K: Key, T: Data> {
-    _t: PhantomData<(K, T)>,
-}
-
-impl<K: Key, T: Data> KeyedGrpcSink<K, T> {
-    pub fn new() -> Self {
-        Self { _t: PhantomData }
-    }
-}
-
-impl<K: Key, T: Data> KeyedSink<K, T> for KeyedGrpcSink<K, T> {
-    fn as_operator(&self) -> Operator {
-        Operator::GrpcSink
-    }
-}
-
-pub struct KeyedFileSink<K: Key, T: Data> {
-    _t: PhantomData<(K, T)>,
-    dir: PathBuf,
-}
-
-impl<K: Key, T: Data> KeyedFileSink<K, T> {
-    pub fn new(dir: PathBuf) -> KeyedFileSink<K, T> {
-        KeyedFileSink {
-            _t: PhantomData,
-            dir,
-        }
-    }
-}
-
-impl<K: Key, T: Data> KeyedSink<K, T> for KeyedFileSink<K, T> {
-    fn as_operator(&self) -> Operator {
-        Operator::FileSink {
-            dir: self.dir.clone(),
-        }
-    }
-}
-
-pub struct NullSink<K: Key, T: Data> {
-    _t: PhantomData<(K, T)>,
-}
-
-impl<K: Key, T: Data> NullSink<K, T> {
-    pub fn new() -> NullSink<K, T> {
-        NullSink { _t: PhantomData }
-    }
-}
-
-impl<K: Key, T: Data> KeyedSink<K, T> for NullSink<K, T> {
-    fn as_operator(&self) -> Operator {
-        Operator::NullSink
-    }
 }
 
 impl<K: Key, T: Data> KeyedStream<K, T> {
@@ -1488,19 +1321,6 @@ impl TryFrom<Program> for PipelineProgram {
 impl From<Operator> for GrpcApi::operator::Operator {
     fn from(operator: Operator) -> Self {
         match operator {
-            Operator::FileSource { dir, delay } => GrpcOperator::FileSource(GrpcApi::FileSource {
-                dir: dir.to_string_lossy().to_string(),
-                micros_delay: delay.as_micros() as u64,
-            }),
-            Operator::ImpulseSource {
-                start_time,
-                spec,
-                total_events,
-            } => GrpcOperator::ImpulseSource(GrpcApi::ImpulseSource {
-                micros_start: to_micros(start_time),
-                total_events: total_events.map(|total| total as u64),
-                spec: Some(spec.into()),
-            }),
             Operator::ConnectorSource(c) => GrpcOperator::ConnectorSource(c.into()),
             Operator::ConnectorSink(c) => GrpcOperator::ConnectorSink(c.into()),
             FusedWasmUDFs { name, udfs } => GrpcOperator::WasmUdfs(GrpcApi::WasmUdfs {
@@ -1553,21 +1373,8 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 })
             }
             Operator::GlobalKey => todo!(),
-            Operator::ConsoleSink => GrpcOperator::BuiltinSink(GrpcApi::BuiltinSink::Log.into()),
-            Operator::GrpcSink => GrpcOperator::BuiltinSink(GrpcApi::BuiltinSink::Web.into()),
-            Operator::NullSink => GrpcOperator::BuiltinSink(GrpcApi::BuiltinSink::Null.into()),
-            Operator::FileSink { dir } => GrpcOperator::FileSink(GrpcApi::FileSink {
-                file_path: dir.to_string_lossy().to_string(),
-            }),
             Operator::WindowJoin { window } => GrpcOperator::WindowJoin(GrpcApi::Window {
                 window: Some(window.into()),
-            }),
-            Operator::NexmarkSource {
-                first_event_rate,
-                num_events: total_events,
-            } => GrpcOperator::NexmarkSource(GrpcApi::NexmarkSource {
-                first_event_rate,
-                total_events,
             }),
             Operator::ExpressionOperator {
                 name,
@@ -1694,14 +1501,6 @@ impl From<Operator> for GrpcApi::operator::Operator {
     }
 }
 
-impl From<ImpulseSpec> for GrpcApi::impulse_source::Spec {
-    fn from(spec: ImpulseSpec) -> Self {
-        match spec {
-            ImpulseSpec::Delay(delay) => Spec::MicrosDelay(delay.as_micros() as u64),
-            ImpulseSpec::EventsPerSecond(events_qops) => Spec::EventQps(events_qops),
-        }
-    }
-}
 
 impl From<SerializationMode> for GrpcApi::SerializationMode {
     fn from(value: SerializationMode) -> Self {
@@ -1822,24 +1621,6 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
     fn try_from(operator: arroyo_rpc::grpc::api::Operator) -> Result<Self> {
         let result = match operator.operator {
             Some(operator) => match operator {
-                GrpcOperator::FileSource(file_source) => Operator::FileSource {
-                    dir: PathBuf::from(&file_source.dir).canonicalize()?,
-                    delay: Duration::from_micros(file_source.micros_delay),
-                },
-                GrpcOperator::ImpulseSource(impulse_source) => {
-                    let spec = match impulse_source.spec {
-                        Some(Spec::MicrosDelay(micros_delay)) => {
-                            ImpulseSpec::Delay(Duration::from_micros(micros_delay))
-                        }
-                        Some(Spec::EventQps(event_qps)) => ImpulseSpec::EventsPerSecond(event_qps),
-                        None => bail!("impulse source {:?} missing spec", impulse_source),
-                    };
-                    Operator::ImpulseSource {
-                        start_time: from_micros(impulse_source.micros_start),
-                        spec,
-                        total_events: impulse_source.total_events.map(|events| events as usize),
-                    }
-                }
                 GrpcOperator::ConnectorSource(c) => Operator::ConnectorSource(c.into()),
                 GrpcOperator::ConnectorSink(c) => Operator::ConnectorSink(c.into()),
                 GrpcOperator::WasmUdfs(wasm_udfs) => Operator::FusedWasmUDFs {
@@ -1889,24 +1670,8 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         max_lateness: Duration::from_micros(watermark.max_lateness_micros),
                     })
                 }
-                GrpcOperator::BuiltinSink(sink) => {
-                    match BuiltinSink::from_i32(sink)
-                        .ok_or_else(|| anyhow!("unable to map enum"))?
-                    {
-                        BuiltinSink::Null => Operator::NullSink,
-                        BuiltinSink::Web => Operator::GrpcSink,
-                        BuiltinSink::Log => Operator::ConsoleSink,
-                    }
-                }
-                GrpcOperator::FileSink(file) => Operator::FileSink {
-                    dir: PathBuf::from(file.file_path),
-                },
                 GrpcOperator::WindowJoin(window) => Operator::WindowJoin {
                     window: window.into(),
-                },
-                GrpcOperator::NexmarkSource(nexmark_source) => Operator::NexmarkSource {
-                    first_event_rate: nexmark_source.first_event_rate,
-                    num_events: nexmark_source.total_events,
                 },
                 GrpcOperator::ExpressionOperator(expression_operator) => {
                     let return_type = expression_operator.return_type().into();

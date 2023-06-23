@@ -51,8 +51,6 @@ import {
   useJob,
   useOperatorErrors,
   usePipelineGraph,
-  useSinks,
-  useSources,
 } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';

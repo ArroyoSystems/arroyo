@@ -5,11 +5,12 @@ use std::{
 
 use quote::{format_ident, quote};
 use arrow_schema::DataType;
-use arroyo_sql::types::{StructDef, StructField, TypeDef};
 use schemars::schema::{RootSchema, Schema};
 use syn::{parse_str, Type};
 use tracing::log::warn;
 use typify::{TypeDetails, TypeSpace, TypeSpaceSettings};
+
+use crate::types::{StructField, StructDef, TypeDef};
 
 pub const ROOT_NAME: &str = "ArroyoJsonRoot";
 

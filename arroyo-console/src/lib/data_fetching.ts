@@ -5,7 +5,6 @@ import {
   GetConnectionTablesReq,
   GetConnectionsReq,
   GetConnectorsReq,
-  GetSourcesReq,
   JobCheckpointsReq,
   JobDetailsReq,
   JobMetricsReq,
@@ -308,34 +307,3 @@ export const usePipelineGraph = (client: ApiClient, query?: string, udfInput?: s
   };
 };
 
-// GetSourcesReq
-
-const SourcesFetcher = (client: ApiClient) => {
-  return async (params: { key: string }) => {
-    return await (await (await client)()).getSources(new GetSourcesReq({}));
-  };
-};
-
-export const useSources = (client: ApiClient) => {
-  const { data, isLoading } = useSWR(sourcesKey(), SourcesFetcher(client));
-
-  return {
-    sources: data,
-    sourcesLoading: isLoading,
-  };
-};
-
-// GetSinksReq
-
-export const useSinks = (client: ApiClient) => {
-  let allSinks: Array<SinkOpt> = [
-    { name: 'Web', value: { case: 'builtin', value: BuiltinSink.Web } },
-    { name: 'Log', value: { case: 'builtin', value: BuiltinSink.Log } },
-    { name: 'Null', value: { case: 'builtin', value: BuiltinSink.Null } },
-  ];
-
-
-  return {
-    sinks: allSinks,
-  };
-};

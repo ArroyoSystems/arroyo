@@ -4,13 +4,6 @@ package arroyo_api;
 
 // Job management
 
-enum BuiltinSink {
-  Null = 0;
-  Web = 1;
-  Log = 2;
-}
-
-
 enum UdfLanguage {
   Rust = 0;
 }
@@ -26,10 +19,6 @@ message CreateSqlJob {
 
   repeated CreateUdf udfs = 5;
 
-  oneof sink {
-    BuiltinSink builtin = 3;
-    string user = 4;
-  };
   bool preview = 6;
 }
 
@@ -147,18 +136,13 @@ message ProgramEdge {
 
 message Operator {
   oneof operator {
-    FileSource file_source = 1;
-    ImpulseSource impulse_source = 2;
     ConnectorOp connector_source = 3;
     ConnectorOp connector_sink = 22;
     WasmUdfs wasm_udfs = 4;
     WindowOperator window = 5;
     Aggregator aggregator = 6;
     PeriodicWatermark periodic_watermark = 7;
-    BuiltinSink builtin_sink = 8;
-    FileSink file_sink = 9;
     Window window_join = 10;
-    NexmarkSource nexmark_source = 12;
     ExpressionOperator expression_operator = 13;
     Flatten flatten = 14;
     FlattenExpressionOperator flatten_expression_operator = 15;
@@ -171,20 +155,6 @@ message Operator {
     UpdatingOperator updating_operator = 24;
     NonWindowAggregator non_window_aggregator = 25;
     UpdatingKeyOperator updating_key_operator = 26;
-  }
-}
-
-message FileSource {
-  string dir = 1;
-  uint64 micros_delay = 2;
-}
-
-message ImpulseSource {
-  uint64 micros_start = 1;
-  optional uint64 total_events = 2;
-  oneof spec {
-    uint64 micros_delay = 3;
-    float event_qps = 4;
   }
 }
 
@@ -264,15 +234,6 @@ message PeriodicWatermark {
 message ExpressionWatermark {
   uint64 period_micros = 1;
   string expression = 2;
-}
-
-message FileSink {
-  string file_path = 1;
-}
-
-message NexmarkSource {
-  uint64 first_event_rate = 1;
-  optional uint64 total_events = 2;
 }
 
 message ExpressionOperator {
@@ -684,9 +645,10 @@ message SourceField {
 
 enum Format {
   JsonFormat = 0;
-  ProtobufFormat = 1;
-  AvroFormat = 2;
-  RawStringFormat = 3;
+  DebeziumJsonFormat = 1;
+  ProtobufFormat = 2;
+  AvroFormat = 3;
+  RawStringFormat = 4;
 }
 
 message FormatOptions {
@@ -694,7 +656,7 @@ message FormatOptions {
 }
 
 message ConnectionSchema {
-  Format format = 1;
+  optional Format format = 1;
   FormatOptions format_options = 2;
   repeated SourceField fields = 3;
 

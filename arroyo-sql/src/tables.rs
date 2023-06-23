@@ -2,27 +2,31 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
+use arroyo_connectors::{Connection, ConnectionType, serialization_mode, connector_for_type};
 use arroyo_datastream::{ConnectorOp, Operator, SerializationMode};
-use datafusion::sql::{
+use arroyo_rpc::grpc::{api::{ConnectionSchema, Format, FormatOptions, SourceField}, self};
+use datafusion::{sql::{
     sqlparser::ast::{ColumnOption, Statement, Value, ColumnDef}, planner::{SqlToRel, PlannerContext},
-};
-use datafusion_common::{DFField, DFSchema};
-use datafusion_expr::LogicalPlan;
+}, optimizer::{OptimizerContext, analyzer::Analyzer, optimizer::Optimizer}};
+use datafusion_common::{DFField, DFSchema, config::ConfigOptions};
+use datafusion_expr::{LogicalPlan, DdlStatement, CreateView, CreateMemoryTable, DmlStatement, WriteOp};
+use serde_json::{json};
 
 use crate::{
     expressions::{Column, ColumnExpression, Expression, ExpressionContext},
-    external::{SqlSink, SqlSource},
+    external::{SqlSink, SqlSource, ProcessingMode},
     operators::Projection,
     pipeline::{SourceOperator, SqlOperator, SqlPipelineBuilder},
     types::{convert_data_type, StructDef, StructField, TypeDef},
-    ArroyoSchemaProvider, ConnectorType,
+    ArroyoSchemaProvider, json_schema,
 };
+
 
 #[derive(Debug, Clone)]
 pub struct ConnectorTable {
     pub id: Option<i64>,
     pub name: String,
-    pub connector_type: ConnectorType,
+    pub connection_type: ConnectionType,
     pub fields: Vec<StructField>,
     pub type_name: Option<String>,
     pub operator: String,
@@ -33,9 +37,140 @@ pub struct ConnectorTable {
     pub watermark_field: Option<String>,
 }
 
+fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
+    let def = schema.definition.as_ref()?;
+    match def {
+        grpc::api::connection_schema::Definition::JsonSchema(_) => {
+            Some(format!("{}::{}", name, json_schema::ROOT_NAME))
+        }
+        grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
+        grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
+        grpc::api::connection_schema::Definition::RawSchema(_) => {
+            Some("arroyo_types::RawJson".to_string())
+        },
+    }
+}
+
+pub fn schema_defs(name: &str, schema: &ConnectionSchema) -> Option<String> {
+    let def = schema.definition.as_ref()?;
+
+    match def {
+        grpc::api::connection_schema::Definition::JsonSchema(s) => {
+            Some(json_schema::get_defs(&name, &s).unwrap())
+        }
+        grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
+        grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
+        grpc::api::connection_schema::Definition::RawSchema(_) => {
+            None
+        },
+    }
+}
+
+fn produce_optimized_plan(statement: &Statement, schema_provider: &ArroyoSchemaProvider) -> Result<LogicalPlan> {
+    let sql_to_rel = SqlToRel::new(schema_provider);
+    let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
+
+    let optimizer_config = OptimizerContext::default();
+    let analyzer = Analyzer::default();
+    let optimizer = Optimizer::new();
+    let analyzed_plan =
+        analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
+    let plan = optimizer.optimize(&analyzed_plan, &optimizer_config, |_plan, _rule| {})?;
+    Ok(plan)
+}
+
+impl From<Connection> for ConnectorTable {
+    fn from(value: Connection) -> Self {
+        ConnectorTable {
+            id: value.id,
+            name: value.name.clone(),
+            connection_type: value.connection_type,
+            fields: value.schema.fields.iter().map(|f| f.clone().into()).collect(),
+            type_name: schema_type(&value.name, &value.schema),
+            operator: value.operator,
+            config: value.config,
+            description: value.description,
+            serialization_mode: serialization_mode(&value.schema).into(),
+            event_time_field: None,
+            watermark_field: None,
+        }
+    }
+}
+
+/// Converts flattened json (with `.` separated paths) into nested JSON
+fn unflatten_json(map: &HashMap<String, String>) -> serde_json::Value {
+    let mut obj = json!({});
+
+    for (k, v) in map {
+        let mut obj = &mut obj;
+        let path: Vec<_> = k.split(".").collect();
+        let (last, path) = path.split_last().unwrap();
+
+        for c in path {
+            if obj.get(c).is_none() {
+                obj.as_object_mut().unwrap().insert(c.to_string(), json!({}));
+            }
+
+            obj = obj.get_mut(c).unwrap()
+        }
+
+        obj.as_object_mut().unwrap().insert(last.to_string(), serde_json::Value::String(v.to_string()));
+    }
+
+    obj
+}
+
 impl ConnectorTable {
-    fn from_options(connector: &str, fields: Vec<StructField>, options: &HashMap<String, String>) -> Result<Self> {
-        todo!()
+    fn from_options(name: &str, connector: &str, fields: Vec<StructField>, options: &HashMap<String, String>) -> Result<Self> {
+        let connector = connector_for_type(connector)
+            .ok_or_else(|| anyhow!("Unknown connector '{}'", connector))?;
+
+        let value = unflatten_json(options);
+
+        let connection_config = value.get("connection").map(|s| serde_json::to_string(s).unwrap())
+            .unwrap_or_else(|| "{}".to_string());
+
+        let table_config = value.get("table").map(|s| serde_json::to_string(s).unwrap())
+            .unwrap_or_else(|| "{}".to_string());
+
+        let mut format = None;
+        if let Some(f) = options.get("format") {
+            format = Some(match f.as_str() {
+                "json" => Format::JsonFormat,
+                "debezium_json" => Format::DebeziumJsonFormat,
+                "protobuf" => Format::ProtobufFormat,
+                "avro" => Format::AvroFormat,
+                "raw_string" => Format::RawStringFormat,
+                f => bail!("Unknown format '{}'", f)
+            });
+        }
+
+        let schema_registry = options.get("format_options.confluent_schema_registry")
+            .map(|f| f == "true")
+            .unwrap_or(false);
+
+        let schema_fields: Result<Vec<SourceField>> = fields.iter().map(|f|
+            f.clone().try_into()
+            .map_err(|_| anyhow!("Field '{}' has a type '{:?}' that cannot be used in a connection table", f.name, f.data_type)))
+            .collect();
+
+        let schema = ConnectionSchema {
+            format: format.map(|f| f as i32),
+            format_options: Some(FormatOptions {
+                confluent_schema_registry: schema_registry,
+            }),
+            fields: schema_fields?,
+            definition: None,
+        };
+
+        println!("Schema = {:#?}", schema);
+
+        let connection = connector.get_connection(None, name, &connection_config, &table_config, Some(&schema))?;
+
+        let mut table: ConnectorTable = connection.into();
+        table.fields = fields;
+
+        Ok(table)
     }
 
     fn physical_fields(&self) -> Vec<&StructField> {
@@ -146,10 +281,17 @@ impl ConnectorTable {
         }
     }
 
+    fn processing_mode(&self) -> ProcessingMode {
+        match self.serialization_mode {
+            SerializationMode::DebeziumJson => ProcessingMode::Update,
+            _ => ProcessingMode::Append,
+        }
+    }
+
     pub fn as_sql_source(&self) -> Result<SqlOperator> {
-        match self.connector_type {
-            ConnectorType::Source => {}
-            ConnectorType::Sink => {
+        match self.connection_type {
+            ConnectionType::Source => {}
+            ConnectionType::Sink => {
                 bail!("cannot read from sink")
             }
         };
@@ -169,7 +311,7 @@ impl ConnectorTable {
                 fields: self.fields.clone(),
             },
             operator: Operator::ConnectorSource(self.connector_op()),
-            serialization_mode: self.serialization_mode,
+            processing_mode: self.processing_mode(),
         };
 
         Ok(SqlOperator::Source(SourceOperator {
@@ -182,11 +324,11 @@ impl ConnectorTable {
     }
 
     pub fn as_sql_sink(&self, input: SqlOperator) -> Result<SqlOperator> {
-        match self.connector_type {
-            ConnectorType::Source => {
+        match self.connection_type {
+            ConnectionType::Source => {
                 bail!("Inserting into a source is not allowed")
             }
-            ConnectorType::Sink => {}
+            ConnectionType::Sink => {}
         }
 
         if input.is_updating() {
@@ -221,14 +363,7 @@ pub enum Table {
     TableFromQuery {
         name: String,
         logical_plan: LogicalPlan,
-    },
-    InsertQuery {
-        sink_name: String,
-        logical_plan: LogicalPlan,
-    },
-    Anonymous {
-        logical_plan: LogicalPlan,
-    },
+    }
 }
 
 fn value_to_inner_string(value: &Value) -> Result<String> {
@@ -242,7 +377,7 @@ fn value_to_inner_string(value: &Value) -> Result<String> {
 
 impl Table {
     fn schema_from_columns(columns: &Vec<ColumnDef>, schema_provider: &ArroyoSchemaProvider) -> Result<Vec<StructField>> {
-        let mut struct_field_pairs = columns
+        let struct_field_pairs = columns
             .iter()
             .map(|column| {
                 let name = column.name.value.to_string();
@@ -252,7 +387,7 @@ impl Table {
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
 
-                let mut struct_field =
+                let struct_field =
                     StructField::new(name, None, TypeDef::DataType(data_type, nullable));
 
                 let generating_expression = column.options.iter().find_map(|option| {
@@ -269,11 +404,6 @@ impl Table {
                 Ok((struct_field, generating_expression))
             })
             .collect::<Result<Vec<_>>>()?;
-
-        // if there are virtual fields, need to do some additional work
-        let has_virtual_fields = struct_field_pairs
-            .iter()
-            .any(|(_, generating_expression)| generating_expression.is_some());
 
         let physical_struct: StructDef = StructDef {
             name: None,
@@ -329,48 +459,62 @@ impl Table {
             .collect::<Result<Vec<_>>>()
     }
 
-    pub fn from_statement(
+    pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Option<Self>> {
-        let Statement::CreateTable { name, columns, with_options, query: None, .. } = statement else {
-            return Ok(None);
-        };
-
-        let name: String = name.to_string();
-        let mut with_map = HashMap::new();
-        for option in with_options {
-            with_map.insert(
-                option.name.value.to_string(),
-                value_to_inner_string(&option.value)?,
-            );
-        }
-
-        let fields = Self::schema_from_columns(columns, schema_provider)?;
-
-        let connector = with_map.get("connector");
-
-        match connector {
-            Some(connector) => {
-                Ok(Some(Table::ConnectorTable(ConnectorTable::from_options(connector, fields, &with_map)?)))
+        if let Statement::CreateTable { name, columns, with_options, query: None, .. } = statement {
+            let name: String = name.to_string();
+            let mut with_map = HashMap::new();
+            for option in with_options {
+                with_map.insert(
+                    option.name.value.to_string(),
+                    value_to_inner_string(&option.value)?,
+                );
             }
-            None => {
-                if fields.iter().any(|f| f.expression.is_some()) {
-                    bail!("Virtual fields are not supported in memory tables. Just write a query.");
-                }
 
-                Ok(Some(Table::MemoryTable { name, fields }))
+            let fields = Self::schema_from_columns(columns, schema_provider)?;
+
+            let connector = with_map.get("connector");
+
+            match connector {
+                Some(connector) => {
+                    Ok(Some(Table::ConnectorTable(ConnectorTable::from_options(&name, connector, fields, &with_map)?)))
+                }
+                None => {
+                    if fields.iter().any(|f| f.expression.is_some()) {
+                        bail!("Virtual fields are not supported in memory tables. Just write a query.");
+                    }
+
+                    Ok(Some(Table::MemoryTable { name, fields }))
+                }
+            }
+        } else {
+            match &produce_optimized_plan(statement, schema_provider)? {
+                // views and memory tables are the same now.
+                LogicalPlan::Ddl(DdlStatement::CreateView(CreateView { name, input, .. }))
+                | LogicalPlan::Ddl(DdlStatement::CreateMemoryTable(CreateMemoryTable {
+                    name,
+                    input,
+                    ..
+                })) => {
+                    // Return a TableFromQuery
+                    Ok(Some(Table::TableFromQuery {
+                        name: name.to_string(),
+                        logical_plan: (**input).clone(),
+                    }))
+                }
+                _ => Ok(None),
             }
         }
     }
 
-    pub fn name(&self) -> Option<String> {
+    pub fn name(&self) -> &str {
         match self {
             Table::MemoryTable { name, .. } | Table::TableFromQuery { name, .. } => {
-                Some(name.clone())
+                name.as_str()
             }
-            Table::ConnectorTable(c) => Some(c.name.clone()),
-            Table::InsertQuery { .. } | Table::Anonymous { .. } => None,
+            Table::ConnectorTable(c) => c.name.as_str(),
         }
     }
 
@@ -384,9 +528,7 @@ impl Table {
                     Ok(field)
                 })
                 .collect::<Result<Vec<_>>>(),
-            Table::TableFromQuery { logical_plan, .. }
-            | Table::InsertQuery { logical_plan, .. }
-            | Table::Anonymous { logical_plan } => logical_plan
+            Table::TableFromQuery { logical_plan, .. } => logical_plan
                 .schema()
                 .fields()
                 .iter()
@@ -414,12 +556,6 @@ impl Table {
             Table::TableFromQuery { logical_plan, .. } => {
                 builder.insert_sql_plan(&logical_plan.clone())
             }
-            Table::InsertQuery { .. } => {
-                bail!("insert queries can't be a table scan");
-            }
-            Table::Anonymous { .. } => {
-                bail!("anonymous queries can't be table sources.")
-            }
         }
     }
 
@@ -430,8 +566,56 @@ impl Table {
                 Ok(SqlOperator::NamedTable(name.clone(), Box::new(input)))
             }
             Table::TableFromQuery { .. } => todo!(),
-            Table::InsertQuery { .. } => todo!(),
-            Table::Anonymous { .. } => todo!(),
         }
+    }
+}
+
+pub enum Insert {
+    InsertQuery {
+        sink_name: String,
+        logical_plan: LogicalPlan,
+    },
+    Anonymous {
+        logical_plan: LogicalPlan,
+    },
+}
+
+
+impl Insert {
+    pub fn try_from_statement(statement: &Statement, schema_provider: &ArroyoSchemaProvider) -> Result<Insert> {
+        let logical_plan = produce_optimized_plan(statement, schema_provider)?;
+
+        match &logical_plan {
+            LogicalPlan::Dml(DmlStatement {
+                table_name,
+                op: WriteOp::Insert,
+                input,
+                ..
+            }) => {
+                let sink_name = table_name.to_string();
+                Ok(Insert::InsertQuery {
+                    sink_name,
+                    logical_plan: (**input).clone(),
+                })
+            }
+            _ => Ok(Insert::Anonymous {
+                logical_plan
+            }),
+        }
+    }
+
+    pub fn get_fields(&self) -> Result<Vec<Field>> {
+        match self  {
+            Insert::InsertQuery { logical_plan, .. }
+            | Insert::Anonymous { logical_plan } => logical_plan
+                .schema()
+                .fields()
+                .iter()
+                .map(|field| {
+                    let field: Field = (**field.field()).clone();
+                    Ok(field)
+                })
+                .collect::<Result<Vec<_>>>(),
+            }
     }
 }

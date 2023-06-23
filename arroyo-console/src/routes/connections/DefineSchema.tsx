@@ -2,7 +2,7 @@ import { Box, Button, Code, FormControl, FormLabel, Link, Select, Stack, StepSta
 import React, { Dispatch, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { ApiClient } from '../../main';
-import { ConnectionSchema, Connector, Format, FormatOptions, JsonSchemaDef } from '../../gen/api_pb';
+import { ConnectionSchema, Connector, Format, FormatOptions } from '../../gen/api_pb';
 import { ConfluentSchemaEditor } from './ConfluentSchemaEditor';
 import { JsonSchemaEditor } from './JsonSchemaEditor';
 

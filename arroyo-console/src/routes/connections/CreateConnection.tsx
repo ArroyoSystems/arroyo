@@ -20,7 +20,7 @@ import {
 } from '@chakra-ui/react';
 import { useConnectors } from '../../lib/data_fetching';
 import { useEffect, useState } from 'react';
-import { ConnectionSchema, Connector, SourceSchema } from '../../gen/api_pb';
+import { ConnectionSchema, Connector } from '../../gen/api_pb';
 
 import { ConfigureConnection } from './ConfigureConnection';
 import { DefineSchema } from './DefineSchema';

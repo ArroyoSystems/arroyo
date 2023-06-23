@@ -28,17 +28,6 @@ impl Connector for SSEConnector {
         }
     }
 
-    fn register(
-        &self,
-        id: i64,
-        name: &str,
-        config: Self::ConfigT,
-        table: Self::TableT,
-        schema: Option<&ConnectionSchema>,
-        schema_provider: &mut arroyo_sql::ArroyoSchemaProvider,
-    ) {
-        todo!()
-    }
 
     fn test(
         &self,
@@ -53,6 +42,17 @@ impl Connector for SSEConnector {
 
     fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> grpc::api::TableType {
         return grpc::api::TableType::Source;
+    }
+
+    fn get_connection(
+        &self,
+        id: Option<i64>,
+        name: &str,
+        config: Self::ConfigT,
+        table: Self::TableT,
+        schema: Option<&ConnectionSchema>,
+    ) -> anyhow::Result<crate::Connection> {
+        todo!()
     }
 }
 

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use arroyo_rpc::grpc::api::{
-    api_grpc_client::ApiGrpcClient, create_pipeline_req, BuiltinSink, CreateJobReq,
+    api_grpc_client::ApiGrpcClient, create_pipeline_req, CreateJobReq,
     CreatePipelineReq, GetJobsReq, JobCheckpointsReq, JobDetailsReq,
     StopType, UpdateJobReq,
 };
@@ -181,9 +181,6 @@ pub async fn main() {
                     ),
                     parallelism: 1,
                     udfs: vec![],
-                    sink: Some(arroyo_rpc::grpc::api::create_sql_job::Sink::Builtin(
-                        BuiltinSink::Web as i32,
-                    )),
                     preview: false,
                 },
             )),

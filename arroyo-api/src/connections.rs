@@ -1,10 +1,9 @@
+use arroyo_connectors::connector_for_type;
 use arroyo_rpc::grpc::api::{Connection, CreateConnectionReq, TestSourceMessage};
-use arroyo_rpc::grpc::api::{CreateConnectionResp, DeleteConnectionReq, GetConnectorsResp};
+use arroyo_rpc::grpc::api::{CreateConnectionResp, DeleteConnectionReq};
 use cornucopia_async::GenericClient;
-use tokio::sync::mpsc::channel;
 use tonic::Status;
 
-use crate::connectors::connector_for_type;
 use crate::handle_delete;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnection;

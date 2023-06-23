@@ -11,7 +11,8 @@
             "enum": [
                 "json",
                 "json_schema_registry",
-                "raw_json"
+                "raw_json",
+                "debezium_json"
             ]
         },
         "rate_limit": {

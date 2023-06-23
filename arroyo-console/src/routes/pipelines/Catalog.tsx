@@ -8,7 +8,7 @@ import {
   Flex,
   Text,
 } from '@chakra-ui/react';
-import { ConnectionTable, SourceDef, SourceField } from '../../gen/api_pb';
+import { ConnectionTable, SourceField } from '../../gen/api_pb';
 
 function CatalogField({ field, nesting }: { field: SourceField; nesting: number }) {
   switch (field.fieldType!.type.case) {

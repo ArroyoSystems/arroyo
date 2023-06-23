@@ -6,6 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::connectors::OperatorConfig;
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
@@ -140,6 +141,10 @@ impl<K: Key, T: Data + Serialize> GrpcSink<K, T> {
             _ts: PhantomData,
             client: None,
         }
+    }
+
+    pub fn from_config(_config: &str) -> Self {
+        Self::new()
     }
 
     fn name(&self) -> String {

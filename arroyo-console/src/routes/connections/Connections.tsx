@@ -49,7 +49,7 @@ const icons = {
   http: FaGlobeAmericas,
 };
 
-const format = (f: Format) => {
+const format = (f: Format | undefined) => {
   switch (f) {
     case Format.AvroFormat:
       return 'Avro';
@@ -58,7 +58,9 @@ const format = (f: Format) => {
     case Format.ProtobufFormat:
       return 'Protobuf';
     case Format.RawStringFormat:
-      return 'Rsaw';
+      return 'Raw';
+    case Format.DebeziumJsonFormat:
+      return 'Debezium JSON';
     default:
       return 'unknown';
   }

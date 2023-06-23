@@ -5,13 +5,11 @@ use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, TestSourceMessage, TableType},
 };
-use arroyo_sql::ArroyoSchemaProvider;
+use http::SSEConnector;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use typify::import_types;
-
-use crate::{connectors::http::SSEConnector, json_schema};
 
 use self::kafka::KafkaConnector;
 
@@ -19,6 +17,24 @@ pub mod http;
 pub mod kafka;
 
 import_types!(schema = "../connector-schemas/common.json",);
+
+#[derive(Debug, Copy, Clone)]
+pub enum ConnectionType {
+    Source,
+    Sink,
+}
+
+#[derive(Debug, Clone)]
+pub struct Connection {
+    pub id: Option<i64>,
+    pub name: String,
+    pub connection_type: ConnectionType,
+    pub schema: ConnectionSchema,
+    pub operator: String,
+    pub config: String,
+    pub description: String,
+}
+
 
 pub trait Connector: Send {
     type ConfigT: DeserializeOwned + Serialize;
@@ -47,15 +63,14 @@ pub trait Connector: Send {
         tx: Sender<Result<TestSourceMessage, Status>>,
     );
 
-    fn register(
+    fn get_connection(
         &self,
-        id: i64,
+        id: Option<i64>,
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        schema_provider: &mut ArroyoSchemaProvider,
-    );
+    ) -> anyhow::Result<Connection>;
 }
 
 pub trait ErasedConnector: Send {
@@ -78,15 +93,14 @@ pub trait ErasedConnector: Send {
         tx: Sender<Result<TestSourceMessage, Status>>,
     ) -> Result<(), serde_json::Error>;
 
-    fn register(
+    fn get_connection(
         &self,
-        id: i64,
+        id: Option<i64>,
         name: &str,
         config: &str,
         table: &str,
         schema: Option<&ConnectionSchema>,
-        schema_provider: &mut ArroyoSchemaProvider,
-    ) -> Result<(), serde_json::Error>;
+    ) -> anyhow::Result<Connection>;
 }
 
 impl<C: Connector> ErasedConnector for C {
@@ -129,25 +143,21 @@ impl<C: Connector> ErasedConnector for C {
         Ok(())
     }
 
-    fn register(
+    fn get_connection(
         &self,
-        id: i64,
+        id: Option<i64>,
         name: &str,
         config: &str,
         table: &str,
         schema: Option<&ConnectionSchema>,
-        schema_provider: &mut ArroyoSchemaProvider,
-    ) -> Result<(), serde_json::Error> {
-        self.register(
+    ) -> anyhow::Result<Connection> {
+        self.get_connection(
             id,
             name,
             self.parse_config(config)?,
             self.parse_table(table)?,
             schema,
-            schema_provider,
-        );
-
-        Ok(())
+        )
     }
 }
 
@@ -161,34 +171,6 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("sse", Box::new(SSEConnector {}));
 
     m
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RawConfig {
-    charset: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum JsonConfig {
-    JsonSchema { schema: String },
-    JsonFields {},
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum SchemaType {
-    Raw(RawConfig),
-    JSON(JsonConfig),
-}
-
-#[derive(Default, Debug, Serialize, Deserialize)]
-pub struct SchemaOptions {
-    confluent_schema_registry: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Schema {
-    schema_type: SchemaType,
-    options: SchemaOptions,
 }
 
 pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializationMode {
@@ -209,11 +191,14 @@ pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializat
         grpc::api::Format::AvroFormat => todo!(),
         grpc::api::Format::RawStringFormat => {
             if confluent {
-                OperatorConfigSerializationMode::JsonSchemaRegistry
+                todo!("support raw json schemas with confluent schema registry decoding")
             } else {
-                OperatorConfigSerializationMode::Json
+                OperatorConfigSerializationMode::RawJson
             }
         }
+        grpc::api::Format::DebeziumJsonFormat => {
+            OperatorConfigSerializationMode::DebeziumJson
+        },
     }
 }
 
@@ -225,35 +210,7 @@ impl From<OperatorConfigSerializationMode> for SerializationMode {
                 SerializationMode::JsonSchemaRegistry
             }
             OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
+            OperatorConfigSerializationMode::DebeziumJson => SerializationMode::DebeziumJson,
         }
-    }
-}
-
-pub fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
-    let def = schema.definition.as_ref()?;
-    match def {
-        grpc::api::connection_schema::Definition::JsonSchema(_) => {
-            Some(format!("{}::{}", name, json_schema::ROOT_NAME))
-        }
-        grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::RawSchema(_) => {
-            Some("arroyo_types::RawJson".to_string())
-        },
-    }
-}
-
-pub fn schema_defs(name: &str, schema: &ConnectionSchema) -> Option<String> {
-    let def = schema.definition.as_ref()?;
-
-    match def {
-        grpc::api::connection_schema::Definition::JsonSchema(s) => {
-            Some(json_schema::get_defs(&name, &s).unwrap())
-        }
-        grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::RawSchema(_) => {
-            None
-        },
     }
 }

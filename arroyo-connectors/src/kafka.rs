@@ -1,4 +1,4 @@
-use arroyo_sql::{ArroyoSchemaProvider, ConnectorType};
+use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
@@ -19,10 +19,12 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
 
-use super::{schema_defs, schema_type, serialization_mode, Connector, OperatorConfig};
+use crate::{ConnectionType, Connection, serialization_mode};
 
-const CONFIG_SCHEMA: &str = include_str!("../../../connector-schemas/kafka/connection.json");
-const TABLE_SCHEMA: &str = include_str!("../../../connector-schemas/kafka/table.json");
+use super::{Connector, OperatorConfig};
+
+const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/kafka/connection.json");
+const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/kafka/table.json");
 
 import_types!(schema = "../connector-schemas/kafka/connection.json",);
 import_types!(schema = "../connector-schemas/kafka/table.json");
@@ -52,23 +54,22 @@ impl Connector for KafkaConnector {
         }
     }
 
-    fn register(
+    fn get_connection(
         &self,
-        id: i64,
+        id: Option<i64>,
         name: &str,
         config: KafkaConfig,
         table: KafkaTable,
         schema: Option<&ConnectionSchema>,
-        provider: &mut ArroyoSchemaProvider,
-    ) {
+    ) -> anyhow::Result<Connection> {
         let (typ, operator, desc) = match table.type_ {
             TableType::Source { .. } => (
-                ConnectorType::Source,
+                ConnectionType::Source,
                 "connectors::kafka::source::KafkaSourceFunc",
                 format!("KafkaSource<{}>", table.topic),
             ),
             TableType::Sink { .. } => (
-                ConnectorType::Sink,
+                ConnectionType::Sink,
                 "connectors::kafka::sink::KafkaSinkFunc",
                 format!("KafkaSink<{}>", table.topic),
             ),
@@ -81,27 +82,15 @@ impl Connector for KafkaConnector {
             serialization_mode: serialization_mode(schema.as_ref().unwrap()),
         };
 
-        if let Some(defs) = schema_defs(name, schema.as_ref().unwrap()) {
-            provider.add_defs(name, defs);
-        }
-
-        provider.add_connector_table(
+        Ok(Connection {
             id,
-            name.to_string(),
-            typ,
-            schema
-                .as_ref()
-                .unwrap()
-                .fields
-                .iter()
-                .map(|t| t.clone().into())
-                .collect(),
-            schema_type(name, schema.as_ref().unwrap()),
-            operator.to_string(),
-            serde_json::to_string(&config).unwrap(),
-            desc,
-            serialization_mode(schema.as_ref().unwrap()).into(),
-        );
+            name: name.to_string(),
+            connection_type: typ,
+            schema: schema.map(|s| s.to_owned()).ok_or_else(|| anyhow!("No schema defined for Kafka connection"))?,
+            operator: operator.to_string(),
+            config: serde_json::to_string(&config).unwrap(),
+            description: desc,
+        })
     }
 
     fn test(
@@ -121,7 +110,7 @@ impl Connector for KafkaConnector {
         tester.start();
     }
 
-    fn table_type(&self, config: Self::ConfigT, table: Self::TableT) -> grpc::api::TableType {
+    fn table_type(&self, _: Self::ConfigT, table: Self::TableT) -> grpc::api::TableType {
         match table.type_ {
             TableType::Source { .. } => grpc::api::TableType::Source,
             TableType::Sink { .. } => grpc::api::TableType::Sink,
@@ -150,13 +139,13 @@ impl KafkaTester {
             .set("group.id", "arroyo-kafka-source-tester");
 
         match &self.connection.authentication {
-            KafkaConfigAuthentication::None { } => {},
-            KafkaConfigAuthentication::Sasl {
+            None | Some(KafkaConfigAuthentication::None { }) => {},
+            Some(KafkaConfigAuthentication::Sasl {
                 mechanism,
                 password,
                 protocol,
                 username,
-            } => {
+            }) => {
                 client_config.set("sasl.mechanism", mechanism);
                 client_config.set("security.protocol", protocol);
                 client_config.set("sasl.username", username);

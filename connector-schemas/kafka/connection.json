@@ -52,8 +52,7 @@
         }
     },
     "required": [
-        "bootstrapServers",
-        "authentication"
+        "bootstrapServers"
     ]
 }
 

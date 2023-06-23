@@ -16,7 +16,7 @@ use syn::{parse_quote, parse_str};
 
 use crate::{
     expressions::SortExpression,
-    external::{SinkUpdateType, SqlSink, SqlSource},
+    external::{SinkUpdateType, SqlSink, SqlSource, ProcessingMode},
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
     pipeline::{
@@ -1224,9 +1224,9 @@ impl PlanGraph {
         if let Some(source_id) = source_operator.source.id {
             self.saved_sources_used.push(source_id);
         }
-        let mut current_index = match source_operator.source.serialization_mode {
-            SerializationMode::DebeziumJson => self.add_debezium_source(&source_operator),
-            _ => self.insert_operator(
+        let mut current_index = match source_operator.source.processing_mode {
+            ProcessingMode::Update => self.add_debezium_source(&source_operator),
+            ProcessingMode::Append => self.insert_operator(
                 PlanOperator::Source(source_operator.name.clone(), source_operator.source.clone()),
                 PlanType::Unkeyed(source_operator.source.struct_def.clone()),
             ),

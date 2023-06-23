@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::Context;
+use arroyo_connectors::connector_for_type;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Transaction;
 use petgraph::Direction;
@@ -10,21 +11,19 @@ use tonic::Status;
 use tracing::log::info;
 use tracing::warn;
 
-use arroyo_datastream::{Operator, Program};
-use arroyo_rpc::grpc::api::create_sql_job::Sink;
+use arroyo_datastream::{Operator, Program, ConnectorOp};
 use arroyo_rpc::grpc::api::{
-    self, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob, PipelineDef,
+    self, create_pipeline_req, CreatePipelineReq, CreateSqlJob, PipelineDef,
     PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf, UdfLanguage,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
 use crate::connection_tables;
-use crate::connectors::connector_for_type;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbPipeline;
 use crate::types::public::PipelineType;
 use crate::{
-    connections, handle_db_error, log_and_map, optimizations, required_field,
+    handle_db_error, log_and_map, optimizations, required_field,
     AuthData,
 };
 
@@ -51,26 +50,20 @@ where
         }
     }
 
-    for connection in connections::get_connections(auth_data, tx).await? {
-        schema_provider.add_connection(connection)
-    }
-
     for table in connection_tables::get(auth_data, tx).await? {
         let Some(connector) = connector_for_type(&table.connector) else {
             warn!("Saved table found with unknown connector {}", table.connector);
             continue;
         };
 
-        connector
-            .register(
-                table.id,
-                &table.name,
-                &table.connection.map(|c| c.config.clone()).unwrap_or_else(|| "{}".to_string()),
-                &table.config,
-                table.schema.as_ref(),
-                &mut schema_provider,
-            )
+        let connection = connector.get_connection(Some(table.id),
+            &table.name,
+            &table.connection.map(|c| c.config.clone()).unwrap_or_else(|| "{}".to_string()),
+            &table.config,
+            table.schema.as_ref())
             .map_err(log_and_map)?;
+
+        schema_provider.add_connector_table(connection);
     }
 
     let (program, connections) = arroyo_sql::parse_and_get_program(
@@ -94,56 +87,6 @@ fn set_parallelism(program: &mut Program, parallelism: usize) {
     for node in program.graph.node_weights_mut() {
         node.parallelism = parallelism;
     }
-}
-
-async fn set_default_parallelism(_auth: &AuthData, program: &mut Program) -> Result<(), Status> {
-    let sources = program.graph.externals(Direction::Incoming);
-
-    let mut parallelism = 1;
-
-    for source_idx in sources {
-        let source = program.graph.node_weight(source_idx).unwrap();
-        parallelism = parallelism.max(match &source.operator {
-            Operator::FileSource { .. } => 1,
-            Operator::ImpulseSource { spec, .. } => {
-                let eps = match spec {
-                    arroyo_datastream::ImpulseSpec::Delay(d) => 1.0 / d.as_secs_f32(),
-                    arroyo_datastream::ImpulseSpec::EventsPerSecond(eps) => *eps,
-                };
-
-                (eps / 50_000.0).round() as usize
-            }
-            // Operator::KafkaSource { .. } => {
-            //     // for now, just use a default parallelism of 1 for kafka until we have autoscaling
-            //     1
-
-            //     // let (tx, _) = channel(1);
-            //     // let kafka = KafkaTester::new(
-            //     //     KafkaConnection {
-            //     //         bootstrap_servers: bootstrap_servers.join(","),
-            //     //     },
-            //     //     Some(topic.clone()),
-            //     //     None,
-            //     //     tx,
-            //     // );
-
-            //     // kafka
-            //     //     .topic_metadata()
-            //     //     .await?
-            //     //     .partitions
-            //     //     .min(auth.org_metadata.max_parallelism as usize)
-            // }
-            Operator::NexmarkSource {
-                first_event_rate, ..
-            } => (*first_event_rate as f32 / 50_000.0).round() as usize,
-            Operator::ConnectorSource { .. } => todo!(),
-            op => panic!("Found non-source in a source position in graph: {:?}", op),
-        });
-    }
-
-    info!("Setting pipeline parallelism to {}", parallelism);
-    set_parallelism(program, parallelism);
-    Ok(())
 }
 
 pub(crate) async fn create_pipeline<'a>(
@@ -224,13 +167,11 @@ pub(crate) async fn create_pipeline<'a>(
     if is_preview {
         set_parallelism(&mut program, 1);
         for node in program.graph.node_weights_mut() {
-            // if it is a connector sink or file sink, switch to null
-            if let Operator::ConnectorSink { .. } | Operator::FileSink { .. } = node.operator {
-                node.operator = Operator::GrpcSink;
+            // if it is a connector sink or switch to a web sink
+            if let Operator::ConnectorSink { .. } = node.operator {
+                node.operator = Operator::ConnectorSink(ConnectorOp::web_sink());
             }
         }
-    } else if compute_parallelism {
-        set_default_parallelism(&auth, &mut program).await?;
     }
 
     let proto_program: PipelineProgram = program.try_into().map_err(log_and_map)?;
@@ -333,7 +274,6 @@ pub(crate) async fn sql_graph(
         query: req.query,
         parallelism: 1,
         udfs: req.udfs,
-        sink: Some(Sink::Builtin(BuiltinSink::Null as i32)),
         preview: false,
     };
 

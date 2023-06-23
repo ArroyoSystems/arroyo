@@ -3,7 +3,7 @@
 /* eslint-disable */
 /* @ts-nocheck */
 
-import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateConnectionTableReq, CreateConnectionTableResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, SourceMetadataResp, TestSchemaReq, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
+import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateConnectionTableReq, CreateConnectionTableResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, GetConnectionsReq, GetConnectionsResp, GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
 import {MethodKind} from "@bufbuild/protobuf";
 
 /**
@@ -85,57 +85,12 @@ export const ApiGrpc = {
       kind: MethodKind.Unary,
     },
     /**
-     * @generated from rpc arroyo_api.ApiGrpc.CreateSource
-     */
-    createSource: {
-      name: "CreateSource",
-      I: CreateSourceReq,
-      O: CreateSourceResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.GetSources
-     */
-    getSources: {
-      name: "GetSources",
-      I: GetSourcesReq,
-      O: GetSourcesResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.DeleteSource
-     */
-    deleteSource: {
-      name: "DeleteSource",
-      I: DeleteSourceReq,
-      O: DeleteSourceResp,
-      kind: MethodKind.Unary,
-    },
-    /**
      * @generated from rpc arroyo_api.ApiGrpc.GetConfluentSchema
      */
     getConfluentSchema: {
       name: "GetConfluentSchema",
       I: ConfluentSchemaReq,
       O: ConfluentSchemaResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.GetSourceMetadata
-     */
-    getSourceMetadata: {
-      name: "GetSourceMetadata",
-      I: CreateSourceReq,
-      O: SourceMetadataResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.TestSchema
-     */
-    testSchema: {
-      name: "TestSchema",
-      I: TestSchemaReq,
-      O: TestSchemaResp,
       kind: MethodKind.Unary,
     },
     /**

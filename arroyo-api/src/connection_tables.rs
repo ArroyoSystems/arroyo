@@ -1,10 +1,11 @@
 use anyhow::anyhow;
 use arrow_schema::DataType;
+use arroyo_connectors::{ErasedConnector, connector_for_type};
 use arroyo_rpc::grpc::api::{
     connection_schema::Definition, ConnectionSchema, ConnectionTable, CreateConnectionTableReq,
     TableType, TestSchemaReq, TestSourceMessage, ConfluentSchemaReq, ConfluentSchemaResp, Connection,
 };
-use arroyo_sql::types::{StructField, TypeDef};
+use arroyo_sql::{types::{StructField, TypeDef}, json_schema::{convert_json_schema, self}};
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Pool;
 use http::StatusCode;
@@ -13,8 +14,7 @@ use tonic::Status;
 use tracing::warn;
 
 use crate::{
-    connectors::{self, ErasedConnector}, handle_db_error,
-    json_schema::{self, convert_json_schema},
+    handle_db_error,
     log_and_map,
     queries::api_queries::{self, GetConnectionTables},
     required_field, AuthData,
@@ -22,7 +22,7 @@ use crate::{
 
 async fn get_and_validate_connector<E: GenericClient>(req: &CreateConnectionTableReq, auth: &AuthData, c: &E)
     -> Result<(Box<dyn ErasedConnector>, Option<i64>, String, Option<ConnectionSchema>), Status> {
-    let connector = connectors::connector_for_type(&req.connector)
+    let connector = connector_for_type(&req.connector)
         .ok_or_else(|| {
             anyhow!(
                 "Unknown connector '{}'",
@@ -119,7 +119,7 @@ pub(crate) async fn test(
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<Receiver<Result<TestSourceMessage, Status>>, Status> {
-    let (connector, connection_id, config, schema) =
+    let (connector, _, config, schema) =
         get_and_validate_connector(&req, &auth, client).await?;
 
     let (tx, rx) = channel(8);

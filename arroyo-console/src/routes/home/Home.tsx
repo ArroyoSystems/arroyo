@@ -14,15 +14,12 @@ import { useEffect, useState } from 'react';
 import { useLinkClickHandler } from 'react-router-dom';
 import {
   GetJobsReq,
-  GetSourcesReq,
   JobStatus,
-  SourceDef,
 } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
 
 interface HomeState {
   jobs: Array<JobStatus> | null;
-  sources: Array<SourceDef> | null;
 }
 
 interface Props {
@@ -55,17 +52,15 @@ export const Stat = (props: Props) => {
 };
 
 export function Home({ client }: { client: ApiClient }) {
-  const [state, setState] = useState<HomeState>({ jobs: null, sources: null });
+  const [state, setState] = useState<HomeState>({ jobs: null });
 
   useEffect(() => {
     const fetchData = async () => {
       const clientObj = await client();
       const jobs = clientObj.getJobs(new GetJobsReq({}));
-      const sources = clientObj.getSources(new GetSourcesReq({}));
 
       setState({
         jobs: (await jobs).jobs,
-        sources: (await sources).sources,
       });
     };
 
@@ -107,7 +102,6 @@ export function Home({ client }: { client: ApiClient }) {
               value={failedJobs?.toString()}
               color={failedJobs != null && failedJobs > 0 ? 'red.300' : undefined}
             />
-            <Stat label="Sources" value={state.sources?.length.toString()} />
           </SimpleGrid>
         </Stack>
       </Stack>
