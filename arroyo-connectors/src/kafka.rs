@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
@@ -19,7 +19,7 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
 
-use crate::{ConnectionType, Connection, serialization_mode};
+use crate::{ConnectionType, Connection, serialization_mode, pull_opt};
 
 use super::{Connector, OperatorConfig};
 
@@ -54,7 +54,7 @@ impl Connector for KafkaConnector {
         }
     }
 
-    fn get_connection(
+    fn from_config(
         &self,
         id: Option<i64>,
         name: &str,
@@ -115,6 +115,54 @@ impl Connector for KafkaConnector {
             TableType::Source { .. } => grpc::api::TableType::Source,
             TableType::Sink { .. } => grpc::api::TableType::Sink,
         }
+    }
+
+    fn from_options(&self, name: &str, opts: &mut std::collections::HashMap<String, String>,
+        schema: Option<&ConnectionSchema>) -> anyhow::Result<Connection> {
+
+        let auth = opts.remove("authentication.type");
+        let auth = match auth.as_ref().map(|t| t.as_str()) {
+            Some("none") | None => KafkaConfigAuthentication::None {  },
+            Some("sasl") => KafkaConfigAuthentication::Sasl {
+                mechanism: pull_opt("authentication.mechanism", opts)?,
+                protocol:  pull_opt("authentication.mechanism", opts)?,
+                username: pull_opt("authentication.username", opts)?,
+                password:  pull_opt("authentication.password", opts)?,
+            },
+            Some(other) => bail!("Unknown auth type '{}'", other)
+        };
+
+        let connection = KafkaConfig {
+            authentication: Some(auth),
+            bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", opts)?),
+        };
+
+        let typ = pull_opt("type", opts)?;
+        let table_type = match typ.as_str() {
+            "source" => {
+                let offset = opts.remove("source.offset");
+                TableType::Source {
+                    offset: match offset.as_ref().map(|f| f.as_str()) {
+                        Some("earliest") => SourceOffset::Earliest,
+                        None | Some("latest") => SourceOffset::Latest,
+                        Some(other) => bail!("Invalid value for source.offset '{}'", other)
+                    }
+                }
+            }
+            "sink" => {
+                TableType::Sink { }
+            }
+            _ => {
+                bail!("type must be one of 'source' or 'sink")
+            }
+        };
+
+        let table = KafkaTable {
+            topic: pull_opt("topic", opts)?,
+            type_: table_type,
+        };
+
+        Self::from_config(&self, None, name, connection, table, schema)
     }
 }
 

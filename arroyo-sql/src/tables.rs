@@ -97,44 +97,13 @@ impl From<Connection> for ConnectorTable {
     }
 }
 
-/// Converts flattened json (with `.` separated paths) into nested JSON
-fn unflatten_json(map: &HashMap<String, String>) -> serde_json::Value {
-    let mut obj = json!({});
-
-    for (k, v) in map {
-        let mut obj = &mut obj;
-        let path: Vec<_> = k.split(".").collect();
-        let (last, path) = path.split_last().unwrap();
-
-        for c in path {
-            if obj.get(c).is_none() {
-                obj.as_object_mut().unwrap().insert(c.to_string(), json!({}));
-            }
-
-            obj = obj.get_mut(c).unwrap()
-        }
-
-        obj.as_object_mut().unwrap().insert(last.to_string(), serde_json::Value::String(v.to_string()));
-    }
-
-    obj
-}
-
 impl ConnectorTable {
-    fn from_options(name: &str, connector: &str, fields: Vec<StructField>, options: &HashMap<String, String>) -> Result<Self> {
+    fn from_options(name: &str, connector: &str, fields: Vec<StructField>, options: &mut HashMap<String, String>) -> Result<Self> {
         let connector = connector_for_type(connector)
             .ok_or_else(|| anyhow!("Unknown connector '{}'", connector))?;
 
-        let value = unflatten_json(options);
-
-        let connection_config = value.get("connection").map(|s| serde_json::to_string(s).unwrap())
-            .unwrap_or_else(|| "{}".to_string());
-
-        let table_config = value.get("table").map(|s| serde_json::to_string(s).unwrap())
-            .unwrap_or_else(|| "{}".to_string());
-
         let mut format = None;
-        if let Some(f) = options.get("format") {
+        if let Some(f) = options.remove("format") {
             format = Some(match f.as_str() {
                 "json" => Format::JsonFormat,
                 "debezium_json" => Format::DebeziumJsonFormat,
@@ -145,7 +114,7 @@ impl ConnectorTable {
             });
         }
 
-        let schema_registry = options.get("format_options.confluent_schema_registry")
+        let schema_registry = options.remove("format_options.confluent_schema_registry")
             .map(|f| f == "true")
             .unwrap_or(false);
 
@@ -163,9 +132,12 @@ impl ConnectorTable {
             definition: None,
         };
 
-        println!("Schema = {:#?}", schema);
+        let connection = connector.from_options(name, options, Some(&schema))?;
 
-        let connection = connector.get_connection(None, name, &connection_config, &table_config, Some(&schema))?;
+        if !options.is_empty() {
+            let keys: Vec<String> = options.keys().map(|s| s.to_string()).collect();
+            bail!("Unknown options provided in WITH clause for {}: {}", name, keys.join(", "));
+        }
 
         let mut table: ConnectorTable = connection.into();
         table.fields = fields;
@@ -475,11 +447,11 @@ impl Table {
 
             let fields = Self::schema_from_columns(columns, schema_provider)?;
 
-            let connector = with_map.get("connector");
+            let connector = with_map.get("connector").cloned();
 
             match connector {
                 Some(connector) => {
-                    Ok(Some(Table::ConnectorTable(ConnectorTable::from_options(&name, connector, fields, &with_map)?)))
+                    Ok(Some(Table::ConnectorTable(ConnectorTable::from_options(&name, &connector, fields, &mut with_map)?)))
                 }
                 None => {
                     if fields.iter().any(|f| f.expression.is_some()) {

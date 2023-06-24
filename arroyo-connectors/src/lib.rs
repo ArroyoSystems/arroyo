@@ -1,5 +1,6 @@
 use std::{collections::HashMap};
 
+use anyhow::anyhow;
 use arroyo_datastream::SerializationMode;
 use arroyo_rpc::grpc::{
     self,
@@ -35,7 +36,6 @@ pub struct Connection {
     pub description: String,
 }
 
-
 pub trait Connector: Send {
     type ConfigT: DeserializeOwned + Serialize;
     type TableT: DeserializeOwned + Serialize;
@@ -63,7 +63,10 @@ pub trait Connector: Send {
         tx: Sender<Result<TestSourceMessage, Status>>,
     );
 
-    fn get_connection(
+    fn from_options(&self, name: &str, options: &mut HashMap<String, String>,
+        schema: Option<&ConnectionSchema>) -> anyhow::Result<Connection>;
+
+    fn from_config(
         &self,
         id: Option<i64>,
         name: &str,
@@ -93,7 +96,10 @@ pub trait ErasedConnector: Send {
         tx: Sender<Result<TestSourceMessage, Status>>,
     ) -> Result<(), serde_json::Error>;
 
-    fn get_connection(
+    fn from_options(&self, name: &str, options: &mut HashMap<String, String>,
+        schema: Option<&ConnectionSchema>) -> anyhow::Result<Connection>;
+
+    fn from_config(
         &self,
         id: Option<i64>,
         name: &str,
@@ -143,7 +149,12 @@ impl<C: Connector> ErasedConnector for C {
         Ok(())
     }
 
-    fn get_connection(
+    fn from_options(&self, name: &str, options: &mut HashMap<String, String>,
+        schema: Option<&ConnectionSchema>) -> anyhow::Result<Connection> {
+            self.from_options(name, options, schema)
+        }
+
+    fn from_config(
         &self,
         id: Option<i64>,
         name: &str,
@@ -151,7 +162,7 @@ impl<C: Connector> ErasedConnector for C {
         table: &str,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
-        self.get_connection(
+        self.from_config(
             id,
             name,
             self.parse_config(config)?,
@@ -159,6 +170,11 @@ impl<C: Connector> ErasedConnector for C {
             schema,
         )
     }
+}
+
+pub(crate) fn pull_opt(name: &str, opts: &mut HashMap<String, String>) -> anyhow::Result<String> {
+    opts.remove(name)
+        .ok_or_else(|| anyhow!("Required option '{}' not set", name))
 }
 
 pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {

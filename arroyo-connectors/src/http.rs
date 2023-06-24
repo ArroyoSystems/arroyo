@@ -44,7 +44,7 @@ impl Connector for SSEConnector {
         return grpc::api::TableType::Source;
     }
 
-    fn get_connection(
+    fn from_config(
         &self,
         id: Option<i64>,
         name: &str,
@@ -52,6 +52,11 @@ impl Connector for SSEConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
+        todo!()
+    }
+
+    fn from_options(&self, name: &str, options: &mut std::collections::HashMap<String, String>,
+        schema: Option<&ConnectionSchema>) -> anyhow::Result<crate::Connection> {
         todo!()
     }
 }

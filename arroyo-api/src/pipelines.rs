@@ -56,7 +56,7 @@ where
             continue;
         };
 
-        let connection = connector.get_connection(Some(table.id),
+        let connection = connector.from_config(Some(table.id),
             &table.name,
             &table.connection.map(|c| c.config.clone()).unwrap_or_else(|| "{}".to_string()),
             &table.config,
