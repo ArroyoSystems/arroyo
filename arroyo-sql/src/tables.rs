@@ -144,7 +144,7 @@ impl ConnectorTable {
             .map(|f| {
                 f.clone().try_into().map_err(|_| {
                     anyhow!(
-                        "Field '{}' has a type '{:?}' that cannot be used in a connection table",
+                        "field '{}' has a type '{:?}' that cannot be used in a connection table",
                         f.name,
                         f.data_type
                     )
@@ -166,8 +166,7 @@ impl ConnectorTable {
         if !options.is_empty() {
             let keys: Vec<String> = options.keys().map(|s| s.to_string()).collect();
             bail!(
-                "Unknown options provided in WITH clause for {}: {}",
-                name,
+                "unknown options provided in WITH clause: {}",
                 keys.join(", ")
             );
         }
@@ -490,15 +489,13 @@ impl Table {
 
             let fields = Self::schema_from_columns(columns, schema_provider)?;
 
-            let connector = with_map.get("connector").cloned();
+            let connector = with_map.remove("connector");
 
             match connector {
-                Some(connector) => Ok(Some(Table::ConnectorTable(ConnectorTable::from_options(
-                    &name,
-                    &connector,
-                    fields,
-                    &mut with_map,
-                )?))),
+                Some(connector) => Ok(Some(Table::ConnectorTable(
+                    ConnectorTable::from_options(&name, &connector, fields, &mut with_map)
+                        .map_err(|e| anyhow!("Failed to construct table '{}': {:?}", name, e))?,
+                ))),
                 None => {
                     if fields.iter().any(|f| f.expression.is_some()) {
                         bail!("Virtual fields are not supported in memory tables. Just write a query.");

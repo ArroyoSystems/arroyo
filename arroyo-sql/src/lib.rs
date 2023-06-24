@@ -32,6 +32,7 @@ use datafusion_expr::{
     TypeSignature, Volatility,
 };
 use expressions::Expression;
+use external::SqlSink;
 use pipeline::{SqlOperator, SqlPipelineBuilder};
 use plan_graph::{get_program, PlanGraph};
 use schemas::window_arrow_struct;
@@ -348,13 +349,33 @@ pub fn parse_and_get_program_sync(
 
     let mut plan_graph = PlanGraph::new(config.clone());
 
-    // If there isn't a sink, throw an error
+    // If there isn't a sink, add a web sink to the last insert
     if !sql_pipeline_builder
         .insert_nodes
         .iter()
         .any(|n| matches!(n, SqlOperator::Sink(..)))
     {
-        bail!("Pipeline must include at least one sink node");
+        let insert = sql_pipeline_builder.insert_nodes.pop().unwrap();
+        let struct_def = insert.return_type();
+        let sink = Table::ConnectorTable(ConnectorTable {
+            id: None,
+            name: "web".to_string(),
+            connection_type: arroyo_connectors::ConnectionType::Sink,
+            fields: struct_def.fields.clone(),
+            type_name: None,
+            operator: "GrpcSink".to_string(),
+            config: "{}".to_string(),
+            description: "WebSink".to_string(),
+            serialization_mode: if insert.is_updating() {
+                arroyo_datastream::SerializationMode::DebeziumJson
+            } else {
+                arroyo_datastream::SerializationMode::Json
+            },
+            event_time_field: None,
+            watermark_field: None,
+        });
+
+        plan_graph.add_sql_operator(sink.as_sql_sink(insert)?);
     }
 
     for output in sql_pipeline_builder.insert_nodes.into_iter() {

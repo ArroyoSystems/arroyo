@@ -132,7 +132,7 @@ impl Connector for KafkaConnector {
                 username: pull_opt("authentication.username", opts)?,
                 password: pull_opt("authentication.password", opts)?,
             },
-            Some(other) => bail!("Unknown auth type '{}'", other),
+            Some(other) => bail!("unknown auth type '{}'", other),
         };
 
         let connection = KafkaConfig {
@@ -148,7 +148,7 @@ impl Connector for KafkaConnector {
                     offset: match offset.as_ref().map(|f| f.as_str()) {
                         Some("earliest") => SourceOffset::Earliest,
                         None | Some("latest") => SourceOffset::Latest,
-                        Some(other) => bail!("Invalid value for source.offset '{}'", other),
+                        Some(other) => bail!("invalid value for source.offset '{}'", other),
                     },
                 }
             }

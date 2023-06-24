@@ -186,7 +186,7 @@ impl<C: Connector> ErasedConnector for C {
 
 pub(crate) fn pull_opt(name: &str, opts: &mut HashMap<String, String>) -> anyhow::Result<String> {
     opts.remove(name)
-        .ok_or_else(|| anyhow!("Required option '{}' not set", name))
+        .ok_or_else(|| anyhow!("required option '{}' not set", name))
 }
 
 pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
