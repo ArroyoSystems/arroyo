@@ -28,7 +28,6 @@ impl Connector for SSEConnector {
         }
     }
 
-
     fn test(
         &self,
         name: &str,
@@ -55,8 +54,12 @@ impl Connector for SSEConnector {
         todo!()
     }
 
-    fn from_options(&self, name: &str, options: &mut std::collections::HashMap<String, String>,
-        schema: Option<&ConnectionSchema>) -> anyhow::Result<crate::Connection> {
+    fn from_options(
+        &self,
+        name: &str,
+        options: &mut std::collections::HashMap<String, String>,
+        schema: Option<&ConnectionSchema>,
+    ) -> anyhow::Result<crate::Connection> {
         todo!()
     }
 }

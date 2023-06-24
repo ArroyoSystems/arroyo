@@ -1,10 +1,10 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 use anyhow::anyhow;
 use arroyo_datastream::SerializationMode;
 use arroyo_rpc::grpc::{
     self,
-    api::{ConnectionSchema, TestSourceMessage, TableType},
+    api::{ConnectionSchema, TableType, TestSourceMessage},
 };
 use http::SSEConnector;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -63,8 +63,12 @@ pub trait Connector: Send {
         tx: Sender<Result<TestSourceMessage, Status>>,
     );
 
-    fn from_options(&self, name: &str, options: &mut HashMap<String, String>,
-        schema: Option<&ConnectionSchema>) -> anyhow::Result<Connection>;
+    fn from_options(
+        &self,
+        name: &str,
+        options: &mut HashMap<String, String>,
+        schema: Option<&ConnectionSchema>,
+    ) -> anyhow::Result<Connection>;
 
     fn from_config(
         &self,
@@ -96,8 +100,12 @@ pub trait ErasedConnector: Send {
         tx: Sender<Result<TestSourceMessage, Status>>,
     ) -> Result<(), serde_json::Error>;
 
-    fn from_options(&self, name: &str, options: &mut HashMap<String, String>,
-        schema: Option<&ConnectionSchema>) -> anyhow::Result<Connection>;
+    fn from_options(
+        &self,
+        name: &str,
+        options: &mut HashMap<String, String>,
+        schema: Option<&ConnectionSchema>,
+    ) -> anyhow::Result<Connection>;
 
     fn from_config(
         &self,
@@ -149,10 +157,14 @@ impl<C: Connector> ErasedConnector for C {
         Ok(())
     }
 
-    fn from_options(&self, name: &str, options: &mut HashMap<String, String>,
-        schema: Option<&ConnectionSchema>) -> anyhow::Result<Connection> {
-            self.from_options(name, options, schema)
-        }
+    fn from_options(
+        &self,
+        name: &str,
+        options: &mut HashMap<String, String>,
+        schema: Option<&ConnectionSchema>,
+    ) -> anyhow::Result<Connection> {
+        self.from_options(name, options, schema)
+    }
 
     fn from_config(
         &self,
@@ -212,9 +224,7 @@ pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializat
                 OperatorConfigSerializationMode::RawJson
             }
         }
-        grpc::api::Format::DebeziumJsonFormat => {
-            OperatorConfigSerializationMode::DebeziumJson
-        },
+        grpc::api::Format::DebeziumJsonFormat => OperatorConfigSerializationMode::DebeziumJson,
     }
 }
 

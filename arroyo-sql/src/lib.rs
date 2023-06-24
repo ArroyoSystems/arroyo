@@ -4,19 +4,19 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
 use arroyo_connectors::Connection;
-use arroyo_datastream::{Program};
+use arroyo_datastream::Program;
 use datafusion::physical_plan::functions::make_scalar_function;
 
 mod expressions;
 pub mod external;
+pub mod json_schema;
 mod operators;
 mod optimizations;
 mod pipeline;
 mod plan_graph;
 pub mod schemas;
-pub mod types;
 mod tables;
-pub mod json_schema;
+pub mod types;
 
 use datafusion::prelude::create_udf;
 
@@ -28,14 +28,14 @@ use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
 use datafusion_expr::{
-    AccumulatorFunctionImplementation,
-    ReturnTypeFunction, Signature, StateTypeFunction, TypeSignature, Volatility,
+    AccumulatorFunctionImplementation, ReturnTypeFunction, Signature, StateTypeFunction,
+    TypeSignature, Volatility,
 };
 use expressions::Expression;
 use pipeline::{SqlOperator, SqlPipelineBuilder};
 use plan_graph::{get_program, PlanGraph};
 use schemas::window_arrow_struct;
-use tables::{Table, Insert, ConnectorTable, schema_defs};
+use tables::{schema_defs, ConnectorTable, Insert, Table};
 
 use crate::types::{StructDef, StructField, TypeDef};
 use quote::ToTokens;
@@ -52,7 +52,6 @@ pub struct UdfDef {
     ret: TypeDef,
     def: String,
 }
-
 
 #[derive(Debug, Clone, Default)]
 pub struct ArroyoSchemaProvider {
@@ -140,10 +139,7 @@ impl ArroyoSchemaProvider {
         }
     }
 
-    pub fn add_connector_table(
-        &mut self,
-        connection: Connection,
-    ) {
+    pub fn add_connector_table(&mut self, connection: Connection) {
         if let Some(def) = schema_defs(&connection.name, &connection.schema) {
             self.source_defs.insert(connection.name.clone(), def);
         }
@@ -235,7 +231,6 @@ fn create_table_source(fields: Vec<Field>) -> Arc<dyn TableSource> {
     )))
 }
 
-
 impl ContextProvider for ArroyoSchemaProvider {
     fn get_table_provider(
         &self,
@@ -302,7 +297,6 @@ impl ContextProvider for ArroyoSchemaProvider {
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub struct SqlConfig {
     pub default_parallelism: usize,
@@ -337,7 +331,6 @@ pub fn parse_and_get_program_sync(
     mut schema_provider: ArroyoSchemaProvider,
     config: SqlConfig,
 ) -> Result<(Program, Vec<i64>)> {
-
     let dialect = PostgreSqlDialect {};
     let mut inserts = vec![];
     for statement in Parser::parse_sql(&dialect, &query)? {
@@ -356,7 +349,11 @@ pub fn parse_and_get_program_sync(
     let mut plan_graph = PlanGraph::new(config.clone());
 
     // If there isn't a sink, throw an error
-    if !sql_pipeline_builder.insert_nodes.iter().any(|n| matches!(n, SqlOperator::Sink(..))) {
+    if !sql_pipeline_builder
+        .insert_nodes
+        .iter()
+        .any(|n| matches!(n, SqlOperator::Sink(..)))
+    {
         bail!("Pipeline must include at least one sink node");
     }
 
@@ -366,7 +363,6 @@ pub fn parse_and_get_program_sync(
 
     get_program(plan_graph, sql_pipeline_builder.schema_provider.clone())
 }
-
 
 #[derive(Clone)]
 pub struct TestStruct {
@@ -418,7 +414,8 @@ fn test_struct_def() -> StructDef {
             StructField::new(
                 "non_nullable_i32".to_string(),
                 None,
-                TypeDef::DataType(DataType::Int32, false)),
+                TypeDef::DataType(DataType::Int32, false),
+            ),
             StructField::new(
                 "nullable_i32".to_string(),
                 None,
@@ -477,18 +474,12 @@ fn test_struct_def() -> StructDef {
             StructField::new(
                 "non_nullable_timestamp".to_string(),
                 None,
-                TypeDef::DataType(
-                    DataType::Timestamp(TimeUnit::Microsecond, None),
-                    false,
-                ),
+                TypeDef::DataType(DataType::Timestamp(TimeUnit::Microsecond, None), false),
             ),
             StructField::new(
                 "nullable_timestamp".to_string(),
                 None,
-                TypeDef::DataType(
-                    DataType::Timestamp(TimeUnit::Microsecond, None),
-                    true,
-                ),
+                TypeDef::DataType(DataType::Timestamp(TimeUnit::Microsecond, None), true),
             ),
             StructField::new(
                 "non_nullable_bytes".to_string(),

@@ -2,9 +2,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use arroyo_rpc::grpc::api::{
-    api_grpc_client::ApiGrpcClient, create_pipeline_req, CreateJobReq,
-    CreatePipelineReq, GetJobsReq, JobCheckpointsReq, JobDetailsReq,
-    StopType, UpdateJobReq,
+    api_grpc_client::ApiGrpcClient, create_pipeline_req, CreateJobReq, CreatePipelineReq,
+    GetJobsReq, JobCheckpointsReq, JobDetailsReq, StopType, UpdateJobReq,
 };
 use arroyo_types::DatabaseConfig;
 use rand::RngCore;

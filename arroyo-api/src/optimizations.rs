@@ -433,7 +433,7 @@ mod tests {
 
     use petgraph::prelude::DiGraph;
 
-    use arroyo_datastream::{StreamEdge, StreamNode, WindowAgg, ConnectorOp};
+    use arroyo_datastream::{ConnectorOp, StreamEdge, StreamNode, WindowAgg};
 
     use super::fuse_window_aggregation;
 
@@ -491,7 +491,7 @@ mod tests {
             operator: arroyo_datastream::Operator::ConnectorSink(ConnectorOp {
                 operator: "ConsoleSink".to_string(),
                 config: "".to_string(),
-                description: "ConsoleSink".to_string()
+                description: "ConsoleSink".to_string(),
             }),
             parallelism: 5,
         });

@@ -1,7 +1,7 @@
 #![allow(clippy::comparison_chain)]
 use std::collections::HashMap;
 
-use std::time::{Duration};
+use std::time::Duration;
 use std::unreachable;
 
 use anyhow::Result;
@@ -17,7 +17,7 @@ use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
 
 use crate::expressions::ExpressionContext;
-use crate::external::{SqlSink, SqlSource, ProcessingMode};
+use crate::external::{ProcessingMode, SqlSink, SqlSource};
 use crate::tables::{Insert, Table};
 use crate::{
     expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
@@ -378,9 +378,7 @@ impl SqlOperator {
 
     pub fn is_updating(&self) -> bool {
         match self {
-            SqlOperator::Source(source) => {
-                source.source.processing_mode == ProcessingMode::Update
-            }
+            SqlOperator::Source(source) => source.source.processing_mode == ProcessingMode::Update,
             SqlOperator::Aggregator(input, aggregate_operator) => {
                 input.is_updating()
                     || (!input.has_window() && aggregate_operator.window == WindowType::Instant)
@@ -494,8 +492,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             bail!("only insert statements are currently supported")
         }
         let input = self.insert_sql_plan(&dml_statement.input)?;
-        self
-            .schema_provider
+        self.schema_provider
             .get_table(&dml_statement.table_name.to_string())
             .ok_or_else(|| {
                 anyhow!(

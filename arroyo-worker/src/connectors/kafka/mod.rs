@@ -8,7 +8,6 @@ pub mod source;
 import_types!(schema = "../connector-schemas/kafka/connection.json");
 import_types!(schema = "../connector-schemas/kafka/table.json");
 
-
 impl SourceOffset {
     fn get_offset(&self) -> Offset {
         match self {

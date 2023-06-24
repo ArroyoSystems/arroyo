@@ -16,7 +16,10 @@ use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEF
 use arroyo_rpc::grpc::api::{
     source_field_type, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
-use datafusion::{sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo}, parquet::format::DateType};
+use datafusion::{
+    parquet::format::DateType,
+    sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo},
+};
 
 use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
@@ -153,7 +156,13 @@ impl StructField {
         }
     }
 
-    pub fn with_rename(name: String, alias: Option<String>, data_type: TypeDef, renamed_from: Option<String>, original_type: Option<String>)  -> Self {
+    pub fn with_rename(
+        name: String,
+        alias: Option<String>,
+        data_type: TypeDef,
+        renamed_from: Option<String>,
+        original_type: Option<String>,
+    ) -> Self {
         Self {
             name,
             alias,
@@ -164,7 +173,12 @@ impl StructField {
         }
     }
 
-    pub fn generated_by(name: String, alias: Option<String>, data_type: TypeDef, expression: Expression) -> Self {
+    pub fn generated_by(
+        name: String,
+        alias: Option<String>,
+        data_type: TypeDef,
+        expression: Expression,
+    ) -> Self {
         Self {
             name,
             alias,
@@ -175,7 +189,6 @@ impl StructField {
         }
     }
 }
-
 
 /* this returns a duration with the same length as the postgres interval. */
 pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration {
@@ -624,7 +637,9 @@ fn primitive_to_sql(primitive_type: PrimitiveType) -> &'static str {
         PrimitiveType::Bool => "BOOLEAN",
         PrimitiveType::String => "TEXT",
         PrimitiveType::Bytes => "BINARY",
-        PrimitiveType::UnixMillis | PrimitiveType::UnixMicros | PrimitiveType::DateTime => "TIMESTAMP",
+        PrimitiveType::UnixMillis | PrimitiveType::UnixMicros | PrimitiveType::DateTime => {
+            "TIMESTAMP"
+        }
         PrimitiveType::Json => "JSONB",
     }
 }
@@ -707,10 +722,6 @@ impl From<SourceField> for StructField {
             ),
         };
 
-        StructField::new(
-            f.field_name,
-            None,
-            t,
-        )
+        StructField::new(f.field_name, None, t)
     }
 }

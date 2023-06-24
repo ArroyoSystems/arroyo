@@ -1,9 +1,9 @@
-use arroyo_connectors::connectors;
 use ::time::OffsetDateTime;
+use arroyo_connectors::connectors;
 use arroyo_rpc::grpc::api::{
     CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
-    DeleteJobReq, DeleteJobResp, GetConnectorsReq,
-    GetConnectorsResp, PipelineProgram, GetConnectionTablesReq, GetConnectionTablesResp,
+    DeleteJobReq, DeleteJobResp, GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq,
+    GetConnectorsResp, PipelineProgram,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -11,11 +11,10 @@ use arroyo_rpc::grpc::{
         api_grpc_server::{ApiGrpc, ApiGrpcServer},
         CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp,
         CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq,
-        CreatePipelineResp,  GetConnectionsReq,
-        GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq,
-        GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq,
-        JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes,
-        OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, StopType,
+        CreatePipelineResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp,
+        GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp,
+        JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq,
+        OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, StopType,
         TestSourceMessage, UpdateJobReq, UpdateJobResp,
     },
     controller_grpc_client::ControllerGrpcClient,
@@ -416,10 +415,7 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<GetConnectorsResp>, Status> {
         let (_request, _auth) = self.authenticate(request).await?;
 
-        let connectors = connectors()
-            .values()
-            .map(|c| c.metadata())
-            .collect();
+        let connectors = connectors().values().map(|c| c.metadata()).collect();
 
         Ok(Response::new(GetConnectorsResp { connectors }))
     }
@@ -501,9 +497,7 @@ impl ApiGrpc for ApiServer {
         let (_, auth) = self.authenticate(request).await?;
 
         let tables = connection_tables::get(&auth, &self.client().await?).await?;
-        Ok(Response::new(GetConnectionTablesResp {
-            tables
-        }))
+        Ok(Response::new(GetConnectionTablesResp { tables }))
     }
 
     async fn get_confluent_schema(

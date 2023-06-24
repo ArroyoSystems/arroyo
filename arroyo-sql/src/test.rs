@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use arrow_schema::{DataType, TimeUnit};
 use arroyo_datastream::SerializationMode;
-use arroyo_rpc::grpc::api::{Connection};
+use arroyo_rpc::grpc::api::Connection;
 
 use crate::{
     parse_and_get_program,
@@ -234,7 +234,6 @@ async fn test_udf() {
     schema_provider
         .add_rust_udf("fn my_sqr(x: u64) -> u64 { x * x }")
         .unwrap();
-
 
     todo!()
     // schema_provider.add_saved_source_with_type(

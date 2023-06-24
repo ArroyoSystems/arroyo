@@ -3,14 +3,14 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use quote::{format_ident, quote};
 use arrow_schema::DataType;
+use quote::{format_ident, quote};
 use schemars::schema::{RootSchema, Schema};
 use syn::{parse_str, Type};
 use tracing::log::warn;
 use typify::{TypeDetails, TypeSpace, TypeSpaceSettings};
 
-use crate::types::{StructField, StructDef, TypeDef};
+use crate::types::{StructDef, StructField, TypeDef};
 
 pub const ROOT_NAME: &str = "ArroyoJsonRoot";
 
@@ -61,7 +61,9 @@ pub fn convert_json_schema(name: &str, schema: &str) -> Result<Vec<StructField>,
             fields,
         },
         _,
-    ) = to_schema_type(&type_space, name, s.name(), s.details()).unwrap().0
+    ) = to_schema_type(&type_space, name, s.name(), s.details())
+        .unwrap()
+        .0
     {
         Ok(fields)
     } else {
@@ -185,13 +187,16 @@ fn to_schema_type(
                 }
             }
 
-            Some((TypeDef::StructDef(
-                StructDef {
-                    name: Some(format!("{}::{}", source_name, type_name)),
-                    fields,
-                },
-                false,
-            ), None))
+            Some((
+                TypeDef::StructDef(
+                    StructDef {
+                        name: Some(format!("{}::{}", source_name, type_name)),
+                        fields,
+                    },
+                    false,
+                ),
+                None,
+            ))
         }
         TypeDetails::Option(opt) => {
             let t = type_space.get_type(&opt).unwrap();
@@ -209,7 +214,10 @@ fn to_schema_type(
                 "i64" => (Int64, None),
                 "f32" => (Float32, None),
                 "f64" => (Float64, None),
-                "chrono::DateTime<chrono::offset::Utc>" => (Timestamp(arrow_schema::TimeUnit::Microsecond, None), Some("datetime".to_string())),
+                "chrono::DateTime<chrono::offset::Utc>" => (
+                    Timestamp(arrow_schema::TimeUnit::Microsecond, None),
+                    Some("datetime".to_string()),
+                ),
                 _ => {
                     warn!("Unhandled primitive in json-schema: {}", t);
                     return None;
@@ -221,13 +229,16 @@ fn to_schema_type(
         TypeDetails::Newtype(t) => {
             let t = type_space.get_type(&t.subtype()).unwrap();
             to_schema_type(type_space, source_name, t.name(), t.details())
-        },
+        }
         _ => {
             warn!(
                 "Unhandled JSON schema type for field {}, converting to raw json",
                 type_name
             );
-            Some((TypeDef::DataType(DataType::Utf8, false), Some("json".to_string())))
+            Some((
+                TypeDef::DataType(DataType::Utf8, false),
+                Some("json".to_string()),
+            ))
         }
     }
 }

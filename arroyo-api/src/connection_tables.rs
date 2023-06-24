@@ -1,11 +1,15 @@
 use anyhow::anyhow;
 use arrow_schema::DataType;
-use arroyo_connectors::{ErasedConnector, connector_for_type};
+use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::grpc::api::{
-    connection_schema::Definition, ConnectionSchema, ConnectionTable, CreateConnectionTableReq,
-    TableType, TestSchemaReq, TestSourceMessage, ConfluentSchemaReq, ConfluentSchemaResp, Connection,
+    connection_schema::Definition, ConfluentSchemaReq, ConfluentSchemaResp, Connection,
+    ConnectionSchema, ConnectionTable, CreateConnectionTableReq, TableType, TestSchemaReq,
+    TestSourceMessage,
 };
-use arroyo_sql::{types::{StructField, TypeDef}, json_schema::{convert_json_schema, self}};
+use arroyo_sql::{
+    json_schema::{self, convert_json_schema},
+    types::{StructField, TypeDef},
+};
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Pool;
 use http::StatusCode;
@@ -14,23 +18,27 @@ use tonic::Status;
 use tracing::warn;
 
 use crate::{
-    handle_db_error,
-    log_and_map,
+    handle_db_error, log_and_map,
     queries::api_queries::{self, GetConnectionTables},
     required_field, AuthData,
 };
 
-async fn get_and_validate_connector<E: GenericClient>(req: &CreateConnectionTableReq, auth: &AuthData, c: &E)
-    -> Result<(Box<dyn ErasedConnector>, Option<i64>, String, Option<ConnectionSchema>), Status> {
+async fn get_and_validate_connector<E: GenericClient>(
+    req: &CreateConnectionTableReq,
+    auth: &AuthData,
+    c: &E,
+) -> Result<
+    (
+        Box<dyn ErasedConnector>,
+        Option<i64>,
+        String,
+        Option<ConnectionSchema>,
+    ),
+    Status,
+> {
     let connector = connector_for_type(&req.connector)
-        .ok_or_else(|| {
-            anyhow!(
-                "Unknown connector '{}'",
-                req.connector,
-            )
-        })
+        .ok_or_else(|| anyhow!("Unknown connector '{}'", req.connector,))
         .map_err(log_and_map)?;
-
 
     let (connection_id, config) = if let Some(connection_id) = &req.connection_id {
         let connection_id: i64 = connection_id.parse().map_err(|_| {
@@ -52,14 +60,17 @@ async fn get_and_validate_connector<E: GenericClient>(req: &CreateConnectionTabl
                     connection.r#type, req.connector)));
         }
 
-        (Some(connection_id), serde_json::to_string(&connection.config).unwrap())
+        (
+            Some(connection_id),
+            serde_json::to_string(&connection.config).unwrap(),
+        )
     } else {
         (None, "".to_string())
     };
 
-    connector.validate_table(&req.config).map_err(|e| {
-        Status::invalid_argument(&format!("Failed to parse config: {:?}", e))
-    })?;
+    connector
+        .validate_table(&req.config)
+        .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
 
     let schema = if let Some(schema) = &req.schema {
         Some(expand_schema(&req.name, schema)?)
@@ -83,7 +94,6 @@ pub(crate) async fn create(
         .await
         .map_err(log_and_map)?;
 
-
     let (connector, connection_id, config, schema) =
         get_and_validate_connector(&req, &auth, &transaction).await?;
 
@@ -91,9 +101,7 @@ pub(crate) async fn create(
 
     let table_config: serde_json::Value = serde_json::from_str(&req.config).unwrap();
 
-    let schema: Option<serde_json::Value> = schema
-        .map(|s| serde_json::to_value(s).unwrap());
-
+    let schema: Option<serde_json::Value> = schema.map(|s| serde_json::to_value(s).unwrap());
 
     api_queries::create_connection_table()
         .bind(
@@ -119,13 +127,15 @@ pub(crate) async fn test(
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<Receiver<Result<TestSourceMessage, Status>>, Status> {
-    let (connector, _, config, schema) =
-        get_and_validate_connector(&req, &auth, client).await?;
+    let (connector, _, config, schema) = get_and_validate_connector(&req, &auth, client).await?;
 
     let (tx, rx) = channel(8);
 
-    connector.test(&req.name, &config, &req.config, schema.as_ref(), tx)
-        .map_err(|e| Status::invalid_argument(format!("Failed to parse config or schema: {:?}", e)))?;
+    connector
+        .test(&req.name, &config, &req.config, schema.as_ref(), tx)
+        .map_err(|e| {
+            Status::invalid_argument(format!("Failed to parse config or schema: {:?}", e))
+        })?;
 
     Ok(rx)
 }
@@ -191,7 +201,10 @@ pub(crate) async fn test_schema(req: TestSchemaReq) -> Result<Vec<String>, Statu
 
 // attempts to fill in the SQL schema from a schema object that may just have a json-schema or
 // other source schema. schemas stored in the database should always be expanded first.
-pub(crate) fn expand_schema(name: &str, schema: &ConnectionSchema) -> Result<ConnectionSchema, Status> {
+pub(crate) fn expand_schema(
+    name: &str,
+    schema: &ConnectionSchema,
+) -> Result<ConnectionSchema, Status> {
     let mut schema = schema.clone();
 
     if let Some(d) = &schema.definition {
@@ -208,9 +221,11 @@ pub(crate) fn expand_schema(name: &str, schema: &ConnectionSchema) -> Result<Con
                     "Avro schemas are not yet supported",
                 ))
             }
-            Definition::RawSchema(_) => vec![
-                StructField::new("value".to_string(), None, TypeDef::DataType(DataType::Utf8, false))
-            ],
+            Definition::RawSchema(_) => vec![StructField::new(
+                "value".to_string(),
+                None,
+                TypeDef::DataType(DataType::Utf8, false),
+            )],
         };
 
         let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
@@ -222,7 +237,6 @@ pub(crate) fn expand_schema(name: &str, schema: &ConnectionSchema) -> Result<Con
     Ok(schema)
 }
 
-
 pub(crate) async fn get_confluent_schema(
     req: ConfluentSchemaReq,
 ) -> Result<ConfluentSchemaResp, Status> {
@@ -231,50 +245,52 @@ pub(crate) async fn get_confluent_schema(
         "{}/subjects/{}-value/versions/latest",
         req.endpoint, req.topic
     );
-    let resp = reqwest::get(url)
-        .await
-        .map_err(|e| {
-            warn!("Got error response from schema registry: {:?}", e);
-            match e.status() {
-                Some(StatusCode::NOT_FOUND) => Status::failed_precondition(format!(
-                    "Could not find value schema for topic '{}'",
-                    req.topic
-                )),
-                Some(code) => {
-                    Status::failed_precondition(format!("Schema registry returned error: {}", code))
-                }
-                None => {
-                    warn!(
-                        "Unknown error connecting to schema registry {}: {:?}",
-                        req.endpoint, e
-                    );
-                    Status::failed_precondition(format!(
-                        "Could not connect to Schema Registry at {}: unknown error",
-                        req.endpoint
-                    ))
-                }
+    let resp = reqwest::get(url).await.map_err(|e| {
+        warn!("Got error response from schema registry: {:?}", e);
+        match e.status() {
+            Some(StatusCode::NOT_FOUND) => Status::failed_precondition(format!(
+                "Could not find value schema for topic '{}'",
+                req.topic
+            )),
+            Some(code) => {
+                Status::failed_precondition(format!("Schema registry returned error: {}", code))
             }
-        })?;
+            None => {
+                warn!(
+                    "Unknown error connecting to schema registry {}: {:?}",
+                    req.endpoint, e
+                );
+                Status::failed_precondition(format!(
+                    "Could not connect to Schema Registry at {}: unknown error",
+                    req.endpoint
+                ))
+            }
+        }
+    })?;
 
     if !resp.status().is_success() {
         return Err(Status::failed_precondition(format!(
-            "Received an error status code from the provided endpoint: {} {}", resp.status().as_u16(),
-            resp.bytes().await.map(|bs| String::from_utf8_lossy(&bs).to_string())
-                .unwrap_or_else(|_| "<failed to read body>".to_string()))));
+            "Received an error status code from the provided endpoint: {} {}",
+            resp.status().as_u16(),
+            resp.bytes()
+                .await
+                .map(|bs| String::from_utf8_lossy(&bs).to_string())
+                .unwrap_or_else(|_| "<failed to read body>".to_string())
+        )));
     }
 
-    let value: serde_json::Value = resp.json()
-        .await
-        .map_err(|e| {
-            warn!("Invalid json from schema registry: {:?}", e);
-            Status::failed_precondition("Schema registry returned invalid JSON".to_string())
-        })?;
+    let value: serde_json::Value = resp.json().await.map_err(|e| {
+        warn!("Invalid json from schema registry: {:?}", e);
+        Status::failed_precondition("Schema registry returned invalid JSON".to_string())
+    })?;
 
     let schema_type = value
         .get("schemaType")
         .ok_or_else(|| {
-            Status::failed_precondition("The JSON returned from this endpoint was \
-            unexpected. Please confirm that the URL is correct.")
+            Status::failed_precondition(
+                "The JSON returned from this endpoint was \
+            unexpected. Please confirm that the URL is correct.",
+            )
         })?
         .as_str();
 

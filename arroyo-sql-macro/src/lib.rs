@@ -1,4 +1,4 @@
-use arroyo_datastream::{SerializationMode};
+use arroyo_datastream::SerializationMode;
 
 use arroyo_sql::{
     get_test_expression, parse_and_get_program_sync, ArroyoSchemaProvider, SqlConfig,

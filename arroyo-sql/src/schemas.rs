@@ -28,18 +28,12 @@ pub(crate) fn window_type_def() -> TypeDef {
                 StructField::new(
                     "start_time".to_string(),
                     None,
-                    TypeDef::DataType(
-                        DataType::Timestamp(TimeUnit::Millisecond, None),
-                        false,
-                    ),
+                    TypeDef::DataType(DataType::Timestamp(TimeUnit::Millisecond, None), false),
                 ),
                 StructField::new(
                     "end_time".to_string(),
                     None,
-                    TypeDef::DataType(
-                        DataType::Timestamp(TimeUnit::Millisecond, None),
-                        false,
-                    ),
+                    TypeDef::DataType(DataType::Timestamp(TimeUnit::Millisecond, None), false),
                 ),
             ],
         },

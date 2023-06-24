@@ -2,9 +2,7 @@ use anyhow::{anyhow, bail};
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-use std::{
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use arroyo_rpc::grpc::{
     self,
@@ -19,7 +17,7 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
 
-use crate::{ConnectionType, Connection, serialization_mode, pull_opt};
+use crate::{pull_opt, serialization_mode, Connection, ConnectionType};
 
 use super::{Connector, OperatorConfig};
 
@@ -86,7 +84,9 @@ impl Connector for KafkaConnector {
             id,
             name: name.to_string(),
             connection_type: typ,
-            schema: schema.map(|s| s.to_owned()).ok_or_else(|| anyhow!("No schema defined for Kafka connection"))?,
+            schema: schema
+                .map(|s| s.to_owned())
+                .ok_or_else(|| anyhow!("No schema defined for Kafka connection"))?,
             operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description: desc,
@@ -117,19 +117,22 @@ impl Connector for KafkaConnector {
         }
     }
 
-    fn from_options(&self, name: &str, opts: &mut std::collections::HashMap<String, String>,
-        schema: Option<&ConnectionSchema>) -> anyhow::Result<Connection> {
-
+    fn from_options(
+        &self,
+        name: &str,
+        opts: &mut std::collections::HashMap<String, String>,
+        schema: Option<&ConnectionSchema>,
+    ) -> anyhow::Result<Connection> {
         let auth = opts.remove("authentication.type");
         let auth = match auth.as_ref().map(|t| t.as_str()) {
-            Some("none") | None => KafkaConfigAuthentication::None {  },
+            Some("none") | None => KafkaConfigAuthentication::None {},
             Some("sasl") => KafkaConfigAuthentication::Sasl {
                 mechanism: pull_opt("authentication.mechanism", opts)?,
-                protocol:  pull_opt("authentication.mechanism", opts)?,
+                protocol: pull_opt("authentication.mechanism", opts)?,
                 username: pull_opt("authentication.username", opts)?,
-                password:  pull_opt("authentication.password", opts)?,
+                password: pull_opt("authentication.password", opts)?,
             },
-            Some(other) => bail!("Unknown auth type '{}'", other)
+            Some(other) => bail!("Unknown auth type '{}'", other),
         };
 
         let connection = KafkaConfig {
@@ -145,13 +148,11 @@ impl Connector for KafkaConnector {
                     offset: match offset.as_ref().map(|f| f.as_str()) {
                         Some("earliest") => SourceOffset::Earliest,
                         None | Some("latest") => SourceOffset::Latest,
-                        Some(other) => bail!("Invalid value for source.offset '{}'", other)
-                    }
+                        Some(other) => bail!("Invalid value for source.offset '{}'", other),
+                    },
                 }
             }
-            "sink" => {
-                TableType::Sink { }
-            }
+            "sink" => TableType::Sink {},
             _ => {
                 bail!("type must be one of 'source' or 'sink")
             }
@@ -165,7 +166,6 @@ impl Connector for KafkaConnector {
         Self::from_config(&self, None, name, connection, table, schema)
     }
 }
-
 
 struct KafkaTester {
     connection: KafkaConfig,
@@ -181,13 +181,16 @@ impl KafkaTester {
     async fn connect(&self) -> Result<BaseConsumer, String> {
         let mut client_config = ClientConfig::new();
         client_config
-            .set("bootstrap.servers", &self.connection.bootstrap_servers.to_string())
+            .set(
+                "bootstrap.servers",
+                &self.connection.bootstrap_servers.to_string(),
+            )
             .set("enable.auto.commit", "false")
             .set("auto.offset.reset", "earliest")
             .set("group.id", "arroyo-kafka-source-tester");
 
         match &self.connection.authentication {
-            None | Some(KafkaConfigAuthentication::None { }) => {},
+            None | Some(KafkaConfigAuthentication::None {}) => {}
             Some(KafkaConfigAuthentication::Sasl {
                 mechanism,
                 password,
@@ -198,7 +201,7 @@ impl KafkaTester {
                 client_config.set("security.protocol", protocol);
                 client_config.set("sasl.username", username);
                 client_config.set("sasl.password", password);
-            },
+            }
         };
 
         let client: BaseConsumer = client_config
@@ -216,10 +219,7 @@ impl KafkaTester {
     pub async fn topic_metadata(&self) -> Result<TopicMetadata, Status> {
         let client = self.connect().await.map_err(Status::failed_precondition)?;
         let metadata = client
-            .fetch_metadata(
-                Some(&self.table.topic),
-                Duration::from_secs(5),
-            )
+            .fetch_metadata(Some(&self.table.topic), Duration::from_secs(5))
             .map_err(|e| {
                 Status::failed_precondition(format!(
                     "Failed to read topic metadata from Kafka: {:?}",

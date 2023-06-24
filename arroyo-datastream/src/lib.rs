@@ -16,9 +16,7 @@ use arroyo_rpc::grpc::api::create_pipeline_req::Config;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
 use arroyo_types::nexmark::Event;
-use arroyo_types::{
-    Data, GlobalKey, JoinType, Key,
-};
+use arroyo_types::{Data, GlobalKey, JoinType, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -33,8 +31,8 @@ use prost::Message;
 
 use crate::Operator::FusedWasmUDFs;
 use arroyo_rpc::grpc::api::{
-    Aggregator, CreateJobReq, CreatePipelineReq, JobEdge, JobGraph, JobNode,
-    PipelineProgram, ProgramNode, StopType, UpdateJobReq, WasmFunction,
+    Aggregator, CreateJobReq, CreatePipelineReq, JobEdge, JobGraph, JobNode, PipelineProgram,
+    ProgramNode, StopType, UpdateJobReq, WasmFunction,
 };
 use petgraph::{Direction, Graph};
 use rand::distributions::Alphanumeric;
@@ -588,7 +586,6 @@ impl Debug for StreamEdge {
 pub trait Source<T: Data> {
     fn as_operator(&self) -> Operator;
 }
-
 
 pub struct Stream<T> {
     _t: PhantomData<T>,
@@ -1500,7 +1497,6 @@ impl From<Operator> for GrpcApi::operator::Operator {
         }
     }
 }
-
 
 impl From<SerializationMode> for GrpcApi::SerializationMode {
     fn from(value: SerializationMode) -> Self {

@@ -16,7 +16,7 @@ use syn::{parse_quote, parse_str};
 
 use crate::{
     expressions::SortExpression,
-    external::{SinkUpdateType, SqlSink, SqlSource, ProcessingMode},
+    external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource},
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
     pipeline::{
@@ -765,9 +765,7 @@ impl PlanNode {
             PlanOperator::Flatten => arroyo_datastream::Operator::FlattenOperator {
                 name: "flatten".into(),
             },
-            PlanOperator::Sink(_, sql_sink) => {
-                sql_sink.operator.clone()
-            }
+            PlanOperator::Sink(_, sql_sink) => sql_sink.operator.clone(),
             PlanOperator::ToDebezium => arroyo_datastream::Operator::ExpressionOperator {
                 name: "to_debezium".into(),
                 expression: quote!({

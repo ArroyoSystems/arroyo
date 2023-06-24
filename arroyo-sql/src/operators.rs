@@ -49,11 +49,7 @@ impl Projection {
             .map(|(i, computation)| {
                 let field_name = self.field_names[i].clone();
                 let field_type = computation.return_type();
-                StructField::new(
-                    field_name.name,
-                    field_name.relation,
-                    field_type,
-                )
+                StructField::new(field_name.name, field_name.relation, field_type)
             })
             .collect();
         StructDef { name: None, fields }
@@ -69,12 +65,7 @@ impl Projection {
                 let name = field_name.name;
                 let alias = field_name.relation;
                 let data_type = field.return_type();
-                let field_ident = StructField::new(
-                    name,
-                    alias,
-                    data_type,
-                )
-                .field_ident();
+                let field_ident = StructField::new(name, alias, data_type).field_ident();
                 let expr = field.to_syn_expression();
                 quote!(#field_ident : #expr)
             })
@@ -97,11 +88,7 @@ impl Projection {
             .map(|(i, computation)| {
                 let field_name = self.field_names[i].clone();
                 let field_type = computation.return_type();
-                StructField::new(
-                    field_name.name,
-                    field_name.relation,
-                    field_type,
-                )
+                StructField::new(field_name.name, field_name.relation, field_type)
             })
             .collect();
         StructDef { name: None, fields }
@@ -117,12 +104,7 @@ impl Projection {
                 let name = field_name.name;
                 let alias = field_name.relation;
                 let data_type = field.return_type();
-                let field_ident = StructField::new(
-                    name,
-                    alias,
-                    data_type,
-                )
-                .field_ident();
+                let field_ident = StructField::new(name, alias, data_type).field_ident();
                 let expr = field.to_syn_expression();
                 quote!(#field_ident : #expr)
             })
@@ -156,11 +138,7 @@ impl AggregateProjection {
             .map(|(i, computation)| {
                 let field_name = self.field_names[i].clone();
                 let field_type = computation.return_type();
-                StructField::new(
-                    field_name.name,
-                    field_name.relation,
-                    field_type,
-                )
+                StructField::new(field_name.name, field_name.relation, field_type)
             })
             .collect();
         StructDef { name: None, fields }
@@ -177,12 +155,7 @@ impl AggregateProjection {
                 let alias = field_name.relation;
                 let data_type = field_computation.return_type();
                 let expr = field_computation.to_syn_expression();
-                let field_ident = StructField::new(
-                    name,
-                    alias,
-                    data_type,
-                )
-                .field_ident();
+                let field_ident = StructField::new(name, alias, data_type).field_ident();
                 quote!(#field_ident: #expr)
             })
             .collect();
@@ -405,12 +378,7 @@ impl TwoPhaseAggregateProjection {
                 let alias = field_name.relation;
                 let data_type = field_computation.return_type();
                 let expr = field_computation.bin_aggregating_expression();
-                let field_ident = StructField::new(
-                    name,
-                    alias,
-                    data_type,
-                )
-                .field_ident();
+                let field_ident = StructField::new(name, alias, data_type).field_ident();
                 let i: syn::Index = parse_str(&i.to_string()).unwrap();
                 quote!(#field_ident: {let arg = &arg.#i; #expr})
             })
@@ -436,12 +404,7 @@ impl TwoPhaseAggregateProjection {
                 let alias = field_name.relation;
                 let data_type = field_computation.return_type();
                 let expr = field_computation.to_aggregating_syn_expression();
-                let field_ident = StructField::new(
-                    name,
-                    alias,
-                    data_type,
-                )
-                .field_ident();
+                let field_ident = StructField::new(name, alias, data_type).field_ident();
                 let i: syn::Index = parse_str(&i.to_string()).unwrap();
                 quote!(#field_ident: {let arg = &arg.1.#i; #expr})
             })
@@ -465,11 +428,7 @@ impl TwoPhaseAggregateProjection {
             .map(|(i, computation)| {
                 let field_name = self.field_names[i].clone();
                 let field_type = computation.return_type();
-                StructField::new(
-                    field_name.name,
-                    field_name.relation,
-                    field_type,
-                )
+                StructField::new(field_name.name, field_name.relation, field_type)
             })
             .collect();
         StructDef { name: None, fields }

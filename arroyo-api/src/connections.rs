@@ -127,4 +127,3 @@ pub(crate) async fn delete_connection(
 
     Ok(())
 }
-

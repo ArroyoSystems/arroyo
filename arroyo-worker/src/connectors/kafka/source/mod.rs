@@ -89,22 +89,21 @@ where
             panic!("found non-source kafka config in source operator");
         };
 
-
         let mut client_configs: HashMap<String, String> = HashMap::new();
 
         match connection.authentication {
-            None | Some(super::KafkaConfigAuthentication::None {  }) => {},
+            None | Some(super::KafkaConfigAuthentication::None {}) => {}
             Some(super::KafkaConfigAuthentication::Sasl {
                 mechanism,
                 password,
                 protocol,
-                username }) =>
-                {
-                    client_configs.insert("sasl.mechanism".to_string(), mechanism);
-                    client_configs.insert("security.protocol".to_string(), protocol);
-                    client_configs.insert("sasl.username".to_string(), username);
-                    client_configs.insert("sasl.password".to_string(), password);
-                }
+                username,
+            }) => {
+                client_configs.insert("sasl.mechanism".to_string(), mechanism);
+                client_configs.insert("security.protocol".to_string(), protocol);
+                client_configs.insert("sasl.username".to_string(), username);
+                client_configs.insert("sasl.password".to_string(), password);
+            }
         };
 
         Self {

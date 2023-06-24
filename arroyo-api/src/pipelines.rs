@@ -11,10 +11,10 @@ use tonic::Status;
 use tracing::log::info;
 use tracing::warn;
 
-use arroyo_datastream::{Operator, Program, ConnectorOp};
+use arroyo_datastream::{ConnectorOp, Operator, Program};
 use arroyo_rpc::grpc::api::{
-    self, create_pipeline_req, CreatePipelineReq, CreateSqlJob, PipelineDef,
-    PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf, UdfLanguage,
+    self, create_pipeline_req, CreatePipelineReq, CreateSqlJob, PipelineDef, PipelineGraphReq,
+    PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf, UdfLanguage,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
@@ -22,10 +22,7 @@ use crate::connection_tables;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbPipeline;
 use crate::types::public::PipelineType;
-use crate::{
-    handle_db_error, log_and_map, optimizations, required_field,
-    AuthData,
-};
+use crate::{handle_db_error, log_and_map, optimizations, required_field, AuthData};
 
 async fn compile_sql<'e, E>(
     sql: &CreateSqlJob,
@@ -56,11 +53,17 @@ where
             continue;
         };
 
-        let connection = connector.from_config(Some(table.id),
-            &table.name,
-            &table.connection.map(|c| c.config.clone()).unwrap_or_else(|| "{}".to_string()),
-            &table.config,
-            table.schema.as_ref())
+        let connection = connector
+            .from_config(
+                Some(table.id),
+                &table.name,
+                &table
+                    .connection
+                    .map(|c| c.config.clone())
+                    .unwrap_or_else(|| "{}".to_string()),
+                &table.config,
+                table.schema.as_ref(),
+            )
             .map_err(log_and_map)?;
 
         schema_provider.add_connector_table(connection);
@@ -97,7 +100,7 @@ pub(crate) async fn create_pipeline<'a>(
     let pipeline_type;
     let mut program;
     let connections;
-        let text;
+    let text;
     let compute_parallelism;
     let udfs: Option<Vec<Udf>>;
     let is_preview;

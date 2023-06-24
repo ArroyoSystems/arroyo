@@ -13,7 +13,7 @@ use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use super::{KafkaSourceFunc};
+use super::KafkaSourceFunc;
 
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode, Serialize, Deserialize, PartialEq)]
 struct TestData {
