@@ -67,6 +67,9 @@ dependencies:
   ajv:
     specifier: ^8.12.0
     version: 8.12.0
+  ajv-formats:
+    specifier: ^2.1.1
+    version: 2.1.1(ajv@8.12.0)
   d3:
     specifier: ^7.8.5
     version: 7.8.5

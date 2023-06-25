@@ -57,63 +57,9 @@ SELECT connection_tables.id as id,
     connections.type as connection_type,
     connections.config as connection_config
 FROM connection_tables
-JOIN connections ON connections.id = connection_tables.connection_id
+LEFT JOIN connections ON connections.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id;
 
------------ sources --------------------
-
---! create_source(connection_id?)
-INSERT INTO sources
-(organization_id, created_by, name, type, config, schema_id, connection_id)
-VALUES (:organization_id, :created_by, :name, :type, :config, :schema_id, :connection_id);
-
---! get_sources: (schema_config?, connection_name?, connection_type?, connection_config?, source_config?)
-SELECT
-    schemas.id as schema_id,
-    schemas.type as schema_type,
-    schemas.config as schema_config,
-    schemas.kafka_schema_registry as kafka_schema_registry,
-    sd.id as source_id,
-    sd.name as source_name,
-    sd.type as source_type,
-    sd.config as source_config,
-    connections.name as connection_name,
-    connections.type as connection_type,
-    connections.config as connection_config,
-    (SELECT count(*) as consumer_count
-        FROM pipeline_sources
-        WHERE pipeline_sources.source_id = sd.id
-    ) as consumer_count
-FROM sources as sd
-INNER JOIN schemas ON schema_id = schemas.id
-LEFT JOIN connections ON connection_id = connections.id
-WHERE sd.organization_id = :organization_id;
-
---! delete_source
-DELETE FROM sources
-WHERE organization_id = :organization_id AND name = :name;
-
------------ sinks ----------------------
-
---! create_sink(connection_id?)
-INSERT INTO sinks
-(organization_id, created_by, name, type, connection_id, config)
-VALUES (:organization_id, :created_by, :name, :type, :connection_id, :config);
-
---! get_sinks: (connection_id?)
-SELECT
-    id,
-    name,
-    type,
-    connection_id,
-    config,
-    (SELECT count(*) as producer_count FROM pipeline_sinks WHERE pipeline_sinks.sink_id = sinks.id) as producers
-FROM sinks
-WHERE organization_id = :organization_id;
-
---! delete_sink
-DELETE FROM sinks
-WHERE organization_id = :organization_id AND name = :name;
 
 ----------- pipelines -------------------
 

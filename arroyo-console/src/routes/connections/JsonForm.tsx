@@ -16,6 +16,7 @@ import { JSONSchema7 } from 'json-schema';
 import { Form, useFormik } from 'formik';
 
 import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 import { useEffect, useMemo } from 'react';
 
 function StringWidget({
@@ -213,7 +214,7 @@ export function JsonForm({
   error: string | null;
   button?: string;
 }) {
-  const ajv = useMemo(() => new Ajv(), [schema]);
+  const ajv = useMemo(() => addFormats(new Ajv()), [schema]);
 
   const formik = useFormik({
     initialValues: initial,

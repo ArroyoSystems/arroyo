@@ -481,6 +481,8 @@ dependencies = [
  "arroyo-datastream",
  "arroyo-rpc",
  "arroyo-types",
+ "eventsource-client",
+ "futures",
  "rdkafka",
  "regress",
  "schemars",

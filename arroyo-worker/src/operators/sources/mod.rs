@@ -21,7 +21,6 @@ use tokio::select;
 use tokio::time::sleep;
 use tracing::{debug, info};
 
-pub mod eventsource;
 pub mod nexmark;
 
 #[derive(Encode, Decode, Debug, Copy, Clone, Eq, PartialEq)]

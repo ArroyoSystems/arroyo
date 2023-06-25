@@ -6,18 +6,21 @@ use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, TableType, TestSourceMessage},
 };
-use http::SSEConnector;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use sse::SSEConnector;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use typify::import_types;
 
 use self::kafka::KafkaConnector;
 
-pub mod http;
 pub mod kafka;
+pub mod sse;
 
 import_types!(schema = "../connector-schemas/common.json",);
+
+#[derive(Serialize, Deserialize)]
+pub struct EmptyConfig {}
 
 #[derive(Debug, Copy, Clone)]
 pub enum ConnectionType {
@@ -43,7 +46,7 @@ pub trait Connector: Send {
     fn name(&self) -> &'static str;
 
     fn parse_config(&self, s: &str) -> Result<Self::ConfigT, serde_json::Error> {
-        serde_json::from_str(s)
+        serde_json::from_str(if s.is_empty() { "{}" } else { s })
     }
 
     fn parse_table(&self, s: &str) -> Result<Self::TableT, serde_json::Error> {

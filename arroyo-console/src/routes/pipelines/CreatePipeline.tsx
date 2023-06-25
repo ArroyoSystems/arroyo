@@ -6,13 +6,8 @@ import {
   Badge,
   Box,
   Button,
-  Card,
-  CardBody,
-  CardHeader,
-  Divider,
   Flex,
   HStack,
-  Heading,
   Spacer,
   Spinner,
   Stack,
@@ -27,7 +22,6 @@ import {
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BuiltinSink,
   ConnectionTable,
   CreatePipelineReq,
   CreateSqlJob,
@@ -167,7 +161,6 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
           value: new CreateSqlJob({
             query: queryInput,
             udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfsInput })],
-            sink: { case: 'builtin', value: BuiltinSink.Web },
             preview: true,
           }),
         },

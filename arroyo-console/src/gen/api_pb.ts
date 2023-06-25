@@ -7,32 +7,6 @@ import type {BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMe
 import {Message, proto3, protoInt64} from "@bufbuild/protobuf";
 
 /**
- * @generated from enum arroyo_api.BuiltinSink
- */
-export enum BuiltinSink {
-  /**
-   * @generated from enum value: Null = 0;
-   */
-  Null = 0,
-
-  /**
-   * @generated from enum value: Web = 1;
-   */
-  Web = 1,
-
-  /**
-   * @generated from enum value: Log = 2;
-   */
-  Log = 2,
-}
-// Retrieve enum metadata with: proto3.getEnumType(BuiltinSink)
-proto3.util.setEnumType(BuiltinSink, "arroyo_api.BuiltinSink", [
-  { no: 0, name: "Null" },
-  { no: 1, name: "Web" },
-  { no: 2, name: "Log" },
-]);
-
-/**
  * @generated from enum arroyo_api.UdfLanguage
  */
 export enum UdfLanguage {
@@ -573,23 +547,6 @@ export class CreateSqlJob extends Message<CreateSqlJob> {
   udfs: CreateUdf[] = [];
 
   /**
-   * @generated from oneof arroyo_api.CreateSqlJob.sink
-   */
-  sink: {
-    /**
-     * @generated from field: arroyo_api.BuiltinSink builtin = 3;
-     */
-    value: BuiltinSink;
-    case: "builtin";
-  } | {
-    /**
-     * @generated from field: string user = 4;
-     */
-    value: string;
-    case: "user";
-  } | { case: undefined; value?: undefined } = { case: undefined };
-
-  /**
    * @generated from field: bool preview = 6;
    */
   preview = false;
@@ -605,8 +562,6 @@ export class CreateSqlJob extends Message<CreateSqlJob> {
     { no: 1, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "parallelism", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 5, name: "udfs", kind: "message", T: CreateUdf, repeated: true },
-    { no: 3, name: "builtin", kind: "enum", T: proto3.getEnumType(BuiltinSink), oneof: "sink" },
-    { no: 4, name: "user", kind: "scalar", T: 9 /* ScalarType.STRING */, oneof: "sink" },
     { no: 6, name: "preview", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
@@ -1454,18 +1409,6 @@ export class Operator extends Message<Operator> {
    */
   operator: {
     /**
-     * @generated from field: arroyo_api.FileSource file_source = 1;
-     */
-    value: FileSource;
-    case: "fileSource";
-  } | {
-    /**
-     * @generated from field: arroyo_api.ImpulseSource impulse_source = 2;
-     */
-    value: ImpulseSource;
-    case: "impulseSource";
-  } | {
-    /**
      * @generated from field: arroyo_api.ConnectorOp connector_source = 3;
      */
     value: ConnectorOp;
@@ -1502,28 +1445,10 @@ export class Operator extends Message<Operator> {
     case: "periodicWatermark";
   } | {
     /**
-     * @generated from field: arroyo_api.BuiltinSink builtin_sink = 8;
-     */
-    value: BuiltinSink;
-    case: "builtinSink";
-  } | {
-    /**
-     * @generated from field: arroyo_api.FileSink file_sink = 9;
-     */
-    value: FileSink;
-    case: "fileSink";
-  } | {
-    /**
      * @generated from field: arroyo_api.Window window_join = 10;
      */
     value: Window;
     case: "windowJoin";
-  } | {
-    /**
-     * @generated from field: arroyo_api.NexmarkSource nexmark_source = 12;
-     */
-    value: NexmarkSource;
-    case: "nexmarkSource";
   } | {
     /**
      * @generated from field: arroyo_api.ExpressionOperator expression_operator = 13;
@@ -1606,18 +1531,13 @@ export class Operator extends Message<Operator> {
   static readonly runtime = proto3;
   static readonly typeName = "arroyo_api.Operator";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "file_source", kind: "message", T: FileSource, oneof: "operator" },
-    { no: 2, name: "impulse_source", kind: "message", T: ImpulseSource, oneof: "operator" },
     { no: 3, name: "connector_source", kind: "message", T: ConnectorOp, oneof: "operator" },
     { no: 22, name: "connector_sink", kind: "message", T: ConnectorOp, oneof: "operator" },
     { no: 4, name: "wasm_udfs", kind: "message", T: WasmUdfs, oneof: "operator" },
     { no: 5, name: "window", kind: "message", T: WindowOperator, oneof: "operator" },
     { no: 6, name: "aggregator", kind: "enum", T: proto3.getEnumType(Aggregator), oneof: "operator" },
     { no: 7, name: "periodic_watermark", kind: "message", T: PeriodicWatermark, oneof: "operator" },
-    { no: 8, name: "builtin_sink", kind: "enum", T: proto3.getEnumType(BuiltinSink), oneof: "operator" },
-    { no: 9, name: "file_sink", kind: "message", T: FileSink, oneof: "operator" },
     { no: 10, name: "window_join", kind: "message", T: Window, oneof: "operator" },
-    { no: 12, name: "nexmark_source", kind: "message", T: NexmarkSource, oneof: "operator" },
     { no: 13, name: "expression_operator", kind: "message", T: ExpressionOperator, oneof: "operator" },
     { no: 14, name: "flatten", kind: "message", T: Flatten, oneof: "operator" },
     { no: 15, name: "flatten_expression_operator", kind: "message", T: FlattenExpressionOperator, oneof: "operator" },
@@ -1646,111 +1566,6 @@ export class Operator extends Message<Operator> {
 
   static equals(a: Operator | PlainMessage<Operator> | undefined, b: Operator | PlainMessage<Operator> | undefined): boolean {
     return proto3.util.equals(Operator, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.FileSource
- */
-export class FileSource extends Message<FileSource> {
-  /**
-   * @generated from field: string dir = 1;
-   */
-  dir = "";
-
-  /**
-   * @generated from field: uint64 micros_delay = 2;
-   */
-  microsDelay = protoInt64.zero;
-
-  constructor(data?: PartialMessage<FileSource>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.FileSource";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "dir", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "micros_delay", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FileSource {
-    return new FileSource().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FileSource {
-    return new FileSource().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FileSource {
-    return new FileSource().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: FileSource | PlainMessage<FileSource> | undefined, b: FileSource | PlainMessage<FileSource> | undefined): boolean {
-    return proto3.util.equals(FileSource, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.ImpulseSource
- */
-export class ImpulseSource extends Message<ImpulseSource> {
-  /**
-   * @generated from field: uint64 micros_start = 1;
-   */
-  microsStart = protoInt64.zero;
-
-  /**
-   * @generated from field: optional uint64 total_events = 2;
-   */
-  totalEvents?: bigint;
-
-  /**
-   * @generated from oneof arroyo_api.ImpulseSource.spec
-   */
-  spec: {
-    /**
-     * @generated from field: uint64 micros_delay = 3;
-     */
-    value: bigint;
-    case: "microsDelay";
-  } | {
-    /**
-     * @generated from field: float event_qps = 4;
-     */
-    value: number;
-    case: "eventQps";
-  } | { case: undefined; value?: undefined } = { case: undefined };
-
-  constructor(data?: PartialMessage<ImpulseSource>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.ImpulseSource";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "micros_start", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 2, name: "total_events", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
-    { no: 3, name: "micros_delay", kind: "scalar", T: 4 /* ScalarType.UINT64 */, oneof: "spec" },
-    { no: 4, name: "event_qps", kind: "scalar", T: 2 /* ScalarType.FLOAT */, oneof: "spec" },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImpulseSource {
-    return new ImpulseSource().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ImpulseSource {
-    return new ImpulseSource().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ImpulseSource {
-    return new ImpulseSource().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ImpulseSource | PlainMessage<ImpulseSource> | undefined, b: ImpulseSource | PlainMessage<ImpulseSource> | undefined): boolean {
-    return proto3.util.equals(ImpulseSource, a, b);
   }
 }
 
@@ -2225,86 +2040,6 @@ export class ExpressionWatermark extends Message<ExpressionWatermark> {
 
   static equals(a: ExpressionWatermark | PlainMessage<ExpressionWatermark> | undefined, b: ExpressionWatermark | PlainMessage<ExpressionWatermark> | undefined): boolean {
     return proto3.util.equals(ExpressionWatermark, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.FileSink
- */
-export class FileSink extends Message<FileSink> {
-  /**
-   * @generated from field: string file_path = 1;
-   */
-  filePath = "";
-
-  constructor(data?: PartialMessage<FileSink>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.FileSink";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "file_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FileSink {
-    return new FileSink().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FileSink {
-    return new FileSink().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FileSink {
-    return new FileSink().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: FileSink | PlainMessage<FileSink> | undefined, b: FileSink | PlainMessage<FileSink> | undefined): boolean {
-    return proto3.util.equals(FileSink, a, b);
-  }
-}
-
-/**
- * @generated from message arroyo_api.NexmarkSource
- */
-export class NexmarkSource extends Message<NexmarkSource> {
-  /**
-   * @generated from field: uint64 first_event_rate = 1;
-   */
-  firstEventRate = protoInt64.zero;
-
-  /**
-   * @generated from field: optional uint64 total_events = 2;
-   */
-  totalEvents?: bigint;
-
-  constructor(data?: PartialMessage<NexmarkSource>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime = proto3;
-  static readonly typeName = "arroyo_api.NexmarkSource";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "first_event_rate", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 2, name: "total_events", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NexmarkSource {
-    return new NexmarkSource().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): NexmarkSource {
-    return new NexmarkSource().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): NexmarkSource {
-    return new NexmarkSource().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: NexmarkSource | PlainMessage<NexmarkSource> | undefined, b: NexmarkSource | PlainMessage<NexmarkSource> | undefined): boolean {
-    return proto3.util.equals(NexmarkSource, a, b);
   }
 }
 
