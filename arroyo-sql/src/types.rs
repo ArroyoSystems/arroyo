@@ -16,10 +16,7 @@ use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEF
 use arroyo_rpc::grpc::api::{
     source_field_type, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
-use datafusion::{
-    parquet::format::DateType,
-    sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo},
-};
+use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
 use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};

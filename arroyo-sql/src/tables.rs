@@ -177,13 +177,6 @@ impl ConnectorTable {
         Ok(table)
     }
 
-    fn physical_fields(&self) -> Vec<&StructField> {
-        self.fields
-            .iter()
-            .filter(|f| f.expression.is_none())
-            .collect()
-    }
-
     fn has_virtual_fields(&self) -> bool {
         self.fields.iter().any(|f| f.expression.is_some())
     }
@@ -333,10 +326,6 @@ impl ConnectorTable {
                 bail!("Inserting into a source is not allowed")
             }
             ConnectionType::Sink => {}
-        }
-
-        if input.is_updating() {
-            bail!("inserting updating tables into connection tables is not currently supported");
         }
 
         if self.has_virtual_fields() {

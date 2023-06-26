@@ -349,6 +349,11 @@ pub fn parse_and_get_program_sync(
 
     let mut plan_graph = PlanGraph::new(config.clone());
 
+    // if there are no insert nodes, return an error
+    if sql_pipeline_builder.insert_nodes.is_empty() {
+        bail!("The provided SQL does not contain a query");
+    }
+
     // If there isn't a sink, add a web sink to the last insert
     if !sql_pipeline_builder
         .insert_nodes
