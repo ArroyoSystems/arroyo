@@ -12,6 +12,7 @@ use arroyo_rpc::{
     },
     primitive_to_sql,
 };
+use blackhole::BlackholeConnector;
 use impulse::ImpulseConnector;
 use nexmark::NexmarkConnector;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -22,6 +23,7 @@ use typify::import_types;
 
 use self::kafka::KafkaConnector;
 
+pub mod blackhole;
 pub mod impulse;
 pub mod kafka;
 pub mod nexmark;
@@ -35,6 +37,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("sse", Box::new(SSEConnector {}));
     m.insert("nexmark", Box::new(NexmarkConnector {}));
     m.insert("impulse", Box::new(ImpulseConnector {}));
+    m.insert("blackhole", Box::new(BlackholeConnector {}));
 
     m
 }
