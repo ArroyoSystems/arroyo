@@ -4,8 +4,12 @@ use anyhow::anyhow;
 use arroyo_datastream::SerializationMode;
 use arroyo_rpc::grpc::{
     self,
-    api::{ConnectionSchema, TableType, TestSourceMessage},
+    api::{
+        source_field_type, ConnectionSchema, SourceField, SourceFieldType, TableType,
+        TestSourceMessage,
+    },
 };
+use nexmark::NexmarkConnector;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sse::SSEConnector;
 use tokio::sync::mpsc::Sender;
@@ -15,9 +19,19 @@ use typify::import_types;
 use self::kafka::KafkaConnector;
 
 pub mod kafka;
+pub mod nexmark;
 pub mod sse;
 
 import_types!(schema = "../connector-schemas/common.json",);
+
+pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
+    let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
+    m.insert("kafka", Box::new(KafkaConnector {}));
+    m.insert("sse", Box::new(SSEConnector {}));
+    m.insert("nexmark", Box::new(NexmarkConnector {}));
+
+    m
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct EmptyConfig {}
@@ -57,6 +71,16 @@ pub trait Connector: Send {
 
     fn table_type(&self, config: Self::ConfigT, table: Self::TableT) -> TableType;
 
+    #[allow(unused)]
+    fn get_schema(
+        &self,
+        config: Self::ConfigT,
+        table: Self::TableT,
+        schema: Option<&ConnectionSchema>,
+    ) -> Option<ConnectionSchema> {
+        schema.cloned()
+    }
+
     fn test(
         &self,
         name: &str,
@@ -93,6 +117,13 @@ pub trait ErasedConnector: Send {
     fn validate_table(&self, s: &str) -> Result<(), serde_json::Error>;
 
     fn table_type(&self, config: &str, table: &str) -> Result<TableType, serde_json::Error>;
+
+    fn get_schema(
+        &self,
+        config: &str,
+        table: &str,
+        schema: Option<&ConnectionSchema>,
+    ) -> Result<Option<ConnectionSchema>, serde_json::Error>;
 
     fn test(
         &self,
@@ -139,6 +170,15 @@ impl<C: Connector> ErasedConnector for C {
 
     fn table_type(&self, config: &str, table: &str) -> Result<TableType, serde_json::Error> {
         Ok(self.table_type(self.parse_config(config)?, self.parse_table(table)?))
+    }
+
+    fn get_schema(
+        &self,
+        config: &str,
+        table: &str,
+        schema: Option<&ConnectionSchema>,
+    ) -> Result<Option<ConnectionSchema>, serde_json::Error> {
+        Ok(self.get_schema(self.parse_config(config)?, self.parse_table(table)?, schema))
     }
 
     fn test(
@@ -196,14 +236,6 @@ pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
     connectors().remove(t)
 }
 
-pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
-    let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
-    m.insert("kafka", Box::new(KafkaConnector {}));
-    m.insert("sse", Box::new(SSEConnector {}));
-
-    m
-}
-
 pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializationMode {
     let confluent = schema
         .format_options
@@ -241,5 +273,27 @@ impl From<OperatorConfigSerializationMode> for SerializationMode {
             OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
             OperatorConfigSerializationMode::DebeziumJson => SerializationMode::DebeziumJson,
         }
+    }
+}
+
+pub(crate) fn source_field(name: &str, field_type: source_field_type::Type) -> SourceField {
+    SourceField {
+        field_name: name.to_string(),
+        field_type: Some(SourceFieldType {
+            sql_name: None,
+            r#type: Some(field_type),
+        }),
+        nullable: false,
+    }
+}
+
+pub(crate) fn nullable_field(name: &str, field_type: source_field_type::Type) -> SourceField {
+    SourceField {
+        field_name: name.to_string(),
+        field_type: Some(SourceFieldType {
+            sql_name: None,
+            r#type: Some(field_type),
+        }),
+        nullable: true,
     }
 }

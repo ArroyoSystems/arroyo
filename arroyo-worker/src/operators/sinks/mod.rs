@@ -6,7 +6,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::connectors::OperatorConfig;
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;

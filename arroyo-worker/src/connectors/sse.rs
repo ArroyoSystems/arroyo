@@ -82,7 +82,7 @@ where
                 .events
                 .map(|e| e.split(",").map(|e| e.to_string()).collect())
                 .unwrap_or_else(|| vec![]),
-            serialization_mode: match config.serialization_mode {
+            serialization_mode: match config.serialization_mode.unwrap() {
                 OperatorConfigSerializationMode::Json => SerializationMode::Json,
                 OperatorConfigSerializationMode::JsonSchemaRegistry => {
                     SerializationMode::JsonSchemaRegistry

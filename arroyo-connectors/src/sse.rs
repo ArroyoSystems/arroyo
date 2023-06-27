@@ -44,6 +44,7 @@ impl Connector for SSEConnector {
             enabled: true,
             source: true,
             sink: false,
+            testing: true,
             custom_schemas: true,
             connection_config: None,
             table_config: TABLE_SCHEMA.to_owned(),
@@ -88,7 +89,7 @@ impl Connector for SSEConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: serialization_mode(schema.as_ref().unwrap()),
+            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
         };
 
         Ok(Connection {

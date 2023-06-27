@@ -87,27 +87,6 @@ pub(crate) async fn get_connection<E: GenericClient>(
         .map(|c| c.into())
 }
 
-pub(crate) async fn test_connection(req: CreateConnectionReq) -> Result<TestSourceMessage, Status> {
-    // let connection = req
-    //     .connection_type
-    //     .ok_or_else(|| required_field("connection_type"))?;
-
-    // let (tx, _rx) = channel(8);
-
-    // match connection {
-    //     ReqConnectionType::Kafka(kafka) => Ok(KafkaTester::new(kafka, None, None, tx)
-    //         .test_connection()
-    //         .await),
-    //     ReqConnectionType::Http(http) => Ok((HttpTester { connection: &http }).test().await),
-    //     _ => Ok(TestSourceMessage {
-    //         error: false,
-    //         done: true,
-    //         message: "Testing not yet supported for this connection type".to_string(),
-    //     }),
-    // }
-    todo!()
-}
-
 pub(crate) async fn delete_connection(
     req: DeleteConnectionReq,
     auth: AuthData,

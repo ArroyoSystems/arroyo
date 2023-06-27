@@ -4002,12 +4002,17 @@ export class Connector extends Message<Connector> {
   customSchemas = false;
 
   /**
-   * @generated from field: optional string connection_config = 9;
+   * @generated from field: bool testing = 9;
+   */
+  testing = false;
+
+  /**
+   * @generated from field: optional string connection_config = 10;
    */
   connectionConfig?: string;
 
   /**
-   * @generated from field: string table_config = 10;
+   * @generated from field: string table_config = 11;
    */
   tableConfig = "";
 
@@ -4027,8 +4032,9 @@ export class Connector extends Message<Connector> {
     { no: 6, name: "source", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "sink", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 8, name: "custom_schemas", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 9, name: "connection_config", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 10, name: "table_config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "testing", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 10, name: "connection_config", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 11, name: "table_config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Connector {
@@ -4602,7 +4608,12 @@ export class GetConnectionTablesResp extends Message<GetConnectionTablesResp> {
  */
 export class StructType extends Message<StructType> {
   /**
-   * @generated from field: repeated arroyo_api.SourceField fields = 1;
+   * @generated from field: optional string name = 1;
+   */
+  name?: string;
+
+  /**
+   * @generated from field: repeated arroyo_api.SourceField fields = 2;
    */
   fields: SourceField[] = [];
 
@@ -4614,7 +4625,8 @@ export class StructType extends Message<StructType> {
   static readonly runtime = proto3;
   static readonly typeName = "arroyo_api.StructType";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "fields", kind: "message", T: SourceField, repeated: true },
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 2, name: "fields", kind: "message", T: SourceField, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StructType {

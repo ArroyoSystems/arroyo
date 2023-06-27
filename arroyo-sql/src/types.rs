@@ -648,10 +648,13 @@ impl TryFrom<StructField> for SourceField {
         let field_name = f.name();
         let nullable = f.nullable();
         let field_type = match f.data_type {
-            TypeDef::StructDef(StructDef { fields, .. }, _) => {
+            TypeDef::StructDef(StructDef { fields, name }, _) => {
                 let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
 
-                let t = source_field_type::Type::Struct(StructType { fields: fields? });
+                let t = source_field_type::Type::Struct(StructType {
+                    name,
+                    fields: fields?,
+                });
 
                 SourceFieldType {
                     sql_name: None,
@@ -713,7 +716,7 @@ impl From<SourceField> for StructField {
             source_field_type::Type::Struct(s) => TypeDef::StructDef(
                 StructDef {
                     fields: s.fields.into_iter().map(|t| t.into()).collect(),
-                    name: None,
+                    name: s.name,
                 },
                 f.nullable,
             ),

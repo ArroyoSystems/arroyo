@@ -4,11 +4,9 @@ use anyhow::Context;
 use arroyo_connectors::connector_for_type;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Transaction;
-use petgraph::Direction;
 use prost::Message;
 use serde_json::Value;
 use tonic::Status;
-use tracing::log::info;
 use tracing::warn;
 
 use arroyo_datastream::{ConnectorOp, Operator, Program};
@@ -101,7 +99,6 @@ pub(crate) async fn create_pipeline<'a>(
     let mut program;
     let connections;
     let text;
-    let compute_parallelism;
     let udfs: Option<Vec<Udf>>;
     let is_preview;
 
@@ -120,7 +117,6 @@ pub(crate) async fn create_pipeline<'a>(
             connections = vec![];
             text = None;
             udfs = None;
-            compute_parallelism = false;
             is_preview = false;
         }
         create_pipeline_req::Config::Sql(sql) => {
@@ -144,7 +140,6 @@ pub(crate) async fn create_pipeline<'a>(
                     })
                     .collect(),
             );
-            compute_parallelism = sql.parallelism == 0;
             is_preview = sql.preview;
         }
     };
@@ -167,8 +162,9 @@ pub(crate) async fn create_pipeline<'a>(
         )));
     }
 
+    set_parallelism(&mut program, 1);
+
     if is_preview {
-        set_parallelism(&mut program, 1);
         for node in program.graph.node_weights_mut() {
             // if it is a connector sink or switch to a web sink
             if let Operator::ConnectorSink { .. } = node.operator {
@@ -213,16 +209,6 @@ pub(crate) async fn create_pipeline<'a>(
         .one()
         .await
         .map_err(log_and_map)?;
-
-    if !is_preview {
-        for connection in connections {
-            todo!()
-            // api_queries::add_pipeline_sink()
-            //     .bind(tx, &pipeline_id, &sink)
-            //     .await
-            //     .map_err(log_and_map)?;
-        }
-    }
 
     Ok(pipeline_id)
 }

@@ -45,7 +45,7 @@ INSERT INTO connection_tables
 (organization_id, created_by, name, table_type, connector, connection_id, config, schema)
 VALUES (:organization_id, :created_by, :name, :table_type, :connector, :connection_id, :config, :schema);
 
---! get_connection_tables: (connection_id?, connection_name?, connection_type?, connection_config?)
+--! get_connection_tables: (connection_id?, connection_name?, connection_type?, connection_config?, schema?)
 SELECT connection_tables.id as id,
     connection_tables.name as name,
     connection_tables.connector as connector,

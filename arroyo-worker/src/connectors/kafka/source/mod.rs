@@ -110,7 +110,7 @@ where
             topic: table.topic,
             bootstrap_servers: connection.bootstrap_servers.to_string(),
             offset_mode: *offset,
-            serialization_mode: match config.serialization_mode {
+            serialization_mode: match config.serialization_mode.unwrap() {
                 OperatorConfigSerializationMode::Json => SerializationMode::Json,
                 OperatorConfigSerializationMode::JsonSchemaRegistry => {
                     SerializationMode::JsonSchemaRegistry

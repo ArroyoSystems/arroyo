@@ -81,7 +81,7 @@ const columns: Array<ColumnDef> = [
   },
   {
     name: 'format',
-    accessor: s => <Text>{format(s.schema!.format)}</Text>
+    accessor: s => <Text>{s.schema ? format(s.schema!.format) : "built-in"}</Text>
   },
   {
     name: "pipelines",

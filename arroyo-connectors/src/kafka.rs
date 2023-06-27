@@ -46,6 +46,7 @@ impl Connector for KafkaConnector {
             enabled: true,
             source: true,
             sink: true,
+            testing: true,
             custom_schemas: true,
             connection_config: Some(CONFIG_SCHEMA.to_string()),
             table_config: TABLE_SCHEMA.to_string(),
@@ -77,7 +78,7 @@ impl Connector for KafkaConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: serialization_mode(schema.as_ref().unwrap()),
+            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
         };
 
         Ok(Connection {

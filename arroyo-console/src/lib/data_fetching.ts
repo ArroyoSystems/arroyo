@@ -1,5 +1,4 @@
 import {
-  BuiltinSink,
   CheckpointDetailsReq,
   CreateUdf,
   GetConnectionTablesReq,

@@ -1,0 +1,21 @@
+{
+    "type": "object",
+    "title": "NexmarkTable",
+    "properties": {
+        "event_rate": {
+            "title": "Event rate (messages / sec)",
+            "type": "number",
+            "description": "The number of messages the Nexmark source will emit per second",
+            "examples": ["100"],
+            "minimum": 0
+        },
+        "runtime": {
+            "title": "Runtime (seconds)",
+            "type": "number",
+            "description": "If set, the source will finish after running for this many seconds"
+        }
+    },
+    "required": [
+        "event_rate"
+    ]
+}

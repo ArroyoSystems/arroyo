@@ -57,6 +57,50 @@ function StringWidget({
   );
 }
 
+function NumberWidget({
+  path,
+  title,
+  description,
+  placeholder,
+  required,
+  min,
+  max,
+  value,
+  errors,
+  onChange,
+}: {
+  path: string;
+  title: string;
+  description?: string;
+  placeholder?: number;
+  required?: boolean;
+  min?: number;
+  max?: number;
+  value: number;
+  errors: any;
+  onChange: (e: React.ChangeEvent<any>) => void;
+}) {
+  return (
+    <FormControl isRequired={required} isInvalid={errors[path]}>
+      <FormLabel>{title}</FormLabel>
+      <Input
+        name={path}
+        type="number"
+        min={min}
+        max={max}
+        placeholder={placeholder ? String(placeholder) : undefined}
+        value={value || ''}
+        onChange={e => onChange(e)}
+      />
+      {errors[path] ? (
+        <FormErrorMessage>{errors[path]}</FormErrorMessage>
+      ) : (
+        description && <FormHelperText>{description}</FormHelperText>
+      )}
+    </FormControl>
+  );
+}
+
 function SelectWidget({
   path,
   title,
@@ -151,6 +195,24 @@ export function FormInner({
                   />
                 );
               }
+            case 'number': {
+              return <NumberWidget
+                path={(path ? `${path}.` : '') + key}
+                key={key}
+                title={property.title || key}
+                description={property.description}
+                required={schema.required?.includes(key)}
+                placeholder={
+                  // @ts-ignore
+                  property.examples ? (property.examples[0] as number) : undefined
+                }
+                min={property.minimum}
+                max={property.maximum}
+                value={values[key]}
+                errors={errors}
+                onChange={onChange}
+              />;
+342            }
             case 'object': {
               if (property.oneOf) {
                 const typeKey = '__meta.' + key + '.type';
@@ -191,6 +253,9 @@ export function FormInner({
                   </fieldset>
                 );
               }
+            }
+            default: {
+              console.warn("Unsupported field type", property.type);
             }
           }
         }

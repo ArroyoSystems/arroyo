@@ -19,7 +19,6 @@ use datafusion_common::{config::ConfigOptions, DFField, DFSchema};
 use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
 };
-use serde_json::json;
 
 use crate::{
     expressions::{Column, ColumnExpression, Expression, ExpressionContext},
@@ -47,17 +46,19 @@ pub struct ConnectorTable {
 }
 
 fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
-    let def = schema.definition.as_ref()?;
-    match def {
-        grpc::api::connection_schema::Definition::JsonSchema(_) => {
-            Some(format!("{}::{}", name, json_schema::ROOT_NAME))
+    schema.struct_name.as_ref().cloned().or_else(|| {
+        let def = schema.definition.as_ref()?;
+        match def {
+            grpc::api::connection_schema::Definition::JsonSchema(_) => {
+                Some(format!("{}::{}", name, json_schema::ROOT_NAME))
+            }
+            grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
+            grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
+            grpc::api::connection_schema::Definition::RawSchema(_) => {
+                Some("arroyo_types::RawJson".to_string())
+            }
         }
-        grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::RawSchema(_) => {
-            Some("arroyo_types::RawJson".to_string())
-        }
-    }
+    })
 }
 
 pub fn schema_defs(name: &str, schema: &ConnectionSchema) -> Option<String> {
@@ -157,6 +158,7 @@ impl ConnectorTable {
             format_options: Some(FormatOptions {
                 confluent_schema_registry: schema_registry,
             }),
+            struct_name: None,
             fields: schema_fields?,
             definition: None,
         };
@@ -326,6 +328,10 @@ impl ConnectorTable {
                 bail!("Inserting into a source is not allowed")
             }
             ConnectionType::Sink => {}
+        }
+
+        if input.is_updating() {
+            bail!("inserting updating tables into connection tables is not currently supported");
         }
 
         if self.has_virtual_fields() {

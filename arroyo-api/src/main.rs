@@ -433,17 +433,6 @@ impl ApiGrpc for ApiServer {
         Ok(Response::new(resp))
     }
 
-    async fn test_connection(
-        &self,
-        request: Request<CreateConnectionReq>,
-    ) -> Result<Response<TestSourceMessage>, Status> {
-        let (request, _) = self.authenticate(request).await?;
-
-        Ok(Response::new(
-            connections::test_connection(request.into_inner()).await?,
-        ))
-    }
-
     async fn get_connections(
         &self,
         request: Request<GetConnectionsReq>,

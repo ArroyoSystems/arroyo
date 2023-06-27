@@ -530,9 +530,10 @@ message Connector {
   bool source = 6;
   bool sink = 7;
   bool custom_schemas = 8;
+  bool testing = 9;
 
-  optional string connection_config = 9;
-  string table_config = 10;
+  optional string connection_config = 10;
+  string table_config = 11;
 }
 
 message GetConnectorsResp {
@@ -624,7 +625,8 @@ enum PrimitiveType {
 }
 
 message StructType {
-  repeated SourceField fields = 1;
+  optional string name = 1;
+  repeated SourceField fields = 2;
 }
 
 message SourceFieldType {
@@ -658,6 +660,7 @@ message FormatOptions {
 message ConnectionSchema {
   optional Format format = 1;
   FormatOptions format_options = 2;
+  optional string struct_name = 8;
   repeated SourceField fields = 3;
 
   oneof definition {
@@ -714,7 +717,6 @@ message OutputData {
 service ApiGrpc {
   rpc GetConnectors(GetConnectorsReq) returns (GetConnectorsResp);
   rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp);
-  rpc TestConnection(CreateConnectionReq) returns (TestSourceMessage);
   rpc GetConnections(GetConnectionsReq) returns (GetConnectionsResp);
   rpc DeleteConnection(DeleteConnectionReq) returns (DeleteConnectionResp);
 

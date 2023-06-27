@@ -20,7 +20,7 @@ use tracing::warn;
 use crate::{
     handle_db_error, log_and_map,
     queries::api_queries::{self, GetConnectionTables},
-    required_field, AuthData,
+    AuthData,
 };
 
 async fn get_and_validate_connector<E: GenericClient>(
@@ -163,40 +163,37 @@ pub(crate) async fn get<C: GenericClient>(
         .into_iter()
         .map(|t| {
             let connection = get_connection(&t);
+            let connector = connector_for_type(&t.connector).unwrap_or_else(|| {
+                panic!(
+                    "invalid connector in saved ConnectionTable: {}",
+                    t.connector
+                )
+            });
+
+            let table = serde_json::to_string(&t.config).unwrap();
+            let schema = t.schema.map(|s| serde_json::from_value(s).unwrap());
+            let schema = connector
+                .get_schema(
+                    &connection
+                        .as_ref()
+                        .map(|t| t.config.as_str())
+                        .unwrap_or("{}"),
+                    &table,
+                    schema.as_ref(),
+                )
+                .unwrap_or_else(|e| panic!("Invalid connector config for {}: {:?}", t.id, e));
+
             ConnectionTable {
                 id: t.id,
                 name: t.name,
                 connection,
                 connector: t.connector,
                 table_type: TableType::from_str_name(&t.table_type).unwrap() as i32,
-                config: serde_json::to_string(&t.config).unwrap(),
-                schema: Some(serde_json::from_value(t.schema).unwrap()),
+                config: table,
+                schema,
             }
         })
         .collect())
-}
-
-pub(crate) async fn test_schema(req: TestSchemaReq) -> Result<Vec<String>, Status> {
-    let Some(schema_def) = req
-        .schema
-        .ok_or_else(|| required_field("schema"))?
-        .definition else {
-            return Ok(vec![]);
-        };
-
-    match schema_def {
-        Definition::JsonSchema(schema) => {
-            if let Err(e) = convert_json_schema(&"test", &schema) {
-                Ok(vec![e])
-            } else {
-                Ok(vec![])
-            }
-        }
-        _ => {
-            // TODO: add testing for other schema types
-            Ok(vec![])
-        }
-    }
 }
 
 // attempts to fill in the SQL schema from a schema object that may just have a json-schema or

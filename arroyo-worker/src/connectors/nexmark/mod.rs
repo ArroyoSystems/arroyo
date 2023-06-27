@@ -10,11 +10,18 @@ use rand::{
     distributions::Alphanumeric, distributions::DistString, rngs::SmallRng, seq::SliceRandom, Rng,
     SeedableRng,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::{sync::mpsc::error::TryRecvError, time::sleep};
 use tracing::debug;
 use tracing::{info, log::warn};
+use typify::import_types;
+
+use super::OperatorConfig;
+
+import_types!(schema = "../connector-schemas/nexmark/table.json");
 
 #[cfg(test)]
 mod test;
@@ -64,10 +71,11 @@ const HOT_URLS: [&str; 4] = [
 //static PRODUCER_LAG: &str = "arroyo_worker_producer_lag";
 
 #[derive(StreamNode, Clone)]
-pub struct NexmarkSourceFunc {
-    first_event_rate: u64,
+pub struct NexmarkSourceFunc<K: Data, T: Data> {
+    first_event_rate: f64,
     num_events: Option<u64>,
     state: Option<NexmarkSourceState>,
+    _t: PhantomData<(K, T)>,
 }
 
 #[derive(Debug, Encode, Decode, Clone, PartialEq)]
@@ -77,16 +85,33 @@ struct NexmarkSourceState {
 }
 
 #[source_fn(out_t = Event)]
-impl NexmarkSourceFunc {
+impl<K: Data, T: Data> NexmarkSourceFunc<K, T> {
     fn name(&self) -> String {
         "nexmark".to_string()
     }
 
-    pub fn new(first_event_rate: u64, num_events: Option<u64>) -> NexmarkSourceFunc {
-        NexmarkSourceFunc {
-            first_event_rate,
+    pub fn new(first_event_rate: u64, num_events: Option<u64>) -> Self {
+        Self {
+            first_event_rate: first_event_rate as f64,
             num_events,
             state: None,
+            _t: PhantomData,
+        }
+    }
+
+    pub fn from_config(config: &str) -> Self {
+        let config: OperatorConfig =
+            serde_json::from_str(config).expect("Invalid config for NexmarkSource");
+        let table: NexmarkTable =
+            serde_json::from_value(config.table).expect("Invalid table config for NexmarkSource");
+
+        Self {
+            first_event_rate: table.event_rate,
+            num_events: table
+                .runtime
+                .map(|time| (table.event_rate * time).floor() as u64),
+            state: None,
+            _t: PhantomData,
         }
     }
 
@@ -192,7 +217,7 @@ impl NexmarkSourceFunc {
 pub struct NexmarkConfig {
     num_events: Option<u64>,
     num_event_generators: u64,
-    first_event_rate: u64,
+    first_event_rate: f64,
     next_event_rate: u64,
     rate_period_seconds: u64,
     preload_seconds: u64,
@@ -220,7 +245,7 @@ pub struct NexmarkConfig {
 
 impl NexmarkConfig {
     pub fn new(
-        first_event_rate: u64,
+        first_event_rate: f64,
         num_events: Option<u64>,
         parallelism: usize,
     ) -> NexmarkConfig {
@@ -307,7 +332,7 @@ impl GeneratorConfig {
                 + nexmark_config.auction_proportion
                 + nexmark_config.bid_proportion,
             inter_event_delay: Duration::from_micros(
-                (1000000.0 / (nexmark_config.first_event_rate as f64)
+                (1000000.0 / (nexmark_config.first_event_rate)
                     * (nexmark_config.num_event_generators as f64)) as u64,
             ),
             _step_length_second: (nexmark_config.rate_period_seconds + 2 - 1) / 2,
@@ -651,7 +676,7 @@ pub struct NexmarkGenerator {
 }
 
 impl NexmarkGenerator {
-    pub fn new(first_event_rate: u64, num_events: Option<u64>) -> NexmarkGenerator {
+    pub fn new(first_event_rate: f64, num_events: Option<u64>) -> NexmarkGenerator {
         let time = SystemTime::now();
         NexmarkGenerator::from_config(
             &GeneratorConfig::new(
