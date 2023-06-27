@@ -486,18 +486,22 @@ impl Table {
 
             let connector = with_map.remove("connector");
 
-            match connector {
-                Some(connector) => Ok(Some(Table::ConnectorTable(
-                    ConnectorTable::from_options(&name, &connector, fields, &mut with_map)
-                        .map_err(|e| anyhow!("Failed to construct table '{}': {:?}", name, e))?,
-                ))),
-                None => {
+            match connector.as_ref().map(|c| c.as_str()) {
+                Some("memory") | None => {
                     if fields.iter().any(|f| f.expression.is_some()) {
-                        bail!("Virtual fields are not supported in memory tables. Just write a query.");
+                        bail!("Virtual fields are not supported in memory tables; instead write a query");
+                    }
+
+                    if !with_map.is_empty() {
+                        bail!("Memory tables do not allow any with options; to create a connector table set the 'connector' option");
                     }
 
                     Ok(Some(Table::MemoryTable { name, fields }))
                 }
+                Some(connector) => Ok(Some(Table::ConnectorTable(
+                    ConnectorTable::from_options(&name, connector, fields, &mut with_map)
+                        .map_err(|e| anyhow!("Failed to construct table '{}': {:?}", name, e))?,
+                ))),
             }
         } else {
             match &produce_optimized_plan(statement, schema_provider)? {

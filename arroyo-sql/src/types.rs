@@ -13,8 +13,9 @@ use arrow::{
     datatypes::{Field, IntervalDayTimeType},
 };
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
-use arroyo_rpc::grpc::api::{
-    source_field_type, PrimitiveType, SourceField, SourceFieldType, StructType,
+use arroyo_rpc::{
+    grpc::api::{source_field_type, PrimitiveType, SourceField, SourceFieldType, StructType},
+    primitive_to_sql,
 };
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
@@ -623,24 +624,6 @@ pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> R
     }
 }
 
-fn primitive_to_sql(primitive_type: PrimitiveType) -> &'static str {
-    match primitive_type {
-        PrimitiveType::Int32 => "INTEGER",
-        PrimitiveType::Int64 => "BIGINT",
-        PrimitiveType::UInt32 => "INTEGER UNSIGNED",
-        PrimitiveType::UInt64 => "BIGINT UNSIGNED",
-        PrimitiveType::F32 => "FLOAT",
-        PrimitiveType::F64 => "DOUBLE",
-        PrimitiveType::Bool => "BOOLEAN",
-        PrimitiveType::String => "TEXT",
-        PrimitiveType::Bytes => "BINARY",
-        PrimitiveType::UnixMillis | PrimitiveType::UnixMicros | PrimitiveType::DateTime => {
-            "TIMESTAMP"
-        }
-        PrimitiveType::Json => "JSONB",
-    }
-}
-
 impl TryFrom<StructField> for SourceField {
     type Error = String;
 
@@ -673,6 +656,7 @@ impl TryFrom<StructField> for SourceField {
                     DataType::Binary | DataType::LargeBinary => Ok(PrimitiveType::Bytes),
                     DataType::Timestamp(TimeUnit::Millisecond, _) => Ok(PrimitiveType::UnixMillis),
                     DataType::Timestamp(TimeUnit::Microsecond, _) => Ok(PrimitiveType::UnixMicros),
+                    DataType::Timestamp(TimeUnit::Nanosecond, _) => Ok(PrimitiveType::UnixNanos),
                     DataType::Utf8 => Ok(PrimitiveType::String),
                     dt => Err(format!("Unsupported data type {:?}", dt)),
                 }?;
@@ -700,7 +684,7 @@ impl From<SourceField> for StructField {
                     PrimitiveType::Int32 => DataType::Int32,
                     PrimitiveType::Int64 => DataType::Int64,
                     PrimitiveType::UInt32 => DataType::UInt32,
-                    PrimitiveType::UInt64 => DataType::Int64,
+                    PrimitiveType::UInt64 => DataType::UInt64,
                     PrimitiveType::F32 => DataType::Float32,
                     PrimitiveType::F64 => DataType::Float64,
                     PrimitiveType::Bool => DataType::Boolean,
@@ -708,6 +692,7 @@ impl From<SourceField> for StructField {
                     PrimitiveType::Bytes => DataType::Binary,
                     PrimitiveType::UnixMillis => DataType::Timestamp(TimeUnit::Millisecond, None),
                     PrimitiveType::UnixMicros => DataType::Timestamp(TimeUnit::Microsecond, None),
+                    PrimitiveType::UnixNanos => DataType::Timestamp(TimeUnit::Nanosecond, None),
                     PrimitiveType::DateTime => DataType::Timestamp(TimeUnit::Microsecond, None),
                     PrimitiveType::Json => DataType::Utf8,
                 },

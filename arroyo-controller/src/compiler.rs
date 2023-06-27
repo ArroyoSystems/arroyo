@@ -314,7 +314,6 @@ wasm-opt = false
             use petgraph::graph::DiGraph;
             use arroyo_worker::operators::*;
             use arroyo_worker::connectors;
-            use arroyo_worker::operators::sources::*;
             use arroyo_worker::operators::sinks::*;
             use arroyo_worker::operators::sinks;
             use arroyo_worker::operators::joins::*;

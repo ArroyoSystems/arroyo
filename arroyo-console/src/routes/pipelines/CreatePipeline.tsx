@@ -401,7 +401,18 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   const errorsTab = (
     <TabPanel overflowX="auto" height="100%" position="relative">
       {operatorErrors ? (
-        <OperatorErrors operatorErrors={operatorErrors} />
+        <Box
+          style={{
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            position: 'absolute',
+          }}
+          overflow="auto"
+        >
+          <OperatorErrors operatorErrors={operatorErrors} />
+        </Box>
       ) : (
         <Text>Job errors will appear here.</Text>
       )}

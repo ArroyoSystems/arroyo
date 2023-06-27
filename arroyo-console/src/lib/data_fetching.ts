@@ -15,7 +15,6 @@ import {
 import { ApiClient } from '../main';
 import useSWR from 'swr';
 import { mutate as globalMutate } from 'swr';
-import { SinkOpt } from './types';
 
 // Keys
 

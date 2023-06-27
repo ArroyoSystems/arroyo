@@ -1,5 +1,5 @@
 import { Box, Button, Code, FormControl, FormLabel, Link, Select, Stack, StepStatus, Text } from '@chakra-ui/react';
-import React, { Dispatch, useState } from 'react';
+import React, { Dispatch, useEffect, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { ApiClient } from '../../main';
 import { ConnectionSchema, Connector, Format, FormatOptions } from '../../gen/api_pb';
@@ -119,10 +119,25 @@ const JsonEditor = ({
 };
 
 const RawStringEditor = ({
+  state,
+  setState,
   next,
 }: {
+  state: CreateConnectionState;
+  setState: Dispatch<CreateConnectionState>;
   next: () => void;
 }) => {
+  const submit = () => {
+    setState({
+      ...state,
+      schema: new ConnectionSchema({
+        ...state.schema,
+        definition: { case: 'rawSchema', value: 'value' },
+      }),
+    });
+    next();
+  };
+
   return (
     <Stack spacing={4} maxW='md'>
       <Text>
@@ -134,7 +149,7 @@ const RawStringEditor = ({
         Raw string connection tables have a single <Code>value</Code> column with the value.
       </Text>
 
-      <Button onClick={next}>Continue</Button>
+      <Button onClick={submit}>Continue</Button>
     </Stack>
   );
 }
@@ -161,7 +176,7 @@ export const DefineSchema = ({
     {
       name: 'Raw String',
       value: Format.RawStringFormat,
-      el: <RawStringEditor next={next} />,
+      el: <RawStringEditor state={state} setState={setState} next={next} />,
     },
     {
       name: 'Protobuf (coming soon)',

@@ -2,13 +2,17 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use arroyo_datastream::SerializationMode;
-use arroyo_rpc::grpc::{
-    self,
-    api::{
-        source_field_type, ConnectionSchema, SourceField, SourceFieldType, TableType,
-        TestSourceMessage,
+use arroyo_rpc::{
+    grpc::{
+        self,
+        api::{
+            source_field_type, ConnectionSchema, SourceField, SourceFieldType, TableType,
+            TestSourceMessage,
+        },
     },
+    primitive_to_sql,
 };
+use impulse::ImpulseConnector;
 use nexmark::NexmarkConnector;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sse::SSEConnector;
@@ -18,6 +22,7 @@ use typify::import_types;
 
 use self::kafka::KafkaConnector;
 
+pub mod impulse;
 pub mod kafka;
 pub mod nexmark;
 pub mod sse;
@@ -29,6 +34,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("kafka", Box::new(KafkaConnector {}));
     m.insert("sse", Box::new(SSEConnector {}));
     m.insert("nexmark", Box::new(NexmarkConnector {}));
+    m.insert("impulse", Box::new(ImpulseConnector {}));
 
     m
 }
@@ -280,7 +286,12 @@ pub(crate) fn source_field(name: &str, field_type: source_field_type::Type) -> S
     SourceField {
         field_name: name.to_string(),
         field_type: Some(SourceFieldType {
-            sql_name: None,
+            sql_name: match field_type {
+                source_field_type::Type::Primitive(p) => Some(
+                    primitive_to_sql(grpc::api::PrimitiveType::from_i32(p).unwrap()).to_string(),
+                ),
+                source_field_type::Type::Struct(_) => None,
+            },
             r#type: Some(field_type),
         }),
         nullable: false,

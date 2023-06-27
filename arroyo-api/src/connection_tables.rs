@@ -3,8 +3,7 @@ use arrow_schema::DataType;
 use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::grpc::api::{
     connection_schema::Definition, ConfluentSchemaReq, ConfluentSchemaResp, Connection,
-    ConnectionSchema, ConnectionTable, CreateConnectionTableReq, TableType, TestSchemaReq,
-    TestSourceMessage,
+    ConnectionSchema, ConnectionTable, CreateConnectionTableReq, TableType, TestSourceMessage,
 };
 use arroyo_sql::{
     json_schema::{self, convert_json_schema},
@@ -100,6 +99,12 @@ pub(crate) async fn create(
     let table_type = connector.table_type(&config, &req.config).unwrap();
 
     let table_config: serde_json::Value = serde_json::from_str(&req.config).unwrap();
+
+    if let Some(schema) = &req.schema {
+        if schema.definition.is_none() {
+            return Err(Status::failed_precondition("schema.definition must be set"));
+        }
+    }
 
     let schema: Option<serde_json::Value> = schema.map(|s| serde_json::to_value(s).unwrap());
 

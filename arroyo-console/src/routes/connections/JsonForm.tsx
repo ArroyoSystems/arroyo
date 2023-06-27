@@ -63,6 +63,7 @@ function NumberWidget({
   description,
   placeholder,
   required,
+  type,
   min,
   max,
   value,
@@ -74,6 +75,7 @@ function NumberWidget({
   description?: string;
   placeholder?: number;
   required?: boolean;
+  type: 'number' | 'integer';
   min?: number;
   max?: number;
   value: number;
@@ -86,6 +88,7 @@ function NumberWidget({
       <Input
         name={path}
         type="number"
+        step={type === 'integer' ? 1 : undefined}
         min={min}
         max={max}
         placeholder={placeholder ? String(placeholder) : undefined}
@@ -195,13 +198,15 @@ export function FormInner({
                   />
                 );
               }
-            case 'number': {
+            case 'number':
+            case 'integer': {
               return <NumberWidget
                 path={(path ? `${path}.` : '') + key}
                 key={key}
                 title={property.title || key}
                 description={property.description}
                 required={schema.required?.includes(key)}
+                type={property.type}
                 placeholder={
                   // @ts-ignore
                   property.examples ? (property.examples[0] as number) : undefined

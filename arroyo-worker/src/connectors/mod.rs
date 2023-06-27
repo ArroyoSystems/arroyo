@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
+pub mod impulse;
 pub mod kafka;
 pub mod nexmark;
 pub mod sse;

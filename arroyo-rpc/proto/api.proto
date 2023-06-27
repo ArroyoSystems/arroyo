@@ -620,6 +620,7 @@ enum PrimitiveType {
   Bytes = 8;
   UnixMillis = 9;
   UnixMicros = 12;
+  UnixNanos = 13;
   DateTime = 10;
   Json = 11;
 }

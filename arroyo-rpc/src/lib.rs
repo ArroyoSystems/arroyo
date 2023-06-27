@@ -2,7 +2,9 @@ use std::{fs, time::SystemTime};
 
 use crate::grpc::SubtaskCheckpointMetadata;
 use arroyo_types::{CheckpointBarrier, API_ADDR_ENV};
-use grpc::{api::api_grpc_client::ApiGrpcClient, StopMode, TaskCheckpointEventType};
+use grpc::{
+    api::api_grpc_client::ApiGrpcClient, api::PrimitiveType, StopMode, TaskCheckpointEventType,
+};
 use tonic::{
     codegen::InterceptedService,
     metadata::{Ascii, MetadataValue},
@@ -100,4 +102,23 @@ pub async fn api_client() -> ApiGrpcClient<InterceptedService<Channel, FileAuthI
     let channel = Channel::from_shared(host).unwrap().connect().await.unwrap();
 
     ApiGrpcClient::with_interceptor(channel, FileAuthInterceptor::load())
+}
+
+pub fn primitive_to_sql(primitive_type: PrimitiveType) -> &'static str {
+    match primitive_type {
+        PrimitiveType::Int32 => "INTEGER",
+        PrimitiveType::Int64 => "BIGINT",
+        PrimitiveType::UInt32 => "INTEGER UNSIGNED",
+        PrimitiveType::UInt64 => "BIGINT UNSIGNED",
+        PrimitiveType::F32 => "FLOAT",
+        PrimitiveType::F64 => "DOUBLE",
+        PrimitiveType::Bool => "BOOLEAN",
+        PrimitiveType::String => "TEXT",
+        PrimitiveType::Bytes => "BINARY",
+        PrimitiveType::UnixMillis
+        | PrimitiveType::UnixMicros
+        | PrimitiveType::UnixNanos
+        | PrimitiveType::DateTime => "TIMESTAMP",
+        PrimitiveType::Json => "JSONB",
+    }
 }
