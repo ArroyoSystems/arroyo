@@ -1,3 +1,4 @@
+use anyhow::bail;
 use arroyo_rpc::grpc::{
     self,
     api::{source_field_type, ConnectionSchema, StructType, TestSourceMessage},
@@ -138,8 +139,8 @@ impl Connector for NexmarkConnector {
 
     fn from_options(
         &self,
-        name: &str,
-        options: &mut std::collections::HashMap<String, String>,
+        _: &str,
+        _: &mut std::collections::HashMap<String, String>,
         _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         // let event_rate =
@@ -155,7 +156,7 @@ impl Connector for NexmarkConnector {
         //     event_rate,
         //     runtime,
         // }, None)
-        todo!("requires figuring out how to map schemas from SQL to nexmark")
+        bail!("Nexmark sources cannot currently be created in SQL; create using the web ui instead")
     }
 
     fn from_config(

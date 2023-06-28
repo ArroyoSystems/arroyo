@@ -5,7 +5,6 @@ use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::SinkDataReq;
 use arroyo_types::*;
-use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tonic::transport::Channel;
 

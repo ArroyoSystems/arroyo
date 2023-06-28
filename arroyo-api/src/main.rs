@@ -3,7 +3,7 @@ use arroyo_connectors::connectors;
 use arroyo_rpc::grpc::api::{
     CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
     DeleteJobReq, DeleteJobResp, GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq,
-    GetConnectorsResp, PipelineProgram,
+    GetConnectorsResp, PipelineProgram, TestSchemaReq, TestSchemaResp,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -487,6 +487,19 @@ impl ApiGrpc for ApiServer {
 
         let tables = connection_tables::get(&auth, &self.client().await?).await?;
         Ok(Response::new(GetConnectionTablesResp { tables }))
+    }
+
+    async fn test_schema(
+        &self,
+        request: Request<TestSchemaReq>,
+    ) -> Result<Response<TestSchemaResp>, Status> {
+        let (request, _auth) = self.authenticate(request).await?;
+
+        let errors = connection_tables::test_schema(request.into_inner()).await?;
+        Ok(Response::new(TestSchemaResp {
+            valid: errors.is_empty(),
+            errors,
+        }))
     }
 
     async fn get_confluent_schema(

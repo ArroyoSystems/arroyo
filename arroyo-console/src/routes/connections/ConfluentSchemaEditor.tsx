@@ -15,7 +15,7 @@ import {
   Input,
   Stack,
 } from '@chakra-ui/react';
-import { ConfluentSchemaReq, ConnectionSchema, FormatOptions, SourceSchema } from '../../gen/api_pb';
+import { ConfluentSchemaReq, ConnectionSchema, FormatOptions } from '../../gen/api_pb';
 
 export function ConfluentSchemaEditor({
   state,
@@ -54,13 +54,12 @@ export function ConfluentSchemaEditor({
         ...state,
         schema: new ConnectionSchema({
           ...state.schema,
-          definition: { case: "jsonSchema", value: resp.schema },
+          definition: { case: 'jsonSchema', value: resp.schema },
           formatOptions: new FormatOptions({
             confluentSchemaRegistry: true,
-          })
+          }),
         }),
       });
-
     } catch (e) {
       if (e instanceof ConnectError) {
         setError(e.rawMessage);
@@ -116,11 +115,11 @@ export function ConfluentSchemaEditor({
 
       {successBox}
 
-      { schema != null && (
-        <Button colorScheme='green' onClick={() => next()}>
+      {schema != null && (
+        <Button colorScheme="green" onClick={() => next()}>
           Continue
         </Button>
-      ) }
+      )}
     </Stack>
   );
 }

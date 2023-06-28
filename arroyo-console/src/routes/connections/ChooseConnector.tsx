@@ -8,7 +8,6 @@ import {
   CardBody,
   CardHeader,
   Container,
-  Flex,
   Heading,
   Icon,
   Link,
@@ -18,9 +17,6 @@ import {
   Text,
 } from '@chakra-ui/react';
 import { ApiClient } from '../../main';
-import { useState } from 'react';
-import { SiApachekafka } from 'react-icons/si';
-import { FaGlobeAmericas, FaStream } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 import { useConnectors } from '../../lib/data_fetching';
 
@@ -83,7 +79,6 @@ import { useConnectors } from '../../lib/data_fetching';
 //   },
 // };
 
-
 export function ChooseConnector({ client }: { client: ApiClient }) {
   const navigate = useNavigate();
   const { connectors } = useConnectors(client);
@@ -106,7 +101,7 @@ export function ChooseConnector({ client }: { client: ApiClient }) {
           <Heading size="xs">Select Connector</Heading>
           <Text>Connectors enable reading and writing data from external systems</Text>
           <Box p={8}>
-            <SimpleGrid spacing={8} minChildWidth={'250px'}  w="100%" gridAutoRows={"1fr"}>
+            <SimpleGrid spacing={8} minChildWidth={'250px'} w="100%" gridAutoRows={'1fr'}>
               {connectors?.connectors.map(c => {
                 return (
                   <Card key={c.name} size={'md'} maxW={400}>
@@ -122,7 +117,7 @@ export function ChooseConnector({ client }: { client: ApiClient }) {
 
                     <CardHeader>
                       <Stack direction="row" spacing={4} align="center">
-                        <Icon boxSize={7} ></Icon>
+                        <Icon boxSize={7}></Icon>
                         <Heading size="xs">{c.name}</Heading>
                       </Stack>
                     </CardHeader>
@@ -130,8 +125,14 @@ export function ChooseConnector({ client }: { client: ApiClient }) {
                       <Stack h="100%">
                         <Text pb={4}>{c.description}</Text>
                         <Spacer />
-                        <Button colorScheme='blue' backgroundColor={"gray.600"} variant={"outline"}
-                            onClick={() => navigate(`/connections/new/${c.id}`)}>Create</Button>
+                        <Button
+                          colorScheme="blue"
+                          backgroundColor={'gray.600'}
+                          variant={'outline'}
+                          onClick={() => navigate(`/connections/new/${c.id}`)}
+                        >
+                          Create
+                        </Button>
                       </Stack>
                     </CardBody>
                   </Card>

@@ -165,6 +165,11 @@ impl ConnectorTable {
 
         let connection = connector.from_options(name, options, Some(&schema))?;
 
+        let mut table: ConnectorTable = connection.into();
+        table.fields = fields;
+        table.event_time_field = options.remove("event_time_field");
+        table.watermark_field = options.remove("watermark_field");
+
         if !options.is_empty() {
             let keys: Vec<String> = options.keys().map(|s| s.to_string()).collect();
             bail!(
@@ -172,9 +177,6 @@ impl ConnectorTable {
                 keys.join(", ")
             );
         }
-
-        let mut table: ConnectorTable = connection.into();
-        table.fields = fields;
 
         Ok(table)
     }
@@ -328,10 +330,6 @@ impl ConnectorTable {
                 bail!("Inserting into a source is not allowed")
             }
             ConnectionType::Sink => {}
-        }
-
-        if input.is_updating() {
-            bail!("inserting updating tables into connection tables is not currently supported");
         }
 
         if self.has_virtual_fields() {
@@ -613,22 +611,6 @@ impl Insert {
                 })
             }
             _ => Ok(Insert::Anonymous { logical_plan }),
-        }
-    }
-
-    pub fn get_fields(&self) -> Result<Vec<Field>> {
-        match self {
-            Insert::InsertQuery { logical_plan, .. } | Insert::Anonymous { logical_plan } => {
-                logical_plan
-                    .schema()
-                    .fields()
-                    .iter()
-                    .map(|field| {
-                        let field: Field = (**field.field()).clone();
-                        Ok(field)
-                    })
-                    .collect::<Result<Vec<_>>>()
-            }
         }
     }
 }

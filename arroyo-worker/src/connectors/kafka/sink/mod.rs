@@ -1,3 +1,4 @@
+use crate::connectors::OperatorConfig;
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_types::*;
@@ -16,6 +17,8 @@ use rdkafka::error::KafkaError;
 use rdkafka_sys::RDKafkaErrorCode;
 use serde::Serialize;
 use std::time::Duration;
+
+use super::{client_configs, KafkaConfig, KafkaTable, TableType};
 
 #[cfg(test)]
 mod test;
@@ -41,6 +44,27 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
                 .collect(),
+            _t: PhantomData,
+        }
+    }
+
+    pub fn from_config(config: &str) -> Self {
+        let config: OperatorConfig =
+            serde_json::from_str(config).expect("Invalid config for KafkaSink");
+        let connection: KafkaConfig = serde_json::from_value(config.connection)
+            .expect("Invalid connection config for KafkaSink");
+        let table: KafkaTable =
+            serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
+        let TableType::Sink{ .. } = &table.type_ else {
+            panic!("found non-sink kafka config in sink operator");
+        };
+
+        Self {
+            topic: table.topic,
+            bootstrap_servers: connection.bootstrap_servers.to_string(),
+            producer: None,
+            write_futures: vec![],
+            client_config: client_configs(&connection),
             _t: PhantomData,
         }
     }

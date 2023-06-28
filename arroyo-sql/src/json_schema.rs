@@ -57,7 +57,7 @@ pub fn convert_json_schema(name: &str, schema: &str) -> Result<Vec<StructField>,
 
     if let TypeDef::StructDef(
         StructDef {
-            name: Some(name),
+            name: Some(_),
             fields,
         },
         _,

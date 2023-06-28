@@ -14,7 +14,7 @@ import {
 } from '@chakra-ui/react';
 
 import { Link, Outlet, useLinkClickHandler, useMatch } from 'react-router-dom';
-import { FiHome, FiLogIn, FiGitBranch, FiLogOut, FiLink } from 'react-icons/fi';
+import { FiHome, FiGitBranch, FiLink } from 'react-icons/fi';
 import { CloudSidebar, UserProfile } from './lib/CloudComponents';
 
 function logout() {

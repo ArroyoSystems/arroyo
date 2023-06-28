@@ -1,11 +1,9 @@
-use anyhow::anyhow;
 use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, Format, FormatOptions, TestSourceMessage},
 };
-use std::str::FromStr;
 
-use crate::{pull_opt, Connection, ConnectionType, Connector, EmptyConfig, OperatorConfig};
+use crate::{Connection, ConnectionType, Connector, EmptyConfig, OperatorConfig};
 
 pub struct BlackholeConnector {}
 

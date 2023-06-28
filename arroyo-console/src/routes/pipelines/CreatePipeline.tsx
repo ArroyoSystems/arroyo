@@ -268,16 +268,22 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   };
 
   let catalog = (
-    <Stack width={300} background="gray.900" p={2} spacing={2} pt={4} borderRight={"1px solid"}
-      borderColor={"gray.500"}>
+    <Stack
+      width={300}
+      background="gray.900"
+      p={2}
+      spacing={2}
+      pt={4}
+      borderRight={'1px solid'}
+      borderColor={'gray.500'}
+    >
       {catalogType('Source', sources)}
       {catalogType('Sink', sinks)}
 
       <Spacer />
-      <Box p={4} borderTop={'1px solid'} borderColor={"gray.500"}>
-        Write SQL to create a streaming pipeline.
-        See the <Link to={'http://doc.arroyo.dev/sql'}>SQL docs</Link> for details
-        on Arroyo SQL.
+      <Box p={4} borderTop={'1px solid'} borderColor={'gray.500'}>
+        Write SQL to create a streaming pipeline. See the{' '}
+        <Link to={'http://doc.arroyo.dev/sql'}>SQL docs</Link> for details on Arroyo SQL.
       </Box>
     </Stack>
   );

@@ -5,9 +5,9 @@ use std::{
 
 use arrow_schema::DataType;
 use arroyo_datastream::{
-    EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, Program, SerializationMode,
-    SlidingAggregatingTopN, SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN,
-    TumblingWindowAggregator, WatermarkType, WindowAgg, WindowType,
+    EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, Program, SlidingAggregatingTopN,
+    SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN, TumblingWindowAggregator,
+    WatermarkType, WindowAgg, WindowType,
 };
 
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -341,7 +341,7 @@ pub struct PlanNode {
 impl PlanNode {
     fn into_stream_node(&self, index: usize, sql_config: &SqlConfig) -> StreamNode {
         let name = format!("{}_{}", self.prefix(), index);
-        let operator = self.to_operator(sql_config);
+        let operator = self.to_operator();
         StreamNode {
             operator_id: name,
             parallelism: sql_config.default_parallelism,
@@ -400,7 +400,7 @@ impl PlanNode {
         }
     }
 
-    fn to_operator(&self, sql_config: &SqlConfig) -> Operator {
+    fn to_operator(&self) -> Operator {
         match &self.operator {
             PlanOperator::Source(_name, source) => source.operator.clone(),
             PlanOperator::Watermark(watermark) => Operator::Watermark(watermark.clone()),

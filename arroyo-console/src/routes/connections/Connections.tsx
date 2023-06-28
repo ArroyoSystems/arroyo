@@ -15,7 +15,6 @@ import {
   Thead,
   Text,
   Tr,
-  Icon,
   Code,
   Alert,
   AlertDescription,
@@ -29,12 +28,17 @@ import {
   ModalBody,
   ModalFooter,
 } from '@chakra-ui/react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { FaGlobeAmericas, FaStream } from 'react-icons/fa';
 import { FiInfo, FiXCircle } from 'react-icons/fi';
 import { SiApachekafka } from 'react-icons/si';
 import { useLinkClickHandler } from 'react-router-dom';
-import { Connection, DeleteConnectionReq, GetConnectionsReq, ConnectionTable, TableType, Format } from '../../gen/api_pb';
+import {
+  DeleteConnectionReq,
+  ConnectionTable,
+  TableType,
+  Format,
+} from '../../gen/api_pb';
 import { ApiClient } from '../../main';
 import { useConnectionTables } from '../../lib/data_fetching';
 
@@ -64,7 +68,7 @@ const format = (f: Format | undefined) => {
     default:
       return 'unknown';
   }
-}
+};
 
 const columns: Array<ColumnDef> = [
   {
@@ -81,19 +85,19 @@ const columns: Array<ColumnDef> = [
   },
   {
     name: 'format',
-    accessor: s => <Text>{s.schema ? format(s.schema!.format) : "built-in"}</Text>
+    accessor: s => <Text>{s.schema ? format(s.schema!.format) : 'built-in'}</Text>,
   },
   {
-    name: "pipelines",
-    accessor: s => <Text>1</Text>
-  }
+    name: 'pipelines',
+    accessor: s => <Text>1</Text>,
+  },
 ];
 
 function ConnectionTableTable({ client }: { client: ApiClient }) {
   const [message, setMessage] = useState<string | null>();
   const [isError, setIsError] = useState<boolean>(false);
   const [selected, setSelected] = useState<ConnectionTable | null>(null);
-  const {connectionTables, connectionTablesLoading} = useConnectionTables(client);
+  const { connectionTables, connectionTablesLoading } = useConnectionTables(client);
 
   const deleteTable = async (connection: ConnectionTable) => {
     try {
@@ -171,7 +175,7 @@ function ConnectionTableTable({ client }: { client: ApiClient }) {
                 <Td key={table.name + column.name}>{column.accessor(table)}</Td>
               ))}
 
-              <Td textAlign={"right"}>
+              <Td textAlign={'right'}>
                 <IconButton
                   icon={<FiInfo fontSize="1.25rem" />}
                   variant="ghost"

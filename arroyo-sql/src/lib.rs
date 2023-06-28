@@ -3,8 +3,10 @@ use anyhow::{anyhow, bail, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
-use arroyo_connectors::Connection;
+use arroyo_connectors::kafka::{KafkaConfig, KafkaConnector, KafkaTable};
+use arroyo_connectors::{Connection, Connector};
 use arroyo_datastream::Program;
+use arroyo_rpc::grpc::api::{ConnectionSchema, Format, FormatOptions};
 use datafusion::physical_plan::functions::make_scalar_function;
 
 mod expressions;
@@ -28,11 +30,10 @@ use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
 use datafusion_expr::{
-    AccumulatorFunctionImplementation, ReturnTypeFunction, Signature, StateTypeFunction,
-    TypeSignature, Volatility,
+    AccumulatorFunctionImplementation, LogicalPlan, ReturnTypeFunction, Signature,
+    StateTypeFunction, TypeSignature, Volatility,
 };
-use expressions::Expression;
-use external::SqlSink;
+use expressions::{Expression, ExpressionContext};
 use pipeline::{SqlOperator, SqlPipelineBuilder};
 use plan_graph::{get_program, PlanGraph};
 use schemas::window_arrow_struct;
@@ -543,40 +544,65 @@ pub fn get_test_expression(
     expected_result: &syn::Expr,
 ) -> syn::ItemFn {
     let struct_def = test_struct_def();
+    let schema = ConnectionSchema {
+        format: Some(Format::JsonFormat as i32),
+        format_options: Some(FormatOptions::default()),
+        struct_name: struct_def.name.clone(),
+        fields: struct_def
+            .fields
+            .iter()
+            .map(|s| s.clone().try_into().unwrap())
+            .collect(),
+        definition: None,
+    };
 
     let mut schema_provider = ArroyoSchemaProvider::new();
-    // schema_provider.add_connector_table(
-    //     "test_source".to_string(),
-    //     "nexmark".to_string(),
-    //     struct_def.fields.clone(),
-    //     struct_def.name.clone(),
-    //     SourceConfig::NexmarkSource {
-    //         event_rate: 10,
-    //         runtime: None,
-    //     },
-    //     SerializationMode::Json,
-    // );
+    let kafka = (KafkaConnector {})
+        .from_config(
+            Some(1),
+            "test_source",
+            KafkaConfig {
+                authentication: Some(arroyo_connectors::kafka::KafkaConfigAuthentication::None {}),
+                bootstrap_servers: "localhost:9092".to_string().try_into().unwrap(),
+            },
+            KafkaTable {
+                topic: "test_topic".to_string(),
+                type_: arroyo_connectors::kafka::TableType::Source {
+                    offset: arroyo_connectors::kafka::SourceOffset::Latest,
+                },
+            },
+            Some(&schema),
+        )
+        .unwrap();
 
-    // let mut plan = SqlPreprocessor {
-    //     schema_provider: &mut schema_provider,
-    // }
-    // .plan_query(&format!("SELECT {} FROM test_source", calculation_string))
-    // .unwrap();
+    schema_provider.add_connector_table(kafka);
 
-    // let Table::Anonymous{logical_plan: LogicalPlan::Projection(projection)} = plan.remove(0) else {panic!("expect projection")};
-    // let ctx = ExpressionContext {
-    //     schema_provider: &schema_provider,
-    //     input_struct: &struct_def,
-    // };
+    let mut inserts = vec![];
+    for statement in Parser::parse_sql(
+        &PostgreSqlDialect {},
+        &format!("SELECT {} FROM test_source", calculation_string),
+    )
+    .unwrap()
+    {
+        if let Some(table) = Table::try_from_statement(&statement, &schema_provider).unwrap() {
+            schema_provider.insert_table(table);
+        } else {
+            inserts.push(Insert::try_from_statement(&statement, &schema_provider).unwrap());
+        };
+    }
 
-    // let generating_expression = ctx.compile_expr(&projection.expr[0]).unwrap();
+    let Insert::Anonymous{logical_plan: LogicalPlan::Projection(projection)} = inserts.remove(0) else {panic!("expect projection")};
+    let ctx = ExpressionContext {
+        schema_provider: &schema_provider,
+        input_struct: &struct_def,
+    };
 
-    // generate_test_code(
-    //     test_name,
-    //     &generating_expression,
-    //     input_value,
-    //     expected_result,
-    // );
+    let generating_expression = ctx.compile_expr(&projection.expr[0]).unwrap();
 
-    todo!()
+    generate_test_code(
+        test_name,
+        &generating_expression,
+        input_value,
+        expected_result,
+    )
 }

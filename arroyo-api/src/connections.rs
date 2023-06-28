@@ -1,5 +1,5 @@
 use arroyo_connectors::connector_for_type;
-use arroyo_rpc::grpc::api::{Connection, CreateConnectionReq, TestSourceMessage};
+use arroyo_rpc::grpc::api::{Connection, CreateConnectionReq};
 use arroyo_rpc::grpc::api::{CreateConnectionResp, DeleteConnectionReq};
 use cornucopia_async::GenericClient;
 use tonic::Status;
@@ -7,7 +7,7 @@ use tonic::Status;
 use crate::handle_delete;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnection;
-use crate::{handle_db_error, log_and_map, required_field, AuthData};
+use crate::{handle_db_error, log_and_map, AuthData};
 
 pub(crate) async fn create_connection(
     req: CreateConnectionReq,
@@ -71,20 +71,6 @@ pub(crate) async fn get_connections(
         .map_err(log_and_map)?;
 
     Ok(res.into_iter().map(|rec| rec.into()).collect())
-}
-
-pub(crate) async fn get_connection<E: GenericClient>(
-    auth: &AuthData,
-    name: &str,
-    client: &E,
-) -> Result<Connection, Status> {
-    api_queries::get_connection()
-        .bind(client, &auth.organization_id, &name)
-        .opt()
-        .await
-        .map_err(log_and_map)?
-        .ok_or_else(|| Status::not_found(format!("No connection with name '{}'", name)))
-        .map(|c| c.into())
 }
 
 pub(crate) async fn delete_connection(

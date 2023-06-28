@@ -7,13 +7,12 @@ import {
   FormErrorMessage,
   FormHelperText,
   FormLabel,
-  Heading,
   Input,
   Select,
   Stack,
 } from '@chakra-ui/react';
 import { JSONSchema7 } from 'json-schema';
-import { Form, useFormik } from 'formik';
+import { useFormik } from 'formik';
 
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
@@ -176,8 +175,11 @@ export function FormInner({
                     key={key}
                     title={property.title || key}
                     description={property.description}
-                    placeholder='Select an option'
-                    options={property.enum.map(value => ({ value: value!.toString(), label: value!.toString() }))}
+                    placeholder="Select an option"
+                    options={property.enum.map(value => ({
+                      value: value!.toString(),
+                      label: value!.toString(),
+                    }))}
                     value={values[key]}
                     onChange={onChange}
                   />
@@ -200,24 +202,27 @@ export function FormInner({
               }
             case 'number':
             case 'integer': {
-              return <NumberWidget
-                path={(path ? `${path}.` : '') + key}
-                key={key}
-                title={property.title || key}
-                description={property.description}
-                required={schema.required?.includes(key)}
-                type={property.type}
-                placeholder={
-                  // @ts-ignore
-                  property.examples ? (property.examples[0] as number) : undefined
-                }
-                min={property.minimum}
-                max={property.maximum}
-                value={values[key]}
-                errors={errors}
-                onChange={onChange}
-              />;
-342            }
+              return (
+                <NumberWidget
+                  path={(path ? `${path}.` : '') + key}
+                  key={key}
+                  title={property.title || key}
+                  description={property.description}
+                  required={schema.required?.includes(key)}
+                  type={property.type}
+                  placeholder={
+                    // @ts-ignore
+                    property.examples ? (property.examples[0] as number) : undefined
+                  }
+                  min={property.minimum}
+                  max={property.maximum}
+                  value={values[key]}
+                  errors={errors}
+                  onChange={onChange}
+                />
+              );
+              342;
+            }
             case 'object': {
               if (property.oneOf) {
                 const typeKey = '__meta.' + key + '.type';
@@ -244,23 +249,25 @@ export function FormInner({
                         onChange={onChange}
                       />
 
-                      { value != undefined && <Box p={4}>
-                        <FormInner
-                          path={key}
-                          // @ts-ignore
-                          schema={property.oneOf.find(x => x.title == value) || property.oneOf[0]}
-                          errors={errors}
-                          onChange={onChange}
-                          values={values[key] || {}}
-                        />
-                      </Box> }
+                      {value != undefined && (
+                        <Box p={4}>
+                          <FormInner
+                            path={key}
+                            // @ts-ignore
+                            schema={property.oneOf.find(x => x.title == value) || property.oneOf[0]}
+                            errors={errors}
+                            onChange={onChange}
+                            values={values[key] || {}}
+                          />
+                        </Box>
+                      )}
                     </Stack>
                   </fieldset>
                 );
               }
             }
             default: {
-              console.warn("Unsupported field type", property.type);
+              console.warn('Unsupported field type', property.type);
             }
           }
         }
@@ -275,7 +282,7 @@ export function JsonForm({
   initial = {},
   hasName,
   error,
-  button = "Create",
+  button = 'Create',
 }: {
   schema: JSONSchema7;
   onSubmit: (values: any) => Promise<void>;
@@ -312,17 +319,19 @@ export function JsonForm({
 
   return (
     <form onSubmit={formik.handleSubmit}>
-      {hasName && <FormControl isRequired={true} pb={8}>
-        <FormLabel>Name</FormLabel>
-        <Input
-          name="name"
-          type="text"
-          placeholder={`my-${schema.title?.toLowerCase()}`}
-          value={formik.values.name || ''}
-          onChange={formik.handleChange}
-        />
-        <FormHelperText>Enter a name to identify this {schema.title || "object"}</FormHelperText>
-      </FormControl>}
+      {hasName && (
+        <FormControl isRequired={true} pb={8}>
+          <FormLabel>Name</FormLabel>
+          <Input
+            name="name"
+            type="text"
+            placeholder={`my-${schema.title?.toLowerCase()}`}
+            value={formik.values.name || ''}
+            onChange={formik.handleChange}
+          />
+          <FormHelperText>Enter a name to identify this {schema.title || 'object'}</FormHelperText>
+        </FormControl>
+      )}
 
       <FormInner
         schema={schema}
@@ -331,10 +340,12 @@ export function JsonForm({
         errors={formik.errors}
       />
 
-      { error && <Alert mt={8} status="error">
+      {error && (
+        <Alert mt={8} status="error">
           <AlertIcon />
           {error}
-        </Alert> }
+        </Alert>
+      )}
 
       <Button mt={8} mb={4} type="submit" isLoading={formik.isSubmitting}>
         {button}

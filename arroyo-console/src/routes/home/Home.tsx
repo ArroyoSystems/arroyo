@@ -12,10 +12,7 @@ import {
 } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
 import { useLinkClickHandler } from 'react-router-dom';
-import {
-  GetJobsReq,
-  JobStatus,
-} from '../../gen/api_pb';
+import { GetJobsReq, JobStatus } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
 
 interface HomeState {

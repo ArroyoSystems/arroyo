@@ -14,12 +14,10 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-  Select,
   Stack,
 } from '@chakra-ui/react';
 import React from 'react';
-import { SinkOpt, SqlOptions } from '../lib/types';
-import { ConnectionTable } from '../gen/api_pb';
+import { SqlOptions } from '../lib/types';
 
 export interface StartPipelineModalProps {
   isOpen: boolean;

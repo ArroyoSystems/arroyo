@@ -1,8 +1,34 @@
 import { Dispatch, useRef, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { ApiClient } from '../../main';
-import { Alert, AlertDescription, AlertDialog, AlertDialogBody, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogOverlay, AlertIcon, AlertTitle, Box, Button, FormControl, FormHelperText, FormLabel, Heading, Input, Spinner, Stack, StackDivider, Text, useDisclosure } from '@chakra-ui/react';
-import { Connector, CreateConnectionReq, CreateConnectionTableReq, TestSourceMessage } from '../../gen/api_pb';
+import {
+  Alert,
+  AlertDescription,
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
+  AlertIcon,
+  AlertTitle,
+  Box,
+  Button,
+  FormControl,
+  FormHelperText,
+  FormLabel,
+  Input,
+  Spinner,
+  Stack,
+  StackDivider,
+  Text,
+  useDisclosure,
+} from '@chakra-ui/react';
+import {
+  Connector,
+  CreateConnectionTableReq,
+  TestSourceMessage,
+} from '../../gen/api_pb';
 import { ConnectError } from '@bufbuild/connect-web';
 import { useNavigate } from 'react-router-dom';
 
@@ -17,13 +43,12 @@ export function ConnectionTester({
   setState: Dispatch<CreateConnectionState>;
   client: ApiClient;
 }) {
-
   const [testing, setTesting] = useState<boolean>(false);
   const [messages, setMessages] = useState<Array<TestSourceMessage> | null>(null);
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = useRef<any>();
   const [touched, setTouched] = useState<boolean>(false);
-  const [error, setError] = useState<{title: string, body: string} | null>(null);
+  const [error, setError] = useState<{ title: string; body: string } | null>(null);
   const navigate = useNavigate();
 
   const done = messages != null && messages.length > 0 && messages[messages?.length - 1].done;
@@ -38,7 +63,7 @@ export function ConnectionTester({
     connectionId: state.connectionId || undefined,
     config: JSON.stringify(config),
     schema: state.schema || undefined,
-  })
+  });
 
   const onClickTest = async () => {
     setTesting(true);
@@ -55,9 +80,12 @@ export function ConnectionTester({
         }
       } catch (e) {
         if (e instanceof ConnectError) {
-          setError({title: "Failed to test connection", body: e.rawMessage});
+          setError({ title: 'Failed to test connection', body: e.rawMessage });
         } else {
-          setError({title: "Failed to test connection", body: 'Something went wrong... try again'});
+          setError({
+            title: 'Failed to test connection',
+            body: 'Something went wrong... try again',
+          });
         }
       }
       setTesting(false);
@@ -65,18 +93,21 @@ export function ConnectionTester({
   };
 
   const submit = async () => {
-      setError(null);
-      try {
-        await(await client()).createConnectionTable(createRequest);
-        navigate('/connections');
-      } catch (e) {
-        if (e instanceof ConnectError) {
-          setError({title: "Failed to create connection", body: e.rawMessage});
-        } else {
-          setError({title: "Failed to create connection", body: 'Something went wrong... try again'});
-        }
+    setError(null);
+    try {
+      await (await client()).createConnectionTable(createRequest);
+      navigate('/connections');
+    } catch (e) {
+      if (e instanceof ConnectError) {
+        setError({ title: 'Failed to create connection', body: e.rawMessage });
+      } else {
+        setError({
+          title: 'Failed to create connection',
+          body: 'Something went wrong... try again',
+        });
       }
-  }
+    }
+  };
 
   const onClickContinue = async () => {
     if (errored) {
@@ -109,14 +140,13 @@ export function ConnectionTester({
     );
   }
 
-
   return (
     <>
       {error && (
         <Alert status="error">
-            <AlertIcon />
-            <AlertTitle>{error.title}</AlertTitle>
-            <AlertDescription>{error.body}</AlertDescription>
+          <AlertIcon />
+          <AlertTitle>{error.title}</AlertTitle>
+          <AlertDescription>{error.body}</AlertDescription>
         </Alert>
       )}
       <Stack spacing={8} maxW={'md'}>

@@ -142,7 +142,7 @@ export const ConfigureConnection = ({
         <ClusterEditor
           client={client}
           connectionId={state.connectionId}
-          setConnectionId={(c) => setState({ ...state, connectionId: c })}
+          setConnectionId={c => setState({ ...state, connectionId: c })}
           connector={connector.id}
           connections={connections!}
           schema={JSON.parse(connector.connectionConfig)}
@@ -158,7 +158,7 @@ export const ConfigureConnection = ({
           schema={JSON.parse(connector!.tableConfig)}
           initial={state.table || {}}
           onSubmit={async table => {
-            setState({ ...state, table: table })
+            setState({ ...state, table: table });
             onSubmit();
           }}
           error={null}

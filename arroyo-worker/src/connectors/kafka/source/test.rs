@@ -59,7 +59,7 @@ impl KafkaTopicTester {
         task_info: TaskInfo,
         restore_from: Option<u32>,
     ) -> KafkaSourceWithReads {
-        let mut kafka = KafkaSourceFunc::new(
+        let mut kafka: KafkaSourceFunc<(), TestData> = KafkaSourceFunc::new(
             &self.server,
             &self.topic,
             crate::connectors::kafka::SourceOffset::Earliest,

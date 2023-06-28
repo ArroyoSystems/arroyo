@@ -724,7 +724,7 @@ service ApiGrpc {
   rpc CreateConnectionTable(CreateConnectionTableReq) returns (CreateConnectionTableResp);
   rpc TestConnectionTable(CreateConnectionTableReq) returns (stream TestSourceMessage);
   rpc GetConnectionTables(GetConnectionTablesReq) returns (GetConnectionTablesResp);
-
+  rpc TestSchema(TestSchemaReq) returns (TestSchemaResp);
   rpc GetConfluentSchema(ConfluentSchemaReq) returns (ConfluentSchemaResp);
 
   rpc CreatePipeline(CreatePipelineReq) returns (CreatePipelineResp);

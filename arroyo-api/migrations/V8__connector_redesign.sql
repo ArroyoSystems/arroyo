@@ -24,3 +24,13 @@ CREATE TABLE connection_tables (
     UNIQUE (organization_id, name)
 );
 
+CREATE TABLE connection_table_pipelines (
+    id BIGSERIAL PRIMARY KEY,
+    pipeline_id BIGSERIAL REFERENCES pipeline_definitions(id) ON DELETE CASCADE,
+    connection_table_id BIGSERIAL REFERENCES connection_tables(id)
+);
+
+DROP TABLE pipeline_sinks;
+DROP TABLE pipeline_sources;
+DROP TABLE sinks;
+DROP TABLE sources;

@@ -20,7 +20,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::operators::{SerializationMode, UserError};
 
-use super::{KafkaConfig, KafkaTable, TableType};
+use super::{client_configs, KafkaConfig, KafkaTable, TableType};
 
 #[cfg(test)]
 mod test;
@@ -89,23 +89,6 @@ where
             panic!("found non-source kafka config in source operator");
         };
 
-        let mut client_configs: HashMap<String, String> = HashMap::new();
-
-        match connection.authentication {
-            None | Some(super::KafkaConfigAuthentication::None {}) => {}
-            Some(super::KafkaConfigAuthentication::Sasl {
-                mechanism,
-                password,
-                protocol,
-                username,
-            }) => {
-                client_configs.insert("sasl.mechanism".to_string(), mechanism);
-                client_configs.insert("security.protocol".to_string(), protocol);
-                client_configs.insert("sasl.username".to_string(), username);
-                client_configs.insert("sasl.password".to_string(), password);
-            }
-        };
-
         Self {
             topic: table.topic,
             bootstrap_servers: connection.bootstrap_servers.to_string(),
@@ -118,8 +101,15 @@ where
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
                 OperatorConfigSerializationMode::DebeziumJson => todo!(),
             },
-            client_configs,
-            messages_per_second: NonZeroU32::new(100000).unwrap(),
+            client_configs: client_configs(&connection),
+            messages_per_second: NonZeroU32::new(
+                config
+                    .rate_limit
+                    .map(|l| l.messages_per_second.map(|l| l as u32))
+                    .flatten()
+                    .unwrap_or(u32::MAX),
+            )
+            .unwrap(),
             _t: PhantomData,
         }
     }

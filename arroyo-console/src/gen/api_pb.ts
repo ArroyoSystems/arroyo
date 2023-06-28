@@ -420,6 +420,11 @@ export enum PrimitiveType {
   UnixMicros = 12,
 
   /**
+   * @generated from enum value: UnixNanos = 13;
+   */
+  UnixNanos = 13,
+
+  /**
    * @generated from enum value: DateTime = 10;
    */
   DateTime = 10,
@@ -442,6 +447,7 @@ proto3.util.setEnumType(PrimitiveType, "arroyo_api.PrimitiveType", [
   { no: 8, name: "Bytes" },
   { no: 9, name: "UnixMillis" },
   { no: 12, name: "UnixMicros" },
+  { no: 13, name: "UnixNanos" },
   { no: 10, name: "DateTime" },
   { no: 11, name: "Json" },
 ]);
@@ -4805,6 +4811,11 @@ export class ConnectionSchema extends Message<ConnectionSchema> {
   formatOptions?: FormatOptions;
 
   /**
+   * @generated from field: optional string struct_name = 8;
+   */
+  structName?: string;
+
+  /**
    * @generated from field: repeated arroyo_api.SourceField fields = 3;
    */
   fields: SourceField[] = [];
@@ -4848,6 +4859,7 @@ export class ConnectionSchema extends Message<ConnectionSchema> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "format", kind: "enum", T: proto3.getEnumType(Format), opt: true },
     { no: 2, name: "format_options", kind: "message", T: FormatOptions },
+    { no: 8, name: "struct_name", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 3, name: "fields", kind: "message", T: SourceField, repeated: true },
     { no: 4, name: "json_schema", kind: "scalar", T: 9 /* ScalarType.STRING */, oneof: "definition" },
     { no: 5, name: "protobuf_schema", kind: "scalar", T: 9 /* ScalarType.STRING */, oneof: "definition" },

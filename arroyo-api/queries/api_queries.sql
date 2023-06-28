@@ -78,13 +78,9 @@ SELECT pipelines.id as id, name, type, textual_repr, udfs, program FROM pipeline
 INNER JOIN pipeline_definitions as d ON pipelines.id = d.pipeline_id AND pipelines.current_version = d.version
 WHERE pipelines.id = :pipeline_id AND pipelines.organization_id = :organization_id;
 
---! add_pipeline_source
-INSERT INTO pipeline_sources(pipeline_id, source_id)
-VALUES (:pipeline_id, :source_id);
-
---! add_pipeline_sink
-INSERT INTO pipeline_sinks(pipeline_id, sink_id)
-VALUES (:pipeline_id, :sink_id);
+--! add_pipeline_connection_table
+INSERT INTO connection_table_pipelines(pipeline_id, connection_table_id)
+VALUES (:pipeline_id, :connection_table_id);
 
 --! delete_pipeline
 DELETE FROM pipelines

@@ -1,5 +1,5 @@
-use arroyo_datastream::SerializationMode;
-
+use arroyo_connectors::nexmark::{NexmarkConnector, NexmarkTable};
+use arroyo_connectors::{Connector, EmptyConfig};
 use arroyo_sql::{
     get_test_expression, parse_and_get_program_sync, ArroyoSchemaProvider, SqlConfig,
 };
@@ -116,34 +116,22 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
 
     let mut schema_provider = ArroyoSchemaProvider::new();
 
-    todo!();
     // Add a Nexmark source named "nexmark";
-    // schema_provider.add_saved_source_with_type(
-    //     1,
-    //     "nexmark".to_string(),
-    //     arroyo_sql::schemas::nexmark_fields(),
-    //     Some("arroyo_types::nexmark::Event".to_string()),
-    //     SourceConfig::NexmarkSource {
-    //         event_rate: 10,
-    //         runtime: None,
-    //     },
-    //     SerializationMode::Json,
-    // );
-    // schema_provider.add_connection(Connection {
-    //     name: "local".to_string(),
-    //     sources: 0,
-    //     sinks: 0,
-    //     connection_type: Some(arroyo_rpc::grpc::api::connection::ConnectionType::Kafka(
-    //         KafkaConnection {
-    //             bootstrap_servers: "localhost:9090".to_string(),
-    //             auth_config: Some(KafkaAuthConfig {
-    //                 auth_type: Some(arroyo_rpc::grpc::api::kafka_auth_config::AuthType::NoAuth(
-    //                     arroyo_rpc::grpc::api::NoAuth {},
-    //                 )),
-    //             }),
-    //         },
-    //     )),
-    // });
+    let nexmark = (NexmarkConnector {})
+        .from_config(
+            Some(1),
+            "nexmark",
+            EmptyConfig {},
+            NexmarkTable {
+                event_rate: 10.0,
+                runtime: None,
+            },
+            None,
+        )
+        .unwrap();
+
+    schema_provider.add_connector_table(nexmark);
+
     let (program, _) =
         parse_and_get_program_sync(query_string.value(), schema_provider, SqlConfig::default())
             .unwrap();
@@ -159,13 +147,15 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
     quote!(mod #mod_name {
         use petgraph::graph::DiGraph;
         use arroyo_worker::operators::*;
-        use arroyo_worker::operators::sources::*;
+        use arroyo_worker::connectors;
         use arroyo_worker::operators::sinks::*;
         use arroyo_worker::operators::sinks;
         use arroyo_worker::operators::joins::*;
         use arroyo_worker::operators::windows::*;
         use arroyo_worker::engine::{Program, SubtaskNode};
         use arroyo_worker::{LogicalEdge, LogicalNode};
+        use arroyo_sql::types;
+        use types::*;
         use chrono;
         use std::time::SystemTime;
         use std::str::FromStr;

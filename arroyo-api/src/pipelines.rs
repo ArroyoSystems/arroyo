@@ -210,6 +210,15 @@ pub(crate) async fn create_pipeline<'a>(
         .await
         .map_err(log_and_map)?;
 
+    if !is_preview {
+        for connection in connections {
+            api_queries::add_pipeline_connection_table()
+                .bind(tx, &pipeline_id, &connection)
+                .await
+                .map_err(log_and_map)?;
+        }
+    }
+
     Ok(pipeline_id)
 }
 

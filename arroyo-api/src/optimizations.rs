@@ -429,7 +429,7 @@ impl Optimizer for WasmFusionOptimizer {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::Duration};
+    use std::time::Duration;
 
     use petgraph::prelude::DiGraph;
 

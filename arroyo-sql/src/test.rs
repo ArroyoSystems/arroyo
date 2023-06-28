@@ -1,69 +1,9 @@
-use std::time::Duration;
-
-use arrow_schema::{DataType, TimeUnit};
-use arroyo_datastream::SerializationMode;
-use arroyo_rpc::grpc::api::Connection;
-
-use crate::{
-    parse_and_get_program,
-    types::{StructDef, StructField, TypeDef},
-    ArroyoSchemaProvider, SqlConfig,
+use arroyo_connectors::{
+    nexmark::{NexmarkConnector, NexmarkTable},
+    Connector, EmptyConfig,
 };
 
-fn test_schema() -> Vec<StructField> {
-    vec![
-        StructField::new(
-            "bid".to_string(),
-            None,
-            TypeDef::StructDef(
-                StructDef {
-                    name: Some("arroyo_types::nexmark::Bid".to_string()),
-                    fields: vec![
-                        StructField::new(
-                            "auction".to_string(),
-                            None,
-                            TypeDef::DataType(DataType::UInt64, false),
-                        ),
-                        StructField::new(
-                            "datetime".to_string(),
-                            None,
-                            TypeDef::DataType(
-                                DataType::Timestamp(TimeUnit::Millisecond, None),
-                                false,
-                            ),
-                        ),
-                    ],
-                },
-                true,
-            ),
-        ),
-        StructField::new(
-            "auction".to_string(),
-            None,
-            TypeDef::StructDef(
-                StructDef {
-                    name: Some("arroyo_types::nexmark::Auction".to_string()),
-                    fields: vec![
-                        StructField::new(
-                            "auction".to_string(),
-                            None,
-                            TypeDef::DataType(DataType::UInt64, false),
-                        ),
-                        StructField::new(
-                            "datetime".to_string(),
-                            None,
-                            TypeDef::DataType(
-                                DataType::Timestamp(TimeUnit::Millisecond, None),
-                                false,
-                            ),
-                        ),
-                    ],
-                },
-                true,
-            ),
-        ),
-    ]
-}
+use crate::{parse_and_get_program, ArroyoSchemaProvider, SqlConfig};
 
 #[tokio::test]
 async fn test_parse() {
@@ -139,33 +79,22 @@ async fn test_table_alias() {
 
 fn get_test_schema_provider() -> ArroyoSchemaProvider {
     let mut schema_provider = ArroyoSchemaProvider::new();
-    todo!();
-    // schema_provider.add_saved_source_with_type(
-    //     1,
-    //     "nexmark".to_string(),
-    //     test_schema(),
-    //     Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
-    //     arroyo_datastream::SourceConfig::NexmarkSource {
-    //         event_rate: 10,
-    //         runtime: Some(Duration::from_secs(10)),
-    //     },
-    //     SerializationMode::Json,
-    // );
-    // schema_provider.add_connection(Connection {
-    //     name: "local".to_string(),
-    //     sources: 0,
-    //     sinks: 0,
-    //     connection_type: Some(arroyo_rpc::grpc::api::connection::ConnectionType::Kafka(
-    //         KafkaConnection {
-    //             bootstrap_servers: "localhost:9090".to_string(),
-    //             auth_config: Some(KafkaAuthConfig {
-    //                 auth_type: Some(arroyo_rpc::grpc::api::kafka_auth_config::AuthType::NoAuth(
-    //                     arroyo_rpc::grpc::api::NoAuth {},
-    //                 )),
-    //             }),
-    //         },
-    //     )),
-    // });
+
+    let nexmark = (NexmarkConnector {})
+        .from_config(
+            Some(1),
+            "nexmark",
+            EmptyConfig {},
+            NexmarkTable {
+                event_rate: 10.0,
+                runtime: Some(10.0 * 1_000_000.0),
+            },
+            None,
+        )
+        .unwrap();
+
+    schema_provider.add_connector_table(nexmark);
+
     schema_provider
 }
 
@@ -213,9 +142,11 @@ async fn test_no_virtual_fields_updating() {
         datetime datetime GENERATED ALWAYS AS (CAST(date_string as timestamp)),
         watermark datetime GENERATED ALWAYS AS (CAST(date_string as timestamp) - interval '1 second')
       ) WITH (
-        connection = 'local',
+        connector = 'kafka',
+        bootstrap_servers = 'localhost:9092',
+        type = 'source',
         topic = 'updating',
-        serialization_mode = 'debezium_json'
+        format = 'debezium_json'
       );
       SELECT * FROM debezium_source";
     let err = parse_and_get_program(sql, schema_provider, SqlConfig::default())
@@ -229,27 +160,14 @@ async fn test_no_virtual_fields_updating() {
 
 #[tokio::test]
 async fn test_udf() {
-    let mut schema_provider = ArroyoSchemaProvider::new();
+    let mut schema_provider = get_test_schema_provider();
 
     schema_provider
-        .add_rust_udf("fn my_sqr(x: u64) -> u64 { x * x }")
+        .add_rust_udf("fn my_sqr(x: i64) -> i64 { x * x }")
         .unwrap();
 
-    todo!()
-    // schema_provider.add_saved_source_with_type(
-    //     1,
-    //     "nexmark".to_string(),
-    //     test_schema(),
-    //     Some("arroyo_types::nexmark::NexmarkEvent".to_string()),
-    //     arroyo_datastream::SourceConfig::NexmarkSource {
-    //         event_rate: 10,
-    //         runtime: Some(Duration::from_secs(10)),
-    //     },
-    //     SerializationMode::Json,
-    // );
-
-    // let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
-    // parse_and_get_program(sql, schema_provider, SqlConfig::default())
-    //     .await
-    //     .unwrap();
+    let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
+    parse_and_get_program(sql, schema_provider, SqlConfig::default())
+        .await
+        .unwrap();
 }

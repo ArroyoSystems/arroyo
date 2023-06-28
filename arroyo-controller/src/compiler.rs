@@ -8,7 +8,7 @@ use arroyo_datastream::{
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::CompileQueryReq;
 use arroyo_sql::types::duration_to_syn_expr;
-use arroyo_types::{to_micros, REMOTE_COMPILER_ENDPOINT_ENV};
+use arroyo_types::REMOTE_COMPILER_ENDPOINT_ENV;
 use petgraph::Direction;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};

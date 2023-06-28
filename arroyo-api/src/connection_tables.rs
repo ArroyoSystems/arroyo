@@ -3,7 +3,8 @@ use arrow_schema::DataType;
 use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::grpc::api::{
     connection_schema::Definition, ConfluentSchemaReq, ConfluentSchemaResp, Connection,
-    ConnectionSchema, ConnectionTable, CreateConnectionTableReq, TableType, TestSourceMessage,
+    ConnectionSchema, ConnectionTable, CreateConnectionTableReq, TableType, TestSchemaReq,
+    TestSourceMessage,
 };
 use arroyo_sql::{
     json_schema::{self, convert_json_schema},
@@ -19,7 +20,7 @@ use tracing::warn;
 use crate::{
     handle_db_error, log_and_map,
     queries::api_queries::{self, GetConnectionTables},
-    AuthData,
+    required_field, AuthData,
 };
 
 async fn get_and_validate_connector<E: GenericClient>(
@@ -237,6 +238,29 @@ pub(crate) fn expand_schema(
     }
 
     Ok(schema)
+}
+
+pub(crate) async fn test_schema(req: TestSchemaReq) -> Result<Vec<String>, Status> {
+    let Some(schema_def) = req
+        .schema
+        .ok_or_else(|| required_field("schema"))?
+        .definition else {
+            return Ok(vec![]);
+        };
+
+    match schema_def {
+        Definition::JsonSchema(schema) => {
+            if let Err(e) = convert_json_schema(&"test", &schema) {
+                Ok(vec![e])
+            } else {
+                Ok(vec![])
+            }
+        }
+        _ => {
+            // TODO: add testing for other schema types
+            Ok(vec![])
+        }
+    }
 }
 
 pub(crate) async fn get_confluent_schema(

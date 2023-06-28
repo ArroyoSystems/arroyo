@@ -24,11 +24,11 @@ const connectorsKey = () => {
 
 const connectionsKey = () => {
   return { key: 'Connections' };
-}
+};
 
 const connectionTablesKey = () => {
   return { key: 'ConnectionTables' };
-}
+};
 
 const jobDetailsKey = (jobId?: string) => {
   return jobId ? { key: 'Job', jobId } : null;
@@ -65,11 +65,9 @@ const sinksKey = () => {
 // Connectors
 const connectorsFetcher = (client: ApiClient) => {
   return async () => {
-    return await (
-      await client()
-    ).getConnectors(new GetConnectorsReq({}));
-  }
-}
+    return await (await client()).getConnectors(new GetConnectorsReq({}));
+  };
+};
 
 export const useConnectors = (client: ApiClient) => {
   const { data, isLoading } = useSWR(connectorsKey(), connectorsFetcher(client));
@@ -83,11 +81,9 @@ export const useConnectors = (client: ApiClient) => {
 // Connections
 const connectionsFetcher = (client: ApiClient) => {
   return async () => {
-    return (await (
-      await client()
-    ).getConnections(new GetConnectionsReq({}))).connections;
-  }
-}
+    return (await (await client()).getConnections(new GetConnectionsReq({}))).connections;
+  };
+};
 
 export const useConnections = (client: ApiClient) => {
   const { data, isLoading, mutate } = useSWR(connectionsKey(), connectionsFetcher(client));
@@ -99,32 +95,23 @@ export const useConnections = (client: ApiClient) => {
   };
 };
 
-
 // ConnectionTables
 const connectionTablesFetcher = (client: ApiClient) => {
   return async (params: { connectionId: string }) => {
-    return (await (
-      await client()
-    ).getConnectionTables(new GetConnectionTablesReq({}))).tables;
-  }
-}
+    return (await (await client()).getConnectionTables(new GetConnectionTablesReq({}))).tables;
+  };
+};
 
 export const useConnectionTables = (client: ApiClient) => {
-  const { data, isLoading } = useSWR(
-    connectionTablesKey(),
-    connectionTablesFetcher(client),
-    {
-      refreshInterval: 5000,
-    }
-  );
+  const { data, isLoading } = useSWR(connectionTablesKey(), connectionTablesFetcher(client), {
+    refreshInterval: 5000,
+  });
 
   return {
     connectionTables: data,
     connectionTablesLoading: isLoading,
-  }
-}
-
-
+  };
+};
 
 // JobDetailsReq
 
@@ -304,4 +291,3 @@ export const usePipelineGraph = (client: ApiClient, query?: string, udfInput?: s
     pipelineGraph: data,
   };
 };
-

@@ -1,5 +1,14 @@
-import { Box, Button, Code, FormControl, FormLabel, Link, Select, Stack, StepStatus, Text } from '@chakra-ui/react';
-import React, { Dispatch, useEffect, useState } from 'react';
+import {
+  Button,
+  Code,
+  FormControl,
+  FormLabel,
+  Link,
+  Select,
+  Stack,
+  Text,
+} from '@chakra-ui/react';
+import React, { Dispatch } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { ApiClient } from '../../main';
 import { ConnectionSchema, Connector, Format, FormatOptions } from '../../gen/api_pb';
@@ -22,12 +31,9 @@ const JsonEditor = ({
   let editor: JSX.Element | null = null;
   if (state.schema?.definition.case === 'jsonSchema') {
     if (state.schema?.formatOptions?.confluentSchemaRegistry) {
-      editor = <ConfluentSchemaEditor
-        state={state}
-        setState={setState}
-        client={client}
-        next={next}
-      />;
+      editor = (
+        <ConfluentSchemaEditor state={state} setState={setState} client={client} next={next} />
+      );
     } else {
       editor = <JsonSchemaEditor state={state} setState={setState} next={next} client={client} />;
     }
@@ -46,7 +52,7 @@ const JsonEditor = ({
         <Button onClick={next}>Continue</Button>
       </Stack>
     );
-  };
+  }
 
   const onChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     switch (e.target.value) {
@@ -86,25 +92,22 @@ const JsonEditor = ({
   let value;
   switch (state.schema?.definition.case) {
     case 'jsonSchema':
-      value = state.schema!.formatOptions?.confluentSchemaRegistry ? 'confluentSchemaRegistry' : 'jsonSchema';
+      value = state.schema!.formatOptions?.confluentSchemaRegistry
+        ? 'confluentSchemaRegistry'
+        : 'jsonSchema';
       break;
     case 'rawSchema':
       value = 'rawSchema';
       break;
     default:
-      null
-  };
+      null;
+  }
 
   return (
     <Stack spacing={8}>
       <FormControl>
         <FormLabel>Schema type</FormLabel>
-        <Select
-          maxW={'lg'}
-          placeholder="Select schema type"
-          value={value}
-          onChange={onChange}
-        >
+        <Select maxW={'lg'} placeholder="Select schema type" value={value} onChange={onChange}>
           <option value="jsonSchema">Json Schema</option>
           <option value="rawSchema">Unstructured JSON</option>
           {connector.id === 'kafka' && (
@@ -113,7 +116,7 @@ const JsonEditor = ({
         </Select>
       </FormControl>
 
-      { editor }
+      {editor}
     </Stack>
   );
 };
@@ -139,7 +142,7 @@ const RawStringEditor = ({
   };
 
   return (
-    <Stack spacing={4} maxW='md'>
+    <Stack spacing={4} maxW="md">
       <Text>
         When using the raw string format, values read from the source are interpreted as UTF-8
         encoded strings.
@@ -152,7 +155,7 @@ const RawStringEditor = ({
       <Button onClick={submit}>Continue</Button>
     </Stack>
   );
-}
+};
 
 export const DefineSchema = ({
   connector,
@@ -171,7 +174,15 @@ export const DefineSchema = ({
     {
       name: 'JSON',
       value: Format.JsonFormat,
-      el: <JsonEditor connector={connector} state={state} setState={setState} client={client} next={next} />,
+      el: (
+        <JsonEditor
+          connector={connector}
+          state={state}
+          setState={setState}
+          client={client}
+          next={next}
+        />
+      ),
     },
     {
       name: 'Raw String',

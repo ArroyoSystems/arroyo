@@ -31,7 +31,7 @@ export type CreateConnectionState = {
   connectionId: string | null;
   table: any;
   schema: ConnectionSchema | null;
-}
+};
 
 export const ConnectionCreator = ({
   client,
@@ -69,24 +69,23 @@ export const ConnectionCreator = ({
     },
     {
       title: 'Define schema',
-      el: <DefineSchema
-        client={client}
-        connector={connector}
-        state={state}
-        setState={setState}
-        next={() => {
-          setActiveStep(2);
-        }}
-       />
+      el: (
+        <DefineSchema
+          client={client}
+          connector={connector}
+          state={state}
+          setState={setState}
+          next={() => {
+            setActiveStep(2);
+          }}
+        />
+      ),
     },
     {
-      title: 'Create' ,
-      el: <ConnectionTester
-        client={client}
-        connector={connector}
-        state={state}
-        setState={setState}
-        />
+      title: 'Create',
+      el: (
+        <ConnectionTester client={client} connector={connector} state={state} setState={setState} />
+      ),
     },
   ];
 
@@ -98,11 +97,14 @@ export const ConnectionCreator = ({
     <Stack spacing={8}>
       <Stepper index={activeStep}>
         {steps.map((step, index) => (
-          <Step key={index} onClick={() => {
-            if (activeStep > index) {
-              setActiveStep(index);
-            }
-          }}>
+          <Step
+            key={index}
+            onClick={() => {
+              if (activeStep > index) {
+                setActiveStep(index);
+              }
+            }}
+          >
             <StepIndicator>
               <StepStatus
                 complete={<StepIcon />}
@@ -165,10 +167,7 @@ export const CreateConnection = ({ client }: { client: ApiClient }) => {
             <Heading size="sm">Create {connector?.name} connection</Heading>
           </Stack>
 
-          <ConnectionCreator
-            client={client}
-            connector={connector!}
-            />
+          <ConnectionCreator client={client} connector={connector!} />
         </Stack>
       </Container>
     );

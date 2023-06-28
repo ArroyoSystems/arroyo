@@ -3,7 +3,7 @@ import { CreateConnectionState } from './CreateConnection';
 import { ApiClient } from '../../main';
 import { Alert, AlertIcon, Box, Button, List, ListItem, Stack } from '@chakra-ui/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { ConnectionSchema, JsonSchemaDef, SourceSchema, TestSchemaReq } from '../../gen/api_pb';
+import { ConnectionSchema, TestSchemaReq } from '../../gen/api_pb';
 
 export function JsonSchemaEditor({
   state,
@@ -84,7 +84,7 @@ export function JsonSchemaEditor({
           ...state,
           schema: new ConnectionSchema({
             ...state.schema,
-            definition: { case: 'jsonSchema', value : e.getValue() },
+            definition: { case: 'jsonSchema', value: e.getValue() },
           }),
         });
       });
