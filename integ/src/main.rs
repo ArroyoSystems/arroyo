@@ -154,7 +154,7 @@ pub async fn main() {
             schema: None,
             connector: "nexmark".to_string(),
             connection_id: None,
-            config: "{\"event_rate\": \"10\"}".to_string(),
+            config: "{\"event_rate\": 10.0}".to_string(),
         })
         .await
         .unwrap();

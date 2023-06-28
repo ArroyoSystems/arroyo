@@ -1,13 +1,4 @@
-import {
-  Button,
-  Code,
-  FormControl,
-  FormLabel,
-  Link,
-  Select,
-  Stack,
-  Text,
-} from '@chakra-ui/react';
+import { Button, Code, FormControl, FormLabel, Link, Select, Stack, Text } from '@chakra-ui/react';
 import React, { Dispatch } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { ApiClient } from '../../main';

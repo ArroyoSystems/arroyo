@@ -24,11 +24,7 @@ import {
   Text,
   useDisclosure,
 } from '@chakra-ui/react';
-import {
-  Connector,
-  CreateConnectionTableReq,
-  TestSourceMessage,
-} from '../../gen/api_pb';
+import { Connector, CreateConnectionTableReq, TestSourceMessage } from '../../gen/api_pb';
 import { ConnectError } from '@bufbuild/connect-web';
 import { useNavigate } from 'react-router-dom';
 
