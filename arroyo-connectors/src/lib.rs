@@ -6,8 +6,8 @@ use arroyo_rpc::{
     grpc::{
         self,
         api::{
-            source_field_type, ConnectionSchema, SourceField, SourceFieldType, TableType,
-            TestSourceMessage,
+            connection_schema::Definition, source_field_type, ConnectionSchema, SourceField,
+            SourceFieldType, TableType, TestSourceMessage,
         },
     },
     primitive_to_sql,
@@ -255,6 +255,8 @@ pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializat
         grpc::api::Format::JsonFormat => {
             if confluent {
                 OperatorConfigSerializationMode::JsonSchemaRegistry
+            } else if matches!(schema.definition, Some(Definition::RawSchema { .. })) {
+                OperatorConfigSerializationMode::RawJson
             } else {
                 OperatorConfigSerializationMode::Json
             }

@@ -2,8 +2,9 @@ use ::time::OffsetDateTime;
 use arroyo_connectors::connectors;
 use arroyo_rpc::grpc::api::{
     CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
-    DeleteJobReq, DeleteJobResp, GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq,
-    GetConnectorsResp, PipelineProgram, TestSchemaReq, TestSchemaResp,
+    DeleteConnectionTableReq, DeleteConnectionTableResp, DeleteJobReq, DeleteJobResp,
+    GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp,
+    PipelineProgram, TestSchemaReq, TestSchemaResp,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -487,6 +488,16 @@ impl ApiGrpc for ApiServer {
 
         let tables = connection_tables::get(&auth, &self.client().await?).await?;
         Ok(Response::new(GetConnectionTablesResp { tables }))
+    }
+
+    async fn delete_connection_table(
+        &self,
+        request: Request<DeleteConnectionTableReq>,
+    ) -> Result<Response<DeleteConnectionTableResp>, Status> {
+        let (req, auth) = self.authenticate(request).await?;
+
+        connection_tables::delete(req.into_inner(), auth, &self.client().await?).await?;
+        Ok(Response::new(DeleteConnectionTableResp {}))
     }
 
     async fn test_schema(

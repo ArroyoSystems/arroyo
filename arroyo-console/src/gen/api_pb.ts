@@ -4507,6 +4507,11 @@ export class ConnectionTable extends Message<ConnectionTable> {
    */
   schema?: ConnectionSchema;
 
+  /**
+   * @generated from field: int32 consumers = 8;
+   */
+  consumers = 0;
+
   constructor(data?: PartialMessage<ConnectionTable>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4522,6 +4527,7 @@ export class ConnectionTable extends Message<ConnectionTable> {
     { no: 5, name: "table_type", kind: "enum", T: proto3.getEnumType(TableType) },
     { no: 6, name: "config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 7, name: "schema", kind: "message", T: ConnectionSchema },
+    { no: 8, name: "consumers", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConnectionTable {
@@ -4606,6 +4612,74 @@ export class GetConnectionTablesResp extends Message<GetConnectionTablesResp> {
 
   static equals(a: GetConnectionTablesResp | PlainMessage<GetConnectionTablesResp> | undefined, b: GetConnectionTablesResp | PlainMessage<GetConnectionTablesResp> | undefined): boolean {
     return proto3.util.equals(GetConnectionTablesResp, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.DeleteConnectionTableReq
+ */
+export class DeleteConnectionTableReq extends Message<DeleteConnectionTableReq> {
+  /**
+   * @generated from field: int64 id = 1;
+   */
+  id = protoInt64.zero;
+
+  constructor(data?: PartialMessage<DeleteConnectionTableReq>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.DeleteConnectionTableReq";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteConnectionTableReq {
+    return new DeleteConnectionTableReq().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteConnectionTableReq {
+    return new DeleteConnectionTableReq().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteConnectionTableReq {
+    return new DeleteConnectionTableReq().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteConnectionTableReq | PlainMessage<DeleteConnectionTableReq> | undefined, b: DeleteConnectionTableReq | PlainMessage<DeleteConnectionTableReq> | undefined): boolean {
+    return proto3.util.equals(DeleteConnectionTableReq, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.DeleteConnectionTableResp
+ */
+export class DeleteConnectionTableResp extends Message<DeleteConnectionTableResp> {
+  constructor(data?: PartialMessage<DeleteConnectionTableResp>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.DeleteConnectionTableResp";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteConnectionTableResp {
+    return new DeleteConnectionTableResp().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteConnectionTableResp {
+    return new DeleteConnectionTableResp().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteConnectionTableResp {
+    return new DeleteConnectionTableResp().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteConnectionTableResp | PlainMessage<DeleteConnectionTableResp> | undefined, b: DeleteConnectionTableResp | PlainMessage<DeleteConnectionTableResp> | undefined): boolean {
+    return proto3.util.equals(DeleteConnectionTableResp, a, b);
   }
 }
 

@@ -103,13 +103,14 @@ const connectionTablesFetcher = (client: ApiClient) => {
 };
 
 export const useConnectionTables = (client: ApiClient) => {
-  const { data, isLoading } = useSWR(connectionTablesKey(), connectionTablesFetcher(client), {
+  const { data, isLoading, mutate } = useSWR(connectionTablesKey(), connectionTablesFetcher(client), {
     refreshInterval: 5000,
   });
 
   return {
     connectionTables: data,
     connectionTablesLoading: isLoading,
+    mutateConnectionTables: mutate,
   };
 };
 

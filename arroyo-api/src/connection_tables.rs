@@ -3,8 +3,8 @@ use arrow_schema::DataType;
 use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::grpc::api::{
     connection_schema::Definition, ConfluentSchemaReq, ConfluentSchemaResp, Connection,
-    ConnectionSchema, ConnectionTable, CreateConnectionTableReq, TableType, TestSchemaReq,
-    TestSourceMessage,
+    ConnectionSchema, ConnectionTable, CreateConnectionTableReq, DeleteConnectionTableReq,
+    TableType, TestSchemaReq, TestSourceMessage,
 };
 use arroyo_sql::{
     json_schema::{self, convert_json_schema},
@@ -18,7 +18,7 @@ use tonic::Status;
 use tracing::warn;
 
 use crate::{
-    handle_db_error, log_and_map,
+    handle_db_error, handle_delete, log_and_map,
     queries::api_queries::{self, GetConnectionTables},
     required_field, AuthData,
 };
@@ -128,6 +128,26 @@ pub(crate) async fn create(
     Ok(())
 }
 
+pub(crate) async fn delete(
+    req: DeleteConnectionTableReq,
+    auth: AuthData,
+    client: &impl GenericClient,
+) -> Result<(), Status> {
+    let deleted = api_queries::delete_connection_table()
+        .bind(client, &auth.organization_id, &req.id)
+        .await
+        .map_err(|e| handle_delete("connection_table", "pipelines", e))?;
+
+    if deleted == 0 {
+        return Err(Status::not_found(format!(
+            "No connection table with id {}",
+            req.id
+        )));
+    }
+
+    Ok(())
+}
+
 pub(crate) async fn test(
     req: CreateConnectionTableReq,
     auth: AuthData,
@@ -197,6 +217,7 @@ pub(crate) async fn get<C: GenericClient>(
                 table_type: TableType::from_str_name(&t.table_type).unwrap() as i32,
                 config: table,
                 schema,
+                consumers: t.consumer_count as i32,
             }
         })
         .collect())

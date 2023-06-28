@@ -597,6 +597,7 @@ message ConnectionTable {
   TableType table_type = 5;
   string config = 6;
   ConnectionSchema schema = 7;
+  int32 consumers = 8;
 }
 
 message GetConnectionTablesReq {
@@ -605,6 +606,15 @@ message GetConnectionTablesReq {
 message GetConnectionTablesResp {
   repeated ConnectionTable tables = 1;
 }
+
+
+message DeleteConnectionTableReq {
+  int64 id = 1;
+}
+
+message DeleteConnectionTableResp {
+}
+
 
 // Sources
 
@@ -724,6 +734,7 @@ service ApiGrpc {
   rpc CreateConnectionTable(CreateConnectionTableReq) returns (CreateConnectionTableResp);
   rpc TestConnectionTable(CreateConnectionTableReq) returns (stream TestSourceMessage);
   rpc GetConnectionTables(GetConnectionTablesReq) returns (GetConnectionTablesResp);
+  rpc DeleteConnectionTable(DeleteConnectionTableReq) returns (DeleteConnectionTableResp);
   rpc TestSchema(TestSchemaReq) returns (TestSchemaResp);
   rpc GetConfluentSchema(ConfluentSchemaReq) returns (ConfluentSchemaResp);
 

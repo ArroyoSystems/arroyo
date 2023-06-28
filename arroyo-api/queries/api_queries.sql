@@ -55,10 +55,19 @@ SELECT connection_tables.id as id,
     connection_tables.connection_id as connection_id,
     connections.name as connection_name,
     connections.type as connection_type,
-    connections.config as connection_config
+    connections.config as connection_config,
+    (SELECT count(*) as pipeline_count
+        FROM connection_table_pipelines
+        WHERE connection_table_pipelines.connection_table_id = connection_tables.id
+    ) as consumer_count
+
 FROM connection_tables
 LEFT JOIN connections ON connections.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id;
+
+--! delete_connection_table
+DELETE FROM connection_tables
+WHERE organization_id = :organization_id AND id = :id;
 
 
 ----------- pipelines -------------------

@@ -33,7 +33,7 @@ import { FaGlobeAmericas, FaStream } from 'react-icons/fa';
 import { FiInfo, FiXCircle } from 'react-icons/fi';
 import { SiApachekafka } from 'react-icons/si';
 import { useLinkClickHandler } from 'react-router-dom';
-import { DeleteConnectionReq, ConnectionTable, TableType, Format } from '../../gen/api_pb';
+import { ConnectionTable, TableType, Format, DeleteConnectionTableReq } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
 import { useConnectionTables } from '../../lib/data_fetching';
 
@@ -60,6 +60,8 @@ const format = (f: Format | undefined) => {
       return 'Raw';
     case Format.DebeziumJsonFormat:
       return 'Debezium JSON';
+    case undefined:
+      return 'built-in';
     default:
       return 'unknown';
   }
@@ -84,7 +86,7 @@ const columns: Array<ColumnDef> = [
   },
   {
     name: 'pipelines',
-    accessor: s => <Text>1</Text>,
+    accessor: s => <Text>{s.consumers}</Text>,
   },
 ];
 
@@ -92,16 +94,19 @@ function ConnectionTableTable({ client }: { client: ApiClient }) {
   const [message, setMessage] = useState<string | null>();
   const [isError, setIsError] = useState<boolean>(false);
   const [selected, setSelected] = useState<ConnectionTable | null>(null);
-  const { connectionTables, connectionTablesLoading } = useConnectionTables(client);
+  const { connectionTables, connectionTablesLoading, mutateConnectionTables } = useConnectionTables(client);
 
   const deleteTable = async (connection: ConnectionTable) => {
     try {
       await (
         await client()
-      ).deleteConnection(
-        new DeleteConnectionReq({
-          name: connection.name,
+      ).deleteConnectionTable(
+        new DeleteConnectionTableReq({
+          id: connection.id,
         })
+      );
+      mutateConnectionTables(
+        connectionTables!.filter(c => c.id !== connection.id),
       );
       setMessage(`Connection ${connection.name} successfully deleted`);
     } catch (e) {

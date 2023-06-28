@@ -3,7 +3,7 @@
 /* eslint-disable */
 /* @ts-nocheck */
 
-import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateConnectionTableReq, CreateConnectionTableResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, GetConnectionsReq, GetConnectionsResp, GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, TestSchemaReq, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
+import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateConnectionTableReq, CreateConnectionTableResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, DeleteConnectionReq, DeleteConnectionResp, DeleteConnectionTableReq, DeleteConnectionTableResp, DeleteJobReq, DeleteJobResp, GetConnectionsReq, GetConnectionsResp, GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, TestSchemaReq, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
 import {MethodKind} from "@bufbuild/protobuf";
 
 /**
@@ -73,6 +73,15 @@ export const ApiGrpc = {
       name: "GetConnectionTables",
       I: GetConnectionTablesReq,
       O: GetConnectionTablesResp,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc arroyo_api.ApiGrpc.DeleteConnectionTable
+     */
+    deleteConnectionTable: {
+      name: "DeleteConnectionTable",
+      I: DeleteConnectionTableReq,
+      O: DeleteConnectionTableResp,
       kind: MethodKind.Unary,
     },
     /**
