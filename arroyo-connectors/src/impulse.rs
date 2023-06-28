@@ -14,6 +14,7 @@ use crate::{
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/impulse/table.json");
 
 import_types!(schema = "../connector-schemas/impulse/table.json");
+const ICON: &str = include_str!("../resources/impulse.svg");
 
 pub fn impulse_schema() -> ConnectionSchema {
     use grpc::api::PrimitiveType::*;
@@ -43,8 +44,8 @@ impl Connector for ImpulseConnector {
     fn metadata(&self) -> grpc::api::Connector {
         grpc::api::Connector {
             id: "impulse".to_string(),
-            name: "impulse".to_string(),
-            icon: "".to_string(),
+            name: "Impulse".to_string(),
+            icon: ICON.to_string(),
             description: "Periodic demo source".to_string(),
             enabled: true,
             source: true,

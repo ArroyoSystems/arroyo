@@ -3,6 +3,8 @@ import { Connection, Connector, CreateConnectionReq } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
 import {
   Button,
+  FormControl,
+  FormErrorMessage,
   HStack,
   Heading,
   Modal,
@@ -29,6 +31,7 @@ const ClusterEditor = ({
   connections,
   connectionId,
   setConnectionId,
+  clusterError,
   schema,
   client,
   addCluster,
@@ -37,6 +40,7 @@ const ClusterEditor = ({
   connections: Array<Connection>;
   connectionId: string | null;
   setConnectionId: (id: string) => void;
+  clusterError: string | null;
   schema: JSONSchema7;
   client: ApiClient;
   addCluster: (c: Connection) => void;
@@ -82,19 +86,24 @@ const ClusterEditor = ({
 
         <Text fontSize={'sm'}>Select an existing {connector} cluster or create a new one</Text>
 
-        <Select
-          placeholder="Choose cluster"
-          value={connectionId || undefined}
-          onChange={c => setConnectionId(c.target.value)}
-        >
-          {connections
-            .filter(c => c.connector == connector)
-            .map(c => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-        </Select>
+        <FormControl>
+          <Select
+            placeholder="Choose cluster"
+            value={connectionId || undefined}
+            onChange={c => setConnectionId(c.target.value)}
+            isRequired={true}
+            isInvalid={clusterError != null}
+          >
+            {connections
+              .filter(c => c.connector == connector)
+              .map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name} {c.description != '' && `— ${c.description}`}
+                </option>
+              ))}
+          </Select>
+          {clusterError && <FormErrorMessage>{clusterError}</FormErrorMessage>}
+        </FormControl>
         <HStack>
           <Spacer />
           <Button onClick={() => onOpen()}>
@@ -131,6 +140,7 @@ export const ConfigureConnection = ({
   setState: (s: CreateConnectionState) => void;
 }) => {
   let { connections, connectionsLoading, mutateConnections } = useConnections(client);
+  const [clusterError, setClusterError] = useState<string | null>(null);
 
   if (connectionsLoading) {
     return <></>;
@@ -145,6 +155,7 @@ export const ConfigureConnection = ({
           setConnectionId={c => setState({ ...state, connectionId: c })}
           connector={connector.id}
           connections={connections!}
+          clusterError={clusterError}
           schema={JSON.parse(connector.connectionConfig)}
           addCluster={c => {
             mutateConnections([...connections!, c]);
@@ -158,6 +169,10 @@ export const ConfigureConnection = ({
           schema={JSON.parse(connector!.tableConfig)}
           initial={state.table || {}}
           onSubmit={async table => {
+            if (connector?.connectionConfig && state.connectionId == null) {
+              setClusterError('Cluster is required');
+              return;
+            }
             setState({ ...state, table: table });
             onSubmit();
           }}

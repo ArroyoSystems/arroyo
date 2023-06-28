@@ -166,12 +166,14 @@ pub(crate) async fn test(
     Ok(rx)
 }
 
-fn get_connection(c: &GetConnectionTables) -> Option<Connection> {
+fn get_connection(c: &GetConnectionTables, connector: &dyn ErasedConnector) -> Option<Connection> {
+    let config = serde_json::to_string(&c.connection_config.as_ref()?).unwrap();
     Some(Connection {
         id: format!("{}", c.connection_id?),
         name: c.connection_name.as_ref()?.clone(),
         connector: c.connection_type.as_ref()?.clone(),
-        config: serde_json::to_string(&c.connection_config.as_ref()?).unwrap(),
+        description: connector.config_description(&config).ok()?,
+        config,
     })
 }
 
@@ -188,13 +190,14 @@ pub(crate) async fn get<C: GenericClient>(
     Ok(tables
         .into_iter()
         .map(|t| {
-            let connection = get_connection(&t);
             let connector = connector_for_type(&t.connector).unwrap_or_else(|| {
                 panic!(
                     "invalid connector in saved ConnectionTable: {}",
                     t.connector
                 )
             });
+
+            let connection = get_connection(&t, &*connector);
 
             let table = serde_json::to_string(&t.config).unwrap();
             let schema = t.schema.map(|s| serde_json::from_value(s).unwrap());

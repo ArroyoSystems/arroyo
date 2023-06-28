@@ -23,6 +23,7 @@ use super::Connector;
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/sse/table.json");
 
 import_types!(schema = "../connector-schemas/sse/table.json");
+const ICON: &str = include_str!("../resources/sse.svg");
 
 pub struct SSEConnector {}
 
@@ -39,7 +40,7 @@ impl Connector for SSEConnector {
         grpc::api::Connector {
             id: "sse".to_string(),
             name: "Server-Sent Events".to_string(),
-            icon: "FaGlobeAmericas".to_string(),
+            icon: ICON.to_string(),
             description: "Connect to a SSE/EventSource server".to_string(),
             enabled: true,
             source: true,

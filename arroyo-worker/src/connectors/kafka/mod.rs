@@ -23,13 +23,13 @@ pub fn client_configs(connection: &KafkaConfig) -> HashMap<String, String> {
     let mut client_configs: HashMap<String, String> = HashMap::new();
 
     match &connection.authentication {
-        None | Some(KafkaConfigAuthentication::None {}) => {}
-        Some(KafkaConfigAuthentication::Sasl {
+        KafkaConfigAuthentication::None {} => {}
+        KafkaConfigAuthentication::Sasl {
             mechanism,
             password,
             protocol,
             username,
-        }) => {
+        } => {
             client_configs.insert("sasl.mechanism".to_string(), mechanism.to_string());
             client_configs.insert("security.protocol".to_string(), protocol.to_string());
             client_configs.insert("sasl.username".to_string(), username.to_string());

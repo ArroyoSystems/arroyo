@@ -9,7 +9,7 @@ import {
   CardHeader,
   Container,
   Heading,
-  Icon,
+  Image,
   Link,
   SimpleGrid,
   Spacer,
@@ -19,65 +19,6 @@ import {
 import { ApiClient } from '../../main';
 import { useNavigate } from 'react-router-dom';
 import { useConnectors } from '../../lib/data_fetching';
-
-// export const CONNECTORS = {
-//   "kafka": {
-//     name: 'Kafka',
-//     icon: SiApachekafka,
-//     description: 'Confluent Cloud, Amazon MSK, or self-hosted',
-//     disabled: false,
-//     source: true,
-//     sink: true,
-//   },
-//   "pulsar": {
-//     name: 'Pulsar',
-//     icon: SiApachekafka,
-//     description: 'Confluent Cloud, Amazon MSK, or self-hosted',
-//     disabled: false,
-//     source: true,
-//     sink: true,
-//   },
-//   "redpanda": {
-//     name: 'Redpanda',
-//     icon: SiApachekafka,
-//     description: 'Confluent Cloud, Amazon MSK, or self-hosted',
-//     disabled: false,
-//     source: true,
-//     sink: true,
-//   },
-//   "kinesis": {
-//     name: 'Kinesis',
-//     icon: FaStream,
-//     description: 'AWS Kinesis stream (coming soon)',
-//     disabled: true,
-//     source: true,
-//     sink: true,
-//   },
-//   "http": {
-//     name: 'HTTP',
-//     icon: FaGlobeAmericas,
-//     description: 'HTTP/HTTPS server',
-//     disabled: false,
-//     source: true,
-//     sink: false,
-//   },
-//   "websocket": {
-//     name: 'WebSocket',
-//     icon: FaGlobeAmericas,
-//     description: 'HTTP/HTTPS server',
-//     disabled: false,
-//     source: true,
-//     sink: false,
-//   },
-//   "deltalake": {
-//     name: 'DeltaLake',
-//     icon: FaGlobeAmericas,
-//     description: 'Delta Lake cluster on S3',
-//     disabled: false,
-//     source: false,
-//     sink: true,
-//   },
-// };
 
 export function ChooseConnector({ client }: { client: ApiClient }) {
   const navigate = useNavigate();
@@ -101,7 +42,7 @@ export function ChooseConnector({ client }: { client: ApiClient }) {
           <Heading size="xs">Select Connector</Heading>
           <Text>Connectors enable reading and writing data from external systems</Text>
           <Box p={8}>
-            <SimpleGrid spacing={8} minChildWidth={'250px'} w="100%" gridAutoRows={'1fr'}>
+            <SimpleGrid spacing={8} minChildWidth={'300px'} w="100%" gridAutoRows={'1fr'}>
               {connectors?.connectors.map(c => {
                 return (
                   <Card key={c.name} size={'md'} maxW={400}>
@@ -117,8 +58,13 @@ export function ChooseConnector({ client }: { client: ApiClient }) {
 
                     <CardHeader>
                       <Stack direction="row" spacing={4} align="center">
-                        <Icon boxSize={7}></Icon>
-                        <Heading size="xs">{c.name}</Heading>
+                        <Image
+                          w={75}
+                          h={75}
+                          color={'white'}
+                          src={`data:image/svg+xml;utf8,${encodeURIComponent(c.icon)}`}
+                        />
+                        <Heading size="sm">{c.name}</Heading>
                       </Stack>
                     </CardHeader>
                     <CardBody>

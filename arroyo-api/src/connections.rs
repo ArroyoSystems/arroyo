@@ -3,6 +3,7 @@ use arroyo_rpc::grpc::api::{Connection, CreateConnectionReq};
 use arroyo_rpc::grpc::api::{CreateConnectionResp, DeleteConnectionReq};
 use cornucopia_async::GenericClient;
 use tonic::Status;
+use tracing::warn;
 
 use crate::handle_delete;
 use crate::queries::api_queries;
@@ -14,7 +15,7 @@ pub(crate) async fn create_connection(
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<CreateConnectionResp, Status> {
-    {
+    let description = {
         let connector = connector_for_type(&req.connector).ok_or_else(|| {
             Status::invalid_argument(format!("Unknown connection type '{}'", req.connector))
         })?;
@@ -22,7 +23,11 @@ pub(crate) async fn create_connection(
         (*connector)
             .validate_config(&req.config)
             .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
-    }
+
+        (*connector)
+            .config_description(&req.config)
+            .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?
+    };
 
     let config: serde_json::Value = serde_json::from_str(&req.config).unwrap();
 
@@ -45,18 +50,29 @@ pub(crate) async fn create_connection(
             name: req.name,
             connector: req.connector,
             config: serde_json::to_string(&config).unwrap(),
+            description,
         }),
     })
 }
 
-impl From<DbConnection> for Connection {
-    fn from(val: DbConnection) -> Self {
-        Connection {
+impl TryFrom<DbConnection> for Connection {
+    type Error = String;
+
+    fn try_from(val: DbConnection) -> Result<Self, String> {
+        let connector = connector_for_type(&val.r#type)
+            .ok_or_else(|| format!("Unknown connection type '{}'", val.name))?;
+
+        let description = (*connector)
+            .config_description(&serde_json::to_string(&val.config).unwrap())
+            .map_err(|e| format!("Failed to parse config: {:?}", e))?;
+
+        Ok(Connection {
             id: val.id.to_string(),
             name: val.name,
             connector: val.r#type,
             config: serde_json::to_string(&val.config).unwrap(),
-        }
+            description,
+        })
     }
 }
 
@@ -70,7 +86,19 @@ pub(crate) async fn get_connections(
         .await
         .map_err(log_and_map)?;
 
-    Ok(res.into_iter().map(|rec| rec.into()).collect())
+    Ok(res
+        .into_iter()
+        .filter_map(|rec| {
+            let id = rec.id;
+            match rec.try_into() {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    warn!("Invalid connection {}: {}", id, e);
+                    None
+                }
+            }
+        })
+        .collect())
 }
 
 pub(crate) async fn delete_connection(

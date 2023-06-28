@@ -12,6 +12,7 @@ use crate::{
 };
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/nexmark/table.json");
+const ICON: &str = include_str!("../resources/nexmark.svg");
 
 import_types!(schema = "../connector-schemas/nexmark/table.json");
 
@@ -91,7 +92,7 @@ impl Connector for NexmarkConnector {
         grpc::api::Connector {
             id: "nexmark".to_string(),
             name: "Nexmark".to_string(),
-            icon: "".to_string(),
+            icon: ICON.to_string(),
             description: "Demo source for a simulated auction website".to_string(),
             enabled: true,
             source: true,

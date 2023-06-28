@@ -546,6 +546,7 @@ message Connection {
   string name = 2;
   string connector = 3;
   string config = 4;
+  string description = 5;
 }
 
 message CreateConnectionReq {

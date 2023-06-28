@@ -562,7 +562,7 @@ pub fn get_test_expression(
             Some(1),
             "test_source",
             KafkaConfig {
-                authentication: Some(arroyo_connectors::kafka::KafkaConfigAuthentication::None {}),
+                authentication: arroyo_connectors::kafka::KafkaConfigAuthentication::None {},
                 bootstrap_servers: "localhost:9092".to_string().try_into().unwrap(),
             },
             KafkaTable {

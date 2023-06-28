@@ -68,6 +68,11 @@ pub trait Connector: Send {
 
     fn name(&self) -> &'static str;
 
+    #[allow(unused)]
+    fn config_description(&self, config: Self::ConfigT) -> String {
+        "".to_string()
+    }
+
     fn parse_config(&self, s: &str) -> Result<Self::ConfigT, serde_json::Error> {
         serde_json::from_str(if s.is_empty() { "{}" } else { s })
     }
@@ -127,6 +132,8 @@ pub trait ErasedConnector: Send {
 
     fn table_type(&self, config: &str, table: &str) -> Result<TableType, serde_json::Error>;
 
+    fn config_description(&self, s: &str) -> Result<String, serde_json::Error>;
+
     fn get_schema(
         &self,
         config: &str,
@@ -167,6 +174,10 @@ impl<C: Connector> ErasedConnector for C {
 
     fn metadata(&self) -> grpc::api::Connector {
         self.metadata()
+    }
+
+    fn config_description(&self, s: &str) -> Result<String, serde_json::Error> {
+        Ok(self.config_description(self.parse_config(s)?))
     }
 
     fn validate_config(&self, s: &str) -> Result<(), serde_json::Error> {

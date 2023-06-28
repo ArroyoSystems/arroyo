@@ -11,19 +11,31 @@ VALUES (:organization_id, :created_by, :name, :type, :config)
 RETURNING id;
 
 --! get_connections : DbConnection()
-SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config
+SELECT
+    id,
+    name,
+    type,
+    config
 FROM connections
 WHERE connections.organization_id = :organization_id
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
 --! get_connection : DbConnection()
-SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config
+SELECT
+    id,
+    name,
+    type,
+    config
 FROM connections
 WHERE connections.organization_id = :organization_id AND connections.name = :name
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
 --! get_connection_by_id: DbConnection()
-SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config
+SELECT
+    id,
+    name,
+    type,
+    config
 FROM connections
 WHERE connections.organization_id = :organization_id AND connections.id = :id
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;

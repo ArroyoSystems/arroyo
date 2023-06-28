@@ -7,6 +7,8 @@ use crate::{Connection, ConnectionType, Connector, EmptyConfig, OperatorConfig};
 
 pub struct BlackholeConnector {}
 
+const ICON: &str = include_str!("../resources/blackhole.svg");
+
 impl Connector for BlackholeConnector {
     type ConfigT = EmptyConfig;
     type TableT = EmptyConfig;
@@ -18,8 +20,8 @@ impl Connector for BlackholeConnector {
     fn metadata(&self) -> grpc::api::Connector {
         grpc::api::Connector {
             id: "blackhole".to_string(),
-            name: "blackhole".to_string(),
-            icon: "".to_string(),
+            name: "Blackhole".to_string(),
+            icon: ICON.to_string(),
             description: "No-op sink that swallows all data".to_string(),
             enabled: true,
             source: false,

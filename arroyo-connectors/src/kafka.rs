@@ -23,6 +23,7 @@ use super::{Connector, OperatorConfig};
 
 const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/kafka/connection.json");
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/kafka/table.json");
+const ICON: &str = include_str!("../resources/kafka.svg");
 
 import_types!(schema = "../connector-schemas/kafka/connection.json",);
 import_types!(schema = "../connector-schemas/kafka/table.json");
@@ -41,7 +42,7 @@ impl Connector for KafkaConnector {
         grpc::api::Connector {
             id: "kafka".to_string(),
             name: "Kafka".to_string(),
-            icon: "SiApachekafka".to_string(),
+            icon: ICON.to_string(),
             description: "Confluent Cloud, Amazon MSK, or self-hosted".to_string(),
             enabled: true,
             source: true,
@@ -51,6 +52,10 @@ impl Connector for KafkaConnector {
             connection_config: Some(CONFIG_SCHEMA.to_string()),
             table_config: TABLE_SCHEMA.to_string(),
         }
+    }
+
+    fn config_description(&self, config: Self::ConfigT) -> String {
+        (*config.bootstrap_servers).clone()
     }
 
     fn from_config(
@@ -137,7 +142,7 @@ impl Connector for KafkaConnector {
         };
 
         let connection = KafkaConfig {
-            authentication: Some(auth),
+            authentication: auth,
             bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", opts)?),
         };
 
@@ -191,13 +196,13 @@ impl KafkaTester {
             .set("group.id", "arroyo-kafka-source-tester");
 
         match &self.connection.authentication {
-            None | Some(KafkaConfigAuthentication::None {}) => {}
-            Some(KafkaConfigAuthentication::Sasl {
+            KafkaConfigAuthentication::None {} => {}
+            KafkaConfigAuthentication::Sasl {
                 mechanism,
                 password,
                 protocol,
                 username,
-            }) => {
+            } => {
                 client_config.set("sasl.mechanism", mechanism);
                 client_config.set("security.protocol", protocol);
                 client_config.set("sasl.username", username);

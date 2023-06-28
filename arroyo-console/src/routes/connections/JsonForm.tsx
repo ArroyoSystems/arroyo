@@ -108,6 +108,7 @@ function SelectWidget({
   title,
   description,
   placeholder,
+  required,
   options,
   value,
   onChange,
@@ -116,6 +117,7 @@ function SelectWidget({
   title?: string;
   description?: string;
   placeholder?: string;
+  required?: boolean;
   options: Array<{ value: string; label: string }>;
   value: string;
   onChange: (e: React.ChangeEvent<any>) => void;
@@ -126,6 +128,7 @@ function SelectWidget({
       <Select
         placeholder={placeholder}
         name={path}
+        isRequired={required}
         value={value}
         onChange={onChange}
         borderColor={'gray.600'}
@@ -239,6 +242,7 @@ export function FormInner({
                         path={typeKey}
                         placeholder="Select an option"
                         description={property.description}
+                        required={schema.required?.includes(key)}
                         options={property.oneOf.map(oneOf => ({
                           // @ts-ignore
                           value: oneOf.title!,

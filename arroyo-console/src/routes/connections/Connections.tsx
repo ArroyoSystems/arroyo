@@ -94,7 +94,8 @@ function ConnectionTableTable({ client }: { client: ApiClient }) {
   const [message, setMessage] = useState<string | null>();
   const [isError, setIsError] = useState<boolean>(false);
   const [selected, setSelected] = useState<ConnectionTable | null>(null);
-  const { connectionTables, connectionTablesLoading, mutateConnectionTables } = useConnectionTables(client);
+  const { connectionTables, connectionTablesLoading, mutateConnectionTables } =
+    useConnectionTables(client);
 
   const deleteTable = async (connection: ConnectionTable) => {
     try {
@@ -105,9 +106,7 @@ function ConnectionTableTable({ client }: { client: ApiClient }) {
           id: connection.id,
         })
       );
-      mutateConnectionTables(
-        connectionTables!.filter(c => c.id !== connection.id),
-      );
+      mutateConnectionTables(connectionTables!.filter(c => c.id !== connection.id));
       setMessage(`Connection ${connection.name} successfully deleted`);
     } catch (e) {
       setIsError(true);
