@@ -14,11 +14,12 @@ use arroyo_datastream::{auth_config_to_hashmap, Operator, Program, SinkConfig};
 use arroyo_rpc::grpc::api::create_sql_job::Sink;
 use arroyo_rpc::grpc::api::sink::SinkType;
 use arroyo_rpc::grpc::api::{
-    self, connection, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob,
+    self, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob,
     PipelineDef, PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf,
     UdfLanguage,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
+use arroyo_types::api::ConnectionTypes;
 
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbPipeline;
@@ -81,7 +82,7 @@ where
                 SinkType::Kafka(k) => {
                     let connection =
                         connections::get_connection(auth_data, &k.connection, tx).await?;
-                    let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
+                    let ConnectionTypes::Kafka(kafka) = connection.config else {
                         panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
                     };
                     SinkConfig::Kafka {

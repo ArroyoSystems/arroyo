@@ -3,10 +3,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use arroyo_datastream::auth_config_to_hashmap;
-use arroyo_rpc::grpc::api::{
-    source_schema::Schema, HttpConnection, KafkaConnection, TestSourceMessage,
-};
+use arroyo_types::api::{KafkaConnection, HttpConnection};
+use arroyo_datastream::{auth_config_to_hashmap};
+use arroyo_rpc::grpc::api::{source_schema::Schema, TestSourceMessage};
 use arroyo_types::string_to_map;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use rdkafka::{

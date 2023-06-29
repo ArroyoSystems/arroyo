@@ -1,3 +1,4 @@
+import createClient from 'openapi-fetch';
 import {
   BuiltinSink,
   CheckpointDetailsReq,
@@ -16,6 +17,12 @@ import { ApiClient } from '../main';
 import useSWR from 'swr';
 import { mutate as globalMutate } from 'swr';
 import { SinkOpt } from './types';
+import { components, paths } from '../gen/api-types';
+
+export type PostConnections = components['schemas']['PostConnections'];
+
+const BASE_URL = 'http://localhost:8003';
+const { get, post } = createClient<paths>({ baseUrl: BASE_URL });
 
 // Keys
 
@@ -49,6 +56,14 @@ const sourcesKey = () => {
 
 const sinksKey = () => {
   return { key: 'Sinks' };
+};
+
+const connectionsKey = () => {
+  return { key: 'Connections' };
+};
+
+const connectionKey = (connectionId?: number) => {
+  return connectionId ? { key: 'Connection', connectionId } : null;
 };
 
 // JobDetailsReq
@@ -278,5 +293,36 @@ export const useSinks = (client: ApiClient) => {
 
   return {
     sinks: allSinks,
+  };
+};
+
+// Connection
+
+export const useConnection = () => {
+  // TODO: useSwr call
+
+  const createConnection = async (postConnection: PostConnections) => {
+    await post('/v1/connections', { body: postConnection });
+  };
+
+  const testConnection = async (postConnection: PostConnections) => {
+    await post('/v1/connections/test', { body: postConnection });
+  };
+
+  return {
+    createConnection,
+    testConnection,
+  };
+};
+
+const ConnectionsFetcher = async () => {
+  return await get('/v1/connections', {});
+};
+
+export const useConnections = () => {
+  const { data } = useSWR(connectionsKey(), ConnectionsFetcher);
+
+  return {
+    connections: data?.data,
   };
 };

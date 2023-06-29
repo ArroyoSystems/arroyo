@@ -15,12 +15,14 @@ import { Home } from './routes/home/Home';
 import { Sinks } from './routes/sinks/Sinks';
 import { CreateSource } from './routes/sources/CreateSource';
 import { Connections } from './routes/connections/Connections';
-import { ConnectionEditor } from './routes/connections/CreateConnection';
 import { CreatePipeline } from './routes/pipelines/CreatePipeline';
 import { SinkEditor } from './routes/sinks/CreateSink';
 
 import { addCloudRoutes, createRoot, getClient, needsOrgSetup } from './lib/CloudComponents';
 import PageNotFound from './routes/not_found/PageNotFound';
+import NewConnection from './routes/connections/NewConnection';
+import React from 'react';
+import { ConnectionEditor } from './routes/connections/CreateConnection';
 
 export type ApiClient = () => Promise<PromiseClient<typeof ApiGrpc>>;
 
@@ -46,8 +48,12 @@ export function Router(): JSX.Element {
       element: <Connections client={client} />,
     },
     {
-      path: 'connections/new',
+      path: 'connections/old',
       element: <ConnectionEditor client={client} />,
+    },
+    {
+      path: 'connections/new',
+      element: <NewConnection />,
     },
     {
       path: 'sources',

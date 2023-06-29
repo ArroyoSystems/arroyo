@@ -4,7 +4,6 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
 use arroyo_datastream::{Operator, Program, SerializationMode, SinkConfig, SourceConfig};
-use arroyo_rpc::grpc::api::Connection;
 use datafusion::optimizer::analyzer::Analyzer;
 use datafusion::optimizer::optimizer::Optimizer;
 use datafusion::optimizer::OptimizerContext;
@@ -49,6 +48,7 @@ use quote::ToTokens;
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, VisPublic, Visibility};
+use arroyo_types::api::PostConnections;
 
 #[cfg(test)]
 mod test;
@@ -65,7 +65,7 @@ pub struct ArroyoSchemaProvider {
     pub source_defs: HashMap<String, String>,
     tables: HashMap<String, Table>,
     pub functions: HashMap<String, Arc<ScalarUDF>>,
-    pub connections: HashMap<String, Connection>,
+    pub connections: HashMap<String, PostConnections>,
     pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
 }
@@ -146,7 +146,7 @@ impl ArroyoSchemaProvider {
         }
     }
 
-    pub fn add_connection(&mut self, connection: Connection) {
+    pub fn add_connection(&mut self, connection: PostConnections) {
         self.connections.insert(connection.name.clone(), connection);
     }
 
@@ -638,7 +638,7 @@ pub enum Table {
     MemoryTableWithConnectionConfig {
         name: String,
         fields: Vec<FieldSpec>,
-        connection: Connection,
+        connection: PostConnections,
         connection_config: HashMap<String, String>,
     },
     TableFromQuery {

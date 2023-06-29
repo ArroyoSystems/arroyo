@@ -581,6 +581,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-openapi"
+version = "0.3.0"
+dependencies = [
+ "arroyo-api",
+ "utoipa",
+]
+
+[[package]]
 name = "arroyo-rpc"
 version = "0.3.0"
 dependencies = [
@@ -651,6 +659,7 @@ dependencies = [
  "arroyo-datastream",
  "arroyo-rpc",
  "arroyo-sql",
+ "arroyo-types",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -713,6 +722,7 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "serde",
  "serde_json",
+ "utoipa",
 ]
 
 [[package]]

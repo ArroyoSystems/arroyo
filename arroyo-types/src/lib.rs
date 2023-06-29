@@ -1,3 +1,5 @@
+pub mod api;
+
 use bincode::{config, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};

@@ -45,6 +45,7 @@ import {
 } from '../../gen/api_pb';
 import { RadioCardGroup, RadioCard } from '../../lib/RadioGroup';
 import { ApiClient } from '../../main';
+import { components } from '../../gen/api-types';
 
 // set the value of the field in config at the dot delimited path given by field
 function setField(field: string, config: any, value: any) {
@@ -335,6 +336,8 @@ export function ConnectionEditor({
       onSubmit();
     }
   };
+
+  type CT = components['schemas']['ConnectionTypes'];
 
   return (
     <Container py="8" flex="1">

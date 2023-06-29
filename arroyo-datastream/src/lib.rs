@@ -18,12 +18,11 @@ use arroyo_rpc::grpc::api::impulse_source::Spec;
 use arroyo_rpc::grpc::api::kafka_auth_config::AuthType;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::source_def::SourceType;
-use arroyo_rpc::grpc::api::{
-    self as GrpcApi, ExpressionAggregator, Flatten, KafkaAuthConfig, ProgramEdge,
-};
+use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge, KafkaAuthConfig as KafkaAuthConfigOld};
 use arroyo_types::nexmark::Event;
 use arroyo_types::{
-    from_micros, string_to_map, to_micros, Data, GlobalKey, ImpulseEvent, JoinType, Key,
+    api::KafkaAuthConfig, from_micros, string_to_map, to_micros, Data, GlobalKey, ImpulseEvent,
+    JoinType, Key,
 };
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -441,7 +440,7 @@ impl From<SourceType> for SourceConfig {
                 SourceConfig::Kafka {
                     bootstrap_servers: connection.bootstrap_servers,
                     topic: kafka.topic,
-                    client_configs: auth_config_to_hashmap(connection.auth_config),
+                    client_configs: old_auth_config_to_hashmap(connection.auth_config),
                 }
             }
             SourceType::Impulse(impulse) => SourceConfig::Impulse {
@@ -765,10 +764,24 @@ impl Source<ImpulseEvent> for ImpulseSource {
     }
 }
 
-pub fn auth_config_to_hashmap(config: Option<KafkaAuthConfig>) -> HashMap<String, String> {
+pub fn old_auth_config_to_hashmap(config: Option<KafkaAuthConfigOld>) -> HashMap<String, String> {
     match config.and_then(|config| config.auth_type) {
         None | Some(AuthType::NoAuth(_)) => HashMap::default(),
         Some(AuthType::SaslAuth(sasl_auth)) => vec![
+            ("security.protocol".to_owned(), sasl_auth.protocol),
+            ("sasl.mechanism".to_owned(), sasl_auth.mechanism),
+            ("sasl.username".to_owned(), sasl_auth.username),
+            ("sasl.password".to_owned(), sasl_auth.password),
+        ]
+        .into_iter()
+        .collect(),
+    }
+}
+
+pub fn auth_config_to_hashmap(config: KafkaAuthConfig) -> HashMap<String, String> {
+    match config.sasl_auth {
+        None => HashMap::default(),
+        Some(sasl_auth) => vec![
             ("security.protocol".to_owned(), sasl_auth.protocol),
             ("sasl.mechanism".to_owned(), sasl_auth.mechanism),
             ("sasl.username".to_owned(), sasl_auth.username),

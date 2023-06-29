@@ -1,5 +1,4 @@
 use arroyo_datastream::{SerializationMode, SourceConfig};
-use arroyo_rpc::grpc::api::{Connection, KafkaAuthConfig, KafkaConnection};
 use arroyo_sql::{
     get_test_expression, parse_and_get_program_sync, ArroyoSchemaProvider, SqlConfig,
 };
@@ -7,6 +6,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{parse_macro_input, parse_str, Expr, LitStr, Token};
+use arroyo_types::api::{ConnectionTypes, KafkaAuthConfig, KafkaConnection, PostConnections};
 
 /// This macro is used to generate a test function for a single test case.
 /// Used in the `arroyo-sql-testing` crate.
@@ -128,20 +128,18 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
         },
         SerializationMode::Json,
     );
-    schema_provider.add_connection(Connection {
+    schema_provider.add_connection(PostConnections {
         name: "local".to_string(),
-        sources: 0,
-        sinks: 0,
-        connection_type: Some(arroyo_rpc::grpc::api::connection::ConnectionType::Kafka(
+        // sources: 0,
+        // sinks: 0,
+        config: ConnectionTypes::Kafka(
             KafkaConnection {
                 bootstrap_servers: "localhost:9090".to_string(),
-                auth_config: Some(KafkaAuthConfig {
-                    auth_type: Some(arroyo_rpc::grpc::api::kafka_auth_config::AuthType::NoAuth(
-                        arroyo_rpc::grpc::api::NoAuth {},
-                    )),
-                }),
+                auth_config: KafkaAuthConfig {
+                    sasl_auth: None,
+                },
             },
-        )),
+        ),
     });
     let (program, _) =
         parse_and_get_program_sync(query_string.value(), schema_provider, SqlConfig::default())

@@ -146,3 +146,24 @@ export function formatDate(timestamp: bigint) {
     timeStyle: 'short',
   }).format(date);
 }
+
+export function setNestedField(obj: any, fieldStr: string, value: any): any {
+  const fieldArr: string[] = fieldStr.split('.');
+  let newObj = { ...obj };
+
+  let currObj = newObj;
+  for (let i = 0; i < fieldArr.length - 1; i++) {
+    const field = fieldArr[i];
+
+    currObj = currObj[field];
+  }
+
+  currObj[fieldArr[fieldArr.length - 1]] = value;
+
+  return newObj;
+}
+
+export function oneOfName(o: Object): string {
+  const keys = Object.keys(o);
+  return keys.length ? keys[0] : 'error';
+}

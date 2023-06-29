@@ -5,14 +5,13 @@ use std::time::SystemTime;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
-use arroyo_datastream::auth_config_to_hashmap;
+use arroyo_datastream::{auth_config_to_hashmap};
 use arroyo_datastream::Operator;
 use arroyo_datastream::SerializationMode;
 use arroyo_datastream::SinkConfig;
 use arroyo_datastream::SourceConfig;
 use arroyo_datastream::{ImpulseSpec, OffsetMode};
-use arroyo_rpc::grpc::api::connection::ConnectionType;
-use arroyo_rpc::grpc::api::Connection;
+use arroyo_types::api::{PostConnections, ConnectionTypes};
 use arroyo_types::string_to_map;
 
 use crate::types::StructDef;
@@ -79,7 +78,7 @@ impl SqlSource {
     pub fn try_new(
         id: Option<i64>,
         struct_def: StructDef,
-        connection: Connection,
+        connection: PostConnections,
         connection_config: &HashMap<String, String>,
     ) -> Result<Self> {
         let serialization_mode = SerializationMode::from_config_value(
@@ -88,8 +87,8 @@ impl SqlSource {
                 .map(|x| x.as_str()),
         );
 
-        match connection.connection_type.unwrap() {
-            ConnectionType::Kafka(kafka) => {
+        match connection.config {
+            ConnectionTypes::Kafka(kafka) => {
                 let topic = connection_config
                     .get("topic")
                     .cloned()
@@ -105,10 +104,10 @@ impl SqlSource {
                     serialization_mode,
                 })
             }
-            ConnectionType::Kinesis(_) => {
-                bail!("Kinesis connections are not yet supported")
-            }
-            ConnectionType::Http(http) => {
+            // ConnectionType::Kinesis(_) => {
+            //     bail!("Kinesis connections are not yet supported")
+            // }
+            ConnectionTypes::Http(http) => {
                 let mut path = connection_config.get("path").cloned().unwrap_or_default();
 
                 if !path.is_empty() && !path.starts_with('/') {
@@ -185,10 +184,10 @@ impl SqlSink {
     pub fn try_new_from_connection(
         id: Option<i64>,
         struct_def: StructDef,
-        connection: Connection,
+        connection: PostConnections,
         connection_config: HashMap<String, String>,
     ) -> Result<Self> {
-        let Some(ConnectionType::Kafka(kafka_config)) = connection.connection_type else {
+        let ConnectionTypes::Kafka(kafka_config) = connection.config else {
             bail!("Only Kafka sinks are supported")
         };
         let serialization_mode = SerializationMode::from_config_value(

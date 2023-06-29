@@ -8,4 +8,4 @@ bincode = "2.0.0-rc.3"
 base64 = "0.21"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
+utoipa = "3"

@@ -1,4 +1,3 @@
-import { ConnectError } from '@bufbuild/connect-web';
 import {
   Container,
   Stack,
@@ -7,28 +6,25 @@ import {
   Button,
   Box,
   useColorModeValue,
-  IconButton,
   Table,
   Tbody,
-  Td,
   Th,
   Thead,
   Text,
   Tr,
   Icon,
   Code,
-  Alert,
-  AlertDescription,
-  AlertIcon,
-  CloseButton,
+  Td,
+  IconButton,
 } from '@chakra-ui/react';
-import { useEffect, useState } from 'react';
-import { FaGlobeAmericas, FaStream } from 'react-icons/fa';
-import { FiXCircle } from 'react-icons/fi';
-import { SiApachekafka } from 'react-icons/si';
 import { useLinkClickHandler } from 'react-router-dom';
-import { Connection, DeleteConnectionReq, GetConnectionsReq } from '../../gen/api_pb';
+import { Connection } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
+import { PostConnections, useConnections } from '../../lib/data_fetching';
+import React from 'react';
+import { FiXCircle } from 'react-icons/fi';
+import { components } from '../../gen/api-types';
+import { oneOfName } from '../../lib/util';
 
 interface ConnectionsState {
   connections: Array<Connection> | null;
@@ -36,13 +32,16 @@ interface ConnectionsState {
 
 interface ColumnDef {
   name: string;
-  accessor: (s: Connection) => JSX.Element;
+  accessor: (s: PostConnections) => JSX.Element;
 }
 
+type ConnectionTypes = components['schemas']['ConnectionTypes'];
+
 const icons = {
-  kafka: SiApachekafka,
-  kinesis: FaStream,
-  http: FaGlobeAmericas,
+  // kafka: SiApachekafka,
+  // kinesis: FaStream,
+  // http: FaGlobeAmericas,
+  // [components['schemas']['KafkaConnection']]: SiApachekafka,
 };
 
 const columns: Array<ColumnDef> = [
@@ -78,59 +77,92 @@ const columns: Array<ColumnDef> = [
 ];
 
 function ConnectionTable({ client }: { client: ApiClient }) {
-  const [message, setMessage] = useState<string | null>();
-  const [isError, setIsError] = useState<boolean>(false);
-  const [state, setState] = useState<ConnectionsState>({ connections: null });
+  // const [message, setMessage] = useState<string | null>();
+  // const [isError, setIsError] = useState<boolean>(false);
+  // const [state, setState] = useState<ConnectionsState>({ connections: null });
+  const { connections } = useConnections();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const resp = await (await client()).getConnections(new GetConnectionsReq({}));
+  // useEffect(() => {
+  //   const fetchData = async () => {
+  //     const resp = await (await client()).getConnections(new GetConnectionsReq({}));
+  //
+  //     setState({ connections: resp.connections });
+  //   };
+  //
+  //   fetchData();
+  // }, [message]);
 
-      setState({ connections: resp.connections });
-    };
+  // const deleteConnection = async (connection: Connection) => {
+  //   try {
+  //     await (
+  //       await client()
+  //     ).deleteConnection(
+  //       new DeleteConnectionReq({
+  //         name: connection.name,
+  //       })
+  //     );
+  //     setMessage(`Connection ${connection.name} successfully deleted`);
+  //   } catch (e) {
+  //     setIsError(true);
+  //     if (e instanceof ConnectError) {
+  //       setMessage(e.rawMessage);
+  //     } else {
+  //       setMessage('Something went wrong');
+  //     }
+  //   }
+  // };
 
-    fetchData();
-  }, [message]);
+  // const onClose = () => {
+  //   setMessage(null);
+  //   setIsError(false);
+  // };
+  //
+  // let messageBox = null;
+  // if (message != null) {
+  //   messageBox = (
+  //     <Alert status={isError ? 'error' : 'success'} width="100%">
+  //       <AlertIcon />
+  //       <AlertDescription flexGrow={1}>{message}</AlertDescription>
+  //       <CloseButton alignSelf="flex-end" right={-1} top={-1} onClick={onClose} />
+  //     </Alert>
+  //   );
+  // }
 
-  const deleteConnection = async (connection: Connection) => {
-    try {
-      await (
-        await client()
-      ).deleteConnection(
-        new DeleteConnectionReq({
-          name: connection.name,
-        })
-      );
-      setMessage(`Connection ${connection.name} successfully deleted`);
-    } catch (e) {
-      setIsError(true);
-      if (e instanceof ConnectError) {
-        setMessage(e.rawMessage);
-      } else {
-        setMessage('Something went wrong');
-      }
+  // const pc: PostConnections[] = connections;
+
+  const getConnectionType = (connection: PostConnections) => {
+    if (connection.config.http) {
+      return 'http';
     }
+    return 'unknown';
   };
 
-  const onClose = () => {
-    setMessage(null);
-    setIsError(false);
-  };
+  const tableBody = (
+    <Tbody>
+      {connections?.items.map(connection => (
+        <Tr key={connection.name}>
+          <Td key={'type'}>{oneOfName(connection.config)}</Td>
+          <Td key={'name'}>{connection.name}</Td>
+          <Td key={'config'}>{JSON.stringify(connection.config)}</Td>
+          <Td key={'sources'}>todo</Td>
+          <Td key={'sinks'}>todo</Td>
 
-  let messageBox = null;
-  if (message != null) {
-    messageBox = (
-      <Alert status={isError ? 'error' : 'success'} width="100%">
-        <AlertIcon />
-        <AlertDescription flexGrow={1}>{message}</AlertDescription>
-        <CloseButton alignSelf="flex-end" right={-1} top={-1} onClick={onClose} />
-      </Alert>
-    );
-  }
+          <Td>
+            <IconButton
+              icon={<FiXCircle fontSize="1.25rem" />}
+              variant="ghost"
+              aria-label="Delete connection"
+              // onClick={() => deleteConnection(connection)}
+            />
+          </Td>
+        </Tr>
+      ))}
+    </Tbody>
+  );
 
   return (
     <Stack spacing={2}>
-      {messageBox}
+      {/* {messageBox} */}
       <Table>
         <Thead>
           <Tr>
@@ -144,24 +176,7 @@ function ConnectionTable({ client }: { client: ApiClient }) {
             <Th></Th>
           </Tr>
         </Thead>
-        <Tbody>
-          {state?.connections?.flatMap(connection => (
-            <Tr key={connection.name}>
-              {columns.map(column => (
-                <Td key={connection.name + column.name}>{column.accessor(connection)}</Td>
-              ))}
-
-              <Td>
-                <IconButton
-                  icon={<FiXCircle fontSize="1.25rem" />}
-                  variant="ghost"
-                  aria-label="Delete connection"
-                  onClick={() => deleteConnection(connection)}
-                />
-              </Td>
-            </Tr>
-          ))}
-        </Tbody>
+        {tableBody}
       </Table>
     </Stack>
   );

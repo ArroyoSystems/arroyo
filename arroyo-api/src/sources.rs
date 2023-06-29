@@ -11,11 +11,10 @@ use tracing::warn;
 use arroyo_datastream::{SerializationMode, SourceConfig};
 use arroyo_rpc::grpc::api::{
     self,
-    connection::ConnectionType,
     create_source_req::{self},
     source_def::SourceType,
     source_schema::Schema,
-    ConfluentSchemaReq, ConfluentSchemaResp, Connection, CreateSourceReq, DeleteSourceReq,
+    ConfluentSchemaReq, ConfluentSchemaResp, CreateSourceReq, DeleteSourceReq,
     EventSourceSourceConfig, EventSourceSourceDef, JsonSchemaDef, KafkaSourceConfig,
     KafkaSourceDef, RawJsonDef, SourceDef, SourceField, SourceMetadataResp, TestSourceMessage,
 };
@@ -23,6 +22,7 @@ use arroyo_sql::{
     types::{StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
+use arroyo_types::api::{ConnectionTypes, PostConnections};
 
 use crate::types::public::SchemaType;
 use crate::{
@@ -813,7 +813,7 @@ pub(crate) async fn test_schema(req: CreateSourceReq) -> Result<Vec<String>, Sta
 fn get_kafka_tester(
     config: &KafkaSourceConfig,
     schema: Option<Schema>,
-    connections: Vec<Connection>,
+    connections: Vec<PostConnections>,
     tx: Sender<Result<TestSourceMessage, Status>>,
 ) -> Result<KafkaTester, Status> {
     let connection = connections
@@ -826,7 +826,7 @@ fn get_kafka_tester(
             ))
         })?;
 
-    if let Some(ConnectionType::Kafka(conn)) = connection.connection_type {
+    if let ConnectionTypes::Kafka(conn) = connection.config {
         Ok(KafkaTester::new(
             conn,
             Some(config.topic.clone()),

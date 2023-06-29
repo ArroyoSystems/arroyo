@@ -1,0 +1,233 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Arroyo REST API",
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/v1/connections": {
+      "get": {
+        "tags": [
+          "connection"
+        ],
+        "operationId": "get_connections",
+        "responses": {
+          "200": {
+            "description": "Connection retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionCollection"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "connection"
+        ],
+        "operationId": "create_connection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostConnections"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Connection created successfully"
+          }
+        }
+      }
+    },
+    "/v1/connections/test": {
+      "post": {
+        "tags": [
+          "connection"
+        ],
+        "operationId": "test_connection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostConnections"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Connection tested successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ConnectionCollection": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PostConnections"
+            }
+          }
+        }
+      },
+      "ConnectionTestResult": {
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "properties": {
+          "error": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ConnectionTypes": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "http"
+            ],
+            "properties": {
+              "http": {
+                "$ref": "#/components/schemas/HttpConnection"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kafka"
+            ],
+            "properties": {
+              "kafka": {
+                "$ref": "#/components/schemas/KafkaConnection"
+              }
+            }
+          }
+        ]
+      },
+      "HttpConnection": {
+        "type": "object",
+        "required": [
+          "url",
+          "headers"
+        ],
+        "properties": {
+          "headers": {
+            "type": "string",
+            "example": "Content-Type: application/json"
+          },
+          "url": {
+            "type": "string",
+            "example": "https://mstdn.social/api"
+          }
+        }
+      },
+      "KafkaAuthConfig": {
+        "type": "object",
+        "properties": {
+          "saslAuth": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SaslAuth"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "KafkaConnection": {
+        "type": "object",
+        "required": [
+          "bootstrapServers",
+          "authConfig"
+        ],
+        "properties": {
+          "authConfig": {
+            "$ref": "#/components/schemas/KafkaAuthConfig"
+          },
+          "bootstrapServers": {
+            "type": "string"
+          }
+        }
+      },
+      "PostConnections": {
+        "type": "object",
+        "required": [
+          "name",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ConnectionTypes"
+          },
+          "name": {
+            "type": "string",
+            "example": "mstdn"
+          }
+        }
+      },
+      "SaslAuth": {
+        "type": "object",
+        "required": [
+          "protocol",
+          "mechanism",
+          "username",
+          "password"
+        ],
+        "properties": {
+          "mechanism": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "connection",
+      "description": "Connections management API"
+    }
+  ]
+}

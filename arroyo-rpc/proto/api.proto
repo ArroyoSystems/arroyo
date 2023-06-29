@@ -600,43 +600,26 @@ message SaslAuth {
   string username = 3;
   string password = 4;
 }
-message KinesisConnection {
-}
 
 message HttpConnection {
   string url = 1;
   string headers = 2;
 }
 
-message Connection {
-  string name = 1;
-  oneof connection_type {
-    KafkaConnection kafka = 2;
-    KinesisConnection kinesis = 3;
-    HttpConnection http = 6;
-  }
-
-  int32 sources = 4;
-  int32 sinks = 5;
-}
-
 message CreateConnectionReq {
-  string name = 1;
-  oneof connection_type {
-    KafkaConnection kafka = 2;
-    KinesisConnection kinesis = 3;
-    HttpConnection http = 4;
-  }
+  // deprecated
 }
 
 message CreateConnectionResp {
+  // deprecated
 }
 
 message GetConnectionsReq {
+  // deprecated
 }
 
 message GetConnectionsResp {
-  repeated Connection connections = 1;
+  // deprecated
 }
 
 message DeleteConnectionReq {

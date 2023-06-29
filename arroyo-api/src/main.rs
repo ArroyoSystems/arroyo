@@ -64,7 +64,7 @@ mod json_schema;
 mod metrics;
 mod optimizations;
 mod pipelines;
-mod rest;
+pub mod rest;
 mod sinks;
 mod sources;
 mod testers;
@@ -459,24 +459,20 @@ impl ApiGrpc for ApiServer {
 
     async fn test_connection(
         &self,
-        request: Request<CreateConnectionReq>,
+        _request: Request<CreateConnectionReq>,
     ) -> Result<Response<TestSourceMessage>, Status> {
-        let (request, _) = self.authenticate(request).await?;
-
-        Ok(Response::new(
-            connections::test_connection(request.into_inner()).await?,
+        Err(Status::unimplemented(
+            "This feature has been moved ot the REST API",
         ))
     }
 
     async fn get_connections(
         &self,
-        request: Request<GetConnectionsReq>,
+        _request: Request<GetConnectionsReq>,
     ) -> Result<Response<GetConnectionsResp>, Status> {
-        let (_, auth) = self.authenticate(request).await?;
-
-        Ok(Response::new(GetConnectionsResp {
-            connections: connections::get_connections(&auth, &self.client().await?).await?,
-        }))
+        Err(Status::unimplemented(
+            "This feature has been moved ot the REST API",
+        ))
     }
 
     async fn delete_connection(

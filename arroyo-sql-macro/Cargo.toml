@@ -14,3 +14,4 @@ arroyo-sql = { path = "../arroyo-sql" }
 arroyo-controller = { path = "../arroyo-controller" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-rpc = { path= "../arroyo-rpc" }
+arroyo-types = { path = "../arroyo-types" }
