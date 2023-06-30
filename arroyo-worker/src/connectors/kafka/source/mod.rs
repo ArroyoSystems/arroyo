@@ -99,7 +99,7 @@ where
                     SerializationMode::JsonSchemaRegistry
                 }
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
-                OperatorConfigSerializationMode::DebeziumJson => todo!(),
+                OperatorConfigSerializationMode::DebeziumJson => SerializationMode::Json,
             },
             client_configs: client_configs(&connection),
             messages_per_second: NonZeroU32::new(
