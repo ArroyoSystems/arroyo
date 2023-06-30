@@ -6,6 +6,7 @@ use arroyo_rpc::grpc::api::{
     ConnectionSchema, ConnectionTable, CreateConnectionTableReq, DeleteConnectionTableReq,
     TableType, TestSchemaReq, TestSourceMessage,
 };
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_sql::{
     json_schema::{self, convert_json_schema},
     types::{StructField, TypeDef},
@@ -112,6 +113,7 @@ pub(crate) async fn create(
     api_queries::create_connection_table()
         .bind(
             &transaction,
+            &generate_id(IdTypes::ConnectionTable),
             &auth.organization_id,
             &auth.user_id,
             &req.name,

@@ -1,0 +1,35 @@
+ALTER TABLE api_keys
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE connections
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE schemas
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE pipelines
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE pipeline_definitions
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE job_configs
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE checkpoints
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE job_statuses
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE cluster_info
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE job_log_messages
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE connection_tables
+ADD COLUMN pub_id VARCHAR UNIQUE;
+
+ALTER TABLE connection_table_pipelines
+ADD COLUMN pub_id VARCHAR UNIQUE;

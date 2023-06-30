@@ -3,6 +3,7 @@ use arroyo_rpc::grpc::api::{
     CheckpointDetailsResp, CheckpointOverview, CreateJobReq, JobDetailsResp, JobStatus,
     PipelineProgram, StopType,
 };
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use cornucopia_async::GenericClient;
 use deadpool_postgres::{Pool, Transaction};
 use prost::Message;
@@ -63,6 +64,7 @@ pub(crate) async fn create_job<'a>(
     api_queries::create_job()
         .bind(
             client,
+            &generate_id(IdTypes::JobConfig),
             &job_id,
             &auth.organization_id,
             &pipeline.name,
@@ -79,7 +81,12 @@ pub(crate) async fn create_job<'a>(
         .map_err(log_and_map)?;
 
     api_queries::create_job_status()
-        .bind(client, &job_id, &auth.organization_id)
+        .bind(
+            client,
+            &generate_id(IdTypes::JobStatus),
+            &job_id,
+            &auth.organization_id,
+        )
         .await
         .map_err(log_and_map)?;
 

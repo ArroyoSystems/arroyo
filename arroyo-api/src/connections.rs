@@ -1,6 +1,7 @@
 use arroyo_connectors::connector_for_type;
 use arroyo_rpc::grpc::api::{Connection, CreateConnectionReq};
 use arroyo_rpc::grpc::api::{CreateConnectionResp, DeleteConnectionReq};
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use cornucopia_async::GenericClient;
 use tonic::Status;
 use tracing::warn;
@@ -34,6 +35,7 @@ pub(crate) async fn create_connection(
     let id = api_queries::create_connection()
         .bind(
             client,
+            &generate_id(IdTypes::Connection),
             &auth.organization_id,
             &auth.user_id,
             &req.name,
