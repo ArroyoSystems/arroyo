@@ -43,8 +43,8 @@ WHERE job_id = :job_id AND epoch < :epoch;
 
 --! create_checkpoint
 INSERT INTO checkpoints
-(organization_id, job_id, state_backend, epoch, min_epoch, start_time)
-VALUES (:organization_id, :job_id, :state_backend, :epoch, :min_epoch, :start_time)
+(pub_id, organization_id, job_id, state_backend, epoch, min_epoch, start_time)
+VALUES (:pub_id, :organization_id, :job_id, :state_backend, :epoch, :min_epoch, :start_time)
 RETURNING id;
 
 --! update_checkpoint (finish_time?)
@@ -75,6 +75,6 @@ ORDER BY epoch DESC
 LIMIT 1;
 
 --! create_job_log_message
-INSERT INTO job_log_messages (job_id, operator_id, task_index, log_level, message, details)
-VALUES (:job_id, :operator_id, :task_index, :log_level, :message, :details)
+INSERT INTO job_log_messages (pub_id, job_id, operator_id, task_index, log_level, message, details)
+VALUES (:pub_id, :job_id, :operator_id, :task_index, :log_level, :message, :details)
 RETURNING id;

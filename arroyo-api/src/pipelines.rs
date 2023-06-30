@@ -14,6 +14,7 @@ use arroyo_rpc::grpc::api::{
     self, create_pipeline_req, CreatePipelineReq, CreateSqlJob, PipelineDef, PipelineGraphReq,
     PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf, UdfLanguage,
 };
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
 use crate::connection_tables;
@@ -185,6 +186,7 @@ pub(crate) async fn create_pipeline<'a>(
     let pipeline_id = api_queries::create_pipeline()
         .bind(
             tx,
+            &generate_id(IdTypes::Pipeline),
             &auth.organization_id,
             &auth.user_id,
             &req.name,
@@ -198,6 +200,7 @@ pub(crate) async fn create_pipeline<'a>(
     api_queries::create_pipeline_definition()
         .bind(
             tx,
+            &generate_id(IdTypes::PipelineDefinition),
             &auth.organization_id,
             &auth.user_id,
             &pipeline_id,
@@ -213,7 +216,12 @@ pub(crate) async fn create_pipeline<'a>(
     if !is_preview {
         for connection in connections {
             api_queries::add_pipeline_connection_table()
-                .bind(tx, &pipeline_id, &connection)
+                .bind(
+                    tx,
+                    &generate_id(IdTypes::ConnectionTablePipeline),
+                    &pipeline_id,
+                    &connection,
+                )
                 .await
                 .map_err(log_and_map)?;
         }

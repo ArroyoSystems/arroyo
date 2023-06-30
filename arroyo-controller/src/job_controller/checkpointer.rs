@@ -12,6 +12,7 @@ use arroyo_rpc::grpc::{
     SubtaskCheckpointMetadata, TableDescriptor, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
     TaskCheckpointEventType,
 };
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{from_micros, to_micros};
 use deadpool_postgres::Pool;
@@ -99,6 +100,7 @@ impl CheckpointState {
             controller_queries::create_checkpoint()
                 .bind(
                     &c,
+                    &generate_id(IdTypes::Checkpoint),
                     &organization_id,
                     &job_id,
                     &StateBackend::name().to_string(),

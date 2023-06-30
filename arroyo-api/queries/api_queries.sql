@@ -6,8 +6,8 @@ WHERE api_key = :api_key;
 
 ----------- connections ----------------
 --! create_connection
-INSERT INTO connections (organization_id, created_by, name, type, config)
-VALUES (:organization_id, :created_by, :name, :type, :config)
+INSERT INTO connections (pub_id, organization_id, created_by, name, type, config)
+VALUES (:pub_id, :organization_id, :created_by, :name, :type, :config)
 RETURNING id;
 
 --! get_connections : DbConnection()
@@ -47,15 +47,15 @@ WHERE organization_id = :organization_id AND name = :name;
 ----------- schemas --------------------
 
 --! create_schema
-INSERT INTO schemas (organization_id, created_by, name, kafka_schema_registry, type, config)
-VALUES (:organization_id, :created_by, :name, :kafka_schema_registry, :type, :config) RETURNING id;
+INSERT INTO schemas (pub_id, organization_id, created_by, name, kafka_schema_registry, type, config)
+VALUES (:pub_id, :organization_id, :created_by, :name, :kafka_schema_registry, :type, :config) RETURNING id;
 
 
 ------- connection tables -------------
 --! create_connection_table(connection_id?, schema?)
 INSERT INTO connection_tables
-(organization_id, created_by, name, table_type, connector, connection_id, config, schema)
-VALUES (:organization_id, :created_by, :name, :table_type, :connector, :connection_id, :config, :schema);
+(pub_id, organization_id, created_by, name, table_type, connector, connection_id, config, schema)
+VALUES (:pub_id, :organization_id, :created_by, :name, :table_type, :connector, :connection_id, :config, :schema);
 
 --! get_connection_tables: (connection_id?, connection_name?, connection_type?, connection_config?, schema?)
 SELECT connection_tables.id as id,
@@ -85,13 +85,13 @@ WHERE organization_id = :organization_id AND id = :id;
 ----------- pipelines -------------------
 
 --! create_pipeline
-INSERT INTO pipelines (organization_id, created_by, name, type, current_version)
-VALUES (:organization_id, :created_by, :name, :type, :current_version)
+INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, current_version)
+VALUES (:pub_id, :organization_id, :created_by, :name, :type, :current_version)
 RETURNING id;
 
 --! create_pipeline_definition (textual_repr?, udfs?)
-INSERT INTO pipeline_definitions (organization_id, created_by, pipeline_id, version, textual_repr, udfs, program)
-VALUES  (:organization_id, :created_by, :pipeline_id, :version, :textual_repr, :udfs, :program)
+INSERT INTO pipeline_definitions (pub_id, organization_id, created_by, pipeline_id, version, textual_repr, udfs, program)
+VALUES  (:pub_id, :organization_id, :created_by, :pipeline_id, :version, :textual_repr, :udfs, :program)
 RETURNING id;
 
 --! get_pipeline: DbPipeline(textual_repr?, udfs?)
@@ -100,8 +100,8 @@ INNER JOIN pipeline_definitions as d ON pipelines.id = d.pipeline_id AND pipelin
 WHERE pipelines.id = :pipeline_id AND pipelines.organization_id = :organization_id;
 
 --! add_pipeline_connection_table
-INSERT INTO connection_table_pipelines(pipeline_id, connection_table_id)
-VALUES (:pipeline_id, :connection_table_id);
+INSERT INTO connection_table_pipelines(pub_id, pipeline_id, connection_table_id)
+VALUES (:pub_id, :pipeline_id, :connection_table_id);
 
 --! delete_pipeline
 DELETE FROM pipelines
@@ -123,11 +123,11 @@ WHERE id = :job_id AND organization_id = :organization_id;
 
 --! create_job(ttl_micros?)
 INSERT INTO job_configs
-    (id, organization_id, pipeline_name, created_by, pipeline_definition, checkpoint_interval_micros, ttl_micros)
-VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_definition, :checkpoint_interval_micros, :ttl_micros);
+(pub_id, id, organization_id, pipeline_name, created_by, pipeline_definition, checkpoint_interval_micros, ttl_micros)
+VALUES (:pub_id, :id, :organization_id, :pipeline_name, :created_by, :pipeline_definition, :checkpoint_interval_micros, :ttl_micros);
 
 --! create_job_status
-INSERT INTO job_statuses (id, organization_id) VALUES (:id, :organization_id);
+INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :organization_id);
 
 --! get_jobs: (start_time?, finish_time?, state?, tasks?, textual_repr?, failure_message?, run_id?, udfs?)
 SELECT job_configs.id as id, pipeline_name, stop, textual_repr, start_time, finish_time, state, tasks, pipeline_definition, failure_message, run_id, udfs

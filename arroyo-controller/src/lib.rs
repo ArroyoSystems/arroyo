@@ -15,6 +15,7 @@ use arroyo_rpc::grpc::{
     SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
     WorkerErrorRes,
 };
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::log_event;
 use arroyo_types::{from_micros, ports, DatabaseConfig, NodeId, WorkerId};
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
@@ -430,6 +431,7 @@ impl ControllerGrpc for ControllerServer {
         match queries::controller_queries::create_job_log_message()
             .bind(
                 &client,
+                &generate_id(IdTypes::JobLogMessage),
                 &req.job_id,
                 &req.operator_id,
                 &(req.task_index as i64),

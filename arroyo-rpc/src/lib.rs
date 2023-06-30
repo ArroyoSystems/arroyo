@@ -1,3 +1,5 @@
+pub mod public_ids;
+
 use std::{fs, time::SystemTime};
 
 use crate::grpc::SubtaskCheckpointMetadata;
