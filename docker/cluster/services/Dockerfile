@@ -26,7 +26,7 @@ COPY arroyo-server-common arroyo-server-common
 COPY arroyo-state arroyo-state
 COPY arroyo-metrics arroyo-metrics
 COPY arroyo-compiler-service arroyo-compiler-service
-
+COPY arroyo-connectors arroyo-connectors
 COPY arroyo-api arroyo-api
 COPY arroyo-datastream arroyo-datastream
 COPY arroyo-node arroyo-node
@@ -36,7 +36,7 @@ COPY arroyo-sql-testing arroyo-sql-testing
 COPY arroyo-controller arroyo-controller
 COPY arroyo-console arroyo-console
 COPY docker/refinery.toml refinery.toml
-
+COPY connector-schemas connector-schemas
 COPY integ integ
 
 # set git hash

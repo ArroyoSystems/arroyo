@@ -32,7 +32,7 @@ COPY arroyo-server-common src/arroyo-server-common
 COPY arroyo-state src/arroyo-state
 COPY arroyo-metrics src/arroyo-metrics
 COPY arroyo-compiler-service src/arroyo-compiler-service
-
+COPY arroyo-connectors src/arroyo-connectors
 COPY arroyo-api src/arroyo-api
 COPY arroyo-datastream src/arroyo-datastream
 COPY arroyo-node src/arroyo-node
@@ -41,6 +41,7 @@ COPY arroyo-sql-macro src/arroyo-sql-macro
 COPY arroyo-sql-testing src/arroyo-sql-testing
 COPY arroyo-controller src/arroyo-controller
 COPY arroyo-console src/arroyo-console
+COPY connector-schemas src/connector-schemas
 
 COPY integ src/integ
 
