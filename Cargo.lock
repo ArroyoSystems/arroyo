@@ -707,6 +707,7 @@ dependencies = [
 name = "arroyo-types"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
  "base64 0.21.2",
  "bincode 2.0.0-rc.3",
  "serde",
