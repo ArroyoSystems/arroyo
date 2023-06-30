@@ -129,14 +129,14 @@ impl Connector for KafkaConnector {
         opts: &mut std::collections::HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
-        let auth = opts.remove("authentication.type");
+        let auth = opts.remove("auth.type");
         let auth = match auth.as_ref().map(|t| t.as_str()) {
             Some("none") | None => KafkaConfigAuthentication::None {},
             Some("sasl") => KafkaConfigAuthentication::Sasl {
-                mechanism: pull_opt("authentication.mechanism", opts)?,
-                protocol: pull_opt("authentication.mechanism", opts)?,
-                username: pull_opt("authentication.username", opts)?,
-                password: pull_opt("authentication.password", opts)?,
+                mechanism: pull_opt("auth.mechanism", opts)?,
+                protocol: pull_opt("auth.protocol", opts)?,
+                username: pull_opt("auth.username", opts)?,
+                password: pull_opt("auth.password", opts)?,
             },
             Some(other) => bail!("unknown auth type '{}'", other),
         };
