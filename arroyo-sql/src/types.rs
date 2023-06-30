@@ -383,10 +383,18 @@ impl TypeDef {
                 val
             ))
             .unwrap(),
-            ScalarValue::TimestampSecond(_, _) => todo!(),
-            ScalarValue::TimestampMillisecond(_, _) => todo!(),
-            ScalarValue::TimestampMicrosecond(_, _) => todo!(),
-            ScalarValue::TimestampNanosecond(_, _) => todo!(),
+            ScalarValue::TimestampSecond(Some(secs), _) => {
+                parse_quote!(std::time::UNIX_EPOCH + std::time::Duration::from_secs(#secs as u64))
+            }
+            ScalarValue::TimestampMillisecond(Some(millis), _) => {
+                parse_quote!(std::time::UNIX_EPOCH + std::time::Duration::from_millis(#millis as u64))
+            }
+            ScalarValue::TimestampMicrosecond(Some(micros), _) => {
+                parse_quote!(std::time::UNIX_EPOCH + std::time::Duration::from_micros(#micros as u64))
+            }
+            ScalarValue::TimestampNanosecond(Some(nanos), _) => {
+                parse_quote!(std::time::UNIX_EPOCH + std::time::Duration::from_nanos(#nanos as u64))
+            }
             ScalarValue::IntervalYearMonth(_) => todo!(),
             ScalarValue::IntervalDayTime(Some(val)) => {
                 let (days, ms) = IntervalDayTimeType::to_parts(*val);

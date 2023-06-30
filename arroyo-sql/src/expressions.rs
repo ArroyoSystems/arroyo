@@ -441,11 +441,23 @@ impl<'a> ExpressionContext<'a> {
                         bail!("data structure function {:?} not implemented", fun)
                     }
 
-                    BuiltinScalarFunction::ToTimestamp
-                    | BuiltinScalarFunction::ToTimestampMillis
-                    | BuiltinScalarFunction::ToTimestampMicros
-                    | BuiltinScalarFunction::ToTimestampSeconds
-                    | BuiltinScalarFunction::DateBin
+                    BuiltinScalarFunction::ToTimestamp => CastExpression::new(
+                        Box::new(arg_expressions.remove(0)),
+                        &DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    ),
+                    BuiltinScalarFunction::ToTimestampMillis => CastExpression::new(
+                        Box::new(arg_expressions.remove(0)),
+                        &DataType::Timestamp(TimeUnit::Millisecond, None),
+                    ),
+                    BuiltinScalarFunction::ToTimestampMicros => CastExpression::new(
+                        Box::new(arg_expressions.remove(0)),
+                        &DataType::Timestamp(TimeUnit::Microsecond, None),
+                    ),
+                    BuiltinScalarFunction::ToTimestampSeconds => CastExpression::new(
+                        Box::new(arg_expressions.remove(0)),
+                        &DataType::Timestamp(TimeUnit::Second, None),
+                    ),
+                    BuiltinScalarFunction::DateBin
                     | BuiltinScalarFunction::CurrentDate
                     | BuiltinScalarFunction::FromUnixtime
                     | BuiltinScalarFunction::Now
@@ -1169,6 +1181,8 @@ impl CastExpression {
         // handle timestamp casts
         } else if Self::is_date(input_data_type) && Self::is_date(output_data_type) {
             true
+        } else if *input_data_type == DataType::Int64 && Self::is_date(output_data_type) {
+            true
         } else {
             false
         }
@@ -1222,6 +1236,22 @@ impl CastExpression {
                 std::time::SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_micros(datetime.with_timezone(&chrono::Utc).timestamp_micros() as u64)
             })
+        } else if *input_type == DataType::Int64 && Self::is_date(output_type) {
+            match output_type {
+                DataType::Timestamp(time_unit, None) => {
+                    let from_func: Ident = match time_unit {
+                        TimeUnit::Second => parse_quote!(from_secs),
+                        TimeUnit::Millisecond => parse_quote!(from_millis),
+                        TimeUnit::Microsecond => parse_quote!(from_micros),
+                        TimeUnit::Nanosecond => parse_quote!(from_nanos),
+                    };
+                    parse_quote!({
+                        std::time::SystemTime::UNIX_EPOCH
+                        + std::time::Duration::#from_func(#sub_expr as u64)
+                    })
+                }
+                _ => unreachable!(),
+            }
         } else {
             unreachable!("invalid cast from {:?} to {:?}", input_type, output_type)
         }
