@@ -12,20 +12,11 @@ import {
 } from '@chakra-ui/react';
 import { useEffect, useState } from 'react';
 import { useLinkClickHandler } from 'react-router-dom';
-import {
-  GetJobsReq,
-  GetSinksReq,
-  GetSourcesReq,
-  JobStatus,
-  Sink,
-  SourceDef,
-} from '../../gen/api_pb';
+import { GetJobsReq, JobStatus } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
 
 interface HomeState {
   jobs: Array<JobStatus> | null;
-  sources: Array<SourceDef> | null;
-  sinks: Array<Sink> | null;
 }
 
 interface Props {
@@ -58,19 +49,15 @@ export const Stat = (props: Props) => {
 };
 
 export function Home({ client }: { client: ApiClient }) {
-  const [state, setState] = useState<HomeState>({ jobs: null, sources: null, sinks: null });
+  const [state, setState] = useState<HomeState>({ jobs: null });
 
   useEffect(() => {
     const fetchData = async () => {
       const clientObj = await client();
       const jobs = clientObj.getJobs(new GetJobsReq({}));
-      const sources = clientObj.getSources(new GetSourcesReq({}));
-      const sinks = clientObj.getSinks(new GetSinksReq({}));
 
       setState({
         jobs: (await jobs).jobs,
-        sources: (await sources).sources,
-        sinks: (await sinks).sinks,
       });
     };
 
@@ -112,8 +99,6 @@ export function Home({ client }: { client: ApiClient }) {
               value={failedJobs?.toString()}
               color={failedJobs != null && failedJobs > 0 ? 'red.300' : undefined}
             />
-            <Stat label="Sources" value={state.sources?.length.toString()} />
-            <Stat label="Sinks" value={state.sinks?.length.toString()} />
           </SimpleGrid>
         </Stack>
       </Stack>

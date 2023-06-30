@@ -1,8 +1,10 @@
 use ::time::OffsetDateTime;
+use arroyo_connectors::connectors;
 use arroyo_rpc::grpc::api::{
-    DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq,
-    DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetSinksReq, GetSinksResp, PipelineProgram,
-    SourceMetadataResp,
+    CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
+    DeleteConnectionTableReq, DeleteConnectionTableResp, DeleteJobReq, DeleteJobResp,
+    GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp,
+    PipelineProgram, TestSchemaReq, TestSchemaResp,
 };
 use arroyo_rpc::grpc::{
     self,
@@ -10,13 +12,11 @@ use arroyo_rpc::grpc::{
         api_grpc_server::{ApiGrpc, ApiGrpcServer},
         CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp,
         CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq,
-        CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp,
-        GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq,
-        GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq,
-        JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp,
-        OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq,
-        PipelineGraphResp, StopType, TestSchemaResp, TestSourceMessage, UpdateJobReq,
-        UpdateJobResp,
+        CreatePipelineResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp,
+        GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp,
+        JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq,
+        OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, StopType,
+        TestSourceMessage, UpdateJobReq, UpdateJobResp,
     },
     controller_grpc_client::ControllerGrpcClient,
 };
@@ -56,16 +56,13 @@ use crate::jobs::get_job_details;
 use queries::api_queries;
 
 mod cloud;
+mod connection_tables;
 mod connections;
 mod job_log;
 mod jobs;
-mod json_schema;
 mod metrics;
 mod optimizations;
 mod pipelines;
-mod sinks;
-mod sources;
-mod testers;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -413,26 +410,30 @@ fn handle_delete(name: &str, users: &str, err: tokio_postgres::Error) -> Status 
 #[tonic::async_trait]
 impl ApiGrpc for ApiServer {
     // connections
+    async fn get_connectors(
+        &self,
+        request: Request<GetConnectorsReq>,
+    ) -> Result<Response<GetConnectorsResp>, Status> {
+        let (_request, _auth) = self.authenticate(request).await?;
+
+        let mut connectors: Vec<_> = connectors().values().map(|c| c.metadata()).collect();
+
+        connectors.sort_by_cached_key(|c| c.name.clone());
+
+        Ok(Response::new(GetConnectorsResp { connectors }))
+    }
+
     async fn create_connection(
         &self,
         request: Request<CreateConnectionReq>,
     ) -> Result<Response<CreateConnectionResp>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 
-        connections::create_connection(request.into_inner(), auth, &self.client().await?).await?;
+        let resp =
+            connections::create_connection(request.into_inner(), auth, &self.client().await?)
+                .await?;
 
-        Ok(Response::new(CreateConnectionResp {}))
-    }
-
-    async fn test_connection(
-        &self,
-        request: Request<CreateConnectionReq>,
-    ) -> Result<Response<TestSourceMessage>, Status> {
-        let (request, _) = self.authenticate(request).await?;
-
-        Ok(Response::new(
-            connections::test_connection(request.into_inner()).await?,
-        ))
+        Ok(Response::new(resp))
     }
 
     async fn get_connections(
@@ -457,38 +458,61 @@ impl ApiGrpc for ApiServer {
         Ok(Response::new(DeleteConnectionResp {}))
     }
 
-    // sources
-    async fn create_source(
+    // connection tables
+    type TestConnectionTableStream = ReceiverStream<Result<TestSourceMessage, Status>>;
+
+    async fn test_connection_table(
         &self,
-        request: Request<CreateSourceReq>,
-    ) -> Result<Response<CreateSourceResp>, Status> {
+        request: Request<CreateConnectionTableReq>,
+    ) -> Result<Response<Self::TestConnectionTableStream>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 
-        sources::create_source(request.into_inner(), auth, &self.pool).await?;
-
-        Ok(Response::new(CreateSourceResp {}))
+        let rx = connection_tables::test(request.into_inner(), auth, &self.client().await?).await?;
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    async fn get_sources(
+    async fn create_connection_table(
         &self,
-        request: Request<GetSourcesReq>,
-    ) -> Result<Response<GetSourcesResp>, Status> {
+        request: Request<CreateConnectionTableReq>,
+    ) -> Result<Response<CreateConnectionTableResp>, Status> {
+        let (request, auth) = self.authenticate(request).await?;
+
+        connection_tables::create(request.into_inner(), auth, &self.pool).await?;
+
+        Ok(Response::new(CreateConnectionTableResp {}))
+    }
+
+    async fn get_connection_tables(
+        &self,
+        request: Request<GetConnectionTablesReq>,
+    ) -> Result<Response<GetConnectionTablesResp>, Status> {
         let (_, auth) = self.authenticate(request).await?;
 
-        Ok(Response::new(GetSourcesResp {
-            sources: sources::get_sources(&auth, &self.client().await?).await?,
-        }))
+        let tables = connection_tables::get(&auth, &self.client().await?).await?;
+        Ok(Response::new(GetConnectionTablesResp { tables }))
     }
 
-    async fn delete_source(
+    async fn delete_connection_table(
         &self,
-        request: Request<DeleteSourceReq>,
-    ) -> Result<Response<DeleteSourceResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
+        request: Request<DeleteConnectionTableReq>,
+    ) -> Result<Response<DeleteConnectionTableResp>, Status> {
+        let (req, auth) = self.authenticate(request).await?;
 
-        sources::delete_source(request.into_inner(), auth, &self.client().await?).await?;
+        connection_tables::delete(req.into_inner(), auth, &self.client().await?).await?;
+        Ok(Response::new(DeleteConnectionTableResp {}))
+    }
 
-        Ok(Response::new(DeleteSourceResp {}))
+    async fn test_schema(
+        &self,
+        request: Request<TestSchemaReq>,
+    ) -> Result<Response<TestSchemaResp>, Status> {
+        let (request, _auth) = self.authenticate(request).await?;
+
+        let errors = connection_tables::test_schema(request.into_inner()).await?;
+        Ok(Response::new(TestSchemaResp {
+            valid: errors.is_empty(),
+            errors,
+        }))
     }
 
     async fn get_confluent_schema(
@@ -498,78 +522,8 @@ impl ApiGrpc for ApiServer {
         let (request, _) = self.authenticate(request).await?;
 
         Ok(Response::new(
-            sources::get_confluent_schema(request.into_inner()).await?,
+            connection_tables::get_confluent_schema(request.into_inner()).await?,
         ))
-    }
-
-    async fn test_schema(
-        &self,
-        request: Request<CreateSourceReq>,
-    ) -> Result<Response<TestSchemaResp>, Status> {
-        let (request, _auth) = self.authenticate(request).await?;
-
-        let errors = sources::test_schema(request.into_inner()).await?;
-        Ok(Response::new(TestSchemaResp {
-            valid: errors.is_empty(),
-            errors,
-        }))
-    }
-
-    async fn get_source_metadata(
-        &self,
-        request: Request<CreateSourceReq>,
-    ) -> Result<Response<SourceMetadataResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        Ok(Response::new(
-            sources::get_source_metadata(request.into_inner(), auth, &self.client().await?).await?,
-        ))
-    }
-
-    type TestSourceStream = ReceiverStream<Result<TestSourceMessage, Status>>;
-
-    async fn test_source(
-        &self,
-        request: Request<CreateSourceReq>,
-    ) -> Result<Response<Self::TestSourceStream>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        let rx = sources::test_source(request.into_inner(), auth, &self.client().await?).await?;
-        Ok(Response::new(ReceiverStream::new(rx)))
-    }
-
-    // sinks
-    async fn create_sink(
-        &self,
-        request: Request<CreateSinkReq>,
-    ) -> Result<Response<CreateSinkResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        sinks::create_sink(request.into_inner(), auth, &self.pool).await?;
-
-        Ok(Response::new(CreateSinkResp {}))
-    }
-
-    async fn get_sinks(
-        &self,
-        request: Request<GetSinksReq>,
-    ) -> Result<Response<GetSinksResp>, Status> {
-        let (_, auth) = self.authenticate(request).await?;
-
-        Ok(Response::new(GetSinksResp {
-            sinks: sinks::get_sinks(&auth, &self.client().await?).await?,
-        }))
-    }
-
-    async fn delete_sink(
-        &self,
-        request: Request<DeleteSinkReq>,
-    ) -> Result<Response<DeleteSinkResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        sinks::delete_sink(request.into_inner(), auth, &self.client().await?).await?;
-
-        Ok(Response::new(DeleteSinkResp {}))
     }
 
     // pipelines
@@ -822,12 +776,13 @@ impl ApiGrpc for ApiServer {
         let job_id = request.into_inner().job_id;
         // validate that the job exists, the user has access, and the graph has a GrpcSink
         let details = get_job_details(&job_id, &auth, &self.client().await?).await?;
+
         if !details
             .job_graph
             .unwrap()
             .nodes
             .iter()
-            .any(|n| n.operator.contains("GrpcSink"))
+            .any(|n| n.operator.contains("WebSink"))
         {
             // TODO: make this check more robust
             return Err(Status::invalid_argument(format!(

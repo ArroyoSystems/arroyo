@@ -14,7 +14,7 @@ import {
 } from '@chakra-ui/react';
 
 import { Link, Outlet, useLinkClickHandler, useMatch } from 'react-router-dom';
-import { FiHome, FiLogIn, FiGitBranch, FiLogOut, FiLink } from 'react-icons/fi';
+import { FiHome, FiGitBranch, FiLink } from 'react-icons/fi';
 import { CloudSidebar, UserProfile } from './lib/CloudComponents';
 
 function logout() {
@@ -73,8 +73,6 @@ function Sidebar() {
               <Stack spacing="1">
                 <NavButton label="Home" to="/" icon={FiHome} />
                 <NavButton label="Connections" to="connections" icon={FiLink} />
-                <NavButton label="Sources" to="sources" icon={FiLogIn} />
-                <NavButton label="Sinks" to="sinks" icon={FiLogOut} />
                 <NavButton label="Jobs" to="jobs" icon={FiGitBranch} />
               </Stack>
               <Divider />

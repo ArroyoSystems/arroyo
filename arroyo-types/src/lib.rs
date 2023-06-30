@@ -633,7 +633,7 @@ pub struct CheckpointBarrier {
     pub then_stop: bool,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Serialize)]
 pub enum DatePart {
     Year,
     Month,
@@ -649,7 +649,7 @@ pub enum DatePart {
     DayOfYear,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, PartialOrd, Serialize)]
 pub enum DateTruncPrecision {
     Year,
     Quarter,

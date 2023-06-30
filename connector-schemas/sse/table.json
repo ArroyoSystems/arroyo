@@ -1,0 +1,29 @@
+{
+    "type": "object",
+    "title": "SSETable",
+    "properties": {
+        "endpoint": {
+            "title": "Endpoint",
+            "type": "string",
+            "description": "The endpoint to connect to",
+            "examples": ["https://example.com:8080/sse"],
+            "format": "uri"
+        },
+        "headers": {
+            "title": "Headers",
+            "type": "string",
+            "description": "Comma separated list of headers to send with the request",
+            "pattern": "([a-zA-Z0-9-]+: ?.+,)*([a-zA-Z0-9-]+: ?.+)",
+            "examples": ["Authentication: digest 1234,Content-Type: application/json"]
+        },
+        "events": {
+            "title": "Events",
+            "type": "string",
+            "description": "Comma separated list of events to listen for",
+            "examples": ["event1,event2,event3"]
+        }
+    },
+    "required": [
+        "endpoint"
+    ]
+}

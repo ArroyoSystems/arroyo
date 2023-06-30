@@ -2,9 +2,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use arroyo_rpc::grpc::api::{
-    api_grpc_client::ApiGrpcClient, create_pipeline_req, BuiltinSink, CreateJobReq,
-    CreatePipelineReq, CreateSourceReq, GetJobsReq, JobCheckpointsReq, JobDetailsReq,
-    NexmarkSourceConfig, StopType, UpdateJobReq,
+    api_grpc_client::ApiGrpcClient, create_pipeline_req, CreateConnectionTableReq, CreateJobReq,
+    CreatePipelineReq, GetJobsReq, JobCheckpointsReq, JobDetailsReq, StopType, UpdateJobReq,
 };
 use arroyo_types::DatabaseConfig;
 use rand::RngCore;
@@ -150,19 +149,16 @@ pub async fn main() {
     let source_name = format!("source_{}", run_id);
     info!("Creating source {}", source_name);
     client
-        .create_source(CreateSourceReq {
+        .create_connection_table(CreateConnectionTableReq {
             name: source_name.clone(),
             schema: None,
-            type_oneof: Some(
-                arroyo_rpc::grpc::api::create_source_req::TypeOneof::Nexmark(NexmarkSourceConfig {
-                    events_per_second: 10,
-                    runtime_micros: None,
-                }),
-            ),
+            connector: "nexmark".to_string(),
+            connection_id: None,
+            config: "{\"event_rate\": 10.0}".to_string(),
         })
         .await
         .unwrap();
-    info!("Created source");
+    info!("Created connection table");
 
     // create a pipeline
     let pipeline_name = format!("pipeline_{}", run_id);
@@ -179,9 +175,6 @@ pub async fn main() {
                     ),
                     parallelism: 1,
                     udfs: vec![],
-                    sink: Some(arroyo_rpc::grpc::api::create_sql_job::Sink::Builtin(
-                        BuiltinSink::Web as i32,
-                    )),
                     preview: false,
                 },
             )),

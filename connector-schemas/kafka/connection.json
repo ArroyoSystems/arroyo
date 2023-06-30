@@ -1,0 +1,59 @@
+{
+    "type": "object",
+    "title": "KafkaConfig",
+    "properties": {
+        "bootstrapServers": {
+            "type": "string",
+            "title": "Bootstrap Servers",
+            "description": "Comma-separated list of Kafka servers to connect to",
+            "examples": ["broker-1:9092,broker-2:9092"],
+            "pattern": "^(([\\w\\.\\-]+:\\d+),)*([\\w\\.\\-]+:\\d+)$"
+        },
+        "authentication": {
+            "type": "object",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "None",
+                    "properties": {
+                    },
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "SASL",
+                    "required": [
+                        "protocol",
+                        "mechanism",
+                        "username",
+                        "password"
+                    ],
+                    "properties": {
+                        "protocol": {
+                            "type": "string",
+                            "description": "The SASL protocol to use (e.g., SASL_PLAINTEXT, SASL_SSL, etc."
+                        },
+                        "mechanism": {
+                            "type": "string",
+                            "description": "The SASL mechanism to use (e.g., SCRAM-SHA-256, SCRAM-SHA-512, etc.)"
+                        },
+                        "username": {
+                            "type": "string",
+                            "description": "The username to use for SASL authentication"
+                        },
+                        "password": {
+                            "type": "string",
+                            "description": "The password to use for SASL authentication"
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            ]
+        }
+    },
+    "required": [
+        "bootstrapServers",
+        "authentication"
+    ]
+}
+

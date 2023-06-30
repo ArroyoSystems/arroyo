@@ -11,6 +11,7 @@ kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
+arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-sql = { path = "../arroyo-sql" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-state = { path = "../arroyo-state" }
@@ -29,6 +30,7 @@ chrono = "0.4"
 once_cell = "1"
 
 arrow = { version = "39.0.0", default-features = false }
+arrow-schema = {version = "39.0", features = ["serde"]}
 
 bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = {version = "0.6", features = ["serde-1"]}
@@ -72,6 +74,7 @@ time = "0.3"
 cornucopia_async = { version = "0.4", features = ["with-serde_json-1"] }
 jwt-simple = "0.11.4"
 uuid = "1.3.3"
+regress = "0.6.0"
 
 [build-dependencies]
 cornucopia = { version = "0.9" }

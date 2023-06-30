@@ -3,7 +3,7 @@
 /* eslint-disable */
 /* @ts-nocheck */
 
-import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, CreateSinkReq, CreateSinkResp, CreateSourceReq, CreateSourceResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, DeleteSinkReq, DeleteSinkResp, DeleteSourceReq, DeleteSourceResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GetSinksReq, GetSinksResp, GetSourcesReq, GetSourcesResp, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, SourceMetadataResp, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
+import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateConnectionTableReq, CreateConnectionTableResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, DeleteConnectionReq, DeleteConnectionResp, DeleteConnectionTableReq, DeleteConnectionTableResp, DeleteJobReq, DeleteJobResp, GetConnectionsReq, GetConnectionsResp, GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, TestSchemaReq, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
 import {MethodKind} from "@bufbuild/protobuf";
 
 /**
@@ -13,21 +13,21 @@ export const ApiGrpc = {
   typeName: "arroyo_api.ApiGrpc",
   methods: {
     /**
+     * @generated from rpc arroyo_api.ApiGrpc.GetConnectors
+     */
+    getConnectors: {
+      name: "GetConnectors",
+      I: GetConnectorsReq,
+      O: GetConnectorsResp,
+      kind: MethodKind.Unary,
+    },
+    /**
      * @generated from rpc arroyo_api.ApiGrpc.CreateConnection
      */
     createConnection: {
       name: "CreateConnection",
       I: CreateConnectionReq,
       O: CreateConnectionResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.TestConnection
-     */
-    testConnection: {
-      name: "TestConnection",
-      I: CreateConnectionReq,
-      O: TestSourceMessage,
       kind: MethodKind.Unary,
     },
     /**
@@ -49,57 +49,48 @@ export const ApiGrpc = {
       kind: MethodKind.Unary,
     },
     /**
-     * @generated from rpc arroyo_api.ApiGrpc.CreateSource
+     * @generated from rpc arroyo_api.ApiGrpc.CreateConnectionTable
      */
-    createSource: {
-      name: "CreateSource",
-      I: CreateSourceReq,
-      O: CreateSourceResp,
+    createConnectionTable: {
+      name: "CreateConnectionTable",
+      I: CreateConnectionTableReq,
+      O: CreateConnectionTableResp,
       kind: MethodKind.Unary,
     },
     /**
-     * @generated from rpc arroyo_api.ApiGrpc.GetSources
+     * @generated from rpc arroyo_api.ApiGrpc.TestConnectionTable
      */
-    getSources: {
-      name: "GetSources",
-      I: GetSourcesReq,
-      O: GetSourcesResp,
+    testConnectionTable: {
+      name: "TestConnectionTable",
+      I: CreateConnectionTableReq,
+      O: TestSourceMessage,
+      kind: MethodKind.ServerStreaming,
+    },
+    /**
+     * @generated from rpc arroyo_api.ApiGrpc.GetConnectionTables
+     */
+    getConnectionTables: {
+      name: "GetConnectionTables",
+      I: GetConnectionTablesReq,
+      O: GetConnectionTablesResp,
       kind: MethodKind.Unary,
     },
     /**
-     * @generated from rpc arroyo_api.ApiGrpc.DeleteSource
+     * @generated from rpc arroyo_api.ApiGrpc.DeleteConnectionTable
      */
-    deleteSource: {
-      name: "DeleteSource",
-      I: DeleteSourceReq,
-      O: DeleteSourceResp,
+    deleteConnectionTable: {
+      name: "DeleteConnectionTable",
+      I: DeleteConnectionTableReq,
+      O: DeleteConnectionTableResp,
       kind: MethodKind.Unary,
     },
     /**
-     * @generated from rpc arroyo_api.ApiGrpc.CreateSink
+     * @generated from rpc arroyo_api.ApiGrpc.TestSchema
      */
-    createSink: {
-      name: "CreateSink",
-      I: CreateSinkReq,
-      O: CreateSinkResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.GetSinks
-     */
-    getSinks: {
-      name: "GetSinks",
-      I: GetSinksReq,
-      O: GetSinksResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.DeleteSink
-     */
-    deleteSink: {
-      name: "DeleteSink",
-      I: DeleteSinkReq,
-      O: DeleteSinkResp,
+    testSchema: {
+      name: "TestSchema",
+      I: TestSchemaReq,
+      O: TestSchemaResp,
       kind: MethodKind.Unary,
     },
     /**
@@ -110,33 +101,6 @@ export const ApiGrpc = {
       I: ConfluentSchemaReq,
       O: ConfluentSchemaResp,
       kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.GetSourceMetadata
-     */
-    getSourceMetadata: {
-      name: "GetSourceMetadata",
-      I: CreateSourceReq,
-      O: SourceMetadataResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.TestSchema
-     */
-    testSchema: {
-      name: "TestSchema",
-      I: CreateSourceReq,
-      O: TestSchemaResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.TestSource
-     */
-    testSource: {
-      name: "TestSource",
-      I: CreateSourceReq,
-      O: TestSourceMessage,
-      kind: MethodKind.ServerStreaming,
     },
     /**
      * @generated from rpc arroyo_api.ApiGrpc.CreatePipeline

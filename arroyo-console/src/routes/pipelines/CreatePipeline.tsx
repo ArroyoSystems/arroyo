@@ -22,7 +22,7 @@ import {
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BuiltinSink,
+  ConnectionTable,
   CreatePipelineReq,
   CreateSqlJob,
   CreateUdf,
@@ -31,6 +31,7 @@ import {
   OutputData,
   PipelineGraphReq,
   StopType,
+  TableType,
   UdfLanguage,
 } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
@@ -40,11 +41,10 @@ import { PipelineOutputs } from './JobOutputs';
 import { CodeEditor } from './SqlEditor';
 import { SqlOptions } from '../../lib/types';
 import {
+  useConnectionTables,
   useJob,
   useOperatorErrors,
   usePipelineGraph,
-  useSinks,
-  useSources,
 } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';
@@ -65,14 +65,13 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   const [udfsInput, setUdfsInput] = useState<string>('');
   const [udfsInputToCheck, setUdfsInputToCheck] = useState<string>('');
   const { pipelineGraph } = usePipelineGraph(client, queryInputToCheck, udfsInputToCheck);
-  const { sources, sourcesLoading } = useSources(client);
-  const { sinks } = useSinks(client);
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [options, setOptions] = useState<SqlOptions>({ parallelism: 4, checkpointMS: 5000 });
   const navigate = useNavigate();
   const [startError, setStartError] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState<number>(0);
   const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
+  const { connectionTables, connectionTablesLoading } = useConnectionTables(client);
   const queryParams = useQuery();
 
   const updateQuery = (query: string) => {
@@ -119,7 +118,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   }, [queryParams]);
 
   // Top-level loading state
-  if (sourcesLoading) {
+  if (connectionTablesLoading) {
     return <Loading />;
   }
 
@@ -162,7 +161,6 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
           value: new CreateSqlJob({
             query: queryInput,
             udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfsInput })],
-            sink: { case: 'builtin', value: BuiltinSink.Web },
             preview: true,
           }),
         },
@@ -205,8 +203,6 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
 
   const start = async () => {
     try {
-      let sink = sinks[options.sink!];
-
       let resp = await (
         await client()
       ).startPipeline(
@@ -217,7 +213,6 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
             value: new CreateSqlJob({
               query: queryInput,
               udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfsInput })],
-              sink: sink.value,
             }),
           },
         })
@@ -235,6 +230,9 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     }
   };
 
+  const sources = (connectionTables || []).filter(s => s.tableType == TableType.SOURCE);
+  const sinks = (connectionTables || []).filter(s => s.tableType == TableType.SINK);
+
   const startPipelineModal = (
     <StartPipelineModal
       isOpen={isOpen}
@@ -242,36 +240,53 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
       startError={startError}
       options={options}
       setOptions={setOptions}
-      sinks={sinks}
       start={start}
     />
   );
 
-  let sourcesList = <></>;
-
-  if (sources && sources.sources.length == 0) {
-    sourcesList = (
-      <Stack width={300} background="bg-subtle" p={2} spacing={6}>
-        <Text fontSize="xl">Sources</Text>
-        <Box overflowY="auto" overflowX="hidden">
-          <Text>
-            No sources have been configured. Create one <Link to="/sources/new">here</Link>.
-          </Text>
-        </Box>
+  const catalogType = (name: string, tables: Array<ConnectionTable>) => {
+    return (
+      <Stack p={4}>
+        <Text fontSize={'md'} pt={2} pb={4} fontWeight={'bold'}>
+          {name.toUpperCase()}S
+        </Text>
+        <Stack spacing={4}>
+          {sources.length == 0 ? (
+            <Box overflowY="auto" overflowX="hidden">
+              <Text>
+                No {name}s have been created. Create one <Link to="/connections/new">here</Link>.
+              </Text>
+            </Box>
+          ) : (
+            <Box overflowY="auto" overflowX="hidden">
+              <Catalog tables={tables} />
+            </Box>
+          )}
+        </Stack>
       </Stack>
     );
-  }
+  };
 
-  if (sources && sources.sources.length > 0) {
-    sourcesList = (
-      <Stack width={300} background="bg-subtle" p={2} spacing={6}>
-        <Text fontSize="xl">Sources</Text>
-        <Box overflowY="auto" overflowX="hidden">
-          <Catalog sources={sources!.sources} />
-        </Box>
-      </Stack>
-    );
-  }
+  let catalog = (
+    <Stack
+      width={300}
+      background="gray.900"
+      p={2}
+      spacing={2}
+      pt={4}
+      borderRight={'1px solid'}
+      borderColor={'gray.500'}
+    >
+      {catalogType('Source', sources)}
+      {catalogType('Sink', sinks)}
+
+      <Spacer />
+      <Box p={4} borderTop={'1px solid'} borderColor={'gray.500'}>
+        Write SQL to create a streaming pipeline. See the{' '}
+        <Link to={'http://doc.arroyo.dev/sql'}>SQL docs</Link> for details on Arroyo SQL.
+      </Box>
+    </Stack>
+  );
 
   const previewing = job?.jobStatus?.runningDesired && job?.jobStatus?.state != 'Failed';
 
@@ -392,7 +407,18 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   const errorsTab = (
     <TabPanel overflowX="auto" height="100%" position="relative">
       {operatorErrors ? (
-        <OperatorErrors operatorErrors={operatorErrors} />
+        <Box
+          style={{
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            position: 'absolute',
+          }}
+          overflow="auto"
+        >
+          <OperatorErrors operatorErrors={operatorErrors} />
+        </Box>
       ) : (
         <Text>Job errors will appear here.</Text>
       )}
@@ -474,7 +500,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
 
   return (
     <Flex height={'100vh'}>
-      <Flex>{sourcesList}</Flex>
+      <Flex>{catalog}</Flex>
       <Flex direction={'column'} flex={1}>
         {editorTabs}
         {actionBar}

@@ -4,13 +4,6 @@ package arroyo_api;
 
 // Job management
 
-enum BuiltinSink {
-  Null = 0;
-  Web = 1;
-  Log = 2;
-}
-
-
 enum UdfLanguage {
   Rust = 0;
 }
@@ -26,10 +19,6 @@ message CreateSqlJob {
 
   repeated CreateUdf udfs = 5;
 
-  oneof sink {
-    BuiltinSink builtin = 3;
-    string user = 4;
-  };
   bool preview = 6;
 }
 
@@ -147,19 +136,13 @@ message ProgramEdge {
 
 message Operator {
   oneof operator {
-    FileSource file_source = 1;
-    ImpulseSource impulse_source = 2;
-    KafkaSource kafka_source = 3;
-    EventSourceSource event_source_source = 22;
+    ConnectorOp connector_source = 3;
+    ConnectorOp connector_sink = 22;
     WasmUdfs wasm_udfs = 4;
     WindowOperator window = 5;
     Aggregator aggregator = 6;
     PeriodicWatermark periodic_watermark = 7;
-    BuiltinSink builtin_sink = 8;
-    FileSink file_sink = 9;
     Window window_join = 10;
-    KafkaSink kafka_sink = 11;
-    NexmarkSource nexmark_source = 12;
     ExpressionOperator expression_operator = 13;
     Flatten flatten = 14;
     FlattenExpressionOperator flatten_expression_operator = 15;
@@ -173,36 +156,6 @@ message Operator {
     NonWindowAggregator non_window_aggregator = 25;
     UpdatingKeyOperator updating_key_operator = 26;
   }
-}
-
-message FileSource {
-  string dir = 1;
-  uint64 micros_delay = 2;
-}
-
-message ImpulseSource {
-  uint64 micros_start = 1;
-  optional uint64 total_events = 2;
-  oneof spec {
-    uint64 micros_delay = 3;
-    float event_qps = 4;
-  }
-}
-
-message KafkaSource {
-  string topic = 1;
-  repeated string bootstrap_servers = 2;
-  OffsetMode offset_mode = 3;
-  SerializationMode serialization_mode = 4;
-  uint32 messages_per_second = 5;
-  map<string, string> client_configs = 6;
-}
-
-message EventSourceSource {
-  string url = 1;
-  map<string, string> headers = 2;
-  SerializationMode serialization_mode = 3;
-  repeated string events = 4;
 }
 
 enum SerializationMode {
@@ -281,21 +234,6 @@ message PeriodicWatermark {
 message ExpressionWatermark {
   uint64 period_micros = 1;
   string expression = 2;
-}
-
-message KafkaSink {
-  string topic = 1;
-  repeated string bootstrap_servers = 2;
-  map<string, string> client_configs = 3;
-}
-
-message FileSink {
-  string file_path = 1;
-}
-
-message NexmarkSource {
-  uint64 first_event_rate = 1;
-  optional uint64 total_events = 2;
 }
 
 message ExpressionOperator {
@@ -580,56 +518,45 @@ message JobMetricsResp {
 }
 
 // connections
-message KafkaConnection {
-  string bootstrap_servers = 1;
-  KafkaAuthConfig auth_config = 2;
+message GetConnectorsReq {
 }
 
-message KafkaAuthConfig {
-  oneof auth_type {
-    NoAuth no_auth = 1;
-    SaslAuth sasl_auth =2;
-  }
+message Connector {
+  string id = 1;
+  string name = 2;
+  string icon = 3;
+  string description = 4;
+  bool enabled = 5;
+  bool source = 6;
+  bool sink = 7;
+  bool custom_schemas = 8;
+  bool testing = 9;
+
+  optional string connection_config = 10;
+  string table_config = 11;
 }
 
-message NoAuth {}
-
-message SaslAuth {
-  string protocol = 1;
-  string mechanism = 2;
-  string username = 3;
-  string password = 4;
-}
-message KinesisConnection {
+message GetConnectorsResp {
+  repeated Connector connectors = 1;
 }
 
-message HttpConnection {
-  string url = 1;
-  string headers = 2;
-}
 
 message Connection {
-  string name = 1;
-  oneof connection_type {
-    KafkaConnection kafka = 2;
-    KinesisConnection kinesis = 3;
-    HttpConnection http = 6;
-  }
-
-  int32 sources = 4;
-  int32 sinks = 5;
+  string id = 1;
+  string name = 2;
+  string connector = 3;
+  string config = 4;
+  string description = 5;
 }
 
 message CreateConnectionReq {
   string name = 1;
-  oneof connection_type {
-    KafkaConnection kafka = 2;
-    KinesisConnection kinesis = 3;
-    HttpConnection http = 4;
-  }
+  string connector = 2;
+  string config = 3;
 }
 
 message CreateConnectionResp {
+  Connection connection = 1;
 }
 
 message GetConnectionsReq {
@@ -646,21 +573,51 @@ message DeleteConnectionReq {
 message DeleteConnectionResp {
 }
 
+enum TableType {
+  SOURCE = 0;
+  SINK = 1;
+}
+
+// Connection tables
+message CreateConnectionTableReq {
+  string name = 1;
+  string connector = 2;
+  optional string connection_id = 3;
+  string config = 5;
+  optional ConnectionSchema schema = 6;
+}
+
+message CreateConnectionTableResp {
+}
+
+message ConnectionTable {
+  int64 id = 1;
+  string name = 2;
+  string connector = 3;
+  optional Connection connection  = 4;
+  TableType table_type = 5;
+  string config = 6;
+  ConnectionSchema schema = 7;
+  int32 consumers = 8;
+}
+
+message GetConnectionTablesReq {
+}
+
+message GetConnectionTablesResp {
+  repeated ConnectionTable tables = 1;
+}
+
+
+message DeleteConnectionTableReq {
+  int64 id = 1;
+}
+
+message DeleteConnectionTableResp {
+}
+
+
 // Sources
-
-message JsonSchemaDef {
-  string json_schema = 1;
-}
-
-message JsonFieldDef {
-  repeated SourceField fields = 1;
-}
-
-message ProtobufSchemaDef {
-  string protobuf_schema = 1;
-}
-
-message RawJsonDef {}
 
 enum PrimitiveType {
   Int32 = 0;
@@ -673,12 +630,15 @@ enum PrimitiveType {
   String = 7;
   Bytes = 8;
   UnixMillis = 9;
+  UnixMicros = 12;
+  UnixNanos = 13;
   DateTime = 10;
   Json = 11;
 }
 
 message StructType {
-  repeated SourceField fields = 1;
+  optional string name = 1;
+  repeated SourceField fields = 2;
 }
 
 message SourceFieldType {
@@ -697,107 +657,39 @@ message SourceField {
   bool nullable = 3;
 }
 
-message SourceSchema {
-  oneof schema {
-    string builtin = 2;
-    JsonSchemaDef json_schema = 3;
-    JsonFieldDef json_fields = 4;
-    ProtobufSchemaDef protobuf = 5;
-    RawJsonDef raw_json = 6;
-  }
-
- bool kafka_schema_registry = 7;
+enum Format {
+  JsonFormat = 0;
+  DebeziumJsonFormat = 1;
+  ProtobufFormat = 2;
+  AvroFormat = 3;
+  RawStringFormat = 4;
 }
 
-enum KafkaOffsetMode {
-  Earliest = 0;
-  Latest = 1;
+message FormatOptions {
+  bool confluent_schema_registry = 1;
 }
 
-message KafkaSourceConfig {
-  string topic = 1;
-  string connection = 2;
-}
+message ConnectionSchema {
+  optional Format format = 1;
+  FormatOptions format_options = 2;
+  optional string struct_name = 8;
+  repeated SourceField fields = 3;
 
-message ImpulseSourceConfig {
-  optional uint32 interval_micros = 1;
-  float events_per_second = 2;
-  optional uint32 total_messages = 3;
-}
-
-message FileSourceConfig {
-  string directory = 1;
-  uint32 interval_ms = 2;
-}
-
-message NexmarkSourceConfig {
-  uint32 events_per_second = 1;
-  optional uint64 runtime_micros = 2;
-}
-
-message EventSourceSourceConfig {
-  string connection = 1;
-  string path = 2;
-  string events = 3;
-}
-
-message EventSourceSourceDef {
-  string connection_name = 1;
-  HttpConnection connection = 2;
-  string path = 3;
-  string events = 4;
-}
-
-message CreateSourceReq {
-  string name = 1;
-
-  SourceSchema schema = 2;
-
-  oneof type_oneof {
-    KafkaSourceConfig kafka = 3;
-    ImpulseSourceConfig impulse = 4;
-    FileSourceConfig file = 5;
-    NexmarkSourceConfig nexmark = 6;
-    EventSourceSourceConfig event_source = 7;
+  oneof definition {
+    string json_schema = 4;
+    string protobuf_schema = 5;
+    string avro_schema = 6;
+    string raw_schema = 7;
   }
 }
-
-message CreateSourceResp {
+message ConnectorOp {
+  string operator = 1;
+  string config = 2;
+  string description = 3;
 }
 
-message KafkaSourceDef {
-  string connection_name = 1;
-  KafkaConnection connection = 2;
-  string topic = 3;
-}
-
-message SourceDef {
-  int64 id = 9;
-  string name = 1;
-  SourceSchema schema = 2;
-  optional string connection = 8;
-  int32 consumers = 10;
-
-  oneof source_type {
-    KafkaSourceDef kafka = 3;
-    ImpulseSourceConfig impulse = 4;
-    FileSourceConfig file = 5;
-    NexmarkSourceConfig nexmark = 6;
-    EventSourceSourceDef event_source = 11;
-  }
-
-  repeated SourceField sql_fields = 7;
-}
-
-message GetSourcesReq {}
-message GetSourcesResp {
-  repeated SourceDef sources = 1;
-}
-
-message DeleteSourceReq {
-  string name = 1;
-}
-message DeleteSourceResp {
+message TestSchemaReq {
+  ConnectionSchema schema = 1;
 }
 
 message TestSchemaResp {
@@ -811,11 +703,6 @@ message TestSourceMessage {
   string message = 3;
 }
 
-message SourceMetadataResp {
-  uint32 partitions = 1;
-}
-
-
 message ConfluentSchemaReq {
   string endpoint = 1;
   string topic = 2;
@@ -825,47 +712,6 @@ message ConfluentSchemaResp {
   string schema = 1;
 }
 
-// sinks
-
-message KafkaSinkConfig {
-  string topic = 1;
-  string connection = 2;
-}
-
-message CreateSinkReq {
-  string name = 1;
-
-  oneof sink_type {
-    KafkaSinkConfig kafka = 2;
-  }
-}
-
-message CreateSinkResp {
-}
-
-message GetSinksReq {
-}
-
-message Sink {
-  int64 id = 1;
-  string name = 2;
-  oneof sink_type {
-    KafkaSinkConfig kafka = 3;
-  }
-  int32 producers = 4;
-}
-
-message GetSinksResp {
-  repeated Sink sinks = 1;
-}
-
-message DeleteSinkReq {
-  string name = 1;
-}
-
-message DeleteSinkResp {
-
-}
 
 // outputs
 
@@ -881,23 +727,17 @@ message OutputData {
 }
 
 service ApiGrpc {
+  rpc GetConnectors(GetConnectorsReq) returns (GetConnectorsResp);
   rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp);
-  rpc TestConnection(CreateConnectionReq) returns (TestSourceMessage);
   rpc GetConnections(GetConnectionsReq) returns (GetConnectionsResp);
   rpc DeleteConnection(DeleteConnectionReq) returns (DeleteConnectionResp);
 
-  rpc CreateSource(CreateSourceReq) returns (CreateSourceResp);
-  rpc GetSources(GetSourcesReq) returns (GetSourcesResp);
-  rpc DeleteSource(DeleteSourceReq) returns (DeleteSourceResp);
-
-  rpc CreateSink(CreateSinkReq) returns (CreateSinkResp);
-  rpc GetSinks(GetSinksReq) returns (GetSinksResp);
-  rpc DeleteSink(DeleteSinkReq) returns (DeleteSinkResp);
-
+  rpc CreateConnectionTable(CreateConnectionTableReq) returns (CreateConnectionTableResp);
+  rpc TestConnectionTable(CreateConnectionTableReq) returns (stream TestSourceMessage);
+  rpc GetConnectionTables(GetConnectionTablesReq) returns (GetConnectionTablesResp);
+  rpc DeleteConnectionTable(DeleteConnectionTableReq) returns (DeleteConnectionTableResp);
+  rpc TestSchema(TestSchemaReq) returns (TestSchemaResp);
   rpc GetConfluentSchema(ConfluentSchemaReq) returns (ConfluentSchemaResp);
-  rpc GetSourceMetadata(CreateSourceReq) returns (SourceMetadataResp);
-  rpc TestSchema(CreateSourceReq) returns (TestSchemaResp);
-  rpc TestSource(CreateSourceReq) returns (stream TestSourceMessage);
 
   rpc CreatePipeline(CreatePipelineReq) returns (CreatePipelineResp);
   rpc GraphForPipeline(PipelineGraphReq) returns (PipelineGraphResp);

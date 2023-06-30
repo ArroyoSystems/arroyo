@@ -24,7 +24,7 @@ use syn::{parse_quote, parse_str, Ident, Path};
 #[derive(Debug, Clone)]
 pub struct BinaryOperator(datafusion_expr::Operator);
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum Expression {
     Column(ColumnExpression),
     UnaryBoolean(UnaryBooleanExpression),
@@ -607,7 +607,7 @@ impl Column {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct ColumnExpression {
     column_field: StructField,
 }
@@ -637,7 +637,7 @@ impl ColumnExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum UnaryOperator {
     IsNotNull,
     IsNull,
@@ -650,7 +650,7 @@ pub enum UnaryOperator {
     Negative,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct UnaryBooleanExpression {
     operator: UnaryOperator,
     input: Box<Expression>,
@@ -699,7 +699,7 @@ impl UnaryBooleanExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct LiteralExpression {
     literal: ScalarValue,
 }
@@ -718,7 +718,7 @@ impl LiteralExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum BinaryComparison {
     Eq,
     NotEq,
@@ -753,7 +753,7 @@ impl TryFrom<datafusion_expr::Operator> for BinaryComparison {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct BinaryComparisonExpression {
     pub left: Box<Expression>,
     pub op: BinaryComparison,
@@ -818,7 +818,7 @@ impl BinaryComparisonExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum BinaryMathOperator {
     Plus,
     Minus,
@@ -855,7 +855,8 @@ impl TryFrom<datafusion_expr::Operator> for BinaryMathOperator {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
+
 pub struct BinaryMathExpression {
     left: Box<Expression>,
     op: BinaryMathOperator,
@@ -903,7 +904,7 @@ impl BinaryMathExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructFieldExpression {
     struct_expression: Box<Expression>,
     struct_field: StructField,
@@ -953,7 +954,7 @@ impl StructFieldExpression {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum Aggregator {
     Count,
     Sum,
@@ -1000,7 +1001,7 @@ impl Aggregator {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct AggregationExpression {
     pub producing_expression: Box<Expression>,
     pub aggregator: Aggregator,
@@ -1138,7 +1139,7 @@ impl AggregationExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct CastExpression {
     input: Box<Expression>,
     data_type: DataType,
@@ -1275,7 +1276,7 @@ impl CastExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 enum NumericFunction {
     Abs,
     Acos,
@@ -1369,7 +1370,7 @@ impl TryFrom<BuiltinScalarFunction> for NumericFunction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct NumericExpression {
     function: NumericFunction,
     input: Box<Expression>,
@@ -1395,7 +1396,7 @@ impl NumericExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct SortExpression {
     value: Expression,
     direction: SortDirection,
@@ -1505,7 +1506,7 @@ impl SortExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum StringFunction {
     Ascii(Box<Expression>),
     BitLength(Box<Expression>),
@@ -1550,7 +1551,7 @@ pub enum StringFunction {
     Rtrim(Box<Expression>, Option<Box<Expression>>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum HashFunction {
     MD5,
     SHA224,
@@ -1586,7 +1587,7 @@ impl TryFrom<BuiltinScalarFunction> for HashFunction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct HashExpression {
     function: HashFunction,
     input: Box<Expression>,
@@ -2206,7 +2207,7 @@ impl StringFunction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum DataStructureFunction {
     Coalesce(Vec<Expression>),
     NullIf {
@@ -2339,14 +2340,14 @@ impl DataStructureFunction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 enum JsonFunction {
     GetFirstJsonObject,
     GetJsonObjects,
     ExtractJsonString,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct JsonExpression {
     function: JsonFunction,
     json_string: Box<Expression>,
@@ -2409,7 +2410,7 @@ impl JsonExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct RustUdfExpression {
     name: String,
     args: Vec<(TypeDef, Expression)>,
@@ -2462,7 +2463,7 @@ impl RustUdfExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct WrapTypeExpression {
     name: String,
     arg: Box<Expression>,
@@ -2494,7 +2495,7 @@ impl WrapTypeExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum CaseExpression {
     // match a single value to multiple potential matches
     Match {
@@ -2634,7 +2635,7 @@ impl CaseExpression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd)]
 pub enum DateTimeFunction {
     DateTrunc(Box<Expression>, Box<DateTruncPrecision>),
     DatePart(Box<Expression>, Box<DatePart>),

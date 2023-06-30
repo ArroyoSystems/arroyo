@@ -17,7 +17,7 @@ full_pipeline_codegen! {"query_5_join",
         1,2
     ) AS AuctionBids
     JOIN (
-      SELECT 
+      SELECT
         max(num) AS maxn,
         window
       FROM (
@@ -42,9 +42,10 @@ full_pipeline_codegen! {"watermark_test",
   date_string text,
   datetime datetime GENERATED ALWAYS AS (CAST(date_string as timestamp)),
   watermark datetime GENERATED ALWAYS AS (CAST(date_string as timestamp) - interval '1 second')
-
 ) WITH (
-  connection = 'local',
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'source',
   topic = 'person',
   event_time_field = 'datetime',
   watermark_field = 'watermark'
@@ -54,13 +55,14 @@ SELECT id, name, email FROM person;"}
 
 full_pipeline_codegen! {"sliding_count_distinct",
 "WITH bids as (
-  SELECT bid.auction as auction, bid.price as price, bid.bidder as bidder, bid.extra as extra, bid.datetime as datetime 
+  SELECT bid.auction as auction, bid.price as price, bid.bidder as bidder, bid.extra as extra, bid.datetime as datetime
   FROM nexmark where bid is not null)
 
 SELECT * FROM (
 SELECT bidder, COUNT( distinct auction) as distinct_auctions
 FROM bids B1
 GROUP BY bidder, HOP(INTERVAL '3 second', INTERVAL '10' minute)) WHERE distinct_auctions > 2"}
+
 full_pipeline_codegen! {"right_join",
 "SELECT *
 FROM (SELECT bid.auction as auction, bid.price as price
@@ -75,9 +77,11 @@ full_pipeline_codegen! {"debezium_source", "CREATE table debezium_source (
   auctions_id int,
   initial_bid int
 ) WITH (
-  connection = 'local',
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'source',
   topic = 'updating',
-  serialization_mode = 'debezium_json'
+  format = 'debezium_json'
 );
 
 SELECT * FROM debezium_source"}
@@ -86,9 +90,11 @@ full_pipeline_codegen! {"forced_debezium_sink", "
 CREATE TABLE kafka_raw_sink (
   sum bigint,
 ) WITH (
-  connection = 'local',
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'sink',
   topic = 'raw_sink',
-  serialization_mode = 'debezium_json'
+  format = 'debezium_json'
 );
 INSERT INTO kafka_raw_sink
 SELECT bid.price FROM nexmark;

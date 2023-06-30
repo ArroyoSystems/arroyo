@@ -1,74 +1,78 @@
-use arroyo_rpc::grpc::api::DeleteConnectionReq;
-use arroyo_rpc::grpc::api::{
-    connection::ConnectionType, create_connection_req::ConnectionType as ReqConnectionType,
-    Connection, CreateConnectionReq, TestSourceMessage,
-};
+use arroyo_connectors::connector_for_type;
+use arroyo_rpc::grpc::api::{Connection, CreateConnectionReq};
+use arroyo_rpc::grpc::api::{CreateConnectionResp, DeleteConnectionReq};
 use cornucopia_async::GenericClient;
-use tokio::sync::mpsc::channel;
 use tonic::Status;
+use tracing::warn;
 
 use crate::handle_delete;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnection;
-use crate::testers::HttpTester;
-use crate::types::public;
-use crate::{handle_db_error, log_and_map, required_field, testers::KafkaTester, AuthData};
+use crate::{handle_db_error, log_and_map, AuthData};
 
 pub(crate) async fn create_connection(
     req: CreateConnectionReq,
     auth: AuthData,
     client: &impl GenericClient,
-) -> Result<(), Status> {
-    let (typ, v) = match req
-        .connection_type
-        .ok_or_else(|| required_field("connection.connection_type"))?
-    {
-        ReqConnectionType::Kafka(k) => (
-            public::ConnectionType::kafka,
-            serde_json::to_value(k).map_err(log_and_map)?,
-        ),
-        ReqConnectionType::Kinesis(_) => {
-            return Err(Status::failed_precondition("Kinesis is not yet supported"));
-        }
-        ReqConnectionType::Http(c) => (
-            public::ConnectionType::http,
-            serde_json::to_value(c).map_err(log_and_map)?,
-        ),
+) -> Result<CreateConnectionResp, Status> {
+    let description = {
+        let connector = connector_for_type(&req.connector).ok_or_else(|| {
+            Status::invalid_argument(format!("Unknown connection type '{}'", req.connector))
+        })?;
+
+        (*connector)
+            .validate_config(&req.config)
+            .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
+
+        (*connector)
+            .config_description(&req.config)
+            .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?
     };
 
-    api_queries::create_connection()
+    let config: serde_json::Value = serde_json::from_str(&req.config).unwrap();
+
+    let id = api_queries::create_connection()
         .bind(
             client,
             &auth.organization_id,
             &auth.user_id,
             &req.name,
-            &typ,
-            &v,
+            &req.connector,
+            &serde_json::to_value(&config).unwrap(),
         )
+        .one()
         .await
         .map_err(|e| handle_db_error("connection", e))?;
 
-    Ok(())
+    Ok(CreateConnectionResp {
+        connection: Some(Connection {
+            id: id.to_string(),
+            name: req.name,
+            connector: req.connector,
+            config: serde_json::to_string(&config).unwrap(),
+            description,
+        }),
+    })
 }
 
-impl From<DbConnection> for Connection {
-    fn from(val: DbConnection) -> Self {
-        Connection {
+impl TryFrom<DbConnection> for Connection {
+    type Error = String;
+
+    fn try_from(val: DbConnection) -> Result<Self, String> {
+        let connector = connector_for_type(&val.r#type)
+            .ok_or_else(|| format!("Unknown connection type '{}'", val.name))?;
+
+        let description = (*connector)
+            .config_description(&serde_json::to_string(&val.config).unwrap())
+            .map_err(|e| format!("Failed to parse config: {:?}", e))?;
+
+        Ok(Connection {
+            id: val.id.to_string(),
             name: val.name,
-            connection_type: Some(match val.r#type {
-                public::ConnectionType::kafka => {
-                    ConnectionType::Kafka(serde_json::from_value(val.config).unwrap())
-                }
-                public::ConnectionType::kinesis => {
-                    ConnectionType::Kinesis(serde_json::from_value(val.config).unwrap())
-                }
-                public::ConnectionType::http => {
-                    ConnectionType::Http(serde_json::from_value(val.config).unwrap())
-                }
-            }),
-            sources: val.source_count as i32,
-            sinks: val.sink_count as i32,
-        }
+            connector: val.r#type,
+            config: serde_json::to_string(&val.config).unwrap(),
+            description,
+        })
     }
 }
 
@@ -82,41 +86,19 @@ pub(crate) async fn get_connections(
         .await
         .map_err(log_and_map)?;
 
-    Ok(res.into_iter().map(|rec| rec.into()).collect())
-}
-
-pub(crate) async fn get_connection<E: GenericClient>(
-    auth: &AuthData,
-    name: &str,
-    client: &E,
-) -> Result<Connection, Status> {
-    api_queries::get_connection()
-        .bind(client, &auth.organization_id, &name)
-        .opt()
-        .await
-        .map_err(log_and_map)?
-        .ok_or_else(|| Status::not_found(format!("No connection with name '{}'", name)))
-        .map(|c| c.into())
-}
-
-pub(crate) async fn test_connection(req: CreateConnectionReq) -> Result<TestSourceMessage, Status> {
-    let connection = req
-        .connection_type
-        .ok_or_else(|| required_field("connection_type"))?;
-
-    let (tx, _rx) = channel(8);
-
-    match connection {
-        ReqConnectionType::Kafka(kafka) => Ok(KafkaTester::new(kafka, None, None, tx)
-            .test_connection()
-            .await),
-        ReqConnectionType::Http(http) => Ok((HttpTester { connection: &http }).test().await),
-        _ => Ok(TestSourceMessage {
-            error: false,
-            done: true,
-            message: "Testing not yet supported for this connection type".to_string(),
-        }),
-    }
+    Ok(res
+        .into_iter()
+        .filter_map(|rec| {
+            let id = rec.id;
+            match rec.try_into() {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    warn!("Invalid connection {}: {}", id, e);
+                    None
+                }
+            }
+        })
+        .collect())
 }
 
 pub(crate) async fn delete_connection(
@@ -131,7 +113,7 @@ pub(crate) async fn delete_connection(
 
     if deleted == 0 {
         return Err(Status::not_found(format!(
-            "Not connection with name {}",
+            "No connection with name {}",
             req.name
         )));
     }

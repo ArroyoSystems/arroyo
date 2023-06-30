@@ -1,0 +1,28 @@
+{
+    "type": "object",
+    "title": "ImpulseTable",
+    "properties": {
+        "event_rate": {
+            "title": "Event rate (messages / sec)",
+            "type": "number",
+            "description": "The number of messages the impulse source will emit per second",
+            "examples": [
+                "100"
+            ],
+            "minimum": 0
+        },
+        "event_time_interval": {
+            "title": "Event time interval (µs)",
+            "type": "integer",
+            "description": "The number of microseconds in between the event times of subsequent events emmitted by the source; if not set wall-clock time is used"
+        },
+        "message_count": {
+            "title": "Message count",
+            "type": "integer",
+            "description": "The number of messages the impulse source will emit before stopping; if not set the source will run forever"
+        }
+    },
+    "required": [
+        "event_rate"
+    ]
+}

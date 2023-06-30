@@ -27,15 +27,14 @@ pub mod join_with_expiration;
 pub mod joins;
 pub mod sinks;
 pub mod sliding_top_n_aggregating_window;
-pub mod sources;
 pub mod tumbling_aggregating_window;
 pub mod tumbling_top_n_window;
 pub mod updating_aggregate;
 pub mod windows;
 
 pub struct UserError {
-    name: String,
-    details: String,
+    pub name: String,
+    pub details: String,
 }
 
 impl UserError {

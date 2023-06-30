@@ -13,6 +13,10 @@ use arrow::{
     datatypes::{Field, IntervalDayTimeType},
 };
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
+use arroyo_rpc::{
+    grpc::api::{source_field_type, PrimitiveType, SourceField, SourceFieldType, StructType},
+    primitive_to_sql,
+};
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
 use datafusion_common::ScalarValue;
@@ -22,12 +26,14 @@ use regex::Regex;
 use syn::PathArguments::AngleBracketed;
 use syn::{parse_quote, parse_str, GenericArgument, Type};
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+use crate::expressions::Expression;
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructDef {
     pub name: Option<String>,
     pub fields: Vec<StructField>,
 }
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructPair {
     pub left: StructDef,
     pub right: StructDef,
@@ -126,11 +132,60 @@ impl StructDef {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructField {
     pub name: String,
     pub alias: Option<String>,
     pub data_type: TypeDef,
+    pub renamed_from: Option<String>,
+    pub original_type: Option<String>,
+    pub expression: Option<Box<Expression>>,
+}
+
+impl StructField {
+    pub fn new(name: String, alias: Option<String>, data_type: TypeDef) -> Self {
+        Self {
+            name,
+            alias,
+            data_type,
+            renamed_from: None,
+            original_type: None,
+            expression: None,
+        }
+    }
+
+    pub fn with_rename(
+        name: String,
+        alias: Option<String>,
+        data_type: TypeDef,
+        renamed_from: Option<String>,
+        original_type: Option<String>,
+    ) -> Self {
+        Self {
+            name,
+            alias,
+            data_type,
+            renamed_from,
+            original_type,
+            expression: None,
+        }
+    }
+
+    pub fn generated_by(
+        name: String,
+        alias: Option<String>,
+        data_type: TypeDef,
+        expression: Expression,
+    ) -> Self {
+        Self {
+            name,
+            alias,
+            data_type,
+            renamed_from: None,
+            original_type: None,
+            expression: Some(Box::new(expression)),
+        }
+    }
 }
 
 /* this returns a duration with the same length as the postgres interval. */
@@ -173,7 +228,7 @@ impl From<StructField> for Field {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum TypeDef {
     StructDef(StructDef, bool),
     DataType(DataType, bool),
@@ -181,25 +236,34 @@ pub enum TypeDef {
 
 fn rust_to_arrow(typ: &Type) -> std::result::Result<DataType, ()> {
     match typ {
-        Type::Path(pat) => match pat.path.get_ident().ok_or(())?.to_string().as_str() {
-            "bool" => Ok(DataType::Boolean),
-            "i8" => Ok(DataType::Int8),
-            "i16" => Ok(DataType::Int16),
-            "i32" => Ok(DataType::Int32),
-            "i64" => Ok(DataType::Int64),
-            "u8" => Ok(DataType::UInt8),
-            "u16" => Ok(DataType::UInt16),
-            "u32" => Ok(DataType::UInt32),
-            "u64" => Ok(DataType::UInt64),
-            "f16" => Ok(DataType::Float16),
-            "f32" => Ok(DataType::Float32),
-            "f64" => Ok(DataType::Float64),
-            "std::time::SystemTime" => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
-            "std::time::Duration" => Ok(DataType::Duration(TimeUnit::Microsecond)),
-            "String" => Ok(DataType::Utf8),
-            "Vec<u8>" => Ok(DataType::Binary),
-            _ => Err(()),
-        },
+        Type::Path(pat) => {
+            let path: Vec<String> = pat
+                .path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect();
+
+            match path.join("::").as_str() {
+                "bool" => Ok(DataType::Boolean),
+                "i8" => Ok(DataType::Int8),
+                "i16" => Ok(DataType::Int16),
+                "i32" => Ok(DataType::Int32),
+                "i64" => Ok(DataType::Int64),
+                "u8" => Ok(DataType::UInt8),
+                "u16" => Ok(DataType::UInt16),
+                "u32" => Ok(DataType::UInt32),
+                "u64" => Ok(DataType::UInt64),
+                "f16" => Ok(DataType::Float16),
+                "f32" => Ok(DataType::Float32),
+                "f64" => Ok(DataType::Float64),
+                "String" => Ok(DataType::Utf8),
+                "Vec<u8>" => Ok(DataType::Binary),
+                "std::time::SystemTime" => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
+                "std::time::Duration" => Ok(DataType::Duration(TimeUnit::Microsecond)),
+                _ => Err(()),
+            }
+        }
         _ => Err(()),
     }
 }
@@ -237,6 +301,14 @@ impl TypeDef {
             TypeDef::DataType(_, optional) => *optional,
         }
     }
+
+    pub fn to_optional(self) -> Self {
+        match self {
+            TypeDef::StructDef(t, _) => TypeDef::StructDef(t, true),
+            TypeDef::DataType(t, _) => TypeDef::DataType(t, true),
+        }
+    }
+
     // TODO: rename this
     pub fn return_type(&self) -> Type {
         if self.is_optional() {
@@ -415,7 +487,7 @@ impl StructField {
         parse_str(&type_string).unwrap()
     }
 
-    pub(crate) fn data_type_name(data_type: &DataType) -> String {
+    pub fn data_type_name(data_type: &DataType) -> String {
         match data_type {
             DataType::Null => todo!(),
             DataType::Boolean => "bool".to_string(),
@@ -467,11 +539,11 @@ impl StructField {
     }
 
     pub fn as_nullable(&self) -> Self {
-        StructField {
-            name: self.name.clone(),
-            alias: self.alias.clone(),
-            data_type: self.data_type.as_nullable(),
-        }
+        StructField::new(
+            self.name.clone(),
+            self.alias.clone(),
+            self.data_type.as_nullable(),
+        )
     }
 
     pub(crate) fn nullable(&self) -> bool {
@@ -566,5 +638,92 @@ pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> R
         )
     } else {
         Ok(DataType::Decimal128(precision, scale))
+    }
+}
+
+impl TryFrom<StructField> for SourceField {
+    type Error = String;
+
+    fn try_from(f: StructField) -> Result<Self, Self::Error> {
+        let field_name = f.name();
+        let nullable = f.nullable();
+        let field_type = match f.data_type {
+            TypeDef::StructDef(StructDef { fields, name }, _) => {
+                let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
+
+                let t = source_field_type::Type::Struct(StructType {
+                    name,
+                    fields: fields?,
+                });
+
+                SourceFieldType {
+                    sql_name: None,
+                    r#type: Some(t),
+                }
+            }
+            TypeDef::DataType(dt, _) => {
+                let pt = match dt {
+                    DataType::Boolean => Ok(PrimitiveType::Bool),
+                    DataType::Int32 => Ok(PrimitiveType::Int32),
+                    DataType::Int64 => Ok(PrimitiveType::Int64),
+                    DataType::UInt32 => Ok(PrimitiveType::UInt32),
+                    DataType::UInt64 => Ok(PrimitiveType::UInt64),
+                    DataType::Float32 => Ok(PrimitiveType::F32),
+                    DataType::Float64 => Ok(PrimitiveType::F64),
+                    DataType::Binary | DataType::LargeBinary => Ok(PrimitiveType::Bytes),
+                    DataType::Timestamp(TimeUnit::Millisecond, _) => Ok(PrimitiveType::UnixMillis),
+                    DataType::Timestamp(TimeUnit::Microsecond, _) => Ok(PrimitiveType::UnixMicros),
+                    DataType::Timestamp(TimeUnit::Nanosecond, _) => Ok(PrimitiveType::UnixNanos),
+                    DataType::Utf8 => Ok(PrimitiveType::String),
+                    dt => Err(format!("Unsupported data type {:?}", dt)),
+                }?;
+
+                SourceFieldType {
+                    r#type: Some(source_field_type::Type::Primitive(pt.into())),
+                    sql_name: Some(primitive_to_sql(pt).to_string()),
+                }
+            }
+        };
+
+        Ok(SourceField {
+            field_name,
+            field_type: Some(field_type),
+            nullable,
+        })
+    }
+}
+
+impl From<SourceField> for StructField {
+    fn from(f: SourceField) -> Self {
+        let t = match f.field_type.unwrap().r#type.unwrap() {
+            source_field_type::Type::Primitive(pt) => TypeDef::DataType(
+                match PrimitiveType::from_i32(pt).unwrap() {
+                    PrimitiveType::Int32 => DataType::Int32,
+                    PrimitiveType::Int64 => DataType::Int64,
+                    PrimitiveType::UInt32 => DataType::UInt32,
+                    PrimitiveType::UInt64 => DataType::UInt64,
+                    PrimitiveType::F32 => DataType::Float32,
+                    PrimitiveType::F64 => DataType::Float64,
+                    PrimitiveType::Bool => DataType::Boolean,
+                    PrimitiveType::String => DataType::Utf8,
+                    PrimitiveType::Bytes => DataType::Binary,
+                    PrimitiveType::UnixMillis => DataType::Timestamp(TimeUnit::Millisecond, None),
+                    PrimitiveType::UnixMicros => DataType::Timestamp(TimeUnit::Microsecond, None),
+                    PrimitiveType::UnixNanos => DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    PrimitiveType::DateTime => DataType::Timestamp(TimeUnit::Microsecond, None),
+                    PrimitiveType::Json => DataType::Utf8,
+                },
+                f.nullable,
+            ),
+            source_field_type::Type::Struct(s) => TypeDef::StructDef(
+                StructDef {
+                    fields: s.fields.into_iter().map(|t| t.into()).collect(),
+                    name: s.name,
+                },
+                f.nullable,
+            ),
+        };
+
+        StructField::new(f.field_name, None, t)
     }
 }

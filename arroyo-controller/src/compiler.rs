@@ -8,7 +8,7 @@ use arroyo_datastream::{
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::CompileQueryReq;
 use arroyo_sql::types::duration_to_syn_expr;
-use arroyo_types::{to_micros, REMOTE_COMPILER_ENDPOINT_ENV};
+use arroyo_types::REMOTE_COMPILER_ENDPOINT_ENV;
 use petgraph::Direction;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -313,7 +313,7 @@ wasm-opt = false
             #![allow(warnings)]
             use petgraph::graph::DiGraph;
             use arroyo_worker::operators::*;
-            use arroyo_worker::operators::sources::*;
+            use arroyo_worker::connectors;
             use arroyo_worker::operators::sinks::*;
             use arroyo_worker::operators::sinks;
             use arroyo_worker::operators::joins::*;
@@ -359,70 +359,24 @@ wasm-opt = false
             let input = program.graph.edges_directed(idx, Direction::Incoming).next();
             let output = program.graph.edges_directed(idx, Direction::Outgoing).next();
             let body = match &node.operator {
-                Operator::FileSource { dir, delay } => {
-                    let dir = dir.to_string_lossy();
-                    let delay = duration_to_syn_expr(*delay);
+                Operator::ConnectorSource(c)  => {
+                    let out_k = parse_type(&output.unwrap().weight().key);
                     let out_t = parse_type(&output.unwrap().weight().value);
-                    quote! {
-                        Box::new(FileSourceFunc::<#out_t>::from_dir(&std::path::PathBuf::from(#dir), #delay))
-                    }
-                }
-                Operator::ImpulseSource { start_time, spec, total_events } => {
-                    let start_time = to_micros(*start_time);
-                    let (interval, spec) = match spec {
-                        arroyo_datastream::ImpulseSpec::Delay(delay) => {
-                            let delay = duration_to_syn_expr(*delay);
-                            (
-                                quote! { Some(#delay) },
-                                quote!{ sources::ImpulseSpec::Delay(#delay) }
-                            )
-                        }
-                        arroyo_datastream::ImpulseSpec::EventsPerSecond(eps) => {
-                            (
-                                quote!{ None },
-                                quote!{ sources::ImpulseSpec::EventsPerSecond(#eps) },
-                            )
-                        },
-                    };
 
-                    let limit = total_events.unwrap_or(usize::MAX);
+                    let strukt = parse_type(&c.operator);
+                    let config = &c.config;
                     quote! {
-                        Box::new(ImpulseSourceFunc::new(
-                            #interval,
-                            #spec,
-                            #limit,
-                            arroyo_types::from_micros(#start_time),
-                        ))
+                        Box::new(#strukt::<#out_k, #out_t>::from_config(#config))
                     }
                 }
-                Operator::KafkaSource { topic, bootstrap_servers, offset_mode, kafka_input_format, messages_per_second, client_configs } => {
-                    let offset_mode = format!("{:?}", offset_mode);
-                    let offset_mode = format_ident!("{}", offset_mode);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let bootstrap_servers = bootstrap_servers.join(",");
-                    let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
+                Operator::ConnectorSink(c)  => {
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
 
+                    let strukt = parse_type(&c.operator);
+                    let config = &c.config;
                     quote! {
-                        Box::new(sources::kafka::KafkaSourceFunc::<#out_t>::new(
-                            #bootstrap_servers,
-                            #topic,
-                            sources::kafka::OffsetMode::#offset_mode,
-                            #kafka_input_format,
-                            #messages_per_second,
-                            vec![#(#client_configs),*]))
-                    }
-                }
-                Operator::EventSourceSource { url, headers, events, serialization_mode } => {
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let headers = headers.iter().map(|(k, v)| quote!((#k, #v))).collect::<Vec<_>>();
-                    let headers = quote!{ vec![#(#headers),*] };
-                    let events = events.iter().map(|v| quote!(#v)).collect::<Vec<_>>();
-                    quote! {
-                        Box::new(eventsource::EventSourceSourceFunc::<#out_t>::new(
-                            #url,
-                            #headers,
-                            vec![#(#events),*],
-                            #serialization_mode,))
+                        Box::new(#strukt::<#in_k, #in_t>::from_config(#config))
                     }
                 }
                 Operator::FusedWasmUDFs { name, udfs: _ } => {
@@ -492,36 +446,6 @@ wasm-opt = false
                         }
                     }
                 }
-                Operator::ConsoleSink => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    quote! {
-                        Box::new(ConsoleSink::<#in_k, #in_t>::new())
-                     }
-                }
-                Operator::GrpcSink => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    quote! {
-                        Box::new(GrpcSink::<#in_k, #in_t>::new())
-                     }
-                }
-                Operator::FileSink { dir } => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-
-                    let dir = dir.to_string_lossy();
-                    quote! {
-                        Box::new(FileSink::<#in_k, #in_t>::new(std::path::PathBuf::from(#dir)))
-                    }
-                }
-                Operator::NullSink => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    quote! {
-                        Box::new(NullSink::<#in_k, #in_t>::new())
-                     }
-                }
                 Operator::Watermark(watermark) => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
@@ -590,33 +514,6 @@ wasm-opt = false
                         }
                     }
                 }
-                Operator::KafkaSink { topic, bootstrap_servers, client_configs } => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-
-                    let bootstrap_servers = bootstrap_servers.join(",");
-                    let client_configs: Vec<_> = client_configs.iter().map(|(key, val)| quote!((#key, #val))).collect();
-                    quote! {
-                        Box::new(sinks::kafka::KafkaSinkFunc::<#in_k, #in_t>::new(
-                            #bootstrap_servers,
-                            #topic,
-                        vec![#(#client_configs ),*]))
-                    }
-                }
-                Operator::NexmarkSource{first_event_rate, num_events}  => {
-                    match *num_events {
-                        Some(events) => {
-                            quote! {
-                                Box::new(sources::nexmark::NexmarkSourceFunc::new(#first_event_rate, Some(#events)))
-                            }
-                        }
-                        None => {
-                            quote! {
-                                Box::new(sources::nexmark::NexmarkSourceFunc::new(#first_event_rate, None))
-                            }
-                        }
-                    }
-                    }
                 Operator::Count => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);

@@ -25,198 +25,193 @@ pub(crate) fn window_type_def() -> TypeDef {
         StructDef {
             name: Some("arroyo_types::Window".to_string()),
             fields: vec![
-                StructField {
-                    name: "start_time".to_string(),
-                    alias: None,
-                    data_type: TypeDef::DataType(
-                        DataType::Timestamp(TimeUnit::Millisecond, None),
-                        false,
-                    ),
-                },
-                StructField {
-                    name: "end_time".to_string(),
-                    alias: None,
-                    data_type: TypeDef::DataType(
-                        DataType::Timestamp(TimeUnit::Millisecond, None),
-                        false,
-                    ),
-                },
+                StructField::new(
+                    "start_time".to_string(),
+                    None,
+                    TypeDef::DataType(DataType::Timestamp(TimeUnit::Millisecond, None), false),
+                ),
+                StructField::new(
+                    "end_time".to_string(),
+                    None,
+                    TypeDef::DataType(DataType::Timestamp(TimeUnit::Millisecond, None), false),
+                ),
             ],
         },
         false,
     )
 }
 
+// StructField \{\s+name: ([^,])+,\s+alias: ([^,]+), data_type: ([^,]+)\}
 pub fn nexmark_fields() -> Vec<StructField> {
     // return the fields of the nexmark schema
     vec![
-        StructField {
-            name: "person".to_string(),
-            alias: None,
-            data_type: TypeDef::StructDef(
+        StructField::new(
+            "person".to_string(),
+            None,
+            TypeDef::StructDef(
                 StructDef {
                     name: Some("arroyo_types::nexmark::Person".to_string()),
                     fields: vec![
-                        StructField {
-                            name: "id".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Int64, false),
-                        },
-                        StructField {
-                            name: "name".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
-                        StructField {
-                            name: "email_address".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
-                        StructField {
-                            name: "credit_card".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
-                        StructField {
-                            name: "city".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
-                        StructField {
-                            name: "state".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
-                        StructField {
-                            name: "datetime".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(
+                        StructField::new(
+                            "id".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Int64, false),
+                        ),
+                        StructField::new(
+                            "name".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
+                        StructField::new(
+                            "email_address".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
+                        StructField::new(
+                            "credit_card".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
+                        StructField::new(
+                            "city".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
+                        StructField::new(
+                            "state".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
+                        StructField::new(
+                            "datetime".to_string(),
+                            None,
+                            TypeDef::DataType(
                                 DataType::Timestamp(TimeUnit::Millisecond, None),
                                 false,
                             ),
-                        },
-                        StructField {
-                            name: "extra".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
+                        ),
+                        StructField::new(
+                            "extra".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
                     ],
                 },
                 true,
             ),
-        },
-        StructField {
-            name: "bid".to_string(),
-            alias: None,
-            data_type: TypeDef::StructDef(
+        ),
+        StructField::new(
+            "bid".to_string(),
+            None,
+            TypeDef::StructDef(
                 StructDef {
                     name: Some("arroyo_types::nexmark::Bid".to_string()),
                     fields: vec![
-                        StructField {
-                            name: "auction".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Int64, false),
-                        },
-                        StructField {
-                            name: "bidder".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Int64, false),
-                        },
-                        StructField {
-                            name: "price".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Int64, false),
-                        },
-                        StructField {
-                            name: "channel".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
-                        StructField {
-                            name: "url".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
-                        StructField {
-                            name: "datetime".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(
+                        StructField::new(
+                            "auction".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Int64, false),
+                        ),
+                        StructField::new(
+                            "bidder".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Int64, false),
+                        ),
+                        StructField::new(
+                            "price".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Int64, false),
+                        ),
+                        StructField::new(
+                            "channel".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
+                        StructField::new(
+                            "url".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
+                        StructField::new(
+                            "datetime".to_string(),
+                            None,
+                            TypeDef::DataType(
                                 DataType::Timestamp(TimeUnit::Millisecond, None),
                                 false,
                             ),
-                        },
-                        StructField {
-                            name: "extra".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
+                        ),
+                        StructField::new(
+                            "extra".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
                     ],
                 },
                 true,
             ),
-        },
-        StructField {
-            name: "auction".to_string(),
-            alias: None,
-            data_type: TypeDef::StructDef(
+        ),
+        StructField::new(
+            "auction".to_string(),
+            None,
+            TypeDef::StructDef(
                 StructDef {
                     name: Some("arroyo_types::nexmark::Auction".to_string()),
                     fields: vec![
-                        StructField {
-                            name: "id".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Int64, false),
-                        },
-                        StructField {
-                            name: "description".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
-                        StructField {
-                            name: "initial_bid".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Int64, false),
-                        },
-                        StructField {
-                            name: "reserve".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Int64, false),
-                        },
-                        StructField {
-                            name: "datetime".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(
+                        StructField::new(
+                            "id".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Int64, false),
+                        ),
+                        StructField::new(
+                            "description".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
+                        StructField::new(
+                            "initial_bid".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Int64, false),
+                        ),
+                        StructField::new(
+                            "reserve".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Int64, false),
+                        ),
+                        StructField::new(
+                            "datetime".to_string(),
+                            None,
+                            TypeDef::DataType(
                                 DataType::Timestamp(TimeUnit::Millisecond, None),
                                 false,
                             ),
-                        },
-                        StructField {
-                            name: "expires".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(
+                        ),
+                        StructField::new(
+                            "expires".to_string(),
+                            None,
+                            TypeDef::DataType(
                                 DataType::Timestamp(TimeUnit::Millisecond, None),
                                 false,
                             ),
-                        },
-                        StructField {
-                            name: "seller".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Int64, false),
-                        },
-                        StructField {
-                            name: "category".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Int64, false),
-                        },
-                        StructField {
-                            name: "extra".to_string(),
-                            alias: None,
-                            data_type: TypeDef::DataType(DataType::Utf8, false),
-                        },
+                        ),
+                        StructField::new(
+                            "seller".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Int64, false),
+                        ),
+                        StructField::new(
+                            "category".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Int64, false),
+                        ),
+                        StructField::new(
+                            "extra".to_string(),
+                            None,
+                            TypeDef::DataType(DataType::Utf8, false),
+                        ),
                     ],
                 },
                 true,
             ),
-        },
+        ),
     ]
 }

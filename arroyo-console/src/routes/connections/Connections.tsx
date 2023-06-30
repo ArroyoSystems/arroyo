@@ -15,28 +15,31 @@ import {
   Thead,
   Text,
   Tr,
-  Icon,
   Code,
   Alert,
   AlertDescription,
   AlertIcon,
   CloseButton,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalCloseButton,
+  ModalBody,
+  ModalFooter,
 } from '@chakra-ui/react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { FaGlobeAmericas, FaStream } from 'react-icons/fa';
-import { FiXCircle } from 'react-icons/fi';
+import { FiInfo, FiXCircle } from 'react-icons/fi';
 import { SiApachekafka } from 'react-icons/si';
 import { useLinkClickHandler } from 'react-router-dom';
-import { Connection, DeleteConnectionReq, GetConnectionsReq } from '../../gen/api_pb';
+import { ConnectionTable, TableType, Format, DeleteConnectionTableReq } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
-
-interface ConnectionsState {
-  connections: Array<Connection> | null;
-}
+import { useConnectionTables } from '../../lib/data_fetching';
 
 interface ColumnDef {
   name: string;
-  accessor: (s: Connection) => JSX.Element;
+  accessor: (s: ConnectionTable) => JSX.Element;
 }
 
 const icons = {
@@ -45,62 +48,65 @@ const icons = {
   http: FaGlobeAmericas,
 };
 
+const format = (f: Format | undefined) => {
+  switch (f) {
+    case Format.AvroFormat:
+      return 'Avro';
+    case Format.JsonFormat:
+      return 'JSON';
+    case Format.ProtobufFormat:
+      return 'Protobuf';
+    case Format.RawStringFormat:
+      return 'Raw';
+    case Format.DebeziumJsonFormat:
+      return 'Debezium JSON';
+    case undefined:
+      return 'built-in';
+    default:
+      return 'unknown';
+  }
+};
+
 const columns: Array<ColumnDef> = [
-  {
-    name: 'type',
-    accessor: s => (
-      <Stack direction="row">
-        <Icon boxSize="5" as={icons[s.connectionType.case!]} />
-        <Text>{s.connectionType.case!}</Text>
-      </Stack>
-    ),
-  },
   {
     name: 'name',
     accessor: s => <Text>{s.name}</Text>,
   },
   {
-    name: 'config',
-    accessor: s => (
-      <Box maxW={400} whiteSpace="pre-wrap">
-        <Code>{JSON.stringify(s.connectionType.value!, null, 2)}</Code>
-      </Box>
-    ),
+    name: 'connector',
+    accessor: s => <Text>{s.connector}</Text>,
   },
   {
-    name: 'sources',
-    accessor: s => <Text>{s.sources}</Text>,
+    name: 'table type',
+    accessor: s => <Text>{TableType[s.tableType].toLowerCase()}</Text>,
   },
   {
-    name: 'sinks',
-    accessor: s => <Text>{s.sinks}</Text>,
+    name: 'format',
+    accessor: s => <Text>{s.schema ? format(s.schema!.format) : 'built-in'}</Text>,
+  },
+  {
+    name: 'pipelines',
+    accessor: s => <Text>{s.consumers}</Text>,
   },
 ];
 
-function ConnectionTable({ client }: { client: ApiClient }) {
+function ConnectionTableTable({ client }: { client: ApiClient }) {
   const [message, setMessage] = useState<string | null>();
   const [isError, setIsError] = useState<boolean>(false);
-  const [state, setState] = useState<ConnectionsState>({ connections: null });
+  const [selected, setSelected] = useState<ConnectionTable | null>(null);
+  const { connectionTables, connectionTablesLoading, mutateConnectionTables } =
+    useConnectionTables(client);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const resp = await (await client()).getConnections(new GetConnectionsReq({}));
-
-      setState({ connections: resp.connections });
-    };
-
-    fetchData();
-  }, [message]);
-
-  const deleteConnection = async (connection: Connection) => {
+  const deleteTable = async (connection: ConnectionTable) => {
     try {
       await (
         await client()
-      ).deleteConnection(
-        new DeleteConnectionReq({
-          name: connection.name,
+      ).deleteConnectionTable(
+        new DeleteConnectionTableReq({
+          id: connection.id,
         })
       );
+      mutateConnectionTables(connectionTables!.filter(c => c.id !== connection.id));
       setMessage(`Connection ${connection.name} successfully deleted`);
     } catch (e) {
       setIsError(true);
@@ -130,6 +136,23 @@ function ConnectionTable({ client }: { client: ApiClient }) {
 
   return (
     <Stack spacing={2}>
+      <Modal size="2xl" onClose={() => setSelected(null)} isOpen={selected != null} isCentered>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Connection {selected?.name}</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Code colorScheme="black" width="100%" p={4}>
+              {/* toJson -> parse -> stringify to get around the inabilityof JSON.stringify to handle BigInt */}
+              <pre>{JSON.stringify(JSON.parse(selected?.config || '{}'), null, 2)}</pre>
+            </Code>
+          </ModalBody>
+          <ModalFooter>
+            <Button onClick={() => setSelected(null)}>Close</Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
       {messageBox}
       <Table>
         <Thead>
@@ -145,18 +168,25 @@ function ConnectionTable({ client }: { client: ApiClient }) {
           </Tr>
         </Thead>
         <Tbody>
-          {state?.connections?.flatMap(connection => (
-            <Tr key={connection.name}>
+          {connectionTables?.map(table => (
+            <Tr key={table.name}>
               {columns.map(column => (
-                <Td key={connection.name + column.name}>{column.accessor(connection)}</Td>
+                <Td key={table.name + column.name}>{column.accessor(table)}</Td>
               ))}
 
-              <Td>
+              <Td textAlign={'right'}>
+                <IconButton
+                  icon={<FiInfo fontSize="1.25rem" />}
+                  variant="ghost"
+                  aria-label="View config"
+                  onClick={() => setSelected(table)}
+                />
+
                 <IconButton
                   icon={<FiXCircle fontSize="1.25rem" />}
                   variant="ghost"
                   aria-label="Delete connection"
-                  onClick={() => deleteConnection(connection)}
+                  onClick={() => deleteTable(table)}
                 />
               </Td>
             </Tr>
@@ -194,7 +224,7 @@ export function Connections({ client }: { client: ApiClient }) {
           borderRadius="lg"
         >
           <Stack spacing={{ base: '5', lg: '6' }}>
-            <ConnectionTable client={client} />
+            <ConnectionTableTable client={client} />
           </Stack>
         </Box>
       </Stack>

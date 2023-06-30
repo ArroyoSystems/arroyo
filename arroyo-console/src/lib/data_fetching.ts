@@ -1,9 +1,9 @@
 import {
-  BuiltinSink,
   CheckpointDetailsReq,
   CreateUdf,
-  GetSinksReq,
-  GetSourcesReq,
+  GetConnectionTablesReq,
+  GetConnectionsReq,
+  GetConnectorsReq,
   JobCheckpointsReq,
   JobDetailsReq,
   JobMetricsReq,
@@ -15,9 +15,20 @@ import {
 import { ApiClient } from '../main';
 import useSWR from 'swr';
 import { mutate as globalMutate } from 'swr';
-import { SinkOpt } from './types';
 
 // Keys
+
+const connectorsKey = () => {
+  return { key: 'Connectors' };
+};
+
+const connectionsKey = () => {
+  return { key: 'Connections' };
+};
+
+const connectionTablesKey = () => {
+  return { key: 'ConnectionTables' };
+};
 
 const jobDetailsKey = (jobId?: string) => {
   return jobId ? { key: 'Job', jobId } : null;
@@ -43,12 +54,60 @@ const pipelineGraphKey = (query?: string, udfInput?: string) => {
   return query ? { key: 'PipelineGraph', query, udfInput } : null;
 };
 
-const sourcesKey = () => {
-  return { key: 'Sources' };
+// Connectors
+const connectorsFetcher = (client: ApiClient) => {
+  return async () => {
+    return await (await client()).getConnectors(new GetConnectorsReq({}));
+  };
 };
 
-const sinksKey = () => {
-  return { key: 'Sinks' };
+export const useConnectors = (client: ApiClient) => {
+  const { data, isLoading } = useSWR(connectorsKey(), connectorsFetcher(client));
+
+  return {
+    connectors: data,
+    connectorsLoading: isLoading,
+  };
+};
+
+// Connections
+const connectionsFetcher = (client: ApiClient) => {
+  return async () => {
+    return (await (await client()).getConnections(new GetConnectionsReq({}))).connections;
+  };
+};
+
+export const useConnections = (client: ApiClient) => {
+  const { data, isLoading, mutate } = useSWR(connectionsKey(), connectionsFetcher(client));
+
+  return {
+    connections: data,
+    connectionsLoading: isLoading,
+    mutateConnections: mutate,
+  };
+};
+
+// ConnectionTables
+const connectionTablesFetcher = (client: ApiClient) => {
+  return async () => {
+    return (await (await client()).getConnectionTables(new GetConnectionTablesReq({}))).tables;
+  };
+};
+
+export const useConnectionTables = (client: ApiClient) => {
+  const { data, isLoading, mutate } = useSWR(
+    connectionTablesKey(),
+    connectionTablesFetcher(client),
+    {
+      refreshInterval: 5000,
+    }
+  );
+
+  return {
+    connectionTables: data,
+    connectionTablesLoading: isLoading,
+    mutateConnectionTables: mutate,
+  };
 };
 
 // JobDetailsReq
@@ -227,56 +286,5 @@ export const usePipelineGraph = (client: ApiClient, query?: string, udfInput?: s
 
   return {
     pipelineGraph: data,
-  };
-};
-
-// GetSourcesReq
-
-const SourcesFetcher = (client: ApiClient) => {
-  return async (params: { key: string }) => {
-    return await (await (await client)()).getSources(new GetSourcesReq({}));
-  };
-};
-
-export const useSources = (client: ApiClient) => {
-  const { data, isLoading } = useSWR(sourcesKey(), SourcesFetcher(client));
-
-  return {
-    sources: data,
-    sourcesLoading: isLoading,
-  };
-};
-
-// GetSinksReq
-
-const SinksFetcher = (client: ApiClient) => {
-  return async (params: { key: string }) => {
-    return await (await (await client)()).getSinks(new GetSinksReq({}));
-  };
-};
-
-export const useSinks = (client: ApiClient) => {
-  const { data } = useSWR(sinksKey(), SinksFetcher(client));
-
-  let allSinks: Array<SinkOpt> = [
-    { name: 'Web', value: { case: 'builtin', value: BuiltinSink.Web } },
-    { name: 'Log', value: { case: 'builtin', value: BuiltinSink.Log } },
-    { name: 'Null', value: { case: 'builtin', value: BuiltinSink.Null } },
-  ];
-
-  if (data) {
-    data.sinks.forEach(sink => {
-      allSinks.push({
-        name: sink.name,
-        value: {
-          case: 'user',
-          value: sink.name,
-        },
-      });
-    });
-  }
-
-  return {
-    sinks: allSinks,
   };
 };

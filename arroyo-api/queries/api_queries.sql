@@ -7,23 +7,37 @@ WHERE api_key = :api_key;
 ----------- connections ----------------
 --! create_connection
 INSERT INTO connections (organization_id, created_by, name, type, config)
-VALUES (:organization_id, :created_by, :name, :type, :config);
+VALUES (:organization_id, :created_by, :name, :type, :config)
+RETURNING id;
 
 --! get_connections : DbConnection()
-SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config,
-    (SELECT count(*) as source_count FROM sources where sources.connection_id = connections.id) as source_count,
-    (SELECT count(*) as sink_count FROM sinks where sinks.connection_id = connections.id) as sink_count
+SELECT
+    id,
+    name,
+    type,
+    config
 FROM connections
 WHERE connections.organization_id = :organization_id
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
 --! get_connection : DbConnection()
-SELECT connections.id as id, connections.name as name, connections.type as type, connections.config as config,
-    (SELECT count(*) as source_count FROM sources where sources.connection_id = connections.id) as source_count,
-    (SELECT count(*) as sink_count FROM sinks where sinks.connection_id = connections.id) as sink_count
+SELECT
+    id,
+    name,
+    type,
+    config
 FROM connections
 WHERE connections.organization_id = :organization_id AND connections.name = :name
-GROUP BY connections.id
+ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
+
+--! get_connection_by_id: DbConnection()
+SELECT
+    id,
+    name,
+    type,
+    config
+FROM connections
+WHERE connections.organization_id = :organization_id AND connections.id = :id
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
 --! delete_connection
@@ -37,60 +51,36 @@ INSERT INTO schemas (organization_id, created_by, name, kafka_schema_registry, t
 VALUES (:organization_id, :created_by, :name, :kafka_schema_registry, :type, :config) RETURNING id;
 
 
------------ sources --------------------
+------- connection tables -------------
+--! create_connection_table(connection_id?, schema?)
+INSERT INTO connection_tables
+(organization_id, created_by, name, table_type, connector, connection_id, config, schema)
+VALUES (:organization_id, :created_by, :name, :table_type, :connector, :connection_id, :config, :schema);
 
---! create_source(connection_id?)
-INSERT INTO sources
-(organization_id, created_by, name, type, config, schema_id, connection_id)
-VALUES (:organization_id, :created_by, :name, :type, :config, :schema_id, :connection_id);
-
---! get_sources: (schema_config?, connection_name?, connection_type?, connection_config?, source_config?)
-SELECT
-    schemas.id as schema_id,
-    schemas.type as schema_type,
-    schemas.config as schema_config,
-    schemas.kafka_schema_registry as kafka_schema_registry,
-    sd.id as source_id,
-    sd.name as source_name,
-    sd.type as source_type,
-    sd.config as source_config,
+--! get_connection_tables: (connection_id?, connection_name?, connection_type?, connection_config?, schema?)
+SELECT connection_tables.id as id,
+    connection_tables.name as name,
+    connection_tables.connector as connector,
+    connection_tables.table_type as table_type,
+    connection_tables.config as config,
+    connection_tables.schema as schema,
+    connection_tables.connection_id as connection_id,
     connections.name as connection_name,
     connections.type as connection_type,
     connections.config as connection_config,
-    (SELECT count(*) as consumer_count
-        FROM pipeline_sources
-        WHERE pipeline_sources.source_id = sd.id
+    (SELECT count(*) as pipeline_count
+        FROM connection_table_pipelines
+        WHERE connection_table_pipelines.connection_table_id = connection_tables.id
     ) as consumer_count
-FROM sources as sd
-INNER JOIN schemas ON schema_id = schemas.id
-LEFT JOIN connections ON connection_id = connections.id
-WHERE sd.organization_id = :organization_id;
 
---! delete_source
-DELETE FROM sources
-WHERE organization_id = :organization_id AND name = :name;
+FROM connection_tables
+LEFT JOIN connections ON connections.id = connection_tables.connection_id
+WHERE connection_tables.organization_id = :organization_id;
 
------------ sinks ----------------------
+--! delete_connection_table
+DELETE FROM connection_tables
+WHERE organization_id = :organization_id AND id = :id;
 
---! create_sink(connection_id?)
-INSERT INTO sinks
-(organization_id, created_by, name, type, connection_id, config)
-VALUES (:organization_id, :created_by, :name, :type, :connection_id, :config);
-
---! get_sinks: (connection_id?)
-SELECT
-    id,
-    name,
-    type,
-    connection_id,
-    config,
-    (SELECT count(*) as producer_count FROM pipeline_sinks WHERE pipeline_sinks.sink_id = sinks.id) as producers
-FROM sinks
-WHERE organization_id = :organization_id;
-
---! delete_sink
-DELETE FROM sinks
-WHERE organization_id = :organization_id AND name = :name;
 
 ----------- pipelines -------------------
 
@@ -109,13 +99,9 @@ SELECT pipelines.id as id, name, type, textual_repr, udfs, program FROM pipeline
 INNER JOIN pipeline_definitions as d ON pipelines.id = d.pipeline_id AND pipelines.current_version = d.version
 WHERE pipelines.id = :pipeline_id AND pipelines.organization_id = :organization_id;
 
---! add_pipeline_source
-INSERT INTO pipeline_sources(pipeline_id, source_id)
-VALUES (:pipeline_id, :source_id);
-
---! add_pipeline_sink
-INSERT INTO pipeline_sinks(pipeline_id, sink_id)
-VALUES (:pipeline_id, :sink_id);
+--! add_pipeline_connection_table
+INSERT INTO connection_table_pipelines(pipeline_id, connection_table_id)
+VALUES (:pipeline_id, :connection_table_id);
 
 --! delete_pipeline
 DELETE FROM pipelines

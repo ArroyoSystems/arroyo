@@ -38,6 +38,7 @@ use tracing::info;
 
 pub use ordered_float::OrderedFloat;
 
+pub mod connectors;
 pub mod engine;
 mod inq_reader;
 mod network_manager;

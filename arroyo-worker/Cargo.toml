@@ -54,6 +54,8 @@ rdkafka-sys = "=4.2.0"
 eventsource-client = "0.11.0"
 regex = "1.8.1"
 anyhow = "1.0.71"
+typify = "0.0.13"
+regress = "0.6.0"
 
 [dev-dependencies]
 test-case = "2.2"

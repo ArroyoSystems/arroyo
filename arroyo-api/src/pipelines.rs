@@ -1,39 +1,32 @@
 use std::str::FromStr;
 
 use anyhow::Context;
+use arroyo_connectors::connector_for_type;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Transaction;
-use petgraph::Direction;
 use prost::Message;
 use serde_json::Value;
 use tonic::Status;
-use tracing::log::info;
 use tracing::warn;
 
-use arroyo_datastream::{auth_config_to_hashmap, Operator, Program, SinkConfig};
-use arroyo_rpc::grpc::api::create_sql_job::Sink;
-use arroyo_rpc::grpc::api::sink::SinkType;
+use arroyo_datastream::{ConnectorOp, Operator, Program};
 use arroyo_rpc::grpc::api::{
-    self, connection, create_pipeline_req, BuiltinSink, CreatePipelineReq, CreateSqlJob,
-    PipelineDef, PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf,
-    UdfLanguage,
+    self, create_pipeline_req, CreatePipelineReq, CreateSqlJob, PipelineDef, PipelineGraphReq,
+    PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf, UdfLanguage,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
+use crate::connection_tables;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbPipeline;
 use crate::types::public::PipelineType;
-use crate::{
-    connections, handle_db_error, log_and_map, optimizations, required_field, sinks,
-    sources::{self, Source},
-    AuthData,
-};
+use crate::{handle_db_error, log_and_map, optimizations, required_field, AuthData};
 
 async fn compile_sql<'e, E>(
     sql: &CreateSqlJob,
     auth_data: &AuthData,
     tx: &E,
-) -> Result<(Program, Vec<i64>, Vec<i64>), Status>
+) -> Result<(Program, Vec<i64>), Status>
 where
     E: GenericClient,
 {
@@ -52,55 +45,33 @@ where
         }
     }
 
-    for source in sources::get_sources(auth_data, tx).await? {
-        let s: Source = source.try_into().map_err(log_and_map)?;
-        s.register(&mut schema_provider, auth_data);
+    for table in connection_tables::get(auth_data, tx).await? {
+        let Some(connector) = connector_for_type(&table.connector) else {
+            warn!("Saved table found with unknown connector {}", table.connector);
+            continue;
+        };
+
+        let connection = connector
+            .from_config(
+                Some(table.id),
+                &table.name,
+                &table
+                    .connection
+                    .map(|c| c.config.clone())
+                    .unwrap_or_else(|| "{}".to_string()),
+                &table.config,
+                table.schema.as_ref(),
+            )
+            .map_err(log_and_map)?;
+
+        schema_provider.add_connector_table(connection);
     }
-    for connection in connections::get_connections(auth_data, tx).await? {
-        schema_provider.add_connection(connection)
-    }
 
-    let sinks = sinks::get_sinks(auth_data, tx).await?;
-
-    let mut used_sink_ids = vec![];
-
-    let sink = match sql.sink.as_ref().ok_or_else(|| required_field("sink"))? {
-        Sink::Builtin(builtin) => match BuiltinSink::from_i32(*builtin).unwrap() {
-            BuiltinSink::Null => SinkConfig::Null,
-            BuiltinSink::Web => SinkConfig::Grpc,
-            BuiltinSink::Log => SinkConfig::Console,
-        },
-        Sink::User(name) => {
-            let sink = sinks.into_iter().find(|s| s.name == *name).ok_or_else(|| {
-                Status::failed_precondition(format!("No sink with name '{}'", name))
-            })?;
-
-            used_sink_ids.push(sink.id);
-
-            match sink.sink_type.unwrap() {
-                SinkType::Kafka(k) => {
-                    let connection =
-                        connections::get_connection(auth_data, &k.connection, tx).await?;
-                    let connection::ConnectionType::Kafka(kafka) = connection.connection_type.unwrap() else {
-                        panic!("kafka sink {} [{}] configured with non-kafka connection", name, auth_data.organization_id);
-                    };
-                    SinkConfig::Kafka {
-                        bootstrap_servers: kafka.bootstrap_servers.clone(),
-                        topic: k.topic,
-                        client_configs: auth_config_to_hashmap(kafka.auth_config),
-                    }
-                }
-            }
-        }
-    };
-
-    let (program, sources) = arroyo_sql::parse_and_get_program(
+    let (program, connections) = arroyo_sql::parse_and_get_program(
         &sql.query,
         schema_provider,
         SqlConfig {
             default_parallelism: sql.parallelism as usize,
-            sink,
-            kafka_qps: Some(auth_data.org_metadata.kafka_qps),
         },
     )
     .await
@@ -110,63 +81,13 @@ where
         Status::invalid_argument(format!("{}", err.root_cause()))
     })?;
 
-    Ok((program, sources, used_sink_ids))
+    Ok((program, connections))
 }
 
 fn set_parallelism(program: &mut Program, parallelism: usize) {
     for node in program.graph.node_weights_mut() {
         node.parallelism = parallelism;
     }
-}
-
-async fn set_default_parallelism(_auth: &AuthData, program: &mut Program) -> Result<(), Status> {
-    let sources = program.graph.externals(Direction::Incoming);
-
-    let mut parallelism = 1;
-
-    for source_idx in sources {
-        let source = program.graph.node_weight(source_idx).unwrap();
-        parallelism = parallelism.max(match &source.operator {
-            Operator::FileSource { .. } => 1,
-            Operator::ImpulseSource { spec, .. } => {
-                let eps = match spec {
-                    arroyo_datastream::ImpulseSpec::Delay(d) => 1.0 / d.as_secs_f32(),
-                    arroyo_datastream::ImpulseSpec::EventsPerSecond(eps) => *eps,
-                };
-
-                (eps / 50_000.0).round() as usize
-            }
-            Operator::KafkaSource { .. } => {
-                // for now, just use a default parallelism of 1 for kafka until we have autoscaling
-                1
-
-                // let (tx, _) = channel(1);
-                // let kafka = KafkaTester::new(
-                //     KafkaConnection {
-                //         bootstrap_servers: bootstrap_servers.join(","),
-                //     },
-                //     Some(topic.clone()),
-                //     None,
-                //     tx,
-                // );
-
-                // kafka
-                //     .topic_metadata()
-                //     .await?
-                //     .partitions
-                //     .min(auth.org_metadata.max_parallelism as usize)
-            }
-            Operator::NexmarkSource {
-                first_event_rate, ..
-            } => (*first_event_rate as f32 / 50_000.0).round() as usize,
-            Operator::EventSourceSource { .. } => 1,
-            op => panic!("Found non-source in a source position in graph: {:?}", op),
-        });
-    }
-
-    info!("Setting pipeline parallelism to {}", parallelism);
-    set_parallelism(program, parallelism);
-    Ok(())
 }
 
 pub(crate) async fn create_pipeline<'a>(
@@ -176,10 +97,8 @@ pub(crate) async fn create_pipeline<'a>(
 ) -> Result<i64, Status> {
     let pipeline_type;
     let mut program;
-    let sources;
-    let sinks;
+    let connections;
     let text;
-    let compute_parallelism;
     let udfs: Option<Vec<Udf>>;
     let is_preview;
 
@@ -195,11 +114,9 @@ pub(crate) async fn create_pipeline<'a>(
                 .map_err(log_and_map)?
                 .try_into()
                 .map_err(log_and_map)?;
-            sources = vec![];
-            sinks = vec![];
+            connections = vec![];
             text = None;
             udfs = None;
-            compute_parallelism = false;
             is_preview = false;
         }
         create_pipeline_req::Config::Sql(sql) => {
@@ -212,7 +129,7 @@ pub(crate) async fn create_pipeline<'a>(
             }
 
             pipeline_type = PipelineType::sql;
-            (program, sources, sinks) = compile_sql(&sql, &auth, tx).await?;
+            (program, connections) = compile_sql(&sql, &auth, tx).await?;
             text = Some(sql.query);
             udfs = Some(
                 sql.udfs
@@ -223,7 +140,6 @@ pub(crate) async fn create_pipeline<'a>(
                     })
                     .collect(),
             );
-            compute_parallelism = sql.parallelism == 0;
             is_preview = sql.preview;
         }
     };
@@ -246,16 +162,15 @@ pub(crate) async fn create_pipeline<'a>(
         )));
     }
 
+    set_parallelism(&mut program, 1);
+
     if is_preview {
-        set_parallelism(&mut program, 1);
         for node in program.graph.node_weights_mut() {
-            // if it is a kafka sink or file sink, switch to null
-            if let Operator::KafkaSink { .. } | Operator::FileSink { .. } = node.operator {
-                node.operator = Operator::GrpcSink;
+            // if it is a connector sink or switch to a web sink
+            if let Operator::ConnectorSink { .. } = node.operator {
+                node.operator = Operator::ConnectorSink(ConnectorOp::web_sink());
             }
         }
-    } else if compute_parallelism {
-        set_default_parallelism(&auth, &mut program).await?;
     }
 
     let proto_program: PipelineProgram = program.try_into().map_err(log_and_map)?;
@@ -296,16 +211,9 @@ pub(crate) async fn create_pipeline<'a>(
         .map_err(log_and_map)?;
 
     if !is_preview {
-        for source in sources {
-            api_queries::add_pipeline_source()
-                .bind(tx, &pipeline_id, &source)
-                .await
-                .map_err(log_and_map)?;
-        }
-
-        for sink in sinks {
-            api_queries::add_pipeline_sink()
-                .bind(tx, &pipeline_id, &sink)
+        for connection in connections {
+            api_queries::add_pipeline_connection_table()
+                .bind(tx, &pipeline_id, &connection)
                 .await
                 .map_err(log_and_map)?;
         }
@@ -364,12 +272,11 @@ pub(crate) async fn sql_graph(
         query: req.query,
         parallelism: 1,
         udfs: req.udfs,
-        sink: Some(Sink::Builtin(BuiltinSink::Null as i32)),
         preview: false,
     };
 
     match compile_sql(&sql, &auth, client).await {
-        Ok((mut program, _, _)) => {
+        Ok((mut program, _)) => {
             optimizations::optimize(&mut program.graph);
             Ok(PipelineGraphResp {
                 result: Some(api::pipeline_graph_resp::Result::JobGraph(

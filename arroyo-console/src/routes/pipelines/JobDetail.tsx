@@ -153,7 +153,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
     const outputsTab = (
       <TabPanel w={'100%'}>
         {outputs.length == 0 ? (
-          job?.jobGraph?.nodes.find(n => n.operator.includes('GrpcSink')) != null ? (
+          job?.jobGraph?.nodes.find(n => n.operator.includes('WebSink')) != null ? (
             <Button isLoading={subscribed} onClick={subscribe} width={150} size="sm">
               Read output
             </Button>

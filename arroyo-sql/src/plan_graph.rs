@@ -5,9 +5,9 @@ use std::{
 
 use arrow_schema::DataType;
 use arroyo_datastream::{
-    EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, Program, SerializationMode,
-    SlidingAggregatingTopN, SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN,
-    TumblingWindowAggregator, WatermarkType, WindowAgg, WindowType,
+    EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, Program, SlidingAggregatingTopN,
+    SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN, TumblingWindowAggregator,
+    WatermarkType, WindowAgg, WindowType,
 };
 
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -16,7 +16,7 @@ use syn::{parse_quote, parse_str};
 
 use crate::{
     expressions::SortExpression,
-    external::{SinkUpdateType, SqlSink, SqlSource},
+    external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource},
     operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
     pipeline::{
@@ -341,7 +341,7 @@ pub struct PlanNode {
 impl PlanNode {
     fn into_stream_node(&self, index: usize, sql_config: &SqlConfig) -> StreamNode {
         let name = format!("{}_{}", self.prefix(), index);
-        let operator = self.to_operator(sql_config);
+        let operator = self.to_operator();
         StreamNode {
             operator_id: name,
             parallelism: sql_config.default_parallelism,
@@ -400,9 +400,9 @@ impl PlanNode {
         }
     }
 
-    fn to_operator(&self, sql_config: &SqlConfig) -> Operator {
+    fn to_operator(&self) -> Operator {
         match &self.operator {
-            PlanOperator::Source(_name, source) => source.get_operator(sql_config),
+            PlanOperator::Source(_name, source) => source.operator.clone(),
             PlanOperator::Watermark(watermark) => Operator::Watermark(watermark.clone()),
             PlanOperator::RecordTransform(record_transform) => {
                 record_transform.as_operator(self.output_type.is_updating())
@@ -765,35 +765,7 @@ impl PlanNode {
             PlanOperator::Flatten => arroyo_datastream::Operator::FlattenOperator {
                 name: "flatten".into(),
             },
-            PlanOperator::Sink(_sink_name, sql_sink) => {
-                match &sql_sink.sink_config {
-                    arroyo_datastream::SinkConfig::Kafka {
-                        bootstrap_servers,
-                        topic,
-                        client_configs,
-                    } => {
-                        arroyo_datastream::Operator::KafkaSink {
-                            topic: topic.clone(),
-                            // split by comma
-                            bootstrap_servers: bootstrap_servers
-                                .split(',')
-                                .map(|s| s.to_string())
-                                .collect(),
-                            client_configs: client_configs.clone(),
-                        }
-                    }
-                    arroyo_datastream::SinkConfig::Console => {
-                        arroyo_datastream::Operator::ConsoleSink
-                    }
-                    arroyo_datastream::SinkConfig::File { directory } => {
-                        arroyo_datastream::Operator::FileSink {
-                            dir: directory.into(),
-                        }
-                    }
-                    arroyo_datastream::SinkConfig::Grpc => arroyo_datastream::Operator::GrpcSink,
-                    arroyo_datastream::SinkConfig::Null => arroyo_datastream::Operator::NullSink,
-                }
-            }
+            PlanOperator::Sink(_, sql_sink) => sql_sink.operator.clone(),
             PlanOperator::ToDebezium => arroyo_datastream::Operator::ExpressionOperator {
                 name: "to_debezium".into(),
                 expression: quote!({
@@ -1250,9 +1222,9 @@ impl PlanGraph {
         if let Some(source_id) = source_operator.source.id {
             self.saved_sources_used.push(source_id);
         }
-        let mut current_index = match source_operator.source.serialization_mode {
-            SerializationMode::DebeziumJson => self.add_debezium_source(&source_operator),
-            _ => self.insert_operator(
+        let mut current_index = match source_operator.source.processing_mode {
+            ProcessingMode::Update => self.add_debezium_source(&source_operator),
+            ProcessingMode::Append => self.insert_operator(
                 PlanOperator::Source(source_operator.name.clone(), source_operator.source.clone()),
                 PlanType::Unkeyed(source_operator.source.struct_def.clone()),
             ),
@@ -1585,11 +1557,11 @@ impl PlanGraph {
         let input_type = input.return_type();
         let input_index = self.add_sql_operator(*input);
         let mut result_type = input_type.clone();
-        result_type.fields.push(StructField {
-            name: window_operator.field_name.clone(),
-            alias: None,
-            data_type: TypeDef::DataType(DataType::UInt64, false),
-        });
+        result_type.fields.push(StructField::new(
+            window_operator.field_name.clone(),
+            None,
+            TypeDef::DataType(DataType::UInt64, false),
+        ));
         let partition_struct = window_operator.partition.output_struct();
 
         let partition_key_node = PlanOperator::RecordTransform(RecordTransform::KeyProjection(

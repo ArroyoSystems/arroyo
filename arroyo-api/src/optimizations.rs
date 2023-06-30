@@ -429,11 +429,11 @@ impl Optimizer for WasmFusionOptimizer {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, time::Duration};
+    use std::time::Duration;
 
     use petgraph::prelude::DiGraph;
 
-    use arroyo_datastream::{StreamEdge, StreamNode, WindowAgg};
+    use arroyo_datastream::{ConnectorOp, StreamEdge, StreamNode, WindowAgg};
 
     use super::fuse_window_aggregation;
 
@@ -442,10 +442,11 @@ mod tests {
         let mut graph = DiGraph::new();
         let source = graph.add_node(StreamNode {
             operator_id: "o1".to_string(),
-            operator: arroyo_datastream::Operator::FileSource {
-                dir: PathBuf::new(),
-                delay: Duration::ZERO,
-            },
+            operator: arroyo_datastream::Operator::ConnectorSource(ConnectorOp {
+                operator: "NullSource".to_string(),
+                config: "".to_string(),
+                description: "Null".to_string(),
+            }),
             parallelism: 5,
         });
 
@@ -487,7 +488,11 @@ mod tests {
 
         let sink = graph.add_node(StreamNode {
             operator_id: "o6".to_string(),
-            operator: arroyo_datastream::Operator::ConsoleSink {},
+            operator: arroyo_datastream::Operator::ConnectorSink(ConnectorOp {
+                operator: "ConsoleSink".to_string(),
+                config: "".to_string(),
+                description: "ConsoleSink".to_string(),
+            }),
             parallelism: 5,
         });
 

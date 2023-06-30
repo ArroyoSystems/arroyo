@@ -1,0 +1,31 @@
+{
+    "type": "object",
+    "title": "OperatorConfig",
+    "properties": {
+        "connection": {
+        },
+        "table": {
+        },
+        "serialization_mode": {
+            "type": "string",
+            "enum": [
+                "json",
+                "json_schema_registry",
+                "raw_json",
+                "debezium_json"
+            ]
+        },
+        "rate_limit": {
+            "type": "object",
+            "properties": {
+                "messages_per_second": {
+                    "type": "number"
+                }
+            }
+        }
+    },
+    "required": [
+        "connection",
+        "table"
+    ]
+}
