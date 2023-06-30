@@ -182,9 +182,9 @@ impl ArroyoSchemaProvider {
 
             let ret: TypeDef = match &function.sig.output {
                 ReturnType::Default => bail!("return type must be specified in UDF"),
-                ReturnType::Type(_, t) => (&**t).try_into().map_err(|_| {
-                    anyhow!("Could not convert return type into a SQL data type")
-                })?,
+                ReturnType::Type(_, t) => (&**t)
+                    .try_into()
+                    .map_err(|_| anyhow!("Could not convert return type into a SQL data type"))?,
             };
 
             let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);

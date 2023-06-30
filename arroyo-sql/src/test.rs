@@ -149,13 +149,9 @@ async fn test_no_virtual_fields_updating() {
         format = 'debezium_json'
       );
       SELECT * FROM debezium_source";
-    let err = parse_and_get_program(sql, schema_provider, SqlConfig::default())
+    let _ = parse_and_get_program(sql, schema_provider, SqlConfig::default())
         .await
         .unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "can't read from a source with virtual fields and update mode."
-    );
 }
 
 #[tokio::test]

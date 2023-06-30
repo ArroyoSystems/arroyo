@@ -801,7 +801,9 @@ impl<'a> SqlPipelineBuilder<'a> {
             .schema_provider
             .get_table(&table_name)
             .ok_or_else(|| anyhow!("table {} not found", table_scan.table_name))?;
-        let source = source.as_sql_source(self)?;
+        let source = source
+            .as_sql_source(self)
+            .map_err(|e| anyhow!("failed to plan {}: {}", table_scan.table_name, e))?;
 
         if let Some(projection) = table_scan.projection.as_ref() {
             let fields: Vec<StructField> = projection
@@ -1010,7 +1012,10 @@ impl<'a> SqlPipelineBuilder<'a> {
                         );
                     }
                     Table::ConnectorTable(c) => {
-                        self.insert_nodes.push(c.as_sql_sink(input)?);
+                        self.insert_nodes.push(
+                            c.as_sql_sink(input)
+                                .map_err(|e| anyhow!("failed to plan {}: {}", c.name, e))?,
+                        );
                     }
                     Table::TableFromQuery {
                         name: _,

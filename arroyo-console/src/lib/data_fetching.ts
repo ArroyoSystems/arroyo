@@ -54,14 +54,6 @@ const pipelineGraphKey = (query?: string, udfInput?: string) => {
   return query ? { key: 'PipelineGraph', query, udfInput } : null;
 };
 
-const sourcesKey = () => {
-  return { key: 'Sources' };
-};
-
-const sinksKey = () => {
-  return { key: 'Sinks' };
-};
-
 // Connectors
 const connectorsFetcher = (client: ApiClient) => {
   return async () => {
@@ -97,7 +89,7 @@ export const useConnections = (client: ApiClient) => {
 
 // ConnectionTables
 const connectionTablesFetcher = (client: ApiClient) => {
-  return async (params: { connectionId: string }) => {
+  return async () => {
     return (await (await client()).getConnectionTables(new GetConnectionTablesReq({}))).tables;
   };
 };

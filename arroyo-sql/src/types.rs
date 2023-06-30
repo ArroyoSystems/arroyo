@@ -261,9 +261,7 @@ fn rust_to_arrow(typ: &Type) -> std::result::Result<DataType, ()> {
                 "Vec<u8>" => Ok(DataType::Binary),
                 "std::time::SystemTime" => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
                 "std::time::Duration" => Ok(DataType::Duration(TimeUnit::Microsecond)),
-                _ => {
-                    Err(())
-                }
+                _ => Err(()),
             }
         }
         _ => Err(()),

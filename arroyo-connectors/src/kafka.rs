@@ -325,10 +325,9 @@ impl KafkaTester {
                     }
                     None => {
                         // wait
+                        tokio::time::sleep(Duration::from_millis(500)).await;
                     }
                 }
-
-                tokio::time::sleep(Duration::from_millis(500)).await;
             }
 
             return Err(format!(

@@ -171,7 +171,7 @@ impl ConnectorTable {
         table.watermark_field = options.remove("watermark_field");
 
         if !options.is_empty() {
-            let keys: Vec<String> = options.keys().map(|s| s.to_string()).collect();
+            let keys: Vec<String> = options.keys().map(|s| format!("'{}'", s)).collect();
             bail!(
                 "unknown options provided in WITH clause: {}",
                 keys.join(", ")
@@ -491,7 +491,11 @@ impl Table {
                     }
 
                     if !with_map.is_empty() {
-                        bail!("Memory tables do not allow any with options; to create a connector table set the 'connector' option");
+                        if connector.is_some() {
+                            bail!("Memory tables do not allow with options");
+                        } else {
+                            bail!("Memory tables do not allow with options; to create a connection table set the 'connector' option");
+                        }
                     }
 
                     Ok(Some(Table::MemoryTable { name, fields }))
