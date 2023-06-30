@@ -1187,4 +1187,41 @@ mod tests {
         },
         None
     );
+
+    // to_timestamp methods
+    single_test_codegen!(
+        "to_timestamp",
+        "to_timestamp(1685659545809000000)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        arroyo_types::from_nanos(1685659545809000000)
+    );
+
+    single_test_codegen!(
+        "to_timestamp_millis",
+        "to_timestamp_millis(1685659545809)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        arroyo_types::from_millis(1685659545809)
+    );
+
+    single_test_codegen!(
+        "to_timestamp_micros",
+        "to_timestamp_micros(1685659545809000)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        arroyo_types::from_micros(1685659545809000)
+    );
+
+    single_test_codegen!(
+        "to_timestamp_seconds",
+        "to_timestamp_seconds(168565954)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        arroyo_types::from_millis(168565954000)
+    );
 }
