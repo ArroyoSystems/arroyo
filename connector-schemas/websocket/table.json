@@ -14,6 +14,7 @@
         "subscription_message": {
             "title": "Subscription Message",
             "type": "string",
+            "maxLength": 2048,
             "description": "An optional message to send after the socket is opened",
             "examples": [
                 "{\"type\":\"subscribe\",\"channels\":[\"updates\"]}"

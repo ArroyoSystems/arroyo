@@ -13,11 +13,11 @@ use arroyo_types::{Data, Record};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::{debug, info};
 use typify::import_types;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     engine::{Context, StreamNode},
@@ -59,20 +59,19 @@ where
 
         Self {
             url: table.endpoint,
-            subscription_message: table.subscription_message,
+            subscription_message: table.subscription_message.map(|s| s.into()),
             serialization_mode: match config.serialization_mode.unwrap() {
-                OperatorConfigSerializationMode::Json => SerializationMode::Json,
+                OperatorConfigSerializationMode::Json
+                | OperatorConfigSerializationMode::DebeziumJson => SerializationMode::Json,
                 OperatorConfigSerializationMode::JsonSchemaRegistry => {
                     SerializationMode::JsonSchemaRegistry
                 }
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
-                OperatorConfigSerializationMode::DebeziumJson => todo!(),
             },
             state: WebsocketSourceState::default(),
             _t: PhantomData,
         }
     }
-
 
     fn name(&self) -> String {
         "WebsocketSource".to_string()
@@ -143,8 +142,15 @@ where
 
         if let Some(msg) = &self.subscription_message {
             if let Err(e) = tx.send(tungstenite::Message::Text(msg.clone())).await {
-                ctx.report_error("Failed to send subscription message to websocket server".to_string(), e.to_string()).await;
-                panic!("Failed to send subscription message to websocket server: {:?}", e);
+                ctx.report_error(
+                    "Failed to send subscription message to websocket server".to_string(),
+                    e.to_string(),
+                )
+                .await;
+                panic!(
+                    "Failed to send subscription message to websocket server: {:?}",
+                    e
+                );
             }
         }
 

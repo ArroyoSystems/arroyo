@@ -1,9 +1,13 @@
-use anyhow::{anyhow};
+use std::time::Duration;
+
+use anyhow::anyhow;
 use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, TestSourceMessage},
 };
+use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc::Sender;
+use tokio_tungstenite::{connect_async, tungstenite};
 use tonic::Status;
 use typify::import_types;
 
@@ -51,12 +55,94 @@ impl Connector for WebsocketConnector {
         &self,
         _: &str,
         _: Self::ConfigT,
-        _: Self::TableT,
+        table: Self::TableT,
         _: Option<&ConnectionSchema>,
         tx: Sender<Result<TestSourceMessage, Status>>,
     ) {
         tokio::task::spawn(async move {
-            tx.send(Ok(TestSourceMessage { error: false, done: true, message: "Yay".to_string() })).await.unwrap();
+            let send = |error: bool, done: bool, message: String| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(Ok(TestSourceMessage {
+                        error,
+                        done,
+                        message,
+                    }))
+                    .await
+                    .unwrap();
+                }
+            };
+
+            let ws_stream = match connect_async(&table.endpoint).await {
+                Ok((ws_stream, _)) => ws_stream,
+                Err(e) => {
+                    send(
+                        true,
+                        true,
+                        format!("Failed to connect to websocket server: {:?}", e),
+                    )
+                    .await;
+                    return;
+                }
+            };
+
+            send(
+                false,
+                false,
+                "Successfully connected to websocket server".to_string(),
+            )
+            .await;
+
+            let (mut tx, mut rx) = ws_stream.split();
+
+            if let Some(msg) = table.subscription_message {
+                match tx
+                    .send(tungstenite::Message::Text(msg.clone().into()))
+                    .await
+                {
+                    Ok(_) => {
+                        send(false, false, "Sent subscription message".to_string()).await;
+                    }
+                    Err(e) => {
+                        send(
+                            true,
+                            true,
+                            format!("Failed to send subscription message: {:?}", e),
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
+
+            tokio::select! {
+                message = rx.next() => {
+                    match message {
+                        Some(Ok(_)) => {
+                            send(false, false, "Received message from websocket".to_string()).await;
+                        },
+                        Some(Err(e)) => {
+                            send(true, true, format!("Received error from websocket: {:?}", e)).await;
+                            return;
+                        }
+                        None => {
+                            send(true, true, "Websocket disconnected before sending message".to_string()).await;
+                            return;
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                    send(true, true, "Did not receive any messages after 30 seconds".to_string()).await;
+                    return;
+                }
+            }
+
+            send(
+                false,
+                true,
+                "Successfully validated websocket connection".to_string(),
+            )
+            .await;
         });
     }
 
@@ -109,7 +195,7 @@ impl Connector for WebsocketConnector {
             EmptyConfig {},
             WebsocketTable {
                 endpoint,
-                subscription_message
+                subscription_message: subscription_message.map(SubscriptionMessage),
             },
             schema,
         )

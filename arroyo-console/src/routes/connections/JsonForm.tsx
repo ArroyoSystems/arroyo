@@ -10,6 +10,7 @@ import {
   Input,
   Select,
   Stack,
+  Textarea,
 } from '@chakra-ui/react';
 import { JSONSchema7 } from 'json-schema';
 import { useFormik } from 'formik';
@@ -24,6 +25,7 @@ function StringWidget({
   description,
   placeholder,
   required,
+  maxLength,
   value,
   errors,
   onChange,
@@ -32,6 +34,7 @@ function StringWidget({
   title: string;
   description?: string;
   placeholder?: string;
+  maxLength?: number;
   required?: boolean;
   value: string;
   errors: any;
@@ -40,13 +43,24 @@ function StringWidget({
   return (
     <FormControl isRequired={required} isInvalid={errors[path]}>
       <FormLabel>{title}</FormLabel>
-      <Input
-        name={path}
-        type="text"
-        placeholder={placeholder}
-        value={value || ''}
-        onChange={e => onChange(e)}
-      />
+      {maxLength == null || maxLength < 100 ? (
+        <Input
+          name={path}
+          type="text"
+          placeholder={placeholder}
+          value={value || ''}
+          onChange={e => onChange(e)}
+        />
+      ) : (
+        <Textarea
+          name={path}
+          placeholder={placeholder}
+          value={value || ''}
+          onChange={e => onChange(e)}
+          resize={'vertical'}
+          size={'md'}
+        />
+      )}
       {errors[path] ? (
         <FormErrorMessage>{errors[path]}</FormErrorMessage>
       ) : (
@@ -195,6 +209,7 @@ export function FormInner({
                     title={property.title || key}
                     description={property.description}
                     required={schema.required?.includes(key)}
+                    maxLength={property.maxLength}
                     // @ts-ignore
                     placeholder={property.examples ? (property.examples[0] as string) : undefined}
                     value={values[key]}

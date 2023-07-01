@@ -469,14 +469,15 @@ impl<K: Key, T: Data> Context<K, T> {
     }
 
     pub async fn report_error(&mut self, message: String, details: String) {
-        self.control_tx.send(
-            ControlResp::Error {
+        self.control_tx
+            .send(ControlResp::Error {
                 operator_id: self.task_info.operator_id.clone(),
                 task_index: self.task_info.task_index,
                 message,
                 details,
-            }
-        ).await.unwrap();
+            })
+            .await
+            .unwrap();
     }
 }
 

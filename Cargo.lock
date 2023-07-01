@@ -489,6 +489,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
  "tonic",
  "tracing",
  "typify",
