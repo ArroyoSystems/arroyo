@@ -1,0 +1,11 @@
+[package]
+name = "arroyo-openapi"
+version = "0.3.0"
+edition = "2021"
+
+[dependencies]
+arroyo-api = { path = "../arroyo-api" }
+
+[build-dependencies]
+arroyo-api = { path = "../arroyo-api" }
+utoipa = "3"

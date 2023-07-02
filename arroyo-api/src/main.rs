@@ -63,6 +63,7 @@ mod jobs;
 mod metrics;
 mod optimizations;
 mod pipelines;
+mod rest;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -200,12 +201,12 @@ async fn server(pool: Pool) {
         .allow_headers(cors::Any)
         .allow_origin(cors::Any);
 
-    let app = Router::new()
+    let console_app = Router::new()
         .route_service("/", fallback)
         .fallback_service(serve_dir)
         .layer(cors);
 
-    let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
+    let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
     start_admin_server("api", ports::API_ADMIN, shutdown_rx.resubscribe());
 
@@ -215,13 +216,14 @@ async fn server(pool: Pool) {
 
     log_event("service_startup", json!({"service": "api"}));
 
+    let mut console_shutdown_rx = shutdown_rx.resubscribe();
     tokio::spawn(async move {
         select! {
             result = axum::Server::bind(&addr)
-            .serve(app.into_make_service()) => {
+            .serve(console_app.into_make_service()) => {
                 result.unwrap();
             }
-            _ = shutdown_rx.recv() => {
+            _ = console_shutdown_rx.recv() => {
 
             }
         }
@@ -239,6 +241,22 @@ async fn server(pool: Pool) {
         pool,
         controller_addr,
     };
+
+    let rest_addr = format!("0.0.0.0:{}", 8003).parse().unwrap();
+    let app = rest::create_rest_app();
+    let mut rest_shutdown_rx = shutdown_rx.resubscribe();
+
+    info!("Starting rest api server on {:?}", rest_addr);
+    tokio::spawn(async move {
+        select! {
+            result = axum::Server::bind(&rest_addr)
+            .serve(app.into_make_service()) => {
+                result.unwrap();
+            }
+            _ = rest_shutdown_rx.recv() => {
+            }
+        }
+    });
 
     let addr = format!("0.0.0.0:{}", grpc_port("api", ports::API_GRPC))
         .parse()
