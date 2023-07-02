@@ -1,0 +1,32 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Arroyo REST API",
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/v1/ping": {
+      "get": {
+        "tags": [
+          "ping"
+        ],
+        "operationId": "ping",
+        "responses": {
+          "200": {
+            "description": "Ping endpoint"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "ping",
+      "description": "Ping"
+    }
+  ]
+}
