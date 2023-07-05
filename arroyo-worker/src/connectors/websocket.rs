@@ -171,7 +171,7 @@ where
                                     tungstenite::Message::Ping(d) => {
                                         tx.send(tungstenite::Message::Pong(d)).await
                                             .map(|_| None)
-                                            .map_err(|e| UserError::new("Failed to sned pong to websocket server", e.to_string()))
+                                            .map_err(|e| UserError::new("Failed to send pong to websocket server", e.to_string()))
                                     },
                                     tungstenite::Message::Pong(_) => {
                                         // ignore
