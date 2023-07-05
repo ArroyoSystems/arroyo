@@ -20,6 +20,7 @@ use sse::SSEConnector;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use typify::import_types;
+use websocket::WebsocketConnector;
 
 use self::kafka::KafkaConnector;
 
@@ -28,6 +29,7 @@ pub mod impulse;
 pub mod kafka;
 pub mod nexmark;
 pub mod sse;
+pub mod websocket;
 
 import_types!(schema = "../connector-schemas/common.json",);
 
@@ -38,7 +40,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("nexmark", Box::new(NexmarkConnector {}));
     m.insert("impulse", Box::new(ImpulseConnector {}));
     m.insert("blackhole", Box::new(BlackholeConnector {}));
-
+    m.insert("websocket", Box::new(WebsocketConnector {}));
     m
 }
 
