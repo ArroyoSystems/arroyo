@@ -84,6 +84,11 @@ WHERE organization_id = :organization_id AND id = :id;
 
 ----------- pipelines -------------------
 
+--! get_pipelines
+SELECT pipelines.pub_id, name, textual_repr, udfs FROM pipelines
+INNER JOIN pipeline_definitions as d ON pipelines.id = d.pipeline_id AND pipelines.current_version = d.version
+WHERE pipelines.organization_id = :organization_id;
+
 --! create_pipeline
 INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, current_version)
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :current_version)
@@ -93,6 +98,11 @@ RETURNING id;
 INSERT INTO pipeline_definitions (pub_id, organization_id, created_by, pipeline_id, version, textual_repr, udfs, program)
 VALUES  (:pub_id, :organization_id, :created_by, :pipeline_id, :version, :textual_repr, :udfs, :program)
 RETURNING id;
+
+--! get_pipeline_rest: DbPipelineRest (textual_repr?, udfs?)
+SELECT pipelines.pub_id as id, name, type, textual_repr, udfs, program FROM pipelines
+INNER JOIN pipeline_definitions as d ON pipelines.id = d.pipeline_id AND pipelines.current_version = d.version
+WHERE pipelines.pub_id = :pub_id AND pipelines.organization_id = :organization_id;
 
 --! get_pipeline: DbPipeline(textual_repr?, udfs?)
 SELECT pipelines.id as id, name, type, textual_repr, udfs, program FROM pipelines

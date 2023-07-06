@@ -55,6 +55,7 @@ use uuid::Uuid;
 use crate::jobs::get_job_details;
 use queries::api_queries;
 
+mod auth;
 mod cloud;
 mod connection_tables;
 mod connections;
@@ -63,7 +64,8 @@ mod jobs;
 mod metrics;
 mod optimizations;
 mod pipelines;
-mod rest;
+pub mod rest;
+mod rest_utils;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -237,13 +239,14 @@ async fn server(pool: Pool) {
     let controller_addr = std::env::var(CONTROLLER_ADDR_ENV)
         .unwrap_or_else(|_| format!("http://localhost:{}", ports::CONTROLLER_GRPC));
 
+    let api_server_pool = pool.clone();
     let server = ApiServer {
-        pool,
+        pool: api_server_pool,
         controller_addr,
     };
 
     let rest_addr = format!("0.0.0.0:{}", 8003).parse().unwrap();
-    let app = rest::create_rest_app();
+    let app = rest::create_rest_app(pool);
     let mut rest_shutdown_rx = shutdown_rx.resubscribe();
 
     info!("Starting rest api server on {:?}", rest_addr);
@@ -582,7 +585,7 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<PipelineDef>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 
-        let def = pipelines::get_pipeline(
+        let def = pipelines::query_pipeline(
             &request.into_inner().pipeline_id,
             &auth,
             &self.client().await?,
@@ -635,13 +638,11 @@ impl ApiGrpc for ApiServer {
 
     async fn get_jobs(
         &self,
-        request: Request<GetJobsReq>,
+        _request: Request<GetJobsReq>,
     ) -> Result<Response<GetJobsResp>, Status> {
-        let (_, auth) = self.authenticate(request).await?;
-
-        let jobs = jobs::get_jobs(&auth, &self.client().await?).await?;
-
-        Ok(Response::new(GetJobsResp { jobs }))
+        Err(Status::unimplemented(
+            "This feature has been moved ot the REST API",
+        ))
     }
 
     async fn get_job_details(

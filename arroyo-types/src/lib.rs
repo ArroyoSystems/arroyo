@@ -1,3 +1,5 @@
+pub mod api;
+
 use bincode::{config, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -8,6 +10,9 @@ use std::hash::Hash;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+#[macro_use]
+extern crate num_derive;
 
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
 pub struct Window {

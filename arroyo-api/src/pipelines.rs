@@ -2,8 +2,11 @@ use std::str::FromStr;
 
 use anyhow::Context;
 use arroyo_connectors::connector_for_type;
+use axum::extract::{Path, State};
+use axum::Json;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Transaction;
+use http::StatusCode;
 use prost::Message;
 use serde_json::Value;
 use tonic::Status;
@@ -16,10 +19,13 @@ use arroyo_rpc::grpc::api::{
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
+use arroyo_types::api::{JobCollection, Pipeline, PipelineCollection, PipelinePost};
 
 use crate::connection_tables;
 use crate::queries::api_queries;
-use crate::queries::api_queries::DbPipeline;
+use crate::queries::api_queries::{DbPipeline, DbPipelineRest};
+use crate::rest::AppState;
+use crate::rest_utils::{authenticate, client, log_and_map_rest, BearerAuth, ErrorResp};
 use crate::types::public::PipelineType;
 use crate::{handle_db_error, log_and_map, optimizations, required_field, AuthData};
 
@@ -251,7 +257,37 @@ impl TryInto<PipelineDef> for DbPipeline {
     }
 }
 
-pub(crate) async fn get_pipeline(
+impl Into<Pipeline> for DbPipelineRest {
+    fn into(self) -> Pipeline {
+        Pipeline {
+            id: self.id,
+            name: self.name,
+            definition: self.textual_repr,
+            udfs: vec![], //todo
+        }
+    }
+}
+
+pub(crate) async fn query_pipeline_rest(
+    id: &str,
+    auth: &AuthData,
+    db: &impl GenericClient,
+) -> Result<Pipeline, ErrorResp> {
+    let pipeline = api_queries::get_pipeline_rest()
+        .bind(db, &id, &auth.organization_id)
+        .opt()
+        .await
+        .map_err(log_and_map_rest)?;
+
+    let res: DbPipelineRest = pipeline.ok_or_else(|| ErrorResp {
+        status_code: StatusCode::NOT_FOUND,
+        message: "Pipeline not found".to_string(),
+    })?;
+
+    Ok(res.into())
+}
+
+pub(crate) async fn query_pipeline(
     id: &str,
     auth: &AuthData,
     db: &impl GenericClient,
@@ -303,4 +339,91 @@ pub(crate) async fn sql_graph(
             _ => Err(err),
         },
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/pipelines",
+    tag = "pipelines",
+    request_body = PipelinePost,
+    responses(
+        (status = 200, description = "Created pipeline", body = Pipeline),
+    ),
+)]
+pub async fn post_pipeline(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Json(pipelinePost): Json<PipelinePost>,
+) -> Result<Json<Pipeline>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    Err(ErrorResp {
+        status_code: StatusCode::NOT_IMPLEMENTED,
+        message: "Method not implemented yet".to_string(),
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/pipelines",
+    tag = "pipelines",
+    responses(
+        (status = 200, description = "Got pipelines collection", body = PipelineCollection),
+    ),
+)]
+pub async fn get_pipelines(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+) -> Result<Json<PipelineCollection>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    Err(ErrorResp {
+        status_code: StatusCode::NOT_IMPLEMENTED,
+        message: "Method not implemented yet".to_string(),
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/pipelines/{id}",
+    tag = "pipelines",
+    responses(
+        (status = 200, description = "Got pipeline", body = Pipeline),
+    ),
+)]
+pub async fn get_pipeline(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path(id): Path<String>,
+) -> Result<Json<Pipeline>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    let p = query_pipeline_rest(&id, &auth_data, &client).await?;
+    Ok(Json(p))
+
+    // Err(ErrorResp {
+    //     status_code: StatusCode::NOT_IMPLEMENTED,
+    //     message: "Method not implemented yet".to_string(),
+    // })
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/pipelines/{id}/jobs",
+    tag = "pipelines",
+    responses(
+        (status = 200, description = "Got jobs collection", body = JobCollection),
+    ),
+)]
+pub async fn get_jobs(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+) -> Result<Json<JobCollection>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+    Err(ErrorResp {
+        status_code: StatusCode::NOT_IMPLEMENTED,
+        message: "Method not implemented yet".to_string(),
+    })
 }

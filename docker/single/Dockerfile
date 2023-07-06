@@ -69,6 +69,7 @@ COPY arroyo-console arroyo-console
 COPY integ integ
 COPY docker/refinery.toml refinery.toml
 COPY connector-schemas connector-schemas
+COPY arroyo-openapi arroyo-openapi
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
