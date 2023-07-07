@@ -36,6 +36,7 @@ COPY arroyo-connectors src/arroyo-connectors
 COPY arroyo-api src/arroyo-api
 COPY arroyo-datastream src/arroyo-datastream
 COPY arroyo-node src/arroyo-node
+COPY arroyo-openapi src/arroyo-openapi
 COPY arroyo-sql src/arroyo-sql
 COPY arroyo-sql-macro src/arroyo-sql-macro
 COPY arroyo-sql-testing src/arroyo-sql-testing
