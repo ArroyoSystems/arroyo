@@ -284,23 +284,25 @@ export function FormInner({
                   </fieldset>
                 );
               } else {
-                return<fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
+                return (
+                  <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
                     <legend
                       style={{ marginLeft: '8px', paddingLeft: '16px', paddingRight: '16px' }}
                     >
-                    {property.title || key}
+                      {property.title || key}
                     </legend>
-                 <Box p={4}>
-                          <FormInner
-                            path={key}
-                            // @ts-ignore
-                            schema={property}
-                            errors={errors}
-                            onChange={onChange}
-                            values={values[key] || {}}
-                          />
-                        </Box>
+                    <Box p={4}>
+                      <FormInner
+                        path={key}
+                        // @ts-ignore
+                        schema={property}
+                        errors={errors}
+                        onChange={onChange}
+                        values={values[key] || {}}
+                      />
+                    </Box>
                   </fieldset>
+                );
               }
             }
             default: {
