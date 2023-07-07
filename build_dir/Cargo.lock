@@ -101,6 +101,7 @@ checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 [[package]]
 name = "arrow"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "ahash 0.8.3",
  "arrow-arith",
@@ -121,6 +122,7 @@ dependencies = [
 [[package]]
 name = "arrow-arith"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -134,6 +136,7 @@ dependencies = [
 [[package]]
 name = "arrow-array"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "ahash 0.8.3",
  "arrow-buffer",
@@ -148,6 +151,7 @@ dependencies = [
 [[package]]
 name = "arrow-buffer"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "half",
  "num",
@@ -156,6 +160,7 @@ dependencies = [
 [[package]]
 name = "arrow-cast"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -170,6 +175,7 @@ dependencies = [
 [[package]]
 name = "arrow-csv"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -187,6 +193,7 @@ dependencies = [
 [[package]]
 name = "arrow-data"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "arrow-buffer",
  "arrow-schema",
@@ -197,6 +204,7 @@ dependencies = [
 [[package]]
 name = "arrow-ipc"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -209,6 +217,7 @@ dependencies = [
 [[package]]
 name = "arrow-json"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -227,6 +236,7 @@ dependencies = [
 [[package]]
 name = "arrow-ord"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -240,6 +250,7 @@ dependencies = [
 [[package]]
 name = "arrow-row"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -253,10 +264,12 @@ dependencies = [
 [[package]]
 name = "arrow-schema"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 
 [[package]]
 name = "arrow-select"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -268,6 +281,7 @@ dependencies = [
 [[package]]
 name = "arrow-string"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -2427,6 +2441,7 @@ dependencies = [
 [[package]]
 name = "object_store"
 version = "0.6.1"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=direct_multipart#063b825c02d06b1a46dfa7cfca5daec0e0eaae93"
 dependencies = [
  "async-trait",
  "base64 0.21.0",
@@ -2563,6 +2578,7 @@ dependencies = [
 [[package]]
 name = "parquet"
 version = "39.0.0"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=39_0_0/write_trailing_bytes#31d78a5e44d483346b3351ead32b4f0d7c0d7b7d"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",

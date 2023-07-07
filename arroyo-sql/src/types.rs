@@ -667,7 +667,7 @@ impl StructField {
             DataType::Struct(struct_fields) => {
                 if struct_fields.is_empty() {
                     return quote!(arrow::datatypes::DataType::Struct(
-                        arrow_schema::Fields::default()
+                        arrow::datatypes::Fields::default()
                     ));
                 }
                 let fields: Vec<_> = struct_fields
