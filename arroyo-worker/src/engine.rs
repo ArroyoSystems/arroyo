@@ -1155,10 +1155,10 @@ impl Engine {
                                     controller.worker_error(Request::new(
                                         WorkerErrorReq {
                                             job_id: job_id.clone(),
-                                            operator_id: operator_id,
+                                            operator_id,
                                             task_index: task_index as u32,
-                                            message: message,
-                                            details: details
+                                            message,
+                                            details
                                         }
                                     )).await.err()
                                 } else {

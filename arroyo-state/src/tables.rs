@@ -4,7 +4,7 @@ use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor, TableType};
 use arroyo_types::{from_micros, Data, Key, TaskInfo};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, SystemTime};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 pub struct TimeKeyMap<'a, K: Key, V: Data, S: BackingStore> {
     table: char,
@@ -444,7 +444,8 @@ pub struct GlobalKeyedStateCache<K: Key, V: Data> {
 impl<K: Key, V: Data> GlobalKeyedStateCache<K, V> {
     pub async fn from_checkpoint<S: BackingStore>(backing_store: &S, table: char) -> Self {
         let mut values = HashMap::new();
-        for (key, value) in backing_store.get_key_values(table).await {
+        for (key, value) in backing_store.get_global_key_values(table).await {
+            error!("Loaded key {:?} and value {:?} from checkpoint", key, value);
             values.insert(key, value);
         }
         Self { values }

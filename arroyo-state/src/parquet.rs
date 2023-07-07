@@ -23,7 +23,7 @@ use rusoto_core::{ByteStream, Region, RusotoError};
 use rusoto_s3::{
     DeleteObjectRequest, GetObjectError, GetObjectRequest, PutObjectRequest, S3Client, S3,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
 use std::env;
 use std::io::ErrorKind;
 use std::ops::RangeInclusive;
@@ -514,6 +514,7 @@ impl ParquetWriter {
                 .iter()
                 .map(|table| (table.name.chars().next().unwrap(), table.clone()))
                 .collect(),
+            table_min_times: HashMap::new(),
             builders: HashMap::new(),
             current_files,
         })
@@ -698,6 +699,7 @@ struct ParquetFlusher {
     table_descriptors: HashMap<char, TableDescriptor>,
     builders: HashMap<char, RecordBatchBuilder>,
     current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>,
+    table_min_times: HashMap<char, SystemTime>,
 }
 
 #[derive(Clone)]
@@ -904,7 +906,7 @@ impl ParquetFlusher {
                         }
                         Some(ParquetQueueItem::Checkpoint(epoch)) => {
                             checkpoint_epoch = Some(epoch);
-                        }
+                        },
                         None => {
                             debug!("Parquet flusher closed");
                             return Ok(false);
@@ -941,6 +943,7 @@ impl ParquetFlusher {
                         min_routing_key: stats.min_routing_key,
                         max_routing_key: stats.max_routing_key,
                         max_timestamp_micros: to_micros(stats.max_timestamp),
+                        min_required_timestamp_micros: None,
                     });
             }
             let mut new_file_map: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> =

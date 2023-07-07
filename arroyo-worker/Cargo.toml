@@ -40,6 +40,12 @@ sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
 ordered-float = "3"
+arrow = "39.0.0"
+parquet = { version = "39.0.0", features = ["async"]}
+arrow-array = "39.0.0"
+rusoto_core = "0.48.0"
+rusoto_s3 = "0.48.0"
+object_store = {version = "0.6.1", features = ["aws"]}
 
 tonic = "0.8"
 prost = "0.11"
@@ -60,3 +66,4 @@ tokio-tungstenite = { version = "0.19", features = ["native-tls"] }
 
 [dev-dependencies]
 test-case = "2.2"
+

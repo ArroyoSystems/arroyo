@@ -369,7 +369,7 @@ pub fn parse_and_get_program_sync(
             connection_type: arroyo_connectors::ConnectionType::Sink,
             fields: struct_def.fields.clone(),
             type_name: None,
-            operator: "GrpcSink".to_string(),
+            operator: "GrpcSink::<#in_k, #in_t>".to_string(),
             config: "{}".to_string(),
             description: "WebSink".to_string(),
             serialization_mode: if insert.is_updating() {
