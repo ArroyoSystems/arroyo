@@ -123,7 +123,7 @@ export function JobDetail({ client }: { client: ApiClient }) {
             activeOperator={activeOperator}
           />
         </Flex>
-        <Stack w="500px" className="pipelineInfo" spacing={2} overflow={'scroll'}>
+        <Stack w="500px" className="pipelineInfo" spacing={2} overflow={'auto'}>
           {job?.jobStatus?.failureMessage ? (
             <Box>
               <Alert status="error" marginBottom={5}>
