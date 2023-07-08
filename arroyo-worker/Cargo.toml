@@ -57,6 +57,7 @@ anyhow = "1.0.71"
 typify = "0.0.13"
 regress = "0.6.0"
 tokio-tungstenite = { version = "0.19", features = ["native-tls"] }
+fluvio = {version = "0.19", features = ["openssl"]}
 
 [dev-dependencies]
 test-case = "2.2"
