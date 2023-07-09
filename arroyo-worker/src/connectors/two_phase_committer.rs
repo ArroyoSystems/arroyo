@@ -11,6 +11,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use arroyo_macro::{process_fn, StreamNode};
+use arroyo_rpc::CheckpointEvent;
 use arroyo_state::tables::GlobalKeyedState;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -30,6 +31,7 @@ use parquet::{
 use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::{warn, info};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/parquet/table.json");
@@ -72,8 +74,12 @@ pub trait TwoPhaseCommitter<K: Key, T: Data + Sync>: Send + 'static {
 
 #[process_fn(in_k = K, in_t = T)]
 impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOperator<K, T, TPC> {
-    pub fn from_config(config: &str) -> Self {
-        todo!()
+    pub(crate) fn new(committer: TPC) -> Self{
+        Self{
+            committer,
+            pre_commits: Vec::new(),
+            phantom: PhantomData,
+        }
     }
 
     fn name(&self) -> String {
@@ -123,6 +129,7 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
         checkpoint_barrier: &arroyo_types::CheckpointBarrier,
         ctx: &mut crate::engine::Context<(), ()>,
     ) {
+        info!("received checkpoint barrier {:?}", checkpoint_barrier);
         let (recovery_data, pre_commits) = self
             .committer
             .checkpoint(&ctx.task_info, checkpoint_barrier.then_stop)
@@ -148,4 +155,30 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             .await
             .expect("committer committed");
     }
+
+    async fn handle_raw_control_message(
+        &mut self,
+        control_message: arroyo_rpc::ControlMessage,
+        ctx: &mut Context<(), ()>,
+    ) {
+        match control_message {
+            arroyo_rpc::ControlMessage::Checkpoint(_) => warn!("shouldn't receive checkpoint"),
+            arroyo_rpc::ControlMessage::Stop { mode: _ } => warn!("shouldn't receive stop"),
+            arroyo_rpc::ControlMessage::Commit { epoch } => {
+                self.handle_commit(ctx).await;
+                let checkpoint_event = arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
+                    checkpoint_epoch: epoch,
+                    operator_id: ctx.task_info.operator_id.clone(),
+                    subtask_index: ctx.task_info.task_index as u32,
+                    time: SystemTime::now(),
+                    event_type: arroyo_rpc::grpc::TaskCheckpointEventType::FinishedCommit.into(),
+                });
+                ctx.control_tx
+                    .send(checkpoint_event)
+                    .await
+                    .expect("sent commit event");
+            }
+        }
+    }
+
 }

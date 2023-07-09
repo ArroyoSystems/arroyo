@@ -1134,6 +1134,7 @@ impl Engine {
                                             job_id: job_id.clone(),
                                             operator_id: c.operator_id,
                                             epoch: c.checkpoint_epoch,
+                                            needs_commit: false,
                                             metadata: Some(c.subtask_metadata),
                                         }
                                     )).await.err()

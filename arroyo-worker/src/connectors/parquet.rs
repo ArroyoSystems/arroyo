@@ -31,6 +31,7 @@ use parquet::{
 use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::{info, error};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/parquet/table.json");
@@ -38,7 +39,7 @@ import_types!(schema = "../connector-schemas/parquet/table.json");
 use crate::engine::Context;
 use arroyo_types::*;
 
-use super::{two_phase_committer::TwoPhaseCommitter, OperatorConfig};
+use super::{two_phase_committer::{TwoPhaseCommitter, TwoPhaseCommitterOperator}, OperatorConfig};
 
 #[derive(StreamNode)]
 pub struct ParquetSink<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> {
@@ -50,7 +51,7 @@ pub struct ParquetSink<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send +
 
 #[process_fn(in_k = K, in_t = T)]
 impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetSink<K, T, R> {
-    pub fn from_config(config: &str) -> Self {
+    pub fn from_config(config: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
         let config: OperatorConfig =
             serde_json::from_str(config).expect("Invalid config for Parquet");
         let table: ParquetTable =
@@ -68,7 +69,7 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetS
             row_batch_size: None,
             row_group_size: None,
         });
-        match write_target {
+        let committer = match write_target {
             Destination::LocalFilesystem { local_directory } => {
                 Self::new_local(&local_directory, file_settings, format_settings)
             }
@@ -76,7 +77,8 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetS
                 s3_bucket,
                 s3_directory,
             } => Self::new_s3(&s3_bucket, &s3_directory, file_settings, format_settings),
-        }
+        };
+        TwoPhaseCommitterOperator::new(committer)
     }
 
     pub fn new_local(
@@ -481,6 +483,7 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
     }
 
     async fn run(&mut self) -> Result<()> {
+        error!("running async parquet writer");
         loop {
             tokio::select! {
                 Some(message) = self.receiver.recv() => {
@@ -532,6 +535,7 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
                             for file_to_finish in files_to_finish {
                                 self.finish_file(file_to_finish).await?;
                             }
+                            self.checkpoint_sender.send(CheckpointData::Finished {  max_file_index: self.max_file_index}).await?;
                         }
                         ParquetMessages::Close{and_commit} => {
                             self.stop().await?;
@@ -647,6 +651,7 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
     }
 
     async fn take_checkpoint(&mut self, _subtask_id: usize) -> Result<()> {
+        info!("taking checkpoints for parquet writer");
         for (filename, writer) in self.writers.iter_mut() {
             let in_progress_checkpoint =
                 CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
