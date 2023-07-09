@@ -8,8 +8,9 @@ use crate::network_manager::NetworkManager;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
-    CheckpointReq, CheckpointResp, JobFinishedReq, JobFinishedResp, RegisterWorkerReq,
-    StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp, WorkerResources,
+    CheckpointReq, CheckpointResp, CommitCheckpointReq, CommitCheckpointResp, JobFinishedReq,
+    JobFinishedResp, RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq,
+    StopExecutionResp, WorkerResources,
 };
 use arroyo_rpc::ControlMessage;
 use arroyo_server_common::start_admin_server;
@@ -147,6 +148,7 @@ impl Debug for LogicalNode {
 
 struct EngineState {
     sources: Vec<Sender<ControlMessage>>,
+    sinks: Vec<Sender<ControlMessage>>,
     running_engine: RunningEngine,
 }
 
@@ -332,10 +334,12 @@ impl WorkerGrpc for WorkerServer {
         };
 
         let sources = engine.source_controls();
+        let sinks = engine.sink_controls();
 
         let mut state = self.state.lock().unwrap();
         *state = Some(EngineState {
             sources,
+            sinks,
             running_engine: engine,
         });
 
@@ -374,6 +378,31 @@ impl WorkerGrpc for WorkerServer {
         }
 
         Ok(Response::new(CheckpointResp {}))
+    }
+
+    async fn commit_checkpoint(
+        &self,
+        request: Request<CommitCheckpointReq>,
+    ) -> Result<Response<CommitCheckpointResp>, Status> {
+        let senders = {
+            let state = self.state.lock().unwrap();
+
+            if let Some(state) = state.as_ref() {
+                state.sinks.clone()
+            } else {
+                return Err(Status::failed_precondition(
+                    "Worker has not yet started execution",
+                ));
+            }
+        };
+        let req = request.into_inner();
+
+        for n in &senders {
+            n.send(ControlMessage::Commit { epoch: req.epoch })
+                .await
+                .unwrap();
+        }
+        Ok(Response::new(CommitCheckpointResp {}))
     }
 
     async fn stop_execution(

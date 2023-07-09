@@ -11,7 +11,9 @@ use std::{
 
 use anyhow::{bail, Result};
 use arroyo_macro::{process_fn, StreamNode};
+use arroyo_rpc::ControlMessage;
 use arroyo_state::tables::GlobalKeyedState;
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
@@ -36,7 +38,7 @@ import_types!(schema = "../connector-schemas/parquet/table.json");
 use crate::engine::Context;
 use arroyo_types::*;
 
-use super::OperatorConfig;
+use super::{two_phase_committer::TwoPhaseCommitter, OperatorConfig};
 
 #[derive(StreamNode)]
 pub struct ParquetSink<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> {
@@ -159,11 +161,6 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetS
             .map(|state| state.max_file_index)
             .max()
             .unwrap_or(1);
-        let next_epoch = tracking_key_state
-            .get_all()
-            .first()
-            .map(|state| state.epoch + 1)
-            .unwrap_or(1);
 
         let recovered_files = if ctx.task_info.task_index == 0 {
             let mut table: GlobalKeyedState<String, InProgressFileCheckpoint<T>, _> =
@@ -175,7 +172,6 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetS
 
         self.sender
             .send(ParquetMessages::Init {
-                epoch: next_epoch,
                 max_file_index,
                 subtask_id: ctx.task_info.task_index,
                 recovered_files,
@@ -195,12 +191,22 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetS
             .unwrap();
     }
 
+    async fn handle_raw_control_message(
+        &mut self,
+        control_message: arroyo_rpc::ControlMessage,
+        ctx: &mut Context<(), ()>,
+    ) {
+    }
+
     async fn on_close(&mut self, _ctx: &mut crate::engine::Context<(), ()>) {
         if self.closed {
             return;
         }
         self.closed = true;
-        self.sender.send(ParquetMessages::Close).await.unwrap();
+        self.sender
+            .send(ParquetMessages::Close { and_commit: true })
+            .await
+            .unwrap();
         self.checkpoint_receiver.recv().await;
     }
 
@@ -211,7 +217,6 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetS
     ) {
         self.sender
             .send(ParquetMessages::Checkpoint {
-                epoch: checkpoint_barrier.epoch as usize,
                 subtask_id: ctx.task_info.task_index,
                 then_stop: checkpoint_barrier.then_stop,
             })
@@ -232,16 +237,13 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetS
                         )
                         .await;
                 }
-                CheckpointData::Finished {
-                    epoch,
-                    max_file_index,
-                } => {
+                CheckpointData::Finished { max_file_index } => {
                     let mut tracking_key_state = ctx.state.get_global_keyed_state('m').await;
                     tracking_key_state
                         .insert(
                             ctx.task_info.task_index,
                             CoordinationState {
-                                epoch,
+                                epoch: 0,
                                 max_file_index: max_file_index + 1,
                             },
                         )
@@ -269,23 +271,24 @@ enum ParquetMessages<T: Data> {
         time: SystemTime,
     },
     Init {
-        epoch: usize,
         max_file_index: usize,
         subtask_id: usize,
         recovered_files: Vec<InProgressFileCheckpoint<T>>,
     },
     Checkpoint {
-        epoch: usize,
         subtask_id: usize,
         then_stop: bool,
     },
-    Close,
+    FilesToFinish(Vec<FileToFinish>),
+    Close {
+        and_commit: bool,
+    },
 }
 
 #[derive(Debug)]
 enum CheckpointData<T: Data> {
     InProgressFileCheckpoint(InProgressFileCheckpoint<T>),
-    Finished { epoch: usize, max_file_index: usize },
+    Finished { max_file_index: usize },
 }
 
 #[derive(Debug, Decode, Encode, Clone, PartialEq, Eq)]
@@ -366,7 +369,6 @@ impl CredentialProvider for S3Credentialing {
 struct AsyncMultipartParquetWriter<T: Data + Sync, R: RecordBatchBuilder<T>> {
     path: PathBuf,
     current_writer_name: String,
-    current_epoch: usize,
     max_file_index: usize,
     subtask_id: usize,
     object_store: Arc<dyn ObjectStore>,
@@ -374,7 +376,7 @@ struct AsyncMultipartParquetWriter<T: Data + Sync, R: RecordBatchBuilder<T>> {
     receiver: Receiver<ParquetMessages<T>>,
     checkpoint_sender: Sender<CheckpointData<T>>,
     futures: FuturesUnordered<BoxedTryFuture<ParquetCallbackWithName>>,
-    files_to_finish: HashMap<usize, Vec<FileToFinish>>,
+    files_to_finish: Vec<FileToFinish>,
     rolling_policy: RollingPolicy,
     properties: ParquetWriterProperties,
 }
@@ -385,11 +387,11 @@ struct ParquetWriterProperties {
     target_part_size: usize,
 }
 
-#[derive(Debug)]
-struct FileToFinish {
+#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
+pub struct FileToFinish {
     filename: String,
     multi_part_upload_id: String,
-    completed_parts: Vec<UploadPart>,
+    completed_parts: Vec<String>,
 }
 
 struct RollingPolicy {
@@ -461,7 +463,6 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
         Self {
             path,
             current_writer_name: "".to_string(),
-            current_epoch: 0,
             max_file_index: 0,
             subtask_id: 0,
             object_store,
@@ -469,17 +470,14 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
             receiver,
             checkpoint_sender,
             futures: FuturesUnordered::new(),
-            files_to_finish: HashMap::new(),
+            files_to_finish: Vec::new(),
             rolling_policy: file_settings.into(),
             properties,
         }
     }
 
-    fn add_part_to_finish(&mut self, epoch: usize, file_to_finish: FileToFinish) {
-        self.files_to_finish
-            .entry(epoch)
-            .or_default()
-            .push(file_to_finish);
+    fn add_part_to_finish(&mut self, file_to_finish: FileToFinish) {
+        self.files_to_finish.push(file_to_finish);
     }
 
     async fn run(&mut self) -> Result<()> {
@@ -495,7 +493,7 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
                                 self.futures.push(future);
                             }
                         },
-                        ParquetMessages::Init {epoch,max_file_index, subtask_id,recovered_files } => {
+                        ParquetMessages::Init {max_file_index, subtask_id,recovered_files } => {
                             if let Some(writer) = self.writers.get_mut(&self.current_writer_name) {
                                 if let Some(future) = writer.close()? {
                                     self.futures.push(future);
@@ -513,26 +511,29 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
                             self.subtask_id = subtask_id;
                             self.current_writer_name = new_writer.name();
                             self.writers.insert(new_writer.name(), new_writer);
-                            self.current_epoch = epoch;
                             for recovered_file in recovered_files {
-                                let (epoch, file_to_finish) = SingleMultipartParquetWriter::<T, R>::from_checkpoint(epoch,
+                                let file_to_finish = SingleMultipartParquetWriter::<T, R>::from_checkpoint(
                                      &Path::parse(&recovered_file.filename)?, recovered_file.data, self.object_store.clone()).await?;
-                                    self.add_part_to_finish(epoch, file_to_finish);
+                                    self.add_part_to_finish(file_to_finish);
                             }
                         },
-                        ParquetMessages::Checkpoint { epoch, subtask_id, then_stop } => {
+                        ParquetMessages::Checkpoint { subtask_id, then_stop } => {
                             self.flush_futures().await?;
                             if then_stop {
                                 self.stop().await?;
                             }
-                            self.take_checkpoint(epoch, subtask_id).await?;
-                            self.checkpoint_sender.send(CheckpointData::Finished { epoch , max_file_index: self.max_file_index}).await?;
-                            self.current_epoch = epoch;
+                            self.take_checkpoint( subtask_id).await?;
+                            self.checkpoint_sender.send(CheckpointData::Finished {  max_file_index: self.max_file_index}).await?;
                             if then_stop {
                                 break;
                             }
                         },
-                        ParquetMessages::Close => {
+                        ParquetMessages::FilesToFinish(files_to_finish) =>{
+                            for file_to_finish in files_to_finish {
+                                self.finish_file(file_to_finish).await?;
+                            }
+                        }
+                        ParquetMessages::Close{and_commit} => {
                             self.stop().await?;
                             break;
                         },
@@ -540,7 +541,7 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
                 }
                 Some(result) = self.futures.next() => {
                     let ParquetCallbackWithName { callback, name } = result?;
-                    self.process_callback(name, callback)?;
+                    //self.process_callback(name, callback)?;
                 }
                 // duration
                 _ = tokio::time::sleep(self.rolling_policy.check_interval) => {
@@ -599,7 +600,7 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
             } => {
                 if let Some(file_to_write) = writer.handle_completed_part(part_idx, upload_part)? {
                     // need the file to finish to be checkpointed first.
-                    self.add_part_to_finish(self.current_epoch + 2, file_to_write);
+                    self.add_part_to_finish(file_to_write);
                     self.writers.remove(&name);
                 }
                 Ok(())
@@ -607,36 +608,45 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
         }
     }
 
+    async fn finish_file(&mut self, file_to_finish: FileToFinish) -> Result<()> {
+        let FileToFinish {
+            filename,
+            multi_part_upload_id,
+            completed_parts,
+        } = file_to_finish;
+        let parts: Vec<_> = completed_parts
+            .into_iter()
+            .map(|content_id| UploadPart {
+                content_id: content_id.clone(),
+            })
+            .collect();
+        let location = Path::parse(&filename)?;
+        self.object_store
+            .close_multipart(&location, &multi_part_upload_id, parts)
+            .await
+            .unwrap();
+        Ok(())
+    }
+
     async fn stop(&mut self) -> Result<()> {
         if let Some(writer) = self.writers.get_mut(&self.current_writer_name) {
-            if let Some(future) = writer.close()? {
+            let close_future: Option<BoxedTryFuture<ParquetCallbackWithName>> = writer.close()?;
+            if let Some(future) = close_future {
                 self.futures.push(future);
             }
         }
         while let Some(result) = self.futures.next().await {
-            let ParquetCallbackWithName { callback, name } = result?;
-            self.process_callback(name, callback)?;
+            let ParquetCallbackWithName { callback, name } = result.unwrap();
+            self.process_callback(name, callback).unwrap();
         }
-        for (_, file_to_finish) in self.files_to_finish.drain() {
-            for FileToFinish {
-                filename,
-                multi_part_upload_id,
-                completed_parts,
-            } in file_to_finish
-            {
-                self.object_store
-                    .close_multipart(
-                        &Path::parse(&filename)?,
-                        &multi_part_upload_id,
-                        completed_parts,
-                    )
-                    .await?;
-            }
+        // drain files
+        while let Some(file_to_finish) = self.files_to_finish.pop() {
+            self.finish_file(file_to_finish).await.unwrap();
         }
         Ok(())
     }
 
-    async fn take_checkpoint(&mut self, epoch: usize, _subtask_id: usize) -> Result<()> {
+    async fn take_checkpoint(&mut self, _subtask_id: usize) -> Result<()> {
         for (filename, writer) in self.writers.iter_mut() {
             let in_progress_checkpoint =
                 CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
@@ -646,42 +656,19 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
                 });
             self.checkpoint_sender.send(in_progress_checkpoint).await?;
         }
-        if let Some(finished_files) = self.files_to_finish.remove(&epoch) {
-            for FileToFinish {
-                filename,
-                multi_part_upload_id,
-                completed_parts,
-            } in finished_files
-            {
-                self.object_store
-                    .close_multipart(
-                        &Path::parse(&filename)?,
-                        &multi_part_upload_id,
-                        completed_parts,
-                    )
-                    .await?;
-            }
-        }
-
-        for (_epoch, files_to_finish) in &self.files_to_finish {
-            for file_to_finish in files_to_finish {
-                self.checkpoint_sender
-                    .send(CheckpointData::InProgressFileCheckpoint(
-                        InProgressFileCheckpoint {
-                            filename: file_to_finish.filename.clone(),
-                            data: FileCheckpointData::MultiPartWriterUploadCompleted {
-                                multi_part_upload_id: file_to_finish.multi_part_upload_id.clone(),
-                                completed_parts: file_to_finish
-                                    .completed_parts
-                                    .iter()
-                                    .map(|upload_part| upload_part.content_id.clone())
-                                    .collect(),
-                            },
-                            buffered_data: vec![],
+        for file_to_finish in &self.files_to_finish {
+            self.checkpoint_sender
+                .send(CheckpointData::InProgressFileCheckpoint(
+                    InProgressFileCheckpoint {
+                        filename: file_to_finish.filename.clone(),
+                        data: FileCheckpointData::MultiPartWriterUploadCompleted {
+                            multi_part_upload_id: file_to_finish.multi_part_upload_id.clone(),
+                            completed_parts: file_to_finish.completed_parts.clone(),
                         },
-                    ))
-                    .await?;
-            }
+                        buffered_data: vec![],
+                    },
+                ))
+                .await?;
         }
         Ok(())
     }
@@ -774,12 +761,10 @@ impl<T: Data, R: RecordBatchBuilder<T>> SingleMultipartParquetWriter<T, R> {
     }
 
     async fn from_checkpoint(
-        mut epoch: usize,
         path: &Path,
         checkpoint_data: FileCheckpointData,
         object_store: Arc<dyn ObjectStore>,
-    ) -> Result<(usize, FileToFinish)> {
-        epoch += 1;
+    ) -> Result<FileToFinish> {
         let mut parts = vec![];
         let multipart_id = match checkpoint_data {
             FileCheckpointData::MultiPartNotCreated {
@@ -867,18 +852,14 @@ impl<T: Data, R: RecordBatchBuilder<T>> SingleMultipartParquetWriter<T, R> {
                 for content_id in completed_parts {
                     parts.push(UploadPart { content_id })
                 }
-                epoch += 1;
                 multi_part_upload_id
             }
         };
-        Ok((
-            epoch,
-            FileToFinish {
-                filename: path.to_string(),
-                multi_part_upload_id: multipart_id,
-                completed_parts: parts,
-            },
-        ))
+        Ok(FileToFinish {
+            filename: path.to_string(),
+            multi_part_upload_id: multipart_id,
+            completed_parts: parts.into_iter().map(|p| p.content_id).collect(),
+        })
     }
 
     fn name(&self) -> String {
@@ -1052,7 +1033,7 @@ impl<T: Data, R: RecordBatchBuilder<T>> SingleMultipartParquetWriter<T, R> {
                     .iter()
                     .map(|part| match part {
                         UploadPartOrBufferedData::UploadPart(upload_part) => {
-                            Ok(upload_part.clone())
+                            Ok(upload_part.content_id.clone())
                         }
                         UploadPartOrBufferedData::BufferedData { .. } => {
                             bail!("unfinished part in get_complete_multipart_future")
@@ -1195,5 +1176,148 @@ impl Write for SharedBuffer {
     fn flush(&mut self) -> std::io::Result<()> {
         let mut buffer = self.buffer.try_lock().unwrap();
         Write::flush(&mut *buffer)
+    }
+}
+
+#[derive(Debug, Decode, Encode, Clone, PartialEq, Eq)]
+pub struct ParquetDataRecovery<T: Data> {
+    next_file_index: usize,
+    active_files: Vec<InProgressFileCheckpoint<T>>,
+}
+
+#[async_trait]
+impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> TwoPhaseCommitter<K, T>
+    for ParquetSink<K, T, R>
+{
+    type DataRecovery = ParquetDataRecovery<T>;
+
+    type PreCommit = FileToFinish;
+
+    fn name(&self) -> String {
+        "parquet_sink".to_string()
+    }
+
+    async fn init(
+        &mut self,
+        task_info: &TaskInfo,
+        data_recovery: Vec<Self::DataRecovery>,
+    ) -> Result<()> {
+        let mut max_file_index = 0;
+        let mut recovered_files = Vec::new();
+        if task_info.task_index == 0 {
+            for parquet_data_recovery in data_recovery {
+                max_file_index = max_file_index.max(parquet_data_recovery.next_file_index);
+                recovered_files.extend(parquet_data_recovery.active_files.into_iter());
+            }
+        }
+        self.sender
+            .send(ParquetMessages::Init {
+                max_file_index,
+                subtask_id: task_info.task_index,
+                recovered_files,
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn insert_record(&mut self, record: &Record<K, T>) -> Result<()> {
+        let value = record.value.clone();
+        self.sender
+            .send(ParquetMessages::Data {
+                value,
+                time: record.timestamp,
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn commit(
+        &mut self,
+        task_info: &TaskInfo,
+        pre_commit: Vec<Self::PreCommit>,
+    ) -> Result<()> {
+        self.sender
+            .send(ParquetMessages::FilesToFinish(pre_commit))
+            .await?;
+        // loop over checkpoint receiver until finished received
+        while let Some(checkpoint_message) = self.checkpoint_receiver.recv().await {
+            match checkpoint_message {
+                CheckpointData::Finished { max_file_index } => return Ok(()),
+                _ => {
+                    bail!("unexpected checkpoint message")
+                }
+            }
+        }
+        bail!("checkpoint receiver closed unexpectedly")
+    }
+
+    async fn checkpoint(
+        &mut self,
+        task_info: &TaskInfo,
+        stopping: bool,
+    ) -> Result<(Self::DataRecovery, HashMap<String, Self::PreCommit>)> {
+        self.sender
+            .send(ParquetMessages::Checkpoint {
+                subtask_id: task_info.task_index,
+                then_stop: stopping,
+            })
+            .await?;
+        let mut pre_commit_messages = HashMap::new();
+        let mut active_files = Vec::new();
+        while let Some(checkpoint_message) = self.checkpoint_receiver.recv().await {
+            match checkpoint_message {
+                CheckpointData::Finished { max_file_index } => {
+                    return Ok((
+                        ParquetDataRecovery {
+                            next_file_index: max_file_index + 1,
+                            active_files,
+                        },
+                        pre_commit_messages,
+                    ))
+                }
+                CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
+                    filename,
+                    data,
+                    buffered_data,
+                }) => {
+                    if let FileCheckpointData::MultiPartWriterUploadCompleted {
+                        multi_part_upload_id,
+                        completed_parts,
+                    } = data
+                    {
+                        pre_commit_messages.insert(
+                            filename.clone(),
+                            FileToFinish {
+                                filename,
+                                multi_part_upload_id,
+                                completed_parts,
+                            },
+                        );
+                    } else {
+                        active_files.push(InProgressFileCheckpoint {
+                            filename,
+                            data,
+                            buffered_data,
+                        })
+                    }
+                }
+            }
+        }
+        bail!("checkpoint receiver closed unexpectedly")
+    }
+
+    async fn close(&mut self, and_commit: bool) -> Result<()> {
+        self.sender
+            .send(ParquetMessages::Close { and_commit })
+            .await?;
+        while let Some(checkpoint_message) = self.checkpoint_receiver.recv().await {
+            match checkpoint_message {
+                CheckpointData::Finished { max_file_index: _ } => return Ok(()),
+                _ => {
+                    bail!("unexpected checkpoint message")
+                }
+            }
+        }
+        Ok(())
     }
 }

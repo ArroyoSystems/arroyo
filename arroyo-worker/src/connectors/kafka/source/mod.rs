@@ -273,6 +273,9 @@ where
                                 }
                             }
                         }
+                        Some(ControlMessage::Commit { epoch: _ }) => {
+                            unreachable!("sources shouldn't receive commit messages");
+                        }
                         None => {
 
                         }

@@ -788,6 +788,30 @@ impl RunningEngine {
             .collect()
     }
 
+    pub fn sink_controls(&self) -> Vec<Sender<ControlMessage>> {
+        self.program
+            .graph
+            .externals(Direction::Outgoing)
+            .filter(|idx| {
+                let w = self.program.graph.node_weight(*idx).unwrap();
+                self.assignments
+                    .get(&(w.id().to_string(), w.subtask_idx()))
+                    .unwrap()
+                    .worker_id
+                    == self.worker_id.0
+            })
+            .map(|idx| {
+                self.program
+                    .graph
+                    .node_weight(idx)
+                    .unwrap()
+                    .as_queue()
+                    .tx
+                    .clone()
+            })
+            .collect()
+    }
+
     pub fn stop(&mut self) {
         self.shutdown_tx.send(true).unwrap();
     }
