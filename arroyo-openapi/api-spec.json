@@ -21,9 +21,236 @@
           }
         }
       }
+    },
+    "/v1/pipelines": {
+      "get": {
+        "tags": [
+          "pipelines"
+        ],
+        "operationId": "get_pipelines",
+        "responses": {
+          "200": {
+            "description": "Got pipelines collection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineCollection"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "pipelines"
+        ],
+        "operationId": "post_pipeline",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelinePost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Created pipeline",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pipeline"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pipelines/{id}": {
+      "get": {
+        "tags": [
+          "pipelines"
+        ],
+        "operationId": "get_pipeline",
+        "responses": {
+          "200": {
+            "description": "Got pipeline",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pipeline"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pipelines/{id}/jobs": {
+      "get": {
+        "tags": [
+          "pipelines"
+        ],
+        "operationId": "get_jobs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pipeline id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Got jobs collection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCollection"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Job": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "JobCollection": {
+        "type": "object",
+        "required": [
+          "data",
+          "hasMore"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Pipeline": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "udfs"
+        ],
+        "properties": {
+          "definition": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "udfs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Udf"
+            }
+          }
+        }
+      },
+      "PipelineCollection": {
+        "type": "object",
+        "required": [
+          "data",
+          "hasMore"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Pipeline"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PipelinePost": {
+        "type": "object",
+        "required": [
+          "name",
+          "definition",
+          "udfs"
+        ],
+        "properties": {
+          "definition": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "preview": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "udfs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Udf"
+            }
+          }
+        }
+      },
+      "Udf": {
+        "type": "object",
+        "required": [
+          "language",
+          "definition"
+        ],
+        "properties": {
+          "definition": {
+            "type": "string"
+          },
+          "language": {
+            "$ref": "#/components/schemas/UdfLanguage"
+          }
+        }
+      },
+      "UdfLanguage": {
+        "type": "string",
+        "enum": [
+          "rust"
+        ]
+      }
     }
   },
   "tags": [
+    {
+      "name": "pipelines",
+      "description": "Pipelines"
+    },
     {
       "name": "ping",
       "description": "Ping"

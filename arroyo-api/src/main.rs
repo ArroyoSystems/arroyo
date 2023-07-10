@@ -20,35 +20,26 @@ use arroyo_rpc::grpc::{
     },
     controller_grpc_client::ControllerGrpcClient,
 };
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_types::{
-    grpc_port, ports, service_port, telemetry_enabled, DatabaseConfig, API_ENDPOINT_ENV,
-    ASSET_DIR_ENV, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
+    grpc_port, ports, service_port, DatabaseConfig, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
 };
-use axum::body::Body;
-use axum::{response::IntoResponse, Json, Router};
+use axum::{response::IntoResponse, Json};
 use cornucopia_async::GenericClient;
 use deadpool_postgres::{ManagerConfig, Object, Pool, RecyclingMethod};
 use http::StatusCode;
-use once_cell::sync::Lazy;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::env;
-use std::path::PathBuf;
-use std::str::FromStr;
 use std::time::Duration;
 use tokio::{select, sync::broadcast};
 use tokio_postgres::error::SqlState;
 use tokio_postgres::NoTls;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status};
-use tower::service_fn;
-use tower_http::{
-    cors::{self, CorsLayer},
-    services::ServeDir,
-};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -63,7 +54,9 @@ mod jobs;
 mod metrics;
 mod optimizations;
 mod pipelines;
-mod rest;
+pub mod rest;
+mod rest_types;
+mod rest_utils;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -167,67 +160,16 @@ pub async fn main() {
     server(pool).await;
 }
 
-fn to_micros(dt: OffsetDateTime) -> u64 {
+pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
     (dt.unix_timestamp_nanos() / 1_000) as u64
 }
 
 async fn server(pool: Pool) {
-    let asset_dir = env::var(ASSET_DIR_ENV).unwrap_or_else(|_| "arroyo-console/dist".to_string());
-
-    static INDEX_HTML: Lazy<String> = Lazy::new(|| {
-        let asset_dir =
-            env::var(ASSET_DIR_ENV).unwrap_or_else(|_| "arroyo-console/dist".to_string());
-
-        let endpoint = env::var(API_ENDPOINT_ENV).unwrap_or_else(|_| String::new());
-
-        std::fs::read_to_string(PathBuf::from_str(&asset_dir).unwrap()
-            .join("index.html"))
-            .expect("Could not find index.html in asset dir (you may need to build the console sources)")
-            .replace("{{API_ENDPOINT}}", &endpoint)
-            .replace("{{CLUSTER_ID}}", &arroyo_server_common::get_cluster_id())
-            .replace("{{DISABLE_TELEMETRY}}", if telemetry_enabled() { "false" } else { "true" })
-    });
-
-    let fallback = service_fn(|_: http::Request<_>| async move {
-        let body = Body::from(INDEX_HTML.as_str());
-        let res = http::Response::new(body);
-        Ok::<_, _>(res)
-    });
-
-    let serve_dir = ServeDir::new(&asset_dir).not_found_service(fallback);
-
-    // TODO: enable in development only!!!
-    let cors = CorsLayer::new()
-        .allow_headers(cors::Any)
-        .allow_origin(cors::Any);
-
-    let console_app = Router::new()
-        .route_service("/", fallback)
-        .fallback_service(serve_dir)
-        .layer(cors);
-
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
     start_admin_server("api", ports::API_ADMIN, shutdown_rx.resubscribe());
 
-    let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
-    let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
-    info!("Starting http server on {:?}", addr);
-
     log_event("service_startup", json!({"service": "api"}));
-
-    let mut console_shutdown_rx = shutdown_rx.resubscribe();
-    tokio::spawn(async move {
-        select! {
-            result = axum::Server::bind(&addr)
-            .serve(console_app.into_make_service()) => {
-                result.unwrap();
-            }
-            _ = console_shutdown_rx.recv() => {
-
-            }
-        }
-    });
 
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(arroyo_rpc::grpc::API_FILE_DESCRIPTOR_SET)
@@ -237,19 +179,21 @@ async fn server(pool: Pool) {
     let controller_addr = std::env::var(CONTROLLER_ADDR_ENV)
         .unwrap_or_else(|_| format!("http://localhost:{}", ports::CONTROLLER_GRPC));
 
+    let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
+    let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
+    let api_server_pool = pool.clone();
     let server = ApiServer {
-        pool,
+        pool: api_server_pool,
         controller_addr,
     };
 
-    let rest_addr = format!("0.0.0.0:{}", 8003).parse().unwrap();
-    let app = rest::create_rest_app();
+    let app = rest::create_rest_app(server.clone(), pool);
     let mut rest_shutdown_rx = shutdown_rx.resubscribe();
 
-    info!("Starting rest api server on {:?}", rest_addr);
+    info!("Starting rest api server on {:?}", addr);
     tokio::spawn(async move {
         select! {
-            result = axum::Server::bind(&rest_addr)
+            result = axum::Server::bind(&addr)
             .serve(app.into_make_service()) => {
                 result.unwrap();
             }
@@ -340,7 +284,8 @@ impl IntoResponse for HttpError {
     }
 }
 
-struct ApiServer {
+#[derive(Clone)]
+pub struct ApiServer {
     pool: Pool,
     controller_addr: String,
 }
@@ -362,6 +307,7 @@ impl ApiServer {
     async fn start_or_preview(
         &self,
         req: CreatePipelineReq,
+        pub_id: String,
         preview: bool,
         auth: AuthData,
     ) -> Result<Response<CreateJobResp>, Status> {
@@ -372,7 +318,8 @@ impl ApiServer {
             .await
             .map_err(log_and_map)?;
 
-        let pipeline_id = pipelines::create_pipeline(req, auth.clone(), &transaction).await?;
+        let pipeline_id =
+            pipelines::create_pipeline(req, &pub_id, auth.clone(), &transaction).await?;
         let create_job = CreateJobReq {
             pipeline_id: format!("{}", pipeline_id),
             checkpoint_interval_micros: DEFAULT_CHECKPOINT_INTERVAL.as_micros() as u64,
@@ -554,7 +501,13 @@ impl ApiGrpc for ApiServer {
         let mut client = self.client().await?;
         let transaction = client.transaction().await.map_err(log_and_map)?;
 
-        let id = pipelines::create_pipeline(request.into_inner(), auth, &transaction).await?;
+        let id = pipelines::create_pipeline(
+            request.into_inner(),
+            &generate_id(IdTypes::Pipeline),
+            auth,
+            &transaction,
+        )
+        .await?;
 
         transaction.commit().await.map_err(log_and_map)?;
 
@@ -582,7 +535,7 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<PipelineDef>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 
-        let def = pipelines::get_pipeline(
+        let def = pipelines::query_pipeline(
             &request.into_inner().pipeline_id,
             &auth,
             &self.client().await?,
@@ -618,8 +571,13 @@ impl ApiGrpc for ApiServer {
         request: Request<CreatePipelineReq>,
     ) -> Result<Response<CreateJobResp>, Status> {
         let (request, auth) = self.authenticate(request).await?;
-        self.start_or_preview(request.into_inner(), false, auth)
-            .await
+        self.start_or_preview(
+            request.into_inner(),
+            generate_id(IdTypes::Pipeline),
+            false,
+            auth,
+        )
+        .await
     }
 
     async fn preview_pipeline(
@@ -629,8 +587,13 @@ impl ApiGrpc for ApiServer {
         let (request, auth) = self.authenticate(request).await?;
 
         log_event("pipeline_preview", json!({"service": "api"}));
-        self.start_or_preview(request.into_inner(), true, auth)
-            .await
+        self.start_or_preview(
+            request.into_inner(),
+            generate_id(IdTypes::Pipeline),
+            true,
+            auth,
+        )
+        .await
     }
 
     async fn get_jobs(

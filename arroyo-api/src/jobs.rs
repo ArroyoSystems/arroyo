@@ -30,7 +30,7 @@ pub(crate) async fn create_job<'a>(
     auth: AuthData,
     client: &Transaction<'a>,
 ) -> Result<String, Status> {
-    let pipeline = pipelines::get_pipeline(&request.pipeline_id, &auth, client).await?;
+    let pipeline = pipelines::query_pipeline(&request.pipeline_id, &auth, client).await?;
 
     let checkpoint_interval = if request.preview {
         Duration::from_secs(24 * 60 * 60)

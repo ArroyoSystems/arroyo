@@ -84,10 +84,20 @@ WHERE organization_id = :organization_id AND id = :id;
 
 ----------- pipelines -------------------
 
+--: DbPipelineRest ()
+
+--! get_pipelines : DbPipelineRest
+SELECT pipelines.pub_id as id, name, type, textual_repr, udfs, program FROM pipelines
+WHERE pipelines.organization_id = :organization_id AND pipelines.pub_id IS NOT NULL;
+
 --! create_pipeline(udfs?, textual_repr?)
 INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program)
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program)
 RETURNING id;
+
+--! get_pipeline_rest: DbPipelineRest
+SELECT pipelines.pub_id as id, name, type, textual_repr, udfs, program FROM pipelines
+WHERE pipelines.pub_id = :pub_id AND pipelines.organization_id = :organization_id;
 
 --! get_pipeline: DbPipeline(textual_repr?, udfs)
 SELECT pipelines.id as id, name, type, textual_repr, udfs, program FROM pipelines
@@ -100,6 +110,10 @@ VALUES (:pub_id, :pipeline_id, :connection_table_id);
 --! delete_pipeline
 DELETE FROM pipelines
 WHERE id = :pipeline_id AND organization_id = :organization_id;
+
+--! delete_pipeline_rest
+DELETE FROM pipelines
+WHERE pub_id = :pub_id AND organization_id = :organization_id;
 
 
 ----------- jobs -----------------------
@@ -129,6 +143,14 @@ FROM job_configs
          LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipeline_id = pipelines.id
 WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
+ORDER BY COALESCE(job_configs.updated_at, job_configs.created_at) DESC;
+
+--! get_pipeline_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, run_id?)
+SELECT job_configs.pub_id as id, stop, start_time, finish_time, state, tasks, failure_message, run_id
+FROM job_configs
+         LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
+         INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
+WHERE job_configs.organization_id = :organization_id AND pipelines.pub_id = :pub_id AND ttl_micros IS NULL
 ORDER BY COALESCE(job_configs.updated_at, job_configs.created_at) DESC;
 
 --! get_job_details: (start_time?, finish_time?, state?, tasks?, textual_repr?, udfs, failure_message?, run_id?)

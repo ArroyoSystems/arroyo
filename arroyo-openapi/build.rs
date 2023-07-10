@@ -1,5 +1,5 @@
 use arroyo_api;
-use arroyo_api::ApiDoc;
+use arroyo_api::rest::ApiDoc;
 use std::fs;
 use utoipa::OpenApi;
 
