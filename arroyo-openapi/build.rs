@@ -1,4 +1,3 @@
-use arroyo_api;
 use arroyo_api::ApiDoc;
 use std::fs;
 use utoipa::OpenApi;
