@@ -11,7 +11,10 @@ use std::{
 
 use anyhow::{bail, Result};
 use arroyo_macro::{process_fn, StreamNode};
-use arroyo_rpc::CheckpointEvent;
+use arroyo_rpc::{
+    grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior},
+    CheckpointEvent, ControlMessage,
+};
 use arroyo_state::tables::GlobalKeyedState;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -31,7 +34,7 @@ use parquet::{
 use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{warn, info};
+use tracing::{info, warn};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/parquet/table.json");
@@ -74,8 +77,8 @@ pub trait TwoPhaseCommitter<K: Key, T: Data + Sync>: Send + 'static {
 
 #[process_fn(in_k = K, in_t = T)]
 impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOperator<K, T, TPC> {
-    pub(crate) fn new(committer: TPC) -> Self{
-        Self{
+    pub(crate) fn new(committer: TPC) -> Self {
+        Self {
             committer,
             pre_commits: Vec::new(),
             phantom: PhantomData,
@@ -89,7 +92,14 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
     fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
         vec![
             arroyo_state::global_table("r", "recovery data"),
-            arroyo_state::global_table("p", "pre-commit data"),
+            TableDescriptor {
+                name: "p".into(),
+                description: "pre-commit data".into(),
+                table_type: TableType::Global as i32,
+                delete_behavior: TableDeleteBehavior::None as i32,
+                write_behavior: TableWriteBehavior::CommitWrites as i32,
+                retention_micros: 0,
+            },
         ]
     }
 
@@ -109,8 +119,6 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             .init(&ctx.task_info, state_vec)
             .await
             .expect("committer initialized");
-
-        self.handle_commit(ctx).await;
     }
 
     async fn process_element(&mut self, record: &Record<K, T>, _ctx: &mut Context<(), ()>) {
@@ -120,8 +128,13 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             .expect("record inserted");
     }
 
-    async fn on_close(&mut self, _ctx: &mut crate::engine::Context<(), ()>) {
-        self.committer.close(false).await.unwrap();
+    async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>) {
+        info!("waiting for commit message");
+        if let Some(ControlMessage::Commit { epoch }) = ctx.control_rx.recv().await {
+            self.handle_commit(epoch, ctx).await;
+        }else {
+            warn!("no commit message received, not committing")
+        }
     }
 
     async fn handle_checkpoint(
@@ -147,13 +160,25 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             pre_commit_state.insert(key, value).await;
         }
     }
-    async fn handle_commit(&mut self, ctx: &mut crate::engine::Context<(), ()>) {
+    async fn handle_commit(&mut self, epoch: u32, ctx: &mut crate::engine::Context<(), ()>) {
         let pre_commits = self.pre_commits.clone();
         self.pre_commits.clear();
         self.committer
             .commit(&ctx.task_info, pre_commits)
             .await
             .expect("committer committed");
+        let checkpoint_event = arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
+            checkpoint_epoch: epoch,
+            operator_id: ctx.task_info.operator_id.clone(),
+            subtask_index: ctx.task_info.task_index as u32,
+            time: SystemTime::now(),
+            event_type: arroyo_rpc::grpc::TaskCheckpointEventType::FinishedCommit.into(),
+        });
+        ctx.control_tx
+            .send(checkpoint_event)
+            .await
+            .expect("sent commit event");
+        info!("sent commit event")
     }
 
     async fn handle_raw_control_message(
@@ -161,24 +186,13 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
         control_message: arroyo_rpc::ControlMessage,
         ctx: &mut Context<(), ()>,
     ) {
+        info!("received control message {:?}", control_message);
         match control_message {
             arroyo_rpc::ControlMessage::Checkpoint(_) => warn!("shouldn't receive checkpoint"),
             arroyo_rpc::ControlMessage::Stop { mode: _ } => warn!("shouldn't receive stop"),
             arroyo_rpc::ControlMessage::Commit { epoch } => {
-                self.handle_commit(ctx).await;
-                let checkpoint_event = arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
-                    checkpoint_epoch: epoch,
-                    operator_id: ctx.task_info.operator_id.clone(),
-                    subtask_index: ctx.task_info.task_index as u32,
-                    time: SystemTime::now(),
-                    event_type: arroyo_rpc::grpc::TaskCheckpointEventType::FinishedCommit.into(),
-                });
-                ctx.control_tx
-                    .send(checkpoint_event)
-                    .await
-                    .expect("sent commit event");
+                self.handle_commit(epoch, ctx).await;
             }
         }
     }
-
 }

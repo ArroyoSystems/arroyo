@@ -129,6 +129,20 @@ impl RunningJobModel {
                     } else {
                         checkpoint_state.checkpoint_finished(c).await;
                         checkpoint_state.update_db(pool).await?;
+                        if checkpoint_state.start_commits() {
+                            for worker in self.workers.values_mut() {
+                                worker
+                                    .connect
+                                    .checkpoint(Request::new(CheckpointReq {
+                                        timestamp: to_micros(SystemTime::now()),
+                                        min_epoch: self.min_epoch,
+                                        epoch: self.epoch,
+                                        then_stop: false,
+                                        is_commit: true,
+                                    }))
+                                    .await?;
+                            }
+                        }
                     }
                 } else {
                     warn!(
@@ -198,7 +212,7 @@ impl RunningJobModel {
             }
         }
 
-        if self.state == JobState::Running && self.all_tasks_finished() {
+        if self.state == JobState::Running && self.all_tasks_finished() && self.checkpoint_state.is_none(){
             for w in &mut self.workers.values_mut() {
                 if let Err(e) = w.connect.job_finished(JobFinishedReq {}).await {
                     warn!(
@@ -239,6 +253,7 @@ impl RunningJobModel {
                     timestamp: to_micros(SystemTime::now()),
                     min_epoch: self.min_epoch,
                     then_stop,
+                    is_commit: false,
                 }))
                 .await?;
         }

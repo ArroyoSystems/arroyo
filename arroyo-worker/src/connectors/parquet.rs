@@ -31,7 +31,7 @@ use parquet::{
 use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{info, error};
+use tracing::{error, info};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/parquet/table.json");
@@ -39,7 +39,10 @@ import_types!(schema = "../connector-schemas/parquet/table.json");
 use crate::engine::Context;
 use arroyo_types::*;
 
-use super::{two_phase_committer::{TwoPhaseCommitter, TwoPhaseCommitterOperator}, OperatorConfig};
+use super::{
+    two_phase_committer::{TwoPhaseCommitter, TwoPhaseCommitterOperator},
+    OperatorConfig,
+};
 
 #[derive(StreamNode)]
 pub struct ParquetSink<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> {
@@ -527,9 +530,6 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
                             }
                             self.take_checkpoint( subtask_id).await?;
                             self.checkpoint_sender.send(CheckpointData::Finished {  max_file_index: self.max_file_index}).await?;
-                            if then_stop {
-                                break;
-                            }
                         },
                         ParquetMessages::FilesToFinish(files_to_finish) =>{
                             for file_to_finish in files_to_finish {
@@ -952,6 +952,9 @@ impl<T: Data, R: RecordBatchBuilder<T>> SingleMultipartParquetWriter<T, R> {
 
     // Closes the upload, returning a future that should be added to the parent futures if necessary.
     fn close(&mut self) -> Result<Option<BoxedTryFuture<ParquetCallbackWithName>>> {
+        if self.closed {
+            return Ok(None);
+        }
         self.closed = true;
         if self.records_in_current_batch > 0 {
             self.current_part_writer
@@ -1312,9 +1315,14 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> TwoPhase
     }
 
     async fn close(&mut self, and_commit: bool) -> Result<()> {
+        if self.closed {
+            return Ok(());
+        }
+        self.closed = true;
         self.sender
             .send(ParquetMessages::Close { and_commit })
-            .await?;
+            .await
+            .unwrap();
         while let Some(checkpoint_message) = self.checkpoint_receiver.recv().await {
             match checkpoint_message {
                 CheckpointData::Finished { max_file_index: _ } => return Ok(()),

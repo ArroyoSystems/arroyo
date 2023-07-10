@@ -1122,6 +1122,7 @@ impl Engine {
                                         }
                                     )).await.err()
                                 } else {
+                                    warn!("no controller");
                                     None
                                 }
                             }
@@ -1215,6 +1216,7 @@ impl Engine {
                         }
                     }
                     _ = shutdown_rx.recv() => {
+                        info!("shutting down");
                         break;
                     }
                 }

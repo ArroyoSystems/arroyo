@@ -9,8 +9,8 @@ use arroyo_rpc::grpc::{
     self,
     api::{self, OperatorCheckpointDetail},
     backend_data, BackendData, CheckpointMetadata, OperatorCheckpointMetadata,
-    SubtaskCheckpointMetadata, TableDescriptor, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
-    TaskCheckpointEventType,
+    SubtaskCheckpointMetadata, TableDescriptor, TableWriteBehavior, TaskCheckpointCompletedReq,
+    TaskCheckpointEventReq, TaskCheckpointEventType,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_state::{BackingStore, StateBackend};
@@ -59,10 +59,19 @@ pub struct CheckpointState {
     tasks_per_operator: HashMap<String, usize>,
     tasks: HashMap<String, BTreeMap<u32, SubtaskState>>,
     completed_operators: HashSet<String>,
+    subtasks_to_commit: HashSet<(u32, String)>,
+    commit_state: CommitState,
 
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
     operator_details: HashMap<String, OperatorCheckpointDetail>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CommitState {
+    NotStarted,
+    Started,
+    Finished,
 }
 
 impl CheckpointState {
@@ -121,11 +130,14 @@ impl CheckpointState {
             tasks_per_operator,
             tasks: HashMap::new(),
             completed_operators: HashSet::new(),
+            subtasks_to_commit: HashSet::new(),
+            commit_state: CommitState::NotStarted,
             operator_details: HashMap::new(),
         })
     }
 
     pub fn checkpoint_event(&mut self, c: TaskCheckpointEventReq) {
+        info!(message = "Checkpoint event", checkpoint_id = self.checkpoint_id, event_type = ?c.event_type(), subtask_index = c.subtask_index, operator_id = ?c.operator_id);
         // This is all for the UI
         self.operator_details
             .entry(c.operator_id.clone())
@@ -161,8 +173,20 @@ impl CheckpointState {
                     grpc::TaskCheckpointEventType::FinishedSync => {
                         api::TaskCheckpointEventType::CheckpointSyncFinished
                     }
+                    grpc::TaskCheckpointEventType::FinishedCommit => {
+                        api::TaskCheckpointEventType::CheckpointPreCommit
+                    }
                 } as i32,
             });
+
+        if grpc::TaskCheckpointEventType::FinishedCommit == c.event_type() {
+            info!("received finished commit");
+            self.subtasks_to_commit
+                .remove(&(c.subtask_index, c.operator_id.clone()));
+            if self.subtasks_to_commit.is_empty() {
+                self.commit_state = CommitState::Finished;
+            }
+        }
 
         // this is for the actual checkpoint management
         self.tasks
@@ -174,6 +198,7 @@ impl CheckpointState {
     }
 
     pub async fn checkpoint_finished(&mut self, c: TaskCheckpointCompletedReq) {
+        info!(message = "Checkpoint finished", checkpoint_id = self.checkpoint_id, job_id = self.job_id, epoch = self.epoch, min_epoch = self.min_epoch, operator_id = %c.operator_id, subtask_index = c.metadata.as_ref().unwrap().subtask_index, time = c.time);
         // this is just for the UI
         let metadata = c.metadata.as_ref().unwrap();
 
@@ -214,6 +239,15 @@ impl CheckpointState {
             );
             return;
         }
+        if metadata.has_state
+            && metadata
+                .tables
+                .iter()
+                .any(|table| table.write_behavior() == TableWriteBehavior::CommitWrites)
+        {
+            self.subtasks_to_commit
+                .insert((metadata.subtask_index, c.operator_id.clone()));
+        }
 
         let subtasks = self
             .tasks
@@ -235,74 +269,83 @@ impl CheckpointState {
             .finish(c);
 
         if subtasks.len() == total_tasks && subtasks.values().all(|c| c.done()) {
-            debug!("Finishing checkpoint for operator {}", operator_id);
-
-            let start_time = subtasks
-                .values()
-                .map(|s| s.start_time.unwrap())
-                .min()
-                .unwrap();
-            let finish_time = subtasks
-                .values()
-                .map(|s| s.finish_time.unwrap())
-                .max()
-                .unwrap();
-
-            let min_watermark = subtasks
-                .values()
-                .map(|s| s.metadata.as_ref().unwrap().watermark)
-                .min()
-                .unwrap();
-
-            let max_watermark = subtasks
-                .values()
-                .map(|s| s.metadata.as_ref().unwrap().watermark)
-                .max()
-                .unwrap();
-            let has_state = subtasks
-                .values()
-                .any(|s| s.metadata.as_ref().unwrap().has_state);
-
-            let tables: HashMap<String, TableDescriptor> = subtasks
-                .values()
-                .flat_map(|t| t.metadata.as_ref().unwrap().tables.clone())
-                .map(|t| (t.name.clone(), t))
-                .collect();
-
-            // the sort here is load-bearing
-            let backend_data: BTreeMap<(u32, String), BackendData> = subtasks
-                .values()
-                .map(|s| (s.metadata.as_ref().unwrap()))
-                .filter(|metadata| metadata.has_state)
-                .flat_map(|metadata| metadata.backend_data.clone())
-                .filter_map(Self::backend_data_to_key)
-                .collect();
-
-            let size = subtasks
-                .values()
-                .fold(0, |size, s| size + s.metadata.as_ref().unwrap().bytes);
-
-            StateBackend::complete_operator_checkpoint(OperatorCheckpointMetadata {
-                job_id: self.job_id.to_string(),
-                operator_id: operator_id.clone(),
-                epoch: self.epoch,
-                start_time: to_micros(start_time),
-                finish_time: to_micros(finish_time),
-                min_watermark,
-                max_watermark,
-                has_state,
-                tables: tables.into_values().collect(),
-                backend_data: backend_data.into_values().collect(),
-                bytes: size,
-            })
-            .await;
-
-            if let Some(op) = self.operator_details.get_mut(&operator_id) {
-                op.finish_time = Some(to_micros(finish_time));
-            }
-
-            self.completed_operators.insert(operator_id);
+            self.publish_operator_checkpoint(operator_id).await;
         }
+    }
+
+    async fn publish_operator_checkpoint(&mut self, operator_id: String) {
+        info!("Finishing checkpoint for operator {}", operator_id);
+        info!(
+            "current commit tasks to finish {:?}",
+            self.subtasks_to_commit
+        );
+        let subtasks = self.tasks.get_mut(&operator_id).unwrap();
+
+        let start_time = subtasks
+            .values()
+            .map(|s| s.start_time.unwrap())
+            .min()
+            .unwrap();
+        let finish_time = subtasks
+            .values()
+            .map(|s| s.finish_time.unwrap())
+            .max()
+            .unwrap();
+
+        let min_watermark = subtasks
+            .values()
+            .map(|s| s.metadata.as_ref().unwrap().watermark)
+            .min()
+            .unwrap();
+
+        let max_watermark = subtasks
+            .values()
+            .map(|s| s.metadata.as_ref().unwrap().watermark)
+            .max()
+            .unwrap();
+        let has_state = subtasks
+            .values()
+            .any(|s| s.metadata.as_ref().unwrap().has_state);
+
+        let tables: HashMap<String, TableDescriptor> = subtasks
+            .values()
+            .flat_map(|t| t.metadata.as_ref().unwrap().tables.clone())
+            .map(|t| (t.name.clone(), t))
+            .collect();
+
+        // the sort here is load-bearing
+        let backend_data: BTreeMap<(u32, String), BackendData> = subtasks
+            .values()
+            .map(|s| (s.metadata.as_ref().unwrap()))
+            .filter(|metadata| metadata.has_state)
+            .flat_map(|metadata| metadata.backend_data.clone())
+            .filter_map(Self::backend_data_to_key)
+            .collect();
+
+        let size = subtasks
+            .values()
+            .fold(0, |size, s| size + s.metadata.as_ref().unwrap().bytes);
+
+        StateBackend::complete_operator_checkpoint(OperatorCheckpointMetadata {
+            job_id: self.job_id.to_string(),
+            operator_id: operator_id.clone(),
+            epoch: self.epoch,
+            start_time: to_micros(start_time),
+            finish_time: to_micros(finish_time),
+            min_watermark,
+            max_watermark,
+            has_state,
+            tables: tables.into_values().collect(),
+            backend_data: backend_data.into_values().collect(),
+            bytes: size,
+        })
+        .await;
+
+        if let Some(op) = self.operator_details.get_mut(&operator_id) {
+            op.finish_time = Some(to_micros(finish_time));
+        }
+
+        self.completed_operators.insert(operator_id);
     }
 
     fn backend_data_to_key(backend_data: BackendData) -> Option<((u32, String), BackendData)> {
@@ -318,6 +361,24 @@ impl CheckpointState {
 
     pub fn done(&self) -> bool {
         self.completed_operators.len() == self.tasks_per_operator.len()
+            && self.commit_state == CommitState::Finished
+    }
+
+    pub fn start_commits(&mut self) -> bool {
+        if self.completed_operators.len() == self.tasks_per_operator.len()
+            && self.commit_state == CommitState::NotStarted
+        {
+            if self.subtasks_to_commit.is_empty() {
+                self.commit_state = CommitState::Finished;
+                false
+            } else {
+                info!("starting commits");
+                self.commit_state = CommitState::Started;
+                true
+            }
+        } else {
+            false
+        }
     }
 
     pub async fn update_db(&self, pool: &Pool) -> anyhow::Result<()> {
