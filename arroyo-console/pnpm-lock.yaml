@@ -91,9 +91,15 @@ dependencies:
   monaco-sql-languages:
     specifier: ^0.9.5
     version: 0.9.5
+  openapi-fetch:
+    specifier: ^0.6.1
+    version: 0.6.1
   openapi-typescript:
     specifier: ^6.2.8
     version: 6.2.8
+  openapi-typescript-fetch:
+    specifier: ^1.1.3
+    version: 1.1.3
   prop-types:
     specifier: ^15.8.1
     version: 15.8.1
@@ -4530,6 +4536,15 @@ packages:
     dependencies:
       wrappy: 1.0.2
     dev: true
+
+  /openapi-fetch@0.6.1:
+    resolution: {integrity: sha512-CGWPqqtL31uC2e4eEU9NHoqYMXnJ7Jk4H/4Yguil4tO22MIZi91hlQJ/51E8CiaKdSTODh03yF4ndjIOABVHUw==}
+    dev: false
+
+  /openapi-typescript-fetch@1.1.3:
+    resolution: {integrity: sha512-smLZPck4OkKMNExcw8jMgrMOGgVGx2N/s6DbKL2ftNl77g5HfoGpZGFy79RBzU/EkaO0OZpwBnslfdBfh7ZcWg==}
+    engines: {node: '>= 12.0.0', npm: '>= 7.0.0'}
+    dev: false
 
   /openapi-typescript@6.2.8:
     resolution: {integrity: sha512-yA+y5MHiu6cjmtsGfNLavzVuvGCKzjL3H+exgHDPK6bnp6ZVFibtAiafenNSRDWL0x+7Sw/VPv5SbaqiPLW46w==}

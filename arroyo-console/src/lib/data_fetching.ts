@@ -15,6 +15,13 @@ import {
 import { ApiClient } from '../main';
 import useSWR from 'swr';
 import { mutate as globalMutate } from 'swr';
+import { components, paths } from '../gen/api-types';
+import createClient from 'openapi-fetch';
+
+export type Pipeline = components['schemas']['Pipeline'];
+
+const BASE_URL = 'http://localhost:8003';
+const { get, post } = createClient<paths>({ baseUrl: BASE_URL });
 
 // Keys
 
@@ -52,6 +59,14 @@ const operatorErrorsKey = (jobId?: string) => {
 
 const pipelineGraphKey = (query?: string, udfInput?: string) => {
   return query ? { key: 'PipelineGraph', query, udfInput } : null;
+};
+
+const pipelinesKey = () => {
+  return { key: 'Pipelines' };
+};
+
+const pipelineJobsKey = (pipelineId?: string) => {
+  return pipelineId ? { key: 'PipelineJobs', pipelineId } : null;
 };
 
 // Connectors
@@ -287,4 +302,31 @@ export const usePipelineGraph = (client: ApiClient, query?: string, udfInput?: s
   return {
     pipelineGraph: data,
   };
+};
+
+// Pipelines (GET /v1/pipelines)
+
+const PipelinesFetcher = async () => {
+  return (await get('/v1/pipelines', {})).data;
+};
+
+export const usePipelines = () => {
+  const { data } = useSWR(pipelinesKey(), PipelinesFetcher);
+
+  return { pipelines: data?.data };
+};
+
+const PipelineJobsFetcher = async () => {
+  return async (params: { key: string; pipelineId?: string }) => {
+    console.log('fetching');
+    return (await get(`/v1/pipelines/{id}/jobs`, { params: { path: { id: params.pipelineId! } } }))
+      .data;
+  };
+};
+
+export const usePipelineJobs = (pipelineId: string) => {
+  console.log(`useing pipeline jobs, ${pipelineId}`);
+  const { data } = useSWR(pipelineJobsKey(pipelineId), PipelineJobsFetcher());
+
+  return { jobs: data };
 };

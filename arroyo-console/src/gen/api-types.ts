@@ -8,11 +8,58 @@ export interface paths {
   "/v1/ping": {
     get: operations["ping"];
   };
+  "/v1/pipelines": {
+    get: operations["get_pipelines"];
+    post: operations["post_pipeline"];
+  };
+  "/v1/pipelines/{id}": {
+    get: operations["get_pipeline"];
+  };
+  "/v1/pipelines/{id}/jobs": {
+    get: operations["get_jobs"];
+  };
 }
 
 export type webhooks = Record<string, never>;
 
-export type components = Record<string, never>;
+export interface components {
+  schemas: {
+    Job: {
+      id: string;
+    };
+    JobCollection: {
+      data: (components["schemas"]["Job"])[];
+      hasMore: boolean;
+    };
+    Pipeline: {
+      definition?: string | null;
+      id: string;
+      name: string;
+      udfs: (components["schemas"]["Udf"])[];
+    };
+    PipelineCollection: {
+      data: (components["schemas"]["Pipeline"])[];
+      hasMore: boolean;
+    };
+    PipelinePost: {
+      definition: string;
+      name: string;
+      preview?: boolean | null;
+      udfs: (components["schemas"]["Udf"])[];
+    };
+    Udf: {
+      definition: string;
+      language: components["schemas"]["UdfLanguage"];
+    };
+    /** @enum {string} */
+    UdfLanguage: "rust";
+  };
+  responses: never;
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
+}
 
 export type external = Record<string, never>;
 
@@ -22,6 +69,57 @@ export interface operations {
     responses: {
       /** @description Ping endpoint */
       200: never;
+    };
+  };
+  get_pipelines: {
+    responses: {
+      /** @description Got pipelines collection */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PipelineCollection"];
+        };
+      };
+    };
+  };
+  post_pipeline: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PipelinePost"];
+      };
+    };
+    responses: {
+      /** @description Created pipeline */
+      200: {
+        content: {
+          "application/json": components["schemas"]["Pipeline"];
+        };
+      };
+    };
+  };
+  get_pipeline: {
+    responses: {
+      /** @description Got pipeline */
+      200: {
+        content: {
+          "application/json": components["schemas"]["Pipeline"];
+        };
+      };
+    };
+  };
+  get_jobs: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Got jobs collection */
+      200: {
+        content: {
+          "application/json": components["schemas"]["JobCollection"];
+        };
+      };
     };
   };
 }

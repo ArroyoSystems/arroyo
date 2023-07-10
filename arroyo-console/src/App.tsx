@@ -73,7 +73,7 @@ function Sidebar() {
               <Stack spacing="1">
                 <NavButton label="Home" to="/" icon={FiHome} />
                 <NavButton label="Connections" to="connections" icon={FiLink} />
-                <NavButton label="Jobs" to="jobs" icon={FiGitBranch} />
+                <NavButton label="Pipelines" to="pipelines" icon={FiGitBranch} />
               </Stack>
               <Divider />
               <Stack>

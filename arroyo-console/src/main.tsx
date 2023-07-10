@@ -50,7 +50,7 @@ export function Router(): JSX.Element {
       element: <CreateConnection client={client} />,
     },
     {
-      path: 'jobs',
+      path: 'pipelines',
       element: <JobsIndex client={client} />,
     },
     {
