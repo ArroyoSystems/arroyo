@@ -372,7 +372,7 @@ message JobStatus {
   bool running_desired = 8;
   string state = 3;
   uint64 run_id = 11;
-  string definition_id = 9;
+  string pipeline_id = 9;
   optional uint64 start_time = 4;
   optional uint64 finish_time = 5;
   optional uint64 tasks = 6;

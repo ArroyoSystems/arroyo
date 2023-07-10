@@ -84,19 +84,13 @@ WHERE organization_id = :organization_id AND id = :id;
 
 ----------- pipelines -------------------
 
---! create_pipeline
-INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, current_version)
-VALUES (:pub_id, :organization_id, :created_by, :name, :type, :current_version)
+--! create_pipeline(udfs?, textual_repr?)
+INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program)
+VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program)
 RETURNING id;
 
---! create_pipeline_definition (textual_repr?, udfs?)
-INSERT INTO pipeline_definitions (pub_id, organization_id, created_by, pipeline_id, version, textual_repr, udfs, program)
-VALUES  (:pub_id, :organization_id, :created_by, :pipeline_id, :version, :textual_repr, :udfs, :program)
-RETURNING id;
-
---! get_pipeline: DbPipeline(textual_repr?, udfs?)
+--! get_pipeline: DbPipeline(textual_repr?, udfs)
 SELECT pipelines.id as id, name, type, textual_repr, udfs, program FROM pipelines
-INNER JOIN pipeline_definitions as d ON pipelines.id = d.pipeline_id AND pipelines.current_version = d.version
 WHERE pipelines.id = :pipeline_id AND pipelines.organization_id = :organization_id;
 
 --! add_pipeline_connection_table
@@ -123,25 +117,25 @@ WHERE id = :job_id AND organization_id = :organization_id;
 
 --! create_job(ttl_micros?)
 INSERT INTO job_configs
-(pub_id, id, organization_id, pipeline_name, created_by, pipeline_definition, checkpoint_interval_micros, ttl_micros)
-VALUES (:pub_id, :id, :organization_id, :pipeline_name, :created_by, :pipeline_definition, :checkpoint_interval_micros, :ttl_micros);
+(pub_id, id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros)
+VALUES (:pub_id, :id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :checkpoint_interval_micros, :ttl_micros);
 
 --! create_job_status
 INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :organization_id);
 
---! get_jobs: (start_time?, finish_time?, state?, tasks?, textual_repr?, failure_message?, run_id?, udfs?)
-SELECT job_configs.id as id, pipeline_name, stop, textual_repr, start_time, finish_time, state, tasks, pipeline_definition, failure_message, run_id, udfs
+--! get_jobs: (start_time?, finish_time?, state?, tasks?, textual_repr?, failure_message?, run_id?, udfs)
+SELECT job_configs.id as id, pipeline_name, stop, textual_repr, start_time, finish_time, state, tasks, pipeline_id, failure_message, run_id, udfs
 FROM job_configs
          LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
-         INNER JOIN pipeline_definitions ON pipeline_definition = pipeline_definitions.id
+         INNER JOIN pipelines ON pipeline_id = pipelines.id
 WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY COALESCE(job_configs.updated_at, job_configs.created_at) DESC;
 
---! get_job_details: (start_time?, finish_time?, state?, tasks?, textual_repr?, udfs?, failure_message?, run_id?)
-SELECT pipeline_name, stop, parallelism_overrides, state, start_time, finish_time, tasks, textual_repr, program, pipeline_definition, udfs, failure_message, run_id
+--! get_job_details: (start_time?, finish_time?, state?, tasks?, textual_repr?, udfs, failure_message?, run_id?)
+SELECT pipeline_name, stop, parallelism_overrides, state, start_time, finish_time, tasks, textual_repr, program, pipeline_id, udfs, failure_message, run_id
 FROM job_configs
          LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
-         INNER JOIN pipeline_definitions ON pipeline_definition = pipeline_definitions.id
+         INNER JOIN pipelines ON pipeline_id = pipelines.id
 WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_id;
 
 --! get_job_checkpoints: (finish_time?)
@@ -161,10 +155,8 @@ WHERE job_id = :job_id
 
 --! delete_pipeline_for_job
 DELETE FROM pipelines WHERE pipelines.id = (
-    SELECT pipelines.id as pipeline_id
+    SELECT pipeline_id
     FROM job_configs
-    INNER JOIN pipeline_definitions as pd ON job_configs.pipeline_definition = pd.id
-    INNER JOIN pipelines ON pipelines.id = pd.pipeline_id
     WHERE job_configs.id = :job_id AND job_configs.organization_id = :organization_id);
 
 --! get_operator_errors

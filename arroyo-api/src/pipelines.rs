@@ -5,7 +5,6 @@ use arroyo_connectors::connector_for_type;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Transaction;
 use prost::Message;
-use serde_json::Value;
 use tonic::Status;
 use tracing::warn;
 
@@ -177,7 +176,6 @@ pub(crate) async fn create_pipeline<'a>(
     let proto_program: PipelineProgram = program.try_into().map_err(log_and_map)?;
 
     let program = proto_program.encode_to_vec();
-    let version = 2;
 
     if req.name.is_empty() {
         return Err(required_field("name"));
@@ -191,27 +189,13 @@ pub(crate) async fn create_pipeline<'a>(
             &auth.user_id,
             &req.name,
             &pipeline_type,
-            &version,
-        )
-        .one()
-        .await
-        .map_err(|e| handle_db_error("pipeline", e))?;
-
-    api_queries::create_pipeline_definition()
-        .bind(
-            tx,
-            &generate_id(IdTypes::PipelineDefinition),
-            &auth.organization_id,
-            &auth.user_id,
-            &pipeline_id,
-            &version,
             &text,
             &udfs.map(|t| serde_json::to_value(t).unwrap()),
             &program,
         )
         .one()
         .await
-        .map_err(log_and_map)?;
+        .map_err(|e| handle_db_error("pipeline", e))?;
 
     if !is_preview {
         for connection in connections {
@@ -244,8 +228,7 @@ impl TryInto<PipelineDef> for DbPipeline {
             name: self.name,
             r#type: format!("{:?}", self.r#type),
             definition: self.textual_repr,
-            udfs: serde_json::from_value(self.udfs.unwrap_or_else(|| Value::Array(vec![])))
-                .map_err(log_and_map)?,
+            udfs: serde_json::from_value(self.udfs).map_err(log_and_map)?,
             job_graph: Some(program.as_job_graph()),
         })
     }

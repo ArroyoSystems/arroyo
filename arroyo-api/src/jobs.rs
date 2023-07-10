@@ -8,7 +8,7 @@ use cornucopia_async::GenericClient;
 use deadpool_postgres::{Pool, Transaction};
 use prost::Message;
 use rand::{distributions::Alphanumeric, Rng};
-use serde_json::{from_str, Value};
+use serde_json::from_str;
 use std::{collections::HashMap, time::Duration};
 use tonic::Status;
 
@@ -115,9 +115,8 @@ pub(crate) async fn get_jobs(
                 finish_time: rec.finish_time.map(to_micros),
                 tasks: rec.tasks.map(|t| t as u64),
                 definition: rec.textual_repr,
-                udfs: serde_json::from_value(rec.udfs.unwrap_or_else(|| Value::Array(vec![])))
-                    .map_err(log_and_map)?,
-                definition_id: format!("{}", rec.pipeline_definition),
+                udfs: serde_json::from_value(rec.udfs).map_err(log_and_map)?,
+                pipeline_id: format!("{}", rec.pipeline_id),
                 failure_message: rec.failure_message,
             })
         })
@@ -211,9 +210,8 @@ pub(crate) async fn get_job_details(
         finish_time: res.finish_time.map(to_micros),
         tasks: res.tasks.map(|t| t as u64),
         definition: res.textual_repr,
-        definition_id: format!("{}", res.pipeline_definition),
-        udfs: serde_json::from_value(res.udfs.unwrap_or_else(|| Value::Array(vec![])))
-            .map_err(log_and_map)?,
+        pipeline_id: format!("{}", res.pipeline_id),
+        udfs: serde_json::from_value(res.udfs).map_err(log_and_map)?,
         failure_message: res.failure_message,
     };
 
