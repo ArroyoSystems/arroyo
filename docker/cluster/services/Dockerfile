@@ -36,6 +36,7 @@ COPY arroyo-sql-macro arroyo-sql-macro
 COPY arroyo-sql-testing arroyo-sql-testing
 COPY arroyo-controller arroyo-controller
 COPY arroyo-console arroyo-console
+COPY arroyo-openapi arroyo-openapi
 COPY docker/refinery.toml refinery.toml
 COPY connector-schemas connector-schemas
 COPY integ integ

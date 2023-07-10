@@ -8,6 +8,11 @@
     },
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "/api/"
+    }
+  ],
   "paths": {
     "/v1/ping": {
       "get": {
@@ -21,12 +26,314 @@
           }
         }
       }
+    },
+    "/v1/pipelines": {
+      "get": {
+        "tags": [
+          "pipelines"
+        ],
+        "summary": "List all pipelines",
+        "description": "List all pipelines",
+        "operationId": "get_pipelines",
+        "responses": {
+          "200": {
+            "description": "Got pipelines collection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineCollection"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "pipelines"
+        ],
+        "summary": "Create a new pipeline",
+        "description": "Create a new pipeline\n\nThe API will create a single job for the pipeline.",
+        "operationId": "post_pipeline",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelinePost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Created pipeline and job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pipeline"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pipelines/{id}": {
+      "get": {
+        "tags": [
+          "pipelines"
+        ],
+        "summary": "Get a single pipeline",
+        "description": "Get a single pipeline",
+        "operationId": "get_pipeline",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pipeline id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Got pipeline",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pipeline"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "pipelines"
+        ],
+        "summary": "Delete a pipeline",
+        "description": "Delete a pipeline",
+        "operationId": "delete_pipeline",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pipeline id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted pipeline"
+          }
+        }
+      }
+    },
+    "/v1/pipelines/{id}/jobs": {
+      "get": {
+        "tags": [
+          "pipelines"
+        ],
+        "summary": "List a pipeline's jobs",
+        "description": "List a pipeline's jobs",
+        "operationId": "get_jobs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pipeline id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Got jobs collection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCollection"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Job": {
+        "type": "object",
+        "required": [
+          "id",
+          "runningDesired",
+          "state",
+          "runId"
+        ],
+        "properties": {
+          "failureMessage": {
+            "type": "string",
+            "nullable": true
+          },
+          "finishTime": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0.0
+          },
+          "id": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0.0
+          },
+          "runningDesired": {
+            "type": "boolean"
+          },
+          "startTime": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0.0
+          },
+          "state": {
+            "type": "string"
+          },
+          "tasks": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0.0
+          }
+        }
+      },
+      "JobCollection": {
+        "type": "object",
+        "required": [
+          "data",
+          "hasMore"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Pipeline": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "query",
+          "udfs"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "udfs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Udf"
+            }
+          }
+        }
+      },
+      "PipelineCollection": {
+        "type": "object",
+        "required": [
+          "data",
+          "hasMore"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Pipeline"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PipelinePost": {
+        "type": "object",
+        "required": [
+          "name",
+          "query",
+          "udfs",
+          "parallelism"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "parallelism": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0.0
+          },
+          "preview": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "query": {
+            "type": "string"
+          },
+          "udfs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Udf"
+            }
+          }
+        }
+      },
+      "Udf": {
+        "type": "object",
+        "required": [
+          "definition"
+        ],
+        "properties": {
+          "definition": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "tags": [
     {
+      "name": "pipelines",
+      "description": "Pipeline management endpoints"
+    },
+    {
       "name": "ping",
-      "description": "Ping"
+      "description": "Ping endpoint"
     }
   ]
 }
