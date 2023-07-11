@@ -8,6 +8,11 @@
     },
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "/api/"
+    }
+  ],
   "paths": {
     "/v1/ping": {
       "get": {
@@ -27,6 +32,8 @@
         "tags": [
           "pipelines"
         ],
+        "summary": "List all pipelines",
+        "description": "List all pipelines",
         "operationId": "get_pipelines",
         "responses": {
           "200": {
@@ -45,6 +52,8 @@
         "tags": [
           "pipelines"
         ],
+        "summary": "Create a new pipeline",
+        "description": "Create a new pipeline\n\nThe API will create a single job for the pipeline.",
         "operationId": "post_pipeline",
         "requestBody": {
           "content": {
@@ -58,7 +67,7 @@
         },
         "responses": {
           "200": {
-            "description": "Created pipeline",
+            "description": "Created pipeline and job",
             "content": {
               "application/json": {
                 "schema": {
@@ -75,7 +84,20 @@
         "tags": [
           "pipelines"
         ],
+        "summary": "Get a single pipeline",
+        "description": "Get a single pipeline",
         "operationId": "get_pipeline",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pipeline id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Got pipeline",
@@ -88,6 +110,30 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "pipelines"
+        ],
+        "summary": "Delete a pipeline",
+        "description": "Delete a pipeline",
+        "operationId": "delete_pipeline",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pipeline id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted pipeline"
+          }
+        }
       }
     },
     "/v1/pipelines/{id}/jobs": {
@@ -95,6 +141,8 @@
         "tags": [
           "pipelines"
         ],
+        "summary": "List a pipeline's jobs",
+        "description": "List a pipeline's jobs",
         "operationId": "get_jobs",
         "parameters": [
           {
@@ -127,11 +175,47 @@
       "Job": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "runningDesired",
+          "state",
+          "runId"
         ],
         "properties": {
+          "failureMessage": {
+            "type": "string",
+            "nullable": true
+          },
+          "finishTime": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0.0
+          },
           "id": {
             "type": "string"
+          },
+          "runId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0.0
+          },
+          "runningDesired": {
+            "type": "boolean"
+          },
+          "startTime": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0.0
+          },
+          "state": {
+            "type": "string"
+          },
+          "tasks": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "minimum": 0.0
           }
         }
       },
@@ -158,17 +242,17 @@
         "required": [
           "id",
           "name",
+          "query",
           "udfs"
         ],
         "properties": {
-          "definition": {
-            "type": "string",
-            "nullable": true
-          },
           "id": {
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "query": {
             "type": "string"
           },
           "udfs": {
@@ -201,19 +285,25 @@
         "type": "object",
         "required": [
           "name",
-          "definition",
-          "udfs"
+          "query",
+          "udfs",
+          "parallelism"
         ],
         "properties": {
-          "definition": {
-            "type": "string"
-          },
           "name": {
             "type": "string"
+          },
+          "parallelism": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0.0
           },
           "preview": {
             "type": "boolean",
             "nullable": true
+          },
+          "query": {
+            "type": "string"
           },
           "udfs": {
             "type": "array",
@@ -226,34 +316,24 @@
       "Udf": {
         "type": "object",
         "required": [
-          "language",
           "definition"
         ],
         "properties": {
           "definition": {
             "type": "string"
-          },
-          "language": {
-            "$ref": "#/components/schemas/UdfLanguage"
           }
         }
-      },
-      "UdfLanguage": {
-        "type": "string",
-        "enum": [
-          "rust"
-        ]
       }
     }
   },
   "tags": [
     {
       "name": "pipelines",
-      "description": "Pipelines"
+      "description": "Pipeline management endpoints"
     },
     {
       "name": "ping",
-      "description": "Ping"
+      "description": "Ping endpoint"
     }
   ]
 }

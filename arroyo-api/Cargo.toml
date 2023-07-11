@@ -83,7 +83,3 @@ cornucopia = { version = "0.9" }
 postgres = "0.19.5"
 arroyo-types = { path = "../arroyo-types" }
 utoipa = "3"
-
-[lib]
-crate-type = ["lib"]
-path = "./src/main.rs"

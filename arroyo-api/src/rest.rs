@@ -16,8 +16,8 @@ use tower_http::services::ServeDir;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::rest_types::{Job, JobCollection, Pipeline, PipelineCollection, PipelinePost, Udf};
 use crate::ApiServer;
+use crate::rest_types::{Job, JobCollection, Pipeline, PipelineCollection, PipelinePost, Udf};
 use arroyo_types::{telemetry_enabled, API_ENDPOINT_ENV, ASSET_DIR_ENV};
 
 use crate::pipelines::__path_post_pipeline;
