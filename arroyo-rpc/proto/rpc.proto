@@ -40,6 +40,8 @@ enum TaskCheckpointEventType {
   FINISHED_OPERATOR_SETUP = 2;
   // finished the synchronous part of checkpointing
   FINISHED_SYNC = 3;
+  // finished pre-commit
+  FINISHED_COMMIT = 4;
 }
 
 message TaskCheckpointEventReq {
@@ -62,6 +64,7 @@ message TaskCheckpointCompletedReq {
   string operator_id = 4;
   uint32 epoch = 5;
   SubtaskCheckpointMetadata metadata = 6;
+  bool needs_commit = 7;
 }
 
 message TaskCheckpointCompletedResp {
@@ -191,6 +194,7 @@ message ParquetStoreData {
   uint64 min_routing_key = 4;
   uint64 max_routing_key = 5;
   uint64 max_timestamp_micros = 6;
+  optional uint64 min_required_timestamp_micros = 7;
 }
 
 // Checkpoint metadata
@@ -261,6 +265,8 @@ enum TableWriteBehavior {
   DefaultWrites = 0;
 
   NoWritesBeforeWatermark = 1;
+
+  CommitWrites = 2;
 }
 
 message TableDescriptor {
@@ -296,6 +302,8 @@ message CheckpointReq {
   uint64 timestamp = 3;
   // if set, tasks will finish after completing the checkpoint
   bool then_stop = 4;
+  // if this message is solely to perform a commit.
+  bool is_commit = 5;
 }
 
 message CheckpointResp {

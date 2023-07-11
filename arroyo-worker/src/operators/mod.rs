@@ -608,12 +608,10 @@ pub struct MapOperator<InKey: Key, InT: Data, OutKey: Key, OutT: Data> {
     pub map_fn: Box<dyn Fn(&Record<InKey, InT>, &TaskInfo) -> Record<OutKey, OutT> + Send>,
 }
 
-#[process_fn(in_k = InKey, in_t = InT, out_k = OutKey, out_t = OutT)]
 impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> MapOperator<InKey, InT, OutKey, OutT> {
     fn name(&self) -> String {
         self.name.clone()
     }
-
     async fn process_element(
         &mut self,
         record: &Record<InKey, InT>,
@@ -621,6 +619,326 @@ impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> MapOperator<InKey, InT, Out
     ) {
         let record = (self.map_fn)(record, &ctx.task_info);
         ctx.collector.collect(record).await;
+    }
+    fn start_fn(
+        mut self: Box<Self>,
+        task_info: arroyo_types::TaskInfo,
+        restore_from: Option<arroyo_rpc::grpc::CheckpointMetadata>,
+        control_rx: tokio::sync::mpsc::Receiver<arroyo_rpc::ControlMessage>,
+        control_tx: tokio::sync::mpsc::Sender<arroyo_rpc::ControlResp>,
+        mut in_qs: Vec<Vec<tokio::sync::mpsc::Receiver<crate::engine::QueueItem>>>,
+        out_qs: Vec<Vec<crate::engine::OutQueue>>,
+    ) -> tokio::task::JoinHandle<()> {
+        use arroyo_types::*;
+        use bincode;
+        use bincode::config;
+        use futures::stream::FuturesUnordered;
+        use futures::{FutureExt, StreamExt};
+        use std::collections::HashMap;
+        use tokio;
+        use tracing::Instrument;
+        if in_qs.len() != 1usize {
+            panic!(
+                "Wrong number of logical inputs for node {} (expected {}, found {})",
+                task_info.operator_name,
+                1usize,
+                in_qs.len()
+            );
+        }
+        let mut in_qs: Vec<_> = in_qs.into_iter().flatten().collect();
+        let tables = self.tables();
+        tokio::spawn(async move {
+            let mut ctx = crate::engine::Context::<OutKey, OutT>::new(
+                task_info,
+                restore_from,
+                control_rx,
+                control_tx,
+                in_qs.len(),
+                out_qs,
+                tables,
+            )
+            .await;
+            Self::on_start(&mut (*self), &mut ctx).await;
+            let task_info = ctx.task_info.clone();
+            let name = self.name();
+            let mut counter = crate::engine::CheckpointCounter::new(in_qs.len());
+            let mut closed: std::collections::HashSet<usize> = std::collections::HashSet::new();
+            let mut sel = crate::inq_reader::InQReader::new();
+            let in_partitions = in_qs.len();
+            for (i, mut q) in in_qs.into_iter().enumerate() {
+                let stream = async_stream::stream! {
+                  while let Some(item) = q.recv().await {
+                    yield(i,item);
+                  }println!("FINISHED");
+                };
+                sel.push(Box::pin(stream));
+            }
+            let mut blocked = vec![];
+            loop {
+                tokio::select! {
+                  Some(control_message) = ctx.control_rx.recv() => {
+                    self.handle_raw_control_message(control_message, &mut ctx).await;
+                  }
+                  Some(((idx,item),s)) = sel.next() => {
+                    match idx/(in_partitions/1usize){
+                      0usize => {
+                        let message = match item {
+                          crate::engine::QueueItem::Data(datum) => {
+                            *datum.downcast().expect(&format!("failed to downcast data in {}",self.name()))
+                          }crate::engine::QueueItem::Bytes(bs) => {
+                            ctx.counters.get("arroyo_worker_bytes_recv").expect("bytes received").inc_by(bs.len()as u64);
+                            bincode::decode_from_slice(&bs,config::standard()).expect("Failed to deserialize message (expected <InKey, InT>)").0
+                          }
+                        };
+                        let local_idx = idx-(in_partitions/1usize)*0usize;
+                        tracing::debug!("[{}] Received message {}-{}, {:?} [{:?}]",ctx.task_info.operator_name,0usize,local_idx,message,stacker::remaining_stack());
+                        if let arroyo_types::Message::Record(record) =  &message {
+                          ctx.counters.get("arroyo_worker_messages_recv").expect("msg received").inc();
+                          Self::process_element(&mut(*self),record, &mut ctx).instrument(tracing::trace_span!("handle_fn",name,operator_id = task_info.operator_id,subtask_idx = task_info.task_index)).await;
+                        }else {
+                          match Self::handle_control_message(&mut(*self),idx, &message, &mut counter, &mut closed,in_partitions, &mut ctx).await {
+                            crate::ControlOutcome::Continue => {}
+                            crate::ControlOutcome::Stop => {
+                              ctx.broadcast(arroyo_types::Message::Stop).await;
+                              break;
+                            }crate::ControlOutcome::Finish => {
+                              ctx.broadcast(arroyo_types::Message::EndOfData).await;
+                              break;
+                            }
+                          }
+                        }tracing::debug!("[{}] Handled message {}-{}, {:?} [{:?}]",ctx.task_info.operator_name,0usize,local_idx,message,stacker::remaining_stack());
+                        if counter.is_blocked(idx){
+                          blocked.push(s);
+                        }else {
+                          if counter.all_clear()&& !blocked.is_empty(){
+                            for q in blocked.drain(..){
+                              sel.push(q);
+                            }
+                          }sel.push(s);
+                        }
+                      }_ => unreachable!()
+                    }
+                  }else => {
+                    tracing::info!("[{}] Stream completed",ctx.task_info.operator_name);
+                    break;
+                  }
+                }
+            }
+            Self::on_close(&mut (*self), &mut ctx).await;
+            tracing::info!(
+                "Task finished {}-{}",
+                ctx.task_info.operator_name,
+                ctx.task_info.task_index
+            );
+            ctx.control_tx
+                .send(arroyo_rpc::ControlResp::TaskFinished {
+                    operator_id: ctx.task_info.operator_id.clone(),
+                    task_index: ctx.task_info.task_index,
+                })
+                .await
+                .expect("control response unwrap");
+        })
+    }
+    async fn handle_control_message<CONTROL_K: arroyo_types::Key, CONTROL_T: arroyo_types::Data>(
+        &mut self,
+        idx: usize,
+        message: &arroyo_types::Message<CONTROL_K, CONTROL_T>,
+        counter: &mut crate::engine::CheckpointCounter,
+        closed: &mut std::collections::HashSet<usize>,
+        in_partitions: usize,
+        ctx: &mut crate::engine::Context<OutKey, OutT>,
+    ) -> crate::ControlOutcome {
+        use arroyo_types::*;
+        use tracing::info;
+        use tracing::trace;
+        match message {
+            Message::Record(record) => {
+                unreachable!();
+            }
+            Message::Barrier(t) => {
+                tracing::debug!(
+                    "received barrier in {}-{}-{}-{}",
+                    self.name(),
+                    ctx.task_info.operator_id,
+                    ctx.task_info.task_index,
+                    idx
+                );
+                if counter.all_clear() {
+                    ctx.control_tx
+                        .send(arroyo_rpc::ControlResp::CheckpointEvent(
+                            arroyo_rpc::CheckpointEvent {
+                                checkpoint_epoch: t.epoch,
+                                operator_id: ctx.task_info.operator_id.clone(),
+                                subtask_index: ctx.task_info.task_index as u32,
+                                time: std::time::SystemTime::now(),
+                                event_type:
+                                    arroyo_rpc::grpc::TaskCheckpointEventType::StartedAlignment,
+                            },
+                        ))
+                        .await
+                        .unwrap();
+                }
+                if counter.mark(idx, &t) {
+                    tracing::debug!(
+                        "Checkpointing {}-{}-{}",
+                        self.name(),
+                        ctx.task_info.operator_id,
+                        ctx.task_info.task_index
+                    );
+                    if self.checkpoint(*t, ctx).await {
+                        return crate::ControlOutcome::Stop;
+                    }
+                }
+            }
+            Message::Watermark(watermark) => {
+                if idx >= ctx.watermarks.len() {
+                    panic!("watermark index is too big");
+                }
+                ctx.watermarks[idx] = Some(*watermark);
+                trace!(
+                    "received watermark {:?} in {}-{}",
+                    watermark,
+                    self.name(),
+                    ctx.task_info.task_index
+                );
+                if let Some(watermark) = ctx.watermark() {
+                    ctx.state.handle_watermark(watermark);
+                    self.handle_watermark_int(watermark, ctx).await;
+                }
+            }
+            Message::Stop => {
+                closed.insert(idx);
+                if closed.len() == in_partitions {
+                    ctx.broadcast(arroyo_types::Message::Stop).await;
+                    return crate::ControlOutcome::Stop;
+                }
+            }
+            Message::EndOfData => {
+                closed.insert(idx);
+                if closed.len() == in_partitions {
+                    ctx.broadcast(arroyo_types::Message::EndOfData).await;
+                    return crate::ControlOutcome::Finish;
+                }
+            }
+        }
+        crate::ControlOutcome::Continue
+    }
+    #[must_use]
+    async fn checkpoint(
+        &mut self,
+        checkpoint_barrier: arroyo_types::CheckpointBarrier,
+        ctx: &mut crate::engine::Context<OutKey, OutT>,
+    ) -> bool {
+        {}
+        let __tracing_attr_span = tracing::span!(
+            target: module_path!(),
+            tracing::Level::TRACE,
+            "checkpoint",
+            checkpoint_barrier = tracing::field::debug(&checkpoint_barrier),
+            name = self.name(),
+            operator_id = ctx.task_info.operator_id,
+            subtask_idx = ctx.task_info.task_index,
+        );
+        let __tracing_instrument_future = async move {
+            #[allow(
+                unreachable_code,
+                clippy::diverging_sub_expression,
+                clippy::let_unit_value,
+                clippy::unreachable,
+                clippy::let_with_type_underscore
+            )]
+            if false {
+                let __tracing_attr_fake_return: bool =
+                    unreachable!("this is just for type inference, and is unreachable code");
+                return __tracing_attr_fake_return;
+            }
+            {
+                crate::process_fn::ProcessFnUtils::send_event(
+                    checkpoint_barrier,
+                    ctx,
+                    arroyo_rpc::grpc::TaskCheckpointEventType::StartedCheckpointing,
+                )
+                .await;
+                self.handle_checkpoint(&checkpoint_barrier, ctx).await;
+                crate::process_fn::ProcessFnUtils::send_event(
+                    checkpoint_barrier,
+                    ctx,
+                    arroyo_rpc::grpc::TaskCheckpointEventType::FinishedOperatorSetup,
+                )
+                .await;
+                let watermark = ctx.watermark();
+                ctx.state.checkpoint(checkpoint_barrier, watermark).await;
+                crate::process_fn::ProcessFnUtils::send_event(
+                    checkpoint_barrier,
+                    ctx,
+                    arroyo_rpc::grpc::TaskCheckpointEventType::FinishedSync,
+                )
+                .await;
+                ctx.broadcast(arroyo_types::Message::Barrier(checkpoint_barrier))
+                    .await;
+                checkpoint_barrier.then_stop
+            }
+        };
+        if !__tracing_attr_span.is_disabled() {
+            tracing::Instrument::instrument(__tracing_instrument_future, __tracing_attr_span).await
+        } else {
+            __tracing_instrument_future.await
+        }
+    }
+    async fn handle_watermark_int(
+        &mut self,
+        watermark: std::time::SystemTime,
+        ctx: &mut crate::engine::Context<OutKey, OutT>,
+    ) {
+        use tracing::trace;
+        trace!(
+            "handling watermark {} for {}-{}",
+            arroyo_types::to_millis(watermark),
+            ctx.task_info.operator_name,
+            ctx.task_info.task_index
+        );
+        let finished = crate::process_fn::ProcessFnUtils::finished_timers(watermark, ctx).await;
+        for (k, tv) in finished {
+            self.handle_timer(k, tv.data, ctx).await;
+        }
+        self.handle_watermark(watermark, ctx).await;
+    }
+    async fn handle_checkpoint(
+        &mut self,
+        checkpoint_barrier: &arroyo_types::CheckpointBarrier,
+        ctx: &mut crate::engine::Context<OutKey, OutT>,
+    ) {
+    }
+
+    async fn on_start(&mut self, ctx: &mut crate::engine::Context<OutKey, OutT>) {}
+
+    async fn on_close(&mut self, ctx: &mut crate::engine::Context<OutKey, OutT>) {}
+
+    async fn handle_timer(
+        &mut self,
+        key: OutKey,
+        tv: (),
+        ctx: &mut crate::engine::Context<OutKey, OutT>,
+    ) {
+    }
+
+    async fn handle_watermark(
+        &mut self,
+        watermark: std::time::SystemTime,
+        ctx: &mut crate::engine::Context<OutKey, OutT>,
+    ) {
+        ctx.broadcast(arroyo_types::Message::Watermark(watermark))
+            .await;
+    }
+    async fn handle_raw_control_message(
+        &mut self,
+        control_message: arroyo_rpc::ControlMessage,
+        ctx: &mut Context<OutKey, OutT>,
+    ) {
+    }
+
+    fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
+        vec![]
     }
 }
 

@@ -439,6 +439,7 @@ enum TaskCheckpointEventType {
   CHECKPOINT_STARTED = 1;
   CHECKPOINT_OPERATOR_FINISHED = 2;
   CHECKPOINT_SYNC_FINISHED = 3;
+  CHECKPOINT_PRE_COMMIT = 4;
 }
 
 message TaskCheckpointEvent {

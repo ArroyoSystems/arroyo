@@ -121,7 +121,7 @@ mod test {
         for (key, value) in &*DATE_TRUNC_TESTCASES {
             let observed: DateTime<Utc> = date_trunc(*REFERENCE_DATETIME, *key).into();
             let date_fixed_offset =
-                DateTime::parse_from_rfc3339(*value).expect("Failed to parse date and time");
+                DateTime::parse_from_rfc3339(value).expect("Failed to parse date and time");
             let expected: DateTime<Utc> = DateTime::from_utc(date_fixed_offset.naive_utc(), Utc);
             assert_eq!(observed, expected, "Wrong result for {:?} ", key)
         }

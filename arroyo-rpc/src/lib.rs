@@ -31,6 +31,7 @@ pub mod grpc {
 pub enum ControlMessage {
     Checkpoint(CheckpointBarrier),
     Stop { mode: StopMode },
+    Commit { epoch: u32 },
 }
 
 #[derive(Debug, Clone)]

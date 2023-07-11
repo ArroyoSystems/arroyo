@@ -106,11 +106,9 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
         for future in self.write_futures.drain(..) {
             match future.await.expect("Kafka producer shut down") {
                 Ok(_) => {}
-                Err((e, _)) => match e {
-                    _ => {
-                        panic!("Unhandled kafka error: {:?}", e);
-                    }
-                },
+                Err((e, _)) => {
+                    panic!("Unhandled kafka error: {:?}", e);
+                }
             }
         }
     }

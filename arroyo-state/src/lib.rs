@@ -17,6 +17,7 @@ use tables::{
     KeyedStateCache, TimeKeyMap, TimeKeyMapCache,
 };
 use tokio::sync::mpsc::Sender;
+use tracing::warn;
 
 pub mod parquet;
 pub mod tables;

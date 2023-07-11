@@ -225,7 +225,6 @@ impl FusedRecordTransform {
                     let expr = projection.to_syn_expression();
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
-
                             let record: #record_type = { let arg = &record.value;
                                 arroyo_types::Record {
                                 timestamp: record.timestamp,
@@ -1803,6 +1802,16 @@ pub fn get_program(
         .iter()
         .map(|s| s.def(key_structs.contains(&s.struct_name())))
         .collect();
+
+    let all_types: HashSet<_> = types
+        .iter()
+        .flat_map(|s| s.all_structs_including_named())
+        .collect();
+    other_defs.extend(
+        all_types
+            .iter()
+            .map(|s| s.generate_record_batch_builder().to_string()),
+    );
 
     other_defs.extend(
         schema_provider

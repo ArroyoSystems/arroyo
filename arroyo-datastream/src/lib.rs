@@ -321,7 +321,7 @@ pub struct ConnectorOp {
 impl ConnectorOp {
     pub fn web_sink() -> Self {
         ConnectorOp {
-            operator: "GrpcSink".to_string(),
+            operator: "GrpcSink::<#in_k, #in_t>".to_string(),
             config: "{}".to_string(),
             description: "WebSink".to_string(),
         }
