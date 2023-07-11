@@ -74,7 +74,7 @@ impl Connector for KafkaConnector {
             ),
             TableType::Sink { .. } => (
                 ConnectionType::Sink,
-                "connectors::kafka::sink::KafkaSinkFunc",
+                "connectors::kafka::sink::KafkaSinkFunc::<#in_k, #in_t>",
                 format!("KafkaSink<{}>", table.topic),
             ),
         };

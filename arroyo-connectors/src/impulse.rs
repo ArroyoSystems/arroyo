@@ -141,13 +141,17 @@ impl Connector for ImpulseConnector {
         _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         let description = format!(
-            "{}Impulse<{} eps>",
+            "{}Impulse<{} eps{}>",
             if table.message_count.is_some() {
                 "Bounded"
             } else {
                 ""
             },
-            table.event_rate
+            table.event_rate,
+            table
+                .event_time_interval
+                .map(|t| format!(", {} micros", t))
+                .unwrap_or("".to_string())
         );
 
         let config = OperatorConfig {

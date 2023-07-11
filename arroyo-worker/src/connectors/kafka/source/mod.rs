@@ -105,8 +105,7 @@ where
             messages_per_second: NonZeroU32::new(
                 config
                     .rate_limit
-                    .map(|l| l.messages_per_second.map(|l| l as u32))
-                    .flatten()
+                    .and_then(|l| l.messages_per_second.map(|l| l as u32))
                     .unwrap_or(u32::MAX),
             )
             .unwrap(),

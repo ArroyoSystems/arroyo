@@ -191,6 +191,7 @@ message ParquetStoreData {
   uint64 min_routing_key = 4;
   uint64 max_routing_key = 5;
   uint64 max_timestamp_micros = 6;
+  optional uint64 min_required_timestamp_micros = 7;
 }
 
 // Checkpoint metadata

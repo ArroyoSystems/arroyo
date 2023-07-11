@@ -84,7 +84,7 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
         Self::new(
             table
                 .event_time_interval
-                .map(|i| Duration::from_millis(i as u64)),
+                .map(|i| Duration::from_micros(i as u64)),
             ImpulseSpec::EventsPerSecond(table.event_rate as f32),
             table
                 .message_count
@@ -120,6 +120,12 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
                 Duration::from_secs_f32(1.0 / (eps / ctx.task_info.parallelism as f32))
             }
         };
+        info!(
+            "Starting impulse source with delay {:?} and limit {}",
+            delay, self.limit
+        );
+
+        let start_time = SystemTime::now() - delay * self.state.counter as u32;
 
         while self.state.counter < self.limit {
             let timestamp = self
@@ -137,16 +143,16 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
             .await;
 
             self.state.counter += 1;
-            ctx.state
-                .get_global_keyed_state('i')
-                .await
-                .insert(ctx.task_info.task_index, self.state)
-                .await;
 
             match ctx.control_rx.try_recv() {
                 Ok(ControlMessage::Checkpoint(c)) => {
                     // checkpoint our state
                     debug!("starting checkpointing {}", ctx.task_info.task_index);
+                    ctx.state
+                        .get_global_keyed_state('i')
+                        .await
+                        .insert(ctx.task_info.task_index, self.state)
+                        .await;
                     if self.checkpoint(c, ctx).await {
                         return SourceFinishType::Immediate;
                     }
@@ -169,7 +175,10 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
             }
 
             if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
+                let next_sleep = start_time + delay * self.state.counter as u32;
+                if let Ok(sleep_time) = next_sleep.duration_since(SystemTime::now()) {
+                    tokio::time::sleep(sleep_time).await;
+                }
             }
         }
 

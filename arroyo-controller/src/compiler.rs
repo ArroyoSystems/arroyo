@@ -147,6 +147,13 @@ members = [
 exclude = [
   "wasm-fns",
 ]
+[patch.crates-io]
+parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'direct_multipart' }
 "#;
 
         // NOTE: These must be kept in sync with the Cargo configs in ops/query-compiler/build-base
@@ -184,6 +191,10 @@ bincode = "=2.0.0-rc.3"
 bincode_derive = "=2.0.0-rc.3"
 serde = "1.0"
 serde_json = "1.0"
+arrow = "39.0.0"
+parquet = "39.0.0"
+arrow-array = "39.0.0"
+arrow-schema = "39.0.0"
 arroyo-types = {{ path = "{}/arroyo-types" }}
 arroyo-worker = {{ path = "{}/arroyo-worker"{}}}
 "#,
@@ -370,13 +381,14 @@ wasm-opt = false
                     }
                 }
                 Operator::ConnectorSink(c)  => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
+                    // In c.operator, replace #in_k and #in_t with the actual types
+                    let replaced_type = c.operator.replace("#in_k", &input.unwrap().weight().key);
+                    let replaced_type = replaced_type.replace("#in_t", &input.unwrap().weight().value);
 
-                    let strukt = parse_type(&c.operator);
+                    let strukt = parse_type(&replaced_type);
                     let config = &c.config;
                     quote! {
-                        Box::new(#strukt::<#in_k, #in_t>::from_config(#config))
+                        Box::new(#strukt::from_config(#config))
                     }
                 }
                 Operator::FusedWasmUDFs { name, udfs: _ } => {
