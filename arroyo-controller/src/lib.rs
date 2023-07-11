@@ -96,7 +96,7 @@ pub struct JobConfig {
     id: String,
     organization_id: String,
     pipeline_name: String,
-    definition_id: i64,
+    pipeline_id: i64,
     stop_mode: StopMode,
     checkpoint_interval: Duration,
     ttl: Option<Duration>,
@@ -571,7 +571,7 @@ impl ControllerServer {
                         id: p.id.clone(),
                         organization_id: p.org_id,
                         pipeline_name: p.pipeline_name,
-                        definition_id: p.definition_id,
+                        pipeline_id: p.pipeline_id,
                         stop_mode: p.stop,
                         checkpoint_interval: Duration::from_micros(
                             p.checkpoint_interval_micros as u64,

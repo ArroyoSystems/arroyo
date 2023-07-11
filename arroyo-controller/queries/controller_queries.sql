@@ -3,7 +3,7 @@ SELECT
     job_configs.id as id,
     job_configs.organization_id as org_id,
     pipeline_name,
-    pipeline_definition as definition_id,
+    pipeline_id,
     checkpoint_interval_micros,
     ttl_micros,
     parallelism_overrides,
@@ -34,7 +34,7 @@ SET state = :state,
 WHERE id = :job_id;
 
 --! get_program
-SELECT program FROM pipeline_definitions WHERE id = :id;
+SELECT program FROM pipelines WHERE id = :id;
 
 --! mark_checkpoints_compacted
 UPDATE checkpoints
