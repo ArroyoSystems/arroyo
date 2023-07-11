@@ -256,7 +256,6 @@ impl<S: BackingStore> StateStore<S> {
     ) -> GlobalKeyedState<K, V, S> {
         // this is done because populating it is async, so can't use or_insert().
         if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
-            warn!("Creating new cache for table {}", table);
             let cache: Box<dyn Any + Send> = match &self.restore_from {
                 Some(_restore_from) => {
                     let cache =

@@ -70,7 +70,6 @@ impl<'a, K: Key, V: Data + PartialEq, S: BackingStore> TimeKeyMap<'a, K, V, S> {
 
     pub async fn get_all(&mut self) -> Vec<(SystemTime, &K, &V)> {
         if !self.cache.buffered_values.is_empty() {
-            warn!("buffered values present, flushing them before returning all values");
             self.flush().await;
         }
         self.cache
@@ -445,7 +444,6 @@ impl<K: Key, V: Data> GlobalKeyedStateCache<K, V> {
     pub async fn from_checkpoint<S: BackingStore>(backing_store: &S, table: char) -> Self {
         let mut values = HashMap::new();
         for (key, value) in backing_store.get_global_key_values(table).await {
-            error!("Loaded key {:?} and value {:?} from checkpoint", key, value);
             values.insert(key, value);
         }
         Self { values }
@@ -513,7 +511,6 @@ impl<K: Key, V: Data> KeyedStateCache<K, V> {
     pub async fn from_checkpoint<S: BackingStore>(backing_store: &S, table: char) -> Self {
         let mut values = HashMap::new();
         for (key, value) in backing_store.get_key_values(table).await {
-            info!("Loaded key: {:?} value: {:?}", key, value);
             match value {
                 Some(value) => values.insert(key, value),
                 None => values.remove(&key),

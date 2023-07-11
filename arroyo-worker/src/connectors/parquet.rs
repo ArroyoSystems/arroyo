@@ -371,7 +371,8 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
                                 self.futures.push(future);
                             }
                         },
-                        ParquetMessages::Init {max_file_index, subtask_id,recovered_files } => {
+                        ParquetMessages::Init {max_file_index, subtask_id, recovered_files } => {
+                            info!("files to write {:?}", recovered_files);
                             if let Some(writer) = self.writers.get_mut(&self.current_writer_name) {
                                 if let Some(future) = writer.close()? {
                                     self.futures.push(future);
@@ -390,6 +391,7 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
                             self.current_writer_name = new_writer.name();
                             self.writers.insert(new_writer.name(), new_writer);
                             for recovered_file in recovered_files {
+                                info!("recovered file {:?}", recovered_file);
                                 let file_to_finish = SingleMultipartParquetWriter::<T, R>::from_checkpoint(
                                      &Path::parse(&recovered_file.filename)?, recovered_file.data, self.object_store.clone()).await?;
                                     self.add_part_to_finish(file_to_finish);
@@ -1088,9 +1090,9 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> TwoPhase
     ) -> Result<()> {
         let mut max_file_index = 0;
         let mut recovered_files = Vec::new();
-        if task_info.task_index == 0 {
-            for parquet_data_recovery in data_recovery {
-                max_file_index = max_file_index.max(parquet_data_recovery.next_file_index);
+        for parquet_data_recovery in data_recovery {
+            max_file_index = max_file_index.max(parquet_data_recovery.next_file_index);
+            if task_info.task_index == 0 {
                 recovered_files.extend(parquet_data_recovery.active_files.into_iter());
             }
         }

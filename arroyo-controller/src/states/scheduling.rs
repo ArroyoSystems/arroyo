@@ -298,7 +298,16 @@ impl State for Scheduling {
 
         // TODO: better error handling
         let c = ctx.pool.get().await.unwrap();
-        let restore_epoch = controller_queries::last_successful_checkpoint()
+
+        #[derive(Clone)]
+        struct CheckpointInfo {
+            epoch: u32,
+            min_epoch: u32,
+            id: i64,
+            needs_commits: bool,
+        }
+
+        let checkpoint_info = controller_queries::last_successful_checkpoint()
             .bind(&c, &ctx.config.id)
             .opt()
             .await
@@ -311,22 +320,36 @@ impl State for Scheduling {
                     min_epoch = r.min_epoch
                 );
 
-                (r.epoch as u32, r.min_epoch as u32, r.needs_commits)
+                CheckpointInfo {
+                    epoch: r.epoch as u32,
+                    min_epoch: r.min_epoch as u32,
+                    id: r.id,
+                    needs_commits: r.needs_commits,
+                }
             });
 
         {
             // mark in-progress checkpoints as failed
-            let last_epoch = restore_epoch.map(|(epoch, _, _)| epoch).unwrap_or(0);
+            let last_epoch = checkpoint_info
+                .as_ref()
+                .map(|checkpoint_info| checkpoint_info.epoch)
+                .unwrap_or(0);
             controller_queries::mark_failed()
                 .bind(&c, &ctx.config.id, &(last_epoch as i32 + 1))
                 .await
                 .unwrap();
         }
 
-        let mut commit_subtasks = vec![];
+        let mut committing_state = None;
 
         // clear all of the epochs after the one we're loading so that we don't read in-progress data
-        if let Some((epoch, min_epoch, needs_commit)) = restore_epoch {
+        if let Some(CheckpointInfo {
+            epoch,
+            min_epoch,
+            id,
+            needs_commits,
+        }) = checkpoint_info.clone()
+        {
             let mut metadata = StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch)
                 .await
                 .unwrap_or_else(|| panic!("epoch {} not found for job {}", epoch, ctx.config.id));
@@ -334,7 +357,8 @@ impl State for Scheduling {
                 return Err(ctx.retryable(self, "failed to prepare checkpoint for loading", e, 10));
             }
             metadata.min_epoch = min_epoch;
-            if needs_commit {
+            if needs_commits {
+                let mut commit_subtasks = HashSet::new();
                 for operator_id in &metadata.operator_ids {
                     let operator_metadata =
                         StateBackend::load_operator_metadata(&ctx.config.id, operator_id, epoch)
@@ -356,10 +380,11 @@ impl State for Scheduling {
                             .find(|node| node.operator_id == *operator_id)
                             .unwrap();
                         for subtask_index in 0..program_node.parallelism {
-                            commit_subtasks.push((subtask_index as u32, operator_id.clone()))
+                            commit_subtasks.insert((operator_id.clone(), subtask_index as u32));
                         }
                     }
                 }
+                committing_state = Some((id, epoch, commit_subtasks));
             }
             StateBackend::complete_checkpoint(metadata).await;
         }
@@ -372,6 +397,7 @@ impl State for Scheduling {
                 let assignments = assignments.clone();
 
                 let job_id = ctx.config.id.clone();
+                let restore_epoch = checkpoint_info.as_ref().map(|info| info.epoch);
                 tokio::spawn(async move {
                     info!(
                         message = "starting execution on worker",
@@ -381,7 +407,7 @@ impl State for Scheduling {
                     for i in 0..10 {
                         match c
                             .start_execution(Request::new(StartExecutionReq {
-                                restore_epoch: restore_epoch.map(|(epoch, _, _)| epoch),
+                                restore_epoch,
                                 tasks: assignments.clone(),
                             }))
                             .await
@@ -444,16 +470,27 @@ impl State for Scheduling {
 
         ctx.status.tasks = Some(ctx.program.task_count() as i32);
 
-        let controller = JobController::new(
+        let needs_commit = committing_state.is_some();
+
+        let mut controller = JobController::new(
             ctx.pool.clone(),
             ctx.config.clone(),
             ctx.program.clone(),
-            restore_epoch.map(|(epoch, _, _)| epoch).unwrap_or(0),
-            restore_epoch
-                .map(|(_, min_epoch, _)| min_epoch)
+            checkpoint_info.as_ref().map(|info| info.epoch).unwrap_or(0),
+            checkpoint_info
+                .as_ref()
+                .map(|info| info.min_epoch)
                 .unwrap_or(0),
             worker_connects,
+            committing_state.map(|tuple| tuple.into()),
         );
+        if needs_commit {
+            info!("restored checkpoint was in committing phase, sending commits");
+            controller
+                .send_commit_messages()
+                .await
+                .expect("failed to send commit messages");
+        }
 
         ctx.job_controller = Some(controller);
         Ok(Transition::next(*self, Running {}))

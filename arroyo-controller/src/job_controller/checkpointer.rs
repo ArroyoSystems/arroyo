@@ -54,6 +54,14 @@ pub enum CheckpointingOrCommittingState {
     Checkpointing(CheckpointState),
     Committing(CommittingState),
 }
+impl CheckpointingOrCommittingState {
+    pub(crate) fn done(&self) -> bool {
+        match self {
+            CheckpointingOrCommittingState::Checkpointing(checkpointing) => checkpointing.done(),
+            CheckpointingOrCommittingState::Committing(committing) => committing.done(),
+        }
+    }
+}
 
 pub struct CheckpointState {
     job_id: String,
@@ -64,8 +72,7 @@ pub struct CheckpointState {
     tasks_per_operator: HashMap<String, usize>,
     tasks: HashMap<String, BTreeMap<u32, SubtaskState>>,
     completed_operators: HashSet<String>,
-    subtasks_to_commit: HashSet<(u32, String)>,
-    commit_state: CommitState,
+    subtasks_to_commit: HashSet<(String, u32)>,
 
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
@@ -73,7 +80,50 @@ pub struct CheckpointState {
 }
 
 pub struct CommittingState {
-    subtask_to_commit: HashSet<(u32, String)>,
+    checkpoint_id: i64,
+    epoch: u32,
+    subtasks_to_commit: HashSet<(String, u32)>,
+}
+
+impl CommittingState {
+    pub fn new(checkpoint_id: i64, epoch: u32, subtasks_to_commit: HashSet<(String, u32)>) -> Self {
+        Self {
+            checkpoint_id,
+            epoch,
+            subtasks_to_commit,
+        }
+    }
+    pub fn subtask_committed(&mut self, operator_id: String, subtask_index: u32) {
+        self.subtasks_to_commit
+            .remove(&(operator_id, subtask_index));
+    }
+
+    pub fn done(&self) -> bool {
+        self.subtasks_to_commit.is_empty()
+    }
+
+    pub async fn finish(self, pool: &Pool) -> anyhow::Result<()> {
+        let finish_time = SystemTime::now();
+
+        let c = pool.get().await?;
+        controller_queries::commit_checkpoint()
+            .bind(&c, &finish_time.into(), &self.checkpoint_id)
+            .await?;
+
+        Ok(())
+    }
+}
+
+impl From<(i64, u32, HashSet<(String, u32)>)> for CommittingState {
+    fn from(
+        (checkpoint_id, epoch, subtasks_to_commit): (i64, u32, HashSet<(String, u32)>),
+    ) -> Self {
+        Self {
+            checkpoint_id,
+            epoch,
+            subtasks_to_commit,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -140,13 +190,12 @@ impl CheckpointState {
             tasks: HashMap::new(),
             completed_operators: HashSet::new(),
             subtasks_to_commit: HashSet::new(),
-            commit_state: CommitState::NotStarted,
             operator_details: HashMap::new(),
         })
     }
 
     pub fn checkpoint_event(&mut self, c: TaskCheckpointEventReq) {
-        info!(message = "Checkpoint event", checkpoint_id = self.checkpoint_id, event_type = ?c.event_type(), subtask_index = c.subtask_index, operator_id = ?c.operator_id);
+        debug!(message = "Checkpoint event", checkpoint_id = self.checkpoint_id, event_type = ?c.event_type(), subtask_index = c.subtask_index, operator_id = ?c.operator_id);
         // This is all for the UI
         self.operator_details
             .entry(c.operator_id.clone())
@@ -189,12 +238,7 @@ impl CheckpointState {
             });
 
         if grpc::TaskCheckpointEventType::FinishedCommit == c.event_type() {
-            info!("received finished commit");
-            self.subtasks_to_commit
-                .remove(&(c.subtask_index, c.operator_id.clone()));
-            if self.subtasks_to_commit.is_empty() {
-                self.commit_state = CommitState::Finished;
-            }
+            panic!("shouldn't receive finished commits while checkpointing");
         }
 
         // this is for the actual checkpoint management
@@ -207,7 +251,7 @@ impl CheckpointState {
     }
 
     pub async fn checkpoint_finished(&mut self, c: TaskCheckpointCompletedReq) {
-        info!(message = "Checkpoint finished", checkpoint_id = self.checkpoint_id, job_id = self.job_id, epoch = self.epoch, min_epoch = self.min_epoch, operator_id = %c.operator_id, subtask_index = c.metadata.as_ref().unwrap().subtask_index, time = c.time);
+        debug!(message = "Checkpoint finished", checkpoint_id = self.checkpoint_id, job_id = self.job_id, epoch = self.epoch, min_epoch = self.min_epoch, operator_id = %c.operator_id, subtask_index = c.metadata.as_ref().unwrap().subtask_index, time = c.time);
         // this is just for the UI
         let metadata = c.metadata.as_ref().unwrap();
 
@@ -255,7 +299,7 @@ impl CheckpointState {
                 .any(|table| table.write_behavior() == TableWriteBehavior::CommitWrites)
         {
             self.subtasks_to_commit
-                .insert((metadata.subtask_index, c.operator_id.clone()));
+                .insert((c.operator_id.clone(), metadata.subtask_index));
         }
 
         let subtasks = self
@@ -283,11 +327,6 @@ impl CheckpointState {
     }
 
     async fn publish_operator_checkpoint(&mut self, operator_id: String) {
-        info!("Finishing checkpoint for operator {}", operator_id);
-        info!(
-            "current commit tasks to finish {:?}",
-            self.subtasks_to_commit
-        );
         let subtasks = self.tasks.get_mut(&operator_id).unwrap();
 
         let start_time = subtasks
@@ -370,24 +409,14 @@ impl CheckpointState {
 
     pub fn done(&self) -> bool {
         self.completed_operators.len() == self.tasks_per_operator.len()
-            && self.commit_state == CommitState::Finished
     }
 
-    pub fn start_commits(&mut self) -> bool {
-        if self.completed_operators.len() == self.tasks_per_operator.len()
-            && self.commit_state == CommitState::NotStarted
-        {
-            if self.subtasks_to_commit.is_empty() {
-                self.commit_state = CommitState::Finished;
-                false
-            } else {
-                info!("starting commits");
-                self.commit_state = CommitState::Started;
-                true
-            }
-        } else {
-            false
-        }
+    pub fn committing_state(&self) -> CommittingState {
+        CommittingState::new(
+            self.checkpoint_id,
+            self.epoch,
+            self.subtasks_to_commit.clone(),
+        )
     }
 
     pub async fn update_db(&self, pool: &Pool) -> anyhow::Result<()> {
@@ -425,8 +454,35 @@ impl CheckpointState {
             .bind(
                 &c,
                 &operator_state,
-                &Some(OffsetDateTime::now_utc()),
+                &Some(finish_time.into()),
                 &crate::types::public::CheckpointState::ready,
+                &self.checkpoint_id,
+            )
+            .await?;
+
+        Ok(())
+    }
+    pub async fn pre_commit_finish(self, pool: &Pool) -> anyhow::Result<()> {
+        let finish_time = SystemTime::now();
+        StateBackend::complete_checkpoint(CheckpointMetadata {
+            job_id: self.job_id,
+            epoch: self.epoch,
+            start_time: to_micros(self.start_time),
+            finish_time: to_micros(finish_time),
+            min_epoch: self.min_epoch,
+            operator_ids: self.completed_operators.iter().cloned().collect(),
+        })
+        .await;
+
+        let operator_state = serde_json::to_value(&self.operator_details).unwrap();
+
+        let c = pool.get().await?;
+        controller_queries::update_checkpoint()
+            .bind(
+                &c,
+                &operator_state,
+                &None,
+                &crate::types::public::CheckpointState::committing,
                 &self.checkpoint_id,
             )
             .await?;
