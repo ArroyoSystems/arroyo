@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use typify::import_types;
 
 pub mod blackhole;
+pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
 pub mod nexmark;
