@@ -11,8 +11,6 @@ use std::{
 
 use anyhow::{bail, Result};
 use arroyo_macro::{process_fn, StreamNode};
-use arroyo_rpc::ControlMessage;
-use arroyo_state::tables::GlobalKeyedState;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::{stream::FuturesUnordered, Future};
@@ -31,7 +29,7 @@ use parquet::{
 use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/parquet/table.json");
@@ -44,7 +42,6 @@ use super::{
     OperatorConfig,
 };
 
-#[derive(StreamNode)]
 pub struct ParquetSink<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> {
     sender: Sender<ParquetMessages<T>>,
     checkpoint_receiver: Receiver<CheckpointData<T>>,
@@ -52,7 +49,6 @@ pub struct ParquetSink<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send +
     _ts: PhantomData<(K, R)>,
 }
 
-#[process_fn(in_k = K, in_t = T)]
 impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetSink<K, T, R> {
     pub fn from_config(config: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
         let config: OperatorConfig =
@@ -143,130 +139,6 @@ impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<T> + Send + 'static> ParquetS
             _ts: PhantomData,
         }
     }
-
-    fn name(&self) -> String {
-        "parquet_sink".to_string()
-    }
-
-    fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
-        vec![
-            arroyo_state::global_table("p", "parquet sink state"),
-            arroyo_state::global_table("m", "max file index"),
-        ]
-    }
-
-    async fn on_start(&mut self, ctx: &mut Context<(), ()>) {
-        let mut tracking_key_state: GlobalKeyedState<usize, CoordinationState, _> =
-            ctx.state.get_global_keyed_state('m').await;
-        // take the max of all values
-        let state_vec = tracking_key_state.get_all();
-        let max_file_index = tracking_key_state
-            .get_all()
-            .into_iter()
-            .map(|state| state.max_file_index)
-            .max()
-            .unwrap_or(1);
-
-        let recovered_files = if ctx.task_info.task_index == 0 {
-            let mut table: GlobalKeyedState<String, InProgressFileCheckpoint<T>, _> =
-                ctx.state.get_global_keyed_state('p').await;
-            table.get_all().into_iter().cloned().collect()
-        } else {
-            vec![]
-        };
-
-        self.sender
-            .send(ParquetMessages::Init {
-                max_file_index,
-                subtask_id: ctx.task_info.task_index,
-                recovered_files,
-            })
-            .await
-            .unwrap();
-    }
-
-    async fn process_element(&mut self, record: &Record<K, T>, _ctx: &mut Context<(), ()>) {
-        let value = record.value.clone();
-        self.sender
-            .send(ParquetMessages::Data {
-                value,
-                time: record.timestamp,
-            })
-            .await
-            .unwrap();
-    }
-
-    async fn handle_raw_control_message(
-        &mut self,
-        control_message: arroyo_rpc::ControlMessage,
-        ctx: &mut Context<(), ()>,
-    ) {
-    }
-
-    async fn on_close(&mut self, _ctx: &mut crate::engine::Context<(), ()>) {
-        if self.closed {
-            return;
-        }
-        self.closed = true;
-        self.sender
-            .send(ParquetMessages::Close { and_commit: true })
-            .await
-            .unwrap();
-        self.checkpoint_receiver.recv().await;
-    }
-
-    async fn handle_checkpoint(
-        &mut self,
-        checkpoint_barrier: &arroyo_types::CheckpointBarrier,
-        ctx: &mut crate::engine::Context<(), ()>,
-    ) {
-        self.sender
-            .send(ParquetMessages::Checkpoint {
-                subtask_id: ctx.task_info.task_index,
-                then_stop: checkpoint_barrier.then_stop,
-            })
-            .await
-            .unwrap();
-        while let Some(checkpoint_data) = self.checkpoint_receiver.recv().await {
-            match checkpoint_data {
-                CheckpointData::InProgressFileCheckpoint(in_progress_file_checkpoint) => {
-                    let mut global_keyed_state: GlobalKeyedState<
-                        String,
-                        InProgressFileCheckpoint<T>,
-                        _,
-                    > = ctx.state.get_global_keyed_state('p').await;
-                    global_keyed_state
-                        .insert(
-                            in_progress_file_checkpoint.filename.clone(),
-                            in_progress_file_checkpoint,
-                        )
-                        .await;
-                }
-                CheckpointData::Finished { max_file_index } => {
-                    let mut tracking_key_state = ctx.state.get_global_keyed_state('m').await;
-                    tracking_key_state
-                        .insert(
-                            ctx.task_info.task_index,
-                            CoordinationState {
-                                epoch: 0,
-                                max_file_index: max_file_index + 1,
-                            },
-                        )
-                        .await;
-                    break;
-                }
-            }
-        }
-
-        if checkpoint_barrier.then_stop {
-            self.closed = true;
-        }
-    }
-}
-#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
-struct CoordinationState {
-    epoch: usize,
-    max_file_index: usize,
 }
 
 #[derive(Debug)]
@@ -545,7 +417,7 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
                 }
                 Some(result) = self.futures.next() => {
                     let ParquetCallbackWithName { callback, name } = result?;
-                    //self.process_callback(name, callback)?;
+                    self.process_callback(name, callback)?;
                 }
                 // duration
                 _ = tokio::time::sleep(self.rolling_policy.check_interval) => {
@@ -618,6 +490,10 @@ impl<T: Data + std::marker::Sync, R: RecordBatchBuilder<T>> AsyncMultipartParque
             multi_part_upload_id,
             completed_parts,
         } = file_to_finish;
+        if completed_parts.len() == 0 {
+            warn!("no parts to finish for file {}", filename);
+            return Ok(());
+        }
         let parts: Vec<_> = completed_parts
             .into_iter()
             .map(|content_id| UploadPart {

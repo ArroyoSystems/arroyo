@@ -50,6 +50,11 @@ impl SubtaskState {
     }
 }
 
+pub enum CheckpointingOrCommittingState {
+    Checkpointing(CheckpointState),
+    Committing(CommittingState),
+}
+
 pub struct CheckpointState {
     job_id: String,
     checkpoint_id: i64,
@@ -65,6 +70,10 @@ pub struct CheckpointState {
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
     operator_details: HashMap<String, OperatorCheckpointDetail>,
+}
+
+pub struct CommittingState {
+    subtask_to_commit: HashSet<(u32, String)>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

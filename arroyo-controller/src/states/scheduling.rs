@@ -5,7 +5,10 @@ use std::{
 };
 
 use arroyo_datastream::Program;
-use arroyo_rpc::grpc::{worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment};
+use arroyo_rpc::grpc::{
+    backend_data, worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TableWriteBehavior,
+    TaskAssignment,
+};
 use arroyo_types::WorkerId;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
@@ -308,20 +311,22 @@ impl State for Scheduling {
                     min_epoch = r.min_epoch
                 );
 
-                (r.epoch as u32, r.min_epoch as u32)
+                (r.epoch as u32, r.min_epoch as u32, r.needs_commits)
             });
 
         {
             // mark in-progress checkpoints as failed
-            let last_epoch = restore_epoch.map(|(epoch, _)| epoch).unwrap_or(0);
+            let last_epoch = restore_epoch.map(|(epoch, _, _)| epoch).unwrap_or(0);
             controller_queries::mark_failed()
                 .bind(&c, &ctx.config.id, &(last_epoch as i32 + 1))
                 .await
                 .unwrap();
         }
 
+        let mut commit_subtasks = vec![];
+
         // clear all of the epochs after the one we're loading so that we don't read in-progress data
-        if let Some((epoch, min_epoch)) = restore_epoch {
+        if let Some((epoch, min_epoch, needs_commit)) = restore_epoch {
             let mut metadata = StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch)
                 .await
                 .unwrap_or_else(|| panic!("epoch {} not found for job {}", epoch, ctx.config.id));
@@ -329,6 +334,33 @@ impl State for Scheduling {
                 return Err(ctx.retryable(self, "failed to prepare checkpoint for loading", e, 10));
             }
             metadata.min_epoch = min_epoch;
+            if needs_commit {
+                for operator_id in &metadata.operator_ids {
+                    let operator_metadata =
+                        StateBackend::load_operator_metadata(&ctx.config.id, operator_id, epoch)
+                            .await;
+                    let Some(operator_metadata) = operator_metadata else {
+                        panic!("operator metadata for {} not found for job {}", operator_id, ctx.config.id);
+                    };
+                    if operator_metadata.has_state
+                        && operator_metadata
+                            .tables
+                            .iter()
+                            .any(|table| TableWriteBehavior::CommitWrites == table.write_behavior())
+                    {
+                        // find the node with matching operator id
+                        let program_node = ctx
+                            .program
+                            .graph
+                            .node_weights()
+                            .find(|node| node.operator_id == *operator_id)
+                            .unwrap();
+                        for subtask_index in 0..program_node.parallelism {
+                            commit_subtasks.push((subtask_index as u32, operator_id.clone()))
+                        }
+                    }
+                }
+            }
             StateBackend::complete_checkpoint(metadata).await;
         }
 
@@ -349,7 +381,7 @@ impl State for Scheduling {
                     for i in 0..10 {
                         match c
                             .start_execution(Request::new(StartExecutionReq {
-                                restore_epoch: restore_epoch.map(|(epoch, _)| epoch),
+                                restore_epoch: restore_epoch.map(|(epoch, _, _)| epoch),
                                 tasks: assignments.clone(),
                             }))
                             .await
@@ -416,13 +448,14 @@ impl State for Scheduling {
             ctx.pool.clone(),
             ctx.config.clone(),
             ctx.program.clone(),
-            restore_epoch.map(|(epoch, _)| epoch).unwrap_or(0),
-            restore_epoch.map(|(_, min_epoch)| min_epoch).unwrap_or(0),
+            restore_epoch.map(|(epoch, _, _)| epoch).unwrap_or(0),
+            restore_epoch
+                .map(|(_, min_epoch, _)| min_epoch)
+                .unwrap_or(0),
             worker_connects,
         );
 
         ctx.job_controller = Some(controller);
-
         Ok(Transition::next(*self, Running {}))
     }
 }

@@ -212,7 +212,10 @@ impl RunningJobModel {
             }
         }
 
-        if self.state == JobState::Running && self.all_tasks_finished() && self.checkpoint_state.is_none(){
+        if self.state == JobState::Running
+            && self.all_tasks_finished()
+            && self.checkpoint_state.is_none()
+        {
             for w in &mut self.workers.values_mut() {
                 if let Err(e) = w.connect.job_finished(JobFinishedReq {}).await {
                     warn!(
@@ -505,6 +508,10 @@ impl JobController {
         self.model
             .start_checkpoint(&self.config.organization_id, &self.pool, then_stop)
             .await
+    }
+
+    pub async fn commit_saved_checkpoint(&mut self, checkpoint_state: CheckpointState) {
+        self.model.checkpoint_state = Some(checkpoint_state);
     }
 
     pub fn finished(&self) -> bool {

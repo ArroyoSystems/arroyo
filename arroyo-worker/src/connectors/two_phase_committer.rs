@@ -132,7 +132,7 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
         info!("waiting for commit message");
         if let Some(ControlMessage::Commit { epoch }) = ctx.control_rx.recv().await {
             self.handle_commit(epoch, ctx).await;
-        }else {
+        } else {
             warn!("no commit message received, not committing")
         }
     }

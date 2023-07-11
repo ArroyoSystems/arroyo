@@ -68,9 +68,9 @@ SET
 WHERE job_id = :job_id AND epoch >= :epoch;
 
 --! last_successful_checkpoint
-SELECT epoch, min_epoch
+SELECT epoch, min_epoch, state = 'committing' as needs_commits
 FROM checkpoints
-WHERE job_id = :job_id AND state = 'ready'
+WHERE job_id = :job_id AND (state = 'ready' or state = 'committing')
 ORDER BY epoch DESC
 LIMIT 1;
 
