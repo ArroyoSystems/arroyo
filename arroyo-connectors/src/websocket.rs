@@ -22,7 +22,7 @@ use super::Connector;
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/websocket/table.json");
 
 import_types!(schema = "../connector-schemas/websocket/table.json");
-const ICON: &str = include_str!("../resources/sse.svg");
+const ICON: &str = include_str!("../resources/websocket.svg");
 
 pub struct WebsocketConnector {}
 
