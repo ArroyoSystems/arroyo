@@ -1,0 +1,18 @@
+image:
+  file: .gitpod.Dockerfile
+
+tasks:
+  - init: cargo build
+    command: cargo watch -x run
+  - name: Set up arroyo database
+    command: |
+      until pg_isready ; do sleep 1; done
+      psql -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
+      createdb arroyo
+      refinery migrate -c dev/refinery.toml -p arroyo-api/migrations
+
+
+ports:
+  - name: postgres
+    port: 5432
+    onOpen: ignore
