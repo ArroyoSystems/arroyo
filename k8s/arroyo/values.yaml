@@ -6,7 +6,7 @@ imagePullSecrets: []
 
 # service-specific configuration
 api:
-  replicas: 1
+  replicas: 1x
   resources:
     limits: {}
     requests:
@@ -15,7 +15,7 @@ api:
   image:
     repository: ghcr.io/arroyosystems/arroyo-services
     pullPolicy: IfNotPresent
-    tag: "0.3.0"
+    tag: "0.4.0"
 
 controller:
   resources:
@@ -26,7 +26,7 @@ controller:
   image:
     repository: ghcr.io/arroyosystems/arroyo-services
     pullPolicy: IfNotPresent
-    tag: "0.3.0"
+    tag: "0.4.0"
 
 compiler:
   replicas: 1
@@ -38,7 +38,7 @@ compiler:
   image:
     repository: ghcr.io/arroyosystems/arroyo-compiler
     pullPolicy: IfNotPresent
-    tag: "0.3.0"
+    tag: "0.4.0"
 
 worker:
   resources:
@@ -50,7 +50,7 @@ worker:
   image:
     repository: ghcr.io/arroyosystems/arroyo-worker
     pullPolicy: IfNotPresent
-    tag: "0.3.0"
+    tag: "0.4.0"
 
 postgresql:
   # set to true to deploy a postgres instance in-cluster
