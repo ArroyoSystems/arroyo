@@ -54,6 +54,8 @@ jobs:
         with:
           toolchain: stable
           override: true
+      - name: Setup npm
+        uses: actions/setup-node@v3
       - name: Setup Postgres
         run: |
           sudo apt-get update
@@ -98,6 +100,11 @@ jobs:
         run: cargo fmt -- --check
       - name: Build
         run: cargo build --all-features
+      - name: Validate API
+        run: |
+          npm install --global ibm-openapi-validator
+          cd arroyo-openapi
+          lint-openapi --errors-only api-spec.json
       - name: Test
         run: cargo nextest run
       - name: Integ
