@@ -10,7 +10,6 @@ import {
   useBreakpointValue,
   useColorModeValue,
 } from '@chakra-ui/react';
-import { useEffect, useState } from 'react';
 import { useLinkClickHandler } from 'react-router-dom';
 import { GetJobsReq, JobStatus } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
@@ -49,22 +48,21 @@ export const Stat = (props: Props) => {
   );
 };
 
-
-
-const fetchJobs = async (client:ApiClient) => {
+const fetchJobs = async (client: ApiClient) => {
   const clientObj = await client();
   return (await clientObj.getJobs(new GetJobsReq({}))).jobs;
 };
 
 export function Home({ client }: { client: ApiClient }) {
-
   const { data: jobs } = useSWR('jobs', fetchJobs);
   let runningJobs = 0;
   let allJobs = 0;
   let failedJobs = 0;
 
   if (jobs) {
-    runningJobs = jobs.filter(j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting').length;
+    runningJobs = jobs.filter(
+      j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting'
+    ).length;
     allJobs = jobs.length;
     failedJobs = jobs.filter(j => j.state == 'Failed').length;
   }
