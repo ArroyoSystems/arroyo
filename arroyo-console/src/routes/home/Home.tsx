@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 import { useLinkClickHandler } from 'react-router-dom';
 import { GetJobsReq, JobStatus } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
+import useSWR from 'swr';
 
 interface HomeState {
   jobs: Array<JobStatus> | null;
@@ -48,27 +49,25 @@ export const Stat = (props: Props) => {
   );
 };
 
+
+
+const fetchJobs = async (client:ApiClient) => {
+  const clientObj = await client();
+  return (await clientObj.getJobs(new GetJobsReq({}))).jobs;
+};
+
 export function Home({ client }: { client: ApiClient }) {
-  const [state, setState] = useState<HomeState>({ jobs: null });
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const clientObj = await client();
-      const jobs = clientObj.getJobs(new GetJobsReq({}));
+  const { data: jobs } = useSWR('jobs', fetchJobs);
+  let runningJobs = "0";
+  let allJobs = "0";
+  let failedJobs = "0";
 
-      setState({
-        jobs: (await jobs).jobs,
-      });
-    };
-
-    fetchData();
-  }, []);
-
-  let runningJobs = state.jobs
-    ?.filter(j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting')
-    .length.toString();
-  let allJobs = state.jobs?.length.toString();
-  let failedJobs = state.jobs?.filter(j => j.state == 'Failed').length;
+  if (jobs) {
+    runningJobs = jobs.filter(j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting').length.toString();
+    allJobs = jobs.length.toString();
+    failedJobs = jobs.filter(j => j.state == 'Failed').length.toString();
+  }
 
   return (
     <Container py="8" flex="1">
