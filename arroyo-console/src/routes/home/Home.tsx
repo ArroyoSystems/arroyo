@@ -59,14 +59,14 @@ const fetchJobs = async (client:ApiClient) => {
 export function Home({ client }: { client: ApiClient }) {
 
   const { data: jobs } = useSWR('jobs', fetchJobs);
-  let runningJobs = "0";
-  let allJobs = "0";
-  let failedJobs = "0";
+  let runningJobs = 0;
+  let allJobs = 0;
+  let failedJobs = 0;
 
   if (jobs) {
-    runningJobs = jobs.filter(j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting').length.toString();
-    allJobs = jobs.length.toString();
-    failedJobs = jobs.filter(j => j.state == 'Failed').length.toString();
+    runningJobs = jobs.filter(j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting').length;
+    allJobs = jobs.length;
+    failedJobs = jobs.filter(j => j.state == 'Failed').length;
   }
 
   return (
