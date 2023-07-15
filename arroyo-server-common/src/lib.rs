@@ -51,7 +51,7 @@ pub fn init_logging(name: &str) -> Option<WorkerGuard> {
     let stdout_log = tracing_subscriber::fmt::layer()
         .with_line_number(false)
         .with_file(false)
-        .with_span_events(FmtSpan::NEW)
+        .with_span_events(FmtSpan::NONE)
         .with_filter(
             EnvFilter::builder()
                 .with_default_directive(LevelFilter::INFO.into())

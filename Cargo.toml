@@ -8,6 +8,7 @@ members = [
     "arroyo-macro",
     "arroyo-metrics",
     "arroyo-node",
+    "arroyo-openapi",
     "arroyo-rpc",
     "arroyo-server-common",
     "arroyo-sql",

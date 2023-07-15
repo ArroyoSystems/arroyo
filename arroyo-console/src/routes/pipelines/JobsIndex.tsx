@@ -200,7 +200,7 @@ function JobsTable({ client }: { client: ApiClient }) {
               ))}
               <Td textAlign="right">
                 <IconButton
-                  onClick={() => navigate('/pipelines/new?from=' + job.definitionId)}
+                  onClick={() => navigate('/pipelines/new?from=' + job.pipelineId)}
                   icon={<FiCopy fontSize="1.25rem" />}
                   variant="ghost"
                   aria-label="Duplicate"
