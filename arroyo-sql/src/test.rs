@@ -1,9 +1,10 @@
+use arrow_schema::DataType;
 use arroyo_connectors::{
     nexmark::{NexmarkConnector, NexmarkTable},
     Connector, EmptyConfig,
 };
 
-use crate::{parse_and_get_program, ArroyoSchemaProvider, SqlConfig};
+use crate::{parse_and_get_program, types::TypeDef, ArroyoSchemaProvider, SqlConfig};
 
 #[tokio::test]
 async fn test_parse() {
@@ -161,6 +162,9 @@ async fn test_udf() {
     schema_provider
         .add_rust_udf("fn my_sqr(x: i64) -> i64 { x * x }")
         .unwrap();
+
+    let def = schema_provider.udf_defs.get("my_sqr").unwrap();
+    assert_eq!(def.ret, TypeDef::DataType(DataType::Int64, false));
 
     let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
     parse_and_get_program(sql, schema_provider, SqlConfig::default())
