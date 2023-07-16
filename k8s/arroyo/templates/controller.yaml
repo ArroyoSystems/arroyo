@@ -6,7 +6,6 @@ metadata:
     {{- include "arroyo.labels" . | nindent 4 }}
     app: {{ include "arroyo.fullname" . }}-controller
 spec:
-spec:
   replicas: 1
   selector:
     matchLabels:
@@ -104,10 +103,12 @@ spec:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         readinessProbe:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         {{- if .Values.compiler.resources }}
         resources: {{- toYaml .Values.compiler.resources | nindent 10 }}
         {{- end }}

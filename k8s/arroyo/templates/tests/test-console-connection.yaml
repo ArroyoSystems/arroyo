@@ -11,5 +11,5 @@ spec:
     - name: wget
       image: busybox
       command: ['wget']
-      args: ['{{ include "arroyo.fullname" . }}-api:{{ .Values.service.port }}']
+      args: ['{{ include "arroyo.fullname" . }}-api:{{ .Values.service.apiPort }}']
   restartPolicy: Never

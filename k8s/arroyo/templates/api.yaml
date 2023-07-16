@@ -59,10 +59,12 @@ spec:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         readinessProbe:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         {{- if .Values.api.resources }}
         resources: {{- toYaml .Values.api.resources | nindent 12 }}
         {{- end }}
@@ -89,9 +91,9 @@ spec:
   ports:
     - name: http
       protocol: TCP
-      port: 80
+      port: {{ .Values.service.apiPort }}
       targetPort: 8000
     - name: grpc
       protocol: TCP
-      port: 8001
+      port: {{ .Values.service.grpcPort }}
       targetPort: 8001
