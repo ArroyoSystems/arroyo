@@ -53,6 +53,12 @@ export function ConnectionTester({
   let config = JSON.parse(JSON.stringify(state.table));
   delete config.__meta;
 
+  const isValidSQLTableName = (name: string | undefined) => {
+    // This is a very basic check and may not cover all cases.
+    // Update this according to your actual validation rules.
+    return name && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(name);
+  };
+
   const createRequest = new CreateConnectionTableReq({
     name: state.name,
     connector: connector.id,
@@ -146,10 +152,9 @@ export function ConnectionTester({
         </Alert>
       )}
       <Stack spacing={8} maxW={'md'}>
-        <FormControl>
+        <FormControl isInvalid={touched && (state.name === '' || !isValidSQLTableName(state.name))}>
           <FormLabel>Connection Name</FormLabel>
           <Input
-            isInvalid={touched && state.name == ''}
             type="text"
             value={state.name || ''}
             onChange={v => {
@@ -162,12 +167,29 @@ export function ConnectionTester({
             <dfn title="Names must start with a letter or _, contain only letters, numbers, and _s, and have fewer than 63 characters">
               valid SQL table name
             </dfn>
+            <Text
+              mt={2}
+              style={{
+                color:
+                  touched && (!state.name || !isValidSQLTableName(state.name)) ? 'red' : 'inherit',
+              }}
+            >
+              {touched && state.name === '' && "Table Name can't be empty."}
+              {touched &&
+                state.name !== '' &&
+                !isValidSQLTableName(state.name) &&
+                'Table Name is not a valid SQL table name.'}
+            </Text>
           </FormHelperText>
         </FormControl>
 
         <Text>Before creating the connection, we can validate that it is configured properly.</Text>
 
-        <Button variant="primary" isDisabled={testing} onClick={onClickTest}>
+        <Button
+          variant="primary"
+          isDisabled={testing || state.name === '' || !isValidSQLTableName(state.name)}
+          onClick={onClickTest}
+        >
           Test Connection
         </Button>
 
