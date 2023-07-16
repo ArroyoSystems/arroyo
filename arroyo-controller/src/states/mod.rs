@@ -503,7 +503,7 @@ pub async fn run_to_completion(
     scheduler: Arc<dyn Scheduler>,
 ) {
     let c = pool.get().await.unwrap();
-    let id = config.read().unwrap().definition_id;
+    let id = config.read().unwrap().pipeline_id;
     let mut program: Program = {
         let res = controller_queries::get_program()
             .bind(&c, &id)

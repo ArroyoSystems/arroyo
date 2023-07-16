@@ -6,7 +6,7 @@ ARG MOLD_ARCH
 ARG GIT_SHA
 
 RUN apt-get update && \
-    apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl cmake clang wget && \
+    apt-get -y install curl git pkg-config unzip build-essential libssl-dev openssl cmake clang wget && \
     # Install mold
     wget https://github.com/rui314/mold/releases/download/v1.11.0/mold-1.11.0-${MOLD_ARCH}-linux.tar.gz && \
     tar xvfz mold*.tar.gz && \
@@ -36,6 +36,7 @@ COPY arroyo-connectors src/arroyo-connectors
 COPY arroyo-api src/arroyo-api
 COPY arroyo-datastream src/arroyo-datastream
 COPY arroyo-node src/arroyo-node
+COPY arroyo-openapi src/arroyo-openapi
 COPY arroyo-sql src/arroyo-sql
 COPY arroyo-sql-macro src/arroyo-sql-macro
 COPY arroyo-sql-testing src/arroyo-sql-testing
