@@ -54,7 +54,7 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD }}
       - name: Login to GHCR
-        if: github.event_name != 'pull_request'
+        if:  ${{ github.event_name != 'pull_request' }}
         uses: docker/login-action@v1
         with:
           registry: ghcr.io
@@ -95,6 +95,7 @@ jobs:
           labels: ${{ steps.arroyo-docker.outputs.labels }}
   manifest:
     needs: build
+    if:  ${{ github.event_name != 'pull_request' }}
     strategy:
       matrix:
         image_type:
