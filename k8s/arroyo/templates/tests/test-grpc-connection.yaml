@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "arroyo.fullname" . }}-test-connection"
+  labels:
+    {{- include "arroyo.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: grpcurl
+      image: fullstorydev/grpcurl:v1.8.7-alpine
+      args: ['-plaintext', '{{ include "arroyo.fullname" . }}-api:{{ .Values.service.grpcPort }}','list']
+  restartPolicy: Never

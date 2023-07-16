@@ -141,7 +141,9 @@ securityContext: {}
 
 service:
   type: ClusterIP
-  port: 80
+  apiPort: 80
+  grpcPort: 8001
+
 
 apiResources: {}
 controllerResources: {}
