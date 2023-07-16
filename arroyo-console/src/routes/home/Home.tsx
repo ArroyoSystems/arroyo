@@ -89,8 +89,8 @@ export function Home({ client }: { client: ApiClient }) {
         </Stack>
         <Stack spacing={{ base: '5', lg: '6' }}>
           <SimpleGrid columns={{ base: 1, md: 3 }} gap="6">
-            <Stat label="Running Jobs" value={runningJobs} />
-            <Stat label="All Jobs" value={allJobs} />
+            <Stat label="Running Jobs" value={runningJobs?.toString()} />
+            <Stat label="All Jobs" value={allJobs?.toString()} />
             <Stat
               label="Failed Jobs"
               value={failedJobs?.toString()}
