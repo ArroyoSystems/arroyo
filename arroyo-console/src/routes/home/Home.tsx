@@ -54,7 +54,7 @@ const fetchJobs = async (client: ApiClient) => {
 };
 
 export function Home({ client }: { client: ApiClient }) {
-  const { data: jobs } = useSWR('jobs', fetchJobs);
+  const { data: jobs } = useSWR('jobs', () => fetchJobs(client));
   let runningJobs = 0;
   let allJobs = 0;
   let failedJobs = 0;
