@@ -9,7 +9,7 @@ Arroyo control plane. This is the easiest way to get a production quality Arroyo
 See the [docs](https://doc.arroyo.dev/deployment/kubernetes) for full information on how to use this helm chart.
 
 Each version of the helm chart is associated by default with a particular release of Arroyo. The latest release
-is [0.4.0](https://www.arroyo.dev/blog/arroyo-0-3-0).
+is [0.4.1](https://www.arroyo.dev/blog/arroyo-0-4-0).
 
 ## Quickstart
 

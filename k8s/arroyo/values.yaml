@@ -15,7 +15,7 @@ api:
   image:
     repository: ghcr.io/arroyosystems/arroyo-services
     pullPolicy: IfNotPresent
-    tag: "0.4.0"
+    tag: "0.4.1"
 
 controller:
   resources:
@@ -26,7 +26,7 @@ controller:
   image:
     repository: ghcr.io/arroyosystems/arroyo-services
     pullPolicy: IfNotPresent
-    tag: "0.4.0"
+    tag: "0.4.1"
 
 compiler:
   replicas: 1
@@ -38,7 +38,7 @@ compiler:
   image:
     repository: ghcr.io/arroyosystems/arroyo-compiler
     pullPolicy: IfNotPresent
-    tag: "0.4.0"
+    tag: "0.4.1"
 
 worker:
   resources:
@@ -50,7 +50,7 @@ worker:
   image:
     repository: ghcr.io/arroyosystems/arroyo-worker
     pullPolicy: IfNotPresent
-    tag: "0.4.0"
+    tag: "0.4.1"
 
 postgresql:
   # set to true to deploy a postgres instance in-cluster
