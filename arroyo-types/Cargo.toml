@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 bincode = "2.0.0-rc.3"
 serde = { version = "1.0", features = ["derive"] }
-
+arrow = "39.0.0"
+arrow-array = "39.0.0"

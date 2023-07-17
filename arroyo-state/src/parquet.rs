@@ -904,7 +904,7 @@ impl ParquetFlusher {
                         }
                         Some(ParquetQueueItem::Checkpoint(epoch)) => {
                             checkpoint_epoch = Some(epoch);
-                        }
+                        },
                         None => {
                             debug!("Parquet flusher closed");
                             return Ok(false);
@@ -941,6 +941,7 @@ impl ParquetFlusher {
                         min_routing_key: stats.min_routing_key,
                         max_routing_key: stats.max_routing_key,
                         max_timestamp_micros: to_micros(stats.max_timestamp),
+                        min_required_timestamp_micros: None,
                     });
             }
             let mut new_file_map: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> =

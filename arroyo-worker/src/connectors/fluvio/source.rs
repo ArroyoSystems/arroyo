@@ -240,6 +240,9 @@ where
                                 }
                             }
                         }
+                        Some(ControlMessage::Commit{..}) => {
+                            return Err(UserError::new("Fluvio source does not support committing", ""));
+                        }
                         None => {
 
                         }

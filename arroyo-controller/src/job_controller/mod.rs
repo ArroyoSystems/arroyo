@@ -7,7 +7,8 @@ use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
 use arroyo_datastream::Program;
 use arroyo_rpc::grpc::{
-    worker_grpc_client::WorkerGrpcClient, CheckpointReq, JobFinishedReq, StopExecutionReq, StopMode,
+    worker_grpc_client::WorkerGrpcClient, CheckpointReq, JobFinishedReq, StopExecutionReq,
+    StopMode, TaskCheckpointEventType,
 };
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{to_micros, WorkerId};
@@ -20,7 +21,7 @@ use tracing::{error, info, warn};
 
 use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
 
-use self::checkpointer::CheckpointState;
+use self::checkpointer::{CheckpointState, CheckpointingOrCommittingState, CommittingState};
 
 mod checkpointer;
 
@@ -71,7 +72,7 @@ pub struct RunningJobModel {
     job_id: String,
     state: JobState,
     program: Program,
-    checkpoint_state: Option<CheckpointState>,
+    checkpoint_state: Option<CheckpointingOrCommittingState>,
     epoch: u32,
     min_epoch: u32,
     last_checkpoint: Instant,
@@ -106,8 +107,21 @@ impl RunningJobModel {
                             job_id = self.job_id,
                         );
                     } else {
-                        checkpoint_state.checkpoint_event(c);
-                        checkpoint_state.update_db(pool).await?;
+                        match checkpoint_state {
+                            CheckpointingOrCommittingState::Checkpointing(checkpoint_state) => {
+                                checkpoint_state.checkpoint_event(c);
+                                checkpoint_state.update_db(pool).await?
+                            }
+                            CheckpointingOrCommittingState::Committing(committing_state) => {
+                                if matches!(c.event_type(), TaskCheckpointEventType::FinishedCommit)
+                                {
+                                    committing_state
+                                        .subtask_committed(c.operator_id, c.subtask_index)
+                                } else {
+                                    warn!("unexpected checkpoint event type {:?}", c.event_type())
+                                }
+                            }
+                        };
                     }
                 } else {
                     warn!(
@@ -127,6 +141,9 @@ impl RunningJobModel {
                             self.job_id,
                         );
                     } else {
+                        let CheckpointingOrCommittingState::Checkpointing(checkpoint_state)  = checkpoint_state else {
+                            bail!("Received checkpoint finished but not checkpointing");
+                        };
                         checkpoint_state.checkpoint_finished(c).await;
                         checkpoint_state.update_db(pool).await?;
                     }
@@ -198,7 +215,10 @@ impl RunningJobModel {
             }
         }
 
-        if self.state == JobState::Running && self.all_tasks_finished() {
+        if self.state == JobState::Running
+            && self.all_tasks_finished()
+            && self.checkpoint_state.is_none()
+        {
             for w in &mut self.workers.values_mut() {
                 if let Err(e) = w.connect.job_finished(JobFinishedReq {}).await {
                     warn!(
@@ -239,11 +259,12 @@ impl RunningJobModel {
                     timestamp: to_micros(SystemTime::now()),
                     min_epoch: self.min_epoch,
                     then_stop,
+                    is_commit: false,
                 }))
                 .await?;
         }
 
-        self.checkpoint_state = Some(
+        self.checkpoint_state = Some(CheckpointingOrCommittingState::Checkpointing(
             CheckpointState::start(
                 self.job_id.clone(),
                 organization_id,
@@ -253,7 +274,7 @@ impl RunningJobModel {
                 pool,
             )
             .await?,
-        );
+        ));
 
         Ok(())
     }
@@ -261,20 +282,59 @@ impl RunningJobModel {
     pub async fn finish_checkpoint_if_done(&mut self, pool: &Pool) -> anyhow::Result<()> {
         if self.checkpoint_state.as_ref().unwrap().done() {
             let state = self.checkpoint_state.take().unwrap();
-            let duration = state
-                .start_time
-                .elapsed()
-                .unwrap_or(Duration::ZERO)
-                .as_secs_f32();
-            state.finish(pool).await?;
-            self.last_checkpoint = Instant::now();
-            self.checkpoint_state = None;
-            info!(
-                message = "Finished checkpointing",
-                job_id = self.job_id,
-                epoch = self.epoch,
-                duration
-            );
+            match state {
+                CheckpointingOrCommittingState::Checkpointing(checkpointing) => {
+                    let committing_state = checkpointing.committing_state();
+                    let duration = checkpointing
+                        .start_time
+                        .elapsed()
+                        .unwrap_or(Duration::ZERO)
+                        .as_secs_f32();
+                    // shortcut if committing is unnecessary
+                    if committing_state.done() {
+                        checkpointing.finish(pool).await?;
+                        self.last_checkpoint = Instant::now();
+                        self.checkpoint_state = None;
+                        info!(
+                            message = "Finished checkpointing",
+                            job_id = self.job_id,
+                            epoch = self.epoch,
+                            duration
+                        );
+                    } else {
+                        checkpointing.pre_commit_finish(pool).await?;
+                        self.checkpoint_state =
+                            Some(CheckpointingOrCommittingState::Committing(committing_state));
+                        info!(
+                            message = "Committing checkpoint",
+                            job_id = self.job_id,
+                            epoch = self.epoch,
+                        );
+                        for worker in self.workers.values_mut() {
+                            worker
+                                .connect
+                                .checkpoint(Request::new(CheckpointReq {
+                                    timestamp: to_micros(SystemTime::now()),
+                                    min_epoch: self.min_epoch,
+                                    epoch: self.epoch,
+                                    then_stop: false,
+                                    is_commit: true,
+                                }))
+                                .await?;
+                        }
+                    }
+                }
+                CheckpointingOrCommittingState::Committing(committing) => {
+                    committing.finish(pool).await?;
+                    self.last_checkpoint = Instant::now();
+                    self.checkpoint_state = None;
+                    info!(
+                        message = "Finished committing checkpointing",
+                        job_id = self.job_id,
+                        epoch = self.epoch,
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -360,13 +420,15 @@ impl JobController {
         epoch: u32,
         min_epoch: u32,
         worker_connects: HashMap<WorkerId, WorkerGrpcClient<Channel>>,
+        commit_state: Option<CommittingState>,
     ) -> Self {
         Self {
             pool,
             model: RunningJobModel {
                 job_id: config.id.clone(),
                 state: JobState::Running,
-                checkpoint_state: None,
+                checkpoint_state: commit_state
+                    .map(|state| CheckpointingOrCommittingState::Committing(state)),
                 epoch,
                 min_epoch,
                 last_checkpoint: Instant::now(),
@@ -506,6 +568,25 @@ impl JobController {
             self.model.finish_checkpoint_if_done(&self.pool).await?;
         }
         Ok(self.model.checkpoint_state.is_none())
+    }
+
+    pub async fn send_commit_messages(&mut self) -> anyhow::Result<()> {
+        let Some(CheckpointingOrCommittingState::Committing(_committing)) = &self.model.checkpoint_state else {
+            bail!("should be committing")
+        };
+        for worker in self.model.workers.values_mut() {
+            worker
+                .connect
+                .checkpoint(Request::new(CheckpointReq {
+                    timestamp: to_micros(SystemTime::now()),
+                    min_epoch: self.model.min_epoch,
+                    epoch: self.model.epoch,
+                    then_stop: false,
+                    is_commit: true,
+                }))
+                .await?;
+        }
+        Ok(())
     }
 
     pub async fn wait_for_finish(&mut self, rx: &mut Receiver<JobMessage>) -> anyhow::Result<()> {
