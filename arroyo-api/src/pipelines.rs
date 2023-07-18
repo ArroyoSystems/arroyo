@@ -505,12 +505,37 @@ pub async fn delete_pipeline(
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
-
-    api_queries::delete_pipeline_rest()
+    let jobs: Vec<Job> = api_queries::get_pipeline_jobs()
         .bind(&client, &auth_data.organization_id, &pipeline_pub_id)
+        .all()
+        .await
+        .map_err(log_and_map_rest)?
+        .into_iter()
+        .map(|j| j.into())
+        .collect();
+
+    if jobs
+        .iter()
+        .any(|job| job.state != "Stopped" && job.state != "Finished" && job.state != "Failed")
+    {
+        return Err(ErrorResp {
+            status_code: StatusCode::BAD_REQUEST,
+            message: "Pipeline's jobs must be in a terminal state (stopped, finished, or failed) before it can be deleted"
+                .to_string(),
+        });
+    }
+
+    let count = api_queries::delete_pipeline_rest()
+        .bind(&client, &pipeline_pub_id, &auth_data.organization_id)
         .await
         .map_err(log_and_map_rest)?;
+
+    if count != 1 {
+        return Err(ErrorResp {
+            status_code: StatusCode::NOT_FOUND,
+            message: "Pipeline not found".to_string(),
+        });
+    }
 
     Ok(())
 }
