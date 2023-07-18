@@ -56,7 +56,7 @@ export function ConnectionTester({
   const isValidSQLTableName = (name: string | undefined) => {
     // This is a very basic check and may not cover all cases.
     // Update this according to your actual validation rules.
-    return name && /^[a-zA-Z][a-zA-Z0-9_]*$/.test(name);
+    return name && /^[_a-zA-Z][a-zA-Z0-9_]*$/.test(name);
   };
 
   const createRequest = new CreateConnectionTableReq({
