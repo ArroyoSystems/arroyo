@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-worker"
-version = "0.3.0"
+version = "0.4.1"
 edition = "2021"
 
 [features]
@@ -56,6 +56,8 @@ regex = "1.8.1"
 anyhow = "1.0.71"
 typify = "0.0.13"
 regress = "0.6.0"
+tokio-tungstenite = { version = "0.19", features = ["native-tls"] }
+fluvio = {version = "0.19", features = ["openssl"]}
 
 [dev-dependencies]
 test-case = "2.2"

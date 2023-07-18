@@ -7,7 +7,7 @@ use arrow_schema::DataType;
 use quote::{format_ident, quote};
 use schemars::schema::{RootSchema, Schema};
 use syn::{parse_str, Type};
-use tracing::log::warn;
+use tracing::warn;
 use typify::{TypeDetails, TypeSpace, TypeSpaceSettings};
 
 use crate::types::{StructDef, StructField, TypeDef};

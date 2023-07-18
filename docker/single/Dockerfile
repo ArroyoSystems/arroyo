@@ -8,7 +8,7 @@ ARG PROM_ARCH
 ARG GIT_SHA
 
 RUN apt-get update
-RUN apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
+RUN apt-get -y install git curl pkg-config unzip build-essential libssl-dev openssl \
     cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash
 
 RUN wget https://github.com/rui314/mold/releases/download/v1.11.0/mold-1.11.0-${MOLD_ARCH}-linux.tar.gz && \
@@ -61,6 +61,7 @@ COPY arroyo-connectors arroyo-connectors
 COPY arroyo-api arroyo-api
 COPY arroyo-datastream arroyo-datastream
 COPY arroyo-node arroyo-node
+COPY arroyo-openapi arroyo-openapi
 COPY arroyo-sql arroyo-sql
 COPY arroyo-sql-macro arroyo-sql-macro
 COPY arroyo-sql-testing arroyo-sql-testing
@@ -69,6 +70,7 @@ COPY arroyo-console arroyo-console
 COPY integ integ
 COPY docker/refinery.toml refinery.toml
 COPY connector-schemas connector-schemas
+COPY arroyo-openapi arroyo-openapi
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock

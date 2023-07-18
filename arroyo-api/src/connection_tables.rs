@@ -191,30 +191,32 @@ pub(crate) async fn get<C: GenericClient>(
 
     Ok(tables
         .into_iter()
-        .map(|t| {
-            let connector = connector_for_type(&t.connector).unwrap_or_else(|| {
-                panic!(
-                    "invalid connector in saved ConnectionTable: {}",
-                    t.connector
-                )
-            });
+        .filter_map(|t| {
+            let Some(connector) = connector_for_type(&t.connector) else {
+                warn!("invalid connector {} in saved ConnectionTable {}", t.connector, t.id);
+                return None;
+            };
 
             let connection = get_connection(&t, &*connector);
 
             let table = serde_json::to_string(&t.config).unwrap();
             let schema = t.schema.map(|s| serde_json::from_value(s).unwrap());
-            let schema = connector
-                .get_schema(
-                    &connection
-                        .as_ref()
-                        .map(|t| t.config.as_str())
-                        .unwrap_or("{}"),
-                    &table,
-                    schema.as_ref(),
-                )
-                .unwrap_or_else(|e| panic!("Invalid connector config for {}: {:?}", t.id, e));
+            let schema = match connector.get_schema(
+                &connection
+                    .as_ref()
+                    .map(|t| t.config.as_str())
+                    .unwrap_or("{}"),
+                &table,
+                schema.as_ref(),
+            ) {
+                Ok(schema) => schema,
+                Err(e) => {
+                    warn!("Invalid connector config for {}: {:?}", t.id, e);
+                    return None;
+                }
+            };
 
-            ConnectionTable {
+            Some(ConnectionTable {
                 id: t.id,
                 name: t.name,
                 connection,
@@ -223,7 +225,7 @@ pub(crate) async fn get<C: GenericClient>(
                 config: table,
                 schema,
                 consumers: t.consumer_count as i32,
-            }
+            })
         })
         .collect())
 }

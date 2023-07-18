@@ -2458,7 +2458,8 @@ impl RustUdfExpression {
                 || self
                     .args
                     .iter()
-                    .any(|(t, e)| t.is_optional() && !e.nullable()),
+                    // nullable if there are non-null UDF params with nullable arguments
+                    .any(|(t, e)| !t.is_optional() && e.nullable()),
         )
     }
 }

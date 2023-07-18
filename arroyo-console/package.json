@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "format": "npx prettier --write src/ && npx eslint --fix --ext .js,.jsx,.ts,.tsx src",
     "check": "npx prettier --check src/ && npx eslint --ext .js,.jsx,.ts,.tsx src",
-    "generate": "PATH=$PATH:$(pwd)/node_modules/.bin protoc -I $(pwd)/../arroyo-rpc/proto --es_out src/gen --es_opt target=ts --connect-web_out src/gen  --connect-web_opt target=ts api.proto"
+    "generate": "PATH=$PATH:$(pwd)/node_modules/.bin protoc -I $(pwd)/../arroyo-rpc/proto --es_out src/gen --es_opt target=ts --connect-web_out src/gen  --connect-web_opt target=ts api.proto",
+    "openapi": "cargo build && npx openapi-typescript $(pwd)/../arroyo-openapi/api-spec.json --output $(pwd)/src/gen/api-types.ts"
   },
   "dependencies": {
     "@babel/core": "^7.22.5",
@@ -42,6 +43,7 @@
     "metrics-graphics": "3.0.0-beta1",
     "monaco-editor": "^0.34.1",
     "monaco-sql-languages": "^0.9.5",
+    "openapi-typescript": "^6.2.8",
     "prop-types": "^15.8.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

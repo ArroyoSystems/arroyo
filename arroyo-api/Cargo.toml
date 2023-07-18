@@ -1,7 +1,8 @@
 [package]
 name = "arroyo-api"
-version = "0.3.0"
+version = "0.4.1"
 edition = "2021"
+license = "MIT OR Apache-2.0"
 
 [features]
 default = []
@@ -36,8 +37,12 @@ bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = {version = "0.6", features = ["serde-1"]}
 
 http = "0.2"
-tower-http = {version = "0.4", features = ["trace", "fs", "cors"]}
-axum = "0.6.12"
+tower-http = {version = "0.4", features = ["trace", "fs", "cors", "validate-request", "auth"]}
+axum = {version = "0.6.12", features = ["headers"]}
+axum-extra = "0.7.4"
+thiserror = "1.0.40"
+utoipa = "3"
+utoipa-swagger-ui = { version = "3", features = ["axum"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -80,3 +85,4 @@ regress = "0.6.0"
 cornucopia = { version = "0.9" }
 postgres = "0.19.5"
 arroyo-types = { path = "../arroyo-types" }
+utoipa = "3"

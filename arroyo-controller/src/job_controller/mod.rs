@@ -486,10 +486,15 @@ impl JobController {
         Ok(())
     }
 
-    pub async fn checkpoint(&mut self, then_stop: bool) -> anyhow::Result<()> {
-        self.model
-            .start_checkpoint(&self.config.organization_id, &self.pool, then_stop)
-            .await
+    pub async fn checkpoint(&mut self, then_stop: bool) -> anyhow::Result<bool> {
+        if self.model.checkpoint_state.is_none() {
+            self.model
+                .start_checkpoint(&self.config.organization_id, &self.pool, then_stop)
+                .await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     pub fn finished(&self) -> bool {

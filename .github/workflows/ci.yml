@@ -19,6 +19,21 @@ jobs:
         run: |
           cd arroyo-console
           pnpm check
+
+  check-dockerfiles:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v3
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@ec02537da5712d66d4d50a0f33b7eb52773b5ed1
+        with:
+          ruby-version: '3.1'
+      - name: Install dependencies
+        run: gem install toml-rb
+      - name: Check Dockerfiles
+        run: ruby docker/check_dockerfiles.rb
+
   build-rust:
     runs-on: ubuntu-latest-16-cores
     env:
@@ -39,6 +54,8 @@ jobs:
         with:
           toolchain: stable
           override: true
+      - name: Setup npm
+        uses: actions/setup-node@v3
       - name: Setup Postgres
         run: |
           sudo apt-get update
@@ -83,6 +100,11 @@ jobs:
         run: cargo fmt -- --check
       - name: Build
         run: cargo build --all-features
+      - name: Validate API
+        run: |
+          npm install --global ibm-openapi-validator
+          cd arroyo-openapi
+          lint-openapi --errors-only api-spec.json
       - name: Test
         run: cargo nextest run
       - name: Integ

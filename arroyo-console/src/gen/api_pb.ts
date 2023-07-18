@@ -2876,9 +2876,9 @@ export class JobStatus extends Message<JobStatus> {
   runId = protoInt64.zero;
 
   /**
-   * @generated from field: string definition_id = 9;
+   * @generated from field: string pipeline_id = 9;
    */
-  definitionId = "";
+  pipelineId = "";
 
   /**
    * @generated from field: optional uint64 start_time = 4;
@@ -2923,7 +2923,7 @@ export class JobStatus extends Message<JobStatus> {
     { no: 8, name: "running_desired", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "state", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 11, name: "run_id", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 9, name: "definition_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "pipeline_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "start_time", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
     { no: 5, name: "finish_time", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
     { no: 6, name: "tasks", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
