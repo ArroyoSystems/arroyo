@@ -17,7 +17,8 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
-use parquet::file::properties::WriterProperties;
+use parquet::basic::ZstdLevel;
+use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use prost::Message;
 use rusoto_core::{ByteStream, Region, RusotoError};
 use rusoto_s3::{
@@ -880,7 +881,8 @@ impl ParquetFlusher {
         record_batch: arrow_array::RecordBatch,
     ) -> Result<usize> {
         let props = WriterProperties::builder()
-            .set_compression(parquet::basic::Compression::SNAPPY)
+            .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::default()))
+            .set_statistics_enabled(EnabledStatistics::None)
             .build();
         let cursor = Vec::new();
         let mut writer = ArrowWriter::try_new(cursor, record_batch.schema(), Some(props)).unwrap();

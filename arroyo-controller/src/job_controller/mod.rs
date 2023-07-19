@@ -109,7 +109,7 @@ impl RunningJobModel {
                     } else {
                         match checkpoint_state {
                             CheckpointingOrCommittingState::Checkpointing(checkpoint_state) => {
-                                checkpoint_state.checkpoint_event(c);
+                                checkpoint_state.checkpoint_event(c)?;
                                 checkpoint_state.update_db(pool).await?
                             }
                             CheckpointingOrCommittingState::Committing(committing_state) => {

@@ -1,5 +1,6 @@
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData, time::SystemTime};
+use std::{collections::HashMap, marker::PhantomData, time::SystemTime};
 
+use crate::engine::Context;
 use anyhow::Result;
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::{
@@ -7,15 +8,9 @@ use arroyo_rpc::{
     CheckpointEvent, ControlMessage,
 };
 use arroyo_state::tables::GlobalKeyedState;
+use arroyo_types::{Data, Key, Record, TaskInfo};
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
-use typify::import_types;
-
-import_types!(schema = "../connector-schemas/parquet/table.json");
-
-use crate::engine::Context;
-use arroyo_types::*;
+use tracing::warn;
 
 #[derive(StreamNode)]
 pub struct TwoPhaseCommitterOperator<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> {
@@ -133,7 +128,6 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
     }
 
     async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>) {
-        info!("waiting for commit message");
         if let Some(ControlMessage::Commit { epoch }) = ctx.control_rx.recv().await {
             self.handle_commit(epoch, ctx).await;
         } else {
@@ -146,7 +140,6 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
         checkpoint_barrier: &arroyo_types::CheckpointBarrier,
         ctx: &mut crate::engine::Context<(), ()>,
     ) {
-        info!("received checkpoint barrier {:?}", checkpoint_barrier);
         let (recovery_data, pre_commits) = self
             .committer
             .checkpoint(&ctx.task_info, checkpoint_barrier.then_stop)
@@ -190,7 +183,6 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
         control_message: arroyo_rpc::ControlMessage,
         ctx: &mut Context<(), ()>,
     ) {
-        info!("received control message {:?}", control_message);
         match control_message {
             arroyo_rpc::ControlMessage::Checkpoint(_) => warn!("shouldn't receive checkpoint"),
             arroyo_rpc::ControlMessage::Stop { mode: _ } => warn!("shouldn't receive stop"),

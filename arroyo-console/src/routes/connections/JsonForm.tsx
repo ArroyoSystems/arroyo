@@ -283,7 +283,7 @@ export function FormInner({
                     </Stack>
                   </fieldset>
                 );
-              } else {
+              } else if (values[key] > 0) {
                 return (
                   <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
                     <legend

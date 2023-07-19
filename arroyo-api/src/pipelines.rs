@@ -175,7 +175,7 @@ pub(crate) async fn create_pipeline<'a>(
         )));
     }
 
-    set_parallelism(&mut program, 4);
+    set_parallelism(&mut program, 1);
 
     if is_preview {
         for node in program.graph.node_weights_mut() {

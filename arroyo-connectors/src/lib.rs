@@ -26,11 +26,11 @@ use websocket::WebsocketConnector;
 use self::kafka::KafkaConnector;
 
 pub mod blackhole;
+pub mod filesystem;
 pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
 pub mod nexmark;
-pub mod parquet;
 pub mod sse;
 pub mod websocket;
 
@@ -45,7 +45,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("blackhole", Box::new(BlackholeConnector {}));
     m.insert("websocket", Box::new(WebsocketConnector {}));
     m.insert("fluvio", Box::new(FluvioConnector {}));
-    m.insert("parquet", Box::new(parquet::ParquetConnector {}));
+    m.insert("filesystem", Box::new(filesystem::FileSystemConnector {}));
 
     m
 }

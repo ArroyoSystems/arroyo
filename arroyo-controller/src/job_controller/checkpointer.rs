@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::queries::controller_queries;
+use anyhow::bail;
 use arroyo_datastream::Program;
 use arroyo_rpc::grpc::{
     self,
@@ -182,8 +183,16 @@ impl CheckpointState {
         })
     }
 
-    pub fn checkpoint_event(&mut self, c: TaskCheckpointEventReq) {
+    pub fn checkpoint_event(&mut self, c: TaskCheckpointEventReq) -> anyhow::Result<()> {
         debug!(message = "Checkpoint event", checkpoint_id = self.checkpoint_id, event_type = ?c.event_type(), subtask_index = c.subtask_index, operator_id = ?c.operator_id);
+
+        if grpc::TaskCheckpointEventType::FinishedCommit == c.event_type() {
+            bail!(
+                "shouldn't receive finished commit {:?} while checkpointing",
+                c
+            );
+        }
+
         // This is all for the UI
         self.operator_details
             .entry(c.operator_id.clone())
@@ -225,10 +234,6 @@ impl CheckpointState {
                 } as i32,
             });
 
-        if grpc::TaskCheckpointEventType::FinishedCommit == c.event_type() {
-            panic!("shouldn't receive finished commits while checkpointing");
-        }
-
         // this is for the actual checkpoint management
         self.tasks
             .entry(c.operator_id.clone())
@@ -236,6 +241,7 @@ impl CheckpointState {
             .entry(c.subtask_index)
             .or_insert_with(SubtaskState::new)
             .event(c);
+        Ok(())
     }
 
     pub async fn checkpoint_finished(&mut self, c: TaskCheckpointCompletedReq) {

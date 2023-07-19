@@ -7,32 +7,34 @@ use typify::import_types;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{serialization_mode, Connection, ConnectionType, EmptyConfig, OperatorConfig};
+use crate::{
+    pull_opt, serialization_mode, Connection, ConnectionType, EmptyConfig, OperatorConfig,
+};
 
 use super::Connector;
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/parquet/table.json");
+const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/filesystem/table.json");
 
-import_types!(schema = "../connector-schemas/parquet/table.json");
+import_types!(schema = "../connector-schemas/filesystem/table.json");
 const ICON: &str = include_str!("../resources/parquet.svg");
 
-pub struct ParquetConnector {}
+pub struct FileSystemConnector {}
 
-impl Connector for ParquetConnector {
+impl Connector for FileSystemConnector {
     type ConfigT = EmptyConfig;
 
-    type TableT = ParquetTable;
+    type TableT = FileSystemTable;
 
     fn name(&self) -> &'static str {
-        "parquet"
+        "filesystem"
     }
 
     fn metadata(&self) -> grpc::api::Connector {
         grpc::api::Connector {
-            id: "parquet".to_string(),
-            name: "Parquet Sink".to_string(),
+            id: "filesystem".to_string(),
+            name: "FileSystem Sink".to_string(),
             icon: ICON.to_string(),
-            description: "Write to Parquet".to_string(),
+            description: "Write to a filesystem (S3)".to_string(),
             enabled: true,
             source: false,
             sink: true,
@@ -76,7 +78,11 @@ impl Connector for ParquetConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let description = format!("Parquet<>");
+        let (description, operator) = match &table.format_settings {
+            Some(FormatSettings::Parquet { .. }) => ("FileSystem<Parquet>".to_string(), "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"),
+            Some(FormatSettings::Json {  }) => ("FileSystem<JSON>".to_string(), "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"),
+            None => bail!("have to have some format settings"),
+        };
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -91,9 +97,8 @@ impl Connector for ParquetConnector {
             connection_type: ConnectionType::Sink,
             schema: schema
                 .map(|s| s.to_owned())
-                .ok_or_else(|| anyhow!("No schema defined for SSE source"))?,
-            operator: "connectors::parquet::ParquetSink::<#in_k, #in_t, connectors::parquet::BufferingMultipartWriter<connectors::parquet::BufferedRecordBatchBuilder<#in_tRecordBatchBuilder>>>"
-                .to_string(),
+                .ok_or_else(|| anyhow!("No schema defined for FileSystemSink"))?,
+            operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
@@ -105,12 +110,15 @@ impl Connector for ParquetConnector {
         opts: &mut std::collections::HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let write_target = if let (Some(s3_bucket), Some(s3_directory)) =
-            (opts.remove("s3_bucket"), opts.remove("s3_directory"))
-        {
+        let write_target = if let (Some(s3_bucket), Some(s3_directory), Some(aws_region)) = (
+            opts.remove("s3_bucket"),
+            opts.remove("s3_directory"),
+            opts.remove("aws_region"),
+        ) {
             Destination::S3Bucket {
                 s3_bucket,
                 s3_directory,
+                aws_region,
             }
         } else {
             bail!("Only s3 targets are supported currently")
@@ -144,30 +152,35 @@ impl Connector for ParquetConnector {
             target_file_size,
             target_part_size,
         });
-
-        let compression = opts
-            .remove("parquet_compression")
-            .map(|value| Compression::try_from(value).map_err(|e| anyhow::anyhow!(e)))
-            .transpose()?;
-        let row_batch_size = opts
-            .remove("parquet_row_batch_size")
-            .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
-            .transpose()?;
-        let row_group_size = opts
-            .remove("parquet_row_group_size")
-            .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
-            .transpose()?;
-        let format_settings = Some(FormatSettings {
-            compression,
-            row_batch_size,
-            row_group_size,
-        });
+        let format_settings = match pull_opt("fileformat", opts)?.as_str() {
+            "parquet" => {
+                let compression = opts
+                    .remove("parquet_compression")
+                    .map(|value| Compression::try_from(value).map_err(|e| anyhow::anyhow!(e)))
+                    .transpose()?;
+                let row_batch_size = opts
+                    .remove("parquet_row_batch_size")
+                    .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
+                    .transpose()?;
+                let row_group_size = opts
+                    .remove("parquet_row_group_size")
+                    .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
+                    .transpose()?;
+                Some(FormatSettings::Parquet {
+                    compression,
+                    row_batch_size,
+                    row_group_size,
+                })
+            }
+            "json" => Some(FormatSettings::Json {}),
+            other => bail!("Unsupported format: {}", other),
+        };
 
         self.from_config(
             None,
             name,
             EmptyConfig {},
-            ParquetTable {
+            FileSystemTable {
                 write_target,
                 file_settings,
                 format_settings,

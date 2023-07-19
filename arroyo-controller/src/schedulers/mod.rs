@@ -182,7 +182,6 @@ impl Scheduler for ProcessScheduler {
                     .env(JOB_ID_ENV, &job_id)
                     .env(NODE_ID_ENV, format!("{}", 1))
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
-                    .env("RUST_BACKTRACE", "1")
                     .kill_on_drop(true)
                     .spawn()
                     .unwrap();

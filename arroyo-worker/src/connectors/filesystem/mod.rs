@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
-    io::Write,
     marker::PhantomData,
     pin::Pin,
     sync::Arc,
@@ -9,7 +8,6 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use arrow_array::RecordBatch;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::{stream::FuturesUnordered, Future};
@@ -20,130 +18,103 @@ use object_store::{
     path::Path,
     CredentialProvider, MultipartId, ObjectStore, UploadPart,
 };
-use parquet::{
-    arrow::ArrowWriter,
-    basic::{GzipLevel, ZstdLevel},
-    file::properties::WriterProperties,
-};
 use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{info, warn};
+use tracing::warn;
 use typify::import_types;
 
-import_types!(schema = "../connector-schemas/parquet/table.json");
+import_types!(schema = "../connector-schemas/filesystem/table.json");
 
 use arroyo_types::*;
+pub mod json;
+pub mod parquet;
+
+use self::{
+    json::{JsonWriter, PassThrough},
+    parquet::{FixedSizeRecordBatchBuilder, RecordBatchBufferingWriter},
+};
 
 use super::{
     two_phase_committer::{TwoPhaseCommitter, TwoPhaseCommitterOperator},
     OperatorConfig,
 };
 
-pub struct ParquetSink<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static> {
-    sender: Sender<ParquetMessages<T>>,
+pub struct FileSystemSink<
+    K: Key,
+    T: Data + Sync,
+    R: MultiPartWriter<InputType = T> + Send + 'static,
+> {
+    sender: Sender<FileSystemMessages<T>>,
     checkpoint_receiver: Receiver<CheckpointData<T>>,
     _ts: PhantomData<(K, R)>,
 }
+pub type ParquetFileSystemSink<K, T, R> = FileSystemSink<
+    K,
+    T,
+    BatchMultipartWriter<FixedSizeRecordBatchBuilder<R>, RecordBatchBufferingWriter<R>>,
+>;
 
-impl<
-        K: Key,
-        T: Data + Sync,
-        R: MultiPartWriter<InputType = T, ConfigT = ParquetWriterProperties> + Send + 'static,
-    > ParquetSink<K, T, R>
+pub type JsonFileSystemSink<K, T> =
+    FileSystemSink<K, T, BatchMultipartWriter<PassThrough<T>, JsonWriter<T>>>;
+
+impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
+    FileSystemSink<K, T, R>
 {
-    pub fn generic_from_config(config: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
+    pub fn from_config(config_str: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
         let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for Parquet");
-        let table: ParquetTable =
-            serde_json::from_value(config.table).expect("Invalid table config for Parquet");
-        let write_target = table.write_target;
-        let file_settings = table.file_settings.unwrap_or(FileSettings {
-            inactivity_rollover_seconds: None,
-            max_parts: None,
-            rollover_seconds: None,
-            target_file_size: None,
-            target_part_size: None,
-        });
-        let format_settings = table.format_settings.unwrap_or(FormatSettings {
-            compression: None,
-            row_batch_size: None,
-            row_group_size: None,
-        });
-        let committer = match write_target {
+            serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
+        let table: FileSystemTable =
+            serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
+        let (object_store, path): (Box<dyn ObjectStore>, String) = match table.write_target.clone()
+        {
             Destination::LocalFilesystem { local_directory } => {
-                Self::new_local(&local_directory, file_settings, format_settings)
+                (Box::new(LocalFileSystem::new()), local_directory)
             }
             Destination::S3Bucket {
                 s3_bucket,
                 s3_directory,
-            } => Self::new_s3(&s3_bucket, &s3_directory, file_settings, format_settings),
+                aws_region,
+            } => {
+                (
+                    Box::new(
+                        // use default credentials
+                        AmazonS3Builder::from_env()
+                            .with_bucket_name(s3_bucket)
+                            .with_credentials(Arc::new(S3Credentialing::try_new().unwrap()))
+                            .with_region(aws_region)
+                            .build()
+                            .unwrap(),
+                    ),
+                    s3_directory,
+                )
+            }
         };
-        TwoPhaseCommitterOperator::new(committer)
-    }
 
-    pub fn new_local(
-        local_path: &str,
-        file_settings: FileSettings,
-        format_settings: FormatSettings,
-    ) -> Self {
-        Self::new_from_object_store(
-            Box::new(LocalFileSystem::new()),
-            local_path,
-            file_settings,
-            format_settings,
-        )
-    }
-
-    pub fn new_s3(
-        bucket: &str,
-        key: &str,
-        file_settings: FileSettings,
-        format_settings: FormatSettings,
-    ) -> Self {
-        let object_store = Box::new(
-            // use default credentialsp
-            AmazonS3Builder::from_env()
-                .with_bucket_name(bucket)
-                .with_credentials(Arc::new(S3Credentialing::try_new().unwrap()))
-                .with_region("us-west-2")
-                .build()
-                .unwrap(),
-        );
-        Self::new_from_object_store(object_store, key, file_settings, format_settings)
-    }
-
-    fn new_from_object_store(
-        object_store: Box<dyn ObjectStore>,
-        path: &str,
-        file_settings: FileSettings,
-        format_settings: FormatSettings,
-    ) -> Self {
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
         let path = path.into();
+        let mut writer = AsyncMultipartFileSystemWriter::<T, R>::new(
+            path,
+            Arc::new(object_store),
+            receiver,
+            checkpoint_sender,
+            table.file_settings.clone().unwrap(),
+            table,
+        );
         tokio::spawn(async move {
-            let mut writer = AsyncMultipartParquetWriter::<T, R>::new(
-                path,
-                Arc::new(object_store),
-                receiver,
-                checkpoint_sender,
-                file_settings,
-                format_settings,
-            );
             writer.run().await.unwrap();
         });
-
-        Self {
+        TwoPhaseCommitterOperator::new(Self {
             sender,
             checkpoint_receiver,
             _ts: PhantomData,
-        }
+        })
     }
 }
 
 #[derive(Debug)]
-enum ParquetMessages<T: Data> {
+enum FileSystemMessages<T: Data> {
     Data {
         value: T,
         time: SystemTime,
@@ -242,26 +213,25 @@ impl CredentialProvider for S3Credentialing {
     }
 }
 
-struct AsyncMultipartParquetWriter<T: Data + Sync, R: MultiPartWriter> {
+struct AsyncMultipartFileSystemWriter<T: Data + Sync, R: MultiPartWriter> {
     path: Path,
     current_writer_name: String,
     max_file_index: usize,
     subtask_id: usize,
     object_store: Arc<dyn ObjectStore>,
     writers: HashMap<String, R>,
-    receiver: Receiver<ParquetMessages<T>>,
+    receiver: Receiver<FileSystemMessages<T>>,
     checkpoint_sender: Sender<CheckpointData<T>>,
     futures: FuturesUnordered<BoxedTryFuture<MultipartCallbackWithName>>,
     files_to_finish: Vec<FileToFinish>,
-    properties: ParquetWriterProperties,
+    properties: FileSystemTable,
     rolling_policy: RollingPolicy,
 }
 
 #[async_trait]
 pub trait MultiPartWriter {
     type InputType: Data;
-    type ConfigT;
-    fn new(object_store: Arc<dyn ObjectStore>, path: Path, config: Self::ConfigT) -> Self;
+    fn new(object_store: Arc<dyn ObjectStore>, path: Path, config: &FileSystemTable) -> Self;
 
     fn name(&self) -> String;
 
@@ -289,6 +259,8 @@ pub trait MultiPartWriter {
     fn close(&mut self) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>>;
 
     fn stats(&self) -> Option<MultiPartWriterStats>;
+
+    fn get_finished_file(&mut self) -> FileToFinish;
 }
 
 async fn from_checkpoint(
@@ -396,13 +368,6 @@ async fn from_checkpoint(
     }))
 }
 
-#[derive(Debug, Clone)]
-pub struct ParquetWriterProperties {
-    parquet_options: WriterProperties,
-    row_batch_size: usize,
-    target_part_size: usize,
-}
-
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct FileToFinish {
     filename: String,
@@ -474,30 +439,19 @@ pub struct MultiPartWriterStats {
     first_write_at: Instant,
 }
 
-impl<T, R> AsyncMultipartParquetWriter<T, R>
+impl<T, R> AsyncMultipartFileSystemWriter<T, R>
 where
     T: Data + std::marker::Sync,
-    R: MultiPartWriter<InputType = T, ConfigT = ParquetWriterProperties>,
+    R: MultiPartWriter<InputType = T>,
 {
     fn new(
         path: Path,
         object_store: Arc<dyn ObjectStore>,
-        receiver: Receiver<ParquetMessages<T>>,
+        receiver: Receiver<FileSystemMessages<T>>,
         checkpoint_sender: Sender<CheckpointData<T>>,
         file_settings: FileSettings,
-        format_settings: FormatSettings,
+        writer_properties: FileSystemTable,
     ) -> Self {
-        let row_batch_size = format_settings.row_batch_size.unwrap_or(10_000) as usize;
-        let parquet_options = format_settings_to_parquet_writer_options(format_settings);
-        let target_part_size = file_settings
-            .target_part_size
-            .unwrap_or(5 * 1024 * 1024)
-            .max(5 * 1024 * 1024) as usize;
-        let properties = ParquetWriterProperties {
-            parquet_options,
-            row_batch_size,
-            target_part_size,
-        };
         Self {
             path,
             current_writer_name: "".to_string(),
@@ -509,7 +463,7 @@ where
             checkpoint_sender,
             futures: FuturesUnordered::new(),
             files_to_finish: Vec::new(),
-            properties,
+            properties: writer_properties,
             rolling_policy: RollingPolicy::from_file_settings(file_settings),
         }
     }
@@ -524,15 +478,15 @@ where
             tokio::select! {
                 Some(message) = self.receiver.recv() => {
                     match message {
-                        ParquetMessages::Data{value, time} => {
+                        FileSystemMessages::Data{value, time} => {
                             let Some(writer) = self.writers.get_mut(&self.current_writer_name) else {
-                                bail!("expect the current parquet writer to be initialized");
+                                bail!("expect the current writer to be initialized");
                             };
                             if let Some(future) = writer.insert_value(value, time).await? {
                                 self.futures.push(future);
                             }
                         },
-                        ParquetMessages::Init {max_file_index, subtask_id, recovered_files } => {
+                        FileSystemMessages::Init {max_file_index, subtask_id, recovered_files } => {
                             if let Some(writer) = self.writers.get_mut(&self.current_writer_name) {
                                 if let Some(future) = writer.close()? {
                                     self.futures.push(future);
@@ -540,12 +494,7 @@ where
                             }
                             self.max_file_index = max_file_index;
                             self.subtask_id = subtask_id;
-                            let new_writer = R::new(
-                                self.object_store.clone(),
-                                // take base path, add max_file_index and subtask_id, plus parquet suffix
-                                format!("{}/{}-{}.parquet", self.path, self.max_file_index, self.subtask_id).into(),
-                                self.properties.clone(),
-                            );
+                            let new_writer = self.new_writer();
                             self.current_writer_name = new_writer.name();
                             self.writers.insert(new_writer.name(), new_writer);
                             for recovered_file in recovered_files {
@@ -556,7 +505,7 @@ where
 
                                 for value in recovered_file.buffered_data {
                                     let Some(writer) = self.writers.get_mut(&self.current_writer_name) else {
-                                        bail!("expect the current parquet writer to be initialized");
+                                        bail!("expect the current writer to be initialized");
                                     };
                                     if let Some(future) = writer.insert_value(value, SystemTime::now()).await? {
                                         self.futures.push(future);
@@ -564,7 +513,7 @@ where
                                 }
                             }
                         },
-                        ParquetMessages::Checkpoint { subtask_id, then_stop } => {
+                        FileSystemMessages::Checkpoint { subtask_id, then_stop } => {
                             self.flush_futures().await?;
                             if then_stop {
                                 self.stop().await?;
@@ -572,9 +521,8 @@ where
                             self.take_checkpoint( subtask_id).await?;
                             self.checkpoint_sender.send(CheckpointData::Finished {  max_file_index: self.max_file_index}).await?;
                         },
-                        ParquetMessages::FilesToFinish(files_to_finish) =>{
+                        FileSystemMessages::FilesToFinish(files_to_finish) =>{
                             for file_to_finish in files_to_finish {
-                                info!("finishing {}", file_to_finish.filename);
                                 self.finish_file(file_to_finish).await?;
                             }
                             self.checkpoint_sender.send(CheckpointData::Finished {  max_file_index: self.max_file_index}).await?;
@@ -593,12 +541,7 @@ where
                                 self.futures.push(future);
                             }
                             self.max_file_index += 1;
-                            let new_writer = R::new(
-                                self.object_store.clone(),
-                                // take base path, add max_file_index and subtask_id, plus parquet suffix
-                                format!("{}/{}-{}.parquet", self.path, self.max_file_index, self.subtask_id).into(),
-                                self.properties.clone(),
-                            );
+                            let new_writer = self.new_writer();
                             self.current_writer_name = new_writer.name();
                             self.writers.insert(new_writer.name(), new_writer);
                         }
@@ -612,6 +555,18 @@ where
         Ok(())
     }
 
+    fn new_writer(&mut self) -> R {
+        R::new(
+            self.object_store.clone(),
+            format!(
+                "{}/{:0>5}-{:0>3}",
+                self.path, self.max_file_index, self.subtask_id
+            )
+            .into(),
+            &self.properties,
+        )
+    }
+
     async fn flush_futures(&mut self) -> Result<()> {
         while let Some(MultipartCallbackWithName { callback, name }) =
             self.futures.try_next().await?
@@ -622,13 +577,8 @@ where
     }
 
     fn process_callback(&mut self, name: String, callback: MultipartCallback) -> Result<()> {
-        info!("got callback {:?} for writer {}", callback, name);
         let writer = self.writers.get_mut(&name).ok_or_else(|| {
-            anyhow::anyhow!(
-                "missing parquet writer {} for callback {:?}",
-                name,
-                callback
-            )
+            anyhow::anyhow!("missing writer {} for callback {:?}", name, callback)
         })?;
         match callback {
             MultipartCallback::InitializedMultipart { multipart_id } => {
@@ -645,6 +595,12 @@ where
                     self.add_part_to_finish(file_to_write);
                     self.writers.remove(&name);
                 }
+                Ok(())
+            }
+            MultipartCallback::UploadsFinished => {
+                let file_to_write = writer.get_finished_file();
+                self.add_part_to_finish(file_to_write);
+                self.writers.remove(&name);
                 Ok(())
             }
         }
@@ -671,7 +627,6 @@ where
             .close_multipart(&location, &multi_part_upload_id, parts)
             .await
             .unwrap();
-        info!("finished file {}", filename);
         Ok(())
     }
 
@@ -679,7 +634,6 @@ where
         if let Some(writer) = self.writers.get_mut(&self.current_writer_name) {
             let close_future: Option<BoxedTryFuture<MultipartCallbackWithName>> = writer.close()?;
             if let Some(future) = close_future {
-                info!("current writer has close future");
                 self.futures.push(future);
             }
         }
@@ -692,11 +646,12 @@ where
 
     async fn take_checkpoint(&mut self, _subtask_id: usize) -> Result<()> {
         for (filename, writer) in self.writers.iter_mut() {
+            let buffered_data = writer.currently_buffered_data();
             let in_progress_checkpoint =
                 CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
                     filename: filename.clone(),
                     data: writer.get_in_progress_checkpoint(),
-                    buffered_data: writer.currently_buffered_data(),
+                    buffered_data,
                 });
             self.checkpoint_sender.send(in_progress_checkpoint).await?;
         }
@@ -721,15 +676,6 @@ where
 
 type BoxedTryFuture<T> = Pin<Box<dyn Future<Output = Result<T>> + Send>>;
 
-pub struct BufferingMultipartWriter<B: BufferedBuilder> {
-    builder: B,
-    max_record_batch_size: usize,
-    target_part_size: usize,
-    closed: bool,
-    multipart_manager: MultipartManager,
-    stats: Option<MultiPartWriterStats>,
-}
-
 struct MultipartManager {
     object_store: Arc<dyn ObjectStore>,
     location: Path,
@@ -740,6 +686,7 @@ struct MultipartManager {
     parts_to_add: Vec<PartToUpload>,
     closed: bool,
 }
+
 impl MultipartManager {
     fn new(object_store: Arc<dyn ObjectStore>, location: Path) -> Self {
         Self {
@@ -985,141 +932,76 @@ impl MultipartManager {
             trailing_bytes,
         }
     }
+
+    fn get_finished_file(&mut self) -> FileToFinish {
+        if !self.closed {
+            unreachable!("get_finished_file called on open file");
+        }
+        FileToFinish {
+            filename: self.name(),
+            multi_part_upload_id: self
+                .multipart_id
+                .as_ref()
+                .expect("finished files should have a multipart ID")
+                .clone(),
+            completed_parts: self
+                .pushed_parts
+                .iter()
+                .map(|part| match part {
+                    UploadPartOrBufferedData::UploadPart(upload_part) => {
+                        upload_part.content_id.clone()
+                    }
+                    UploadPartOrBufferedData::BufferedData { .. } => {
+                        unreachable!("unfinished part in get_finished_file")
+                    }
+                })
+                .collect(),
+        }
+    }
 }
 
-pub trait BufferedBuilder: Default + Send {
+pub trait BatchBuilder: Send {
     type InputType: Data;
     type BatchData;
-    type BuilderConfigT;
-    fn new(config: Self::BuilderConfigT) -> Self;
-    fn insert(&mut self, value: Self::InputType);
-    fn buffer_len(&self) -> usize;
+    fn new(config: &FileSystemTable) -> Self;
+    fn insert(&mut self, value: Self::InputType) -> Option<Self::BatchData>;
     fn buffered_inputs(&self) -> Vec<Self::InputType>;
     fn flush_buffer(&mut self) -> Self::BatchData;
-    fn byte_buffer_length(&mut self) -> usize;
-    fn add_batch_data(&mut self, data: Self::BatchData);
-    fn get_buffered_bytes(&mut self) -> Vec<u8>;
+}
+
+pub trait BatchBufferingWriter: Send {
+    type BatchData;
+    fn new(config: &FileSystemTable) -> Self;
+    fn suffix() -> String;
+    fn add_batch_data(&mut self, data: Self::BatchData) -> Option<Vec<u8>>;
+    fn buffer_length(&self) -> usize;
+    fn evict_current_buffer(&mut self) -> Vec<u8>;
     fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>>;
-    fn close(&mut self) -> Vec<u8>;
+    fn close(&mut self, final_batch: Option<Self::BatchData>) -> Option<Vec<u8>>;
 }
 
-pub struct BufferedRecordBatchBuilder<R: RecordBatchBuilder> {
-    builder: R,
-    buffer: Vec<R::Data>,
-    arrow_writer: Option<ArrowWriter<SharedBuffer>>,
-    shared_buffer: SharedBuffer,
+pub struct BatchMultipartWriter<
+    BB: BatchBuilder,
+    BBW: BatchBufferingWriter<BatchData = BB::BatchData>,
+> {
+    batch_builder: BB,
+    batch_buffering_writer: BBW,
+    multipart_manager: MultipartManager,
+    stats: Option<MultiPartWriterStats>,
 }
-
-impl<R: RecordBatchBuilder> Default for BufferedRecordBatchBuilder<R> {
-    fn default() -> Self {
-        Self {
-            builder: R::default(),
-            buffer: vec![],
-            arrow_writer: None,
-            shared_buffer: SharedBuffer::new(10 * 1024 * 1024),
-        }
-    }
-}
-
-impl<R: RecordBatchBuilder> BufferedBuilder for BufferedRecordBatchBuilder<R> {
-    type InputType = R::Data;
-    type BatchData = RecordBatch;
-    type BuilderConfigT = WriterProperties;
-
-    fn new(config: Self::BuilderConfigT) -> Self {
-        let builder = R::default();
-        let shared_buffer = SharedBuffer::new(10 * 1024 * 1024);
-        let arrow_writer = ArrowWriter::try_new(
-            shared_buffer.clone(),
-            builder.schema(),
-            // TODO: add props
-            Some(config),
-        )
-        .unwrap();
-        Self {
-            builder: R::default(),
-            buffer: Vec::new(),
-            arrow_writer: Some(arrow_writer),
-            shared_buffer,
-        }
-    }
-    fn insert(&mut self, value: Self::InputType) {
-        self.buffer.push(value.clone());
-        self.builder.add_data(Some(value));
-    }
-    fn buffer_len(&self) -> usize {
-        self.buffer.len()
-    }
-    fn buffered_inputs(&self) -> Vec<Self::InputType> {
-        self.buffer.clone()
-    }
-    fn flush_buffer(&mut self) -> RecordBatch {
-        self.buffer.clear();
-        self.builder.flush()
-    }
-    fn byte_buffer_length(&mut self) -> usize {
-        self.shared_buffer.buffer.try_lock().unwrap().len()
-    }
-
-    fn add_batch_data(&mut self, data: Self::BatchData) {
-        self.arrow_writer.as_mut().unwrap().write(&data).unwrap();
-    }
-
-    fn get_buffered_bytes(&mut self) -> Vec<u8> {
-        let mut buffer = self.shared_buffer.buffer.try_lock().unwrap();
-        let bytes_copy = buffer.clone();
-        buffer.clear();
-        bytes_copy
-    }
-
-    fn close(&mut self) -> Vec<u8> {
-        info!("closing buffered writer");
-        let record_batch = self.flush_buffer();
-        self.add_batch_data(record_batch);
-        self.arrow_writer.take().unwrap().close().unwrap();
-        self.get_buffered_bytes()
-    }
-
-    fn get_trailing_bytes_for_checkpoint(&mut self) -> Option<Vec<u8>> {
-        // record the current size written to the shared buffer
-        let writer = self.arrow_writer.as_mut()?;
-        let result = writer.get_trailing_bytes(SharedBuffer::new(0)).unwrap();
-        let bytes = result.buffer.try_lock().unwrap().to_vec();
-        // copy out the current bytes in the shared buffer, plus the trailing bytes
-        let mut copied_bytes = self.shared_buffer.buffer.try_lock().unwrap().to_vec();
-        copied_bytes.extend(bytes.iter().cloned());
-        Some(copied_bytes)
-    }
-}
-
-impl<K: Key, T: Data + Sync, R: RecordBatchBuilder<Data = T>>
-    ParquetSink<K, T, BufferingMultipartWriter<BufferedRecordBatchBuilder<R>>>
-{
-    pub fn from_config(config: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
-        ParquetSink::generic_from_config(config)
-    }
-}
-
 #[async_trait]
-impl<B: BufferedBuilder<BuilderConfigT = WriterProperties>> MultiPartWriter
-    for BufferingMultipartWriter<B>
+impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> MultiPartWriter
+    for BatchMultipartWriter<BB, BBW>
 {
-    type InputType = B::InputType;
-    type ConfigT = ParquetWriterProperties;
+    type InputType = BB::InputType;
 
-    fn new(
-        object_store: Arc<dyn ObjectStore>,
-        path: Path,
-        config: ParquetWriterProperties,
-    ) -> Self {
-        let row_batch_size = config.row_batch_size;
-        let parquet_options = config.parquet_options;
-        let target_part_size = config.target_part_size;
+    fn new(object_store: Arc<dyn ObjectStore>, path: Path, config: &FileSystemTable) -> Self {
+        let batch_builder = BB::new(config);
+        let batch_buffering_writer = BBW::new(config);
+        let path = format!("{}.{}", path, BBW::suffix()).into();
         Self {
-            builder: B::new(parquet_options),
-            max_record_batch_size: row_batch_size,
-            target_part_size,
-            closed: false,
+            batch_builder,
+            batch_buffering_writer,
             multipart_manager: MultipartManager::new(object_store, path),
             stats: None,
         }
@@ -1145,17 +1027,14 @@ impl<B: BufferedBuilder<BuilderConfigT = WriterProperties>> MultiPartWriter
         let stats = self.stats.as_mut().unwrap();
         stats.last_write_at = Instant::now();
 
-        self.builder.insert(value.clone());
-
-        if self.builder.buffer_len() == self.max_record_batch_size {
-            let batch = self.builder.flush_buffer();
-            let prev_size = self.builder.byte_buffer_length();
-            self.builder.add_batch_data(batch);
-            stats.bytes_written += self.builder.byte_buffer_length() - prev_size;
-            if self.builder.byte_buffer_length() > self.target_part_size {
+        if let Some(batch) = self.batch_builder.insert(value.clone()) {
+            let prev_size = self.batch_buffering_writer.buffer_length();
+            if let Some(bytes) = self.batch_buffering_writer.add_batch_data(batch) {
+                stats.bytes_written += bytes.len() - prev_size;
                 stats.parts_written += 1;
-                self.write_multipart()
+                self.multipart_manager.write_next_part(bytes)
             } else {
+                stats.bytes_written += self.batch_buffering_writer.buffer_length() - prev_size;
                 Ok(None)
             }
         } else {
@@ -1183,34 +1062,57 @@ impl<B: BufferedBuilder<BuilderConfigT = WriterProperties>> MultiPartWriter
         if self.multipart_manager.closed {
             self.multipart_manager.get_closed_file_checkpoint_data()
         } else {
-            self.multipart_manager
-                .get_in_progress_checkpoint(self.builder.get_trailing_bytes_for_checkpoint())
+            self.multipart_manager.get_in_progress_checkpoint(
+                self.batch_buffering_writer
+                    .get_trailing_bytes_for_checkpoint(),
+            )
         }
     }
 
     fn currently_buffered_data(&mut self) -> Vec<Self::InputType> {
-        self.builder.buffered_inputs()
+        self.batch_builder.buffered_inputs()
     }
 
     fn close(&mut self) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
-        self.closed = true;
         self.multipart_manager.closed = true;
-        self.write_multipart()
+        self.write_closing_multipart()
     }
 
     fn stats(&self) -> Option<MultiPartWriterStats> {
         self.stats.clone()
     }
+
+    fn get_finished_file(&mut self) -> FileToFinish {
+        self.multipart_manager.get_finished_file()
+    }
 }
 
-impl<B: BufferedBuilder> BufferingMultipartWriter<B> {
-    fn write_multipart(&mut self) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
-        let data = if self.closed {
-            self.builder.close()
+impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>>
+    BatchMultipartWriter<BB, BBW>
+{
+    fn write_closing_multipart(
+        &mut self,
+    ) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
+        self.multipart_manager.closed = true;
+        let final_batch = if !self.batch_builder.buffered_inputs().is_empty() {
+            Some(self.batch_builder.flush_buffer())
         } else {
-            self.builder.get_buffered_bytes()
+            None
         };
-        self.multipart_manager.write_next_part(data)
+        if let Some(bytes) = self.batch_buffering_writer.close(final_batch) {
+            self.multipart_manager.write_next_part(bytes)
+        } else if self.multipart_manager.all_uploads_finished() {
+            // Return a finished file future
+            let name = self.multipart_manager.name();
+            Ok(Some(Box::pin(async move {
+                Ok(MultipartCallbackWithName {
+                    name,
+                    callback: MultipartCallback::UploadsFinished,
+                })
+            })))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -1223,25 +1125,6 @@ struct PartToUpload {
 enum UploadPartOrBufferedData {
     UploadPart(UploadPart),
     BufferedData { data: Vec<u8> },
-}
-
-fn format_settings_to_parquet_writer_options(format_settings: FormatSettings) -> WriterProperties {
-    let mut parquet_writer_options = WriterProperties::builder();
-    if let Some(compression) = format_settings.compression {
-        let compression = match compression {
-            Compression::None => parquet::basic::Compression::UNCOMPRESSED,
-            Compression::Snappy => parquet::basic::Compression::SNAPPY,
-            Compression::Gzip => parquet::basic::Compression::GZIP(GzipLevel::default()),
-            Compression::Zstd => parquet::basic::Compression::ZSTD(ZstdLevel::default()),
-            Compression::Lz4 => parquet::basic::Compression::LZ4,
-        };
-        parquet_writer_options = parquet_writer_options.set_compression(compression);
-    }
-    if let Some(row_group_size) = format_settings.row_group_size {
-        parquet_writer_options =
-            parquet_writer_options.set_max_row_group_size(row_group_size as usize);
-    }
-    parquet_writer_options.build()
 }
 
 pub struct MultipartCallbackWithName {
@@ -1257,6 +1140,7 @@ pub enum MultipartCallback {
         part_idx: usize,
         upload_part: UploadPart,
     },
+    UploadsFinished,
 }
 
 impl Debug for MultipartCallback {
@@ -1268,60 +1152,27 @@ impl Debug for MultipartCallback {
             MultipartCallback::CompletedPart { part_idx, .. } => {
                 write!(f, "MultipartCallback::CompletedPart({})", part_idx)
             }
+            MultipartCallback::UploadsFinished => write!(f, "MultipartCallback::UploadsFinished"),
         }
-    }
-}
-
-/// A buffer with interior mutability shared by the [`ArrowWriter`] and
-/// [`AsyncArrowWriter`]. From Arrow. This lets us write data from the buffer to S3.
-#[derive(Clone)]
-struct SharedBuffer {
-    /// The inner buffer for reading and writing
-    ///
-    /// The lock is used to obtain internal mutability, so no worry about the
-    /// lock contention.
-    buffer: Arc<futures::lock::Mutex<Vec<u8>>>,
-}
-
-impl SharedBuffer {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            buffer: Arc::new(futures::lock::Mutex::new(Vec::with_capacity(capacity))),
-        }
-    }
-}
-
-impl Write for SharedBuffer {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut buffer = self.buffer.try_lock().unwrap();
-        Write::write(&mut *buffer, buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        let mut buffer = self.buffer.try_lock().unwrap();
-        Write::flush(&mut *buffer)
     }
 }
 
 #[derive(Debug, Decode, Encode, Clone, PartialEq, Eq)]
-pub struct ParquetDataRecovery<T: Data> {
+pub struct FileSystemDataRecovery<T: Data> {
     next_file_index: usize,
     active_files: Vec<InProgressFileCheckpoint<T>>,
 }
 
 #[async_trait]
-impl<
-        K: Key,
-        T: Data + Sync,
-        R: MultiPartWriter<InputType = T, ConfigT = ParquetWriterProperties> + Send + 'static,
-    > TwoPhaseCommitter<K, T> for ParquetSink<K, T, R>
+impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
+    TwoPhaseCommitter<K, T> for FileSystemSink<K, T, R>
 {
-    type DataRecovery = ParquetDataRecovery<T>;
+    type DataRecovery = FileSystemDataRecovery<T>;
 
     type PreCommit = FileToFinish;
 
     fn name(&self) -> String {
-        "parquet_sink".to_string()
+        "filesystem_sink".to_string()
     }
 
     async fn init(
@@ -1331,17 +1182,17 @@ impl<
     ) -> Result<()> {
         let mut max_file_index = 0;
         let mut recovered_files = Vec::new();
-        for parquet_data_recovery in data_recovery {
-            max_file_index = max_file_index.max(parquet_data_recovery.next_file_index);
+        for file_system_data_recovery in data_recovery {
+            max_file_index = max_file_index.max(file_system_data_recovery.next_file_index);
             // task 0 is responsible for recovering all files.
             // This is because the number of subtasks may have changed.
             // Recovering should be reasonably fast since it is just finishing in-flight uploads.
             if task_info.task_index == 0 {
-                recovered_files.extend(parquet_data_recovery.active_files.into_iter());
+                recovered_files.extend(file_system_data_recovery.active_files.into_iter());
             }
         }
         self.sender
-            .send(ParquetMessages::Init {
+            .send(FileSystemMessages::Init {
                 max_file_index,
                 subtask_id: task_info.task_index,
                 recovered_files,
@@ -1353,7 +1204,7 @@ impl<
     async fn insert_record(&mut self, record: &Record<K, T>) -> Result<()> {
         let value = record.value.clone();
         self.sender
-            .send(ParquetMessages::Data {
+            .send(FileSystemMessages::Data {
                 value,
                 time: record.timestamp,
             })
@@ -1367,7 +1218,7 @@ impl<
         pre_commit: Vec<Self::PreCommit>,
     ) -> Result<()> {
         self.sender
-            .send(ParquetMessages::FilesToFinish(pre_commit))
+            .send(FileSystemMessages::FilesToFinish(pre_commit))
             .await?;
         // loop over checkpoint receiver until finished received
         while let Some(checkpoint_message) = self.checkpoint_receiver.recv().await {
@@ -1387,7 +1238,7 @@ impl<
         stopping: bool,
     ) -> Result<(Self::DataRecovery, HashMap<String, Self::PreCommit>)> {
         self.sender
-            .send(ParquetMessages::Checkpoint {
+            .send(FileSystemMessages::Checkpoint {
                 subtask_id: task_info.task_index,
                 then_stop: stopping,
             })
@@ -1398,7 +1249,7 @@ impl<
             match checkpoint_message {
                 CheckpointData::Finished { max_file_index } => {
                     return Ok((
-                        ParquetDataRecovery {
+                        FileSystemDataRecovery {
                             next_file_index: max_file_index + 1,
                             active_files,
                         },
