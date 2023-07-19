@@ -22,10 +22,10 @@ tokio = { version = "1", features = ["full"] }
 typify = "0.0.13"
 schemars = "0.8"
 
-tonic = "0.8"
+tonic = {workspace = true}
 
 # connector dependencies
-rdkafka = { version = "0.28", features = ["cmake-build"] }
+rdkafka = { version = "0.33", features = ["cmake-build"] }
 anyhow = "1.0.71"
 tracing = "0.1.37"
 regress = "0.6.0"

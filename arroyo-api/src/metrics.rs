@@ -1,3 +1,5 @@
+use base64::engine::general_purpose;
+use base64::Engine;
 use cornucopia_async::GenericClient;
 use std::str::FromStr;
 use std::{collections::HashMap, env, time::SystemTime};
@@ -22,7 +24,10 @@ static METRICS_CLIENT: Lazy<Client> = Lazy::new(|| {
     if let Ok(basic_auth) = std::env::var("PROM_AUTH") {
         headers.append(
             AUTHORIZATION,
-            HeaderValue::from_str(&("Basic ".to_owned() + &base64::encode(basic_auth))).unwrap(),
+            HeaderValue::from_str(
+                &("Basic ".to_owned() + &general_purpose::STANDARD.encode(basic_auth)),
+            )
+            .unwrap(),
         );
     }
     let client = reqwest::Client::builder()
