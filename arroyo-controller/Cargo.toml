@@ -17,12 +17,13 @@ arroyo-state = { path = "../arroyo-state" }
 arroyo-sql = { path = "../arroyo-sql" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 
-tonic = "0.8"
-tonic-reflection = "0.5"
+tonic = {workspace = true}
+tonic-reflection = {workspace = true}
+tonic-web = {workspace = true}
+
 prost = "0.11"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
-tonic-web = "0.4.0"
 rand = "0.8"
 bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = {version = "0.6", features = ["serde-1"]}
@@ -44,7 +45,7 @@ serde = "1"
 anyhow = "1.0.70"
 
 # Kubernetes
-kube = { version = "0.82.1", features = ["runtime", "derive"], optional = true }
+kube = { version = "0.84", features = ["runtime", "derive"], optional = true }
 k8s-openapi = { version = "0.18.0", features = ["v1_26"], optional = true }
 serde_yaml = {version = "0.9", optional = true}
 

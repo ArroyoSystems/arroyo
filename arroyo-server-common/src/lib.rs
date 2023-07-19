@@ -3,7 +3,6 @@ use arroyo_types::{admin_port, telemetry_enabled, POSTHOG_KEY};
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Body;
@@ -16,9 +15,9 @@ use pyroscope::{pyroscope::PyroscopeAgentRunning, PyroscopeAgent};
 use pyroscope_pprofrs::{pprof_backend, PprofConfig};
 use reqwest::Client;
 use serde_json::{json, Value};
+use std::fs;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::{fs, io};
 use tokio::select;
 use tokio::sync::broadcast::Receiver;
 use tonic::body::BoxBody;
@@ -179,10 +178,6 @@ async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     .unwrap()
 }
 
-async fn handle_error(_err: io::Error) -> impl IntoResponse {
-    (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong...")
-}
-
 pub fn start_admin_server(service: &str, default_port: u16, mut shutdown: Receiver<i32>) {
     let port = admin_port(service, default_port);
 
@@ -190,7 +185,7 @@ pub fn start_admin_server(service: &str, default_port: u16, mut shutdown: Receiv
 
     let serve_dir = ServeDir::new("arroyo-console/dist")
         .not_found_service(ServeFile::new("arroyo-console/dist/index.html"));
-    let serve_dir = get_service(serve_dir).handle_error(handle_error);
+    let serve_dir = get_service(serve_dir);
 
     let state = Arc::new(AdminState {
         name: format!("arroyo-{}", service),

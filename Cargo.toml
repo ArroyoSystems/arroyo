@@ -24,10 +24,15 @@ exclude = [
     "build_dir",
 ]
 
+[workspace.dependencies]
+tonic = { version = "0.9" }
+tonic-build = { version = "0.9" }
+tonic-web = { version = "0.9" }
+tonic-reflection = { version = "0.9" }
+
+
 [profile.release]
 debug = 1
 
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
-
-
