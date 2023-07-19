@@ -690,9 +690,7 @@ name = "arroyo-sql-macro"
 version = "0.4.1"
 dependencies = [
  "arroyo-connectors",
- "arroyo-controller",
  "arroyo-datastream",
- "arroyo-rpc",
  "arroyo-sql",
  "proc-macro2",
  "quote",

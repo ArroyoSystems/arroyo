@@ -8,9 +8,7 @@ proc-macro = true
 
 [dependencies]
 arroyo-sql = { path = "../arroyo-sql" }
-arroyo-controller = { path = "../arroyo-controller" }
 arroyo-datastream = { path = "../arroyo-datastream" }
-arroyo-rpc = { path= "../arroyo-rpc" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 
 syn = {version = "2", features = ["full"]}
