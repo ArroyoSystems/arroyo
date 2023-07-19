@@ -138,7 +138,7 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
 
     let mod_name: syn::Ident = parse_str(test_name).unwrap();
 
-    let function = arroyo_controller::compiler::ProgramCompiler::make_graph_function(&program);
+    let function = program.make_graph_function();
     let other_defs: Vec<proc_macro2::TokenStream> = program
         .other_defs
         .iter()
