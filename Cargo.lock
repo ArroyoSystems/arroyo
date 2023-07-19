@@ -477,7 +477,6 @@ dependencies = [
  "prost",
  "tokio",
  "tonic",
- "tonic-reflection",
  "tracing",
 ]
 
@@ -486,8 +485,6 @@ name = "arroyo-connectors"
 version = "0.4.1"
 dependencies = [
  "anyhow",
- "arrow",
- "arrow-schema",
  "arroyo-datastream",
  "arroyo-rpc",
  "arroyo-types",
@@ -512,7 +509,6 @@ dependencies = [
  "anyhow",
  "arrow-schema",
  "arroyo-datastream",
- "arroyo-macro",
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-sql",
@@ -524,7 +520,6 @@ dependencies = [
  "cornucopia",
  "cornucopia_async",
  "deadpool-postgres",
- "fork",
  "futures",
  "k8s-openapi",
  "kube",
@@ -552,7 +547,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-reflection",
- "tonic-web",
  "tracing",
  "uuid",
 ]
@@ -654,7 +648,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tonic",
- "tonic-reflection",
  "tower",
  "tower-http",
  "tracing",
@@ -759,11 +752,8 @@ dependencies = [
 name = "arroyo-types"
 version = "0.4.1"
 dependencies = [
- "anyhow",
- "base64 0.21.2",
  "bincode 2.0.0-rc.3",
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -782,8 +772,6 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "bytes",
  "chrono",
- "crossbeam-queue",
- "ctor",
  "eventsource-client",
  "fluvio",
  "futures",
@@ -2173,16 +2161,6 @@ dependencies = [
  "crossbeam-utils",
  "memoffset 0.9.0",
  "scopeguard",
-]
-
-[[package]]
-name = "crossbeam-queue"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1cfb3ea8a53f37c40dea2c7bedcbd88bdfae54f5e2175d6ecaff1c988353add"
-dependencies = [
- "cfg-if",
- "crossbeam-utils",
 ]
 
 [[package]]

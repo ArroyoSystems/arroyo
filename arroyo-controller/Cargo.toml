@@ -10,7 +10,6 @@ k8s = ["kube", "k8s-openapi", "serde_yaml"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
-arroyo-macro = { path = "../arroyo-macro" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-state = { path = "../arroyo-state" }
@@ -19,7 +18,6 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 
 tonic = {workspace = true}
 tonic-reflection = {workspace = true}
-tonic-web = {workspace = true}
 
 prost = "0.11"
 tokio = { version = "1", features = ["full"] }
@@ -31,7 +29,6 @@ quote = "1"
 proc-macro2 = "1"
 prettyplease = "0.2.4"
 syn = {version = "2", features = ["full"]}
-fork = "0.1"
 prometheus = "0.13"
 async-trait = "0.1"
 lazy_static = "1.4.0"
