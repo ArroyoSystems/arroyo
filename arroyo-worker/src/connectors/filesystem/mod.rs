@@ -32,9 +32,9 @@ pub mod local;
 pub mod parquet;
 
 use self::{
-    json::{JsonWriter, PassThrough},
-    local::{LocalFileSystemWriter, ValueWriter},
-    parquet::{FixedSizeRecordBatchBuilder, ParquetValueWriter, RecordBatchBufferingWriter},
+    json::{JsonLocalWriter, JsonWriter, PassThrough},
+    local::{LocalFileSystemWriter, LocalWriter},
+    parquet::{FixedSizeRecordBatchBuilder, ParquetLocalWriter, RecordBatchBufferingWriter},
 };
 
 use super::{
@@ -61,9 +61,11 @@ pub type ParquetFileSystemSink<K, T, R> = FileSystemSink<
 pub type JsonFileSystemSink<K, T> =
     FileSystemSink<K, T, BatchMultipartWriter<PassThrough<T>, JsonWriter<T>>>;
 
-pub type LocalParquetFileSystemSink<K, T, R> = LocalFileSystemWriter<K, T, ParquetValueWriter<R>>;
+pub type LocalParquetFileSystemSink<K, T, R> = LocalFileSystemWriter<K, T, ParquetLocalWriter<R>>;
 
-impl<K: Key, T: Data + Sync, V: ValueWriter<T>> LocalFileSystemWriter<K, T, V> {
+pub type LocalJsonFileSystemSink<K, T> = LocalFileSystemWriter<K, T, JsonLocalWriter>;
+
+impl<K: Key, T: Data + Sync, V: LocalWriter<T>> LocalFileSystemWriter<K, T, V> {
     pub fn from_config(config_str: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
         let config: OperatorConfig =
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
@@ -80,7 +82,7 @@ impl<K: Key, T: Data + Sync, V: ValueWriter<T>> LocalFileSystemWriter<K, T, V> {
                 object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap()
             }
         };
-        let writer = LocalFileSystemWriter::new("/tmp".to_string(), path.to_string(), table);
+        let writer = LocalFileSystemWriter::new(path.to_string(), table);
         TwoPhaseCommitterOperator::new(writer)
     }
 }

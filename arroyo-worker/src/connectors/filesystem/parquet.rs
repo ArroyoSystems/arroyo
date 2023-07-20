@@ -9,7 +9,7 @@ use parquet::{
 };
 
 use super::{
-    local::{CurrentFileRecovery, FilePreCommit, ValueWriter},
+    local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
     BatchBufferingWriter, BatchBuilder, FileSettings, FileSystemTable,
 };
 use super::{Compression, FormatSettings};
@@ -208,7 +208,7 @@ impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<
     }
 }
 
-pub struct ParquetValueWriter<V: RecordBatchBuilder> {
+pub struct ParquetLocalWriter<V: RecordBatchBuilder> {
     builder: V,
     writer: Option<ArrowWriter<SharedBuffer>>,
     tmp_path: String,
@@ -217,7 +217,7 @@ pub struct ParquetValueWriter<V: RecordBatchBuilder> {
     shared_buffer: SharedBuffer,
 }
 
-impl<V: RecordBatchBuilder + 'static> ValueWriter<V::Data> for ParquetValueWriter<V> {
+impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWriter<V> {
     fn new(tmp_path: String, final_path: String, table_properties: &FileSystemTable) -> Self {
         let shared_buffer = SharedBuffer::new(0);
         let writer_properties = writer_properties_from_table(table_properties);
@@ -237,6 +237,10 @@ impl<V: RecordBatchBuilder + 'static> ValueWriter<V::Data> for ParquetValueWrite
             destination_path: final_path,
             shared_buffer,
         }
+    }
+
+    fn file_suffix() -> &'static str {
+        "parquet"
     }
 
     fn write(&mut self, value: V::Data) -> anyhow::Result<()> {

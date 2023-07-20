@@ -14,7 +14,7 @@ use anyhow::{bail, Result};
 
 use super::{FileSystemTable, MultiPartWriterStats, RollingPolicy};
 
-pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: ValueWriter<D>> {
+pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     // writer to a local tmp file
     writer: Option<V>,
     tmp_dir: String,
@@ -29,14 +29,15 @@ pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: ValueWriter<D>> {
     phantom: PhantomData<(K, D)>,
 }
 
-impl<K: Key, D: Data + Sync, V: ValueWriter<D>> LocalFileSystemWriter<K, D, V> {
-    pub fn new(tmp_dir: String, mut final_dir: String, table_properties: FileSystemTable) -> Self {
+impl<K: Key, D: Data + Sync, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
+    pub fn new(mut final_dir: String, table_properties: FileSystemTable) -> Self {
         if !final_dir.starts_with('/') {
             final_dir = format!("/{}", final_dir);
         }
+        // TODO: explore configuration options here
+        let tmp_dir = format!("{}/__in_progress", final_dir);
         // make sure final_dir and tmp_dir exists
         create_dir_all(&tmp_dir).unwrap();
-        create_dir_all(&final_dir).unwrap();
 
         Self {
             writer: None,
@@ -74,7 +75,12 @@ impl<K: Key, D: Data + Sync, V: ValueWriter<D>> LocalFileSystemWriter<K, D, V> {
     }
 
     fn init_writer(&mut self) -> Result<()> {
-        let file_name = format!("{:>05}-{:>03}", self.next_file_index, self.subtask_id);
+        let file_name = format!(
+            "{:>05}-{:>03}.{}",
+            self.next_file_index,
+            self.subtask_id,
+            V::file_suffix()
+        );
         self.writer = Some(V::new(
             format!("{}/{}", self.tmp_dir, file_name),
             format!("{}/{}", self.final_dir, file_name),
@@ -86,8 +92,9 @@ impl<K: Key, D: Data + Sync, V: ValueWriter<D>> LocalFileSystemWriter<K, D, V> {
     }
 }
 
-pub trait ValueWriter<T: Data>: Send + 'static {
+pub trait LocalWriter<T: Data>: Send + 'static {
     fn new(tmp_path: String, final_path: String, table_properties: &FileSystemTable) -> Self;
+    fn file_suffix() -> &'static str;
     fn write(&mut self, value: T) -> Result<()>;
     // returns the total size of the file
     fn sync(&mut self) -> Result<usize>;
@@ -116,7 +123,7 @@ pub struct FilePreCommit {
 }
 
 #[async_trait]
-impl<K: Key, D: Data + Sync, V: ValueWriter<D> + Send + 'static> TwoPhaseCommitter<K, D>
+impl<K: Key, D: Data + Sync, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitter<K, D>
     for LocalFileSystemWriter<K, D, V>
 {
     type DataRecovery = LocalFileDataRecovery;
@@ -165,7 +172,7 @@ impl<K: Key, D: Data + Sync, V: ValueWriter<D> + Send + 'static> TwoPhaseCommitt
         }
         self.subtask_id = task_info.task_index;
         self.finished_files = recovered_files;
-        self.next_file_index = max_file_index + 1;
+        self.next_file_index = max_file_index;
         Ok(())
     }
 

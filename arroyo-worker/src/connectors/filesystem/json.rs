@@ -1,9 +1,12 @@
-use std::marker::PhantomData;
+use std::{fs::File, io::Write, marker::PhantomData};
 
 use arroyo_types::Data;
 use serde::Serialize;
 
-use super::{BatchBufferingWriter, BatchBuilder, FileSettings};
+use super::{
+    local::{CurrentFileRecovery, LocalWriter},
+    BatchBufferingWriter, BatchBuilder, FileSettings,
+};
 
 pub struct PassThrough<D: Data> {
     _phantom: PhantomData<D>,
@@ -101,6 +104,66 @@ impl<D: Data + Serialize> BatchBufferingWriter for JsonWriter<D> {
             None
         } else {
             Some(self.evict_current_buffer())
+        }
+    }
+}
+
+pub struct JsonLocalWriter {
+    tmp_path: String,
+    final_path: String,
+    file: File,
+}
+
+impl<D: Data + Serialize> LocalWriter<D> for JsonLocalWriter {
+    fn new(
+        tmp_path: String,
+        final_path: String,
+        _table_properties: &super::FileSystemTable,
+    ) -> Self {
+        let file = File::create(&tmp_path).unwrap();
+        JsonLocalWriter {
+            tmp_path,
+            final_path,
+            file,
+        }
+    }
+
+    fn file_suffix() -> &'static str {
+        "json"
+    }
+
+    fn write(&mut self, value: D) -> anyhow::Result<()> {
+        self.file
+            .write_all(serde_json::to_vec(&value)?.as_slice())?;
+        self.file.write_all(b"\n")?;
+        Ok(())
+    }
+
+    fn sync(&mut self) -> anyhow::Result<usize> {
+        self.file.flush()?;
+        let size = self.file.metadata()?.len() as usize;
+        Ok(size)
+    }
+
+    fn close(&mut self) -> anyhow::Result<super::local::FilePreCommit> {
+        LocalWriter::<D>::sync(self)?;
+        Ok(super::local::FilePreCommit {
+            tmp_file: self.tmp_path.clone(),
+            destination: self.final_path.clone(),
+        })
+    }
+
+    fn checkpoint(&mut self) -> anyhow::Result<Option<super::local::CurrentFileRecovery>> {
+        let bytes_written = LocalWriter::<D>::sync(self)?;
+        if bytes_written > 0 {
+            Ok(Some(CurrentFileRecovery {
+                tmp_file: self.tmp_path.clone(),
+                bytes_written,
+                suffix: None,
+                destination: self.final_path.clone(),
+            }))
+        } else {
+            Ok(None)
         }
     }
 }
