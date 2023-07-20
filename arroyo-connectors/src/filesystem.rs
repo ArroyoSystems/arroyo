@@ -1,22 +1,19 @@
 use anyhow::{anyhow, bail};
 use arroyo_rpc::grpc::{
     self,
-    api::{ConnectionSchema, TestSourceMessage},
+    api::{ConnectionSchema, Format, TestSourceMessage},
 };
 use typify::import_types;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    pull_opt, serialization_mode, Connection, ConnectionType, EmptyConfig, OperatorConfig,
-};
+use crate::{serialization_mode, Connection, ConnectionType, EmptyConfig, OperatorConfig};
 
 use super::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/filesystem/table.json");
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
-const ICON: &str = include_str!("../resources/parquet.svg");
 
 pub struct FileSystemConnector {}
 
@@ -33,12 +30,13 @@ impl Connector for FileSystemConnector {
         grpc::api::Connector {
             id: "filesystem".to_string(),
             name: "FileSystem Sink".to_string(),
-            icon: ICON.to_string(),
+            icon: "".to_string(),
             description: "Write to a filesystem (S3)".to_string(),
             enabled: true,
             source: false,
             sink: true,
             testing: false,
+            hidden: true,
             custom_schemas: true,
             connection_config: None,
             table_config: TABLE_SCHEMA.to_owned(),
@@ -161,8 +159,8 @@ impl Connector for FileSystemConnector {
             target_file_size,
             target_part_size,
         });
-        let format_settings = match pull_opt("fileformat", opts)?.as_str() {
-            "parquet" => {
+        let format_settings = match schema.ok_or(anyhow!("require schema"))?.format() {
+            Format::ParquetFormat => {
                 let compression = opts
                     .remove("parquet_compression")
                     .map(|value| Compression::try_from(value).map_err(|e| anyhow::anyhow!(e)))
@@ -181,8 +179,8 @@ impl Connector for FileSystemConnector {
                     row_group_size,
                 })
             }
-            "json" => Some(FormatSettings::Json {}),
-            other => bail!("Unsupported format: {}", other),
+            Format::JsonFormat => Some(FormatSettings::Json {}),
+            other => bail!("Unsupported format: {:?}", other),
         };
 
         self.from_config(

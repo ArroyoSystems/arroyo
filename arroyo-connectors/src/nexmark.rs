@@ -98,6 +98,7 @@ impl Connector for NexmarkConnector {
             source: true,
             sink: false,
             testing: false,
+            hidden: false,
             custom_schemas: false,
             connection_config: None,
             table_config: TABLE_SCHEMA.to_string(),

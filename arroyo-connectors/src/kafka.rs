@@ -48,6 +48,7 @@ impl Connector for KafkaConnector {
             source: true,
             sink: true,
             testing: true,
+            hidden: false,
             custom_schemas: true,
             connection_config: Some(CONFIG_SCHEMA.to_string()),
             table_config: TABLE_SCHEMA.to_string(),

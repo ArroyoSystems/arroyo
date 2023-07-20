@@ -290,6 +290,7 @@ pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializat
             }
         }
         grpc::api::Format::DebeziumJsonFormat => OperatorConfigSerializationMode::DebeziumJson,
+        grpc::api::Format::ParquetFormat => todo!(),
     }
 }
 

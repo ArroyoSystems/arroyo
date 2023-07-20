@@ -27,6 +27,7 @@ impl Connector for BlackholeConnector {
             source: false,
             sink: true,
             testing: false,
+            hidden: false,
             custom_schemas: true,
             connection_config: None,
             table_config: "{\"type\": \"object\", \"title\": \"BlackholeTable\"}".to_string(),
