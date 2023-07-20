@@ -132,7 +132,7 @@ impl Connector for FluvioConnector {
             ),
             TableType::Sink { .. } => (
                 ConnectionType::Sink,
-                "connectors::fluvio::sink::FluvioSinkFunc",
+                "connectors::fluvio::sink::FluvioSinkFunc::<#in_k, #in_t>",
                 format!("FluvioSink<{}>", table.topic),
             ),
         };

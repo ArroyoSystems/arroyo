@@ -105,7 +105,7 @@ impl Connector for BlackholeConnector {
                 fields: vec![],
                 definition: None,
             }),
-            operator: "connectors::blackhole::BlackholeSinkFunc".to_string(),
+            operator: "connectors::blackhole::BlackholeSinkFunc::<#in_k, #in_t>".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

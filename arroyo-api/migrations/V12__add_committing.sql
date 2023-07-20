@@ -1,1 +1,1 @@
-ALTER TYPE checkpoint_state ADD VALUE 'committing'
+ALTER TYPE checkpoint_state ADD VALUE 'committing';
