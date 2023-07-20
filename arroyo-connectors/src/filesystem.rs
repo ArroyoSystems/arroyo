@@ -1,4 +1,6 @@
-use anyhow::{anyhow, bail};
+use std::collections::HashMap;
+
+use anyhow::{anyhow, bail, Context, Result};
 use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, Format, TestSourceMessage},
@@ -128,29 +130,14 @@ impl Connector for FileSystemConnector {
                 aws_region,
             }
         } else {
-            bail!("Only s3 targets are supported currently");
+            bail!("Target for filesystem connector incorrectly specified. Should be a URI path or a triple of s3_bucket, s3_directory, and aws_region");
         };
 
-        let inactivity_rollover_seconds = opts
-            .remove("inactivity_rollover_seconds")
-            .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
-            .transpose()?;
-        let max_parts = opts
-            .remove("max_parts")
-            .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
-            .transpose()?;
-        let rollover_seconds = opts
-            .remove("rollover_seconds")
-            .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
-            .transpose()?;
-        let target_file_size = opts
-            .remove("target_file_size")
-            .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
-            .transpose()?;
-        let target_part_size = opts
-            .remove("target_part_size")
-            .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
-            .transpose()?;
+        let inactivity_rollover_seconds = pull_option_to_i64("inactivity_rollover_seconds", opts)?;
+        let max_parts = pull_option_to_i64("max_parts", opts)?;
+        let rollover_seconds = pull_option_to_i64("rollover_seconds", opts)?;
+        let target_file_size = pull_option_to_i64("target_file_size", opts)?;
+        let target_part_size = pull_option_to_i64("target_part_size", opts)?;
 
         let file_settings = Some(FileSettings {
             inactivity_rollover_seconds,
@@ -163,16 +150,14 @@ impl Connector for FileSystemConnector {
             Format::ParquetFormat => {
                 let compression = opts
                     .remove("parquet_compression")
-                    .map(|value| Compression::try_from(value).map_err(|e| anyhow::anyhow!(e)))
+                    .map(|value| {
+                        Compression::try_from(&value).map_err(|_err| {
+                            anyhow!("{} is not a valid parquet_compression argument", value)
+                        })
+                    })
                     .transpose()?;
-                let row_batch_size = opts
-                    .remove("parquet_row_batch_size")
-                    .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
-                    .transpose()?;
-                let row_group_size = opts
-                    .remove("parquet_row_group_size")
-                    .map(|value| value.parse::<i64>().map_err(|e| anyhow::anyhow!(e)))
-                    .transpose()?;
+                let row_batch_size = pull_option_to_i64("parquet_row_batch_size", opts)?;
+                let row_group_size = pull_option_to_i64("parquet_row_group_size", opts)?;
                 Some(FormatSettings::Parquet {
                     compression,
                     row_batch_size,
@@ -195,4 +180,15 @@ impl Connector for FileSystemConnector {
             schema,
         )
     }
+}
+
+fn pull_option_to_i64(name: &str, opts: &mut HashMap<String, String>) -> Result<Option<i64>> {
+    opts.remove(name)
+        .map(|value| {
+            value.parse::<i64>().context(format!(
+                "failed to parse {} as a number for option {}",
+                value, name
+            ))
+        })
+        .transpose()
 }
