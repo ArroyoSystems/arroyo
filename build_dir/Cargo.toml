@@ -8,3 +8,8 @@ members = [
 exclude = [
   "wasm-fns",
 ]
+
+
+[profile.dev]
+debug = false
+strip = true
