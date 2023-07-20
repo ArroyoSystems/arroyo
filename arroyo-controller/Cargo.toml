@@ -10,19 +10,18 @@ k8s = ["kube", "k8s-openapi", "serde_yaml"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
-arroyo-macro = { path = "../arroyo-macro" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-sql = { path = "../arroyo-sql" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 
-tonic = "0.8"
-tonic-reflection = "0.5"
+tonic = {workspace = true}
+tonic-reflection = {workspace = true}
+
 prost = "0.11"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
-tonic-web = "0.4.0"
 rand = "0.8"
 bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = {version = "0.6", features = ["serde-1"]}
@@ -30,7 +29,6 @@ quote = "1"
 proc-macro2 = "1"
 prettyplease = "0.2.4"
 syn = {version = "2", features = ["full"]}
-fork = "0.1"
 prometheus = "0.13"
 async-trait = "0.1"
 lazy_static = "1.4.0"
@@ -44,7 +42,7 @@ serde = "1"
 anyhow = "1.0.70"
 
 # Kubernetes
-kube = { version = "0.82.1", features = ["runtime", "derive"], optional = true }
+kube = { version = "0.84", features = ["runtime", "derive"], optional = true }
 k8s-openapi = { version = "0.18.0", features = ["v1_26"], optional = true }
 serde_yaml = {version = "0.9", optional = true}
 

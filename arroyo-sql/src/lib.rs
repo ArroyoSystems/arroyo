@@ -43,7 +43,7 @@ use crate::types::{StructDef, StructField, TypeDef};
 use quote::ToTokens;
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
-use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, VisPublic, Visibility};
+use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
 
 #[cfg(test)]
 mod test;
@@ -209,9 +209,7 @@ impl ArroyoSchemaProvider {
                     function.sig.ident.to_string());
             };
 
-            function.vis = Visibility::Public(VisPublic {
-                pub_token: Default::default(),
-            });
+            function.vis = Visibility::Public(Default::default());
 
             self.udf_defs.insert(
                 function.sig.ident.to_string(),

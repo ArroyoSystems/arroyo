@@ -175,7 +175,8 @@ async fn test_kafka() {
             .producer
             .as_ref()
             .unwrap()
-            .flush(Duration::from_secs(1));
+            .flush(Duration::from_secs(1))
+            .unwrap();
         let result: String = serde_json::from_str(&get_data(&mut consumer).await.value).unwrap();
         assert_eq!(record.value, result);
     }

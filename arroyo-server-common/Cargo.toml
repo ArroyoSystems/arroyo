@@ -14,13 +14,12 @@ tracing-appender = "0.2"
 
 # middleware
 tower = "0.4"
-tower-http = {version = "0.3", features = ["trace", "fs"]}
-tonic = "0.8"
-tonic-reflection = "0.5"
+tower-http = {version = "0.4", features = ["trace", "fs"]}
+tonic = { workspace = true }
 hyper = "0.14"
 tokio = { version = "1", features = ["full"] }
 prometheus = {version = "0.13.3", features = ["push", "process"] }
-axum = "0.6.12"
+axum = "0.6"
 lazy_static = "1.4.0"
 futures = { version = "0.3" }
 once_cell = "1.17.1"

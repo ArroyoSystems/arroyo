@@ -1,10 +1,13 @@
 use axum::{response::IntoResponse, Json};
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
+use http::HeaderName;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::{select, sync::broadcast};
 use tokio_postgres::NoTls;
+use tonic_web::GrpcWebLayer;
+use tower_http::cors::CorsLayer;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -15,6 +18,11 @@ use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_types::{
     grpc_port, ports, service_port, DatabaseConfig, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
 };
+
+const DEFAULT_EXPOSED_HEADERS: [&str; 3] =
+    ["grpc-status", "grpc-message", "grpc-status-details-bin"];
+const DEFAULT_ALLOW_HEADERS: [&str; 4] =
+    ["x-grpc-web", "content-type", "x-user-agent", "grpc-timeout"];
 
 #[tokio::main]
 pub async fn main() {
@@ -108,11 +116,26 @@ async fn server(pool: Pool) {
 
     arroyo_server_common::grpc_server()
         .accept_http1(true)
-        .add_service(
-            tonic_web::config()
-                .allow_all_origins()
-                .enable(ApiGrpcServer::new(server)),
+        .layer(
+            CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .expose_headers(
+                    DEFAULT_EXPOSED_HEADERS
+                        .iter()
+                        .cloned()
+                        .map(HeaderName::from_static)
+                        .collect::<Vec<HeaderName>>(),
+                )
+                .allow_headers(
+                    DEFAULT_ALLOW_HEADERS
+                        .iter()
+                        .cloned()
+                        .map(HeaderName::from_static)
+                        .collect::<Vec<HeaderName>>(),
+                ),
         )
+        .layer(GrpcWebLayer::new())
+        .add_service(ApiGrpcServer::new(server))
         .add_service(reflection)
         .serve(addr)
         .await

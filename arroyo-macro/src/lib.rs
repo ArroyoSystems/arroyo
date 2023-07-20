@@ -697,7 +697,7 @@ fn impl_stream_node_type(
     let mut methods = HashSet::new();
 
     for item in &input.items {
-        if let ImplItem::Method(method) = item {
+        if let ImplItem::Fn(method) = item {
             methods.insert(format!("{}", method.sig.ident));
         }
     }
