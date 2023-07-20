@@ -514,6 +514,7 @@ dependencies = [
  "arroyo-sql",
  "arroyo-state",
  "arroyo-types",
+ "async-stream",
  "async-trait",
  "bincode 2.0.0-rc.3",
  "chrono",
@@ -594,6 +595,7 @@ dependencies = [
 name = "arroyo-node"
 version = "0.4.1"
 dependencies = [
+ "anyhow",
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-types",
@@ -604,6 +606,7 @@ dependencies = [
  "prost",
  "rand",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tonic-reflection",
  "tracing",

@@ -330,16 +330,28 @@ service WorkerGrpc {
 
 // Node
 
-message StartWorkerReq {
+message StartWorkerHeader {
   string name = 1;
-  bytes binary = 2;
+  string job_id = 2;
   bytes wasm = 3;
-  string job_id = 4;
-  string job_hash = 5;
   uint64 slots = 6;
   uint64 node_id = 7;
   uint64 run_id = 8;
-  map<string, string> env_vars = 9;
+  map<string, string> env_vars = 10;
+  uint64 binary_size = 11;
+}
+
+message StartWorkerData {
+  uint64 part = 1;
+  bytes data = 2;
+  bool has_more = 3;
+}
+
+message StartWorkerReq {
+  oneof msg {
+    StartWorkerHeader header = 2;
+    StartWorkerData data = 3;
+  }
 }
 
 message StartWorkerResp {
@@ -351,10 +363,10 @@ message GetWorkersReq {}
 
 message WorkerStatus {
   string name = 1;
-  string hash = 2;
   uint64 slots = 3;
   bool running = 4;
 }
+
 message GetWorkersResp {
   repeated WorkerStatus statuses = 1;
 }
@@ -376,7 +388,7 @@ enum StopWorkerStatus {
 }
 
 service NodeGrpc {
-  rpc StartWorker(StartWorkerReq) returns (StartWorkerResp);
+  rpc StartWorker(stream StartWorkerReq) returns (StartWorkerResp);
   rpc GetWorkers(GetWorkersReq) returns (GetWorkersResp);
   rpc StopWorker(StopWorkerReq) returns (StopWorkerResp);
 }
