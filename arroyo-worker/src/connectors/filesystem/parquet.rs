@@ -1,4 +1,4 @@
-use std::{io::Write, marker::PhantomData, sync::Arc};
+use std::{fs::File, io::Write, marker::PhantomData, sync::Arc};
 
 use arrow_array::RecordBatch;
 use arroyo_types::RecordBatchBuilder;
@@ -8,7 +8,10 @@ use parquet::{
     file::properties::WriterProperties,
 };
 
-use super::{BatchBufferingWriter, BatchBuilder, FileSettings, FileSystemTable};
+use super::{
+    local::{CurrentFileRecovery, FilePreCommit, ValueWriter},
+    BatchBufferingWriter, BatchBuilder, FileSettings, FileSystemTable,
+};
 use super::{Compression, FormatSettings};
 
 fn writer_properties_from_table(table: &FileSystemTable) -> WriterProperties {
@@ -202,5 +205,89 @@ impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<
         writer.close().unwrap();
         let buffer = self.shared_buffer.buffer.try_lock().unwrap();
         Some(buffer.to_vec())
+    }
+}
+
+pub struct ParquetValueWriter<V: RecordBatchBuilder> {
+    builder: V,
+    writer: Option<ArrowWriter<SharedBuffer>>,
+    tmp_path: String,
+    file: File,
+    destination_path: String,
+    shared_buffer: SharedBuffer,
+}
+
+impl<V: RecordBatchBuilder + 'static> ValueWriter<V::Data> for ParquetValueWriter<V> {
+    fn new(tmp_path: String, final_path: String, table_properties: &FileSystemTable) -> Self {
+        let shared_buffer = SharedBuffer::new(0);
+        let writer_properties = writer_properties_from_table(table_properties);
+        let builder = V::default();
+        let writer = ArrowWriter::try_new(
+            shared_buffer.clone(),
+            V::default().schema(),
+            Some(writer_properties),
+        )
+        .unwrap();
+        let file = File::create(tmp_path.clone()).unwrap();
+        Self {
+            builder,
+            writer: Some(writer),
+            tmp_path,
+            file,
+            destination_path: final_path,
+            shared_buffer,
+        }
+    }
+
+    fn write(&mut self, value: V::Data) -> anyhow::Result<()> {
+        self.builder.add_data(Some(value));
+        Ok(())
+    }
+
+    fn sync(&mut self) -> anyhow::Result<usize> {
+        let mut buffer = self.shared_buffer.buffer.try_lock().unwrap();
+        self.file.write_all(&buffer)?;
+        self.file.sync_all()?;
+        // get size of the file
+        let metadata = self.file.metadata()?;
+        let size = metadata.len() as usize;
+        buffer.clear();
+        Ok(size)
+    }
+
+    fn close(&mut self) -> anyhow::Result<FilePreCommit> {
+        let batch = self.builder.flush();
+        let writer = self.writer.take();
+        let mut writer = writer.unwrap();
+        writer.write(&batch)?;
+        writer.close()?;
+        self.sync()?;
+        Ok(FilePreCommit {
+            tmp_file: self.tmp_path.clone(),
+            destination: self.destination_path.clone(),
+        })
+    }
+
+    fn checkpoint(&mut self) -> anyhow::Result<Option<CurrentFileRecovery>> {
+        let writer = self.writer.as_mut().unwrap();
+        let batch = self.builder.flush();
+        writer.write(&batch)?;
+        writer.flush()?;
+        let bytes_written = self.sync()?;
+        let trailing_bytes = self
+            .writer
+            .as_mut()
+            .unwrap()
+            .get_trailing_bytes(SharedBuffer::new(0))?
+            .buffer
+            .try_lock()
+            .unwrap()
+            .to_vec();
+        Ok(Some(CurrentFileRecovery {
+            tmp_file: self.tmp_path.clone(),
+            bytes_written,
+            suffix: Some(trailing_bytes),
+            destination: self.destination_path.clone(),
+        }))
     }
 }

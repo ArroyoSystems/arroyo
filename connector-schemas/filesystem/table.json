@@ -8,6 +8,21 @@
             "oneOf": [
                 {
                     "type": "object",
+                    "title": "Folder URI",
+                    "properties": {
+                        "Path": {
+                            "title": "Path",
+                            "type": "string",
+                            "description": "URI of the folder to write to"
+                        }
+                    },
+                    "required": [
+                        "Path"
+                    ],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
                     "title": "Local Filesystem",
                     "properties": {
                         "Local Directory": {

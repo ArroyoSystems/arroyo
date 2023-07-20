@@ -28,11 +28,13 @@ import_types!(schema = "../connector-schemas/filesystem/table.json");
 
 use arroyo_types::*;
 pub mod json;
+pub mod local;
 pub mod parquet;
 
 use self::{
     json::{JsonWriter, PassThrough},
-    parquet::{FixedSizeRecordBatchBuilder, RecordBatchBufferingWriter},
+    local::{LocalFileSystemWriter, ValueWriter},
+    parquet::{FixedSizeRecordBatchBuilder, ParquetValueWriter, RecordBatchBufferingWriter},
 };
 
 use super::{
@@ -49,6 +51,7 @@ pub struct FileSystemSink<
     checkpoint_receiver: Receiver<CheckpointData<T>>,
     _ts: PhantomData<(K, R)>,
 }
+
 pub type ParquetFileSystemSink<K, T, R> = FileSystemSink<
     K,
     T,
@@ -58,6 +61,30 @@ pub type ParquetFileSystemSink<K, T, R> = FileSystemSink<
 pub type JsonFileSystemSink<K, T> =
     FileSystemSink<K, T, BatchMultipartWriter<PassThrough<T>, JsonWriter<T>>>;
 
+pub type LocalParquetFileSystemSink<K, T, R> = LocalFileSystemWriter<K, T, ParquetValueWriter<R>>;
+
+impl<K: Key, T: Data + Sync, V: ValueWriter<T>> LocalFileSystemWriter<K, T, V> {
+    pub fn from_config(config_str: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
+        let config: OperatorConfig =
+            serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
+        let table: FileSystemTable =
+            serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
+        let (_object_store, path): (Box<dyn ObjectStore>, Path) = match table.write_target.clone() {
+            Destination::LocalFilesystem { local_directory } => {
+                (Box::new(LocalFileSystem::new()), local_directory.into())
+            }
+            Destination::S3Bucket { .. } => {
+                unreachable!("shouldn't be using local writer for S3");
+            }
+            Destination::FolderUri { path } => {
+                object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap()
+            }
+        };
+        let writer = LocalFileSystemWriter::new("/tmp".to_string(), path.to_string(), table);
+        TwoPhaseCommitterOperator::new(writer)
+    }
+}
+
 impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
     FileSystemSink<K, T, R>
 {
@@ -66,10 +93,9 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
-        let (object_store, path): (Box<dyn ObjectStore>, String) = match table.write_target.clone()
-        {
+        let (object_store, path): (Box<dyn ObjectStore>, Path) = match table.write_target.clone() {
             Destination::LocalFilesystem { local_directory } => {
-                (Box::new(LocalFileSystem::new()), local_directory)
+                (Box::new(LocalFileSystem::new()), local_directory.into())
             }
             Destination::S3Bucket {
                 s3_bucket,
@@ -86,20 +112,21 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
                             .build()
                             .unwrap(),
                     ),
-                    s3_directory,
+                    s3_directory.into(),
                 )
+            }
+            Destination::FolderUri { path } => {
+                object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap()
             }
         };
 
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
-        let path = path.into();
         let mut writer = AsyncMultipartFileSystemWriter::<T, R>::new(
             path,
             Arc::new(object_store),
             receiver,
             checkpoint_sender,
-            table.file_settings.clone().unwrap(),
             table,
         );
         tokio::spawn(async move {
@@ -384,10 +411,7 @@ enum RollingPolicy {
 }
 
 impl RollingPolicy {
-    fn should_roll<MPW: MultiPartWriter>(&self, writer: &MPW) -> bool {
-        let Some(stats) = writer.stats() else {
-            return false
-        };
+    fn should_roll(&self, stats: &MultiPartWriterStats) -> bool {
         match self {
             RollingPolicy::PartLimit(part_limit) => stats.parts_written >= *part_limit,
             RollingPolicy::SizeLimit(size_limit) => stats.bytes_written >= *size_limit,
@@ -398,12 +422,12 @@ impl RollingPolicy {
                 stats.first_write_at.elapsed() >= *duration
             }
             RollingPolicy::AnyPolicy(policies) => {
-                policies.iter().any(|policy| policy.should_roll(writer))
+                policies.iter().any(|policy| policy.should_roll(stats))
             }
         }
     }
 
-    fn from_file_settings(file_settings: FileSettings) -> RollingPolicy {
+    fn from_file_settings(file_settings: &FileSettings) -> RollingPolicy {
         let mut policies = vec![];
         let part_size_limit = file_settings.max_parts.unwrap_or(1000) as usize;
         // this is a hard limit, so will always be present.
@@ -417,17 +441,10 @@ impl RollingPolicy {
         {
             policies.push(RollingPolicy::InactivityDuration(inactivity_timeout))
         }
-        if let Some(rollover_timeout) = file_settings
-            .rollover_seconds
-            .map(|seconds| Duration::from_secs(seconds as u64))
-        {
-            policies.push(RollingPolicy::RolloverDuration(rollover_timeout))
-        }
-        if policies.len() == 1 {
-            policies.pop().unwrap()
-        } else {
-            RollingPolicy::AnyPolicy(policies)
-        }
+        let rollover_timeout =
+            Duration::from_secs(file_settings.rollover_seconds.unwrap_or(30) as u64);
+        policies.push(RollingPolicy::RolloverDuration(rollover_timeout));
+        RollingPolicy::AnyPolicy(policies)
     }
 }
 
@@ -449,7 +466,6 @@ where
         object_store: Arc<dyn ObjectStore>,
         receiver: Receiver<FileSystemMessages<T>>,
         checkpoint_sender: Sender<CheckpointData<T>>,
-        file_settings: FileSettings,
         writer_properties: FileSystemTable,
     ) -> Self {
         Self {
@@ -463,8 +479,10 @@ where
             checkpoint_sender,
             futures: FuturesUnordered::new(),
             files_to_finish: Vec::new(),
+            rolling_policy: RollingPolicy::from_file_settings(
+                writer_properties.file_settings.as_ref().unwrap(),
+            ),
             properties: writer_properties,
-            rolling_policy: RollingPolicy::from_file_settings(file_settings),
         }
     }
 
@@ -536,7 +554,8 @@ where
                 _ = tokio::time::sleep_until(next_policy_check) => {
                     next_policy_check = tokio::time::Instant::now() + Duration::from_millis(100);
                     if let Some(writer) = self.writers.get_mut(&self.current_writer_name) {
-                        if self.rolling_policy.should_roll(writer) {
+                        if let Some(stats) = writer.stats() {
+                            if self.rolling_policy.should_roll(&stats){
                             if let Some(future) = writer.close()? {
                                 self.futures.push(future);
                             }
@@ -545,6 +564,7 @@ where
                             self.current_writer_name = new_writer.name();
                             self.writers.insert(new_writer.name(), new_writer);
                         }
+                    }
                     }
                 }
                 else => {

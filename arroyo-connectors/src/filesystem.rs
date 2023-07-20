@@ -78,10 +78,17 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let (description, operator) = match &table.format_settings {
-            Some(FormatSettings::Parquet { .. }) => ("FileSystem<Parquet>".to_string(), "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"),
-            Some(FormatSettings::Json {  }) => ("FileSystem<JSON>".to_string(), "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"),
-            None => bail!("have to have some format settings"),
+        let is_local = match &table.write_target {
+            Destination::FolderUri { path } => path.starts_with("file://"),
+            Destination::S3Bucket { .. } => false,
+            Destination::LocalFilesystem { .. } => true,
+        };
+        let (description, operator) = match (&table.format_settings, is_local) {
+            (Some(FormatSettings::Parquet { .. }), true) => ("LocalFileSystem<Parquet".to_string(), "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"),
+            (Some(FormatSettings::Parquet { .. }), false) => ("FileSystem<Parquet>".to_string(), "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"),
+            (Some(FormatSettings::Json {  }), true) => bail!("local json unimplemented"),
+            (Some(FormatSettings::Json {  }), false) => ("FileSystem<JSON>".to_string(), "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"),
+            (None, _) => bail!("have to have some format settings"),
         };
 
         let config = OperatorConfig {
@@ -110,7 +117,9 @@ impl Connector for FileSystemConnector {
         opts: &mut std::collections::HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let write_target = if let (Some(s3_bucket), Some(s3_directory), Some(aws_region)) = (
+        let write_target = if let Some(path) = opts.remove("path") {
+            Destination::FolderUri { path }
+        } else if let (Some(s3_bucket), Some(s3_directory), Some(aws_region)) = (
             opts.remove("s3_bucket"),
             opts.remove("s3_directory"),
             opts.remove("aws_region"),
@@ -121,7 +130,7 @@ impl Connector for FileSystemConnector {
                 aws_region,
             }
         } else {
-            bail!("Only s3 targets are supported currently")
+            bail!("Only s3 targets are supported currently");
         };
 
         let inactivity_rollover_seconds = opts
