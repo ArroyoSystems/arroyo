@@ -1,7 +1,7 @@
 use tokio::sync::oneshot;
 use tracing::info;
 
-use crate::states::{stop_if_desired_non_running, StateError};
+use crate::states::{fatal, stop_if_desired_non_running, StateError};
 use crate::{compiler::ProgramCompiler, JobMessage};
 
 use super::{scheduling::Scheduling, Context, State, Transition};
@@ -42,7 +42,7 @@ impl State for Compiling {
         });
         loop {
             tokio::select! {
-                val = &mut rx => match val.unwrap() {
+                val = &mut rx => match val.map_err(|err| fatal("could not compile", err.into()))? {
                     Ok(res) => {
                         ctx.status.pipeline_path = Some(res.pipeline_path);
                         ctx.status.wasm_path = Some(res.wasm_path);

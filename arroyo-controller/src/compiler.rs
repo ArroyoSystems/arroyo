@@ -119,6 +119,13 @@ members = [
 exclude = [
   "wasm-fns",
 ]
+[patch.crates-io]
+parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'direct_multipart' }
 "#;
 
         // NOTE: These must be kept in sync with the Cargo configs in ops/query-compiler/build-base
@@ -156,6 +163,10 @@ bincode = "=2.0.0-rc.3"
 bincode_derive = "=2.0.0-rc.3"
 serde = "1.0"
 serde_json = "1.0"
+arrow = "39.0.0"
+parquet = "39.0.0"
+arrow-array = "39.0.0"
+arrow-schema = "39.0.0"
 arroyo-types = {{ path = "{}/arroyo-types" }}
 arroyo-worker = {{ path = "{}/arroyo-worker"{}}}
 "#,

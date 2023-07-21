@@ -37,7 +37,14 @@ serde = "1.0"
 sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
+url = "2.4.0"
 ordered-float = "3"
+arrow = "39.0.0"
+parquet = { version = "39.0.0", features = ["async"]}
+arrow-array = "39.0.0"
+rusoto_core = "0.48.0"
+rusoto_s3 = "0.48.0"
+object_store = {version = "0.6.1", features = ["aws"]}
 
 tonic = { workspace = true }
 prost = "0.11"

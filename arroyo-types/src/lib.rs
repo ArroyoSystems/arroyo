@@ -1,3 +1,5 @@
+use arrow::datatypes::SchemaRef;
+use arrow_array::RecordBatch;
 use bincode::{config, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -410,6 +412,13 @@ pub enum JoinType {
     Right,
     /// Full Join
     Full,
+}
+
+pub trait RecordBatchBuilder: Default + Debug + Sync + Send {
+    type Data: Data;
+    fn add_data(&mut self, data: Option<Self::Data>);
+    fn flush(&mut self) -> RecordBatch;
+    fn schema(&self) -> SchemaRef;
 }
 
 unsafe impl<K: Key, T: Data> Sync for Record<K, T> {}

@@ -36,6 +36,7 @@ impl Connector for FluvioConnector {
             source: true,
             sink: true,
             testing: false,
+            hidden: false,
             custom_schemas: true,
             connection_config: None,
             table_config: TABLE_SCHEMA.to_string(),
@@ -131,7 +132,7 @@ impl Connector for FluvioConnector {
             ),
             TableType::Sink { .. } => (
                 ConnectionType::Sink,
-                "connectors::fluvio::sink::FluvioSinkFunc",
+                "connectors::fluvio::sink::FluvioSinkFunc::<#in_k, #in_t>",
                 format!("FluvioSink<{}>", table.topic),
             ),
         };

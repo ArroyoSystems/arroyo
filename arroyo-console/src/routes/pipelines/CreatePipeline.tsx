@@ -99,7 +99,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
       setUdfsInput(def.udfs[0].definition || '');
       setOptions({
         ...options,
-        name: def.name + '-copy',
+        name: def.name,
       });
     };
 

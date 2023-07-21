@@ -439,6 +439,7 @@ enum TaskCheckpointEventType {
   CHECKPOINT_STARTED = 1;
   CHECKPOINT_OPERATOR_FINISHED = 2;
   CHECKPOINT_SYNC_FINISHED = 3;
+  CHECKPOINT_PRE_COMMIT = 4;
 }
 
 message TaskCheckpointEvent {
@@ -531,6 +532,7 @@ message Connector {
   bool sink = 7;
   bool custom_schemas = 8;
   bool testing = 9;
+  bool hidden = 12;
 
   optional string connection_config = 10;
   string table_config = 11;
@@ -663,6 +665,7 @@ enum Format {
   ProtobufFormat = 2;
   AvroFormat = 3;
   RawStringFormat = 4;
+  ParquetFormat = 5;
 }
 
 message FormatOptions {

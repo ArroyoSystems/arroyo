@@ -147,6 +147,7 @@ impl Debug for LogicalNode {
 
 struct EngineState {
     sources: Vec<Sender<ControlMessage>>,
+    sinks: Vec<Sender<ControlMessage>>,
     running_engine: RunningEngine,
 }
 
@@ -332,10 +333,12 @@ impl WorkerGrpc for WorkerServer {
         };
 
         let sources = engine.source_controls();
+        let sinks = engine.sink_controls();
 
         let mut state = self.state.lock().unwrap();
         *state = Some(EngineState {
             sources,
+            sinks,
             running_engine: engine,
         });
 
@@ -348,6 +351,30 @@ impl WorkerGrpc for WorkerServer {
         &self,
         request: Request<CheckpointReq>,
     ) -> Result<Response<CheckpointResp>, Status> {
+        let req = request.into_inner();
+
+        if req.is_commit {
+            info!("committing");
+            let senders = {
+                let state = self.state.lock().unwrap();
+
+                if let Some(state) = state.as_ref() {
+                    state.sinks.clone()
+                } else {
+                    return Err(Status::failed_precondition(
+                        "Worker has not yet started execution",
+                    ));
+                }
+            };
+            for sender in &senders {
+                sender
+                    .send(ControlMessage::Commit { epoch: req.epoch })
+                    .await
+                    .unwrap();
+            }
+            return Ok(Response::new(CheckpointResp {}));
+        }
+
         let senders = {
             let state = self.state.lock().unwrap();
 
@@ -359,8 +386,6 @@ impl WorkerGrpc for WorkerServer {
                 ));
             }
         };
-
-        let req = request.into_inner();
 
         let barrier = CheckpointBarrier {
             epoch: req.epoch,

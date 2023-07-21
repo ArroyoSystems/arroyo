@@ -353,7 +353,7 @@ pub struct ConnectorOp {
 impl ConnectorOp {
     pub fn web_sink() -> Self {
         ConnectorOp {
-            operator: "GrpcSink".to_string(),
+            operator: "GrpcSink::<#in_k, #in_t>".to_string(),
             config: "{}".to_string(),
             description: "WebSink".to_string(),
         }
@@ -1311,13 +1311,14 @@ impl Program {
                     }
                 }
                 Operator::ConnectorSink(c)  => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
+                    // In c.operator, replace #in_k and #in_t with the actual types
+                    let replaced_type = c.operator.replace("#in_k", &input.unwrap().weight().key);
+                    let replaced_type = replaced_type.replace("#in_t", &input.unwrap().weight().value);
 
-                    let strukt = parse_type(&c.operator);
+                    let strukt = parse_type(&replaced_type);
                     let config = &c.config;
                     quote! {
-                        Box::new(#strukt::<#in_k, #in_t>::from_config(#config))
+                        Box::new(#strukt::from_config(#config))
                     }
                 }
                 Operator::FusedWasmUDFs { name, udfs: _ } => {

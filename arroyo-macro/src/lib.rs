@@ -493,15 +493,18 @@ fn impl_stream_node_type(
             let mut blocked = vec![];
 
             loop {
-                match sel.next().await {
-                    Some(((idx, item), s)) => {
+                tokio::select! {
+                    Some(control_message) = ctx.control_rx.recv() => {
+                        self.handle_raw_control_message(control_message, &mut ctx).await;
+                    }
+                    Some(((idx, item), s)) = sel.next() => {
                         match idx / (in_partitions / #handler_count) {
                             #(#handle_matchers
                             )*
                             _ => unreachable!()
                         }
                     }
-                    None => {
+                    else => {
                         tracing::info!("[{}] Stream completed", ctx.task_info.operator_name);
                         break;
                     }
@@ -739,6 +742,14 @@ fn impl_stream_node_type(
                     ctx.broadcast(arroyo_types::Message::Watermark(watermark)).await;
                 }
         });
+    }
+
+    if !methods.contains("handle_raw_control_message") {
+        defs.push(quote! {
+            async fn handle_raw_control_message(&mut self, control_message: arroyo_rpc::ControlMessage, ctx: &mut Context<#out_k, #out_t>) {
+                tracing::warn!("default handling of control message {:?}", control_message);
+            }
+        })
     }
 
     if !methods.contains("tables") {
