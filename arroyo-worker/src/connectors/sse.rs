@@ -89,6 +89,9 @@ where
                 }
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
                 OperatorConfigSerializationMode::DebeziumJson => todo!(),
+                OperatorConfigSerializationMode::Parquet => {
+                    unimplemented!("parquet out of SSE source doesn't make sense")
+                }
             },
             state: SSESourceState::default(),
             _t: PhantomData,

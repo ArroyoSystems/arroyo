@@ -100,6 +100,9 @@ where
                 }
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
                 OperatorConfigSerializationMode::DebeziumJson => SerializationMode::Json,
+                OperatorConfigSerializationMode::Parquet => {
+                    unimplemented!("parquet out of kafka source doesn't make sense")
+                }
             },
             client_configs: client_configs(&connection),
             messages_per_second: NonZeroU32::new(

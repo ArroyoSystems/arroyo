@@ -67,6 +67,9 @@ where
                     SerializationMode::JsonSchemaRegistry
                 }
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
+                OperatorConfigSerializationMode::Parquet => {
+                    unimplemented!("parquet out of websocket source doesn't make sense")
+                }
             },
             state: WebsocketSourceState::default(),
             _t: PhantomData,
