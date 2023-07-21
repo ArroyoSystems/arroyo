@@ -16,5 +16,6 @@ arrow = "39.0.0"
 arrow-array = "39.0.0"
 arroyo-types = { path = "../../arroyo-types" }
 arroyo-worker = { path = "../../arroyo-worker" }
+
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

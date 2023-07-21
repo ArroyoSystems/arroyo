@@ -1,8 +1,8 @@
 use anyhow::bail;
 use arroyo_rpc::grpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::{
-    HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StopWorkerReq, StopWorkerStatus,
-    WorkerFinishedReq,
+    HeartbeatNodeReq, RegisterNodeReq, StartWorkerData, StartWorkerHeader, StartWorkerReq,
+    StopWorkerReq, StopWorkerStatus, WorkerFinishedReq,
 };
 use arroyo_types::{
     NodeId, WorkerId, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV,
@@ -42,6 +42,8 @@ lazy_static! {
     )
     .unwrap();
 }
+
+const NODE_PART_SIZE: usize = 2 * 1024 * 1024;
 
 #[async_trait::async_trait]
 pub trait Scheduler: Send + Sync {
@@ -303,10 +305,12 @@ impl NodeStatus {
     }
 }
 
+#[derive(Clone)]
 struct NodeWorker {
     job_id: String,
     node_id: NodeId,
     run_id: i64,
+    running: bool,
 }
 
 #[derive(Default)]
@@ -357,18 +361,22 @@ impl NodeScheduler {
         job_id: &str,
         worker_id: WorkerId,
         force: bool,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<WorkerId>> {
         let state = self.state.lock().await;
 
         let Some(worker) = state.workers.get(&worker_id) else {
             // assume it's already finished
-            return Ok(());
+            return Ok(Some(worker_id));
         };
 
         let Some(node) = state.nodes.get(&worker.node_id) else {
             warn!(message = "node not found for stop worker", node_id = worker.node_id.0);
-            return Ok(());
+            return Ok(Some(worker_id));
         };
+
+        let worker = worker.clone();
+        let node = node.clone();
+        drop(state);
 
         info!(
             message = "stopping worker",
@@ -378,25 +386,28 @@ impl NodeScheduler {
             worker_id = worker_id.0
         );
 
-        let mut client = NodeGrpcClient::connect(format!("http://{}", node.addr)).await?;
+        let Ok(mut client) = NodeGrpcClient::connect(format!("http://{}", node.addr)).await else {
+            warn!("Failed to connect to worker to stop; this likely means it is dead");
+            return Ok(Some(worker_id));
+        };
 
-        match (
-            client
-                .stop_worker(Request::new(StopWorkerReq {
-                    job_id: job_id.to_string(),
-                    worker_id: worker_id.0,
-                    force,
-                }))
-                .await?
-                .get_ref()
-                .status(),
-            force,
-        ) {
+        let Ok(resp) = client
+            .stop_worker(Request::new(StopWorkerReq {
+                job_id: job_id.to_string(),
+                worker_id: worker_id.0,
+                force,
+            }))
+            .await else {
+                warn!("Failed to connect to worker to stop; this likely means it is dead");
+                return Ok(Some(worker_id));
+            };
+
+        match (resp.get_ref().status(), force) {
             (StopWorkerStatus::NotFound, false) => {
                 bail!("couldn't find worker, will only continue if force")
             }
             (StopWorkerStatus::StopFailed, _) => bail!("tried to kill and couldn't"),
-            _ => Ok(()),
+            _ => Ok(None),
         }
     }
 }
@@ -463,7 +474,7 @@ impl Scheduler for NodeScheduler {
             .workers
             .iter()
             .filter(|(_, v)| {
-                v.job_id == job_id && (run_id.is_none() || v.run_id == run_id.unwrap())
+                v.job_id == job_id && v.running && (run_id.is_none() || v.run_id == run_id.unwrap())
             })
             .map(|(w, _)| *w)
             .collect())
@@ -476,6 +487,8 @@ impl Scheduler for NodeScheduler {
         let (binary, wasm) = get_binaries(&start_pipeline_req)
             .await
             .map_err(|_| SchedulerError::CompilationNeeded)?;
+
+        let binary = Arc::new(binary);
 
         // TODO: make this locking more fine-grained
         let mut state = self.state.lock().await;
@@ -536,18 +549,45 @@ impl Scheduler for NodeScheduler {
                     ))
                 })?;
 
+            let header = StartWorkerReq {
+                msg: Some(arroyo_rpc::grpc::start_worker_req::Msg::Header(
+                    StartWorkerHeader {
+                        name: start_pipeline_req.name.clone(),
+                        job_id: start_pipeline_req.job_id.clone(),
+                        wasm: wasm.clone(),
+                        slots: slots_for_this_one as u64,
+                        node_id: node.id.0,
+                        run_id: start_pipeline_req.run_id as u64,
+                        env_vars: start_pipeline_req.env_vars.clone(),
+                        binary_size: binary.len() as u64,
+                    },
+                )),
+            };
+
+            let binary = binary.clone();
+            let outbound = async_stream::stream! {
+                yield header;
+
+                let mut part = 0;
+                let mut sent = 0;
+
+                for chunk in binary.chunks(NODE_PART_SIZE) {
+                    sent += chunk.len();
+
+                    yield StartWorkerReq {
+                        msg: Some(arroyo_rpc::grpc::start_worker_req::Msg::Data(StartWorkerData {
+                            part,
+                            data: chunk.to_vec(),
+                            has_more: sent < binary.len(),
+                        }))
+                    };
+
+                    part += 1;
+                }
+            };
+
             let res = client
-                .start_worker(Request::new(StartWorkerReq {
-                    name: start_pipeline_req.name.clone(),
-                    job_id: start_pipeline_req.job_id.clone(),
-                    binary: binary.clone(),
-                    wasm: wasm.clone(),
-                    job_hash: start_pipeline_req.hash.clone(),
-                    slots: slots_for_this_one as u64,
-                    node_id: node.id.0,
-                    run_id: start_pipeline_req.run_id as u64,
-                    env_vars: start_pipeline_req.env_vars.clone(),
-                }))
+                .start_worker(Request::new(outbound))
                 .await
                 .map_err(|e| {
                     // release back slots already scheduled.
@@ -579,6 +619,7 @@ impl Scheduler for NodeScheduler {
                     job_id: start_pipeline_req.job_id.clone(),
                     run_id: start_pipeline_req.run_id,
                     node_id: node.id,
+                    running: true,
                 },
             );
 
@@ -603,7 +644,17 @@ impl Scheduler for NodeScheduler {
         }
 
         for f in futures {
-            f.await?;
+            match f.await? {
+                Some(worker_id) => {
+                    let mut state = self.state.lock().await;
+                    if let Some(worker) = state.workers.get_mut(&worker_id) {
+                        worker.running = false;
+                    }
+                }
+                None => {
+                    bail!("Failed to stop worker");
+                }
+            }
         }
 
         Ok(())
