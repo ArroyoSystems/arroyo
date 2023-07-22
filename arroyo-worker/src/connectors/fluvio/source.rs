@@ -87,6 +87,9 @@ where
                 }
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
                 OperatorConfigSerializationMode::DebeziumJson => SerializationMode::Json,
+                OperatorConfigSerializationMode::Parquet => {
+                    unreachable!("Parquet in Fluvio doesn't make sense")
+                }
             },
             _t: PhantomData,
         }

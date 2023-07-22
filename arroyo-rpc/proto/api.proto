@@ -162,6 +162,7 @@ enum SerializationMode {
   JSON = 0;
   JSON_SCHEMA_REGISTRY = 1;
   RAW = 2;
+  PARQUET = 3;
 }
 
 message WasmUdfs {

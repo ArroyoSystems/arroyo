@@ -290,7 +290,7 @@ pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializat
             }
         }
         grpc::api::Format::DebeziumJsonFormat => OperatorConfigSerializationMode::DebeziumJson,
-        grpc::api::Format::ParquetFormat => todo!(),
+        grpc::api::Format::ParquetFormat => OperatorConfigSerializationMode::Parquet,
     }
 }
 
@@ -303,6 +303,7 @@ impl From<OperatorConfigSerializationMode> for SerializationMode {
             }
             OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
             OperatorConfigSerializationMode::DebeziumJson => SerializationMode::DebeziumJson,
+            OperatorConfigSerializationMode::Parquet => SerializationMode::Parquet,
         }
     }
 }

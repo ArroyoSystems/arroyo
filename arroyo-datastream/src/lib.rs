@@ -285,6 +285,7 @@ pub enum SerializationMode {
     JsonSchemaRegistry,
     RawJson,
     DebeziumJson,
+    Parquet,
 }
 impl SerializationMode {
     pub fn from_has_registry_flag(has_registry: bool) -> Self {
@@ -324,6 +325,7 @@ impl ToTokens for SerializationMode {
             SerializationMode::DebeziumJson => {
                 quote::quote!(arroyo_worker::operators::SerializationMode::Json)
             }
+            SerializationMode::Parquet => unimplemented!(),
         };
 
         tokens.append_all(serialization_mode);
@@ -336,6 +338,7 @@ impl From<GrpcApi::SerializationMode> for SerializationMode {
             GrpcApi::SerializationMode::Json => Self::Json,
             GrpcApi::SerializationMode::JsonSchemaRegistry => Self::JsonSchemaRegistry,
             GrpcApi::SerializationMode::Raw => Self::RawJson,
+            GrpcApi::SerializationMode::Parquet => Self::Parquet,
         }
     }
 }
@@ -2060,6 +2063,7 @@ impl From<SerializationMode> for GrpcApi::SerializationMode {
             SerializationMode::JsonSchemaRegistry => GrpcApi::SerializationMode::JsonSchemaRegistry,
             SerializationMode::RawJson => GrpcApi::SerializationMode::Raw,
             SerializationMode::DebeziumJson => GrpcApi::SerializationMode::Json,
+            SerializationMode::Parquet => GrpcApi::SerializationMode::Parquet,
         }
     }
 }
