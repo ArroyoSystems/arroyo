@@ -11,9 +11,9 @@ import {
   useColorModeValue,
 } from '@chakra-ui/react';
 import { useLinkClickHandler } from 'react-router-dom';
-import { GetJobsReq, JobStatus } from '../../gen/api_pb';
+import { JobStatus } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
-import useSWR from 'swr';
+import { useJobs } from '../../lib/data_fetching';
 
 interface HomeState {
   jobs: Array<JobStatus> | null;
@@ -48,13 +48,8 @@ export const Stat = (props: Props) => {
   );
 };
 
-const fetchJobs = async (client: ApiClient) => {
-  const clientObj = await client();
-  return (await clientObj.getJobs(new GetJobsReq({}))).jobs;
-};
-
 export function Home({ client }: { client: ApiClient }) {
-  const { data: jobs } = useSWR('jobs', () => fetchJobs(client));
+  const { jobs } = useJobs(client);
   let runningJobs = 0;
   let allJobs = 0;
   let failedJobs = 0;
