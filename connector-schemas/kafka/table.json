@@ -22,10 +22,19 @@
                                 "earliest",
                                 "latest"
                             ]
+                        },
+                        "read_mode": {
+                            "type": "string",
+                            "description": "Type of reading behavior for Kafka Source",
+                            "enum": [
+                                "read_committed",
+                                "read_uncommitted"
+                            ]
                         }
                     },
                     "required": [
-                        "offset"
+                        "offset",
+                        "read_mode"
                     ],
                     "additionalProperties": false
                 },
@@ -33,7 +42,18 @@
                     "type": "object",
                     "title": "Sink",
                     "properties": {
+                        "commit_mode": {
+                            "type": "string",
+                            "description": "Type of committing behavior for Kafka Sink",
+                            "enum": [
+                                "at_least_once",
+                                "exactly_once"
+                            ]
+                        }
                     },
+                    "required": [
+                        "commit_mode"
+                    ],
                     "additionalProperties": false
                 }
             ]

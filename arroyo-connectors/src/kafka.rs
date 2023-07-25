@@ -157,9 +157,23 @@ impl Connector for KafkaConnector {
                         None | Some("latest") => SourceOffset::Latest,
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
                     },
+                    read_mode: match opts.remove("read_mode").as_ref().map(|f| f.as_str()) {
+                        Some("read_committed") => SourceReadMode::ReadCommitted,
+                        Some("read_uncommitted") | None => SourceReadMode::ReadUncommitted,
+                        Some(other) => bail!("invalid value for source.read_mode '{}'", other),
+                    },
                 }
             }
-            "sink" => TableType::Sink {},
+            "sink" => {
+                let commit_mode = opts.remove("commit_mode");
+                TableType::Sink {
+                    commit_mode: match commit_mode.as_ref().map(|f| f.as_str()) {
+                        Some("at_least_once") | None => SinkCommitMode::AtLeastOnce,
+                        Some("exactly_once") => SinkCommitMode::ExactlyOnce,
+                        Some(other) => bail!("invalid value for commit_mode '{}'", other),
+                    },
+                }
+            }
             _ => {
                 bail!("type must be one of 'source' or 'sink")
             }
