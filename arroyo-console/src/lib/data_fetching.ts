@@ -4,6 +4,7 @@ import {
   GetConnectionTablesReq,
   GetConnectionsReq,
   GetConnectorsReq,
+  GetJobsReq,
   JobCheckpointsReq,
   JobDetailsReq,
   JobMetricsReq,
@@ -107,6 +108,22 @@ export const useConnectionTables = (client: ApiClient) => {
     connectionTables: data,
     connectionTablesLoading: isLoading,
     mutateConnectionTables: mutate,
+  };
+};
+
+// Jobs
+
+const jobsFetcher = (client: ApiClient) => {
+  return async () => {
+    let jobs = await (await client()).getJobs(new GetJobsReq({}));
+    return jobs.jobs;
+  };
+};
+
+export const useJobs = (client: ApiClient) => {
+  const { data } = useSWR('jobs', jobsFetcher(client));
+  return {
+    jobs: data,
   };
 };
 
