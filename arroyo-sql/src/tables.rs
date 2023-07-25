@@ -131,6 +131,7 @@ impl ConnectorTable {
                 "protobuf" => Format::ProtobufFormat,
                 "avro" => Format::AvroFormat,
                 "raw_string" => Format::RawStringFormat,
+                "parquet" => Format::ParquetFormat,
                 f => bail!("Unknown format '{}'", f),
             });
         }

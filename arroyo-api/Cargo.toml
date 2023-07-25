@@ -1,12 +1,11 @@
 [package]
 name = "arroyo-api"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [features]
 default = []
-kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
@@ -17,12 +16,12 @@ arroyo-sql = { path = "../arroyo-sql" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-state = { path = "../arroyo-state" }
 
-tonic = "0.8"
-tonic-reflection = "0.5"
+tonic = { workspace = true }
+tonic-reflection = { workspace = true }
+tonic-web = { workspace = true }
 prost = "0.11"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
-tonic-web = "0.4.0"
 tower = "0.4"
 rand = "0.8"
 rand_chacha = "0.3"
@@ -47,7 +46,7 @@ utoipa-swagger-ui = { version = "3", features = ["axum"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-argon2 = "0.4"
+argon2 = "0.5"
 
 # logging
 tracing = "0.1"
@@ -60,14 +59,12 @@ schemars = "0.8"
 # metric querying
 prometheus-http-query = "0.6.5"
 reqwest = "0.11"
-base64 = '0.13'
+base64 = '0.21'
 
 # codegen
-syn = {version = "1", features = ["full"]}
+syn = {version = "2", features = ["full"]}
 quote = "1"
 proc-macro2 = "1"
-# source testing
-rdkafka = { version = "0.28", features = ["cmake-build"] }
 
 # postgres
 refinery = { version = "0.8", features = [ "postgres" ]}

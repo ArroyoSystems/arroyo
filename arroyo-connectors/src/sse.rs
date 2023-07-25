@@ -46,6 +46,7 @@ impl Connector for SSEConnector {
             source: true,
             sink: false,
             testing: true,
+            hidden: false,
             custom_schemas: true,
             connection_config: None,
             table_config: TABLE_SCHEMA.to_owned(),

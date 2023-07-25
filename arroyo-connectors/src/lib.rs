@@ -26,6 +26,7 @@ use websocket::WebsocketConnector;
 use self::kafka::KafkaConnector;
 
 pub mod blackhole;
+pub mod filesystem;
 pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
@@ -44,6 +45,8 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("blackhole", Box::new(BlackholeConnector {}));
     m.insert("websocket", Box::new(WebsocketConnector {}));
     m.insert("fluvio", Box::new(FluvioConnector {}));
+    m.insert("filesystem", Box::new(filesystem::FileSystemConnector {}));
+
     m
 }
 
@@ -287,6 +290,7 @@ pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializat
             }
         }
         grpc::api::Format::DebeziumJsonFormat => OperatorConfigSerializationMode::DebeziumJson,
+        grpc::api::Format::ParquetFormat => OperatorConfigSerializationMode::Parquet,
     }
 }
 
@@ -299,6 +303,7 @@ impl From<OperatorConfigSerializationMode> for SerializationMode {
             }
             OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
             OperatorConfigSerializationMode::DebeziumJson => SerializationMode::DebeziumJson,
+            OperatorConfigSerializationMode::Parquet => SerializationMode::Parquet,
         }
     }
 }

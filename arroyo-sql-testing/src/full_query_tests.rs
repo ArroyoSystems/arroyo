@@ -114,3 +114,18 @@ full_pipeline_codegen! {"sum_of_sums_updating",
 "SELECT bids, count(*) as occurrences FROM (
   SELECT count(*) as bids, bid.auction as auction FROM nexmark where bid is not null group by 2)
 GROUP BY 1"}
+
+full_pipeline_codegen! {"create_parquet_s3_source",
+"CREATE TABLE bids (
+  auction bigint,
+  bidder bigint,
+  price bigint,
+  datetime timestamp
+) WITH (
+  connector ='filesystem',
+  path = 'https://s3.us-west-2.amazonaws.com/demo/s3-uri',
+  format = 'parquet',
+  rollover_seconds = '5'
+);
+
+INSERT INTO Bids select bid.auction, bid.bidder, bid.price , bid.datetime FROM nexmark where bid is not null;"}

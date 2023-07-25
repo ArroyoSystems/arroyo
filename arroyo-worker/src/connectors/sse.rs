@@ -80,8 +80,8 @@ where
                 .collect(),
             events: table
                 .events
-                .map(|e| e.split(",").map(|e| e.to_string()).collect())
-                .unwrap_or_else(|| vec![]),
+                .map(|e| e.split(',').map(|e| e.to_string()).collect())
+                .unwrap_or_else(std::vec::Vec::new),
             serialization_mode: match config.serialization_mode.unwrap() {
                 OperatorConfigSerializationMode::Json => SerializationMode::Json,
                 OperatorConfigSerializationMode::JsonSchemaRegistry => {
@@ -89,6 +89,9 @@ where
                 }
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
                 OperatorConfigSerializationMode::DebeziumJson => todo!(),
+                OperatorConfigSerializationMode::Parquet => {
+                    unimplemented!("parquet out of SSE source doesn't make sense")
+                }
             },
             state: SSESourceState::default(),
             _t: PhantomData,
@@ -140,6 +143,9 @@ where
                     }
                 }
             }
+            ControlMessage::Commit { epoch: _ } => {
+                unreachable!("sources shouldn't receive commit messages");
+            }
         }
         None
     }
@@ -189,7 +195,7 @@ where
                                                         ctx.control_tx.send(
                                                             ControlResp::Error {
                                                                 operator_id: ctx.task_info.operator_id.clone(),
-                                                                task_index: ctx.task_info.task_index.clone(),
+                                                                task_index: ctx.task_info.task_index,
                                                                 message: format!("{} x {}", e.name, errors),
                                                                 details: e.details,
                                                         }).await.unwrap();

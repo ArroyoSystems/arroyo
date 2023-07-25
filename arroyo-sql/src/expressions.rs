@@ -457,9 +457,11 @@ impl<'a> ExpressionContext<'a> {
                         Box::new(arg_expressions.remove(0)),
                         &DataType::Timestamp(TimeUnit::Second, None),
                     ),
+                    BuiltinScalarFunction::FromUnixtime => Ok(Expression::Date(
+                        DateTimeFunction::FromUnixTime(Box::new(arg_expressions.remove(0))),
+                    )),
                     BuiltinScalarFunction::DateBin
                     | BuiltinScalarFunction::CurrentDate
-                    | BuiltinScalarFunction::FromUnixtime
                     | BuiltinScalarFunction::Now
                     | BuiltinScalarFunction::CurrentTime => {
                         bail!("date function {:?} not implemented", fun)
@@ -483,11 +485,14 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::Factorial => bail!("factorial not implemented yet"),
                     BuiltinScalarFunction::Gcd => bail!("gcd not implemented yet"),
                     BuiltinScalarFunction::Lcm => bail!("lcm not implemented yet"),
-                    BuiltinScalarFunction::DatePart | BuiltinScalarFunction::DateTrunc => {
-                        let date_function: DateTimeFunction =
-                            (fun.clone(), arg_expressions).try_into()?;
-                        Ok(Expression::Date(date_function))
-                    }
+                    BuiltinScalarFunction::DatePart => DateTimeFunction::date_part(
+                        arg_expressions.remove(0),
+                        arg_expressions.remove(0),
+                    ),
+                    BuiltinScalarFunction::DateTrunc => DateTimeFunction::date_trunc(
+                        arg_expressions.remove(0),
+                        arg_expressions.remove(0),
+                    ),
                 }
             }
             Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
@@ -2458,7 +2463,8 @@ impl RustUdfExpression {
                 || self
                     .args
                     .iter()
-                    .any(|(t, e)| t.is_optional() && !e.nullable()),
+                    // nullable if there are non-null UDF params with nullable arguments
+                    .any(|(t, e)| !t.is_optional() && e.nullable()),
         )
     }
 }
@@ -2637,115 +2643,97 @@ impl CaseExpression {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd)]
 pub enum DateTimeFunction {
-    DateTrunc(Box<Expression>, Box<DateTruncPrecision>),
-    DatePart(Box<Expression>, Box<DatePart>),
+    DatePart(DatePart, Box<Expression>),
+    DateTrunc(DateTruncPrecision, Box<Expression>),
+    FromUnixTime(Box<Expression>),
 }
 
 fn extract_literal_string(expr: Expression) -> Result<String, anyhow::Error> {
     let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(literal_string))}) = expr else {
         bail!("Can only convert a literal into a string")
     };
-    Ok(literal_string.as_str().to_string())
-}
-
-impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for DateTimeFunction {
-    type Error = anyhow::Error;
-
-    fn try_from(
-        value: (BuiltinScalarFunction, Vec<Expression>),
-    ) -> std::result::Result<Self, Self::Error> {
-        let func = value.0;
-        let mut args = value.1;
-        match (args.len(), func) {
-            (2, BuiltinScalarFunction::DatePart) => {
-                let arg1 = args.remove(0);
-                let arg2 = Box::new(args.remove(0));
-                let date_part = extract_literal_string(arg1)?
-                    .as_str()
-                    .try_into()
-                    .map_err(anyhow::Error::msg)?;
-                Ok(DateTimeFunction::DatePart(arg2, Box::new(date_part)))
-            }
-            (2, BuiltinScalarFunction::DateTrunc) => {
-                let arg1 = args.remove(0);
-                let arg2 = Box::new(args.remove(0));
-                let date_trunc_precision = extract_literal_string(arg1)?
-                    .as_str()
-                    .try_into()
-                    .map_err(anyhow::Error::msg)?;
-                Ok(DateTimeFunction::DateTrunc(
-                    arg2,
-                    Box::new(date_trunc_precision),
-                ))
-            }
-            (_, func) => bail!("function {} with args {:?} not supported", func, args),
-        }
-    }
+    Ok(literal_string)
 }
 
 impl DateTimeFunction {
-    fn non_null_function_invocation(&self) -> syn::Expr {
-        match self {
-            DateTimeFunction::DateTrunc(_, _) => {
-                parse_quote!(arroyo_worker::operators::functions::datetime::date_trunc(
-                    arg1, arg2
-                ))
-            }
-            DateTimeFunction::DatePart(_, _) => {
-                parse_quote!(arroyo_worker::operators::functions::datetime::date_part(
-                    arg1, arg2
-                ))
-            }
-        }
+    fn date_part(date_part: Expression, expr: Expression) -> anyhow::Result<Expression> {
+        let date_part = extract_literal_string(date_part)?
+            .as_str()
+            .try_into()
+            .map_err(|s| anyhow!("Invalid argument for date_part: {}", s))?;
+        Ok(Expression::Date(DateTimeFunction::DatePart(
+            date_part,
+            Box::new(expr),
+        )))
+    }
+
+    fn date_trunc(date_part: Expression, expr: Expression) -> anyhow::Result<Expression> {
+        let date_part = extract_literal_string(date_part)?
+            .as_str()
+            .try_into()
+            .map_err(|s| anyhow!("Invalid argument for date_trunc: {}", s))?;
+        Ok(Expression::Date(DateTimeFunction::DateTrunc(
+            date_part,
+            Box::new(expr),
+        )))
     }
 
     fn to_syn_expression(&self) -> syn::Expr {
-        let function = self.non_null_function_invocation();
-        let (null_arg, expr1, expr2): (bool, syn::Expr, syn::Expr) = match self {
-            DateTimeFunction::DatePart(arg1, arg2) => {
-                let arg2 = format!("arroyo_types::DatePart::{:?}", arg2);
-                (
-                    arg1.nullable(),
-                    arg1.to_syn_expression(),
-                    parse_str(&arg2).unwrap(),
-                )
-            }
-            DateTimeFunction::DateTrunc(arg1, arg2) => {
-                let arg2 = format!("arroyo_types::DateTruncPrecision::{:?}", arg2);
-                (
-                    arg1.nullable(),
-                    arg1.to_syn_expression(),
-                    parse_str(&arg2).unwrap(),
-                )
-            }
-        };
-        match null_arg {
-            true => parse_quote!({
-                use arroyo_types::{DatePart, DateTruncPrecision};
-                if let Some(arg1) = #expr1 {
-                    let arg2 = #expr2;
-                    Some(#function)
+        match self {
+            DateTimeFunction::DatePart(part, expr) => {
+                let part: syn::Expr =
+                    parse_str(&format!("arroyo_types::DatePart::{:?}", part)).unwrap();
+                let arg = expr.to_syn_expression();
+                if expr.nullable() {
+                    parse_quote!(#arg.map(|e| arroyo_worker::operators::functions::datetime::date_part(#part, e)))
                 } else {
-                    None
+                    parse_quote!(arroyo_worker::operators::functions::datetime::date_part(#part, #arg))
                 }
-            }),
-            false => parse_quote!({
-                use arroyo_types::{DatePart, DateTruncPrecision};
-                let arg1 = #expr1;
-                let arg2 = #expr2;
-                #function
-            }),
+            }
+            DateTimeFunction::DateTrunc(trunc, expr) => {
+                let trunc: syn::Expr =
+                    parse_str(&format!("arroyo_types::DateTruncPrecision::{:?}", trunc)).unwrap();
+                let arg = expr.to_syn_expression();
+                if expr.nullable() {
+                    parse_quote!(#arg.map(|e| arroyo_worker::operators::functions::datetime::date_trunc(#trunc, e)))
+                } else {
+                    parse_quote!(arroyo_worker::operators::functions::datetime::date_trunc(#trunc, #arg))
+                }
+            }
+            DateTimeFunction::FromUnixTime(arg) => {
+                let arg_expr = arg.to_syn_expression();
+
+                let expr = if arg.nullable() {
+                    quote! {
+                        #arg_expr.map(|e| chrono::Utc.timestamp_nanos(e as i64).to_rfc3339())
+                    }
+                } else {
+                    quote! {
+                        chrono::Utc.timestamp_nanos(#arg_expr as i64).to_rfc3339()
+                    }
+                };
+
+                parse_quote! {
+                    {
+                        use chrono::TimeZone;
+                        #expr
+                    }
+                }
+            }
         }
     }
 
     fn return_type(&self) -> TypeDef {
         match self {
-            DateTimeFunction::DateTrunc(arg, _) => TypeDef::DataType(
+            DateTimeFunction::DatePart(_, expr) => {
+                TypeDef::DataType(DataType::UInt32, expr.nullable())
+            }
+            DateTimeFunction::DateTrunc(_, expr) => TypeDef::DataType(
                 DataType::Timestamp(TimeUnit::Nanosecond, None),
-                arg.nullable(),
+                expr.nullable(),
             ),
-            DateTimeFunction::DatePart(arg, _) => {
-                TypeDef::DataType(DataType::UInt32, arg.nullable())
+            DateTimeFunction::FromUnixTime(expr) => {
+                TypeDef::DataType(DataType::Utf8, expr.nullable())
             }
         }
     }

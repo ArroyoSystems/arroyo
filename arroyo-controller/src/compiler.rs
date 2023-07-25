@@ -1,13 +1,8 @@
 use crate::states::fatal;
 use anyhow::{anyhow, Result};
-use arroyo_datastream::{
-    AggregateBehavior, EdgeType, NonWindowAggregator, Operator, Program, SlidingAggregatingTopN,
-    SlidingWindowAggregator, TumblingTopN, TumblingWindowAggregator, WasmBehavior, WatermarkType,
-    WindowType,
-};
+use arroyo_datastream::{parse_type, Operator, Program, WasmBehavior};
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::CompileQueryReq;
-use arroyo_sql::types::duration_to_syn_expr;
 use arroyo_types::REMOTE_COMPILER_ENDPOINT_ENV;
 use petgraph::Direction;
 use proc_macro2::TokenStream;
@@ -16,7 +11,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, io};
-use syn::{parse_quote, parse_str, GenericArgument, PathArguments, Type, TypePath};
+use syn::{parse_quote, parse_str};
 use tokio::process::Command;
 use tonic::{Code, Request};
 use tracing::info;
@@ -33,29 +28,6 @@ pub struct ProgramCompiler {
     name: String,
     job_id: String,
     program: Program,
-}
-
-fn parse_type(s: &str) -> Type {
-    let s = s
-        .replace("arroyo_bench::", "")
-        .replace("pipeline::", "")
-        .replace("alloc::string::", "")
-        .replace("alloc::vec::", "");
-    parse_str(&s).expect(&s)
-}
-
-fn extract_container_type(name: &str, t: &Type) -> Option<Type> {
-    if let Type::Path(TypePath { path, .. }) = t {
-        let last = path.segments.last()?;
-        if last.ident == format_ident!("{}", name) {
-            if let PathArguments::AngleBracketed(args) = &last.arguments {
-                if let GenericArgument::Type(t) = args.args.first()? {
-                    return Some(t.clone());
-                }
-            }
-        }
-    }
-    None
 }
 
 impl ProgramCompiler {
@@ -147,6 +119,13 @@ members = [
 exclude = [
   "wasm-fns",
 ]
+[patch.crates-io]
+parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'direct_multipart' }
 "#;
 
         // NOTE: These must be kept in sync with the Cargo configs in ops/query-compiler/build-base
@@ -184,6 +163,10 @@ bincode = "=2.0.0-rc.3"
 bincode_derive = "=2.0.0-rc.3"
 serde = "1.0"
 serde_json = "1.0"
+arrow = "39.0.0"
+parquet = "39.0.0"
+arrow-array = "39.0.0"
+arrow-schema = "39.0.0"
 arroyo-types = {{ path = "{}/arroyo-types" }}
 arroyo-worker = {{ path = "{}/arroyo-worker"{}}}
 "#,
@@ -213,7 +196,6 @@ types = {{ path = "../types" }}
 bincode = "=2.0.0-rc.3"
 bincode_derive = "=2.0.0-rc.3"
 arroyo-types = {{ path = "{}/arroyo-types" }}
-wee_alloc = "0.4.5"
 wasm-bindgen = "0.2"
 serde_json = "1.0"
 [package.metadata.wasm-pack.profile.release]
@@ -335,7 +317,7 @@ wasm-opt = false
             .map(|t| parse_str(t).unwrap())
             .collect();
 
-        let make_graph_function = Self::make_graph_function(&self.program);
+        let make_graph_function = self.program.make_graph_function();
 
         prettyplease::unparse(&parse_quote! {
             #imports
@@ -350,530 +332,6 @@ wasm-opt = false
 
             #(#other_defs )*
         })
-    }
-
-    pub fn make_graph_function(program: &Program) -> syn::ItemFn {
-        let nodes: Vec<_> = program.graph.node_indices().map(|idx| {
-            let node = program.graph.node_weight(idx).unwrap();
-            let description = format!("{:?}", node);
-            let input = program.graph.edges_directed(idx, Direction::Incoming).next();
-            let output = program.graph.edges_directed(idx, Direction::Outgoing).next();
-            let body = match &node.operator {
-                Operator::ConnectorSource(c)  => {
-                    let out_k = parse_type(&output.unwrap().weight().key);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-
-                    let strukt = parse_type(&c.operator);
-                    let config = &c.config;
-                    quote! {
-                        Box::new(#strukt::<#out_k, #out_t>::from_config(#config))
-                    }
-                }
-                Operator::ConnectorSink(c)  => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-
-                    let strukt = parse_type(&c.operator);
-                    let config = &c.config;
-                    quote! {
-                        Box::new(#strukt::<#in_k, #in_t>::from_config(#config))
-                    }
-                }
-                Operator::FusedWasmUDFs { name, udfs: _ } => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let out_k = parse_type(&output.unwrap().weight().key);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-
-                    let name = format!("{}_process", name);
-                    quote! {
-                        Box::new(WasmOperator::<#in_k, #in_t, #out_k, #out_t>::new(#name).unwrap())
-                    }
-                }
-                Operator::Window { typ, agg, flatten } => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-
-                    let agg = match agg {
-                        None => quote!{ WindowOperation::Aggregate(aggregators::vec_aggregator) },
-                        Some(arroyo_datastream::WindowAgg::Count) => quote!{ WindowOperation::Aggregate(aggregators::count_aggregator) },
-                        Some(arroyo_datastream::WindowAgg::Min) => quote!{ WindowOperation::Aggregate(aggregators::min_aggregator) },
-                        Some(arroyo_datastream::WindowAgg::Max) => quote!{ WindowOperation::Aggregate(aggregators::max_aggregator) },
-                        Some(arroyo_datastream::WindowAgg::Sum) => quote!{ WindowOperation::Aggregate(aggregators::sum_aggregator) },
-                        Some(arroyo_datastream::WindowAgg::Expression {
-                            expression,
-                            ..
-                        }) => {
-                            let expr: syn::Expr = parse_str(expression).unwrap();
-                            let operation = if *flatten {
-                                format_ident!("Flatten")
-                            } else {
-                                format_ident!("Aggregate")
-                            };
-
-                            quote! {
-                                WindowOperation::#operation(|mut arg: Vec<_>| {
-                                    #expr
-                                })
-                            }
-                        },
-                    };
-
-                    match typ {
-                        WindowType::Tumbling { width } => {
-                            let width = duration_to_syn_expr(*width);
-
-                            quote! {
-                                Box::new(KeyedWindowFunc::<#in_k, #in_t, #out_t, TumblingWindowAssigner>::
-                                    tumbling_window(#width, #agg))
-                            }
-                        }
-                        WindowType::Sliding { width, slide } => {
-                            let width = duration_to_syn_expr(*width);
-                            let slide = duration_to_syn_expr(*slide);
-
-                            quote! {
-                                Box::new(KeyedWindowFunc::<#in_k, #in_t, #out_t, SlidingWindowAssigner>::
-                                    sliding_window(#width, #slide, #agg))
-                            }
-                        }
-                        WindowType::Instant => {
-                            quote! {
-                                Box::new(KeyedWindowFunc::<#in_k, #in_t, #out_t, InstantWindowAssigner>::
-                                    instant_window(#agg))
-                            }
-                        }
-                    }
-                }
-                Operator::Watermark(watermark) => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-
-                    match watermark {
-                        WatermarkType::FixedLateness { period, max_lateness } => {
-                            let period = duration_to_syn_expr(*period);
-                            let max_lateness = duration_to_syn_expr(*max_lateness);
-                            quote! {
-                                Box::new(
-                                    PeriodicWatermarkGenerator::<#in_k, #in_t>::
-                                    fixed_lateness(#period,#max_lateness))
-                            }
-                        }
-                        WatermarkType::Expression { period, expression } => {
-                            let expr: syn::Expr = parse_str(expression).unwrap();
-                            let watermark_function : syn::ExprClosure = parse_quote!(|record| {#expr});
-                            let period = duration_to_syn_expr(*period);
-                            quote! {
-                                Box::new(
-                                    PeriodicWatermarkGenerator::<#in_k, #in_t>::
-                                    watermark_function(#period, Box::new(#watermark_function)))
-                            }
-                        }
-                    }
-                }
-                Operator::GlobalKey => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    quote! {
-                        Box::new(ToGlobalOperator::<#in_k, #in_t>::new())
-                    }
-                }
-                Operator::WindowJoin { window } => {
-                    let mut inputs: Vec<_> = program.graph.edges_directed(idx, Direction::Incoming)
-                        .collect();
-                    inputs.sort_by_key(|e| e.weight().typ.clone());
-                    assert_eq!(2, inputs.len(), "WindowJoin should have 2 inputs, but has {}", inputs.len());
-                    assert_eq!(inputs[0].weight().key, inputs[1].weight().key, "WindowJoin inputs must have the same key type");
-
-                    let in_k = parse_type(&inputs[0].weight().key);
-                    let in_t1 = parse_type(&inputs[0].weight().value);
-                    let in_t2 = parse_type(&inputs[1].weight().value);
-
-                    match window {
-                        WindowType::Tumbling { width } => {
-                            let width = duration_to_syn_expr(*width);
-                            quote! {
-                                Box::new(WindowedHashJoin::<#in_k, #in_t1, #in_t2, TumblingWindowAssigner, TumblingWindowAssigner>::
-                                    tumbling_window(#width))
-                            }
-                        }
-                        WindowType::Sliding { width, slide } => {
-                            let width = duration_to_syn_expr(*width);
-                            let slide = duration_to_syn_expr(*slide);
-                            quote! {
-                                Box::new(WindowedHashJoin::<#in_k, #in_t1, #in_t2, SlidingWindowAssigner, SlidingWindowAssigner>::
-                                    sliding_window(#width, #slide))
-                            }
-                        }
-                        WindowType::Instant => {
-                            quote! {
-                                Box::new(WindowedHashJoin::<#in_k, #in_t1, #in_t2, InstantWindowAssigner, InstantWindowAssigner>::
-                                    instant_window())
-                            }
-                        }
-                    }
-                }
-                Operator::Count => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-
-                    let in_t = extract_container_type("Vec", &in_t).expect("Input to count is not a Vec");
-                    quote! {
-                        Box::new(CountOperator::<#in_k, #in_t>::new())
-                    }
-                },
-                Operator::Aggregate(behavior) => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let in_t = extract_container_type("Vec", &in_t).expect("Input to aggregate is not a Vec");
-
-                    let behavior = match behavior {
-                        AggregateBehavior::Max => format_ident!("Max"),
-                        AggregateBehavior::Min => format_ident!("Min"),
-                        AggregateBehavior::Sum => format_ident!("Sum"),
-                    };
-
-                    quote! {
-                        Box::new(AggregateOperator::<#in_k, #in_t>::new(AggregateBehavior::#behavior))
-                    }
-                },
-                Operator::FlattenOperator { name } => {
-                    let k = parse_type(&output.unwrap().weight().key);
-                    let t = parse_type(&output.unwrap().weight().value);
-                 quote! {
-                    Box::new(FlattenOperator::<#k, #t>::new(#name.to_string()))
-                }
-            },
-                Operator::ExpressionOperator { name, expression, return_type } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let out_k = parse_type(&output.unwrap().weight().key);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let func: syn::ExprClosure = parse_quote!(|record, _| {#expr});
-                    match return_type {
-                        arroyo_datastream::ExpressionReturnType::Predicate => {
-                            quote! {
-                                Box::new(FilterOperator::<#in_k, #in_t>{
-                                    name: #name.to_string(),
-                                    predicate_fn: Box::new(#func),
-                                })
-                            }
-                        },
-                        arroyo_datastream::ExpressionReturnType::Record => {
-                    quote! {
-                        Box::new(MapOperator::<#in_k, #in_t, #out_k, #out_t> {
-                            name: #name.to_string(),
-                            map_fn: Box::new(#func),
-                        })
-                    }
-                        },
-                        arroyo_datastream::ExpressionReturnType::OptionalRecord => {
-                            quote! {
-                                Box::new(OptionMapOperator::<#in_k, #in_t, #out_k, #out_t> {
-                                    name: #name.to_string(),
-                                    map_fn: Box::new(#func),
-                                })
-                            }
-                        },
-                    }
-                },
-                Operator::FlatMapOperator { name, expression, return_type } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let in_t = extract_container_type("Vec", &in_t).expect("Input to aggregate is not a Vec");
-                    let out_k = parse_type(&output.unwrap().weight().key);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let closure = match return_type {
-                        arroyo_datastream::ExpressionReturnType::Predicate => {
-                            quote! {
-                                |record, _| {
-                                    if #expr {
-                                        Some(record)
-                                    } else {
-                                        None
-                                    }
-                                }
-                            }
-                        },
-                        arroyo_datastream::ExpressionReturnType::Record => {
-                            quote! {
-                                |record, _| {
-                                    Some(#expr)
-                                }
-                            }
-                        },
-                        arroyo_datastream::ExpressionReturnType::OptionalRecord => {
-                            quote! {
-                                |record, _| {
-                                    #expr
-                                }
-                            }
-                        }
-                    };
-                    let func: syn::ExprClosure = parse_str(&quote!(#closure).to_string()).unwrap();
-                    quote! {
-                        Box::new(FlatMapOperator::<#in_k, #in_t, #out_k, #out_t> {
-                            name: #name.to_string(),
-                            map_fn: Box::new(#func),
-                        })
-                    }
-                },
-                Operator::SlidingWindowAggregator(SlidingWindowAggregator{
-                    width,slide,aggregator,bin_merger,
-                    in_memory_add,in_memory_remove,bin_type,mem_type}) => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let bin_t = parse_type(bin_type);
-                    let mem_t = parse_type(mem_type);
-                    let width = duration_to_syn_expr(*width);
-                    let slide = duration_to_syn_expr(*slide);
-                    let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
-                    let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
-                    let in_memory_add: syn::ExprClosure = parse_str(in_memory_add).unwrap();
-                    let in_memory_remove: syn::ExprClosure = parse_str(in_memory_remove).unwrap();
-
-                    quote!{
-                        Box::new(arroyo_worker::operators::aggregating_window::AggregatingWindowFunc::<#in_k, #in_t, #bin_t, #mem_t, #out_t>::
-                            new(#width,
-                                #slide,
-                                #aggregator,
-                                #bin_merger,
-                                #in_memory_add,
-                                #in_memory_remove))
-                    }
-                },
-                Operator::TumblingWindowAggregator(TumblingWindowAggregator { width, aggregator, bin_merger, bin_type }) => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let bin_t = parse_type(bin_type);
-                    let width = duration_to_syn_expr(*width);
-                    let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
-                    let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
-                    quote!{
-                        Box::new(arroyo_worker::operators::tumbling_aggregating_window::
-                            TumblingAggregatingWindowFunc::<#in_k, #in_t, #bin_t, #out_t>::
-                        new(#width,
-                            #aggregator,
-                            #bin_merger))
-                    }
-                },
-                Operator::TumblingTopN(
-                        TumblingTopN {
-                            width,
-                            max_elements,
-                            extractor,
-                            partition_key_type,
-                            converter,
-                        },
-                    ) => {
-                        let in_k = parse_type(&input.unwrap().weight().key);
-                        let in_t = parse_type(&input.unwrap().weight().value);
-                        let out_t = parse_type(&output.unwrap().weight().value);
-                        let pk_type = parse_type(partition_key_type);
-                        let width = duration_to_syn_expr(*width);
-                        let extractor: syn::ExprClosure = parse_str(extractor).expect(extractor);
-                        let converter: syn::ExprClosure = parse_str(converter).unwrap();
-                        quote! {
-                            Box::new(arroyo_worker::operators::tumbling_top_n_window::
-                                TumblingTopNWindowFunc::<#in_k, #in_t, #pk_type, #out_t>::
-                            new(#width,
-                                #max_elements,
-                                #extractor,
-                                #converter))
-                        }
-                    }
-
-                Operator::SlidingAggregatingTopN(
-                    SlidingAggregatingTopN {
-                        width,
-                        slide,
-                        bin_merger,
-                        in_memory_add,
-                        in_memory_remove,
-                        partitioning_func,
-                        extractor,
-                        aggregator,
-                        bin_type,
-                        mem_type,
-                        sort_key_type,
-                        max_elements,
-                    },
-                ) => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let out_k = parse_type(&output.unwrap().weight().key);
-                    let bin_t = parse_type(bin_type);
-                    let mem_t = parse_type(mem_type);
-                    let width = duration_to_syn_expr(*width);
-                    let slide = duration_to_syn_expr(*slide);
-                    let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
-                    let in_memory_add: syn::ExprClosure = parse_str(in_memory_add).unwrap();
-                    let in_memory_remove: syn::ExprClosure =
-                        parse_str(in_memory_remove).unwrap();
-                    let partitioning_func: syn::ExprClosure =
-                        parse_str(partitioning_func).unwrap();
-                    let sort_key_type = parse_type(sort_key_type);
-                    let extractor: syn::ExprClosure = parse_str(extractor).unwrap();
-                    let aggregator: syn::ExprClosure = parse_str(aggregator).expect(aggregator);
-
-                    quote! {
-                    Box::new(arroyo_worker::operators::sliding_top_n_aggregating_window::
-                        SlidingAggregatingTopNWindowFunc::<#in_k, #in_t, #bin_t, #mem_t, #out_k, #sort_key_type, #out_t>::
-                    new(#width,
-                        #slide,
-                        #bin_merger,
-                        #in_memory_add,
-                        #in_memory_remove,
-                        #partitioning_func,
-                        #extractor,
-                        #aggregator,
-                        #max_elements))
-                }
-                }
-                Operator::JoinWithExpiration { left_expiration, right_expiration, join_type } => {
-                    let mut inputs: Vec<_> = program.graph.edges_directed(idx, Direction::Incoming)
-                        .collect();
-                    inputs.sort_by_key(|e| e.weight().typ.clone());
-                    assert_eq!(2, inputs.len(), "JoinWithExpiration should have 2 inputs, but has {}", inputs.len());
-                    assert_eq!(inputs[0].weight().key, inputs[1].weight().key, "JoinWithExpiration inputs must have the same key type");
-
-                    let in_k = parse_type(&inputs[0].weight().key);
-                    let in_t1 = parse_type(&inputs[0].weight().value);
-                    let in_t2 = parse_type(&inputs[1].weight().value);
-                    let left_expiration = duration_to_syn_expr(*left_expiration);
-                    let right_expiration = duration_to_syn_expr(*right_expiration);
-                    match join_type {
-                        arroyo_types::JoinType::Inner => quote!{
-                            Box::new(arroyo_worker::operators::join_with_expiration::
-                                inner_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
-                        },
-                        arroyo_types::JoinType::Left => quote!{
-                            Box::new(arroyo_worker::operators::join_with_expiration::
-                                left_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
-                        },
-                        arroyo_types::JoinType::Right => quote!{
-                            Box::new(arroyo_worker::operators::join_with_expiration::
-                                right_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
-                        },
-                        arroyo_types::JoinType::Full => quote!{
-                            Box::new(arroyo_worker::operators::join_with_expiration::
-                                full_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
-                        },
-                    }
-                },
-                Operator::UpdatingOperator { name, expression } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    let func: syn::ExprClosure = parse_quote!(|arg| {
-                        #expr});
-                    quote!{
-                        Box::new(arroyo_worker::operators::OptionMapOperator::<#in_k, #in_t, #in_k, #out_t>::
-                            updating_operator(#name.to_string(), #func))
-                    }
-                },
-                Operator::NonWindowAggregator(NonWindowAggregator { expiration, aggregator, bin_merger, bin_type }) => {
-                    let in_k = parse_type(&input.unwrap().weight().key);
-                    let in_t = parse_type(&input.unwrap().weight().value);
-                    let updating_out_t = parse_type(&output.unwrap().weight().value);
-                    let out_t = extract_container_type("UpdatingData", &updating_out_t).unwrap();
-                    let bin_t = parse_type(bin_type);
-                    let expiration = duration_to_syn_expr(*expiration);
-                    let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
-                    let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
-                    quote!{
-                        Box::new(arroyo_worker::operators::updating_aggregate::
-                            UpdatingAggregateOperator::<#in_k, #in_t, #bin_t, #out_t>::
-                        new(#expiration,
-                            #aggregator,
-                            #bin_merger))
-                    }
-                },
-                Operator::UpdatingKeyOperator { name, expression } => {
-                    let updating_in_t = parse_type(&input.unwrap().weight().value);
-                    let in_t = extract_container_type("UpdatingData", &updating_in_t).unwrap();
-                    let out_k = parse_type(&output.unwrap().weight().key);
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
-                    quote! {
-                        Box::new(arroyo_worker::operators::
-                            KeyMapUpdatingOperator::<#in_t, #out_k>::
-                        new(#name.to_string(), #expr))
-                    }
-                },
-            };
-
-            (node.operator_id.clone(), description, body, node.parallelism)
-        }).collect();
-
-        let node_defs: Vec<_> = nodes
-            .iter()
-            .map(|(id, description, body, parallelism)| {
-                let ident = format_ident!("{}", id);
-                quote! {
-                    let #ident = graph.add_node(
-                        LogicalNode {
-                            id: #id.to_string(),
-                            description: #description.to_string(),
-                            create_fn: Box::new(|subtask_idx: usize, parallelism: usize| {
-                                SubtaskNode {
-                                    id: #id.to_string(),
-                                    subtask_idx,
-                                    parallelism,
-                                    node: #body
-                                }
-                            }),
-                            initial_parallelism: #parallelism,
-                        }
-                    );
-                }
-            })
-            .collect();
-
-        let edge_defs: Vec<_> = program
-            .graph
-            .edge_indices()
-            .map(|idx| {
-                let e = program.graph.edge_weight(idx).unwrap();
-                let (source, dest) = program.graph.edge_endpoints(idx).unwrap();
-                let source =
-                    format_ident!("{}", program.graph.node_weight(source).unwrap().operator_id);
-                let dest =
-                    format_ident!("{}", program.graph.node_weight(dest).unwrap().operator_id);
-                let typ = match e.typ {
-                    EdgeType::Forward => {
-                        quote! { LogicalEdge::Forward }
-                    }
-                    EdgeType::Shuffle => {
-                        quote! { LogicalEdge::Shuffle }
-                    }
-                    EdgeType::ShuffleJoin(order) => {
-                        quote! { LogicalEdge::ShuffleJoin(#order) }
-                    }
-                };
-
-                quote! {
-                    graph.add_edge(#source, #dest, #typ);
-                }
-            })
-            .collect();
-
-        parse_quote! {
-            pub fn make_graph() -> DiGraph<LogicalNode, LogicalEdge> {
-                let mut graph: DiGraph<LogicalNode, LogicalEdge> = DiGraph::new();
-                #(#node_defs )*
-
-                #(#edge_defs )*
-
-                graph
-            }
-        }
     }
 
     fn compile_wasm_lib(&self) -> TokenStream {
@@ -1028,24 +486,5 @@ wasm-opt = false
 
             #(#wasm_fns )*
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use quote::quote;
-    use syn::parse_str;
-
-    use super::extract_container_type;
-
-    #[test]
-    fn test_extract_vec_type() {
-        let v = extract_container_type("Vec", &parse_str("Vec<Vec<u8>>").unwrap()).unwrap();
-        assert_eq!("Vec < u8 >", quote! { #v }.to_string());
-
-        let v = extract_container_type("Vec", &parse_str("Vec<String>").unwrap()).unwrap();
-        assert_eq!("String", quote! { #v }.to_string());
-        let t = extract_container_type("Vec", &parse_str("HashMap<String, u8>").unwrap());
-        assert!(t.is_none())
     }
 }

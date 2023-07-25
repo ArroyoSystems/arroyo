@@ -43,7 +43,7 @@ use crate::types::{StructDef, StructField, TypeDef};
 use quote::ToTokens;
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
-use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, VisPublic, Visibility};
+use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
 
 #[cfg(test)]
 mod test;
@@ -209,9 +209,7 @@ impl ArroyoSchemaProvider {
                     function.sig.ident.to_string());
             };
 
-            function.vis = Visibility::Public(VisPublic {
-                pub_token: Default::default(),
-            });
+            function.vis = Visibility::Public(Default::default());
 
             self.udf_defs.insert(
                 function.sig.ident.to_string(),
@@ -369,7 +367,7 @@ pub fn parse_and_get_program_sync(
             connection_type: arroyo_connectors::ConnectionType::Sink,
             fields: struct_def.fields.clone(),
             type_name: None,
-            operator: "GrpcSink".to_string(),
+            operator: "GrpcSink::<#in_k, #in_t>".to_string(),
             config: "{}".to_string(),
             description: "WebSink".to_string(),
             serialization_mode: if insert.is_updating() {

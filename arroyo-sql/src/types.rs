@@ -50,6 +50,10 @@ impl StructDef {
             }
         }
     }
+    pub fn struct_name_ident(&self) -> String {
+        let name = self.struct_name();
+        name.replace(":", "_")
+    }
 
     pub fn def(&self, is_key: bool) -> String {
         let fields = self.fields.iter().map(|field| field.def());
@@ -80,6 +84,21 @@ impl StructDef {
                 .iter()
                 .filter_map(|field| match &field.data_type {
                     TypeDef::StructDef(details, _) => Some(details.all_structs()),
+                    TypeDef::DataType(_, _) => None,
+                })
+                .flatten()
+                .collect::<Vec<_>>(),
+        );
+        result
+    }
+
+    pub fn all_structs_including_named(&self) -> Vec<StructDef> {
+        let mut result = vec![self.clone()];
+        result.extend(
+            self.fields
+                .iter()
+                .filter_map(|field| match &field.data_type {
+                    TypeDef::StructDef(details, _) => Some(details.all_structs_including_named()),
                     TypeDef::DataType(_, _) => None,
                 })
                 .flatten()
@@ -129,6 +148,103 @@ impl StructDef {
     pub fn truncated_return_type(&self, terms: usize) -> StructDef {
         let fields = self.fields.iter().take(terms).cloned().collect();
         StructDef { name: None, fields }
+    }
+
+    pub fn generate_record_batch_builder(&self) -> TokenStream {
+        let struct_type = self.get_type();
+        let builder_name = format!("{}RecordBatchBuilder", self.struct_name_ident());
+        let builder_ident: Ident = parse_str(&builder_name).expect(&builder_name);
+
+        let fields = &self.fields;
+        let field_definitions: Vec<TokenStream> = fields
+            .iter()
+            .map(|field| {
+                let field_type = field.to_array_builder_type();
+                let field_name = field.field_array_ident();
+                quote! { #field_name: #field_type }
+            })
+            .collect();
+
+        let schema_initializations: Vec<_> = fields
+            .iter()
+            .map(|field| {
+                let field: Field = field.clone().into();
+                StructField::get_field_literal(&field, field.is_nullable())
+            })
+            .collect();
+
+        let field_initializations: Vec<TokenStream> = fields
+            .iter()
+            .map(|field| {
+                let field_name = field.field_array_ident();
+                let field_initialization = field.create_array_builder();
+                quote! { #field_name : #field_initialization}
+            })
+            .collect();
+
+        let field_appends: Vec<TokenStream> =
+            fields.iter().map(|field| field.field_append()).collect();
+        let field_nulls: Vec<TokenStream> = fields
+            .iter()
+            .map(|field| field.append_null_field())
+            .collect();
+
+        let field_flushes: Vec<TokenStream> =
+            fields.iter().map(|field| field.field_flush()).collect();
+
+        let nullable_schema_initializations: Vec<_> = fields
+            .iter()
+            .map(|field| {
+                let field: Field = field.clone().into();
+                StructField::get_field_literal(&field, true)
+            })
+            .collect();
+
+        quote! {
+            #[derive(Debug)]
+            pub struct #builder_ident {
+                schema: std::sync::Arc<arrow::datatypes::Schema>,
+                #(#field_definitions,)*
+            }
+
+            impl Default for #builder_ident {
+                fn default() -> Self {
+                    let fields :Vec<arrow::datatypes::Field> = vec![#(#schema_initializations,)*];
+                    #builder_ident {
+                        schema: std::sync::Arc::new(arrow::datatypes::Schema::new(fields)),
+                        #(#field_initializations,)*
+                    }
+                }
+            }
+
+            impl #builder_ident {
+                fn nullable() -> Self {
+                    let fields :Vec<arrow::datatypes::Field> = vec![#(#nullable_schema_initializations,)*];
+                    #builder_ident {
+                        schema: std::sync::Arc::new(arrow::datatypes::Schema::new(fields)),
+                        #(#field_initializations,)*
+                    }
+                }
+            }
+
+            impl arroyo_types::RecordBatchBuilder for #builder_ident {
+                type Data = #struct_type;
+                fn add_data(&mut self, data: Option<#struct_type>) {
+                    match data {
+                        Some(data) => {#(#field_appends;)*},
+                        None => {#(#field_nulls;)*},
+                    }
+                }
+
+                fn flush(&mut self) -> arrow_array::RecordBatch {
+                    arrow_array::RecordBatch::try_new(self.schema.clone(), vec![#(#field_flushes,)*]).unwrap()
+                }
+
+                fn schema(&self) -> std::sync::Arc<arrow::datatypes::Schema> {
+                    self.schema.clone()
+                }
+            }
+        }
     }
 }
 
@@ -197,14 +313,6 @@ pub fn interval_month_day_nanos_to_duration(serialized_value: i128) -> Duration 
     let days_to_seconds = ((year_hours + 24 * (day + 30 * extra_month)) as u64) * 60 * 60;
     let nanos = nanos as u64;
     std::time::Duration::from_secs(days_to_seconds) + std::time::Duration::from_nanos(nanos)
-}
-
-// quote a duration as a syn::Expr
-pub fn duration_to_syn_expr(duration: Duration) -> syn::Expr {
-    let secs = duration.as_secs();
-    let nanos = duration.subsec_nanos();
-
-    parse_quote!(std::time::Duration::new(#secs, #nanos))
 }
 
 impl From<StructField> for Field {
@@ -443,6 +551,10 @@ impl StructField {
             None => self.name.clone(),
         }
     }
+    pub fn field_array_ident(&self) -> Ident {
+        let field = self.field_ident();
+        parse_str(&format!("{}_array", field)).unwrap()
+    }
 
     pub fn field_ident(&self) -> Ident {
         match parse_str(&self.field_name()) {
@@ -487,7 +599,143 @@ impl StructField {
         parse_str(&type_string).unwrap()
     }
 
-    pub fn data_type_name(data_type: &DataType) -> String {
+    fn get_field_literal(field: &Field, parent_nullable: bool) -> TokenStream {
+        let name = field.name();
+        let data_type = Self::get_data_type_literal(field.data_type(), parent_nullable);
+        let nullable = field.is_nullable() || parent_nullable;
+        quote!(arrow::datatypes::Field::new(#name, #data_type, #nullable))
+    }
+
+    fn get_data_type_literal(
+        data_type: &arrow_schema::DataType,
+        parent_nullable: bool,
+    ) -> TokenStream {
+        match data_type {
+            DataType::Null => quote!(arrow::datatypes::DataType::Null),
+            DataType::Boolean => quote!(arrow::datatypes::DataType::Boolean),
+            DataType::Int8 => quote!(arrow::datatypes::DataType::Int8),
+            DataType::Int16 => quote!(arrow::datatypes::DataType::Int16),
+            DataType::Int32 => quote!(arrow::datatypes::DataType::Int32),
+            DataType::Int64 => quote!(arrow::datatypes::DataType::Int64),
+            DataType::UInt8 => quote!(arrow::datatypes::DataType::UInt8),
+            DataType::UInt16 => quote!(arrow::datatypes::DataType::UInt16),
+            DataType::UInt32 => quote!(arrow::datatypes::DataType::UInt32),
+            DataType::UInt64 => quote!(arrow::datatypes::DataType::UInt64),
+            DataType::Float16 => quote!(arrow::datatypes::DataType::Float16),
+            DataType::Float32 => quote!(arrow::datatypes::DataType::Float32),
+            DataType::Float64 => quote!(arrow::datatypes::DataType::Float64),
+            DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, None) => {
+                quote!(arrow::datatypes::DataType::Timestamp(
+                    arrow::datatypes::TimeUnit::Millisecond,
+                    None
+                ))
+            }
+            DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None) => {
+                quote!(arrow::datatypes::DataType::Timestamp(
+                    arrow::datatypes::TimeUnit::Microsecond,
+                    None
+                ))
+            }
+            DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None) => {
+                quote!(arrow::datatypes::DataType::Timestamp(
+                    arrow::datatypes::TimeUnit::Nanosecond,
+                    None
+                ))
+            }
+            DataType::Timestamp(_, _) => todo!(),
+            DataType::Date32 => todo!(),
+            DataType::Date64 => todo!(),
+            DataType::Time32(_) => todo!(),
+            DataType::Time64(_) => todo!(),
+            DataType::Duration(_) => todo!(),
+            DataType::Interval(_) => todo!(),
+            DataType::Binary => todo!(),
+            DataType::FixedSizeBinary(_) => todo!(),
+            DataType::LargeBinary => todo!(),
+            DataType::Utf8 => quote!(arrow::datatypes::DataType::Utf8),
+            DataType::LargeUtf8 => todo!(),
+            DataType::List(_) => todo!(),
+            DataType::FixedSizeList(_, _) => todo!(),
+            DataType::LargeList(_) => todo!(),
+            DataType::Struct(struct_fields) => {
+                if struct_fields.is_empty() {
+                    return quote!(arrow::datatypes::DataType::Struct(
+                        arrow::datatypes::Fields::default()
+                    ));
+                }
+                let fields: Vec<_> = struct_fields
+                    .iter()
+                    .map(|field| Self::get_field_literal(field, parent_nullable))
+                    .collect();
+                quote!(arrow::datatypes::DataType::Struct(
+                    vec![#(#fields),*].into()
+                ))
+            }
+            DataType::Union(_, _) => todo!(),
+            DataType::Dictionary(_, _) => todo!(),
+            DataType::Decimal128(_, _) => todo!(),
+            DataType::Decimal256(_, _) => todo!(),
+            DataType::Map(_, _) => todo!(),
+            DataType::RunEndEncoded(_, _) => todo!(),
+        }
+    }
+
+    fn field_append(&self) -> TokenStream {
+        let field_name = self.field_ident();
+        let field_array_name = self.field_array_ident();
+        match &self.data_type {
+            TypeDef::StructDef(_, false) => {
+                quote!(self.#field_array_name.add_data(Some(data.#field_name)))
+            }
+            TypeDef::StructDef(_, true) => {
+                quote!(self.#field_array_name.add_data(data.#field_name))
+            }
+            TypeDef::DataType(
+                DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, None),
+                true,
+            ) => {
+                quote!(self.#field_array_name.append_option(data.#field_name.map(|time| arroyo_types::to_millis(time) as i64)))
+            }
+            TypeDef::DataType(
+                DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, None),
+                false,
+            ) => {
+                quote!(self.#field_array_name.append_value(arroyo_types::to_millis(data.#field_name) as i64))
+            }
+            TypeDef::DataType(
+                DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
+                true,
+            ) => {
+                quote!(self.#field_array_name.append_option(data.#field_name.map(|time| arroyo_types::to_micros(time) as i64)))
+            }
+            TypeDef::DataType(
+                DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
+                false,
+            ) => {
+                quote!(self.#field_array_name.append_value(arroyo_types::to_micros(data.#field_name) as i64))
+            }
+            TypeDef::DataType(
+                DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None),
+                false,
+            ) => {
+                quote!(self.#field_array_name.append_value(arroyo_types::to_nanos(data.#field_name) as i64))
+            }
+            TypeDef::DataType(
+                DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None),
+                true,
+            ) => {
+                quote!(self.#field_array_name.append_option(data.#field_name.map(|time| arroyo_types::to_nanos(time) as i64)))
+            }
+            TypeDef::DataType(_, true) => {
+                quote!(self.#field_array_name.append_option(data.#field_name))
+            }
+            TypeDef::DataType(_, false) => {
+                quote!(self.#field_array_name.append_value(data.#field_name))
+            }
+        }
+    }
+
+    pub(crate) fn data_type_name(data_type: &DataType) -> String {
         match data_type {
             DataType::Null => todo!(),
             DataType::Boolean => "bool".to_string(),
@@ -533,6 +781,152 @@ impl StructField {
         }
     }
 
+    fn create_array_builder(&self) -> TokenStream {
+        match &self.data_type {
+            TypeDef::StructDef(struct_type, false) => {
+                let builder_name = format!("{}RecordBatchBuilder", struct_type.struct_name_ident());
+                let builder_ident: Ident = parse_str(&builder_name).expect(&builder_name);
+                quote!(#builder_ident::default())
+            }
+            TypeDef::StructDef(struct_type, true) => {
+                let builder_name = format!("{}RecordBatchBuilder", struct_type.struct_name_ident());
+                let builder_ident: Ident = parse_str(&builder_name).expect(&builder_name);
+                quote!(#builder_ident::nullable())
+            }
+            TypeDef::DataType(data_type, _) => match data_type {
+                DataType::Null => todo!(),
+                DataType::Boolean
+                | DataType::Int8
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::UInt8
+                | DataType::UInt16
+                | DataType::UInt32
+                | DataType::UInt64
+                | DataType::Float16
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Timestamp(_, None) => {
+                    let builder_type = self.to_array_builder_type();
+                    quote!(#builder_type::with_capacity(1024))
+                }
+                DataType::Timestamp(_, _) => todo!(),
+                DataType::Date32 => todo!(),
+                DataType::Date64 => todo!(),
+                DataType::Time32(_) => todo!(),
+                DataType::Time64(_) => todo!(),
+                DataType::Duration(_) => todo!(),
+                DataType::Interval(_) => todo!(),
+                DataType::Binary => todo!(),
+                DataType::FixedSizeBinary(_) => todo!(),
+                DataType::LargeBinary => todo!(),
+                DataType::Utf8 => quote!(arrow_array::builder::GenericByteBuilder::<
+                    arrow_array::types::GenericStringType<i32>,
+                >::new()),
+                DataType::LargeUtf8 => todo!(),
+                DataType::List(_) => todo!(),
+                DataType::FixedSizeList(_, _) => todo!(),
+                DataType::LargeList(_) => todo!(),
+                DataType::Struct(_) => todo!(),
+                DataType::Union(_, _) => todo!(),
+                DataType::Dictionary(_, _) => todo!(),
+                DataType::Decimal128(_, _) => todo!(),
+                DataType::Decimal256(_, _) => todo!(),
+                DataType::Map(_, _) => todo!(),
+                DataType::RunEndEncoded(_, _) => todo!(),
+            },
+        }
+    }
+
+    fn to_array_builder_type(&self) -> Type {
+        let tokens = match &self.data_type {
+            TypeDef::StructDef(struct_type, _) => {
+                let builder_name = format!("{}RecordBatchBuilder", struct_type.struct_name_ident());
+                parse_str(&builder_name).unwrap()
+            }
+            TypeDef::DataType(data_type, _) => match data_type {
+                DataType::Null => todo!(),
+                DataType::Boolean => quote!(arrow_array::builder::BooleanBuilder),
+                DataType::Int8 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int8Type>)
+                }
+                DataType::Int16 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int16Type>)
+                }
+                DataType::Int32 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int32Type>)
+                }
+                DataType::Int64 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int64Type>)
+                }
+                DataType::UInt8 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::UInt8Type>)
+                }
+                DataType::UInt16 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::UInt16Type>)
+                }
+                DataType::UInt32 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::UInt32Type>)
+                }
+                DataType::UInt64 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::UInt64Type>)
+                }
+                DataType::Float16 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int16Type>)
+                }
+                DataType::Float32 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int32Type>)
+                }
+                DataType::Float64 => {
+                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int64Type>)
+                }
+                DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, None) => quote!(
+                    arrow_array::builder::PrimitiveBuilder::<
+                        arrow_array::types::TimestampMillisecondType,
+                    >
+                ),
+                DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None) => quote!(
+                    arrow_array::builder::PrimitiveBuilder::<
+                        arrow_array::types::TimestampMicrosecondType,
+                    >
+                ),
+                DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None) => quote!(
+                    arrow_array::builder::PrimitiveBuilder::<
+                        arrow_array::types::TimestampNanosecondType,
+                    >
+                ),
+                DataType::Date32 => todo!(),
+                DataType::Date64 => todo!(),
+                DataType::Time32(_) => todo!(),
+                DataType::Time64(_) => todo!(),
+                DataType::Duration(_) => todo!(),
+                DataType::Interval(_) => todo!(),
+                DataType::Binary => todo!(),
+                DataType::FixedSizeBinary(_) => todo!(),
+                DataType::LargeBinary => todo!(),
+                DataType::Utf8 => {
+                    quote!(
+                        arrow_array::builder::GenericByteBuilder<
+                            arrow_array::types::GenericStringType<i32>,
+                        >
+                    )
+                }
+                DataType::LargeUtf8 => todo!(),
+                DataType::List(_) => todo!(),
+                DataType::FixedSizeList(_, _) => todo!(),
+                DataType::LargeList(_) => todo!(),
+                DataType::Struct(_) => todo!(),
+                DataType::Union(_, _) => todo!(),
+                DataType::Dictionary(_, _) => todo!(),
+                DataType::Decimal128(_, _) => todo!(),
+                DataType::Decimal256(_, _) => todo!(),
+                _ => todo!("{:?}", self),
+            },
+        };
+        parse_str(&tokens.to_string()).unwrap()
+    }
+
     pub fn get_return_expression(&self, parent_ident: TokenStream) -> TokenStream {
         let ident: Ident = parse_str(&self.field_name()).unwrap();
         quote!(#parent_ident.#ident.clone())
@@ -548,6 +942,27 @@ impl StructField {
 
     pub(crate) fn nullable(&self) -> bool {
         self.data_type.is_optional()
+    }
+
+    fn append_null_field(&self) -> TokenStream {
+        let array_field = self.field_array_ident();
+        match self.data_type {
+            TypeDef::StructDef(_, _) => quote!(self.#array_field.add_data(None)),
+            TypeDef::DataType(_, _) => quote!(self.#array_field.append_null()),
+        }
+    }
+
+    fn field_flush(&self) -> TokenStream {
+        let array_field = self.field_array_ident();
+        match self.data_type {
+            TypeDef::StructDef(_, _) => {
+                quote!({
+                    let struct_array: arrow_array::StructArray = self.#array_field.flush().into();
+                    std::sync::Arc::new(struct_array)
+                })
+            }
+            TypeDef::DataType(_, _) => quote!(std::sync::Arc::new(self.#array_field.finish())),
+        }
     }
 }
 

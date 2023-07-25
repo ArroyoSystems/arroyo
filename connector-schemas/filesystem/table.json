@@ -1,0 +1,140 @@
+{
+    "type": "object",
+    "title": "FileSystemTable",
+    "properties": {
+        "write_target": {
+            "type": "object",
+            "title": "Destination",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Folder URI",
+                    "properties": {
+                        "Path": {
+                            "title": "Path",
+                            "type": "string",
+                            "description": "URI of the folder to write to"
+                        }
+                    },
+                    "required": [
+                        "Path"
+                    ],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "Local Filesystem",
+                    "properties": {
+                        "Local Directory": {
+                            "title": "Directory",
+                            "type": "string",
+                            "description": "local directory to write to"
+                        }
+                    },
+                    "required": [
+                        "Local Directory"
+                    ],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "S3 Bucket",
+                    "properties": {
+                        "S3 Bucket": {
+                            "title": "Bucket Name",
+                            "type": "string",
+                            "description": "bucket to write to"
+                        },
+                        "S3 Directory": {
+                            "title": "Directory",
+                            "type": "string",
+                            "description": "S3 directory to write to"
+                        },
+                        "AWS Region": {
+                            "title": "AWS Region",
+                            "type": "string",
+                            "description": "AWS region to write to"
+                        }
+                    },
+                    "required": [
+                        "S3 Bucket",
+                        "S3 Directory",
+                        "AWS Region"
+                    ],
+                    "additionalProperties": false
+                }
+            ]
+        },
+        "format_settings": {
+            "type": "object",
+            "title": "Format Settings",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Parquet",
+                    "properties": {
+                        "compression": {
+                            "title": "Compression",
+                            "type": "string",
+                            "enum": [
+                                "none",
+                                "snappy",
+                                "gzip",
+                                "zstd",
+                                "lz4"
+                            ]
+                        },
+                        "row_batch_size": {
+                            "title": "Row Batch Size",
+                            "type": "integer"
+                        },
+                        "row_group_size": {
+                            "title": "Row Group Size",
+                            "type": "integer"
+                        }        
+                    },
+                    "additionalProperties": false
+                },
+                {"type": "object",
+                "title": "JSON",
+                "additionalProperties": false
+                }
+            ]
+        },
+        "file_settings": {
+            "type": "object",
+            "title": "File Settings",
+            "properties": {
+                "target_part_size": {
+                    "title": "Target Part Size",
+                    "type": "integer",
+                    "description": "target size for each part of the multipart upload, in bytes"
+                },
+                "max_parts": {
+                    "title": "Max Parts",
+                    "type": "integer",
+                    "description": "maximum number of parts to upload in a multipart upload"
+                },
+                "target_file_size": {
+                    "title": "Target File Size",
+                    "type": "integer",
+                    "description": "target size for each file, in bytes"
+                },
+                "rollover_seconds": {
+                    "title": "Rollover Seconds",
+                    "type": "integer",
+                    "description": "number of seconds to wait before rolling over to a new file"
+                },
+                "inactivity_rollover_seconds": {
+                    "title": "Inactivity Rollover Seconds",
+                    "type": "integer",
+                    "description": "number of seconds of inactivity to wait before rolling over to a new file"
+                }
+            },
+            "additionalProperties": false
+        }
+    },
+    "required": [
+        "write_target"
+    ]
+}

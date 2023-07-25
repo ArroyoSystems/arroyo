@@ -67,6 +67,9 @@ where
                     SerializationMode::JsonSchemaRegistry
                 }
                 OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
+                OperatorConfigSerializationMode::Parquet => {
+                    unimplemented!("parquet out of websocket source doesn't make sense")
+                }
             },
             state: WebsocketSourceState::default(),
             _t: PhantomData,
@@ -117,6 +120,9 @@ where
                         return Some(SourceFinishType::Immediate);
                     }
                 }
+            }
+            ControlMessage::Commit { epoch: _ } => {
+                unreachable!("sources shouldn't receive commit messages");
             }
         }
         None

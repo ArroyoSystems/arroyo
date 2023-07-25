@@ -18,8 +18,8 @@ use serde_json::json;
 use std::time::{Duration, SystemTime};
 use tracing::debug;
 use wasmtime::{
-    Caller, Engine, InstanceAllocationStrategy, InstanceLimits, Linker, Module,
-    PoolingAllocationStrategy, Store, TypedFunc,
+    Caller, Engine, InstanceAllocationStrategy, Linker, Module, PoolingAllocationConfig, Store,
+    TypedFunc,
 };
 pub mod aggregating_window;
 pub mod functions;
@@ -430,19 +430,15 @@ impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> WasmOperator<InKey, InT, Ou
         config.wasm_memory64(true);
         config.async_support(true);
         config.memory_init_cow(true);
-        //config.allocation_strategy(InstanceAllocationStrategy::pooling());
-        config.allocation_strategy(InstanceAllocationStrategy::Pooling {
-            strategy: PoolingAllocationStrategy::ReuseAffinity,
-            instance_limits: InstanceLimits {
-                count: 100,
-                size: 1 << 20,
-                tables: 1,
-                table_elements: 10_000,
-                memories: 1,
-                memory_pages: 300,
-            },
-        });
-        //config.static_memory_maximum_size(0);
+        let mut pooling_config = PoolingAllocationConfig::default();
+        pooling_config
+            .instance_count(100)
+            .instance_size(1 << 20)
+            .instance_tables(1)
+            .instance_table_elements(10_000)
+            .instance_memories(1)
+            .instance_memory_pages(300);
+        config.allocation_strategy(InstanceAllocationStrategy::Pooling(pooling_config));
 
         let engine = Engine::new(&config)?;
         let store = Store::new(&engine, env);
@@ -515,7 +511,7 @@ impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> WasmOperator<InKey, InT, Ou
             .unwrap();
 
         let wasm_fn = instance
-            .get_typed_func::<u32, (), _>(&mut self.store, &self.name)
+            .get_typed_func::<u32, ()>(&mut self.store, &self.name)
             .unwrap();
 
         self.wasm_fn = Some(wasm_fn);

@@ -212,7 +212,11 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<GetConnectorsResp>, Status> {
         let (_request, _auth) = self.authenticate(request).await?;
 
-        let mut connectors: Vec<_> = connectors().values().map(|c| c.metadata()).collect();
+        let mut connectors: Vec<_> = connectors()
+            .values()
+            .map(|c| c.metadata())
+            .filter(|metadata| !metadata.hidden)
+            .collect();
 
         connectors.sort_by_cached_key(|c| c.name.clone());
 

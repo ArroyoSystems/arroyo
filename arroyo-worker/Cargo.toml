@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-worker"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 
 [features]
@@ -15,10 +15,9 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
 
-crossbeam-queue = "0.3"
 rand = "0.8"
 bincode = "2.0.0-rc.3"
-wasmtime = "1.0"
+wasmtime = "10.0"
 lazy_static = "1.4.0"
 petgraph = "0.6"
 chrono = "0.4"
@@ -29,7 +28,6 @@ tokio-stream = { version = "0.1", features = ["net"] }
 async-trait = "0.1.68"
 async-stream = "0.3.4"
 stacker = "0.1"
-ctor = "0.1"
 bytes = "1.4"
 once_cell = "1.17.1"
 local-ip-address = "0.5"
@@ -39,18 +37,26 @@ serde = "1.0"
 sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
+url = "2.4.0"
 ordered-float = "3"
+arrow = "39.0.0"
+parquet = { version = "39.0.0", features = ["async"]}
+arrow-array = "39.0.0"
+rusoto_core = "0.48.0"
+rusoto_s3 = "0.48.0"
+object_store = {version = "0.6.1", features = ["aws"]}
 
-tonic = "0.8"
+tonic = { workspace = true }
 prost = "0.11"
+
+governor = "0.6"
 
 #logging
 tracing = "0.1"
-governor = "0.5.1"
 
 # connectors
-rdkafka = { version = "0.28", features = ["cmake-build"] }
-rdkafka-sys = "=4.2.0"
+rdkafka = { version = "0.33", features = ["cmake-build"] }
+rdkafka-sys = "4.5.0"
 eventsource-client = "0.11.0"
 regex = "1.8.1"
 anyhow = "1.0.71"
@@ -60,4 +66,4 @@ tokio-tungstenite = { version = "0.19", features = ["native-tls"] }
 fluvio = {version = "0.19", features = ["openssl"]}
 
 [dev-dependencies]
-test-case = "2.2"
+test-case = "3"

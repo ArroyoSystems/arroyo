@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-sql-testing"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 
 
@@ -18,3 +18,7 @@ arroyo-types = { path = "../arroyo-types" }
 arroyo-sql = { path = "../arroyo-sql" }
 arroyo-worker = { path = "../arroyo-worker" }
 arroyo-sql-macro = { path = "../arroyo-sql-macro" }
+
+arrow = "39.0.0"
+arrow-array = "39.0.0"
+arrow-schema = "39.0.0"
