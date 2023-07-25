@@ -40,7 +40,7 @@ fn trunc_to_year(d: DateTime<Utc>) -> Option<DateTime<Utc>> {
     trunc_to_month(d).and_then(|d| d.with_month0(0))
 }
 
-pub fn date_trunc(argument: SystemTime, date_trunc_precision: DateTruncPrecision) -> SystemTime {
+pub fn date_trunc(date_trunc_precision: DateTruncPrecision, argument: SystemTime) -> SystemTime {
     let datetime: DateTime<Utc> = argument.into();
     let truncated = match date_trunc_precision {
         DateTruncPrecision::Second => trunc_to_second(datetime),
@@ -55,7 +55,7 @@ pub fn date_trunc(argument: SystemTime, date_trunc_precision: DateTruncPrecision
     truncated.unwrap().into()
 }
 
-pub fn date_part(argument: SystemTime, part: DatePart) -> u32 {
+pub fn date_part(part: DatePart, argument: SystemTime) -> u32 {
     let datetime: DateTime<Utc> = argument.into();
     match part {
         DatePart::DayOfYear => datetime.ordinal(),
@@ -118,8 +118,8 @@ mod test {
 
     #[test]
     fn test_date_trunc_is_correct() {
-        for (key, value) in &*DATE_TRUNC_TESTCASES {
-            let observed: DateTime<Utc> = date_trunc(*REFERENCE_DATETIME, *key).into();
+        for (key, value) in DATE_TRUNC_TESTCASES.iter() {
+            let observed: DateTime<Utc> = date_trunc(*key, *REFERENCE_DATETIME).into();
             let date_fixed_offset =
                 DateTime::parse_from_rfc3339(value).expect("Failed to parse date and time");
             let expected: DateTime<Utc> = DateTime::from_utc(date_fixed_offset.naive_utc(), Utc);
@@ -129,9 +129,9 @@ mod test {
 
     #[test]
     fn test_date_part_is_correct() {
-        for (key, value) in &*DATE_PART_TESTCASES {
+        for (key, value) in DATE_PART_TESTCASES.iter() {
             assert_eq!(
-                date_part(*REFERENCE_DATETIME, *key),
+                date_part(*key, *REFERENCE_DATETIME),
                 *value,
                 "Wrong result for {:?}",
                 key

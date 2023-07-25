@@ -1188,6 +1188,25 @@ mod tests {
         None
     );
 
+    single_test_codegen!(
+        "from_unixtime_nullable",
+        "from_unixtime(nullable_i64)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        None
+    );
+
+    single_test_codegen!(
+        "from_unixtime",
+        "from_unixtime(non_nullable_i64)",
+        arroyo_sql::TestStruct {
+            non_nullable_i64: 1690233729459529237,
+            ..Default::default()
+        },
+        "2023-07-24T21:22:09.459529237+00:00"
+    );
+
     // to_timestamp methods
     single_test_codegen!(
         "to_timestamp",
