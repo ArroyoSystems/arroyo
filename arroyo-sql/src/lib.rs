@@ -29,10 +29,7 @@ use datafusion::sql::{planner::ContextProvider, TableReference};
 use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
-use datafusion_expr::{
-    AccumulatorFunctionImplementation, LogicalPlan, ReturnTypeFunction, Signature,
-    StateTypeFunction, TypeSignature, Volatility,
-};
+use datafusion_expr::{LogicalPlan, Volatility, WindowUDF};
 use expressions::{Expression, ExpressionContext};
 use pipeline::{SqlOperator, SqlPipelineBuilder};
 use plan_graph::{get_program, PlanGraph};
@@ -252,40 +249,8 @@ impl ContextProvider for ArroyoSchemaProvider {
         self.functions.get(name).cloned()
     }
 
-    fn get_aggregate_meta(&self, name: &str) -> Option<Arc<AggregateUDF>> {
-        match name {
-            "lexographic_max" => {
-                let return_type: ReturnTypeFunction = Arc::new(|input_types| {
-                    let struct_fields = input_types
-                        .iter()
-                        .enumerate()
-                        .map(|(i, data_type)| {
-                            Field::new(format!("_{}", i).as_str(), data_type.clone(), false)
-                        })
-                        .collect();
-                    let result_type: DataType = DataType::Struct(struct_fields);
-                    Ok(Arc::new(result_type))
-                });
-                let accumulator: AccumulatorFunctionImplementation = Arc::new(|_| todo!());
-                let state_type: StateTypeFunction = Arc::new(|_| todo!());
-                Some(Arc::new(AggregateUDF::new(
-                    "lexographic_max",
-                    &Signature::one_of(
-                        vec![
-                            TypeSignature::Any(1),
-                            TypeSignature::Any(2),
-                            TypeSignature::Any(3),
-                            TypeSignature::Any(4),
-                        ],
-                        Volatility::Immutable,
-                    ),
-                    &return_type,
-                    &accumulator,
-                    &state_type,
-                )))
-            }
-            _ => None,
-        }
+    fn get_aggregate_meta(&self, _name: &str) -> Option<Arc<AggregateUDF>> {
+        None
     }
 
     fn get_variable_type(&self, _variable_names: &[String]) -> Option<DataType> {
@@ -294,6 +259,10 @@ impl ContextProvider for ArroyoSchemaProvider {
 
     fn options(&self) -> &datafusion::config::ConfigOptions {
         &self.config_options
+    }
+
+    fn get_window_meta(&self, _name: &str) -> Option<Arc<WindowUDF>> {
+        None
     }
 }
 

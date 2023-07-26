@@ -199,7 +199,7 @@ pub struct ExpressionContext<'a> {
 impl<'a> ExpressionContext<'a> {
     pub fn compile_expr(&self, expression: &Expr) -> Result<Expression> {
         match expression {
-            Expr::Alias(expr, _alias) => self.compile_expr(expr),
+            Expr::Alias(datafusion_expr::expr::Alias { expr, name: _ }) => self.compile_expr(expr),
             Expr::Column(column) => Ok(Expression::Column(ColumnExpression::from_column(
                 column,
                 self.input_struct,
@@ -493,6 +493,26 @@ impl<'a> ExpressionContext<'a> {
                         arg_expressions.remove(0),
                         arg_expressions.remove(0),
                     ),
+                    BuiltinScalarFunction::Decode => bail!("decode not implemented yet"),
+                    BuiltinScalarFunction::Encode => bail!("encode not implemented yet"),
+                    BuiltinScalarFunction::Cot => bail!("cot not implemented yet"),
+                    BuiltinScalarFunction::ArrayAppend
+                    | BuiltinScalarFunction::ArrayConcat
+                    | BuiltinScalarFunction::ArrayContains
+                    | BuiltinScalarFunction::ArrayDims
+                    | BuiltinScalarFunction::ArrayFill
+                    | BuiltinScalarFunction::ArrayLength
+                    | BuiltinScalarFunction::ArrayNdims
+                    | BuiltinScalarFunction::ArrayPosition
+                    | BuiltinScalarFunction::ArrayPositions
+                    | BuiltinScalarFunction::ArrayPrepend
+                    | BuiltinScalarFunction::ArrayRemove
+                    | BuiltinScalarFunction::ArrayReplace
+                    | BuiltinScalarFunction::ArrayToString
+                    | BuiltinScalarFunction::Cardinality
+                    | BuiltinScalarFunction::TrimArray => {
+                        bail!("array functions not implemented yet")
+                    }
                 }
             }
             Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {

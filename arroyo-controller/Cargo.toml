@@ -34,7 +34,7 @@ async-trait = "0.1"
 lazy_static = "1.4.0"
 chrono = "0.4"
 
-arrow-schema = {version = "39.0", features = ["serde"]}
+arrow-schema = {workspace = true}
 object_store = {version = "0.5.5", features = ["aws"]}
 
 serde = "1"
