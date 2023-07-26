@@ -739,7 +739,7 @@ fn impl_stream_node_type(
             async fn handle_watermark(&mut self, watermark: std::time::SystemTime,
                 ctx: &mut crate::engine::Context<#out_k, #out_t>) {
                     // by default, just pass watermarks on down
-                    ctx.broadcast(arroyo_types::Message::Watermark(watermark)).await;
+                    ctx.broadcast(arroyo_types::Message::Watermark(arroyo_types::Watermark::EventTime(watermark))).await;
                 }
         });
     }

@@ -162,15 +162,17 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
     ) {
         let Some(watermark) = ctx.watermark() else {return};
         debug!(
-            "watermark {:?} 
+            "watermark {:?}
         state {:?}",
             watermark, self.state
         );
         while self.should_advance(watermark) {
             self.advance(ctx).await;
         }
-        ctx.broadcast(arroyo_types::Message::Watermark(watermark))
-            .await;
+        ctx.broadcast(arroyo_types::Message::Watermark(Watermark::EventTime(
+            watermark,
+        )))
+        .await;
     }
 
     async fn handle_checkpoint(

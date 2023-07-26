@@ -316,8 +316,10 @@ impl<
         while self.should_advance(watermark) {
             self.advance(ctx).await;
         }
-        ctx.broadcast(arroyo_types::Message::Watermark(watermark))
-            .await;
+        ctx.broadcast(arroyo_types::Message::Watermark(Watermark::EventTime(
+            watermark,
+        )))
+        .await;
     }
 
     async fn handle_checkpoint(

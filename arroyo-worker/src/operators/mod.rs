@@ -10,7 +10,7 @@ use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_types::{
     from_millis, to_millis, CheckpointBarrier, Data, GlobalKey, Key, Message, Record, TaskInfo,
-    UpdatingData, Window,
+    UpdatingData, Watermark, Window,
 };
 use bincode::{config, Decode, Encode};
 use serde::de::DeserializeOwned;
@@ -250,7 +250,9 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
     async fn on_close(&mut self, ctx: &mut Context<K, D>) {
         // send final watermark on close
         ctx.collector
-            .broadcast(Message::Watermark(from_millis(u64::MAX)))
+            .broadcast(Message::Watermark(Watermark::EventTime(from_millis(
+                u64::MAX,
+            ))))
             .await;
     }
 
@@ -271,7 +273,9 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
                 ctx.task_info.task_index,
                 to_millis(watermark)
             );
-            ctx.collector.broadcast(Message::Watermark(watermark)).await;
+            ctx.collector
+                .broadcast(Message::Watermark(Watermark::EventTime(watermark)))
+                .await;
             self.state_cache.last_watermark_emitted_at = record.timestamp;
         }
     }

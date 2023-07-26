@@ -25,8 +25,8 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{
-    from_micros, to_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, WorkerId,
-    BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+    from_micros, to_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark,
+    WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
 };
 use petgraph::graph::DiGraph;
 use petgraph::visit::EdgeRef;
@@ -134,7 +134,7 @@ pub struct Context<K: Key, T: Data, S: BackingStore = StateBackend> {
     pub task_info: TaskInfo,
     pub control_rx: Receiver<ControlMessage>,
     pub control_tx: Sender<ControlResp>,
-    pub watermarks: Vec<Option<SystemTime>>,
+    pub watermarks: Vec<Option<Watermark>>,
     pub state: StateStore<S>,
     pub collector: Collector<K, T>,
     pub counters: HashMap<&'static str, IntCounter>,
@@ -376,7 +376,7 @@ impl<K: Key, T: Data> Context<K, T> {
             task_info,
             control_rx,
             control_tx,
-            watermarks: vec![watermark; input_partitions],
+            watermarks: vec![watermark.map(Watermark::EventTime); input_partitions],
             collector: Collector::<K, T> {
                 out_qs,
                 sent_messages: counters.remove(MESSAGES_SENT),
@@ -423,12 +423,13 @@ impl<K: Key, T: Data> Context<K, T> {
     pub fn watermark(&self) -> Option<SystemTime> {
         self.watermarks
             .iter()
-            .copied()
-            .reduce(|current, next| match next {
-                Some(next) => current.map(|current| current.min(next)),
+            .fold(None, |current, next| match next {
+                Some(Watermark::EventTime(next)) => {
+                    current.map(|current: SystemTime| current.min(*next))
+                }
+                Some(Watermark::Idle) => current,
                 None => None,
             })
-            .flatten()
     }
 
     pub async fn schedule_timer<D: Data + PartialEq + Eq>(

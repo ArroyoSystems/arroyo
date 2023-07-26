@@ -472,7 +472,9 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
         let mut right_state: KeyTimeMultiMap<K, T2, _> =
             ctx.state.get_key_time_multi_map('r').await;
         right_state.expire_entries_before(watermark - self.right_expiration);
-        ctx.broadcast(arroyo_types::Message::Watermark(watermark))
-            .await;
+        ctx.broadcast(arroyo_types::Message::Watermark(Watermark::EventTime(
+            watermark,
+        )))
+        .await;
     }
 }
