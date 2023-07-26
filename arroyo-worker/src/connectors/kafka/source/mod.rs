@@ -89,7 +89,7 @@ where
             panic!("found non-source kafka config in source operator");
         };
         let mut client_configs = client_configs(&connection);
-        if SourceReadMode::ReadCommitted == *read_mode {
+        if let Some(SourceReadMode::ReadCommitted) = read_mode {
             client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
         }
 
@@ -294,7 +294,6 @@ where
 
                         }
                     }
-
                 }
             }
         }
