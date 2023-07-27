@@ -17,8 +17,10 @@ use tower_http::services::ServeDir;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::jobs::{get_job_checkpoints, get_job_errors, get_jobs};
 use crate::pipelines::{
-    delete_pipeline, get_jobs, get_pipeline, get_pipelines, patch_pipeline, post_pipeline,
+    delete_pipeline, get_pipeline, get_pipeline_jobs, get_pipelines, patch_pipeline, post_pipeline,
+    validate_pipeline,
 };
 use crate::rest_utils::ErrorResp;
 use crate::ApiDoc;
@@ -77,17 +79,25 @@ pub fn create_rest_app(server: ApiServer, pool: Pool) -> Router {
 
     // TODO: enable in development only!!!
     let cors = CorsLayer::new()
+        .allow_methods(cors::Any)
         .allow_headers(cors::Any)
         .allow_origin(cors::Any);
 
+    let jobs_routes = Router::new()
+        .route("/", get(get_pipeline_jobs))
+        .route("/:job_id/errors", get(get_job_errors))
+        .route("/:job_id/checkpoints", get(get_job_checkpoints));
+
     let api_routes = Router::new()
         .route("/ping", get(ping))
+        .route("/validate", post(validate_pipeline))
         .route("/pipelines", post(post_pipeline))
         .route("/pipelines", get(get_pipelines))
+        .route("/jobs", get(get_jobs))
         .route("/pipelines/:id", patch(patch_pipeline))
         .route("/pipelines/:id", get(get_pipeline))
         .route("/pipelines/:id", delete(delete_pipeline))
-        .route("/pipelines/:id/jobs", get(get_jobs))
+        .nest("/pipelines/:id/jobs", jobs_routes)
         .fallback(api_fallback);
 
     Router::new()

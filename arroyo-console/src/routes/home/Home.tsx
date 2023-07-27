@@ -10,14 +10,9 @@ import {
   useBreakpointValue,
   useColorModeValue,
 } from '@chakra-ui/react';
-import { useLinkClickHandler } from 'react-router-dom';
-import { JobStatus } from '../../gen/api_pb';
-import { ApiClient } from '../../main';
-import { useJobs } from '../../lib/data_fetching';
-
-interface HomeState {
-  jobs: Array<JobStatus> | null;
-}
+import { useNavigate } from 'react-router-dom';
+import { Job, useJobs } from '../../lib/data_fetching';
+import Loading from '../../components/Loading';
 
 interface Props {
   label: string;
@@ -48,18 +43,24 @@ export const Stat = (props: Props) => {
   );
 };
 
-export function Home({ client }: { client: ApiClient }) {
-  const { jobs } = useJobs(client);
+export function Home() {
+  const { jobs, jobsLoading } = useJobs();
+  const navigate = useNavigate();
+
   let runningJobs = 0;
   let allJobs = 0;
   let failedJobs = 0;
 
+  if (!jobs || jobsLoading) {
+    return <Loading />;
+  }
+
   if (jobs) {
-    runningJobs = jobs.filter(
+    runningJobs = (jobs as Job[]).filter(
       j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting'
     ).length;
     allJobs = jobs.length;
-    failedJobs = jobs.filter(j => j.state == 'Failed').length;
+    failedJobs = (jobs as Job[]).filter(j => j.state == 'Failed').length;
   }
 
   return (
@@ -77,7 +78,7 @@ export function Home({ client }: { client: ApiClient }) {
             </Heading>
           </Stack>
           <HStack spacing="3">
-            <Button variant="primary" onClick={useLinkClickHandler('/pipelines/new')}>
+            <Button variant="primary" onClick={() => navigate('/pipelines/new')}>
               Create Pipeline
             </Button>
           </HStack>

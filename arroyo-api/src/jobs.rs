@@ -1,9 +1,12 @@
+use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
 use arroyo_datastream::Program;
 use arroyo_rpc::grpc::api::{
     CheckpointDetailsResp, CheckpointOverview, CreateJobReq, JobDetailsResp, JobStatus,
     PipelineProgram, StopType,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use axum::extract::{Path, State};
+use axum::Json;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::{Pool, Transaction};
 use prost::Message;
@@ -14,6 +17,12 @@ use tonic::Status;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
 
+use crate::pipelines::query_job_by_pub_id;
+use crate::rest::AppState;
+use crate::rest_types::{
+    Checkpoint, CheckpointCollection, JobCollection, JobLogMessage, JobLogMessageCollection,
+};
+use crate::rest_utils::{authenticate, client, log_and_map_rest, BearerAuth, ErrorResp};
 use crate::{log_and_map, pipelines, queries::api_queries, to_micros, types::public, AuthData};
 
 fn gen_id() -> String {
@@ -46,7 +55,7 @@ pub(crate) async fn create_job<'a>(
         ));
     }
 
-    let running_jobs = get_jobs(&auth, client)
+    let running_jobs = get_job_statuses(&auth, client)
         .await?
         .iter()
         .filter(|j| j.running_desired && j.state != "Failed" && j.state != "Finished")
@@ -93,7 +102,7 @@ pub(crate) async fn create_job<'a>(
     Ok(job_id)
 }
 
-pub(crate) async fn get_jobs(
+pub(crate) async fn get_job_statuses(
     auth: &AuthData,
     client: &impl GenericClient,
 ) -> Result<Vec<JobStatus>, Status> {
@@ -123,11 +132,7 @@ pub(crate) async fn get_jobs(
         .collect()
 }
 
-pub(crate) async fn get_job_details(
-    job_id: &str,
-    auth: &AuthData,
-    client: &impl GenericClient,
-) -> Result<JobDetailsResp, Status> {
+pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option<StopType>, bool) {
     enum Progress {
         InProgress,
         Stable,
@@ -136,31 +141,7 @@ pub(crate) async fn get_job_details(
     use Progress::*;
     use StopType::*;
 
-    let res = api_queries::get_job_details()
-        .bind(client, &auth.organization_id, &job_id)
-        .opt()
-        .await
-        .map_err(log_and_map)?
-        .ok_or_else(|| Status::not_found(format!("There is no job with id '{}'", job_id)))?;
-
-    let mut program: Program = PipelineProgram::decode(&res.program[..])
-        .map_err(log_and_map)?
-        .try_into()
-        .map_err(log_and_map)?;
-
-    program.update_parallelism(
-        &res.parallelism_overrides
-            .as_object()
-            .unwrap()
-            .into_iter()
-            .map(|(k, v)| (k.clone(), v.as_u64().unwrap() as usize))
-            .collect(),
-    );
-
-    let state = res.state.unwrap_or_else(|| "Created".to_string());
-    let running_desired = res.stop == public::StopMode::none;
-
-    let (action_text, action, in_progress) = match (state.as_ref(), running_desired) {
+    let (a, s, p) = match (state.as_ref(), running_desired) {
         ("Created", true) => ("Stop", Some(Checkpoint), InProgress),
         ("Created", false) => ("Start", Some(None), Stable),
 
@@ -200,6 +181,45 @@ pub(crate) async fn get_job_details(
         _ => panic!("unhandled state {}", state),
     };
 
+    let in_progress = match p {
+        InProgress => true,
+        Stable => false,
+    };
+
+    (a.to_string(), s, in_progress)
+}
+
+pub(crate) async fn get_job_details(
+    job_id: &str,
+    auth: &AuthData,
+    client: &impl GenericClient,
+) -> Result<JobDetailsResp, Status> {
+    let res = api_queries::get_job_details()
+        .bind(client, &auth.organization_id, &job_id)
+        .opt()
+        .await
+        .map_err(log_and_map)?
+        .ok_or_else(|| Status::not_found(format!("There is no job with id '{}'", job_id)))?;
+
+    let mut program: Program = PipelineProgram::decode(&res.program[..])
+        .map_err(log_and_map)?
+        .try_into()
+        .map_err(log_and_map)?;
+
+    program.update_parallelism(
+        &res.parallelism_overrides
+            .as_object()
+            .unwrap()
+            .into_iter()
+            .map(|(k, v)| (k.clone(), v.as_u64().unwrap() as usize))
+            .collect(),
+    );
+
+    let state = res.state.unwrap_or_else(|| "Created".to_string());
+    let running_desired = res.stop == public::StopMode::none;
+
+    let (action_text, action, in_progress) = get_action(&state, &running_desired);
+
     let status = JobStatus {
         job_id: job_id.to_string(),
         pipeline_name: res.pipeline_name,
@@ -221,18 +241,22 @@ pub(crate) async fn get_job_details(
 
         action: action.map(|action| action as i32),
         action_text: action_text.to_string(),
-        in_progress: match in_progress {
-            InProgress => true,
-            Stable => false,
-        },
+        in_progress,
     })
 }
 
-pub(crate) async fn get_job_checkpoints(
-    job_id: &str,
+pub(crate) async fn query_job_checkpoints(
+    job_pub_id: &str,
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<Vec<CheckpointOverview>, Status> {
+    let job_id = api_queries::get_pipeline_job()
+        .bind(client, &auth.organization_id, &job_pub_id)
+        .one()
+        .await
+        .map_err(log_and_map)?
+        .id;
+
     let res = api_queries::get_job_checkpoints()
         .bind(client, &job_id, &auth.organization_id)
         .all()
@@ -251,11 +275,18 @@ pub(crate) async fn get_job_checkpoints(
 }
 
 pub(crate) async fn checkpoint_details(
-    job_id: &str,
+    job_pub_id: &str,
     epoch: u32,
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<CheckpointDetailsResp, Status> {
+    let job_id = api_queries::get_pipeline_job()
+        .bind(client, &auth.organization_id, &job_pub_id)
+        .one()
+        .await
+        .map_err(log_and_map)?
+        .id;
+
     let res = api_queries::get_checkpoint_details()
         .bind(client, &job_id, &auth.organization_id, &(epoch as i32))
         .opt()
@@ -263,7 +294,7 @@ pub(crate) async fn checkpoint_details(
         .map_err(log_and_map)?
         .ok_or_else(|| {
             Status::not_found(format!(
-                "There is no checkpoint with epoch for job {} '{}'",
+                "There is no checkpoint with epoch {} for job '{}'",
                 epoch, job_id
             ))
         })?;
@@ -306,4 +337,132 @@ pub(crate) async fn delete_job(job_id: &str, auth: AuthData, pool: &Pool) -> Res
     transaction.commit().await.map_err(log_and_map)?;
 
     Ok(())
+}
+
+/// List a job's error messages
+#[utoipa::path(
+    get,
+    path = "/v1/pipelines/{pipeline_id}/jobs/{job_id}/errors",
+    tag = "jobs",
+    params(
+        ("pipeline_id" = String, Path, description = "Pipeline id"),
+        ("job_id" = String, Path, description = "Job id")
+    ),
+    responses(
+        (status = 200, description = "Got job's error messages", body = JobLogMessageCollection),
+    ),
+)]
+pub async fn get_job_errors(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
+) -> Result<Json<JobLogMessageCollection>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+
+    let errors = api_queries::get_operator_errors_rest()
+        .bind(&client, &auth_data.organization_id, &job_pub_id)
+        .all()
+        .await
+        .map_err(log_and_map_rest)?
+        .into_iter()
+        .map(|m| m.into())
+        .collect();
+
+    Ok(Json(JobLogMessageCollection {
+        data: errors,
+        has_more: false,
+    }))
+}
+
+impl Into<JobLogMessage> for DbLogMessage {
+    fn into(self) -> JobLogMessage {
+        JobLogMessage {
+            created_at: to_micros(self.created_at),
+            operator_id: self.operator_id,
+            task_index: self.task_index.map(|i| i as u64),
+            level: self.log_level.into(),
+            message: self.message,
+            details: self.details,
+        }
+    }
+}
+
+/// List a job's checkpoints
+#[utoipa::path(
+    get,
+    path = "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints",
+    tag = "jobs",
+    params(
+        ("pipeline_id" = String, Path, description = "Pipeline id"),
+        ("job_id" = String, Path, description = "Job id")
+    ),
+    responses(
+        (status = 200, description = "Got job's checkpoints", body = CheckpointCollection),
+    ),
+)]
+pub async fn get_job_checkpoints(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
+) -> Result<Json<CheckpointCollection>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+
+    let checkpoints = api_queries::get_job_checkpoints_rest()
+        .bind(&client, &job_pub_id, &auth_data.organization_id)
+        .all()
+        .await
+        .map_err(log_and_map_rest)?
+        .into_iter()
+        .map(|m| m.into())
+        .collect();
+
+    Ok(Json(CheckpointCollection {
+        data: checkpoints,
+        has_more: false,
+    }))
+}
+
+/// Get all jobs
+#[utoipa::path(
+    get,
+    path = "/v1/jobs",
+    tag = "jobs",
+    responses(
+        (status = 200, description = "Get all jobs", body = JobCollection),
+    ),
+)]
+pub async fn get_jobs(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+) -> Result<Json<JobCollection>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    let jobs: Vec<DbPipelineJob> = api_queries::get_all_jobs()
+        .bind(&client, &auth_data.organization_id)
+        .all()
+        .await
+        .map_err(log_and_map_rest)?;
+
+    Ok(Json(JobCollection {
+        has_more: false,
+        data: jobs.into_iter().map(|p| p.into()).collect(),
+    }))
+}
+
+impl Into<Checkpoint> for DbCheckpoint {
+    fn into(self) -> Checkpoint {
+        Checkpoint {
+            epoch: self.epoch as u32,
+            backend: self.state_backend,
+            start_time: to_micros(self.start_time),
+            finish_time: self.finish_time.map(to_micros),
+        }
+    }
 }

@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, VStack, Text, Icon } from '@chakra-ui/react';
 import { CiFaceFrown } from 'react-icons/ci';
 
-const PageNotFound: React.FC = ({}) => {
+const PageNotFound: React.FC = () => {
   return (
     <VStack justify={'center'} height={'90vh'} spacing={30}>
       <Icon as={CiFaceFrown} boxSize={55} />

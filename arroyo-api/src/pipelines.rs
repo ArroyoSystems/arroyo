@@ -13,7 +13,8 @@ use tonic::{Request, Status};
 use tracing::warn;
 
 use crate::rest_types::{
-    Job, JobCollection, Pipeline, PipelineCollection, PipelinePatch, PipelinePost,
+    Job, JobCollection, Pipeline, PipelineCollection, PipelineGraph, PipelinePatch, PipelinePost,
+    ValidatePipelinePost,
 };
 use arroyo_datastream::{ConnectorOp, Operator, Program};
 use arroyo_rpc::grpc::api::api_grpc_server::ApiGrpc;
@@ -25,6 +26,7 @@ use arroyo_rpc::grpc::api::{
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
+use crate::jobs::get_action;
 use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, DbPipelineRest};
 use crate::rest::AppState;
@@ -247,10 +249,31 @@ impl TryInto<PipelineDef> for DbPipeline {
     }
 }
 
-impl Into<Pipeline> for DbPipelineRest {
-    fn into(self) -> Pipeline {
-        let udfs: Vec<Udf> = serde_json::from_value(self.udfs).unwrap();
-        Pipeline {
+impl TryInto<Pipeline> for DbPipelineRest {
+    type Error = ErrorResp;
+
+    fn try_into(self) -> Result<Pipeline, ErrorResp> {
+        let udfs: Vec<Udf> = serde_json::from_value(self.udfs).map_err(log_and_map)?;
+        let running_desired = self.stop == StopMode::none;
+        let state = self.state.unwrap_or_else(|| "Created".to_string());
+        let (action_text, action, action_in_progress) = get_action(&state, &running_desired);
+
+        let mut program: Program = PipelineProgram::decode(&self.program[..])
+            .map_err(log_and_map)?
+            .try_into()
+            .map_err(log_and_map)?;
+
+        program.update_parallelism(
+            &self
+                .parallelism_overrides
+                .as_object()
+                .unwrap()
+                .into_iter()
+                .map(|(k, v)| (k.clone(), v.as_u64().unwrap() as usize))
+                .collect(),
+        );
+
+        Ok(Pipeline {
             id: self.pub_id,
             name: self.name,
             query: self.textual_repr,
@@ -258,16 +281,23 @@ impl Into<Pipeline> for DbPipelineRest {
             checkpoint_interval_micros: self.checkpoint_interval_micros as u64,
             stop: self.stop.into(),
             created_at: to_micros(self.created_at),
-        }
+            graph: program.into(),
+            action: action.map(|a| a.into()),
+            action_text,
+            action_in_progress,
+            preview: self.ttl_micros.is_some(),
+        })
     }
 }
 
 impl Into<Job> for DbPipelineJob {
     fn into(self) -> Job {
+        let running_desired = self.stop == StopMode::none;
+        let state = self.state.unwrap_or_else(|| "Created".to_string());
         Job {
             id: self.pub_id,
-            running_desired: self.stop == StopMode::none,
-            state: self.state.unwrap_or_else(|| "Created".to_string()),
+            running_desired: running_desired.clone(),
+            state: state.clone(),
             run_id: self.run_id.unwrap_or(0) as u64,
             start_time: self.start_time.map(to_micros),
             finish_time: self.finish_time.map(to_micros),
@@ -332,6 +362,46 @@ pub(crate) async fn sql_graph(
     }
 }
 
+/// Get a pipeline graph
+#[utoipa::path(
+    post,
+    path = "/v1/validate",
+    tag = "pipelines",
+    request_body = ValidatePipelinePost,
+    responses(
+        (status = 200, description = "Created pipeline and job", body = PipelineGraph),
+    ),
+)]
+pub async fn validate_pipeline(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    WithRejection(Json(validate_pipeline_post), _): WithRejection<
+        Json<ValidatePipelinePost>,
+        ApiError,
+    >,
+) -> Result<Json<PipelineGraph>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    let sql = CreateSqlJob {
+        query: validate_pipeline_post.query,
+        parallelism: 1,
+        udfs: validate_pipeline_post
+            .udfs
+            .into_iter()
+            .map(|u| CreateUdf {
+                language: 0,
+                definition: u.definition.to_string(),
+            })
+            .collect(),
+        preview: false,
+    };
+
+    let (mut program, _) = compile_sql(&sql, &auth_data, &client).await?;
+    optimizations::optimize(&mut program.graph);
+    Ok(Json(program.into()))
+}
+
 /// Create a new pipeline
 ///
 /// The API will create a single job for the pipeline.
@@ -365,7 +435,7 @@ pub async fn post_pipeline(
                     definition: u.definition.to_string(),
                 })
                 .collect(),
-            preview: false,
+            preview: pipeline_post.preview.unwrap_or(false),
         })),
     };
 
@@ -376,7 +446,7 @@ pub async fn post_pipeline(
         .start_or_preview(
             create_pipeline_req,
             pipeline_pub_id.clone(),
-            false,
+            pipeline_post.preview.unwrap_or(false),
             auth_data.clone(),
         )
         .await?;
@@ -457,7 +527,10 @@ pub async fn get_pipelines(
 
     Ok(Json(PipelineCollection {
         has_more: false,
-        data: pipelines.into_iter().map(|p| p.into()).collect(),
+        data: pipelines
+            .into_iter()
+            .map(|p| p.try_into().unwrap())
+            .collect(),
     }))
 }
 
@@ -552,7 +625,7 @@ pub async fn delete_pipeline(
         (status = 200, description = "Got jobs collection", body = JobCollection),
     ),
 )]
-pub async fn get_jobs(
+pub async fn get_pipeline_jobs(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
     Path(pipeline_pub_id): Path<String>,
@@ -574,7 +647,7 @@ pub async fn get_jobs(
     }))
 }
 
-async fn query_pipeline_by_pub_id(
+pub async fn query_pipeline_by_pub_id(
     pipeline_pub_id: &String,
     client: &Object,
     auth_data: &AuthData,
@@ -588,6 +661,29 @@ async fn query_pipeline_by_pub_id(
     let res: DbPipelineRest = pipeline.ok_or_else(|| ErrorResp {
         status_code: StatusCode::NOT_FOUND,
         message: "Pipeline not found".to_string(),
+    })?;
+
+    res.try_into()
+}
+
+pub async fn query_job_by_pub_id(
+    pipeline_pub_id: &String,
+    job_pub_id: &String,
+    client: &Object,
+    auth_data: &AuthData,
+) -> Result<Job, ErrorResp> {
+    // make sure pipeline exists
+    query_pipeline_by_pub_id(pipeline_pub_id, client, auth_data).await?;
+
+    let job = api_queries::get_pipeline_job()
+        .bind(client, &auth_data.organization_id, &job_pub_id)
+        .opt()
+        .await
+        .map_err(log_and_map_rest)?;
+
+    let res: DbPipelineJob = job.ok_or_else(|| ErrorResp {
+        status_code: StatusCode::NOT_FOUND,
+        message: "Job not found".to_string(),
     })?;
 
     Ok(res.into())

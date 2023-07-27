@@ -14,6 +14,7 @@ use tonic::Code;
 
 pub type BearerAuth = Option<TypedHeader<Authorization<Bearer>>>;
 
+#[derive(Debug)]
 pub struct ErrorResp {
     pub(crate) status_code: StatusCode,
     pub(crate) message: String,
@@ -26,7 +27,7 @@ pub enum ApiError {
 }
 
 impl IntoResponse for ApiError {
-    fn into_response(self) -> axum::response::Response {
+    fn into_response(self) -> Response {
         let (status, message) = match self {
             ApiError::JsonExtractorRejection(json_rejection) => {
                 (json_rejection.status(), json_rejection.body_text())

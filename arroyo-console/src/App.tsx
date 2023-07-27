@@ -13,13 +13,11 @@ import {
   Text,
 } from '@chakra-ui/react';
 
-import { SWRConfig } from 'swr';
-import { useToast } from '@chakra-ui/react';
-import { ConnectError } from '@bufbuild/connect-web';
-
 import { Link, Outlet, useLinkClickHandler, useMatch } from 'react-router-dom';
 import { FiHome, FiGitBranch, FiLink } from 'react-icons/fi';
 import { CloudSidebar, UserProfile } from './lib/CloudComponents';
+import { usePing } from './lib/data_fetching';
+import ApiUnavailable from './routes/not_found/ApiUnavailable';
 
 function logout() {
   // TODO: also send a request to the server to delete the session
@@ -77,7 +75,7 @@ function Sidebar() {
               <Stack spacing="1">
                 <NavButton label="Home" to="/" icon={FiHome} />
                 <NavButton label="Connections" to="connections" icon={FiLink} />
-                <NavButton label="Jobs" to="jobs" icon={FiGitBranch} />
+                <NavButton label="Pipelines" to="pipelines" icon={FiGitBranch} />
               </Stack>
               <Divider />
               <Stack>
@@ -96,42 +94,23 @@ function Sidebar() {
 }
 
 function App() {
-  const toast = useToast();
+  const { pingError } = usePing();
 
-  const handleError = (error: any) => {
-    if (error instanceof ConnectError) {
-      toast({
-        title: 'Connection Error',
-        description: 'There was a problem connecting. More details are available in the console.',
-        status: 'error',
-        duration: 9000,
-        isClosable: true,
-      });
-    } else {
-      toast({
-        title: 'An error occurred',
-        description: 'An unexpected error occurred. More details are available in the console.',
-        status: 'error',
-        duration: 9000,
-        isClosable: true,
-      });
-    }
-    console.error(error);
-  };
+  let content = (
+    <GridItem className="main" area={'main'}>
+      {<Outlet />}
+    </GridItem>
+  );
+
+  if (pingError) {
+    content = <ApiUnavailable />;
+  }
 
   return (
-    <SWRConfig
-      value={{
-        onError: handleError,
-      }}
-    >
-      <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px 1fr'} h="100vh">
-        <Sidebar />
-        <GridItem className="main" area={'main'}>
-          {<Outlet />}
-        </GridItem>
-      </Grid>
-    </SWRConfig>
+    <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px 1fr'} h="100vh">
+      <Sidebar />
+      {content}
+    </Grid>
   );
 }
 

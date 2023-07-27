@@ -1,12 +1,17 @@
+use crate::jobs::{__path_get_job_checkpoints, __path_get_job_errors, __path_get_jobs};
 use crate::pipelines::__path_get_pipelines;
 use crate::pipelines::__path_post_pipeline;
 use crate::pipelines::{
-    __path_delete_pipeline, __path_get_jobs, __path_get_pipeline, __path_patch_pipeline,
+    __path_delete_pipeline, __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline,
+    __path_validate_pipeline,
 };
+use crate::queries::api_queries;
 use crate::rest::__path_ping;
 use crate::rest_types::{
-    Job, JobCollection, Pipeline, PipelineCollection, PipelinePatch, PipelinePost,
-    StopType as StopTypeRest, Udf, UdfLanguage,
+    Checkpoint, CheckpointCollection, Job, JobCollection, JobLogLevel, JobLogMessage,
+    JobLogMessageCollection, Pipeline, PipelineCollection, PipelineEdge, PipelineGraph,
+    PipelineNode, PipelinePatch, PipelinePost, StopType as StopTypeRest, Udf, UdfLanguage,
+    ValidatePipelinePost,
 };
 use arroyo_connectors::connectors;
 use arroyo_rpc::grpc::api::{
@@ -42,6 +47,7 @@ use time::OffsetDateTime;
 use tokio_postgres::error::SqlState;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status};
+use tower_http::classify::ServerErrorsFailureClass::StatusCode;
 use tracing::{error, info, warn};
 use utoipa::OpenApi;
 
@@ -329,151 +335,92 @@ impl ApiGrpc for ApiServer {
     // pipelines
     async fn create_pipeline(
         &self,
-        request: Request<CreatePipelineReq>,
+        _request: Request<CreatePipelineReq>,
     ) -> Result<Response<CreatePipelineResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        let mut client = self.client().await?;
-        let transaction = client.transaction().await.map_err(log_and_map)?;
-
-        let id = pipelines::create_pipeline(
-            request.into_inner(),
-            &generate_id(IdTypes::Pipeline),
-            auth,
-            &transaction,
-        )
-        .await?;
-
-        transaction.commit().await.map_err(log_and_map)?;
-
-        log_event("pipeline_created", json!({"service": "api"}));
-
-        Ok(Response::new(CreatePipelineResp {
-            pipeline_id: format!("{}", id),
-        }))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn graph_for_pipeline(
         &self,
-        request: Request<PipelineGraphReq>,
+        _request: Request<PipelineGraphReq>,
     ) -> Result<Response<PipelineGraphResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        Ok(Response::new(
-            pipelines::sql_graph(request.into_inner(), auth, &self.client().await?).await?,
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
         ))
     }
 
     async fn get_pipeline(
         &self,
-        request: Request<GetPipelineReq>,
+        _request: Request<GetPipelineReq>,
     ) -> Result<Response<PipelineDef>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        let def = pipelines::query_pipeline(
-            &request.into_inner().pipeline_id,
-            &auth,
-            &self.client().await?,
-        )
-        .await?;
-        Ok(Response::new(def))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn create_job(
         &self,
-        request: Request<CreateJobReq>,
+        _request: Request<CreateJobReq>,
     ) -> Result<Response<CreateJobResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        let mut client = self.client().await?;
-        let transaction = client.transaction().await.map_err(log_and_map)?;
-        transaction
-            .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
-            .await
-            .map_err(log_and_map)?;
-
-        let id = jobs::create_job(request.into_inner(), auth, &transaction).await?;
-
-        transaction.commit().await.map_err(log_and_map)?;
-
-        log_event("job_created", json!({"service": "api"}));
-
-        Ok(Response::new(CreateJobResp { job_id: id }))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn delete_job(
         &self,
-        request: Request<DeleteJobReq>,
+        _request: Request<DeleteJobReq>,
     ) -> Result<Response<DeleteJobResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        jobs::delete_job(&request.into_inner().job_id, auth, &self.pool).await?;
-        Ok(Response::new(DeleteJobResp {}))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn start_pipeline(
         &self,
-        request: Request<CreatePipelineReq>,
+        _request: Request<CreatePipelineReq>,
     ) -> Result<Response<CreateJobResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-        self.start_or_preview(
-            request.into_inner(),
-            generate_id(IdTypes::Pipeline),
-            false,
-            auth,
-        )
-        .await
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn preview_pipeline(
         &self,
-        request: Request<CreatePipelineReq>,
+        _request: Request<CreatePipelineReq>,
     ) -> Result<Response<CreateJobResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        log_event("pipeline_preview", json!({"service": "api"}));
-        self.start_or_preview(
-            request.into_inner(),
-            generate_id(IdTypes::Pipeline),
-            true,
-            auth,
-        )
-        .await
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn get_jobs(
         &self,
-        request: Request<GetJobsReq>,
+        _request: Request<GetJobsReq>,
     ) -> Result<Response<GetJobsResp>, Status> {
-        let (_, auth) = self.authenticate(request).await?;
-
-        let jobs = jobs::get_jobs(&auth, &self.client().await?).await?;
-
-        Ok(Response::new(GetJobsResp { jobs }))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn get_job_details(
         &self,
-        request: Request<JobDetailsReq>,
+        _request: Request<JobDetailsReq>,
     ) -> Result<Response<JobDetailsResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-        let req = request.into_inner();
-
-        jobs::get_job_details(&req.job_id, &auth, &self.client().await?)
-            .await
-            .map(Response::new)
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn get_checkpoints(
         &self,
-        request: Request<JobCheckpointsReq>,
+        _request: Request<JobCheckpointsReq>,
     ) -> Result<Response<JobCheckpointsResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-        let req = request.into_inner();
-
-        jobs::get_job_checkpoints(&req.job_id, auth, &self.client().await?)
-            .await
-            .map(|checkpoints| Response::new(JobCheckpointsResp { checkpoints }))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn get_checkpoint_detail(
@@ -490,18 +437,11 @@ impl ApiGrpc for ApiServer {
 
     async fn get_operator_errors(
         &self,
-        request: Request<OperatorErrorsReq>,
+        _request: Request<OperatorErrorsReq>,
     ) -> Result<Response<OperatorErrorsRes>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-        let job_id = request.into_inner().job_id;
-        let client = self.client().await?;
-
-        // validate that the job exists and user can access it
-        let _ = jobs::get_job_details(&job_id, &auth, &client).await?;
-
-        let messages = job_log::get_operator_errors(&job_id, &client).await?;
-
-        Ok(Response::new(OperatorErrorsRes { messages }))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn get_job_metrics(
@@ -589,7 +529,17 @@ impl ApiGrpc for ApiServer {
     ) -> Result<Response<Self::SubscribeToOutputStream>, Status> {
         let (request, auth) = self.authenticate(request).await?;
 
-        let job_id = request.into_inner().job_id;
+        let job_id = api_queries::get_pipeline_job()
+            .bind(
+                &self.client().await?,
+                &auth.organization_id,
+                &request.into_inner().job_id,
+            )
+            .one()
+            .await
+            .map_err(log_and_map)?
+            .id;
+
         // validate that the job exists, the user has access, and the graph has a GrpcSink
         let details = jobs::get_job_details(&job_id, &auth, &self.client().await?).await?;
 
@@ -655,10 +605,42 @@ impl ApiGrpc for ApiServer {
 #[openapi(
     info(title = "Arroyo REST API", version = "1.0.0"),
     servers((url = "/api/")),
-    paths(ping, post_pipeline, patch_pipeline, get_pipeline, delete_pipeline, get_pipelines, get_jobs),
-    components(schemas(PipelinePost, PipelinePatch, Pipeline, Job, StopTypeRest, Udf, UdfLanguage, PipelineCollection, JobCollection)),
+    paths(
+        ping,
+        validate_pipeline,
+        post_pipeline,
+        patch_pipeline,
+        get_pipeline,
+        delete_pipeline,
+        get_pipelines,
+        get_jobs,
+        get_pipeline_jobs,
+        get_job_errors,
+        get_job_checkpoints
+    ),
+    components(schemas(
+        ValidatePipelinePost,
+        PipelinePost,
+        PipelinePatch,
+        Pipeline,
+        PipelineGraph,
+        PipelineNode,
+        PipelineEdge,
+        Job,
+        StopTypeRest,
+        Udf,
+        UdfLanguage,
+        PipelineCollection,
+        JobCollection,
+        JobLogMessage,
+        JobLogMessageCollection,
+        JobLogLevel,
+        Checkpoint,
+        CheckpointCollection
+    )),
     tags(
         (name = "pipelines", description = "Pipeline management endpoints"),
+        (name = "jobs", description = "Job management endpoints"),
         (name = "ping", description = "Ping endpoint"),
     )
 )]
