@@ -1,1 +1,3 @@
-// Dummy file. The action happens in build.rs.
+// build.rs generates the OpenAPI spec and client
+
+include!("../client/src/lib.rs");

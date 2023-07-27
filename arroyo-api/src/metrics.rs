@@ -15,7 +15,8 @@ use once_cell::sync::Lazy;
 use prometheus_http_query::Client;
 use tonic::Status;
 
-use crate::{jobs, AuthData};
+use crate::queries::api_queries;
+use crate::{jobs, log_and_map, AuthData};
 
 const METRICS_GRANULARITY_SECS: f64 = 5.0;
 
@@ -41,10 +42,17 @@ static METRICS_CLIENT: Lazy<Client> = Lazy::new(|| {
 });
 
 pub(crate) async fn get_metrics(
-    job_id: String,
+    job_pub_id: String,
     auth: AuthData,
     client: &impl GenericClient,
 ) -> Result<JobMetricsResp, Status> {
+    let job_id = api_queries::get_pipeline_job()
+        .bind(client, &auth.organization_id, &job_pub_id)
+        .one()
+        .await
+        .map_err(log_and_map)?
+        .id;
+
     // validate that the job exists and user can access it
     let job_details = jobs::get_job_details(&job_id, &auth, client).await?;
 

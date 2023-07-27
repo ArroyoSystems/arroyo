@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-types = { path = "../arroyo-types" }
+arroyo-openapi = { path = "../arroyo-openapi" }
 
 anyhow = "1.0.71"
 tokio = { version = "1.16.1", features = ["full"] }

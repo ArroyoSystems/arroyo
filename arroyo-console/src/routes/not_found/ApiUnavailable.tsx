@@ -1,16 +1,16 @@
 import React from 'react';
 import { Link, VStack, Text, Icon } from '@chakra-ui/react';
-import { CiFaceFrown } from 'react-icons/ci';
+import { BiTransferAlt } from 'react-icons/bi';
 
-const PageNotFound: React.FC = () => {
+const ApiUnavailable: React.FC = () => {
   return (
     <VStack justify={'center'} height={'90vh'} spacing={30}>
-      <Icon as={CiFaceFrown} boxSize={55} />
+      <Icon as={BiTransferAlt} boxSize={55} />
       <VStack>
-        <Text fontSize="xl">Sorry, page not found</Text>
+        <Text fontSize="xl">The API is currently unavailable.</Text>
         <Text>
           <Link color="blue.400" href={'/'}>
-            Go back home
+            Try again
           </Link>
         </Text>
       </VStack>
@@ -18,4 +18,4 @@ const PageNotFound: React.FC = () => {
   );
 };
 
-export default PageNotFound;
+export default ApiUnavailable;

@@ -2,8 +2,9 @@ import { Box, Text } from '@chakra-ui/react';
 import dagre from 'dagre';
 import { useMemo } from 'react';
 import ReactFlow, { Handle, Position, Background } from 'reactflow';
-import { JobNode, JobGraph, JobMetricsResp } from '../../gen/api_pb';
+import { JobNode, JobMetricsResp } from '../../gen/api_pb';
 import { getBackpressureColor, getOperatorBackpressure } from '../../lib/util';
+import { PipelineGraph } from '../../lib/data_fetching';
 
 function PipelineGraphNode({
   data,
@@ -39,13 +40,13 @@ function PipelineGraphNode({
   );
 }
 
-export function PipelineGraph({
+export function PipelineGraphViewer({
   graph,
   metrics,
   setActiveOperator,
   activeOperator,
 }: {
-  graph: JobGraph;
+  graph: PipelineGraph;
   metrics?: JobMetricsResp;
   setActiveOperator: (op: string) => void;
   activeOperator?: string;

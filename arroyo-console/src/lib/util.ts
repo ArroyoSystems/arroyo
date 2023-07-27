@@ -146,3 +146,44 @@ export function formatDate(timestamp: bigint) {
     timeStyle: 'short',
   }).format(date);
 }
+
+export function relativeTime(timestamp: number): string {
+  const now = Date.now() * 1000;
+  const microsecondsAgo = now - timestamp;
+
+  const secondsAgo = Math.floor(microsecondsAgo / 1_000_000);
+  if (secondsAgo < 60) {
+    return 'just now';
+  }
+
+  const minutesAgo = Math.floor(secondsAgo / 60);
+  if (minutesAgo < 60) {
+    return `${minutesAgo} minutes ago`;
+  }
+
+  const hoursAgo = Math.floor(minutesAgo / 60);
+  if (hoursAgo < 24) {
+    return `${hoursAgo} hours ago`;
+  }
+
+  const daysAgo = Math.floor(hoursAgo / 24);
+  if (daysAgo < 30) {
+    return `${daysAgo} days ago`;
+  }
+
+  const monthsAgo = Math.floor(daysAgo / 30);
+  if (monthsAgo < 12) {
+    return `${monthsAgo} months ago`;
+  }
+
+  const yearsAgo = Math.floor(monthsAgo / 12);
+  return `${yearsAgo} years ago`;
+}
+
+export const formatError = (error: any) => {
+  if ('error' in error && typeof error.error === 'string') {
+    return error.error;
+  } else {
+    return 'Something went wrong.';
+  }
+};
