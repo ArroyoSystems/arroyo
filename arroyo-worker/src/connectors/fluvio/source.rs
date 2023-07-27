@@ -12,7 +12,6 @@ use fluvio::dataplane::link::ErrorCode;
 use fluvio::metadata::objects::Metadata;
 use fluvio::metadata::topic::TopicSpec;
 use fluvio::{consumer::Record as ConsumerRecord, Fluvio, FluvioConfig, Offset};
-use futures_lite::future::FutureExt;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::marker::PhantomData;

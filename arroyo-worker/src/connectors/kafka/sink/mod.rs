@@ -8,7 +8,7 @@ use arroyo_types::*;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
-use tracing::warn;
+use tracing::{error, warn};
 
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
@@ -143,15 +143,16 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
             } => {
                 client_config.set("enable.idempotence", "true");
                 let transactional_id = format!(
-                    "arroyo-id-{}-{}-{}-{}",
+                    "arroyo-id-{}-{}-{}-{}-{}",
                     task_info.job_id,
                     task_info.operator_id,
+                    self.topic,
                     task_info.task_index,
                     next_transaction_index
                 );
                 client_config.set("transactional.id", transactional_id);
                 let producer: FutureProducer = client_config.create()?;
-                producer.init_transactions(Timeout::Never)?;
+                producer.init_transactions(Timeout::After(Duration::from_secs(30)))?;
                 producer.begin_transaction()?;
                 *next_transaction_index += 1;
                 self.producer = Some(producer);
@@ -245,9 +246,20 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
         let Some(committing_producer)= producer_to_complete.take() else {
             unimplemented!("received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented");
         };
-        committing_producer
-            .commit_transaction(Timeout::Never)
-            .expect("committing producer should succeed");
+        let mut commits_attempted = 0;
+        loop {
+            if committing_producer
+                .commit_transaction(Timeout::After(Duration::from_secs(10)))
+                .is_ok()
+            {
+                break;
+            } else if commits_attempted == 5 {
+                panic!("failed to commit 5 times, giving up");
+            } else {
+                error!("failed to commit {} times, retrying", commits_attempted);
+                commits_attempted += 1;
+            }
+        }
         let checkpoint_event = arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
             checkpoint_epoch: epoch,
             operator_id: ctx.task_info.operator_id.clone(),
