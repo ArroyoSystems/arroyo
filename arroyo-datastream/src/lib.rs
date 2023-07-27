@@ -151,15 +151,16 @@ impl Debug for WindowType {
 }
 
 #[derive(Debug, Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
-pub enum WatermarkType {
-    FixedLateness {
-        period: Duration,
-        max_lateness: Duration,
-    },
-    Expression {
-        period: Duration,
-        expression: String,
-    },
+pub struct PeriodicWatermark {
+    pub period: Duration,
+    pub idle_time: Option<Duration>,
+    pub strategy: WatermarkStrategy,
+}
+
+#[derive(Debug, Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WatermarkStrategy {
+    FixedLateness { max_lateness: Duration },
+    Expression { expression: String },
 }
 
 #[derive(Copy, Clone, Encode, Decode, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -398,7 +399,7 @@ pub enum Operator {
     },
     Count,
     Aggregate(AggregateBehavior),
-    Watermark(WatermarkType),
+    Watermark(PeriodicWatermark),
     GlobalKey,
     WindowJoin {
         window: WindowType,
@@ -718,7 +719,7 @@ impl<T: Data> Stream<T> {
         self.add_node(f.as_operator(WasmBehavior::Timestamp))
     }
 
-    pub fn watermark(&mut self, watermark: WatermarkType) -> Stream<T> {
+    pub fn watermark(&mut self, watermark: PeriodicWatermark) -> Stream<T> {
         self.add_node(Operator::Watermark(watermark))
     }
 
@@ -1395,24 +1396,33 @@ impl Program {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
 
-                    match watermark {
-                        WatermarkType::FixedLateness { period, max_lateness } => {
-                            let period = duration_to_syn_expr(*period);
+                    let period = duration_to_syn_expr(watermark.period);
+
+                    let idle_time = match watermark.idle_time {
+                        Some(d) => {
+                            let micros = d.as_micros() as u64;
+                            quote!(Some(Duration::from_micros(#micros)))
+                        }
+                        None => quote!(None),
+                    };
+
+                    match &watermark.strategy {
+                        WatermarkStrategy::FixedLateness { max_lateness } => {
                             let max_lateness = duration_to_syn_expr(*max_lateness);
+
                             quote! {
                                 Box::new(
                                     PeriodicWatermarkGenerator::<#in_k, #in_t>::
-                                    fixed_lateness(#period,#max_lateness))
+                                    fixed_lateness(#period, #idle_time, #max_lateness))
                             }
                         }
-                        WatermarkType::Expression { period, expression } => {
-                            let expr: syn::Expr = parse_str(expression).unwrap();
+                        WatermarkStrategy::Expression { expression } => {
+                            let expr: syn::Expr = parse_str(&expression).unwrap();
                             let watermark_function : syn::ExprClosure = parse_quote!(|record| {#expr});
-                            let period = duration_to_syn_expr(*period);
                             quote! {
                                 Box::new(
                                     PeriodicWatermarkGenerator::<#in_k, #in_t>::
-                                    watermark_function(#period, Box::new(#watermark_function)))
+                                    watermark_function(#period, #idle_time, Box::new(#watermark_function)))
                             }
                         }
                     }
@@ -1914,18 +1924,29 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::Aggregate(AggregateBehavior::Sum) => {
                 GrpcOperator::Aggregator(GrpcApi::Aggregator::SumAggregate.into())
             }
-            Operator::Watermark(WatermarkType::FixedLateness {
+            Operator::Watermark(PeriodicWatermark {
                 period,
-                max_lateness,
-            }) => GrpcOperator::PeriodicWatermark(GrpcApi::PeriodicWatermark {
-                period_micros: period.as_micros() as u64,
-                max_lateness_micros: max_lateness.as_micros() as u64,
-            }),
-            Operator::Watermark(WatermarkType::Expression { period, expression }) => {
-                GrpcOperator::ExpressionWatermark(GrpcApi::ExpressionWatermark {
-                    period_micros: period.as_micros() as u64,
-                    expression,
-                })
+                idle_time,
+                strategy,
+            }) => {
+                let period_micros = period.as_micros() as u64;
+                let idle_time_micros = idle_time.map(|t| t.as_micros() as u64);
+                match strategy {
+                    WatermarkStrategy::FixedLateness { max_lateness } => {
+                        GrpcOperator::PeriodicWatermark(GrpcApi::PeriodicWatermark {
+                            period_micros,
+                            max_lateness_micros: max_lateness.as_micros() as u64,
+                            idle_time_micros,
+                        })
+                    }
+                    WatermarkStrategy::Expression { expression } => {
+                        GrpcOperator::ExpressionWatermark(GrpcApi::ExpressionWatermark {
+                            period_micros,
+                            expression,
+                            idle_time_micros,
+                        })
+                    }
+                }
             }
             Operator::GlobalKey => todo!(),
             Operator::WindowJoin { window } => GrpcOperator::WindowJoin(GrpcApi::Window {
@@ -2219,12 +2240,26 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         Aggregator::SumAggregate => Operator::Aggregate(AggregateBehavior::Sum),
                     }
                 }
-                GrpcOperator::PeriodicWatermark(watermark) => {
-                    Operator::Watermark(WatermarkType::FixedLateness {
-                        period: Duration::from_micros(watermark.period_micros),
-                        max_lateness: Duration::from_micros(watermark.max_lateness_micros),
-                    })
-                }
+                GrpcOperator::PeriodicWatermark(GrpcApi::PeriodicWatermark {
+                    period_micros,
+                    max_lateness_micros,
+                    idle_time_micros,
+                }) => Operator::Watermark(PeriodicWatermark {
+                    period: Duration::from_micros(period_micros),
+                    idle_time: idle_time_micros.map(Duration::from_micros),
+                    strategy: WatermarkStrategy::FixedLateness {
+                        max_lateness: Duration::from_micros(max_lateness_micros),
+                    },
+                }),
+                GrpcOperator::ExpressionWatermark(GrpcApi::ExpressionWatermark {
+                    period_micros,
+                    expression,
+                    idle_time_micros,
+                }) => Operator::Watermark(PeriodicWatermark {
+                    period: Duration::from_micros(period_micros),
+                    idle_time: idle_time_micros.map(Duration::from_micros),
+                    strategy: WatermarkStrategy::Expression { expression },
+                }),
                 GrpcOperator::WindowJoin(window) => Operator::WindowJoin {
                     window: window.into(),
                 },
@@ -2330,13 +2365,6 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         None => JoinType::Inner,
                     },
                 },
-                GrpcOperator::ExpressionWatermark(GrpcApi::ExpressionWatermark {
-                    period_micros,
-                    expression,
-                }) => Operator::Watermark(WatermarkType::Expression {
-                    period: Duration::from_micros(period_micros),
-                    expression,
-                }),
                 GrpcOperator::UpdatingOperator(GrpcApi::UpdatingOperator { name, expression }) => {
                     Operator::UpdatingOperator { name, expression }
                 }

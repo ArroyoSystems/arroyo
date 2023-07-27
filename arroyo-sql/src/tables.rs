@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::str::FromStr;
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
@@ -20,6 +21,7 @@ use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
 };
 
+use crate::DEFAULT_IDLE_TIME;
 use crate::{
     expressions::{Column, ColumnExpression, Expression, ExpressionContext},
     external::{ProcessingMode, SqlSink, SqlSource},
@@ -43,6 +45,7 @@ pub struct ConnectorTable {
     pub serialization_mode: SerializationMode,
     pub event_time_field: Option<String>,
     pub watermark_field: Option<String>,
+    pub idle_time: Option<Duration>,
 }
 
 fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
@@ -109,6 +112,7 @@ impl From<Connection> for ConnectorTable {
             serialization_mode: serialization_mode(&value.schema).into(),
             event_time_field: None,
             watermark_field: None,
+            idle_time: None,
         }
     }
 }
@@ -170,6 +174,15 @@ impl ConnectorTable {
         table.fields = fields;
         table.event_time_field = options.remove("event_time_field");
         table.watermark_field = options.remove("watermark_field");
+
+        table.idle_time = options
+            .remove("idle_micros")
+            .map(|t| i64::from_str(&t))
+            .transpose()
+            .map_err(|_| anyhow!("idle_micros must be sent to a number"))?
+            .or_else(|| DEFAULT_IDLE_TIME.map(|t| t.as_micros() as i64))
+            .filter(|t| *t <= 0)
+            .map(|t| Duration::from_micros(t as u64));
 
         if !options.is_empty() {
             let keys: Vec<String> = options.keys().map(|s| format!("'{}'", s)).collect();
@@ -314,6 +327,7 @@ impl ConnectorTable {
             },
             operator: Operator::ConnectorSource(self.connector_op()),
             processing_mode: self.processing_mode(),
+            idle_time: self.idle_time,
         };
 
         Ok(SqlOperator::Source(SourceOperator {
