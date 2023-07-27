@@ -1,7 +1,17 @@
+use crate::types::public::LogLevel;
 use crate::types::public::StopMode;
+use arroyo_datastream::Program;
 use arroyo_rpc::grpc::api;
+use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidatePipelinePost {
+    pub query: String,
+    pub udfs: Vec<Udf>,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +41,68 @@ pub struct Pipeline {
     pub checkpoint_interval_micros: u64,
     pub stop: StopType,
     pub created_at: u64,
+    pub action: Option<StopType>,
+    pub action_text: String,
+    pub action_in_progress: bool,
+    pub graph: PipelineGraph,
+    pub preview: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineGraph {
+    pub nodes: Vec<PipelineNode>,
+    pub edges: Vec<PipelineEdge>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineNode {
+    pub node_id: String,
+    pub operator: String,
+    pub parallelism: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineEdge {
+    pub src_id: String,
+    pub dest_id: String,
+    pub key_type: String,
+    pub value_type: String,
+    pub edge_type: String,
+}
+
+impl From<Program> for PipelineGraph {
+    fn from(value: Program) -> Self {
+        let nodes = value
+            .graph
+            .node_weights()
+            .map(|node| PipelineNode {
+                node_id: node.operator_id.to_string(),
+                operator: format!("{:?}", node),
+                parallelism: node.parallelism as u32,
+            })
+            .collect();
+
+        let edges = value
+            .graph
+            .edge_references()
+            .map(|edge| {
+                let src = value.graph.node_weight(edge.source()).unwrap();
+                let target = value.graph.node_weight(edge.target()).unwrap();
+                PipelineEdge {
+                    src_id: src.operator_id.to_string(),
+                    dest_id: target.operator_id.to_string(),
+                    key_type: edge.weight().key.to_string(),
+                    value_type: edge.weight().value.to_string(),
+                    edge_type: format!("{:?}", edge.weight().typ),
+                }
+            })
+            .collect();
+
+        PipelineGraph { nodes, edges }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -63,6 +135,18 @@ impl Into<arroyo_rpc::grpc::api::StopType> for StopType {
             StopType::Graceful => arroyo_rpc::grpc::api::StopType::Graceful,
             StopType::Immediate => arroyo_rpc::grpc::api::StopType::Immediate,
             StopType::Force => arroyo_rpc::grpc::api::StopType::Force,
+        }
+    }
+}
+
+impl From<api::StopType> for StopType {
+    fn from(value: api::StopType) -> Self {
+        match value {
+            api::StopType::None => StopType::None,
+            api::StopType::Checkpoint => StopType::Checkpoint,
+            api::StopType::Graceful => StopType::Graceful,
+            api::StopType::Immediate => StopType::Immediate,
+            api::StopType::Force => StopType::Force,
         }
     }
 }
@@ -111,18 +195,53 @@ pub struct Udf {
     pub definition: String,
 }
 
-// Collections need to be created with this macro rather than a generic type
-// because utoipa::ToSchema (and the OpenAPI spec) don't support generics natively
-macro_rules! collection_type {
-    ($struct_name:ident, $item_type:ty) => {
-        #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
-        #[serde(rename_all = "camelCase")]
-        pub struct $struct_name {
-            pub data: Vec<$item_type>,
-            pub has_more: bool,
-        }
-    };
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum JobLogLevel {
+    Info,
+    Warn,
+    Error,
 }
 
-collection_type!(JobCollection, Job);
-collection_type!(PipelineCollection, Pipeline);
+impl From<LogLevel> for JobLogLevel {
+    fn from(value: LogLevel) -> Self {
+        match value {
+            LogLevel::info => JobLogLevel::Info,
+            LogLevel::warn => JobLogLevel::Warn,
+            LogLevel::error => JobLogLevel::Error,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct JobLogMessage {
+    pub created_at: u64,
+    pub operator_id: Option<String>,
+    pub task_index: Option<u64>,
+    pub level: JobLogLevel,
+    pub message: String,
+    pub details: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Checkpoint {
+    pub epoch: u32,
+    pub backend: String,
+    pub start_time: u64,
+    pub finish_time: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+#[aliases(
+    JobCollection = Collection<Job>,
+    PipelineCollection = Collection<Pipeline>,
+    JobLogMessageCollection = Collection<JobLogMessage>,
+    CheckpointCollection = Collection<Checkpoint>,
+)]
+pub struct Collection<T> {
+    pub data: Vec<T>,
+    pub has_more: bool,
+}

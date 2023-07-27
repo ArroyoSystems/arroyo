@@ -1,12 +1,12 @@
 import React from 'react';
 import { Link, Text, VStack } from '@chakra-ui/react';
 
-export interface JobErrorProps {
+export interface PipelineNotFoundProps {
   icon: React.ReactElement;
   message: string;
 }
 
-const JobNotFound: React.FC<JobErrorProps> = ({ icon, message }) => {
+const PipelineNotFound: React.FC<PipelineNotFoundProps> = ({ icon, message }) => {
   return (
     <VStack justify={'center'} height={'90vh'} spacing={30}>
       {icon}
@@ -14,7 +14,7 @@ const JobNotFound: React.FC<JobErrorProps> = ({ icon, message }) => {
         <Text fontSize="xl">{message}</Text>
         <Text>
           <Link color="blue.400" href={'/jobs'}>
-            Back to all jobs
+            Back to all pipelines
           </Link>
         </Text>
       </VStack>
@@ -22,4 +22,4 @@ const JobNotFound: React.FC<JobErrorProps> = ({ icon, message }) => {
   );
 };
 
-export default JobNotFound;
+export default PipelineNotFound;

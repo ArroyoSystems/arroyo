@@ -1,4 +1,3 @@
-import { ConnectError } from '@bufbuild/connect-web';
 import {
   Alert,
   AlertDescription,
@@ -21,34 +20,25 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import {
-  ConnectionTable,
-  CreatePipelineReq,
-  CreateSqlJob,
-  CreateUdf,
-  GetPipelineReq,
-  GrpcOutputSubscription,
-  OutputData,
-  PipelineGraphReq,
-  StopType,
-  TableType,
-  UdfLanguage,
-} from '../../gen/api_pb';
+import { ConnectionTable, GrpcOutputSubscription, OutputData, TableType } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
 import { Catalog } from './Catalog';
-import { PipelineGraph } from './JobGraph';
-import { PipelineOutputs } from './JobOutputs';
+import { PipelineGraphViewer } from './PipelineGraph';
+import { PipelineOutputs } from './PipelineOutputs';
 import { CodeEditor } from './SqlEditor';
 import { SqlOptions } from '../../lib/types';
 import {
+  post,
   useConnectionTables,
-  useJob,
   useOperatorErrors,
+  usePipeline,
   usePipelineGraph,
+  usePipelineJobs,
 } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';
 import StartPipelineModal from '../../components/StartPipelineModal';
+import { formatError } from '../../lib/util';
 
 function useQuery() {
   const { search } = useLocation();
@@ -57,14 +47,19 @@ function useQuery() {
 }
 
 export function CreatePipeline({ client }: { client: ApiClient }) {
-  const [jobId, setJobId] = useState<string | undefined>(undefined);
-  const { job, updateJob, jobError } = useJob(client, jobId);
-  const { operatorErrors } = useOperatorErrors(client, jobId);
+  const [pipelineId, setPipelineId] = useState<string | undefined>(undefined);
+  const { updatePipeline } = usePipeline(pipelineId);
+  const { jobs } = usePipelineJobs(pipelineId, true);
+  const job = jobs?.length ? jobs[0] : undefined;
+  const { operatorErrors } = useOperatorErrors(pipelineId, job?.id);
   const [queryInput, setQueryInput] = useState<string>('');
   const [queryInputToCheck, setQueryInputToCheck] = useState<string>('');
   const [udfsInput, setUdfsInput] = useState<string>('');
   const [udfsInputToCheck, setUdfsInputToCheck] = useState<string>('');
-  const { pipelineGraph } = usePipelineGraph(client, queryInputToCheck, udfsInputToCheck);
+  const { pipelineGraph, pipelineGraphError } = usePipelineGraph(
+    queryInputToCheck,
+    udfsInputToCheck
+  );
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [options, setOptions] = useState<SqlOptions>({ parallelism: 4, checkpointMS: 5000 });
   const navigate = useNavigate();
@@ -73,6 +68,9 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
   const { connectionTables, connectionTablesLoading } = useConnectionTables(client);
   const queryParams = useQuery();
+  const { pipeline: copyFrom, pipelineLoading: copyFromLoading } = usePipeline(
+    queryParams.get('from') ?? undefined
+  );
 
   const updateQuery = (query: string) => {
     window.localStorage.setItem('query', query);
@@ -85,28 +83,17 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   };
 
   useEffect(() => {
-    const copyFrom = queryParams.get('from');
-    const fetch = async (copyFrom: string) => {
-      const def = await (
-        await client()
-      ).getPipeline(
-        new GetPipelineReq({
-          pipelineId: copyFrom,
-        })
-      );
-
-      setQueryInput(def.definition || '');
-      setUdfsInput(def.udfs[0].definition || '');
-      setOptions({
-        ...options,
-        name: def.name,
-      });
-    };
-
     let savedQuery = window.localStorage.getItem('query');
     let savedUdfs = window.localStorage.getItem('udf');
     if (copyFrom != null) {
-      fetch(copyFrom);
+      setQueryInput(copyFrom.query || '');
+      if (copyFrom.udfs.length) {
+        setUdfsInput(copyFrom.udfs[0].definition || '');
+      }
+      setOptions({
+        ...options,
+        name: copyFrom.name + '-copy',
+      });
     } else {
       if (savedQuery != null) {
         setQueryInput(savedQuery);
@@ -115,10 +102,42 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
         setUdfsInput(savedUdfs);
       }
     }
-  }, [queryParams]);
+  }, [copyFrom]);
+
+  useEffect(() => {
+    const subscribeToOutput = async () => {
+      if (!job) {
+        return;
+      }
+
+      console.log('subscribing to output');
+      let counter = 1;
+      let o = [];
+      for await (const res of (await client()).subscribeToOutput(
+        new GrpcOutputSubscription({
+          jobId: job?.id,
+        })
+      )) {
+        let output = {
+          id: counter++,
+          data: res,
+        };
+
+        o.push(output);
+        if (outputs.length > 100) {
+          o.shift();
+        }
+        setOutputs(o);
+      }
+
+      console.log('Job finished');
+    };
+
+    subscribeToOutput();
+  }, [job?.id]);
 
   // Top-level loading state
-  if (connectionTablesLoading) {
+  if (copyFromLoading || connectionTablesLoading) {
     return <Loading />;
   }
 
@@ -130,17 +149,11 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
 
   const pipelineIsValid = async () => {
     check();
-    const res = await (
-      await (
-        await client
-      )()
-    ).graphForPipeline(
-      new PipelineGraphReq({
-        query: queryInput,
-        udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfsInput })],
-      })
-    );
-    return res.result.case == 'jobGraph';
+    const { error } = await post('/v1/pipelines/validate', {
+      body: { query: queryInput, udfs: [{ language: 'rust', definition: udfsInput }] },
+    });
+
+    return error == undefined;
   };
 
   const preview = async () => {
@@ -150,47 +163,23 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
       return;
     }
 
-    let resp = await (
-      await client()
-    ).previewPipeline(
-      new CreatePipelineReq({
-        //name: `preview-${new Date().getTime()}`,
-        name: 'preview',
-        config: {
-          case: 'sql',
-          value: new CreateSqlJob({
-            query: queryInput,
-            udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfsInput })],
-            preview: true,
-          }),
-        },
-      })
-    );
+    const { data: newPipeline, error } = await post('/v1/pipelines', {
+      body: {
+        name: `preview-${new Date().getTime()}`,
+        parallelism: 1,
+        preview: true,
+        query: queryInput,
+        udfs: [{ language: 'rust', definition: udfsInput }],
+      },
+    });
 
-    setJobId(resp.jobId);
-    setTabIndex(1);
-
-    console.log('subscribing to output');
-    let counter = 1;
-    let o = [];
-    for await (const res of (await client()).subscribeToOutput(
-      new GrpcOutputSubscription({
-        jobId: resp.jobId,
-      })
-    )) {
-      let output = {
-        id: counter++,
-        data: res,
-      };
-
-      o.push(output);
-      if (outputs.length > 100) {
-        o.shift();
-      }
-      setOutputs(o);
+    if (error) {
+      console.log('Create pipeline failed');
     }
 
-    console.log('Job finished');
+    // Setting the pipeline id will trigger fetching the job and subscribing to the output
+    setPipelineId(newPipeline?.id);
+    setTabIndex(1);
   };
 
   const run = async () => {
@@ -202,31 +191,27 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   };
 
   const start = async () => {
-    try {
-      let resp = await (
-        await client()
-      ).startPipeline(
-        new CreatePipelineReq({
-          name: options.name,
-          config: {
-            case: 'sql',
-            value: new CreateSqlJob({
-              query: queryInput,
-              udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: udfsInput })],
-            }),
+    const { data, error } = await post('/v1/pipelines', {
+      body: {
+        name: options.name!,
+        parallelism: options.parallelism!,
+        query: queryInput,
+        udfs: [
+          {
+            language: 'rust',
+            definition: udfsInput,
           },
-        })
-      );
+        ],
+      },
+    });
 
+    if (data) {
       localStorage.removeItem('query');
-      navigate(`/jobs/${resp.jobId}`);
-    } catch (e) {
-      if (e instanceof ConnectError) {
-        setStartError(e.rawMessage);
-      } else {
-        setStartError('Something went wrong');
-        console.log('Unhandled error', e);
-      }
+      navigate(`/pipelines/${data.id}`);
+    }
+
+    if (error) {
+      setStartError(formatError(error));
     }
   };
 
@@ -288,7 +273,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     </Stack>
   );
 
-  const previewing = job?.jobStatus?.runningDesired && job?.jobStatus?.state != 'Failed';
+  const previewing = job?.runningDesired && job?.state != 'Failed';
 
   let startPreviewButton = <></>;
   let stopPreviewButton = <></>;
@@ -296,7 +281,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   if (previewing) {
     stopPreviewButton = (
       <Button
-        onClick={() => updateJob({ stop: StopType.Immediate })}
+        onClick={() => updatePipeline({ stop: 'immediate' })}
         size="sm"
         colorScheme="blue"
         title="Stop a preview pipeline"
@@ -356,7 +341,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     </TabPanel>
   );
 
-  if (pipelineGraph?.result.case == 'jobGraph') {
+  if (pipelineGraph) {
     previewPipelineTab = (
       <TabPanel height="100%" position="relative">
         <Box
@@ -369,7 +354,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
           }}
           overflow="auto"
         >
-          <PipelineGraph graph={pipelineGraph.result.value} setActiveOperator={() => {}} />
+          <PipelineGraphViewer graph={pipelineGraph} setActiveOperator={() => {}} />
         </Box>
       </TabPanel>
     );
@@ -453,12 +438,12 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   );
 
   let errorMessage;
-  if (pipelineGraph?.result.case == 'errors') {
-    errorMessage = pipelineGraph.result.value.errors[0].message;
-  } else if (job?.jobStatus?.state == 'Failed') {
+  if (pipelineGraphError) {
+    errorMessage = formatError(pipelineGraphError);
+  } else if (job?.state == 'Failed') {
     errorMessage = 'Job failed. See "Errors" tab for more details.';
-  } else if (jobError && jobError instanceof ConnectError) {
-    errorMessage = jobError.rawMessage;
+    // } else if (jobError && jobError instanceof ConnectError) {
+    //   errorMessage = jobError.rawMessage;
   } else {
     errorMessage = '';
   }
@@ -486,9 +471,9 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
           </Tab>
           <Tab>
             <Text>Errors</Text>
-            {(operatorErrors?.messages?.length || 0) > 0 && (
+            {(operatorErrors?.length || 0) > 0 && (
               <Badge ml={2} colorScheme="red" size={'xs'}>
-                {operatorErrors!.messages.length}
+                {operatorErrors!.length}
               </Badge>
             )}
           </Tab>

@@ -323,7 +323,7 @@ impl KafkaTester {
         }
 
         if let TableType::Source { .. } = self.table.type_ {
-            self.info("Waiting for messsages").await;
+            self.info("Waiting for messages").await;
 
             let start = Instant::now();
             let timeout = Duration::from_secs(30);

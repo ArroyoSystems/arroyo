@@ -40,7 +40,6 @@
 .pipelineInfo .fieldName {
   width: 130px;
   font-weight: bold;
-  text-transform: lowercase;
 }
 
 .operatorDetail .chart .timeseriesGraph .mg-graph text {

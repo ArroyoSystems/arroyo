@@ -1292,6 +1292,36 @@ impl Program {
         JobGraph { nodes, edges }
     }
 
+    pub fn as_job_graph_rest(&self) -> JobGraph {
+        let nodes = self
+            .graph
+            .node_weights()
+            .map(|node| JobNode {
+                node_id: node.operator_id.to_string(),
+                operator: format!("{:?}", node),
+                parallelism: node.parallelism as u32,
+            })
+            .collect();
+
+        let edges = self
+            .graph
+            .edge_references()
+            .map(|edge| {
+                let src = self.graph.node_weight(edge.source()).unwrap();
+                let target = self.graph.node_weight(edge.target()).unwrap();
+                JobEdge {
+                    src_id: src.operator_id.to_string(),
+                    dest_id: target.operator_id.to_string(),
+                    key_type: edge.weight().key.to_string(),
+                    value_type: edge.weight().value.to_string(),
+                    edge_type: format!("{:?}", edge.weight().typ),
+                }
+            })
+            .collect();
+
+        JobGraph { nodes, edges }
+    }
+
     #[tokio::main]
     pub async fn run(&self, name: &str, restore: Option<String>) -> Result<String, Status> {
         self.run_async(name, restore).await

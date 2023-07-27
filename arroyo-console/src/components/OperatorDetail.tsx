@@ -1,13 +1,14 @@
-import { JobGraph, JobMetricsResp } from '../gen/api_pb';
+import { JobMetricsResp } from '../gen/api_pb';
 import { Badge, Box, Code, HStack, Spacer } from '@chakra-ui/react';
 import { getOperatorBackpressure } from '../lib/util';
 import React from 'react';
 import { TimeSeriesGraph } from './TimeSeriesGraph';
 import Loading from './Loading';
+import { PipelineGraph } from '../lib/data_fetching';
 
 export interface OperatorDetailProps {
   operator_id: string;
-  graph?: JobGraph;
+  graph?: PipelineGraph;
   metrics?: JobMetricsResp;
 }
 

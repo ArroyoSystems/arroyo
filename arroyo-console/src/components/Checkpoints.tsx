@@ -1,4 +1,4 @@
-import { CheckpointOverview, JobDetailsResp } from '../gen/api_pb';
+import { CheckpointOverview } from '../gen/api_pb';
 import React, { useState } from 'react';
 import {
   Badge,
@@ -15,13 +15,14 @@ import {
   UnorderedList,
 } from '@chakra-ui/react';
 import * as util from '../lib/util';
-import { useCheckpointDetails } from '../lib/data_fetching';
+import { Job, Pipeline, useCheckpointDetails } from '../lib/data_fetching';
 import { ApiClient } from '../main';
 import CheckpointDetails from './CheckpointDetails';
 
 export interface CheckpointsProps {
   client: ApiClient;
-  job: JobDetailsResp;
+  pipeline: Pipeline;
+  job: Job;
   checkpoints: Array<CheckpointOverview>;
 }
 
@@ -37,13 +38,9 @@ function formatDurationHMS(micros: number): string {
   )}`;
 }
 
-const Checkpoints: React.FC<CheckpointsProps> = ({ client, job, checkpoints }) => {
+const Checkpoints: React.FC<CheckpointsProps> = ({ client, pipeline, job, checkpoints }) => {
   const [epoch, setEpoch] = useState<number | undefined>(undefined);
-  const { checkpoint, checkpointLoading } = useCheckpointDetails(
-    client,
-    job.jobStatus?.jobId,
-    epoch
-  );
+  const { checkpoint } = useCheckpointDetails(client, job.id, epoch);
 
   if (!checkpoints.length) {
     return <Text textStyle="italic">No checkpoints</Text>;
@@ -65,7 +62,7 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ client, job, checkpoints }) =
       return ((x - start) / (end - start)) * w;
     }
 
-    let ops = job.jobGraph?.nodes
+    let ops = pipeline.graph.nodes
       .slice()
       .map(n => {
         return {
