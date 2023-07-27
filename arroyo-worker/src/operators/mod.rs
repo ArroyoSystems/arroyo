@@ -188,13 +188,17 @@ pub struct PeriodicWatermarkGenerator<K: Key, D: Data> {
     interval: Duration,
     watermark_function: Box<dyn Fn(&Record<K, D>) -> SystemTime + Send>,
     state_cache: PeriodicWatermarkGeneratorState,
+    idle_time: Option<Duration>,
+    last_event: SystemTime,
+    idle: bool,
     _t: PhantomData<(K, D)>,
 }
 
-#[process_fn(in_k=K, in_t=D, out_k=K, out_t=D)]
+#[process_fn(in_k=K, in_t=D, out_k=K, out_t=D, tick_ms=1_000)]
 impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
     pub fn fixed_lateness(
         interval: Duration,
+        idle_time: Option<Duration>,
         max_lateness: Duration,
     ) -> PeriodicWatermarkGenerator<K, D> {
         PeriodicWatermarkGenerator {
@@ -204,12 +208,16 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
                 last_watermark_emitted_at: SystemTime::UNIX_EPOCH,
                 max_watermark: SystemTime::UNIX_EPOCH,
             },
+            idle_time,
+            last_event: SystemTime::now(),
+            idle: false,
             _t: PhantomData,
         }
     }
 
     pub fn watermark_function(
         interval: Duration,
+        idle_time: Option<Duration>,
         watermark_function: Box<dyn Fn(&Record<K, D>) -> SystemTime + Send>,
     ) -> Self {
         PeriodicWatermarkGenerator {
@@ -219,6 +227,9 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
                 last_watermark_emitted_at: SystemTime::UNIX_EPOCH,
                 max_watermark: SystemTime::UNIX_EPOCH,
             },
+            idle_time,
+            last_event: SystemTime::now(),
+            idle: false,
             _t: PhantomData,
         }
     }
@@ -236,6 +247,7 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
 
     async fn on_start(&mut self, ctx: &mut Context<K, D>) {
         let gs = ctx.state.get_global_keyed_state('s').await;
+        self.last_event = SystemTime::now();
 
         let state =
             *(gs.get(&ctx.task_info.task_index)
@@ -258,15 +270,17 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
 
     async fn process_element(&mut self, record: &Record<K, D>, ctx: &mut Context<K, D>) {
         ctx.collector.collect(record.clone()).await;
+        self.last_event = SystemTime::now();
 
         let watermark = (self.watermark_function)(record);
 
         self.state_cache.max_watermark = self.state_cache.max_watermark.max(watermark);
-        if record
-            .timestamp
-            .duration_since(self.state_cache.last_watermark_emitted_at)
-            .unwrap_or(Duration::ZERO)
-            > self.interval
+        if self.idle
+            || record
+                .timestamp
+                .duration_since(self.state_cache.last_watermark_emitted_at)
+                .unwrap_or(Duration::ZERO)
+                > self.interval
         {
             debug!(
                 "[{}] Emitting watermark {}",
@@ -277,6 +291,7 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
                 .broadcast(Message::Watermark(Watermark::EventTime(watermark)))
                 .await;
             self.state_cache.last_watermark_emitted_at = record.timestamp;
+            self.idle = false;
         }
     }
 
@@ -284,6 +299,15 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
         let mut gs = ctx.state.get_global_keyed_state('s').await;
 
         gs.insert(ctx.task_info.task_index, self.state_cache).await;
+    }
+
+    async fn handle_tick(&mut self, _: u64, ctx: &mut Context<K, D>) {
+        if let Some(idle_time) = self.idle_time {
+            if self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
+                ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
+                self.idle = true;
+            }
+        }
     }
 }
 

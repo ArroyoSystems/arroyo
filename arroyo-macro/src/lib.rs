@@ -10,7 +10,7 @@ use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{
     parse_macro_input, parse_str, Data, DataEnum, DataStruct, DeriveInput, Expr, Ident, ImplItem,
-    ItemImpl, LitStr, Token, Type,
+    ItemImpl, LitInt, LitStr, Token, Type,
 };
 
 #[derive(Debug)]
@@ -209,19 +209,26 @@ struct StreamTypesAttr {
     out_k: Option<Type>,
     out_t: Option<Type>,
     timer_t: Option<Type>,
+    tick_ms: Option<LitInt>,
 }
 
 impl Parse for StreamTypesAttr {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut fields = HashMap::new();
+        let mut tick_ms = None;
         while !input.is_empty() {
             let k: Ident = input.parse()?;
             input.parse::<Token![=]>()?;
 
-            let v: Type = input.parse()?;
+            let k = k.to_string();
+            if k == "tick_ms" {
+                tick_ms = Some(input.parse()?);
+            } else {
+                let v: Type = input.parse()?;
 
-            let _ = input.parse::<Token![,]>();
-            fields.insert(k.to_string(), v);
+                let _ = input.parse::<Token![,]>();
+                fields.insert(k, v);
+            }
         }
 
         Ok(StreamTypesAttr {
@@ -234,6 +241,7 @@ impl Parse for StreamTypesAttr {
             out_k: fields.remove("out_k"),
             out_t: fields.remove("out_t"),
             timer_t: fields.remove("timer_t"),
+            tick_ms,
         })
     }
 }
@@ -294,7 +302,14 @@ pub fn source_fn(
         .timer_t
         .unwrap_or(parse_str("()").unwrap());
 
-    impl_stream_node_type(StreamNodeType::SourceFn {}, out_k, out_t, timer_t, item)
+    impl_stream_node_type(
+        StreamNodeType::SourceFn {},
+        out_k,
+        out_t,
+        timer_t,
+        stream_types_attr.tick_ms,
+        item,
+    )
 }
 
 #[proc_macro_attribute]
@@ -318,6 +333,7 @@ pub fn process_fn(
         out_k,
         out_t,
         timer_t,
+        stream_types_attr.tick_ms,
         item,
     )
 }
@@ -349,6 +365,7 @@ pub fn co_process_fn(
         out_k,
         out_t,
         timer_t,
+        stream_types_attr.tick_ms,
         item,
     )
 }
@@ -358,6 +375,7 @@ fn impl_stream_node_type(
     out_k: Type,
     out_t: Type,
     timer_t: Type,
+    tick_ms: Option<LitInt>,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let mut defs = vec![];
@@ -472,6 +490,23 @@ fn impl_stream_node_type(
             }
         }
     } else {
+        let tick_setup = tick_ms.as_ref().map(|t| {
+            quote! {
+                let mut ticks = 0u64;
+                let mut next_tick = std::time::SystemTime::now() + std::time::Duration::from_millis(#t);
+            }
+        });
+
+        let tick_case = tick_ms.as_ref().map(|t| {
+            quote! {
+                _ = tokio::time::sleep(next_tick.duration_since(SystemTime::now()).unwrap_or(Duration::ZERO)) => {
+                    self.handle_tick(ticks, &mut ctx).await;
+                    ticks += 1;
+                    next_tick = std::time::SystemTime::now() + std::time::Duration::from_millis(#t);
+                }
+            }
+        });
+
         quote! {
             let mut counter = crate::engine::CheckpointCounter::new(in_qs.len());
             let mut closed: std::collections::HashSet<usize> = std::collections::HashSet::new();
@@ -485,12 +520,13 @@ fn impl_stream_node_type(
                     while let Some(item) = q.recv().await {
                         yield (i, item);
                     }
-                    println!("FINISHED");
                 };
                 sel.push(Box::pin(stream));
             }
 
             let mut blocked = vec![];
+
+            #tick_setup
 
             loop {
                 tokio::select! {
@@ -504,6 +540,7 @@ fn impl_stream_node_type(
                             _ => unreachable!()
                         }
                     }
+                    #tick_case
                     else => {
                         tracing::info!("[{}] Stream completed", ctx.task_info.operator_name);
                         break;
@@ -731,6 +768,12 @@ fn impl_stream_node_type(
     if !methods.contains("handle_timer") {
         defs.push(quote! {
             async fn handle_timer(&mut self, key: #out_k, tv: #timer_t, ctx: &mut crate::engine::Context<#out_k, #out_t>) {}
+        })
+    }
+
+    if !methods.contains("handle_tick") {
+        defs.push(quote! {
+            async fn handle_tick(&mut self, tick: u64, ctx: &mut crate::engine::Context<#out_k, #out_t>) {}
         })
     }
 

@@ -41,9 +41,11 @@ use tables::{schema_defs, ConnectorTable, Insert, Table};
 
 use crate::types::{StructDef, StructField, TypeDef};
 use quote::ToTokens;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
+
+const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(60));
 
 #[cfg(test)]
 mod test;
@@ -377,6 +379,7 @@ pub fn parse_and_get_program_sync(
             },
             event_time_field: None,
             watermark_field: None,
+            idle_time: DEFAULT_IDLE_TIME,
         });
 
         plan_graph.add_sql_operator(sink.as_sql_sink(insert)?);

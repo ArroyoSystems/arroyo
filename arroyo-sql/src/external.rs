@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use arroyo_datastream::Operator;
 
 use crate::types::StructDef;
@@ -14,6 +16,7 @@ pub struct SqlSource {
     pub struct_def: StructDef,
     pub operator: Operator,
     pub processing_mode: ProcessingMode,
+    pub idle_time: Option<Duration>,
 }
 
 #[derive(Clone, Debug)]

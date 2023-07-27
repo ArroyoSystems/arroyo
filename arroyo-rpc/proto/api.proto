@@ -230,11 +230,13 @@ message ExpressionAggregator {
 message PeriodicWatermark {
   uint64 period_micros = 1;
   uint64 max_lateness_micros = 2;
+  optional uint64 idle_time_micros = 3;
 }
 
 message ExpressionWatermark {
   uint64 period_micros = 1;
   string expression = 2;
+  optional uint64 idle_time_micros = 3;
 }
 
 message ExpressionOperator {
