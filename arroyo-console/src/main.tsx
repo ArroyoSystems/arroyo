@@ -4,10 +4,10 @@ import './index.css';
 import { extendTheme, ThemeConfig } from '@chakra-ui/react';
 import { theme as proTheme } from '@chakra-ui/pro-theme';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
-import { JobsIndex } from './routes/pipelines/JobsIndex';
+import { PipelinesIndex } from './routes/pipelines/PipelinesIndex';
 import { ApiGrpc } from './gen/api_connectweb';
 import { PromiseClient } from '@bufbuild/connect-web';
-import { JobDetail } from './routes/pipelines/JobDetail';
+import { PipelineDetails } from './routes/pipelines/PipelineDetails';
 import '@fontsource/inter/variable.css';
 import { Home } from './routes/home/Home';
 import { Connections } from './routes/connections/Connections';
@@ -35,7 +35,7 @@ export function Router(): JSX.Element {
     },
     {
       path: '',
-      element: <Home client={client} />,
+      element: <Home />,
     },
     {
       path: 'connections',
@@ -50,16 +50,16 @@ export function Router(): JSX.Element {
       element: <CreateConnection client={client} />,
     },
     {
-      path: 'jobs',
-      element: <JobsIndex client={client} />,
+      path: 'pipelines',
+      element: <PipelinesIndex />,
     },
     {
       path: 'pipelines/new',
       element: <CreatePipeline client={client} />,
     },
     {
-      path: 'jobs/:id',
-      element: <JobDetail client={client} />,
+      path: 'pipelines/:pipelineId',
+      element: <PipelineDetails client={client} />,
     },
   ];
 

@@ -1,21 +1,34 @@
 import {
   CheckpointDetailsReq,
-  CreateUdf,
-  GetConnectionTablesReq,
   GetConnectionsReq,
+  GetConnectionTablesReq,
   GetConnectorsReq,
-  GetJobsReq,
-  JobCheckpointsReq,
-  JobDetailsReq,
   JobMetricsReq,
-  OperatorErrorsReq,
-  PipelineGraphReq,
-  StopType,
-  UdfLanguage,
 } from '../gen/api_pb';
 import { ApiClient } from '../main';
-import useSWR from 'swr';
-import { mutate as globalMutate } from 'swr';
+import useSWR, { mutate as globalMutate } from 'swr';
+import { components, paths } from '../gen/api-types';
+import createClient from 'openapi-fetch';
+
+type schemas = components['schemas'];
+export type Pipeline = schemas['Pipeline'];
+export type Job = schemas['Job'];
+export type StopType = schemas['StopType'];
+export type PipelineGraph = schemas['PipelineGraph'];
+export type JobLogMessage = schemas['JobLogMessage'];
+export type PipelineNode = schemas['PipelineNode'];
+
+const BASE_URL = 'http://localhost:8000/api';
+export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
+
+const processResponse = (data: any | undefined, error: any | undefined) => {
+  // SWR expects fetchers to throw errors, but openapi-fetch returns the error as a named field,
+  // so this function throws the error if it exists
+  if (error) {
+    throw error;
+  }
+  return data;
+};
 
 // Keys
 
@@ -31,28 +44,58 @@ const connectionTablesKey = () => {
   return { key: 'ConnectionTables' };
 };
 
-const jobDetailsKey = (jobId?: string) => {
-  return jobId ? { key: 'Job', jobId } : null;
-};
-
 const jobMetricsKey = (jobId?: string) => {
   return jobId ? { key: 'JobMetrics', jobId } : null;
 };
 
-const jobCheckpointsKey = (jobId?: string) => {
-  return jobId ? { key: 'JobCheckpoints', jobId } : null;
+const jobCheckpointsKey = (pipelineId?: string, jobId?: string) => {
+  return pipelineId && jobId ? { key: 'JobCheckpoints', pipelineId, jobId } : null;
 };
 
 const checkpointDetailsKey = (jobId?: string, epoch?: number) => {
-  return jobId ? { key: 'CheckpointDetails', jobId, epoch } : null;
+  return jobId && epoch ? { key: 'CheckpointDetails', jobId, epoch } : null;
 };
 
-const operatorErrorsKey = (jobId?: string) => {
-  return jobId ? { key: 'JobEvents', jobId } : null;
+const operatorErrorsKey = (pipelineId?: string, jobId?: string) => {
+  return pipelineId && jobId ? { key: 'JobEvents', pipelineId, jobId } : null;
 };
 
-const pipelineGraphKey = (query?: string, udfInput?: string) => {
-  return query ? { key: 'PipelineGraph', query, udfInput } : null;
+const pipelineGraphKey = (query?: string, udfsInput?: string) => {
+  return query ? { key: 'PipelineGraph', query, udfsInput } : null;
+};
+
+const pipelinesKey = () => {
+  return { key: 'Pipelines' };
+};
+
+const pipelineKey = (pipelineId?: string) => {
+  return pipelineId ? { key: 'Pipeline', pipelineId } : null;
+};
+
+const pipelineJobsKey = (pipelineId?: string) => {
+  return pipelineId ? { key: 'PipelineJobs', pipelineId } : null;
+};
+
+// Ping
+
+const pingFetcher = async () => {
+  const { data, error } = await get('/v1/ping', {});
+  return processResponse(data, error);
+};
+
+export const usePing = () => {
+  const { data, error } = useSWR('ping', pingFetcher, {
+    refreshInterval: 1000,
+    onErrorRetry: (error, key, config, revalidate, {}) => {
+      // explicitly define this function to override the exponential backoff
+      setTimeout(() => revalidate(), 1000);
+    },
+  });
+
+  return {
+    ping: data,
+    pingError: error,
+  };
 };
 
 // Connectors
@@ -113,60 +156,16 @@ export const useConnectionTables = (client: ApiClient) => {
 
 // Jobs
 
-const jobsFetcher = (client: ApiClient) => {
-  return async () => {
-    let jobs = await (await client()).getJobs(new GetJobsReq({}));
-    return jobs.jobs;
-  };
+const jobsFetcher = async () => {
+  const { data, error } = await get('/v1/jobs', {});
+  return processResponse(data, error);
 };
 
-export const useJobs = (client: ApiClient) => {
-  const { data } = useSWR('jobs', jobsFetcher(client));
+export const useJobs = () => {
+  const { data, isLoading } = useSWR('jobs', jobsFetcher);
   return {
-    jobs: data,
-  };
-};
-
-// JobDetailsReq
-
-const jobFetcher = (client: ApiClient) => {
-  return async (params: { jobId: string }) => {
-    return await (
-      await (
-        await client
-      )()
-    ).getJobDetails(
-      new JobDetailsReq({
-        jobId: params.jobId,
-      })
-    );
-  };
-};
-
-export const useJob = (client: ApiClient, jobId?: string) => {
-  const { data, mutate, error } = useSWR(jobDetailsKey(jobId), jobFetcher(client), {
-    refreshInterval: 2000,
-  });
-
-  const updateJob = async (params: { parallelism?: number; stop?: StopType }) => {
-    await (
-      await (
-        await client
-      )()
-    ).updateJob({
-      jobId,
-      parallelism: params.parallelism,
-      stop: params.stop,
-    });
-    mutate();
-    globalMutate(jobMetricsKey(jobId));
-  };
-
-  return {
-    job: data,
-    jobError: error,
-    updateJob,
-    refreshJob: mutate,
+    jobs: data?.data,
+    jobsLoading: isLoading,
   };
 };
 
@@ -187,13 +186,9 @@ const jobMetricsFetcher = (client: ApiClient) => {
 };
 
 export const useJobMetrics = (client: ApiClient, jobId?: string) => {
-  const { data, isLoading, mutate, isValidating, error } = useSWR(
-    jobMetricsKey(jobId),
-    jobMetricsFetcher(client),
-    {
-      refreshInterval: 5000,
-    }
-  );
+  const { data } = useSWR(jobMetricsKey(jobId), jobMetricsFetcher(client), {
+    refreshInterval: 5000,
+  });
 
   return {
     metrics: data,
@@ -202,27 +197,28 @@ export const useJobMetrics = (client: ApiClient, jobId?: string) => {
 
 // JobCheckpointsReq
 
-const jobCheckpointsFetcher = (client: ApiClient) => {
-  return async (params: { key: string; jobId: string }) => {
-    return await (
-      await (
-        await client
-      )()
-    ).getCheckpoints(
-      new JobCheckpointsReq({
-        jobId: params.jobId,
-      })
-    );
+const jobCheckpointsFetcher = () => {
+  return async (params: { key: string; pipelineId: string; jobId: string }) => {
+    const { data, error } = await get('/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints', {
+      params: {
+        path: {
+          pipeline_id: params.pipelineId,
+          job_id: params.jobId,
+        },
+      },
+    });
+
+    return processResponse(data, error);
   };
 };
 
-export const useJobCheckpoints = (client: ApiClient, jobId?: string) => {
-  const { data } = useSWR(jobCheckpointsKey(jobId), jobCheckpointsFetcher(client), {
+export const useJobCheckpoints = (pipelineId?: string, jobId?: string) => {
+  const { data } = useSWR(jobCheckpointsKey(pipelineId, jobId), jobCheckpointsFetcher(), {
     refreshInterval: 5000,
   });
 
   return {
-    checkpoints: data,
+    checkpoints: data?.data,
   };
 };
 
@@ -255,53 +251,116 @@ export const useCheckpointDetails = (client: ApiClient, jobId?: string, epoch?: 
   };
 };
 
-// OperatorErrorsReq
-
-const OperatorErrorsFetcher = (client: ApiClient) => {
-  return async (params: { key: string; jobId: string }) => {
-    return await (
-      await (
-        await client
-      )()
-    ).getOperatorErrors(
-      new OperatorErrorsReq({
-        jobId: params.jobId,
-      })
-    );
+const pipelineGraphFetcher = () => {
+  return async (params: { key: string; query?: string; udfsInput: string }) => {
+    const { data, error } = await post('/v1/pipelines/validate', {
+      body: {
+        query: params.query ?? '',
+        udfs: [{ language: 'rust', definition: params.udfsInput }],
+      },
+    });
+    return processResponse(data, error);
   };
 };
 
-export const useOperatorErrors = (client: ApiClient, jobId?: string) => {
-  const { data } = useSWR(operatorErrorsKey(jobId), OperatorErrorsFetcher(client), {
+export const usePipelineGraph = (query?: string, udfsInput?: string) => {
+  const { data, error } = useSWR(pipelineGraphKey(query, udfsInput), pipelineGraphFetcher());
+
+  return {
+    pipelineGraph: data,
+    pipelineGraphError: error,
+  };
+};
+
+const pipelinesFetcher = async () => {
+  const { data, error } = await get('/v1/pipelines', {});
+  return processResponse(data, error);
+};
+
+export const usePipelines = () => {
+  const { data, error } = useSWR(pipelinesKey(), pipelinesFetcher, { refreshInterval: 2000 });
+  return { pipelines: data?.data, piplinesError: error };
+};
+
+const pipelineFetcher = () => {
+  return async (params: { key: string; pipelineId?: string }) => {
+    const { data, error } = await get(`/v1/pipelines/{id}`, {
+      params: { path: { id: params.pipelineId! } },
+    });
+    return processResponse(data, error);
+  };
+};
+
+export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
+  const options = refresh ? { refreshInterval: 2000 } : {};
+  const { data, error, isLoading, mutate } = useSWR(
+    pipelineKey(pipelineId),
+    pipelineFetcher(),
+    options
+  );
+
+  const updatePipeline = async (params: { stop?: StopType; parallelism?: number }) => {
+    await patch('/v1/pipelines/{id}', {
+      params: { path: { id: pipelineId! } },
+      body: { stop: params.stop, parallelism: params.parallelism },
+    });
+    await mutate();
+  };
+
+  const deletePipeline = async () => {
+    const { error } = await del('/v1/pipelines/{id}', {
+      params: { path: { id: pipelineId! } },
+    });
+    await globalMutate(pipelinesKey());
+    return { error };
+  };
+
+  return {
+    pipeline: data,
+    pipelineError: error,
+    pipelineLoading: isLoading,
+    updatePipeline,
+    deletePipeline,
+  };
+};
+
+const pipelineJobsFetcher = () => {
+  return async (params: { key: string; pipelineId?: string }) => {
+    const { data, error } = await get(`/v1/pipelines/{id}/jobs`, {
+      params: { path: { id: params.pipelineId! } },
+    });
+    return processResponse(data, error);
+  };
+};
+
+export const usePipelineJobs = (pipelineId?: string, refresh: boolean = false) => {
+  const options = refresh ? { refreshInterval: 2000 } : {};
+  const { data, error } = useSWR(pipelineJobsKey(pipelineId), pipelineJobsFetcher(), options);
+
+  return { jobs: data?.data, jobsError: error };
+};
+
+const operatorErrorsFetcher = () => {
+  return async (params: { key: string; pipelineId: string; jobId: string }) => {
+    const { data, error } = await get('/v1/pipelines/{pipeline_id}/jobs/{job_id}/errors', {
+      params: {
+        path: {
+          pipeline_id: params.pipelineId,
+          job_id: params.jobId,
+        },
+      },
+    });
+
+    return processResponse(data, error);
+  };
+};
+
+export const useOperatorErrors = (pipelineId?: string, jobId?: string) => {
+  const { data } = useSWR(operatorErrorsKey(pipelineId, jobId), operatorErrorsFetcher(), {
     refreshInterval: 5000,
   });
 
   return {
-    operatorErrors: data,
-  };
-};
-
-// PipelineGraphReq
-
-const PipelineGraphFetcher = (client: ApiClient) => {
-  return async (params: { key: string; query?: string; udfInput: string }) => {
-    return await (
-      await (
-        await client
-      )()
-    ).graphForPipeline(
-      new PipelineGraphReq({
-        query: params.query,
-        udfs: [new CreateUdf({ language: UdfLanguage.Rust, definition: params.udfInput })],
-      })
-    );
-  };
-};
-
-export const usePipelineGraph = (client: ApiClient, query?: string, udfInput?: string) => {
-  const { data } = useSWR(pipelineGraphKey(query, udfInput), PipelineGraphFetcher(client));
-
-  return {
-    pipelineGraph: data,
+    operatorErrors: data?.data,
   };
 };

@@ -1,6 +1,6 @@
 name: CI
 
-on: [push, pull_request]
+on: [push]
 
 jobs:
   lint-console:
@@ -56,6 +56,10 @@ jobs:
           override: true
       - name: Setup npm
         uses: actions/setup-node@v3
+      - name: Install OpenAPI Generator
+        run: |
+          npm install @openapitools/openapi-generator-cli -g
+          openapi-generator-cli version
       - name: Setup Postgres
         run: |
           sudo apt-get update
@@ -110,7 +114,7 @@ jobs:
       - name: Integ
         run: |
           mkdir /tmp/arroyo-integ
-          DISABLE_TELEMETRY=true OUTPUT_DIR=/tmp/arroyo-integ DEBUG=true target/debug/integ
+          RUST_LOG=info DISABLE_TELEMETRY=true OUTPUT_DIR=/tmp/arroyo-integ DEBUG=true target/debug/integ
   build-console:
     runs-on: ubuntu-latest
     steps:

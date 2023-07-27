@@ -84,39 +84,33 @@ WHERE organization_id = :organization_id AND id = :id;
 
 ----------- pipelines -------------------
 
---: DbPipelineRest ()
-
---! get_pipelines_rest : DbPipelineRest
-SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at
-FROM pipelines
-    INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
-WHERE pipelines.organization_id = :organization_id AND pipelines.pub_id IS NOT NULL
-ORDER BY pipelines.created_at DESC;
+--: DbPipeline (state?, ttl_micros?)
 
 --! create_pipeline(udfs?, textual_repr?)
 INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program)
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program)
 RETURNING id;
 
---! get_pipeline_rest: DbPipelineRest
-SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at
+--! get_pipelines : DbPipeline
+SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
-WHERE pipelines.pub_id = :pub_id AND pipelines.organization_id = :organization_id;
+    LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
+WHERE pipelines.organization_id = :organization_id AND pipelines.pub_id IS NOT NULL AND ttl_micros IS NULL
+ORDER BY pipelines.created_at DESC;
 
---! get_pipeline: DbPipeline(textual_repr?, udfs)
-SELECT pipelines.id as id, name, type, textual_repr, udfs, program FROM pipelines
-WHERE pipelines.id = :pipeline_id AND pipelines.organization_id = :organization_id;
+--! get_pipeline: DbPipeline
+SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros
+FROM pipelines
+    INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
+    LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
+WHERE pipelines.pub_id = :pub_id AND pipelines.organization_id = :organization_id;
 
 --! add_pipeline_connection_table
 INSERT INTO connection_table_pipelines(pub_id, pipeline_id, connection_table_id)
 VALUES (:pub_id, :pipeline_id, :connection_table_id);
 
 --! delete_pipeline
-DELETE FROM pipelines
-WHERE id = :pipeline_id AND organization_id = :organization_id;
-
---! delete_pipeline_rest
 DELETE FROM pipelines
 WHERE pub_id = :pub_id AND organization_id = :organization_id;
 
@@ -155,8 +149,25 @@ SELECT job_configs.id, stop, start_time, finish_time, state, tasks, failure_mess
 FROM job_configs
          LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
-WHERE job_configs.organization_id = :organization_id AND pipelines.pub_id = :pub_id AND ttl_micros IS NULL
+WHERE job_configs.organization_id = :organization_id AND pipelines.pub_id = :pub_id
 ORDER BY job_configs.created_at DESC;
+
+--! get_all_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, run_id?)
+SELECT job_configs.id, stop, start_time, finish_time, state, tasks, failure_message, run_id, checkpoint_interval_micros, job_configs.created_at
+FROM job_configs
+         LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
+         INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
+WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
+ORDER BY job_configs.created_at DESC;
+
+--! get_pipeline_job : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, run_id?)
+SELECT job_configs.id, stop, start_time, finish_time, state, tasks, failure_message, run_id, checkpoint_interval_micros, job_configs.created_at
+FROM job_configs
+         LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
+         INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
+WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_id
+ORDER BY job_configs.created_at DESC;
+
 
 --! get_job_details: (start_time?, finish_time?, state?, tasks?, textual_repr?, udfs, failure_message?, run_id?)
 SELECT pipeline_name, stop, parallelism_overrides, state, start_time, finish_time, tasks, textual_repr, program, pipeline_id, udfs, failure_message, run_id
@@ -165,10 +176,11 @@ FROM job_configs
          INNER JOIN pipelines ON pipeline_id = pipelines.id
 WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_id;
 
---! get_job_checkpoints: (finish_time?)
+--! get_job_checkpoints: DbCheckpoint(finish_time?)
 SELECT epoch, state_backend, start_time, finish_time FROM checkpoints
-WHERE job_id = :job_id
-    AND organization_id = :organization_id
+JOIN job_configs ON checkpoints.job_id = job_configs.id
+WHERE job_configs.id = :job_id
+    AND checkpoints.organization_id = :organization_id
     AND state != 'compacted'
     AND state != 'failed'
 ORDER BY epoch;
@@ -186,14 +198,16 @@ DELETE FROM pipelines WHERE pipelines.id = (
     FROM job_configs
     WHERE job_configs.id = :job_id AND job_configs.organization_id = :organization_id);
 
---! get_operator_errors
+--: DbLogMessage (operator_id?, task_index?)
+
+--! get_operator_errors : DbLogMessage
 SELECT jlm.job_id, jlm.operator_id, jlm.task_index, jlm.created_at, jlm.log_level, jlm.message, jlm.details
 FROM job_log_messages jlm
+JOIN public.job_configs ON job_configs.id = jlm.job_id
 INNER JOIN (
     SELECT operator_id, task_index, MAX(created_at) AS max_created_at
     FROM job_log_messages
-    WHERE job_id = :job_id
-    GROUP BY operator_id, task_index
+    GROUP BY operator_id, task_index, job_id
 ) jlm_max ON jlm.operator_id = jlm_max.operator_id AND jlm.task_index = jlm_max.task_index AND jlm.created_at = jlm_max.max_created_at
-WHERE jlm.job_id = :job_id
+WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_id
   AND jlm.log_level = 'error';

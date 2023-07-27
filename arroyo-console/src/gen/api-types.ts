@@ -5,23 +5,403 @@
 
 
 export interface paths {
+  "/v1/jobs": {
+    /**
+     * Get all jobs 
+     * @description Get all jobs
+     */
+    get: operations["get_jobs"];
+  };
   "/v1/ping": {
     get: operations["ping"];
+  };
+  "/v1/pipelines": {
+    /**
+     * List all pipelines 
+     * @description List all pipelines
+     */
+    get: operations["get_pipelines"];
+    /**
+     * Create a new pipeline 
+     * @description Create a new pipeline
+     * 
+     * The API will create a single job for the pipeline.
+     */
+    post: operations["post_pipeline"];
+  };
+  "/v1/pipelines/validate": {
+    /**
+     * Get a pipeline graph 
+     * @description Get a pipeline graph
+     */
+    post: operations["validate_pipeline"];
+  };
+  "/v1/pipelines/{id}": {
+    /**
+     * Get a single pipeline 
+     * @description Get a single pipeline
+     */
+    get: operations["get_pipeline"];
+    /**
+     * Delete a pipeline 
+     * @description Delete a pipeline
+     */
+    delete: operations["delete_pipeline"];
+    /**
+     * Update a pipeline 
+     * @description Update a pipeline
+     */
+    patch: operations["patch_pipeline"];
+  };
+  "/v1/pipelines/{id}/jobs": {
+    /**
+     * List a pipeline's jobs 
+     * @description List a pipeline's jobs
+     */
+    get: operations["get_pipeline_jobs"];
+  };
+  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints": {
+    /**
+     * List a job's checkpoints 
+     * @description List a job's checkpoints
+     */
+    get: operations["get_job_checkpoints"];
+  };
+  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/errors": {
+    /**
+     * List a job's error messages 
+     * @description List a job's error messages
+     */
+    get: operations["get_job_errors"];
   };
 }
 
 export type webhooks = Record<string, never>;
 
-export type components = Record<string, never>;
+export interface components {
+  schemas: {
+    Checkpoint: {
+      backend: string;
+      /** Format: int32 */
+      epoch: number;
+      /** Format: int64 */
+      finishTime?: number | null;
+      /** Format: int64 */
+      startTime: number;
+    };
+    CheckpointCollection: {
+      data: (components["schemas"]["Checkpoint"])[];
+      hasMore: boolean;
+    };
+    Job: {
+      /** Format: int64 */
+      createdAt: number;
+      failureMessage?: string | null;
+      /** Format: int64 */
+      finishTime?: number | null;
+      id: string;
+      /** Format: int64 */
+      runId: number;
+      runningDesired: boolean;
+      /** Format: int64 */
+      startTime?: number | null;
+      state: string;
+      /** Format: int64 */
+      tasks?: number | null;
+    };
+    JobCollection: {
+      data: (components["schemas"]["Job"])[];
+      hasMore: boolean;
+    };
+    /** @enum {string} */
+    JobLogLevel: "info" | "warn" | "error";
+    JobLogMessage: {
+      /** Format: int64 */
+      createdAt: number;
+      details: string;
+      level: components["schemas"]["JobLogLevel"];
+      message: string;
+      operatorId?: string | null;
+      /** Format: int64 */
+      taskIndex?: number | null;
+    };
+    JobLogMessageCollection: {
+      data: (components["schemas"]["JobLogMessage"])[];
+      hasMore: boolean;
+    };
+    Pipeline: {
+      action?: components["schemas"]["StopType"] | null;
+      actionInProgress: boolean;
+      actionText: string;
+      /** Format: int64 */
+      checkpointIntervalMicros: number;
+      /** Format: int64 */
+      createdAt: number;
+      graph: components["schemas"]["PipelineGraph"];
+      id: string;
+      name: string;
+      preview: boolean;
+      query: string;
+      stop: components["schemas"]["StopType"];
+      udfs: (components["schemas"]["Udf"])[];
+    };
+    PipelineCollection: {
+      data: (components["schemas"]["Pipeline"])[];
+      hasMore: boolean;
+    };
+    PipelineEdge: {
+      destId: string;
+      edgeType: string;
+      keyType: string;
+      srcId: string;
+      valueType: string;
+    };
+    PipelineGraph: {
+      edges: (components["schemas"]["PipelineEdge"])[];
+      nodes: (components["schemas"]["PipelineNode"])[];
+    };
+    PipelineNode: {
+      nodeId: string;
+      operator: string;
+      /** Format: int32 */
+      parallelism: number;
+    };
+    PipelinePatch: {
+      /** Format: int64 */
+      checkpointIntervalMicros?: number | null;
+      /** Format: int64 */
+      parallelism?: number | null;
+      stop?: components["schemas"]["StopType"] | null;
+    };
+    PipelinePost: {
+      name: string;
+      /** Format: int64 */
+      parallelism: number;
+      preview?: boolean | null;
+      query: string;
+      udfs: (components["schemas"]["Udf"])[];
+    };
+    /** @enum {string} */
+    StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
+    Udf: {
+      definition: string;
+      language: components["schemas"]["UdfLanguage"];
+    };
+    /** @enum {string} */
+    UdfLanguage: "rust";
+    ValidatePipelinePost: {
+      query: string;
+      udfs: (components["schemas"]["Udf"])[];
+    };
+  };
+  responses: never;
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
+}
 
 export type external = Record<string, never>;
 
 export interface operations {
 
+  /**
+   * Get all jobs 
+   * @description Get all jobs
+   */
+  get_jobs: {
+    responses: {
+      /** @description Get all jobs */
+      200: {
+        content: {
+          "application/json": components["schemas"]["JobCollection"];
+        };
+      };
+    };
+  };
   ping: {
     responses: {
       /** @description Ping endpoint */
       200: never;
+    };
+  };
+  /**
+   * List all pipelines 
+   * @description List all pipelines
+   */
+  get_pipelines: {
+    responses: {
+      /** @description Got pipelines collection */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PipelineCollection"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a new pipeline 
+   * @description Create a new pipeline
+   * 
+   * The API will create a single job for the pipeline.
+   */
+  post_pipeline: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PipelinePost"];
+      };
+    };
+    responses: {
+      /** @description Created pipeline and job */
+      200: {
+        content: {
+          "application/json": components["schemas"]["Pipeline"];
+        };
+      };
+    };
+  };
+  /**
+   * Get a pipeline graph 
+   * @description Get a pipeline graph
+   */
+  validate_pipeline: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ValidatePipelinePost"];
+      };
+    };
+    responses: {
+      /** @description Created pipeline and job */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PipelineGraph"];
+        };
+      };
+    };
+  };
+  /**
+   * Get a single pipeline 
+   * @description Get a single pipeline
+   */
+  get_pipeline: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Got pipeline */
+      200: {
+        content: {
+          "application/json": components["schemas"]["Pipeline"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete a pipeline 
+   * @description Delete a pipeline
+   */
+  delete_pipeline: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Deleted pipeline */
+      200: never;
+    };
+  };
+  /**
+   * Update a pipeline 
+   * @description Update a pipeline
+   */
+  patch_pipeline: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PipelinePatch"];
+      };
+    };
+    responses: {
+      /** @description Updated pipeline */
+      200: {
+        content: {
+          "application/json": components["schemas"]["Pipeline"];
+        };
+      };
+    };
+  };
+  /**
+   * List a pipeline's jobs 
+   * @description List a pipeline's jobs
+   */
+  get_pipeline_jobs: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Got jobs collection */
+      200: {
+        content: {
+          "application/json": components["schemas"]["JobCollection"];
+        };
+      };
+    };
+  };
+  /**
+   * List a job's checkpoints 
+   * @description List a job's checkpoints
+   */
+  get_job_checkpoints: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        pipeline_id: string;
+        /** @description Job id */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Got job's checkpoints */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CheckpointCollection"];
+        };
+      };
+    };
+  };
+  /**
+   * List a job's error messages 
+   * @description List a job's error messages
+   */
+  get_job_errors: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        pipeline_id: string;
+        /** @description Job id */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Got job's error messages */
+      200: {
+        content: {
+          "application/json": components["schemas"]["JobLogMessageCollection"];
+        };
+      };
     };
   };
 }

@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use anyhow::Context;
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, State};
@@ -13,20 +11,21 @@ use tonic::{Request, Status};
 use tracing::warn;
 
 use crate::rest_types::{
-    Job, JobCollection, Pipeline, PipelineCollection, PipelinePatch, PipelinePost,
+    Job, JobCollection, Pipeline, PipelineCollection, PipelineGraph, PipelinePatch, PipelinePost,
+    ValidatePipelinePost,
 };
 use arroyo_datastream::{ConnectorOp, Operator, Program};
 use arroyo_rpc::grpc::api::api_grpc_server::ApiGrpc;
 use arroyo_rpc::grpc::api::{
-    self, create_pipeline_req, CreatePipelineReq, CreateSqlJob, CreateUdf, PipelineDef,
-    PipelineGraphReq, PipelineGraphResp, PipelineProgram, SqlError, SqlErrors, Udf, UdfLanguage,
-    UpdateJobReq,
+    self, create_pipeline_req, CreatePipelineReq, CreateSqlJob, CreateUdf, PipelineProgram, Udf,
+    UdfLanguage, UpdateJobReq,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
+use crate::jobs::get_action;
 use crate::queries::api_queries;
-use crate::queries::api_queries::{DbPipeline, DbPipelineJob, DbPipelineRest};
+use crate::queries::api_queries::{DbPipeline, DbPipelineJob};
 use crate::rest::AppState;
 use crate::rest_utils::{authenticate, client, log_and_map_rest, ApiError, BearerAuth, ErrorResp};
 use crate::types::public::{PipelineType, StopMode};
@@ -103,7 +102,7 @@ fn set_parallelism(program: &mut Program, parallelism: usize) {
 }
 
 pub(crate) async fn create_pipeline<'a>(
-    req: CreatePipelineReq,
+    req: &CreatePipelineReq,
     pub_id: &str,
     auth: AuthData,
     tx: &Transaction<'a>,
@@ -115,7 +114,7 @@ pub(crate) async fn create_pipeline<'a>(
     let udfs: Option<Vec<Udf>>;
     let is_preview;
 
-    match req.config.ok_or_else(|| required_field("config"))? {
+    match req.config.clone().ok_or_else(|| required_field("config"))? {
         create_pipeline_req::Config::Program(bytes) => {
             if !auth.org_metadata.can_create_programs {
                 return Err(Status::invalid_argument(
@@ -227,30 +226,31 @@ pub(crate) async fn create_pipeline<'a>(
     Ok(pipeline_id)
 }
 
-impl TryInto<PipelineDef> for DbPipeline {
-    type Error = Status;
+impl TryInto<Pipeline> for DbPipeline {
+    type Error = ErrorResp;
 
-    fn try_into(self) -> Result<PipelineDef, Self::Error> {
-        let program: Program = PipelineProgram::decode(&self.program[..])
+    fn try_into(self) -> Result<Pipeline, ErrorResp> {
+        let udfs: Vec<Udf> = serde_json::from_value(self.udfs).map_err(log_and_map)?;
+        let running_desired = self.stop == StopMode::none;
+        let state = self.state.unwrap_or_else(|| "Created".to_string());
+        let (action_text, action, action_in_progress) = get_action(&state, &running_desired);
+
+        let mut program: Program = PipelineProgram::decode(&self.program[..])
             .map_err(log_and_map)?
             .try_into()
             .map_err(log_and_map)?;
 
-        Ok(PipelineDef {
-            pipeline_id: format!("{}", self.id),
-            name: self.name,
-            r#type: format!("{:?}", self.r#type),
-            definition: self.textual_repr,
-            udfs: serde_json::from_value(self.udfs).map_err(log_and_map)?,
-            job_graph: Some(program.as_job_graph()),
-        })
-    }
-}
+        program.update_parallelism(
+            &self
+                .parallelism_overrides
+                .as_object()
+                .unwrap()
+                .into_iter()
+                .map(|(k, v)| (k.clone(), v.as_u64().unwrap() as usize))
+                .collect(),
+        );
 
-impl Into<Pipeline> for DbPipelineRest {
-    fn into(self) -> Pipeline {
-        let udfs: Vec<Udf> = serde_json::from_value(self.udfs).unwrap();
-        Pipeline {
+        Ok(Pipeline {
             id: self.pub_id,
             name: self.name,
             query: self.textual_repr,
@@ -258,7 +258,12 @@ impl Into<Pipeline> for DbPipelineRest {
             checkpoint_interval_micros: self.checkpoint_interval_micros as u64,
             stop: self.stop.into(),
             created_at: to_micros(self.created_at),
-        }
+            graph: program.into(),
+            action: action.map(|a| a.into()),
+            action_text,
+            action_in_progress,
+            preview: self.ttl_micros.is_some(),
+        })
     }
 }
 
@@ -278,58 +283,44 @@ impl Into<Job> for DbPipelineJob {
     }
 }
 
-pub(crate) async fn query_pipeline(
-    id: &str,
-    auth: &AuthData,
-    db: &impl GenericClient,
-) -> Result<PipelineDef, Status> {
-    if let Ok(id) = i64::from_str(id) {
-        let res = api_queries::get_pipeline()
-            .bind(db, &id, &auth.organization_id)
-            .opt()
-            .await
-            .map_err(log_and_map)?;
+/// Get a pipeline graph
+#[utoipa::path(
+    post,
+    path = "/v1/pipelines/validate",
+    tag = "pipelines",
+    request_body = ValidatePipelinePost,
+    responses(
+        (status = 200, description = "Created pipeline and job", body = PipelineGraph),
+    ),
+)]
+pub async fn validate_pipeline(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    WithRejection(Json(validate_pipeline_post), _): WithRejection<
+        Json<ValidatePipelinePost>,
+        ApiError,
+    >,
+) -> Result<Json<PipelineGraph>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-        if let Some(res) = res {
-            return res.try_into();
-        }
-    }
-
-    Err(Status::not_found(format!("No pipeline with id {}", id)))
-}
-
-pub(crate) async fn sql_graph(
-    req: PipelineGraphReq,
-    auth: AuthData,
-    client: &impl GenericClient,
-) -> Result<PipelineGraphResp, Status> {
     let sql = CreateSqlJob {
-        query: req.query,
+        query: validate_pipeline_post.query,
         parallelism: 1,
-        udfs: req.udfs,
+        udfs: validate_pipeline_post
+            .udfs
+            .into_iter()
+            .map(|u| CreateUdf {
+                language: 0,
+                definition: u.definition.to_string(),
+            })
+            .collect(),
         preview: false,
     };
 
-    match compile_sql(&sql, &auth, client).await {
-        Ok((mut program, _)) => {
-            optimizations::optimize(&mut program.graph);
-            Ok(PipelineGraphResp {
-                result: Some(api::pipeline_graph_resp::Result::JobGraph(
-                    program.as_job_graph(),
-                )),
-            })
-        }
-        Err(err) => match err.code() {
-            tonic::Code::InvalidArgument => Ok(PipelineGraphResp {
-                result: Some(api::pipeline_graph_resp::Result::Errors(SqlErrors {
-                    errors: vec![SqlError {
-                        message: err.message().to_string(),
-                    }],
-                })),
-            }),
-            _ => Err(err),
-        },
-    }
+    let (mut program, _) = compile_sql(&sql, &auth_data, &client).await?;
+    optimizations::optimize(&mut program.graph);
+    Ok(Json(program.into()))
 }
 
 /// Create a new pipeline
@@ -365,7 +356,7 @@ pub async fn post_pipeline(
                     definition: u.definition.to_string(),
                 })
                 .collect(),
-            preview: false,
+            preview: pipeline_post.preview.unwrap_or(false),
         })),
     };
 
@@ -376,7 +367,7 @@ pub async fn post_pipeline(
         .start_or_preview(
             create_pipeline_req,
             pipeline_pub_id.clone(),
-            false,
+            pipeline_post.preview.unwrap_or(false),
             auth_data.clone(),
         )
         .await?;
@@ -449,7 +440,7 @@ pub async fn get_pipelines(
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    let pipelines: Vec<DbPipelineRest> = api_queries::get_pipelines_rest()
+    let pipelines: Vec<DbPipeline> = api_queries::get_pipelines()
         .bind(&client, &auth_data.organization_id)
         .all()
         .await
@@ -457,7 +448,10 @@ pub async fn get_pipelines(
 
     Ok(Json(PipelineCollection {
         has_more: false,
-        data: pipelines.into_iter().map(|p| p.into()).collect(),
+        data: pipelines
+            .into_iter()
+            .map(|p| p.try_into().unwrap())
+            .collect(),
     }))
 }
 
@@ -525,7 +519,7 @@ pub async fn delete_pipeline(
         });
     }
 
-    let count = api_queries::delete_pipeline_rest()
+    let count = api_queries::delete_pipeline()
         .bind(&client, &pipeline_pub_id, &auth_data.organization_id)
         .await
         .map_err(log_and_map_rest)?;
@@ -552,7 +546,7 @@ pub async fn delete_pipeline(
         (status = 200, description = "Got jobs collection", body = JobCollection),
     ),
 )]
-pub async fn get_jobs(
+pub async fn get_pipeline_jobs(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
     Path(pipeline_pub_id): Path<String>,
@@ -574,20 +568,43 @@ pub async fn get_jobs(
     }))
 }
 
-async fn query_pipeline_by_pub_id(
+pub async fn query_pipeline_by_pub_id(
     pipeline_pub_id: &String,
-    client: &Object,
+    client: &impl GenericClient,
     auth_data: &AuthData,
 ) -> Result<Pipeline, ErrorResp> {
-    let pipeline = api_queries::get_pipeline_rest()
-        .bind(client, &pipeline_pub_id, &auth_data.organization_id)
+    let pipeline = api_queries::get_pipeline()
+        .bind(client, pipeline_pub_id, &auth_data.organization_id)
         .opt()
         .await
         .map_err(log_and_map_rest)?;
 
-    let res: DbPipelineRest = pipeline.ok_or_else(|| ErrorResp {
+    let res = pipeline.ok_or_else(|| ErrorResp {
         status_code: StatusCode::NOT_FOUND,
         message: "Pipeline not found".to_string(),
+    })?;
+
+    res.try_into()
+}
+
+pub async fn query_job_by_pub_id(
+    pipeline_pub_id: &String,
+    job_pub_id: &String,
+    client: &Object,
+    auth_data: &AuthData,
+) -> Result<Job, ErrorResp> {
+    // make sure pipeline exists
+    query_pipeline_by_pub_id(pipeline_pub_id, client, auth_data).await?;
+
+    let job = api_queries::get_pipeline_job()
+        .bind(client, &auth_data.organization_id, &job_pub_id)
+        .opt()
+        .await
+        .map_err(log_and_map_rest)?;
+
+    let res: DbPipelineJob = job.ok_or_else(|| ErrorResp {
+        status_code: StatusCode::NOT_FOUND,
+        message: "Job not found".to_string(),
     })?;
 
     Ok(res.into())

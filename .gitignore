@@ -3,3 +3,5 @@ target/
 .env
 .vscode/
 arroyo-openapi/api-spec.json
+arroyo-openapi/client
+

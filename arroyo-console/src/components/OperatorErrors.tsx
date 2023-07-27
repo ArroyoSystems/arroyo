@@ -2,10 +2,10 @@ import Loading from './Loading';
 import { Table, TableContainer, Tbody, Td, Th, Thead, Tr } from '@chakra-ui/react';
 import React from 'react';
 import { formatDate } from '../lib/util';
-import { OperatorErrorsRes } from '../gen/api_pb';
+import { JobLogMessage } from '../lib/data_fetching';
 
 export interface OperatorErrorsProps {
-  operatorErrors?: OperatorErrorsRes;
+  operatorErrors?: JobLogMessage[];
 }
 
 const OperatorErrors: React.FC<OperatorErrorsProps> = ({ operatorErrors }) => {
@@ -13,16 +13,16 @@ const OperatorErrors: React.FC<OperatorErrorsProps> = ({ operatorErrors }) => {
     return <Loading />;
   }
 
-  if (operatorErrors && operatorErrors.messages.length == 0) {
+  if (operatorErrors && operatorErrors.length == 0) {
     return <>No errors to display</>;
   }
 
   const tableBody = (
     <Tbody>
-      {operatorErrors.messages.map(m => {
+      {operatorErrors.map(m => {
         return (
           <Tr key={String(m.createdAt)}>
-            <Td>{formatDate(m.createdAt)}</Td>
+            <Td>{formatDate(BigInt(m.createdAt))}</Td>
             <Td>{m.operatorId}</Td>
             <Td>{m.taskIndex?.toString()}</Td>
             <Td>{m.message}</Td>
