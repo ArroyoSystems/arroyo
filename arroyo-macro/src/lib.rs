@@ -493,16 +493,16 @@ fn impl_stream_node_type(
         let tick_setup = tick_ms.as_ref().map(|t| {
             quote! {
                 let mut ticks = 0u64;
-                let mut next_tick = std::time::SystemTime::now() + std::time::Duration::from_millis(#t);
+                let mut interval = tokio::time::interval(std::time::Duration::from_millis(#t));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             }
         });
 
-        let tick_case = tick_ms.as_ref().map(|t| {
+        let tick_case = tick_ms.as_ref().map(|_| {
             quote! {
-                _ = tokio::time::sleep(next_tick.duration_since(SystemTime::now()).unwrap_or(Duration::ZERO)) => {
+                _ = interval.tick() => {
                     self.handle_tick(ticks, &mut ctx).await;
                     ticks += 1;
-                    next_tick = std::time::SystemTime::now() + std::time::Duration::from_millis(#t);
                 }
             }
         });
