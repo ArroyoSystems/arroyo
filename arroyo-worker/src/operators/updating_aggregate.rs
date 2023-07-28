@@ -61,7 +61,7 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> UpdatingAggregateOperator<K, T, Bi
         record: &Record<K, T>,
         ctx: &mut Context<K, UpdatingData<OutT>>,
     ) {
-        if let Some(watermark) = ctx.watermark() {
+        if let Some(watermark) = ctx.last_present_watermark() {
             if record.timestamp < watermark {
                 return;
             }

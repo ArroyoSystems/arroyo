@@ -70,11 +70,12 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
     async fn process_element(&mut self, record: &Record<K, T>, ctx: &mut Context<K, OutT>) {
         let bin_start = self.bin_start(record.timestamp);
 
-        if let Some(watermark) = ctx.watermark() {
+        if let Some(watermark) = ctx.last_present_watermark() {
             if bin_start < self.bin_start(watermark) {
                 return;
             }
         }
+
         self.state = match self.state {
             TumblingWindowState::NoData => TumblingWindowState::BufferedData {
                 earliest_bin_time: bin_start,
@@ -85,8 +86,12 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
                 }
             }
         };
-        let mut aggregating_map: TimeKeyMap<K, BinA, _> =
-            ctx.state.get_time_key_map('a', ctx.watermark()).await;
+
+        let mut aggregating_map: TimeKeyMap<K, BinA, _> = ctx
+            .state
+            .get_time_key_map('a', ctx.last_present_watermark())
+            .await;
+
         let mut key = record.key.clone().unwrap();
         let bin_aggregate = aggregating_map.get(bin_start, &mut key);
         let new_value = (self.bin_merger)(&record.value, bin_aggregate);
@@ -96,8 +101,9 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
     async fn on_start(&mut self, ctx: &mut Context<K, OutT>) {
         let map = ctx
             .state
-            .get_time_key_map::<K, BinA>('a', ctx.watermark())
+            .get_time_key_map::<K, BinA>('a', ctx.last_present_watermark())
             .await;
+
         self.state = match map.get_min_time() {
             Some(min_time) => TumblingWindowState::BufferedData {
                 earliest_bin_time: self.bin_start(min_time),
@@ -131,8 +137,11 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
             }
             TumblingWindowState::NoData => unreachable!(),
         };
-        let mut aggregating_map: TimeKeyMap<K, BinA, _> =
-            ctx.state.get_time_key_map('a', ctx.watermark()).await;
+        let mut aggregating_map: TimeKeyMap<K, BinA, _> = ctx
+            .state
+            .get_time_key_map('a', ctx.last_present_watermark())
+            .await;
+
         let window_end = self.window_end(bin_start);
         let mut records = vec![];
         for (key, value) in aggregating_map.evict_for_timestamp(bin_start) {
@@ -155,24 +164,24 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
         }
     }
 
-    async fn handle_watermark(
-        &mut self,
-        _watermark: std::time::SystemTime,
-        ctx: &mut Context<K, OutT>,
-    ) {
-        let Some(watermark) = ctx.watermark() else {return};
+    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut Context<K, OutT>) {
         debug!(
             "watermark {:?}
-        state {:?}",
+            state {:?}",
             watermark, self.state
         );
-        while self.should_advance(watermark) {
-            self.advance(ctx).await;
+
+        match watermark {
+            Watermark::EventTime(t) => {
+                while self.should_advance(t) {
+                    self.advance(ctx).await;
+                }
+            }
+            Watermark::Idle => (),
         }
-        ctx.broadcast(arroyo_types::Message::Watermark(Watermark::EventTime(
-            watermark,
-        )))
-        .await;
+
+        ctx.broadcast(arroyo_types::Message::Watermark(watermark))
+            .await;
     }
 
     async fn handle_checkpoint(
@@ -180,8 +189,10 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
         _checkpoint_barrier: &arroyo_types::CheckpointBarrier,
         ctx: &mut Context<K, OutT>,
     ) {
-        let mut aggregating_map: TimeKeyMap<K, BinA, _> =
-            ctx.state.get_time_key_map('a', ctx.watermark()).await;
+        let mut aggregating_map: TimeKeyMap<K, BinA, _> = ctx
+            .state
+            .get_time_key_map('a', ctx.last_present_watermark())
+            .await;
         aggregating_map.flush().await;
     }
 }

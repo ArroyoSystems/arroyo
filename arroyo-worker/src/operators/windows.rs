@@ -109,7 +109,9 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
 
     async fn process_element(&mut self, record: &Record<K, T>, ctx: &mut Context<K, OutT>) {
         let windows = self.assigner.windows(record.timestamp);
-        let watermark = ctx.watermark().unwrap_or(SystemTime::UNIX_EPOCH);
+        let watermark = ctx
+            .last_present_watermark()
+            .unwrap_or(SystemTime::UNIX_EPOCH);
         let mut has_window = false;
         let mut key = record.key.clone().unwrap();
         for w in windows {

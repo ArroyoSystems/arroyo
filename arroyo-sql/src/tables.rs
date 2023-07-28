@@ -112,7 +112,7 @@ impl From<Connection> for ConnectorTable {
             serialization_mode: serialization_mode(&value.schema).into(),
             event_time_field: None,
             watermark_field: None,
-            idle_time: None,
+            idle_time: DEFAULT_IDLE_TIME,
         }
     }
 }
