@@ -215,6 +215,13 @@ where
 
         let rate_limiter = RateLimiter::direct(Quota::per_second(self.messages_per_second));
         let mut offsets = HashMap::new();
+
+        if consumer.assignment().unwrap().count() == 0 {
+            warn!("Kafka Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
+                ctx.task_info.operator_id, ctx.task_info.task_index);
+            ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
+        }
+
         loop {
             select! {
                 message = consumer.recv() => {

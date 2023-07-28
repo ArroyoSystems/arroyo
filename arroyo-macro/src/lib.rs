@@ -656,7 +656,7 @@ fn impl_stream_node_type(
                         }
                     }
                     Message::Watermark(watermark) => {
-                        info!("received watermark {:?} in {}-{}", watermark, self.name(), ctx.task_info.task_index);
+                        tracing::debug!("received watermark {:?} in {}-{}", watermark, self.name(), ctx.task_info.task_index);
 
                         let watermark = ctx.watermarks.set(idx, *watermark)
                             .expect("watermark index is too big");

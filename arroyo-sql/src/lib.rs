@@ -45,7 +45,7 @@ use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
 
-const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(10));
+const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
 #[cfg(test)]
 mod test;

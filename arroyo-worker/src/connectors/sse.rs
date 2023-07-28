@@ -5,7 +5,7 @@ use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::tables::GlobalKeyedState;
-use arroyo_types::{string_to_map, Data, Record};
+use arroyo_types::{string_to_map, Data, Message, Record, Watermark};
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
 use futures::StreamExt;
@@ -236,7 +236,9 @@ where
                 }
             }
         } else {
-            // otherwise just process control messages
+            // otherwise set idle and just process control messages
+            ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
+
             loop {
                 let msg = ctx.control_rx.recv().await;
                 if let Some(r) = self.our_handle_control_message(ctx, msg).await {
