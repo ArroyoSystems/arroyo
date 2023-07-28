@@ -98,7 +98,9 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
         ctx: &mut Context<K, (Vec<T1>, Vec<T2>)>,
     ) {
         let windows = assigner.windows(record.timestamp);
-        let watermark = ctx.watermark().unwrap_or(SystemTime::UNIX_EPOCH);
+        let watermark = ctx
+            .last_present_watermark()
+            .unwrap_or(SystemTime::UNIX_EPOCH);
         let mut has_window = false;
         for w in windows {
             if w.end_time > watermark {

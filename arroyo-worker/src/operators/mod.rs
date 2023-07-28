@@ -16,7 +16,7 @@ use bincode::{config, Decode, Encode};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::time::{Duration, SystemTime};
-use tracing::debug;
+use tracing::{debug, info};
 use wasmtime::{
     Caller, Engine, InstanceAllocationStrategy, Linker, Module, PoolingAllocationConfig, Store,
     TypedFunc,
@@ -304,6 +304,7 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
     async fn handle_tick(&mut self, _: u64, ctx: &mut Context<K, D>) {
         if let Some(idle_time) = self.idle_time {
             if self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
+                info!("Setting partition {} to idle", ctx.task_info.task_index);
                 ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
                 self.idle = true;
             }

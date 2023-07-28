@@ -1401,7 +1401,7 @@ impl Program {
                     let idle_time = match watermark.idle_time {
                         Some(d) => {
                             let micros = d.as_micros() as u64;
-                            quote!(Some(Duration::from_micros(#micros)))
+                            quote!(Some(std::time::Duration::from_micros(#micros)))
                         }
                         None => quote!(None),
                     };

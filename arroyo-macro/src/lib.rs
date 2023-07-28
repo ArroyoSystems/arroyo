@@ -656,14 +656,16 @@ fn impl_stream_node_type(
                         }
                     }
                     Message::Watermark(watermark) => {
-                        if idx >= ctx.watermarks.len() {
-                            panic!("watermark index is too big");
-                        }
-                        ctx.watermarks[idx] = Some(*watermark);
+                        info!("received watermark {:?} in {}-{}", watermark, self.name(), ctx.task_info.task_index);
 
-                        trace!("received watermark {:?} in {}-{}", watermark, self.name(), ctx.task_info.task_index);
-                        if let Some(watermark) = ctx.watermark() {
-                            ctx.state.handle_watermark(watermark);
+                        let watermark = ctx.watermarks.set(idx, *watermark)
+                            .expect("watermark index is too big");
+
+                        if let Some(watermark) = watermark {
+                            if let Watermark::EventTime(t) = watermark {
+                                ctx.state.handle_watermark(t);
+                            }
+
                             self.handle_watermark_int(watermark, ctx).await;
                         }
                     }
@@ -707,7 +709,7 @@ fn impl_stream_node_type(
 
             crate::process_fn::ProcessFnUtils::send_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::FinishedOperatorSetup).await;
 
-            let watermark = ctx.watermark();
+            let watermark = ctx.watermarks.last_present_watermark();
             ctx.state.checkpoint(checkpoint_barrier, watermark).await;
 
             crate::process_fn::ProcessFnUtils::send_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::FinishedSync).await;
@@ -719,15 +721,16 @@ fn impl_stream_node_type(
     });
 
     defs.push(quote! {
-        async fn handle_watermark_int(&mut self, watermark: std::time::SystemTime, ctx: &mut crate::engine::Context<#out_k, #out_t>) {
+        async fn handle_watermark_int(&mut self, watermark: arroyo_types::Watermark, ctx: &mut crate::engine::Context<#out_k, #out_t>) {
             // process timers
-            use tracing::trace;
-            trace!("handling watermark {} for {}-{}", arroyo_types::to_millis(watermark), ctx.task_info.operator_name, ctx.task_info.task_index);
+            tracing::trace!("handling watermark {:?} for {}-{}", watermark, ctx.task_info.operator_name, ctx.task_info.task_index);
 
-            let finished = crate::process_fn::ProcessFnUtils::finished_timers(watermark, ctx).await;
+            if let arroyo_types::Watermark::EventTime(t) = watermark {
+                let finished = crate::process_fn::ProcessFnUtils::finished_timers(t, ctx).await;
 
-            for (k, tv) in finished {
-                self.handle_timer(k, tv.data, ctx).await;
+                for (k, tv) in finished {
+                    self.handle_timer(k, tv.data, ctx).await;
+                }
             }
 
             self.handle_watermark(watermark, ctx).await;
@@ -779,10 +782,10 @@ fn impl_stream_node_type(
 
     if !methods.contains("handle_watermark") {
         defs.push(quote! {
-            async fn handle_watermark(&mut self, watermark: std::time::SystemTime,
+            async fn handle_watermark(&mut self, watermark: arroyo_types::Watermark,
                 ctx: &mut crate::engine::Context<#out_k, #out_t>) {
                     // by default, just pass watermarks on down
-                    ctx.broadcast(arroyo_types::Message::Watermark(arroyo_types::Watermark::EventTime(watermark))).await;
+                    ctx.broadcast(arroyo_types::Message::Watermark(watermark)).await;
                 }
         });
     }
