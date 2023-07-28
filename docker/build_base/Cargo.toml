@@ -8,10 +8,11 @@ members = [
 exclude = [
   "wasm-fns",
 ]
+
 [patch.crates-io]
-parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
-arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
-arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
-arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
-arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '39_0_0/write_trailing_bytes'}
-object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'direct_multipart' }
+parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
+arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
+arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
+arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
+arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}

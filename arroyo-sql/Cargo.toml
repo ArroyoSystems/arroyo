@@ -10,10 +10,10 @@ arroyo-rpc = {path = "../arroyo-rpc"}
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 
-datafusion = "25.0"
-datafusion-expr = "25.0"
-datafusion-common = "25.0"
-arrow-schema = {version = "39.0", features = ["serde"]}
+datafusion = "28.0"
+datafusion-expr = "28.0"
+datafusion-common = "28.0"
+arrow-schema = {workspace = true }
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"
 
@@ -22,7 +22,7 @@ petgraph = "0.6"
 tokio = "1.27"
 quote = "1.0"
 regex = "1"
-arrow = { version = "39.0.0", default-features = false }
+arrow = { workspace = true }
 anyhow = {version = "1.0.70", features = ["backtrace"]}
 
 proc-macro2 = "1"

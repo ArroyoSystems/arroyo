@@ -677,7 +677,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             Expr::ScalarUDF(ScalarUDF { fun, args: _ }) => {
                 matches!(fun.name.as_str(), "hop" | "tumble")
             }
-            Expr::Alias(exp, _) => Self::is_window(exp),
+            Expr::Alias(datafusion_expr::expr::Alias { expr, name: _ }) => Self::is_window(expr),
             _ => false,
         }
     }
@@ -702,7 +702,7 @@ impl<'a> SqlPipelineBuilder<'a> {
                 }
                 _ => Ok(None),
             },
-            Expr::Alias(expr, _alias) => Self::find_window(expr),
+            Expr::Alias(datafusion_expr::expr::Alias { expr, name: _ }) => Self::find_window(expr),
             _ => Ok(None),
         }
     }
@@ -854,6 +854,9 @@ impl<'a> SqlPipelineBuilder<'a> {
                         }
                         datafusion_expr::WindowFunction::AggregateUDF(_) => {
                             bail!("Window UDAFs not yet supported");
+                        }
+                        datafusion_expr::WindowFunction::WindowUDF(_) => {
+                            bail!("Window UDFs not yet supported");
                         }
                     };
 

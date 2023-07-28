@@ -16,10 +16,10 @@ tracing = "0.1"
 rand = "0.8"
 bincode = "2.0.0-rc.3"
 tokio = { version = "1", features = ["full", "tracing"] }
-arrow = "39.0.0"
-arrow-array = "39.0.0"
-arrow-schema = "39.0.0"
-parquet = "39.0.0"
+arrow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+parquet = { workspace = true }
 async-trait = "0.1.68"
 async-stream = "0.3.4"
 ctor = "0.2"
