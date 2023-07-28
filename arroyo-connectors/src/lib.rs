@@ -29,6 +29,7 @@ pub mod filesystem;
 pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
+pub mod kinesis;
 pub mod nexmark;
 pub mod sse;
 pub mod websocket;
@@ -43,6 +44,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("websocket", Box::new(WebsocketConnector {}));
     m.insert("fluvio", Box::new(FluvioConnector {}));
     m.insert("filesystem", Box::new(filesystem::FileSystemConnector {}));
+    m.insert("kinesis", Box::new(kinesis::KinesisConnector {}));
 
     m
 }

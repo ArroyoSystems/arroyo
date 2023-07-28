@@ -121,6 +121,13 @@ members = [
 exclude = [
   "wasm-fns",
 ]
+[workspace.dependencies]
+arrow = { version = "43.0.0" }
+arrow-buffer = { version = "43.0.0" }
+arrow-array = { version = "43.0.0" }
+arrow-schema = { version = "43.0.0" }
+parquet = { version = "43.0.0" }
+
 [patch.crates-io]
 parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
 arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}

@@ -1,0 +1,46 @@
+{
+    "type": "object",
+    "title": "KinesisTable",
+    "properties": {
+        "stream_name": {
+            "title": "Stream Name",
+            "type": "string",
+            "description": "The Kinesis stream name for this table"
+        },
+        "type": {
+            "type": "object",
+            "title": "Table Type",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Source",
+                    "properties": {
+                        "offset": {
+                            "type": "string",
+                            "description": "The offset to start reading from",
+                            "enum": [
+                                "earliest",
+                                "latest"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "offset"
+                    ],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "Sink",
+                    "properties": {
+                    },
+                    "additionalProperties": false
+                }
+            ]
+        }
+    },
+    "required": [
+        "stream_name",
+        "type"
+    ]
+}
