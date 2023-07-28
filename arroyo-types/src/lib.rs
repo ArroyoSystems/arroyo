@@ -222,11 +222,17 @@ impl<T: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + 'static
 pub trait Data: Debug + Clone + Encode + Decode + Send + PartialEq + 'static {}
 impl<T: Debug + Clone + Encode + Decode + Send + PartialEq + 'static> Data for T {}
 
+#[derive(Debug, Copy, Clone, Encode, Decode, PartialEq, Eq)]
+pub enum Watermark {
+    EventTime(SystemTime),
+    Idle,
+}
+
 #[derive(Debug, Clone, Encode, Decode)]
 pub enum Message<K: Key, T: Data> {
     Record(Record<K, T>),
     Barrier(CheckpointBarrier),
-    Watermark(SystemTime),
+    Watermark(Watermark),
     Stop,
     EndOfData,
 }

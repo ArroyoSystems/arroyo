@@ -5,9 +5,9 @@ use std::{
 
 use arrow_schema::DataType;
 use arroyo_datastream::{
-    EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, Program, SlidingAggregatingTopN,
-    SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN, TumblingWindowAggregator,
-    WatermarkType, WindowAgg, WindowType,
+    EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program,
+    SlidingAggregatingTopN, SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN,
+    TumblingWindowAggregator, WindowAgg, WindowType,
 };
 
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -30,7 +30,7 @@ use anyhow::Result;
 #[derive(Debug, Clone)]
 pub enum PlanOperator {
     Source(String, SqlSource),
-    Watermark(WatermarkType),
+    Watermark(PeriodicWatermark),
     RecordTransform(RecordTransform),
     FusedRecordTransform(FusedRecordTransform),
     Unkey,
@@ -1256,7 +1256,8 @@ impl PlanGraph {
                 .add_edge(current_index, timestamp_index, timestamp_edge);
             current_index = timestamp_index;
         }
-        let watermark = if let Some(watermark_expression) = source_operator.watermark_column {
+
+        let strategy = if let Some(watermark_expression) = source_operator.watermark_column {
             let expression = watermark_expression.to_syn_expression();
             let null_checked_expression = if watermark_expression.nullable() {
                 parse_quote!(#expression.unwrap_or_else(|| std::time::SystemTime::now()))
@@ -1264,8 +1265,7 @@ impl PlanGraph {
                 expression
             };
 
-            arroyo_datastream::WatermarkType::Expression {
-                period: Duration::from_secs(1),
+            arroyo_datastream::WatermarkStrategy::Expression {
                 expression: quote!({
                    let arg = record.value.clone();
                    #null_checked_expression
@@ -1273,12 +1273,16 @@ impl PlanGraph {
                 .to_string(),
             }
         } else {
-            arroyo_datastream::WatermarkType::FixedLateness {
-                period: Duration::from_secs(1),
+            arroyo_datastream::WatermarkStrategy::FixedLateness {
                 max_lateness: Duration::from_secs(1),
             }
         };
-        let watermark_operator = PlanOperator::Watermark(watermark);
+
+        let watermark_operator = PlanOperator::Watermark(arroyo_datastream::PeriodicWatermark {
+            period: Duration::from_secs(1),
+            idle_time: source_operator.source.idle_time,
+            strategy,
+        });
         let watermark_index = self.insert_operator(
             watermark_operator,
             self.get_plan_node(current_index).output_type.clone(),

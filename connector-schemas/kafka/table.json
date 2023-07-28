@@ -22,6 +22,14 @@
                                 "earliest",
                                 "latest"
                             ]
+                        },
+                        "read_mode": {
+                            "type": "string",
+                            "description": "Type of reading behavior for Kafka Source",
+                            "enum": [
+                                "read_committed",
+                                "read_uncommitted"
+                            ]
                         }
                     },
                     "required": [
@@ -33,6 +41,14 @@
                     "type": "object",
                     "title": "Sink",
                     "properties": {
+                        "commit_mode": {
+                            "type": "string",
+                            "description": "Committing behavior for Kafka Sink. For transactional commits, use `exactly_once`. For non-transactional commits, use `at_least_once`. ",
+                            "enum": [
+                                "at_least_once",
+                                "exactly_once"
+                            ]
+                        }
                     },
                     "additionalProperties": false
                 }

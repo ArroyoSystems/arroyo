@@ -10,10 +10,10 @@ import {
   useBreakpointValue,
   useColorModeValue,
 } from '@chakra-ui/react';
-import { useEffect, useState } from 'react';
 import { useLinkClickHandler } from 'react-router-dom';
-import { GetJobsReq, JobStatus } from '../../gen/api_pb';
+import { JobStatus } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
+import { useJobs } from '../../lib/data_fetching';
 
 interface HomeState {
   jobs: Array<JobStatus> | null;
@@ -49,26 +49,18 @@ export const Stat = (props: Props) => {
 };
 
 export function Home({ client }: { client: ApiClient }) {
-  const [state, setState] = useState<HomeState>({ jobs: null });
+  const { jobs } = useJobs(client);
+  let runningJobs = 0;
+  let allJobs = 0;
+  let failedJobs = 0;
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const clientObj = await client();
-      const jobs = clientObj.getJobs(new GetJobsReq({}));
-
-      setState({
-        jobs: (await jobs).jobs,
-      });
-    };
-
-    fetchData();
-  }, []);
-
-  let runningJobs = state.jobs
-    ?.filter(j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting')
-    .length.toString();
-  let allJobs = state.jobs?.length.toString();
-  let failedJobs = state.jobs?.filter(j => j.state == 'Failed').length;
+  if (jobs) {
+    runningJobs = jobs.filter(
+      j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting'
+    ).length;
+    allJobs = jobs.length;
+    failedJobs = jobs.filter(j => j.state == 'Failed').length;
+  }
 
   return (
     <Container py="8" flex="1">
@@ -92,8 +84,8 @@ export function Home({ client }: { client: ApiClient }) {
         </Stack>
         <Stack spacing={{ base: '5', lg: '6' }}>
           <SimpleGrid columns={{ base: 1, md: 3 }} gap="6">
-            <Stat label="Running Jobs" value={runningJobs} />
-            <Stat label="All Jobs" value={allJobs} />
+            <Stat label="Running Jobs" value={runningJobs?.toString()} />
+            <Stat label="All Jobs" value={allJobs?.toString()} />
             <Stat
               label="Failed Jobs"
               value={failedJobs?.toString()}

@@ -18,7 +18,7 @@ impl ProcessFnUtils {
     ) -> Vec<(OutK, TimerValue<OutK, Timer>)> {
         let mut state = ctx
             .state
-            .get_time_key_map(TIMER_TABLE, ctx.watermark())
+            .get_time_key_map(TIMER_TABLE, ctx.last_present_watermark())
             .await;
         state.evict_all_before_watermark(watermark)
     }

@@ -25,8 +25,8 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{
-    from_micros, to_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, WorkerId,
-    BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+    from_micros, to_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark,
+    WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
 };
 use petgraph::graph::DiGraph;
 use petgraph::visit::EdgeRef;
@@ -79,44 +79,6 @@ fn server_for_hash(x: u64, n: usize) -> usize {
     (n - 1).min((x / range_size) as usize)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_range_for_server() {
-        let n = 6;
-
-        for i in 0..(n - 1) {
-            let range1 = range_for_server(i, n);
-            let range2 = range_for_server(i + 1, n);
-
-            assert_eq!(*range1.end() + 1, *range2.start(), "Ranges not adjacent");
-        }
-
-        let last_range = range_for_server(n - 1, n);
-        assert_eq!(
-            *last_range.end(),
-            u64::MAX,
-            "Last range does not contain u64::MAX"
-        );
-    }
-
-    #[test]
-    fn test_server_for_hash() {
-        let n = 2;
-        let x = u64::MAX;
-
-        let server_index = server_for_hash(x, n);
-        let server_range = range_for_server(server_index, n);
-
-        assert!(
-            server_range.contains(&x),
-            "u64::MAX is not in the correct range"
-        );
-    }
-}
-
 pub trait StreamNode: Send {
     fn node_name(&self) -> String;
     fn start(
@@ -130,11 +92,66 @@ pub trait StreamNode: Send {
     ) -> JoinHandle<()>;
 }
 
+pub struct WatermarkHolder {
+    // This is the last watermark with an actual value; this helps us keep track of the watermark we're at even
+    // if we're currently idle
+    last_present_watermark: Option<SystemTime>,
+    cur_watermark: Option<Watermark>,
+    watermarks: Vec<Option<Watermark>>,
+}
+
+impl WatermarkHolder {
+    pub fn new(watermarks: Vec<Option<Watermark>>) -> Self {
+        let mut s = Self {
+            last_present_watermark: None,
+            cur_watermark: None,
+            watermarks,
+        };
+        s.update_watermark();
+
+        s
+    }
+
+    pub fn watermark(&self) -> Option<Watermark> {
+        self.cur_watermark
+    }
+
+    pub fn last_present_watermark(&self) -> Option<SystemTime> {
+        self.last_present_watermark
+    }
+
+    fn update_watermark(&mut self) {
+        self.cur_watermark = self
+            .watermarks
+            .iter()
+            .fold(Some(Watermark::Idle), |current, next| {
+                match (current?, (*next)?) {
+                    (Watermark::EventTime(cur), Watermark::EventTime(next)) => {
+                        Some(Watermark::EventTime(cur.min(next)))
+                    }
+                    (Watermark::Idle, Watermark::EventTime(t))
+                    | (Watermark::EventTime(t), Watermark::Idle) => Some(Watermark::EventTime(t)),
+                    (Watermark::Idle, Watermark::Idle) => Some(Watermark::Idle),
+                }
+            });
+
+        if let Some(Watermark::EventTime(t)) = self.cur_watermark {
+            self.last_present_watermark = Some(t);
+        }
+    }
+
+    pub fn set(&mut self, idx: usize, watermark: Watermark) -> Option<Option<Watermark>> {
+        *(self.watermarks.get_mut(idx)?) = Some(watermark);
+        self.update_watermark();
+        Some(self.cur_watermark)
+    }
+}
+
 pub struct Context<K: Key, T: Data, S: BackingStore = StateBackend> {
     pub task_info: TaskInfo,
     pub control_rx: Receiver<ControlMessage>,
     pub control_tx: Sender<ControlResp>,
-    pub watermarks: Vec<Option<SystemTime>>,
+    pub watermarks: WatermarkHolder,
     pub state: StateStore<S>,
     pub collector: Collector<K, T>,
     pub counters: HashMap<&'static str, IntCounter>,
@@ -376,7 +393,10 @@ impl<K: Key, T: Data> Context<K, T> {
             task_info,
             control_rx,
             control_tx,
-            watermarks: vec![watermark; input_partitions],
+            watermarks: WatermarkHolder::new(vec![
+                watermark.map(Watermark::EventTime);
+                input_partitions
+            ]),
             collector: Collector::<K, T> {
                 out_qs,
                 sent_messages: counters.remove(MESSAGES_SENT),
@@ -420,15 +440,12 @@ impl<K: Key, T: Data> Context<K, T> {
         (ctx, data_rx)
     }
 
-    pub fn watermark(&self) -> Option<SystemTime> {
-        self.watermarks
-            .iter()
-            .copied()
-            .reduce(|current, next| match next {
-                Some(next) => current.map(|current| current.min(next)),
-                None => None,
-            })
-            .flatten()
+    pub fn watermark(&self) -> Option<Watermark> {
+        self.watermarks.watermark()
+    }
+
+    pub fn last_present_watermark(&self) -> Option<SystemTime> {
+        self.watermarks.last_present_watermark()
     }
 
     pub async fn schedule_timer<D: Data + PartialEq + Eq>(
@@ -437,9 +454,10 @@ impl<K: Key, T: Data> Context<K, T> {
         event_time: SystemTime,
         data: D,
     ) {
-        let Some(watermark) = self.watermark() else {
-            return;
-         };
+        if let Some(watermark) = self.last_present_watermark() {
+            assert!(watermark < event_time, "Timer scheduled for past");
+        };
+
         let mut timer_state: TimeKeyMap<K, TimerValue<K, D>, _> =
             self.state.get_time_key_map(TIMER_TABLE, None).await;
         let value = TimerValue {
@@ -447,8 +465,6 @@ impl<K: Key, T: Data> Context<K, T> {
             key: key.clone(),
             data,
         };
-
-        assert!(watermark < event_time, "Timer scheduled for past");
 
         debug!(
             "[{}] scheduling timer for [{}, {:?}]",
@@ -1229,5 +1245,70 @@ impl Engine {
             assignments: self.assignments,
             worker_id,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_range_for_server() {
+        let n = 6;
+
+        for i in 0..(n - 1) {
+            let range1 = range_for_server(i, n);
+            let range2 = range_for_server(i + 1, n);
+
+            assert_eq!(*range1.end() + 1, *range2.start(), "Ranges not adjacent");
+        }
+
+        let last_range = range_for_server(n - 1, n);
+        assert_eq!(
+            *last_range.end(),
+            u64::MAX,
+            "Last range does not contain u64::MAX"
+        );
+    }
+
+    #[test]
+    fn test_server_for_hash() {
+        let n = 2;
+        let x = u64::MAX;
+
+        let server_index = server_for_hash(x, n);
+        let server_range = range_for_server(server_index, n);
+
+        assert!(
+            server_range.contains(&x),
+            "u64::MAX is not in the correct range"
+        );
+    }
+
+    #[test]
+    fn test_watermark_holder() {
+        let t1 = SystemTime::UNIX_EPOCH;
+        let t2 = t1 + Duration::from_secs(1);
+        let t3 = t2 + Duration::from_secs(1);
+
+        let mut w = WatermarkHolder::new(vec![None, None, None]);
+
+        assert!(w.watermark().is_none());
+
+        w.set(0, Watermark::EventTime(t1));
+        w.set(1, Watermark::EventTime(t2));
+
+        assert!(w.watermark().is_none());
+
+        w.set(2, Watermark::EventTime(t3));
+
+        assert_eq!(w.watermark(), Some(Watermark::EventTime(t1)));
+
+        w.set(0, Watermark::Idle);
+        assert_eq!(w.watermark(), Some(Watermark::EventTime(t2)));
+
+        w.set(1, Watermark::Idle);
+        w.set(2, Watermark::Idle);
+        assert_eq!(w.watermark(), Some(Watermark::Idle));
     }
 }

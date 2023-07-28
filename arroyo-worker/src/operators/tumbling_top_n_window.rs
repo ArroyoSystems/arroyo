@@ -99,7 +99,7 @@ impl<K: Key, T: Data, SK: Ord + Send + 'static, OutT: Data> TumblingTopNWindowFu
             record.key.clone().unwrap(),
             record.timestamp,
             record.value.clone(),
-            ctx.watermark(),
+            ctx.last_present_watermark(),
         )
     }
 
@@ -188,29 +188,32 @@ impl<K: Key, T: Data, SK: Ord + Send + 'static, OutT: Data> TumblingTopNWindowFu
             ctx.collect(record).await;
         }
     }
+
     async fn on_start(&mut self, ctx: &mut Context<K, OutT>) {
-        let watermark = ctx.watermark();
+        let watermark = ctx.last_present_watermark();
         let mut state: TimeKeyMap<(K, u64), (SystemTime, T), _> =
-            ctx.state.get_time_key_map('w', ctx.watermark()).await;
+            ctx.state.get_time_key_map('w', watermark).await;
         for (_bin_time, (key, _rank), (timestamp, value)) in state.get_all().await {
             self.insert(key.clone(), *timestamp, value.clone(), watermark);
         }
     }
 
-    async fn handle_watermark(
-        &mut self,
-        _watermark: std::time::SystemTime,
-        ctx: &mut Context<K, OutT>,
-    ) {
-        let Some(watermark) = ctx.watermark() else {return};
+    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut Context<K, OutT>) {
         debug!(
-            "watermark {:?} 
-        state {:?}",
+            "watermark {:?}
+            state {:?}",
             watermark, self.state
         );
-        while self.should_advance(watermark) {
-            self.advance(ctx).await;
+
+        match watermark {
+            Watermark::EventTime(t) => {
+                while self.should_advance(t) {
+                    self.advance(ctx).await;
+                }
+            }
+            Watermark::Idle => {}
         }
+
         ctx.broadcast(arroyo_types::Message::Watermark(watermark))
             .await;
     }
@@ -220,7 +223,10 @@ impl<K: Key, T: Data, SK: Ord + Send + 'static, OutT: Data> TumblingTopNWindowFu
         _checkpoint_barrier: &arroyo_types::CheckpointBarrier,
         ctx: &mut Context<K, OutT>,
     ) {
-        let mut state = ctx.state.get_time_key_map('w', ctx.watermark()).await;
+        let mut state = ctx
+            .state
+            .get_time_key_map('w', ctx.last_present_watermark())
+            .await;
         for (bucket_timestamp, values) in &self.buffering_max_heaps {
             for (key, heap) in values {
                 let values: Vec<_> = heap

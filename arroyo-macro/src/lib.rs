@@ -10,7 +10,7 @@ use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{
     parse_macro_input, parse_str, Data, DataEnum, DataStruct, DeriveInput, Expr, Ident, ImplItem,
-    ItemImpl, LitStr, Token, Type,
+    ItemImpl, LitInt, LitStr, Token, Type,
 };
 
 #[derive(Debug)]
@@ -209,19 +209,26 @@ struct StreamTypesAttr {
     out_k: Option<Type>,
     out_t: Option<Type>,
     timer_t: Option<Type>,
+    tick_ms: Option<LitInt>,
 }
 
 impl Parse for StreamTypesAttr {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut fields = HashMap::new();
+        let mut tick_ms = None;
         while !input.is_empty() {
             let k: Ident = input.parse()?;
             input.parse::<Token![=]>()?;
 
-            let v: Type = input.parse()?;
+            let k = k.to_string();
+            if k == "tick_ms" {
+                tick_ms = Some(input.parse()?);
+            } else {
+                let v: Type = input.parse()?;
 
-            let _ = input.parse::<Token![,]>();
-            fields.insert(k.to_string(), v);
+                let _ = input.parse::<Token![,]>();
+                fields.insert(k, v);
+            }
         }
 
         Ok(StreamTypesAttr {
@@ -234,6 +241,7 @@ impl Parse for StreamTypesAttr {
             out_k: fields.remove("out_k"),
             out_t: fields.remove("out_t"),
             timer_t: fields.remove("timer_t"),
+            tick_ms,
         })
     }
 }
@@ -294,7 +302,14 @@ pub fn source_fn(
         .timer_t
         .unwrap_or(parse_str("()").unwrap());
 
-    impl_stream_node_type(StreamNodeType::SourceFn {}, out_k, out_t, timer_t, item)
+    impl_stream_node_type(
+        StreamNodeType::SourceFn {},
+        out_k,
+        out_t,
+        timer_t,
+        stream_types_attr.tick_ms,
+        item,
+    )
 }
 
 #[proc_macro_attribute]
@@ -318,6 +333,7 @@ pub fn process_fn(
         out_k,
         out_t,
         timer_t,
+        stream_types_attr.tick_ms,
         item,
     )
 }
@@ -349,6 +365,7 @@ pub fn co_process_fn(
         out_k,
         out_t,
         timer_t,
+        stream_types_attr.tick_ms,
         item,
     )
 }
@@ -358,6 +375,7 @@ fn impl_stream_node_type(
     out_k: Type,
     out_t: Type,
     timer_t: Type,
+    tick_ms: Option<LitInt>,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let mut defs = vec![];
@@ -472,6 +490,23 @@ fn impl_stream_node_type(
             }
         }
     } else {
+        let tick_setup = tick_ms.as_ref().map(|t| {
+            quote! {
+                let mut ticks = 0u64;
+                let mut interval = tokio::time::interval(std::time::Duration::from_millis(#t));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            }
+        });
+
+        let tick_case = tick_ms.as_ref().map(|_| {
+            quote! {
+                _ = interval.tick() => {
+                    self.handle_tick(ticks, &mut ctx).await;
+                    ticks += 1;
+                }
+            }
+        });
+
         quote! {
             let mut counter = crate::engine::CheckpointCounter::new(in_qs.len());
             let mut closed: std::collections::HashSet<usize> = std::collections::HashSet::new();
@@ -485,17 +520,24 @@ fn impl_stream_node_type(
                     while let Some(item) = q.recv().await {
                         yield (i, item);
                     }
-                    println!("FINISHED");
                 };
                 sel.push(Box::pin(stream));
             }
 
             let mut blocked = vec![];
 
+            #tick_setup
+
             loop {
                 tokio::select! {
                     Some(control_message) = ctx.control_rx.recv() => {
-                        self.handle_raw_control_message(control_message, &mut ctx).await;
+                        match control_message {
+                            arroyo_rpc::ControlMessage::Checkpoint(_) => tracing::warn!("shouldn't receive checkpoint"),
+                            arroyo_rpc::ControlMessage::Stop { mode: _ } => tracing::warn!("shouldn't receive stop"),
+                            arroyo_rpc::ControlMessage::Commit { epoch } => {
+                                self.handle_commit(epoch, &mut ctx).await;
+                            }
+                        }
                     }
                     Some(((idx, item), s)) = sel.next() => {
                         match idx / (in_partitions / #handler_count) {
@@ -504,6 +546,7 @@ fn impl_stream_node_type(
                             _ => unreachable!()
                         }
                     }
+                    #tick_case
                     else => {
                         tracing::info!("[{}] Stream completed", ctx.task_info.operator_name);
                         break;
@@ -619,14 +662,16 @@ fn impl_stream_node_type(
                         }
                     }
                     Message::Watermark(watermark) => {
-                        if idx >= ctx.watermarks.len() {
-                            panic!("watermark index is too big");
-                        }
-                        ctx.watermarks[idx] = Some(*watermark);
+                        tracing::debug!("received watermark {:?} in {}-{}", watermark, self.name(), ctx.task_info.task_index);
 
-                        trace!("received watermark {:?} in {}-{}", watermark, self.name(), ctx.task_info.task_index);
-                        if let Some(watermark) = ctx.watermark() {
-                            ctx.state.handle_watermark(watermark);
+                        let watermark = ctx.watermarks.set(idx, *watermark)
+                            .expect("watermark index is too big");
+
+                        if let Some(watermark) = watermark {
+                            if let Watermark::EventTime(t) = watermark {
+                                ctx.state.handle_watermark(t);
+                            }
+
                             self.handle_watermark_int(watermark, ctx).await;
                         }
                     }
@@ -670,7 +715,7 @@ fn impl_stream_node_type(
 
             crate::process_fn::ProcessFnUtils::send_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::FinishedOperatorSetup).await;
 
-            let watermark = ctx.watermark();
+            let watermark = ctx.watermarks.last_present_watermark();
             ctx.state.checkpoint(checkpoint_barrier, watermark).await;
 
             crate::process_fn::ProcessFnUtils::send_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::FinishedSync).await;
@@ -682,15 +727,16 @@ fn impl_stream_node_type(
     });
 
     defs.push(quote! {
-        async fn handle_watermark_int(&mut self, watermark: std::time::SystemTime, ctx: &mut crate::engine::Context<#out_k, #out_t>) {
+        async fn handle_watermark_int(&mut self, watermark: arroyo_types::Watermark, ctx: &mut crate::engine::Context<#out_k, #out_t>) {
             // process timers
-            use tracing::trace;
-            trace!("handling watermark {} for {}-{}", arroyo_types::to_millis(watermark), ctx.task_info.operator_name, ctx.task_info.task_index);
+            tracing::trace!("handling watermark {:?} for {}-{}", watermark, ctx.task_info.operator_name, ctx.task_info.task_index);
 
-            let finished = crate::process_fn::ProcessFnUtils::finished_timers(watermark, ctx).await;
+            if let arroyo_types::Watermark::EventTime(t) = watermark {
+                let finished = crate::process_fn::ProcessFnUtils::finished_timers(t, ctx).await;
 
-            for (k, tv) in finished {
-                self.handle_timer(k, tv.data, ctx).await;
+                for (k, tv) in finished {
+                    self.handle_timer(k, tv.data, ctx).await;
+                }
             }
 
             self.handle_watermark(watermark, ctx).await;
@@ -734,9 +780,15 @@ fn impl_stream_node_type(
         })
     }
 
+    if !methods.contains("handle_tick") {
+        defs.push(quote! {
+            async fn handle_tick(&mut self, tick: u64, ctx: &mut crate::engine::Context<#out_k, #out_t>) {}
+        })
+    }
+
     if !methods.contains("handle_watermark") {
         defs.push(quote! {
-            async fn handle_watermark(&mut self, watermark: std::time::SystemTime,
+            async fn handle_watermark(&mut self, watermark: arroyo_types::Watermark,
                 ctx: &mut crate::engine::Context<#out_k, #out_t>) {
                     // by default, just pass watermarks on down
                     ctx.broadcast(arroyo_types::Message::Watermark(watermark)).await;
@@ -744,10 +796,10 @@ fn impl_stream_node_type(
         });
     }
 
-    if !methods.contains("handle_raw_control_message") {
+    if !methods.contains("handle_commit") {
         defs.push(quote! {
-            async fn handle_raw_control_message(&mut self, control_message: arroyo_rpc::ControlMessage, ctx: &mut Context<#out_k, #out_t>) {
-                tracing::warn!("default handling of control message {:?}", control_message);
+            async fn handle_commit(&mut self, epoch: u32, ctx: &mut Context<#out_k, #out_t>) {
+                tracing::warn!("default handling of commit with epoch {:?}", epoch);
             }
         })
     }

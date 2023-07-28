@@ -13,6 +13,10 @@ import {
   Text,
 } from '@chakra-ui/react';
 
+import { SWRConfig } from 'swr';
+import { useToast } from '@chakra-ui/react';
+import { ConnectError } from '@bufbuild/connect-web';
+
 import { Link, Outlet, useLinkClickHandler, useMatch } from 'react-router-dom';
 import { FiHome, FiGitBranch, FiLink } from 'react-icons/fi';
 import { CloudSidebar, UserProfile } from './lib/CloudComponents';
@@ -92,13 +96,42 @@ function Sidebar() {
 }
 
 function App() {
+  const toast = useToast();
+
+  const handleError = (error: any) => {
+    if (error instanceof ConnectError) {
+      toast({
+        title: 'Connection Error',
+        description: 'There was a problem connecting. More details are available in the console.',
+        status: 'error',
+        duration: 9000,
+        isClosable: true,
+      });
+    } else {
+      toast({
+        title: 'An error occurred',
+        description: 'An unexpected error occurred. More details are available in the console.',
+        status: 'error',
+        duration: 9000,
+        isClosable: true,
+      });
+    }
+    console.error(error);
+  };
+
   return (
-    <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px 1fr'} h="100vh">
-      <Sidebar />
-      <GridItem className="main" area={'main'}>
-        {<Outlet />}
-      </GridItem>
-    </Grid>
+    <SWRConfig
+      value={{
+        onError: handleError,
+      }}
+    >
+      <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px 1fr'} h="100vh">
+        <Sidebar />
+        <GridItem className="main" area={'main'}>
+          {<Outlet />}
+        </GridItem>
+      </Grid>
+    </SWRConfig>
   );
 }
 

@@ -354,7 +354,7 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
     }
 
     async fn process_left(&mut self, record: &Record<K, T1>, ctx: &mut Context<K, Output>) {
-        if let Some(watermark) = ctx.watermark() {
+        if let Some(watermark) = ctx.last_present_watermark() {
             if record.timestamp < watermark {
                 return;
             }
@@ -407,7 +407,7 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
     }
 
     async fn process_right(&mut self, record: &Record<K, T2>, ctx: &mut Context<K, Output>) {
-        if let Some(watermark) = ctx.watermark() {
+        if let Some(watermark) = ctx.last_present_watermark() {
             if record.timestamp < watermark {
                 return;
             }
@@ -461,17 +461,20 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
         }
     }
 
-    async fn handle_watermark(
-        &mut self,
-        _watermark: std::time::SystemTime,
-        ctx: &mut Context<K, Output>,
-    ) {
-        let Some(watermark) = ctx.watermark() else {return};
-        let mut left_state: KeyTimeMultiMap<K, T1, _> = ctx.state.get_key_time_multi_map('l').await;
-        left_state.expire_entries_before(watermark - self.left_expiration);
-        let mut right_state: KeyTimeMultiMap<K, T2, _> =
-            ctx.state.get_key_time_multi_map('r').await;
-        right_state.expire_entries_before(watermark - self.right_expiration);
+    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut Context<K, Output>) {
+        match watermark {
+            Watermark::EventTime(watermark) => {
+                let mut left_state: KeyTimeMultiMap<K, T1, _> =
+                    ctx.state.get_key_time_multi_map('l').await;
+                left_state.expire_entries_before(watermark - self.left_expiration);
+
+                let mut right_state: KeyTimeMultiMap<K, T2, _> =
+                    ctx.state.get_key_time_multi_map('r').await;
+                right_state.expire_entries_before(watermark - self.right_expiration);
+            }
+            Watermark::Idle => (),
+        };
+
         ctx.broadcast(arroyo_types::Message::Watermark(watermark))
             .await;
     }

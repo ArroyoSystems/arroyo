@@ -120,7 +120,7 @@ impl<
     async fn process_element(&mut self, record: &Record<K, T>, ctx: &mut Context<PK, OutT>) {
         let bin_start = self.bin_start(record.timestamp);
 
-        let watermark = ctx.watermark();
+        let watermark = ctx.last_present_watermark();
         if watermark.is_some() && bin_start < self.bin_start(watermark.unwrap()) {
             return;
         }
@@ -137,8 +137,11 @@ impl<
                 SlidingWindowState::InMemoryData { next_window_start }
             }
         };
-        let mut aggregating_map: TimeKeyMap<K, BinA, _> =
-            ctx.state.get_time_key_map('a', ctx.watermark()).await;
+        let mut aggregating_map: TimeKeyMap<K, BinA, _> = ctx
+            .state
+            .get_time_key_map('a', ctx.last_present_watermark())
+            .await;
+
         let mut key = record.key.clone().unwrap();
         let bin_aggregate = aggregating_map.get(bin_start, &mut key);
         let new_value = (self.bin_merger)(&record.value, bin_aggregate);
@@ -146,7 +149,7 @@ impl<
     }
 
     async fn on_start(&mut self, ctx: &mut Context<PK, OutT>) {
-        let watermark = ctx.watermark();
+        let watermark = ctx.last_present_watermark();
         let map: TimeKeyMap<K, BinA, _> = ctx.state.get_time_key_map('a', watermark).await;
 
         let Some(map_min_time) = map.get_min_time()  else {
@@ -264,8 +267,10 @@ impl<
             SlidingWindowState::InMemoryData { next_window_start } => next_window_start,
         };
         let bin_end = bin_start + self.slide;
-        let mut aggregating_map: TimeKeyMap<K, BinA, _> =
-            ctx.state.get_time_key_map('a', ctx.watermark()).await;
+        let mut aggregating_map: TimeKeyMap<K, BinA, _> = ctx
+            .state
+            .get_time_key_map('a', ctx.last_present_watermark())
+            .await;
         // flush the new bin.
         aggregating_map.flush_at_watermark(bin_end).await;
         // add the next bin data to the in memory store.
@@ -307,15 +312,16 @@ impl<
         }
     }
 
-    async fn handle_watermark(
-        &mut self,
-        _watermark: std::time::SystemTime,
-        ctx: &mut Context<PK, OutT>,
-    ) {
-        let Some(watermark) = ctx.watermark() else {return};
-        while self.should_advance(watermark) {
-            self.advance(ctx).await;
+    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut Context<PK, OutT>) {
+        match watermark {
+            Watermark::EventTime(watermark) => {
+                while self.should_advance(watermark) {
+                    self.advance(ctx).await;
+                }
+            }
+            Watermark::Idle => (),
         }
+
         ctx.broadcast(arroyo_types::Message::Watermark(watermark))
             .await;
     }
@@ -325,8 +331,10 @@ impl<
         _checkpoint_barrier: &arroyo_types::CheckpointBarrier,
         ctx: &mut Context<PK, OutT>,
     ) {
-        let mut aggregating_map: TimeKeyMap<K, BinA, _> =
-            ctx.state.get_time_key_map('a', ctx.watermark()).await;
+        let mut aggregating_map: TimeKeyMap<K, BinA, _> = ctx
+            .state
+            .get_time_key_map('a', ctx.last_present_watermark())
+            .await;
         aggregating_map.flush().await;
     }
 }

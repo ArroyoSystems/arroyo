@@ -81,7 +81,7 @@ impl<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data>
     async fn process_element(&mut self, record: &Record<K, T>, ctx: &mut Context<K, OutT>) {
         let bin_start = self.bin_start(record.timestamp);
 
-        let watermark = ctx.watermark();
+        let watermark = ctx.last_present_watermark();
         if watermark.is_some() && bin_start < self.bin_start(watermark.unwrap()) {
             return;
         }
@@ -106,7 +106,7 @@ impl<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data>
     }
 
     async fn on_start(&mut self, ctx: &mut Context<K, OutT>) {
-        let watermark = ctx.watermark();
+        let watermark = ctx.last_present_watermark();
         let map = ctx.state.get_time_key_map::<K, BinA>('a', watermark).await;
 
         let Some(map_min_time) = map.get_min_time()  else {
@@ -175,19 +175,26 @@ impl<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data>
             SlidingWindowState::OnlyBufferedData { earliest_bin_time } => earliest_bin_time,
             SlidingWindowState::InMemoryData { next_window_start } => next_window_start,
         };
+
         let bin_end = bin_start + self.slide;
-        let mut aggregating_map: TimeKeyMap<K, BinA, _> =
-            ctx.state.get_time_key_map('a', ctx.watermark()).await;
+        let mut aggregating_map: TimeKeyMap<K, BinA, _> = ctx
+            .state
+            .get_time_key_map('a', ctx.last_present_watermark())
+            .await;
+
         // flush the new bin.
         aggregating_map.flush_at_watermark(bin_end).await;
+
         // add the next bin data to the in memory store.
         for (key, bin) in aggregating_map.get_all_for_time(bin_start) {
             self.add_data(key, bin.clone());
         }
+
         // remove the leaving bin data from memory
         for (key, bin) in aggregating_map.evict_for_timestamp(bin_start - self.width) {
             self.remove_data(&key, bin);
         }
+
         let window_end = bin_end - Duration::from_nanos(1);
         let mut records = vec![];
         for (key, in_memory) in self.memory_view.iter() {
@@ -215,15 +222,16 @@ impl<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data>
         }
     }
 
-    async fn handle_watermark(
-        &mut self,
-        _watermark: std::time::SystemTime,
-        ctx: &mut Context<K, OutT>,
-    ) {
-        let Some(watermark) = ctx.watermark() else {return};
-        while self.should_advance(watermark) {
-            self.advance(ctx).await;
+    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut Context<K, OutT>) {
+        match watermark {
+            Watermark::EventTime(t) => {
+                while self.should_advance(t) {
+                    self.advance(ctx).await;
+                }
+            }
+            Watermark::Idle => (),
         }
+
         ctx.broadcast(arroyo_types::Message::Watermark(watermark))
             .await;
     }
@@ -233,8 +241,10 @@ impl<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data>
         _checkpoint_barrier: &arroyo_types::CheckpointBarrier,
         ctx: &mut Context<K, OutT>,
     ) {
-        let mut aggregating_map: TimeKeyMap<K, BinA, _> =
-            ctx.state.get_time_key_map('a', ctx.watermark()).await;
+        let mut aggregating_map: TimeKeyMap<K, BinA, _> = ctx
+            .state
+            .get_time_key_map('a', ctx.last_present_watermark())
+            .await;
         aggregating_map.flush().await;
     }
 }

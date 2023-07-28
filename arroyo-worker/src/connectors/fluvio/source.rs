@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use tokio::select;
 use tokio_stream::{Stream, StreamExt, StreamMap};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::operators::{SerializationMode, UserError};
 
@@ -192,6 +192,12 @@ where
             .get_consumer(ctx)
             .await
             .map_err(|e| UserError::new("Could not create Fluvio consumer", format!("{:?}", e)))?;
+
+        if streams.is_empty() {
+            warn!("Fluvio Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
+                ctx.task_info.operator_id, ctx.task_info.task_index);
+            ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
+        }
 
         let mut offsets = HashMap::new();
         loop {

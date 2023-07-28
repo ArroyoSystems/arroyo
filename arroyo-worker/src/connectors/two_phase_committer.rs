@@ -177,18 +177,4 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             .await
             .expect("sent commit event");
     }
-
-    async fn handle_raw_control_message(
-        &mut self,
-        control_message: arroyo_rpc::ControlMessage,
-        ctx: &mut Context<(), ()>,
-    ) {
-        match control_message {
-            arroyo_rpc::ControlMessage::Checkpoint(_) => warn!("shouldn't receive checkpoint"),
-            arroyo_rpc::ControlMessage::Stop { mode: _ } => warn!("shouldn't receive stop"),
-            arroyo_rpc::ControlMessage::Commit { epoch } => {
-                self.handle_commit(epoch, ctx).await;
-            }
-        }
-    }
 }

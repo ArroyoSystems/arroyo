@@ -68,12 +68,14 @@ impl ProgramCompiler {
 
         let req = Request::new(req);
         let resp = client
-            .compile_query(req).await
+            .compile_query(req)
+            .await
             .map_err(|e| match e.code() {
-                Code::Unimplemented => {
-                    fatal("Compilation failed for this query. We have been notified and are looking into the problem.",
-                          anyhow!("compilation request failed: {}", e.message())).into()
-                }
+                Code::Unimplemented => fatal(
+                    "Compilation failed for this query. See the controller logs for more details.",
+                    anyhow!("compilation request failed: {}", e.message()),
+                )
+                .into(),
                 _ => {
                     anyhow!("compilation request failed: {:?}", e.message())
                 }
