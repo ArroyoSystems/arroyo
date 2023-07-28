@@ -1546,7 +1546,7 @@ impl Program {
                             quote! {
                                 |record, _| {
                                     if #expr {
-                                        Some(record)
+                                        Some(record.clone())
                                     } else {
                                         None
                                     }

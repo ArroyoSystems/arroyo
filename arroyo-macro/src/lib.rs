@@ -531,7 +531,13 @@ fn impl_stream_node_type(
             loop {
                 tokio::select! {
                     Some(control_message) = ctx.control_rx.recv() => {
-                        self.handle_raw_control_message(control_message, &mut ctx).await;
+                        match control_message {
+                            arroyo_rpc::ControlMessage::Checkpoint(_) => tracing::warn!("shouldn't receive checkpoint"),
+                            arroyo_rpc::ControlMessage::Stop { mode: _ } => tracing::warn!("shouldn't receive stop"),
+                            arroyo_rpc::ControlMessage::Commit { epoch } => {
+                                self.handle_commit(epoch, &mut ctx).await;
+                            }
+                        }
                     }
                     Some(((idx, item), s)) = sel.next() => {
                         match idx / (in_partitions / #handler_count) {
@@ -790,10 +796,10 @@ fn impl_stream_node_type(
         });
     }
 
-    if !methods.contains("handle_raw_control_message") {
+    if !methods.contains("handle_commit") {
         defs.push(quote! {
-            async fn handle_raw_control_message(&mut self, control_message: arroyo_rpc::ControlMessage, ctx: &mut Context<#out_k, #out_t>) {
-                tracing::warn!("default handling of control message {:?}", control_message);
+            async fn handle_commit(&mut self, epoch: u32, ctx: &mut Context<#out_k, #out_t>) {
+                tracing::warn!("default handling of commit with epoch {:?}", epoch);
             }
         })
     }

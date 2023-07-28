@@ -20,7 +20,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::operators::{SerializationMode, UserError};
 
-use super::{client_configs, KafkaConfig, KafkaTable, TableType};
+use super::{client_configs, KafkaConfig, KafkaTable, SourceReadMode, TableType};
 
 #[cfg(test)]
 mod test;
@@ -85,9 +85,13 @@ where
             .expect("Invalid connection config for KafkaSource");
         let table: KafkaTable =
             serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let TableType::Source{ offset, .. } = &table.type_ else {
+        let TableType::Source{ offset, read_mode } = &table.type_ else {
             panic!("found non-source kafka config in source operator");
         };
+        let mut client_configs = client_configs(&connection);
+        if let Some(SourceReadMode::ReadCommitted) = read_mode {
+            client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
+        }
 
         Self {
             topic: table.topic,
@@ -104,7 +108,7 @@ where
                     unimplemented!("parquet out of kafka source doesn't make sense")
                 }
             },
-            client_configs: client_configs(&connection),
+            client_configs,
             messages_per_second: NonZeroU32::new(
                 config
                     .rate_limit
@@ -290,7 +294,6 @@ where
 
                         }
                     }
-
                 }
             }
         }

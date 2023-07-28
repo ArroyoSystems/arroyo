@@ -570,6 +570,7 @@ pub fn get_test_expression(
                 topic: "test_topic".to_string(),
                 type_: arroyo_connectors::kafka::TableType::Source {
                     offset: arroyo_connectors::kafka::SourceOffset::Latest,
+                    read_mode: Some(arroyo_connectors::kafka::SourceReadMode::ReadUncommitted),
                 },
             },
             Some(&schema),
