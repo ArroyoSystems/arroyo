@@ -9,7 +9,7 @@ use arroyo_rpc::{
     ControlMessage,
 };
 use arroyo_state::tables::GlobalKeyedState;
-use arroyo_types::{Data, Record};
+use arroyo_types::{Data, Message, Record, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -231,7 +231,8 @@ where
                 }
             }
         } else {
-            // otherwise just process control messages
+            // otherwise set idle and just process control messages
+            ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
             loop {
                 let msg = ctx.control_rx.recv().await;
                 if let Some(r) = self.our_handle_control_message(ctx, msg).await {
