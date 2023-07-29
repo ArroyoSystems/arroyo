@@ -1,9 +1,13 @@
 use std::time::{Duration, Instant};
 
+use crate::apis::configuration::Configuration;
+use crate::apis::jobs_api::get_job_checkpoints;
+use crate::apis::pipelines_api::{get_pipeline_jobs, patch_pipeline, post_pipeline};
+use crate::models::{PipelinePatch, PipelinePost, StopType};
+
 use anyhow::Result;
 use arroyo_rpc::grpc::api::{
-    api_grpc_client::ApiGrpcClient, create_pipeline_req, CreateConnectionTableReq, CreateJobReq,
-    CreatePipelineReq, GetJobsReq, JobCheckpointsReq, JobDetailsReq, StopType, UpdateJobReq,
+    api_grpc_client::ApiGrpcClient, CreateConnectionTableReq, GetConnectionTablesReq,
 };
 use arroyo_types::DatabaseConfig;
 use rand::RngCore;
@@ -15,6 +19,8 @@ mod embedded {
     use refinery::embed_migrations;
     embed_migrations!("../arroyo-api/migrations");
 }
+
+include!("../../arroyo-openapi/client/src/lib.rs");
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -38,21 +44,16 @@ pub fn run_service(name: String, args: &[&str], env: Vec<(String, String)>) -> R
     Ok(())
 }
 
-async fn wait_for_state(client: &mut ApiGrpcClient<Channel>, job_id: &str, expected_state: &str) {
+async fn wait_for_state(api_conf: &Configuration, pipeline_id: &str, expected_state: &str) {
     let mut last_state = "None".to_string();
     while last_state != expected_state {
-        let resp = client
-            .get_job_details(JobDetailsReq {
-                job_id: job_id.to_string(),
-            })
-            .await
-            .unwrap()
-            .into_inner();
+        let jobs = get_pipeline_jobs(&api_conf, &pipeline_id).await.unwrap();
+        let job = jobs.data.first().unwrap();
 
-        let status = resp.job_status.unwrap();
-        if last_state != status.state {
-            info!("Job transitioned to {}", status.state);
-            last_state = status.state;
+        let state = job.state.clone();
+        if last_state != state {
+            info!("Job transitioned to {}", state);
+            last_state = state;
         }
 
         if last_state == "Failed" {
@@ -80,7 +81,11 @@ async fn connect() -> ApiGrpcClient<Channel> {
             continue;
         };
 
-        if client.get_jobs(GetJobsReq {}).await.is_ok() {
+        if client
+            .get_connection_tables(GetConnectionTablesReq {})
+            .await
+            .is_ok()
+        {
             return client;
         }
     }
@@ -144,6 +149,15 @@ pub async fn main() {
     .expect("Failed to run compiler service");
 
     let mut client = connect().await;
+    let api_conf = Configuration {
+        base_path: "http://localhost:8000/api".to_string(),
+        user_agent: None,
+        client: Default::default(),
+        basic_auth: None,
+        oauth_access_token: None,
+        bearer_access_token: None,
+        api_key: None,
+    };
 
     // create a source
     let source_name = format!("source_{}", run_id);
@@ -163,59 +177,42 @@ pub async fn main() {
     // create a pipeline
     let pipeline_name = format!("pipeline_{}", run_id);
     info!("Creating pipeline {}", pipeline_name);
-    let pipeline_id = client
-        .create_pipeline(CreatePipelineReq {
-            name: pipeline_name.clone(),
-            config: Some(create_pipeline_req::Config::Sql(
-                arroyo_rpc::grpc::api::CreateSqlJob {
-                    query: format!(
-                        "select count(*) from {} where auction is not null group \
+
+    let pipeline_id = post_pipeline(
+        &api_conf,
+        PipelinePost {
+            name: pipeline_name,
+            parallelism: 1,
+            preview: Some(Some(false)),
+            query: format!(
+                "select count(*) from {} where auction is not null group \
                 by hop(interval '2 seconds', interval '10 seconds')",
-                        source_name
-                    ),
-                    parallelism: 1,
-                    udfs: vec![],
-                    preview: false,
-                },
-            )),
-        })
-        .await
-        .unwrap()
-        .into_inner()
-        .pipeline_id;
+                source_name
+            ),
+            udfs: vec![],
+        },
+    )
+    .await
+    .unwrap()
+    .id;
+
+    let jobs = get_pipeline_jobs(&api_conf, &pipeline_id).await.unwrap();
+    let job = jobs.data.first().unwrap();
+
     info!("Created pipeline {}", pipeline_id);
-
-    // create a job
-    info!("Creating job");
-    let job_id = client
-        .create_job(CreateJobReq {
-            pipeline_id: pipeline_id.clone(),
-            checkpoint_interval_micros: 2_000_000,
-            preview: false,
-        })
-        .await
-        .unwrap()
-        .into_inner()
-        .job_id;
-
-    info!("Created job {}", job_id);
 
     // wait for job to enter running phase
     info!("Waiting until running");
-    wait_for_state(&mut client, &job_id, "Running").await;
+    wait_for_state(&api_conf, &pipeline_id, "Running").await;
 
     // wait for a checkpoint
     info!("Waiting for 10 successful checkpoints");
     loop {
-        let checkpoints = client
-            .get_checkpoints(JobCheckpointsReq {
-                job_id: job_id.clone(),
-            })
+        let checkpoints = get_job_checkpoints(&api_conf, &pipeline_id, &job.id)
             .await
-            .unwrap()
-            .into_inner();
+            .unwrap();
 
-        if let Some(checkpoint) = checkpoints.checkpoints.iter().find(|c| c.epoch == 10) {
+        if let Some(checkpoint) = checkpoints.data.iter().find(|c| c.epoch == 10) {
             if checkpoint.finish_time.is_some() {
                 break;
             }
@@ -226,18 +223,20 @@ pub async fn main() {
 
     // stop job
     info!("Stopping job");
-    client
-        .update_job(UpdateJobReq {
-            job_id: job_id.clone(),
+    patch_pipeline(
+        &api_conf,
+        &pipeline_id,
+        PipelinePatch {
             checkpoint_interval_micros: None,
-            stop: Some(StopType::Checkpoint as i32),
             parallelism: None,
-        })
-        .await
-        .unwrap();
+            stop: Some(Some(StopType::Checkpoint)),
+        },
+    )
+    .await
+    .unwrap();
 
     info!("Waiting for stop");
-    wait_for_state(&mut client, &job_id, "Stopped").await;
+    wait_for_state(&api_conf, &pipeline_id, "Stopped").await;
 
     info!("Test successful ✅")
 }

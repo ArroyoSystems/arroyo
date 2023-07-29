@@ -56,6 +56,10 @@ jobs:
           override: true
       - name: Setup npm
         uses: actions/setup-node@v3
+      - name: Install OpenAPI Generator
+        run: |
+          npm install @openapitools/openapi-generator-cli -g
+          openapi-generator-cli version
       - name: Setup Postgres
         run: |
           sudo apt-get update
@@ -99,7 +103,7 @@ jobs:
       - name: Check Formatting
         run: cargo fmt -- --check
       - name: Build
-        run: cargo build --all-features
+        run: cargo build --all-features -vv
       - name: Validate API
         run: |
           npm install --global ibm-openapi-validator
