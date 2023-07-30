@@ -1,11 +1,10 @@
-use std::{marker::PhantomData, time::SystemTime};
+use std::{marker::PhantomData, time::SystemTime, ops::Range, collections::HashMap};
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::{Context, StreamNode, Collector};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
-use arroyo_state::tables::KeyTimeMultiMap;
+use arroyo_state::tables::{KeyTimeMultiMap, TimeKeyMap};
 use arroyo_types::*;
-use rand::{rngs::SmallRng, RngCore, SeedableRng};
 use std::time::Duration;
 
 use super::{
@@ -51,7 +50,6 @@ pub enum WindowOperation<T: Data, OutT: Data> {
 pub struct KeyedWindowFunc<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> {
     assigner: W,
     operation: WindowOperation<T, OutT>,
-    salt: u64,
     _phantom: PhantomData<(K, T, OutT)>,
 }
 
@@ -64,7 +62,6 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
         KeyedWindowFunc {
             assigner: TumblingWindowAssigner { size },
             operation,
-            salt: SmallRng::from_entropy().next_u64(),
             _phantom: PhantomData,
         }
     }
@@ -77,7 +74,6 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
         KeyedWindowFunc {
             assigner: SlidingWindowAssigner { size, slide },
             operation,
-            salt: SmallRng::from_entropy().next_u64(),
             _phantom: PhantomData,
         }
     }
@@ -87,7 +83,6 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
         KeyedWindowFunc {
             assigner: InstantWindowAssigner {},
             operation,
-            salt: SmallRng::from_entropy().next_u64(),
             _phantom: PhantomData,
         }
     }
@@ -125,7 +120,6 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
         if has_window {
             let key = record.key.as_ref().unwrap().clone();
             let value = record.value.clone();
-            self.salt = self.salt.wrapping_add(1);
             ctx.state
                 .get_key_time_multi_map('w')
                 .await
@@ -173,6 +167,7 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
             }
         }
 
+
         // clear everything before our start time (we're guaranteed that timers execute in order,
         // so with fixed-width windows there won't be any earlier data)
         let next = self.assigner.next(window);
@@ -181,5 +176,135 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
         state
             .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start_time)
             .await;
+    }
+}
+
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+struct SessionWindow {
+    start: SystemTime,
+    end: SystemTime
+}
+
+impl SessionWindow {
+    fn new(start: SystemTime, gap: Duration) -> Self {
+        Self {
+            start,
+            end: start + gap,
+        }
+    }
+
+    fn contains(&self, t: SystemTime) -> bool {
+        self.start >= t && t < self.end
+    }
+}
+
+impl From<Range<SystemTime>> for SessionWindow {
+    fn from(value: Range<SystemTime>) -> Self {
+        Self {
+            start: value.start,
+            end: value.end,
+        }
+    }
+}
+
+#[derive(StreamNode)]
+pub struct SessionWindowFunc<K: Key, T: Data, OutT: Data> {
+    operation: WindowOperation<T, OutT>,
+    gap_size: Duration,
+
+    windows: HashMap<K, Vec<SessionWindow>>,
+}
+
+#[process_fn(in_k = K, in_t = T, out_k = K, out_t = OutT, time_t = SystemTime)]
+impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
+    fn name(&self) -> String {
+        "SessionWindow".to_string()
+    }
+
+    fn tables(&self) -> Vec<TableDescriptor> {
+        vec![TableDescriptor {
+            name: "w".to_string(),
+            description: "window state".to_string(),
+            table_type: TableType::KeyTimeMultiMap as i32,
+            delete_behavior: TableDeleteBehavior::NoReadsBeforeWatermark as i32,
+            write_behavior: TableWriteBehavior::NoWritesBeforeWatermark as i32,
+            retention_micros: self.gap_size.as_micros() as u64,
+        }]
+    }
+
+    fn handle_new_window(windows: &mut Vec<SessionWindow>, key: &mut K, new: SessionWindow) -> Option<SystemTime> {
+        // look for an existing window to extend forward
+        if let Some(w) = windows.iter_mut().find(|w| w.contains(new.end)) {
+            w.start = new.start;
+            None
+        } else {
+            // otherwise we're going to insert and schedule a new window
+            windows.push(new.clone());
+            Some(new.end)
+        }
+    }
+
+    async fn process_element(&mut self, record: &Record<K, T>, ctx: &mut Context<K, OutT>) {
+        let watermark = ctx
+            .last_present_watermark()
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+
+        if watermark >= record.timestamp {
+            // drop late data
+            return;
+        }
+
+
+        let mut key = record.key.as_ref().unwrap().clone();
+        let value = record.value.clone();
+        let timestamp = record.timestamp;
+
+        let (remove, add) = if let Some(windows) = self.windows.get_mut(&key) {
+            if let Some((i, window)) = windows.iter().enumerate()
+                .find(|(_, w)| w.contains(timestamp))
+                .map(|(i, w)| (i, *w)) {
+                // there's an existing window this record falls into
+                let our_end = timestamp + self.gap_size;
+                if our_end > window.end {
+                    // we're extending an existing window
+                    windows.remove(i);
+                    let new = (window.start..our_end).into();
+                    (Some(window.end), Self::handle_new_window(windows, &mut key, new))
+                } else {
+                    (None, None)
+                }
+                // otherwise the window is unchanged, we don't need to do anything
+            } else {
+                // there's no existing window, we need to add one
+                (None, Self::handle_new_window(windows, &mut key, SessionWindow::new(timestamp, self.gap_size)))
+            }
+        } else {
+            // no existing window, create one
+            let window = SessionWindow::new(timestamp, self.gap_size);
+            let mut windows = vec![];
+            let t = Self::handle_new_window(&mut windows, &mut key, window);
+            assert!(self.windows.insert(key.clone(), windows).is_none());
+            (None, t)
+        };
+
+        if let Some(remove) = remove {
+            let _: Option<SystemTime> = ctx.cancel_timer(&mut key, remove).await;
+        }
+        if let Some(add) = add {
+            ctx.schedule_timer(&mut key, add, add).await;
+        }
+
+        ctx.state
+            .get_key_time_multi_map('w')
+            .await
+            .insert(timestamp, key, value)
+            .await;
+    }
+
+    async fn handle_timer(&mut self, mut key: K, t: SystemTime, ctx: &mut Context<K, OutT>) {
+        let mut state = ctx.state.get_key_time_multi_map('w').await;
+
+        let vs: Vec<&T> = state.get_time_range(&mut key, SystemTime::UNIX_EPOCH, t).await;
     }
 }
