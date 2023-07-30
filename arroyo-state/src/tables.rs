@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 
 pub struct TimeKeyMap<'a, K: Key, V: Data, S: BackingStore> {
     table: char,
-    parquet: &'a mut S,
+    store: &'a mut S,
     cache: &'a mut TimeKeyMapCache<K, V>,
 }
 
@@ -15,7 +15,7 @@ impl<'a, K: Key, V: Data + PartialEq, S: BackingStore> TimeKeyMap<'a, K, V, S> {
     pub fn new(table: char, parquet: &'a mut S, cache: &'a mut TimeKeyMapCache<K, V>) -> Self {
         Self {
             table,
-            parquet,
+            store: parquet,
             cache,
         }
     }
@@ -84,6 +84,18 @@ impl<'a, K: Key, V: Data + PartialEq, S: BackingStore> TimeKeyMap<'a, K, V, S> {
             .collect()
     }
 
+    pub fn remove(&mut self, event_time: SystemTime, k: &mut K) -> Option<V> {
+        if let Some(m) = self.cache.buffered_values.get_mut(&event_time) {
+            m.remove(k);
+        }
+
+        if let Some(m) = self.cache.persisted_values.get_mut(&event_time) {
+            m.remove(k)
+        } else {
+            None
+        }
+    }
+
     pub fn get_min_time(&self) -> Option<SystemTime> {
         let persisted_time = self.cache.persisted_values.keys().min();
         let buffered_time = self.cache.buffered_values.keys().min();
@@ -145,7 +157,7 @@ impl<'a, K: Key, V: Data + PartialEq, S: BackingStore> TimeKeyMap<'a, K, V, S> {
             let persisted_map = self.cache.persisted_values.entry(time).or_default();
             let drained = values.drain();
             for (mut key, mut value) in drained {
-                self.parquet
+                self.store
                     .write_data_triple(
                         self.table,
                         TableType::TimeKeyMap,
