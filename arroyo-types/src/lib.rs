@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::ops::RangeInclusive;
+use std::ops::{RangeInclusive, Range};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,8 +15,37 @@ pub mod formats;
 
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
 pub struct Window {
-    pub start_time: SystemTime,
-    pub end_time: SystemTime,
+    pub start: SystemTime,
+    pub end: SystemTime,
+}
+
+impl Window {
+    pub fn new(start: SystemTime, end: SystemTime) -> Self {
+        Self {
+            start,
+            end
+        }
+    }
+
+    pub fn session(start: SystemTime, gap: Duration) -> Self {
+        Self {
+            start,
+            end: start + gap,
+        }
+    }
+
+    pub fn contains(&self, t: SystemTime) -> bool {
+        self.start >= t && t < self.end
+    }
+}
+
+impl From<Range<SystemTime>> for Window {
+    fn from(value: Range<SystemTime>) -> Self {
+        Self {
+            start: value.start,
+            end: value.end,
+        }
+    }
 }
 
 impl Serialize for Window {
@@ -26,8 +55,8 @@ impl Serialize for Window {
     {
         let mut state = serializer.serialize_struct("Window", 2)?;
 
-        state.serialize_field("start", &to_millis(self.start_time))?;
-        state.serialize_field("end", &to_millis(self.end_time))?;
+        state.serialize_field("start", &to_millis(self.start))?;
+        state.serialize_field("end", &to_millis(self.end))?;
 
         state.end()
     }

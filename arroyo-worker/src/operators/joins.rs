@@ -103,10 +103,10 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
             .unwrap_or(SystemTime::UNIX_EPOCH);
         let mut has_window = false;
         for w in windows {
-            if w.end_time > watermark {
+            if w.end > watermark {
                 has_window = true;
                 let mut key = record.key.as_ref().unwrap().clone();
-                ctx.schedule_timer(&mut key, w.end_time, w).await;
+                ctx.schedule_timer(&mut key, w.end, w).await;
             }
         }
 
@@ -131,30 +131,30 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
             let mut left_state = ctx.state.get_key_time_multi_map('l').await;
             let left: Vec<T1> = {
                 let left: Vec<&T1> = left_state
-                    .get_time_range(&mut key, window.start_time, window.end_time)
+                    .get_time_range(&mut key, window.start, window.end)
                     .await;
                 left.into_iter().cloned().collect()
             };
 
             let next = self.assigner1.next(window);
             left_state
-                .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start_time)
+                .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
                 .await;
 
             let mut right_state = ctx.state.get_key_time_multi_map('r').await;
             let right: Vec<T2> = {
                 let right: Vec<&T2> = right_state
-                    .get_time_range(&mut key, window.start_time, window.end_time)
+                    .get_time_range(&mut key, window.start, window.end)
                     .await;
                 right.into_iter().cloned().collect()
             };
             let next = self.assigner2.next(window);
             right_state
-                .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start_time)
+                .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
                 .await;
 
             Record {
-                timestamp: window.end_time - Duration::from_nanos(1),
+                timestamp: window.end - Duration::from_nanos(1),
                 key: Some(key),
                 value: (left, right),
             }
