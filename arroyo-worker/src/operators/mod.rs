@@ -237,6 +237,10 @@ pub trait TimeWindowAssigner<K: Key, T: Data>: Copy + Clone + Send + 'static {
     fn safe_retention_duration(&self) -> Option<Duration>;
 }
 
+pub trait WindowAssigner<K: Key, T: Data>: Clone + Send {
+
+}
+
 #[derive(Clone, Copy)]
 pub struct TumblingWindowAssigner {
     size: Duration,
@@ -246,15 +250,15 @@ impl<K: Key, T: Data> TimeWindowAssigner<K, T> for TumblingWindowAssigner {
     fn windows(&self, ts: SystemTime) -> Vec<Window> {
         let key = to_millis(ts) / (self.size.as_millis() as u64);
         vec![Window {
-            start_time: from_millis(key * self.size.as_millis() as u64),
-            end_time: from_millis((key + 1) * (self.size.as_millis() as u64)),
+            start: from_millis(key * self.size.as_millis() as u64),
+            end: from_millis((key + 1) * (self.size.as_millis() as u64)),
         }]
     }
 
     fn next(&self, window: Window) -> Window {
         Window {
-            start_time: window.end_time,
-            end_time: window.end_time + self.size,
+            start: window.end,
+            end: window.end + self.size,
         }
     }
 
@@ -268,15 +272,15 @@ pub struct InstantWindowAssigner {}
 impl<K: Key, T: Data> TimeWindowAssigner<K, T> for InstantWindowAssigner {
     fn windows(&self, ts: SystemTime) -> Vec<Window> {
         vec![Window {
-            start_time: ts,
-            end_time: ts + Duration::from_nanos(1),
+            start: ts,
+            end: ts + Duration::from_nanos(1),
         }]
     }
 
     fn next(&self, window: Window) -> Window {
         Window {
-            start_time: window.start_time + Duration::from_micros(1),
-            end_time: window.end_time + Duration::from_micros(1),
+            start: window.start + Duration::from_micros(1),
+            end: window.end + Duration::from_micros(1),
         }
     }
 
@@ -317,8 +321,8 @@ impl<K: Key, T: Data> TimeWindowAssigner<K, T> for SlidingWindowAssigner {
 
         while start <= ts {
             windows.push(Window {
-                start_time: start,
-                end_time: start + self.size,
+                start,
+                end: start + self.size,
             });
             start += self.slide;
         }
@@ -327,10 +331,10 @@ impl<K: Key, T: Data> TimeWindowAssigner<K, T> for SlidingWindowAssigner {
     }
 
     fn next(&self, window: Window) -> Window {
-        let start_time = window.start_time + self.slide;
+        let start_time = window.start + self.slide;
         Window {
-            start_time,
-            end_time: start_time + self.size,
+            start: start_time,
+            end: start_time + self.size,
         }
     }
 

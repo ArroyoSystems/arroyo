@@ -278,8 +278,8 @@ impl GroupByKind {
             let field_name = format_ident!("{}", return_struct.fields[*index].field_name());
             let width_literal: LitInt = parse_str(&width.as_millis().to_string()).unwrap();
             assignments.push(quote!(#field_name: arroyo_types::Window{
-                        start_time: arg.timestamp - std::time::Duration::from_millis(#width_literal) + std::time::Duration::from_nanos(1),
-                        end_time: arg.timestamp + std::time::Duration::from_nanos(1)}));
+                        start: arg.timestamp - std::time::Duration::from_millis(#width_literal) + std::time::Duration::from_nanos(1),
+                        end: arg.timestamp + std::time::Duration::from_nanos(1)}));
         }
         let return_type = return_struct.get_type();
         let struct_expression = parse_quote!(

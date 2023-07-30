@@ -1,10 +1,11 @@
-use std::{marker::PhantomData, time::SystemTime, ops::Range, collections::HashMap};
+use std::{marker::PhantomData, time::SystemTime, collections::HashMap};
 
-use crate::engine::{Context, StreamNode, Collector};
+use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
-use arroyo_state::tables::{KeyTimeMultiMap, TimeKeyMap};
+use arroyo_state::tables::{KeyTimeMultiMap, KeyedState};
 use arroyo_types::*;
+use md5::digest::generic_array::functional::FunctionalSequence;
 use std::time::Duration;
 
 use super::{
@@ -44,6 +45,49 @@ pub mod aggregators {
 pub enum WindowOperation<T: Data, OutT: Data> {
     Aggregate(fn(Vec<&T>) -> OutT),
     Flatten(fn(Vec<&T>) -> Vec<OutT>),
+}
+
+impl <T: Data, OutT: Data> WindowOperation<T, OutT> {
+    async fn operate<K: Key>(&self, key: &mut K, window: Window, table: char, ctx: &mut Context<K, OutT>) {
+        let mut state = ctx.state.get_key_time_multi_map(table).await;
+
+        match self {
+            WindowOperation::Aggregate(aggregator) => {
+                let value = {
+                    let vs: Vec<&T> = state
+                        .get_time_range(key, window.start, window.end)
+                        .await;
+                    (aggregator)(vs)
+                };
+
+                let record = Record {
+                    timestamp: window.end - Duration::from_nanos(1),
+                    key: Some(key.clone()),
+                    value,
+                };
+
+                ctx.collect(record).await;
+            }
+            WindowOperation::Flatten(flatten) => {
+                let values = {
+                    let vs: Vec<&T> = state
+                        .get_time_range(key, window.start, window.end)
+                        .await;
+                    (flatten)(vs)
+                };
+
+                for v in values {
+                    let record = Record {
+                        timestamp: window.end - Duration::from_nanos(1),
+                        key: Some(key.clone()),
+                        value: v,
+                    };
+                    ctx.collect(record).await;
+                }
+            }
+        }
+
+    }
 }
 
 #[derive(StreamNode)]
@@ -110,10 +154,10 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
         let mut has_window = false;
         let mut key = record.key.clone().unwrap();
         for w in windows {
-            if w.end_time > watermark {
+            if w.end > watermark {
                 has_window = true;
 
-                ctx.schedule_timer(&mut key, w.end_time, w).await;
+                ctx.schedule_timer(&mut key, w.end, w).await;
             }
         }
 
@@ -129,44 +173,7 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
     }
 
     async fn handle_timer(&mut self, mut key: K, window: Window, ctx: &mut Context<K, OutT>) {
-        let mut state = ctx.state.get_key_time_multi_map('w').await;
-
-        match self.operation {
-            WindowOperation::Aggregate(aggregator) => {
-                let value = {
-                    let vs: Vec<&T> = state
-                        .get_time_range(&mut key, window.start_time, window.end_time)
-                        .await;
-                    (aggregator)(vs)
-                };
-
-                let record = Record {
-                    timestamp: window.end_time - Duration::from_nanos(1),
-                    key: Some(key.clone()),
-                    value,
-                };
-
-                ctx.collect(record).await;
-            }
-            WindowOperation::Flatten(flatten) => {
-                let values = {
-                    let vs: Vec<&T> = state
-                        .get_time_range(&mut key, window.start_time, window.end_time)
-                        .await;
-                    (flatten)(vs)
-                };
-
-                for v in values {
-                    let record = Record {
-                        timestamp: window.end_time - Duration::from_nanos(1),
-                        key: Some(key.clone()),
-                        value: v,
-                    };
-                    ctx.collect(record).await;
-                }
-            }
-        }
-
+        self.operation.operate(&mut key, window, 'w', ctx).await;
 
         // clear everything before our start time (we're guaranteed that timers execute in order,
         // so with fixed-width windows there won't be any earlier data)
@@ -174,66 +181,55 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
         let mut state: KeyTimeMultiMap<K, T, _> = ctx.state.get_key_time_multi_map('w').await;
 
         state
-            .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start_time)
+            .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
             .await;
     }
 }
 
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-struct SessionWindow {
-    start: SystemTime,
-    end: SystemTime
-}
-
-impl SessionWindow {
-    fn new(start: SystemTime, gap: Duration) -> Self {
-        Self {
-            start,
-            end: start + gap,
-        }
-    }
-
-    fn contains(&self, t: SystemTime) -> bool {
-        self.start >= t && t < self.end
-    }
-}
-
-impl From<Range<SystemTime>> for SessionWindow {
-    fn from(value: Range<SystemTime>) -> Self {
-        Self {
-            start: value.start,
-            end: value.end,
-        }
-    }
-}
-
 #[derive(StreamNode)]
 pub struct SessionWindowFunc<K: Key, T: Data, OutT: Data> {
     operation: WindowOperation<T, OutT>,
     gap_size: Duration,
-
-    windows: HashMap<K, Vec<SessionWindow>>,
+    _t: PhantomData<K>,
 }
 
-#[process_fn(in_k = K, in_t = T, out_k = K, out_t = OutT, time_t = SystemTime)]
+#[process_fn(in_k = K, in_t = T, out_k = K, out_t = OutT, time_t = Window)]
 impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
     fn name(&self) -> String {
         "SessionWindow".to_string()
     }
 
-    fn tables(&self) -> Vec<TableDescriptor> {
-        vec![TableDescriptor {
-            name: "w".to_string(),
-            description: "window state".to_string(),
-            table_type: TableType::KeyTimeMultiMap as i32,
-            delete_behavior: TableDeleteBehavior::NoReadsBeforeWatermark as i32,
-            write_behavior: TableWriteBehavior::NoWritesBeforeWatermark as i32,
-            retention_micros: self.gap_size.as_micros() as u64,
-        }]
+    pub async fn new(operation: WindowOperation<T, OutT>, gap_size: Duration) -> Self {
+        Self {
+            operation,
+            gap_size,
+            _t: PhantomData,
+        }
     }
 
-    fn handle_new_window(windows: &mut Vec<SessionWindow>, key: &mut K, new: SessionWindow) -> Option<SystemTime> {
+    fn tables(&self) -> Vec<TableDescriptor> {
+        vec![
+            TableDescriptor {
+                name: "w".to_string(),
+                description: "window state".to_string(),
+                table_type: TableType::KeyTimeMultiMap as i32,
+                delete_behavior: TableDeleteBehavior::NoReadsBeforeWatermark as i32,
+                write_behavior: TableWriteBehavior::NoWritesBeforeWatermark as i32,
+                retention_micros: self.gap_size.as_micros() as u64,
+            },
+            TableDescriptor {
+                name: "s".to_string(),
+                description: "sessions".to_string(),
+                table_type: TableType::TimeKeyMap as i32,
+                delete_behavior: TableDeleteBehavior::NoReadsBeforeWatermark as i32,
+                write_behavior: TableWriteBehavior::NoWritesBeforeWatermark as i32,
+                retention_micros: self.gap_size.as_micros() as u64,
+            },
+        ]
+    }
+
+    fn handle_new_window(windows: &mut Vec<Window>, new: Window) -> Option<SystemTime> {
         // look for an existing window to extend forward
         if let Some(w) = windows.iter_mut().find(|w| w.contains(new.end)) {
             w.start = new.start;
@@ -255,12 +251,16 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
             return;
         }
 
-
         let mut key = record.key.as_ref().unwrap().clone();
         let value = record.value.clone();
         let timestamp = record.timestamp;
 
-        let (remove, add) = if let Some(windows) = self.windows.get_mut(&key) {
+        let mut windows: Option<Vec<Window>> = {
+            let t: KeyedState<'_, K, Vec<Window>, _> = ctx.state.get_key_state('s').await;
+            t.get(&key).map(|t| t.iter().map(|w| *w).collect())
+        };
+
+        let (remove, add) = if let Some(windows) = windows.as_mut() {
             if let Some((i, window)) = windows.iter().enumerate()
                 .find(|(_, w)| w.contains(timestamp))
                 .map(|(i, w)| (i, *w)) {
@@ -270,21 +270,20 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
                     // we're extending an existing window
                     windows.remove(i);
                     let new = (window.start..our_end).into();
-                    (Some(window.end), Self::handle_new_window(windows, &mut key, new))
+                    (Some(window.end), Self::handle_new_window(windows, new))
                 } else {
                     (None, None)
                 }
                 // otherwise the window is unchanged, we don't need to do anything
             } else {
                 // there's no existing window, we need to add one
-                (None, Self::handle_new_window(windows, &mut key, SessionWindow::new(timestamp, self.gap_size)))
+                (None, Self::handle_new_window(windows, Window::session(timestamp, self.gap_size)))
             }
         } else {
             // no existing window, create one
-            let window = SessionWindow::new(timestamp, self.gap_size);
-            let mut windows = vec![];
-            let t = Self::handle_new_window(&mut windows, &mut key, window);
-            assert!(self.windows.insert(key.clone(), windows).is_none());
+            let window = Window::session(timestamp, self.gap_size);
+            windows = Some(vec![]);
+            let t = Self::handle_new_window(windows.as_mut().unwrap(), window);
             (None, t)
         };
 
@@ -292,7 +291,18 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
             let _: Option<SystemTime> = ctx.cancel_timer(&mut key, remove).await;
         }
         if let Some(add) = add {
-            ctx.schedule_timer(&mut key, add, add).await;
+            // we use UNIX_EPOCH as the start of our windows to aovid having to update them when we extend
+            // the beginning; this works because windows are always handled in order
+            ctx.schedule_timer(&mut key, add, Window::new(SystemTime::UNIX_EPOCH, add)).await;
+        }
+
+        if add.is_some() || remove.is_some() {
+            let key = key.clone();
+            ctx.state
+                .get_key_state('s').await
+                // I have no idea if this timestamp is correct -- this datastructure does not make sense to me
+                .insert(timestamp, key, windows.unwrap())
+                .await;
         }
 
         ctx.state
@@ -302,9 +312,28 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
             .await;
     }
 
-    async fn handle_timer(&mut self, mut key: K, t: SystemTime, ctx: &mut Context<K, OutT>) {
-        let mut state = ctx.state.get_key_time_multi_map('w').await;
+    async fn handle_timer(&mut self, mut key: K, window: Window, ctx: &mut Context<K, OutT>) {
+        self.operation.operate(&mut key, window, 'w', ctx).await;
 
-        let vs: Vec<&T> = state.get_time_range(&mut key, SystemTime::UNIX_EPOCH, t).await;
+        // clear this window and everything before it -- we're guaranteed that windows are executed in order and are
+        // non-overlapping so we will never need to reprocess this data
+        let mut state: KeyTimeMultiMap<K, T, _> = ctx.state.get_key_time_multi_map('w').await;
+
+        state
+            .clear_time_range(&mut key, window.start, window.end)
+            .await;
+
+        let mut t: KeyedState<'_, K, Vec<Window>, _> = ctx.state.get_key_state('s').await;
+        let mut windows: Vec<Window> = t.get(&key).map(|t| t.iter().map(|w| *w).collect())
+            .expect("there must be a window for this key in state");
+
+        windows.retain(|w| w.end != window.end);
+
+        if windows.is_empty() {
+            t.remove(key).await;
+        } else {
+            t.insert(windows.iter().map(|w| w.end).max().unwrap(), key, windows)
+                .await;
+        }
     }
 }
