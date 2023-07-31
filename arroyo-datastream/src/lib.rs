@@ -109,6 +109,7 @@ pub enum WindowType {
     Tumbling { width: Duration },
     Sliding { width: Duration, slide: Duration },
     Instant,
+    Session { gap: Duration, }
 }
 
 fn format_duration(duration: Duration) -> String {
@@ -145,6 +146,9 @@ impl Debug for WindowType {
             }
             Self::Instant => {
                 write!(f, "InstantWindow")
+            }
+            Self::Session { gap } => {
+                write!(f, "SessionWindow({})", format_duration(*gap))
             }
         }
     }
@@ -1355,6 +1359,14 @@ impl Program {
                                     instant_window(#agg))
                             }
                         }
+                        WindowType::Session { gap } => {
+                            let gap = duration_to_syn_expr(*gap);
+                            quote! {
+                                Box::new(SessionWindowFunc::<#in_k, #in_t, #out_t>::new(
+                                    #gap, #agg
+                                ))
+                            }
+                        }
                     }
                 }
                 Operator::Watermark(watermark) => {
@@ -1431,6 +1443,9 @@ impl Program {
                                 Box::new(WindowedHashJoin::<#in_k, #in_t1, #in_t2, InstantWindowAssigner, InstantWindowAssigner>::
                                     instant_window())
                             }
+                        }
+                        WindowType::Session { .. } => {
+                            unimplemented!("Session windows are not supported in joins")
                         }
                     }
                 }
@@ -2098,6 +2113,9 @@ impl From<WindowType> for GrpcApi::window::Window {
             WindowType::Instant => {
                 GrpcApi::window::Window::InstantWindow(GrpcApi::InstantWindow {})
             }
+            WindowType::Session { gap } => {
+                GrpcApi::window::Window::SessionWindow(GrpcApi::SessionWindow { gap_micros: gap.as_micros() as u64 })
+            }
         }
     }
 }
@@ -2386,6 +2404,9 @@ impl From<arroyo_rpc::grpc::api::Window> for WindowType {
                 }
             }
             Some(arroyo_rpc::grpc::api::window::Window::InstantWindow(_)) => WindowType::Instant,
+            Some(arroyo_rpc::grpc::api::window::Window::SessionWindow(session)) => {
+                WindowType::Session { gap: Duration::from_micros(session.gap_micros) }
+            }
             None => todo!(),
         }
     }
