@@ -7,7 +7,6 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use cornucopia_async::GenericClient;
 use deadpool_postgres::{Pool, Transaction};
 use prost::Message;
-use rand::{distributions::Alphanumeric, Rng};
 use serde_json::from_str;
 use std::{collections::HashMap, time::Duration};
 use tonic::Status;
@@ -15,15 +14,6 @@ use tonic::Status;
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
 
 use crate::{log_and_map, pipelines, queries::api_queries, to_micros, types::public, AuthData};
-
-fn gen_id() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(8)
-        .map(char::from)
-        .map(|c| c.to_ascii_lowercase())
-        .collect()
-}
 
 pub(crate) async fn create_job<'a>(
     request: CreateJobReq,
@@ -58,13 +48,12 @@ pub(crate) async fn create_job<'a>(
             an increase", auth.org_metadata.max_running_jobs)));
     }
 
-    let job_id = gen_id();
+    let job_id = generate_id(IdTypes::JobConfig);
 
     // TODO: handle chance of collision in ids
     api_queries::create_job()
         .bind(
             client,
-            &generate_id(IdTypes::JobConfig),
             &job_id,
             &auth.organization_id,
             &pipeline.name,

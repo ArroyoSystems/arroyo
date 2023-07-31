@@ -265,7 +265,7 @@ impl Into<Pipeline> for DbPipelineRest {
 impl Into<Job> for DbPipelineJob {
     fn into(self) -> Job {
         Job {
-            id: self.pub_id,
+            id: self.id,
             running_desired: self.stop == StopMode::none,
             state: self.state.unwrap_or_else(|| "Created".to_string()),
             run_id: self.run_id.unwrap_or(0) as u64,
