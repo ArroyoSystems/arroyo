@@ -1,11 +1,10 @@
-use std::{marker::PhantomData, time::SystemTime, collections::HashMap};
+use std::{marker::PhantomData, time::SystemTime};
 
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_state::tables::{KeyTimeMultiMap, KeyedState};
 use arroyo_types::*;
-use md5::digest::generic_array::functional::FunctionalSequence;
 use std::time::Duration;
 
 use super::{

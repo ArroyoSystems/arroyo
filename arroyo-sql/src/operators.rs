@@ -260,11 +260,14 @@ impl GroupByKind {
             let field_name: Ident = format_ident!("{}", field.field_name());
             assignments.push(quote!(#field_name : arg.key.#field_name.clone()));
         });
+
         aggregate_struct.fields.iter().for_each(|field| {
             let field_name: Ident = format_ident!("{}", field.field_name());
             assignments.push(quote!(#field_name : arg.aggregate.#field_name.clone()));
         });
+
         let return_struct = self.output_struct(key_struct, aggregate_struct);
+
         if let GroupByKind::WindowOutput {
             index,
             column: _,
@@ -274,13 +277,19 @@ impl GroupByKind {
             let width = match window_type {
                 WindowType::Tumbling { width } | WindowType::Sliding { width, .. } => width,
                 WindowType::Instant => &Duration::ZERO,
+                WindowType::Session { gap } => todo!(),
             };
+
             let field_name = format_ident!("{}", return_struct.fields[*index].field_name());
             let width_literal: LitInt = parse_str(&width.as_millis().to_string()).unwrap();
-            assignments.push(quote!(#field_name: arroyo_types::Window{
-                        start: arg.timestamp - std::time::Duration::from_millis(#width_literal) + std::time::Duration::from_nanos(1),
-                        end: arg.timestamp + std::time::Duration::from_nanos(1)}));
+            assignments.push(quote! {
+                #field_name: arroyo_types::Window {
+                    start: arg.timestamp - std::time::Duration::from_millis(#width_literal) + std::time::Duration::from_nanos(1),
+                    end: arg.timestamp + std::time::Duration::from_nanos(1)
+                }
+            });
         }
+
         let return_type = return_struct.get_type();
         let struct_expression = parse_quote!(
             #return_type {
@@ -288,6 +297,7 @@ impl GroupByKind {
                     ,*
                 }
         );
+
         if matches!(self, GroupByKind::Updating) {
             parse_quote!(
                 arg.aggregate.map(|subfield| {
