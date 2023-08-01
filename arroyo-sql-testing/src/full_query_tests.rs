@@ -129,3 +129,7 @@ full_pipeline_codegen! {"create_parquet_s3_source",
 );
 
 INSERT INTO Bids select bid.auction, bid.bidder, bid.price , bid.datetime FROM nexmark where bid is not null;"}
+
+full_pipeline_codegen! {"cast_bug",
+"SELECT CAST(1 as FLOAT)
+from nexmark; "}
