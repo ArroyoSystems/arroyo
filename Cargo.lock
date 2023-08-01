@@ -424,6 +424,7 @@ dependencies = [
  "cornucopia_async",
  "deadpool-postgres",
  "futures",
+ "futures-util",
  "http",
  "jwt-simple",
  "once_cell",

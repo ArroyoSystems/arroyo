@@ -17,6 +17,7 @@ export type StopType = schemas['StopType'];
 export type PipelineGraph = schemas['PipelineGraph'];
 export type JobLogMessage = schemas['JobLogMessage'];
 export type PipelineNode = schemas['PipelineNode'];
+export type OutputData = schemas['OutputData'];
 
 const BASE_URL = 'http://localhost:8000/api';
 export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
@@ -363,4 +364,14 @@ export const useOperatorErrors = (pipelineId?: string, jobId?: string) => {
   return {
     operatorErrors: data?.data,
   };
+};
+
+export const useJobOutput = (
+  handler: (event: MessageEvent) => void,
+  pipelineId?: string,
+  jobId?: string
+) => {
+  const url = `${BASE_URL}/v1/pipelines/${pipelineId}/jobs/${jobId}/output`;
+  const eventSource = new EventSource(url);
+  eventSource.addEventListener('message', handler);
 };

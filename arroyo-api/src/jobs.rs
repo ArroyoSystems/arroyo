@@ -1,25 +1,34 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
 use arroyo_datastream::Program;
+use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::{
     CheckpointDetailsResp, CheckpointOverview, CreateJobReq, JobDetailsResp, JobStatus,
     PipelineProgram, StopType,
 };
+use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use axum::extract::{Path, State};
+use axum::response::sse::{Event, Sse};
 use axum::Json;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Transaction;
+use futures_util::stream::Stream;
 use http::StatusCode;
 use prost::Message;
+use std::convert::Infallible;
 use std::{collections::HashMap, time::Duration};
-use tonic::Status;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt as _;
+use tonic::{Request, Status};
+use tracing::info;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
 
-use crate::pipelines::query_job_by_pub_id;
+use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
 use crate::rest_types::{
     Checkpoint, CheckpointCollection, JobCollection, JobLogMessage, JobLogMessageCollection,
+    OutputData,
 };
 use crate::rest_utils::{authenticate, client, log_and_map_rest, BearerAuth, ErrorResp};
 use crate::{log_and_map, queries::api_queries, to_micros, types::public, AuthData};
@@ -366,6 +375,89 @@ pub async fn get_job_checkpoints(
         data: checkpoints,
         has_more: false,
     }))
+}
+
+/// Subscribe to a job's output
+#[utoipa::path(
+    get,
+    path = "/v1/pipelines/{pipeline_id}/jobs/{job_id}/output",
+    tag = "jobs",
+    params(
+        ("pipeline_id" = String, Path, description = "Pipeline id"),
+        ("job_id" = String, Path, description = "Job id")
+    ),
+    responses(
+        (status = 200, description = "Job output as 'text/event-stream'"),
+    ),
+)]
+pub async fn get_job_output(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    // validate that the job exists, the user has access, and the graph has a GrpcSink
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+    let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+    if !pipeline
+        .graph
+        .nodes
+        .iter()
+        .any(|n| n.operator.contains("WebSink"))
+    {
+        // TODO: make this check more robust
+        return Err(ErrorResp {
+            status_code: StatusCode::BAD_REQUEST,
+            message: "Job does not have a web sink".to_string(),
+        });
+    }
+    let (tx, rx) = tokio::sync::mpsc::channel(32);
+
+    let mut controller =
+        ControllerGrpcClient::connect(state.grpc_api_server.controller_addr.clone())
+            .await
+            .unwrap();
+
+    let mut stream = controller
+        .subscribe_to_output(Request::new(grpc::GrpcOutputSubscription {
+            job_id: job_pub_id.clone(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    info!("Subscribed to output");
+    tokio::spawn(async move {
+        let _controller = controller;
+        let mut message_count = 0;
+        while let Some(d) = stream.next().await {
+            if d.as_ref().map(|t| t.done).unwrap_or(false) {
+                info!("Stream done for {}", job_pub_id);
+                break;
+            }
+
+            let v = match d {
+                Ok(d) => d,
+                Err(_) => break,
+            };
+
+            let output_data: OutputData = v.into();
+            let json = serde_json::to_string(&output_data).unwrap();
+            let e = Ok(Event::default().data(json).id(message_count.to_string()));
+
+            if tx.send(e).await.is_err() {
+                break;
+            }
+
+            message_count += 1;
+        }
+
+        info!("Closing watch stream for {}", job_pub_id);
+    });
+
+    Ok(Sse::new(ReceiverStream::new(rx)))
 }
 
 /// Get all jobs

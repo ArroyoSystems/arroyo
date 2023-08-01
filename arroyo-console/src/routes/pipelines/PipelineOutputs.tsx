@@ -1,6 +1,6 @@
 import { Th, Td, Tr, Table, Thead, Tbody } from '@chakra-ui/react';
 import { ReactElement } from 'react';
-import { OutputData } from '../../gen/api_pb';
+import { OutputData } from '../../lib/data_fetching';
 
 export function PipelineOutputs({ outputs }: { outputs: Array<{ id: number; data: OutputData }> }) {
   let headers: Array<ReactElement> = [];
@@ -13,7 +13,7 @@ export function PipelineOutputs({ outputs }: { outputs: Array<{ id: number; data
 
       if (headers.length == 0) {
         Object.keys(parsed).forEach(k => {
-          headers.push(<Th>{k}</Th>);
+          headers.push(<Th key={k}>{k}</Th>);
         });
       }
 
@@ -23,8 +23,8 @@ export function PipelineOutputs({ outputs }: { outputs: Array<{ id: number; data
 
       return (
         <Tr key={row.id}>
-          <Th>{row.id}</Th>
-          <Th>
+          <Th key={'row'}>{row.id + 1}</Th>
+          <Th key={'date'}>
             {new Intl.DateTimeFormat('en-US', { dateStyle: 'short', timeStyle: 'long' }).format(
               new Date(Number(output.timestamp) / 1000)
             )}

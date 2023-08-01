@@ -74,6 +74,13 @@ export interface paths {
      */
     get: operations["get_job_errors"];
   };
+  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/output": {
+    /**
+     * Subscribe to a job's output 
+     * @description Subscribe to a job's output
+     */
+    get: operations["get_job_output"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -128,6 +135,13 @@ export interface components {
     JobLogMessageCollection: {
       data: (components["schemas"]["JobLogMessage"])[];
       hasMore: boolean;
+    };
+    OutputData: {
+      key: string;
+      operatorId: string;
+      /** Format: int64 */
+      timestamp: number;
+      value: string;
     };
     Pipeline: {
       action?: components["schemas"]["StopType"] | null;
@@ -402,6 +416,24 @@ export interface operations {
           "application/json": components["schemas"]["JobLogMessageCollection"];
         };
       };
+    };
+  };
+  /**
+   * Subscribe to a job's output 
+   * @description Subscribe to a job's output
+   */
+  get_job_output: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        pipeline_id: string;
+        /** @description Job id */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Job output as 'text/event-stream' */
+      200: never;
     };
   };
 }
