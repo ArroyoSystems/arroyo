@@ -873,7 +873,9 @@ impl StructField {
                     quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::UInt64Type>)
                 }
                 DataType::Float16 => {
-                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int16Type>)
+                    quote!(
+                        arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Float16Type>
+                    )
                 }
                 DataType::Float32 => {
                     quote!(
@@ -881,7 +883,9 @@ impl StructField {
                     )
                 }
                 DataType::Float64 => {
-                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int64Type>)
+                    quote!(
+                        arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Float64Type>
+                    )
                 }
                 DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, None) => quote!(
                     arrow_array::builder::PrimitiveBuilder::<
