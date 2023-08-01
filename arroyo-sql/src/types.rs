@@ -876,7 +876,9 @@ impl StructField {
                     quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int16Type>)
                 }
                 DataType::Float32 => {
-                    quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int32Type>)
+                    quote!(
+                        arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Float32Type>
+                    )
                 }
                 DataType::Float64 => {
                     quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int64Type>)
