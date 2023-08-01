@@ -20,7 +20,7 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ConnectionTable, GrpcOutputSubscription, OutputData, TableType } from '../../gen/api_pb';
+import { ConnectionTable, TableType } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
 import { Catalog } from './Catalog';
 import { PipelineGraphViewer } from './PipelineGraph';
@@ -28,8 +28,10 @@ import { PipelineOutputs } from './PipelineOutputs';
 import { CodeEditor } from './SqlEditor';
 import { SqlOptions } from '../../lib/types';
 import {
+  OutputData,
   post,
   useConnectionTables,
+  useJobOutput,
   useOperatorErrors,
   usePipeline,
   usePipelineGraph,
@@ -48,7 +50,7 @@ function useQuery() {
 
 export function CreatePipeline({ client }: { client: ApiClient }) {
   const [pipelineId, setPipelineId] = useState<string | undefined>(undefined);
-  const { updatePipeline } = usePipeline(pipelineId);
+  const { pipeline, updatePipeline } = usePipeline(pipelineId);
   const { jobs } = usePipelineJobs(pipelineId, true);
   const job = jobs?.length ? jobs[0] : undefined;
   const { operatorErrors } = useOperatorErrors(pipelineId, job?.id);
@@ -104,36 +106,20 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     }
   }, [copyFrom]);
 
+  const sseHandler = (event: MessageEvent) => {
+    const parsed = JSON.parse(event.data) as OutputData;
+    const o = { id: Number(event.lastEventId), data: parsed };
+    outputs.push(o);
+    if (outputs.length > 20) {
+      outputs.shift();
+    }
+    setOutputs(outputs);
+  };
+
   useEffect(() => {
-    const subscribeToOutput = async () => {
-      if (!job) {
-        return;
-      }
-
-      console.log('subscribing to output');
-      let counter = 1;
-      let o = [];
-      for await (const res of (await client()).subscribeToOutput(
-        new GrpcOutputSubscription({
-          jobId: job?.id,
-        })
-      )) {
-        let output = {
-          id: counter++,
-          data: res,
-        };
-
-        o.push(output);
-        if (outputs.length > 100) {
-          o.shift();
-        }
-        setOutputs(o);
-      }
-
-      console.log('Job finished');
-    };
-
-    subscribeToOutput();
+    if (pipeline && job) {
+      useJobOutput(sseHandler, pipeline.id, job.id);
+    }
   }, [job?.id]);
 
   // Top-level loading state

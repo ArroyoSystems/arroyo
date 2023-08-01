@@ -1,6 +1,7 @@
 use crate::types::public::LogLevel;
 use crate::types::public::StopMode;
 use arroyo_datastream::Program;
+use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api;
 use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
@@ -127,14 +128,14 @@ impl From<StopMode> for StopType {
     }
 }
 
-impl Into<arroyo_rpc::grpc::api::StopType> for StopType {
-    fn into(self) -> arroyo_rpc::grpc::api::StopType {
+impl Into<api::StopType> for StopType {
+    fn into(self) -> api::StopType {
         match self {
-            StopType::None => arroyo_rpc::grpc::api::StopType::None,
-            StopType::Checkpoint => arroyo_rpc::grpc::api::StopType::Checkpoint,
-            StopType::Graceful => arroyo_rpc::grpc::api::StopType::Graceful,
-            StopType::Immediate => arroyo_rpc::grpc::api::StopType::Immediate,
-            StopType::Force => arroyo_rpc::grpc::api::StopType::Force,
+            StopType::None => api::StopType::None,
+            StopType::Checkpoint => api::StopType::Checkpoint,
+            StopType::Graceful => api::StopType::Graceful,
+            StopType::Immediate => api::StopType::Immediate,
+            StopType::Force => api::StopType::Force,
         }
     }
 }
@@ -244,4 +245,24 @@ pub struct Checkpoint {
 pub struct Collection<T> {
     pub data: Vec<T>,
     pub has_more: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputData {
+    pub operator_id: String,
+    pub timestamp: u64,
+    pub key: String,
+    pub value: String,
+}
+
+impl From<grpc::OutputData> for OutputData {
+    fn from(value: grpc::OutputData) -> Self {
+        OutputData {
+            operator_id: value.operator_id,
+            timestamp: value.timestamp,
+            key: value.key,
+            value: value.value,
+        }
+    }
 }

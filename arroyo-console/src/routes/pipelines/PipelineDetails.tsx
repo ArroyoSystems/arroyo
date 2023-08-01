@@ -24,19 +24,19 @@ import {
   useDisclosure,
 } from '@chakra-ui/react';
 import React, { useState } from 'react';
-import { GrpcOutputSubscription, OutputData } from '../../gen/api_pb';
 import 'reactflow/dist/style.css';
 import 'metrics-graphics/dist/mg.css';
 import { ApiClient } from '../../main';
-import { PipelineOutputs } from './PipelineOutputs';
 import { CodeEditor } from './SqlEditor';
 import PipelineConfigModal from './PipelineConfigModal';
 import {
   Job,
+  OutputData,
   PipelineNode,
   StopType,
   useJobCheckpoints,
   useJobMetrics,
+  useJobOutput,
   useOperatorErrors,
   usePipeline,
   usePipelineJobs,
@@ -49,6 +49,7 @@ import { PipelineGraphViewer } from './PipelineGraph';
 import PipelineNotFound from '../../components/PipelineNotFound';
 import { QuestionOutlineIcon } from '@chakra-ui/icons';
 import { formatError } from '../../lib/util';
+import { PipelineOutputs } from './PipelineOutputs';
 
 export function PipelineDetails({ client }: { client: ApiClient }) {
   const [activeOperator, setActiveOperator] = useState<string | undefined>(undefined);
@@ -86,26 +87,22 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
     return <Loading />;
   }
 
+  const sseHandler = (event: MessageEvent) => {
+    const parsed = JSON.parse(event.data) as OutputData;
+    outputs.push({ id: Number(event.lastEventId), data: parsed });
+    if (outputs.length > 20) {
+      outputs.shift();
+    }
+    setOutputs(outputs);
+  };
+
   const subscribe = async () => {
     if (subscribed) {
       return;
     }
 
     setSubscribed(true);
-
-    let row = 1;
-    for await (const res of (await client()).subscribeToOutput(
-      new GrpcOutputSubscription({
-        jobId: job?.id,
-      })
-    )) {
-      outputs.push({ id: row++, data: res });
-      if (outputs.length > 20) {
-        outputs.shift();
-      }
-
-      setOutputs(outputs);
-    }
+    useJobOutput(sseHandler, pipeline.id, job?.id);
   };
 
   async function updateJobState(stop: StopType) {

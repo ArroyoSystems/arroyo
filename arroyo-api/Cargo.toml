@@ -37,7 +37,7 @@ petgraph = {version = "0.6", features = ["serde-1"]}
 
 http = "0.2"
 tower-http = {version = "0.4", features = ["trace", "fs", "cors", "validate-request", "auth"]}
-axum = {version = "0.6.12", features = ["headers"]}
+axum = {version = "0.6.12", features = ["headers", "tokio"]}
 axum-extra = "0.7.4"
 thiserror = "1.0.40"
 utoipa = "3"
@@ -71,6 +71,7 @@ postgres-types = { version = "*", features = ["derive"] }
 tokio-postgres = { version = "*", features = ["with-serde_json-1", "with-time-0_3", "with-uuid-1"] }
 deadpool-postgres = { version = "0.10" }
 futures = "0.3"
+futures-util = "0.3.28"
 time = "0.3"
 cornucopia_async = { version = "0.4", features = ["with-serde_json-1"] }
 jwt-simple = "0.11.4"

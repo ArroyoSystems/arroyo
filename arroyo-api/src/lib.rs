@@ -1,39 +1,35 @@
-use crate::jobs::{__path_get_job_checkpoints, __path_get_job_errors, __path_get_jobs};
+use crate::jobs::{
+    __path_get_job_checkpoints, __path_get_job_errors, __path_get_job_output, __path_get_jobs,
+};
 use crate::pipelines::__path_get_pipelines;
 use crate::pipelines::__path_post_pipeline;
 use crate::pipelines::{
     __path_delete_pipeline, __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline,
     __path_validate_pipeline,
 };
-use crate::queries::api_queries;
 use crate::rest::__path_ping;
 use crate::rest_types::{
     Checkpoint, CheckpointCollection, Job, JobCollection, JobLogLevel, JobLogMessage,
-    JobLogMessageCollection, Pipeline, PipelineCollection, PipelineEdge, PipelineGraph,
+    JobLogMessageCollection, OutputData, Pipeline, PipelineCollection, PipelineEdge, PipelineGraph,
     PipelineNode, PipelinePatch, PipelinePost, StopType as StopTypeRest, Udf, UdfLanguage,
     ValidatePipelinePost,
 };
 use crate::rest_utils::ErrorResp;
 use arroyo_connectors::connectors;
 use arroyo_rpc::grpc::api::{
+    api_grpc_server::ApiGrpc, CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq,
+    ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp,
+    CreatePipelineReq, CreatePipelineResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq,
+    GetJobsResp, GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp,
+    JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq,
+    OperatorErrorsRes, OutputData as OutputDataProto, PipelineDef, PipelineGraphReq,
+    PipelineGraphResp, StopType, TestSourceMessage, UpdateJobReq, UpdateJobResp,
+};
+use arroyo_rpc::grpc::api::{
     CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
     DeleteConnectionTableReq, DeleteConnectionTableResp, DeleteJobReq, DeleteJobResp,
     GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp,
     PipelineProgram, TestSchemaReq, TestSchemaResp,
-};
-use arroyo_rpc::grpc::{
-    self,
-    api::{
-        api_grpc_server::ApiGrpc, CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq,
-        ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq,
-        CreateJobResp, CreatePipelineReq, CreatePipelineResp, GetConnectionsReq,
-        GetConnectionsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GrpcOutputSubscription,
-        JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq,
-        JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef,
-        PipelineGraphReq, PipelineGraphResp, StopType, TestSourceMessage, UpdateJobReq,
-        UpdateJobResp,
-    },
-    controller_grpc_client::ControllerGrpcClient,
 };
 use arroyo_server_common::log_event;
 use cornucopia_async::GenericClient;
@@ -45,9 +41,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 use time::OffsetDateTime;
 use tokio_postgres::error::SqlState;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 use utoipa::OpenApi;
 
 mod cloud;
@@ -520,83 +516,15 @@ impl ApiGrpc for ApiServer {
         }
     }
 
-    type SubscribeToOutputStream = ReceiverStream<Result<OutputData, Status>>;
+    type SubscribeToOutputStream = ReceiverStream<Result<OutputDataProto, Status>>;
 
     async fn subscribe_to_output(
         &self,
-        request: Request<GrpcOutputSubscription>,
+        _request: Request<GrpcOutputSubscription>,
     ) -> Result<Response<Self::SubscribeToOutputStream>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        let job_id = api_queries::get_pipeline_job()
-            .bind(
-                &self.client().await?,
-                &auth.organization_id,
-                &request.into_inner().job_id,
-            )
-            .one()
-            .await
-            .map_err(log_and_map)?
-            .id;
-
-        // validate that the job exists, the user has access, and the graph has a GrpcSink
-        let details = jobs::get_job_details(&job_id, &auth, &self.client().await?).await?;
-
-        if !details
-            .job_graph
-            .unwrap()
-            .nodes
-            .iter()
-            .any(|n| n.operator.contains("WebSink"))
-        {
-            // TODO: make this check more robust
-            return Err(Status::invalid_argument(format!(
-                "Job {} does not have a web sink",
-                job_id
-            )));
-        }
-
-        let (tx, rx) = tokio::sync::mpsc::channel(32);
-
-        let mut controller = ControllerGrpcClient::connect(self.controller_addr.clone())
-            .await
-            .map_err(log_and_map)?;
-
-        info!("connected to controller");
-
-        let mut stream = controller
-            .subscribe_to_output(Request::new(grpc::GrpcOutputSubscription {
-                job_id: job_id.clone(),
-            }))
-            .await
-            .map_err(log_and_map)?
-            .into_inner();
-
-        info!("subscribed to output");
-        tokio::spawn(async move {
-            let _controller = controller;
-            while let Some(d) = stream.next().await {
-                if d.as_ref().map(|t| t.done).unwrap_or(false) {
-                    info!("Stream done for {}", job_id);
-                    break;
-                }
-
-                let v = d.map(|d| OutputData {
-                    operator_id: d.operator_id,
-                    timestamp: d.timestamp,
-                    key: d.key,
-                    value: d.value,
-                });
-
-                if tx.send(v).await.is_err() {
-                    break;
-                }
-            }
-
-            info!("Closing watch stream for {}", job_id);
-        });
-
-        Ok(Response::new(ReceiverStream::new(rx)))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 }
 
@@ -615,7 +543,8 @@ impl ApiGrpc for ApiServer {
         get_jobs,
         get_pipeline_jobs,
         get_job_errors,
-        get_job_checkpoints
+        get_job_checkpoints,
+        get_job_output
     ),
     components(schemas(
         ValidatePipelinePost,
@@ -635,7 +564,8 @@ impl ApiGrpc for ApiServer {
         JobLogMessageCollection,
         JobLogLevel,
         Checkpoint,
-        CheckpointCollection
+        CheckpointCollection,
+        OutputData
     )),
     tags(
         (name = "pipelines", description = "Pipeline management endpoints"),
