@@ -20,8 +20,6 @@ mod embedded {
     embed_migrations!("../arroyo-api/migrations");
 }
 
-include!("../../arroyo-openapi/client/src/lib.rs");
-
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn run_service(name: String, args: &[&str], env: Vec<(String, String)>) -> Result<()> {
