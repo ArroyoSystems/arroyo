@@ -30,7 +30,6 @@ pub struct SqlSink {
 #[derive(Clone, Debug)]
 pub enum SinkUpdateType {
     Allow,
-    Disallow,
     Force,
 }
 

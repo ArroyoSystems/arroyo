@@ -22,6 +22,7 @@ use datafusion_expr::{
 };
 
 use crate::DEFAULT_IDLE_TIME;
+use crate::external::SinkUpdateType;
 use crate::{
     expressions::{Column, ColumnExpression, Expression, ExpressionContext},
     external::{ProcessingMode, SqlSink, SqlSource},
@@ -352,12 +353,18 @@ impl ConnectorTable {
             bail!("Virtual fields are not currently supported in sinks");
         }
 
+        let updating_type = if self.serialization_mode.is_updating() {
+            SinkUpdateType::Force
+        } else {
+            SinkUpdateType::Allow
+        };
+
         Ok(SqlOperator::Sink(
             self.name.clone(),
             SqlSink {
                 id: self.id,
                 struct_def: input.return_type(),
-                updating_type: crate::external::SinkUpdateType::Disallow,
+                updating_type,
                 operator: Operator::ConnectorSink(self.connector_op()),
             },
             Box::new(input),
