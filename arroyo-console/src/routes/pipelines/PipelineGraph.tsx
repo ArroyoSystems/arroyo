@@ -1,16 +1,15 @@
 import { Box, Text } from '@chakra-ui/react';
 import dagre from 'dagre';
-import { useMemo } from 'react';
 import ReactFlow, { Handle, Position, Background } from 'reactflow';
-import { JobNode, JobMetricsResp } from '../../gen/api_pb';
-import { getBackpressureColor, getOperatorBackpressure } from '../../lib/util';
-import { PipelineGraph } from '../../lib/data_fetching';
+import { getBackpressureColor, getCurrentMaxMetric } from '../../lib/util';
+import { OperatorMetricGroup, PipelineGraph, PipelineNode } from '../../lib/data_fetching';
+import { useMemo } from 'react';
 
 function PipelineGraphNode({
   data,
 }: {
   data: {
-    node: JobNode;
+    node: PipelineNode;
     setActiveOperator: (op: string) => void;
     isActive: boolean;
     operatorBackpressure: number;
@@ -42,18 +41,28 @@ function PipelineGraphNode({
 
 export function PipelineGraphViewer({
   graph,
-  metrics,
+  operatorMetricGroups,
   setActiveOperator,
   activeOperator,
 }: {
   graph: PipelineGraph;
-  metrics?: JobMetricsResp;
+  operatorMetricGroups?: OperatorMetricGroup[];
   setActiveOperator: (op: string) => void;
   activeOperator?: string;
 }) {
   const nodeTypes = useMemo(() => ({ pipelineNode: PipelineGraphNode }), []);
 
   const nodes = graph.nodes.map(node => {
+    let backpressure = 0;
+    if (operatorMetricGroups && operatorMetricGroups.length > 0) {
+      const operatorMetricGroup = operatorMetricGroups.find(o => o.operatorId == node.nodeId);
+      if (operatorMetricGroup) {
+        const metricGroups = operatorMetricGroup.metricGroups;
+        const backpressureMetrics = metricGroups.find(m => m.name == 'backpressure');
+        backpressure = backpressureMetrics ? getCurrentMaxMetric(backpressureMetrics) : 0;
+      }
+    }
+
     return {
       id: node.nodeId,
       type: 'pipelineNode',
@@ -62,7 +71,7 @@ export function PipelineGraphViewer({
         node: node,
         setActiveOperator: setActiveOperator,
         isActive: node.nodeId == activeOperator,
-        operatorBackpressure: getOperatorBackpressure(metrics, node.nodeId),
+        operatorBackpressure: backpressure,
       },
       position: {
         x: 0,

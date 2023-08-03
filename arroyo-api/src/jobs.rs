@@ -1,9 +1,7 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
-use arroyo_datastream::Program;
 use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::{
-    CheckpointDetailsResp, CheckpointOverview, CreateJobReq, JobDetailsResp, JobStatus,
-    PipelineProgram, StopType,
+    CheckpointDetailsResp, CheckpointOverview, CreateJobReq, JobStatus, StopType,
 };
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
@@ -14,7 +12,6 @@ use cornucopia_async::GenericClient;
 use deadpool_postgres::Transaction;
 use futures_util::stream::Stream;
 use http::StatusCode;
-use prost::Message;
 use std::convert::Infallible;
 use std::{collections::HashMap, time::Duration};
 use tokio_stream::wrappers::ReceiverStream;
@@ -191,62 +188,6 @@ pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option
     };
 
     (a.to_string(), s, in_progress)
-}
-
-pub(crate) async fn get_job_details(
-    job_id: &str,
-    auth: &AuthData,
-    client: &impl GenericClient,
-) -> Result<JobDetailsResp, Status> {
-    let res = api_queries::get_job_details()
-        .bind(client, &auth.organization_id, &job_id)
-        .opt()
-        .await
-        .map_err(log_and_map)?
-        .ok_or_else(|| Status::not_found(format!("There is no job with id '{}'", job_id)))?;
-
-    let mut program: Program = PipelineProgram::decode(&res.program[..])
-        .map_err(log_and_map)?
-        .try_into()
-        .map_err(log_and_map)?;
-
-    program.update_parallelism(
-        &res.parallelism_overrides
-            .as_object()
-            .unwrap()
-            .into_iter()
-            .map(|(k, v)| (k.clone(), v.as_u64().unwrap() as usize))
-            .collect(),
-    );
-
-    let state = res.state.unwrap_or_else(|| "Created".to_string());
-    let running_desired = res.stop == public::StopMode::none;
-
-    let (action_text, action, in_progress) = get_action(&state, &running_desired);
-
-    let status = JobStatus {
-        job_id: job_id.to_string(),
-        pipeline_name: res.pipeline_name,
-        running_desired,
-        state,
-        run_id: res.run_id.unwrap_or(0) as u64,
-        start_time: res.start_time.map(to_micros),
-        finish_time: res.finish_time.map(to_micros),
-        tasks: res.tasks.map(|t| t as u64),
-        definition: res.textual_repr,
-        pipeline_id: format!("{}", res.pipeline_id),
-        udfs: serde_json::from_value(res.udfs).map_err(log_and_map)?,
-        failure_message: res.failure_message,
-    };
-
-    Ok(JobDetailsResp {
-        job_status: Some(status),
-        job_graph: Some(program.as_job_graph()),
-
-        action: action.map(|action| action as i32),
-        action_text: action_text.to_string(),
-        in_progress,
-    })
 }
 
 pub(crate) async fn checkpoint_details(

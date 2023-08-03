@@ -74,6 +74,13 @@ export interface paths {
      */
     get: operations["get_job_errors"];
   };
+  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/operator_metric_groups": {
+    /**
+     * Get a job's metrics 
+     * @description Get a job's metrics
+     */
+    get: operations["get_operator_metric_groups"];
+  };
   "/v1/pipelines/{pipeline_id}/jobs/{job_id}/output": {
     /**
      * Subscribe to a job's output 
@@ -134,6 +141,26 @@ export interface components {
     };
     JobLogMessageCollection: {
       data: (components["schemas"]["JobLogMessage"])[];
+      hasMore: boolean;
+    };
+    Metric: {
+      /** Format: int64 */
+      time: number;
+      /** Format: double */
+      value: number;
+    };
+    MetricGroup: {
+      name: components["schemas"]["MetricNames"];
+      subtasks: (components["schemas"]["SubtaskMetrics"])[];
+    };
+    /** @enum {string} */
+    MetricNames: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure";
+    OperatorMetricGroup: {
+      metricGroups: (components["schemas"]["MetricGroup"])[];
+      operatorId: string;
+    };
+    OperatorMetricGroupCollection: {
+      data: (components["schemas"]["OperatorMetricGroup"])[];
       hasMore: boolean;
     };
     OutputData: {
@@ -197,6 +224,11 @@ export interface components {
     };
     /** @enum {string} */
     StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
+    SubtaskMetrics: {
+      /** Format: int32 */
+      idx: number;
+      metrics: (components["schemas"]["Metric"])[];
+    };
     Udf: {
       definition: string;
       language: components["schemas"]["UdfLanguage"];
@@ -414,6 +446,28 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["JobLogMessageCollection"];
+        };
+      };
+    };
+  };
+  /**
+   * Get a job's metrics 
+   * @description Get a job's metrics
+   */
+  get_operator_metric_groups: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        pipeline_id: string;
+        /** @description Job id */
+        job_id: string;
+      };
+    };
+    responses: {
+      /** @description Got metric groups */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OperatorMetricGroupCollection"];
         };
       };
     };

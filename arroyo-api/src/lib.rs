@@ -1,6 +1,7 @@
 use crate::jobs::{
     __path_get_job_checkpoints, __path_get_job_errors, __path_get_job_output, __path_get_jobs,
 };
+use crate::metrics::__path_get_operator_metric_groups;
 use crate::pipelines::__path_get_pipelines;
 use crate::pipelines::__path_post_pipeline;
 use crate::pipelines::{
@@ -10,9 +11,9 @@ use crate::pipelines::{
 use crate::rest::__path_ping;
 use crate::rest_types::{
     Checkpoint, CheckpointCollection, Job, JobCollection, JobLogLevel, JobLogMessage,
-    JobLogMessageCollection, OutputData, Pipeline, PipelineCollection, PipelineEdge, PipelineGraph,
-    PipelineNode, PipelinePatch, PipelinePost, StopType as StopTypeRest, Udf, UdfLanguage,
-    ValidatePipelinePost,
+    JobLogMessageCollection, Metric, MetricGroup, MetricNames, OperatorMetricGroup, OutputData,
+    Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
+    PipelinePost, StopType as StopTypeRest, SubtaskMetrics, Udf, UdfLanguage, ValidatePipelinePost,
 };
 use crate::rest_utils::ErrorResp;
 use arroyo_connectors::connectors;
@@ -441,12 +442,10 @@ impl ApiGrpc for ApiServer {
 
     async fn get_job_metrics(
         &self,
-        request: Request<JobMetricsReq>,
+        _request: Request<JobMetricsReq>,
     ) -> Result<Response<JobMetricsResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        Ok(Response::new(
-            metrics::get_metrics(request.into_inner().job_id, auth, &self.client().await?).await?,
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
         ))
     }
 
@@ -544,7 +543,8 @@ impl ApiGrpc for ApiServer {
         get_pipeline_jobs,
         get_job_errors,
         get_job_checkpoints,
-        get_job_output
+        get_job_output,
+        get_operator_metric_groups,
     ),
     components(schemas(
         ValidatePipelinePost,
@@ -565,7 +565,12 @@ impl ApiGrpc for ApiServer {
         JobLogLevel,
         Checkpoint,
         CheckpointCollection,
-        OutputData
+        OutputData,
+        MetricNames,
+        Metric,
+        SubtaskMetrics,
+        MetricGroup,
+        OperatorMetricGroup,
     )),
     tags(
         (name = "pipelines", description = "Pipeline management endpoints"),

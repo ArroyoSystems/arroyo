@@ -32,6 +32,7 @@ import {
   post,
   useConnectionTables,
   useJobOutput,
+  useJobMetrics,
   useOperatorErrors,
   usePipeline,
   usePipelineGraph,
@@ -62,6 +63,8 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     queryInputToCheck,
     udfsInputToCheck
   );
+  const { operatorMetricGroups } = useJobMetrics(pipelineId, job?.id);
+
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [options, setOptions] = useState<SqlOptions>({ parallelism: 4, checkpointMS: 5000 });
   const navigate = useNavigate();
@@ -340,7 +343,11 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
           }}
           overflow="auto"
         >
-          <PipelineGraphViewer graph={pipelineGraph} setActiveOperator={() => {}} />
+          <PipelineGraphViewer
+            graph={pipelineGraph}
+            operatorMetricGroups={operatorMetricGroups}
+            setActiveOperator={() => {}}
+          />
         </Box>
       </TabPanel>
     );

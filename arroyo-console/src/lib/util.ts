@@ -1,4 +1,4 @@
-import { JobMetricsResp, Metric } from '../gen/api_pb';
+import { Metric, MetricGroup } from './data_fetching';
 
 export function durationFormat(micros: number): string {
   const units = [
@@ -100,43 +100,33 @@ export function getBackpressureColor(backpressure: number): string {
   return colors[colors.length - 1];
 }
 
-export function getOperatorBackpressure(
-  metrics: JobMetricsResp | undefined,
-  operator: string
-): number {
-  if (!metrics) {
-    return 0;
-  }
+export function getCurrentMaxMetric(metricGroup: MetricGroup): number {
+  return metricGroup.subtasks
+    .map(s => s.metrics)
+    .filter(m => m.length)
+    .map(m =>
+      m.reduce((r: Metric, c: Metric) => {
+        if (c.time > r.time) {
+          return c;
+        } else {
+          return r;
+        }
+      }, m[0])
+    )
+    .map(m => m.value)
+    .reduce((max, curr) => Math.max(max, curr));
+}
 
-  // reduce the subtasks backpressure to an operator-level backpressure
-
-  const nodeMetrics = metrics.metrics[operator];
-
-  if (!nodeMetrics) {
-    return 0;
-  }
-
-  const backPressureMetrics = Object.entries(nodeMetrics.subtasks)
-    .map(kv => {
-      return kv[1].backpressure;
+export function transformMetricGroup(metric_group: MetricGroup) {
+  return metric_group.subtasks.map(s =>
+    s.metrics.map(m => {
+      return {
+        label: s.idx,
+        x: new Date(Number(m.time) / 1000),
+        y: m.value + m.value * Math.random() * 0.01,
+      };
     })
-    .filter(ml => ml.length);
-
-  if (!backPressureMetrics.length) {
-    return 0;
-  }
-
-  const recent = backPressureMetrics.map(m =>
-    m.reduce((r: Metric, c: Metric) => {
-      if (c.time > r.time) {
-        return c;
-      } else {
-        return r;
-      }
-    }, m[0])
   );
-
-  return recent.map(m => m.value).reduce((max, curr) => Math.max(max, curr));
 }
 
 export function formatDate(timestamp: bigint) {
