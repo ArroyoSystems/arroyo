@@ -30,13 +30,12 @@ import { ApiClient } from '../../main';
 import { CodeEditor } from './SqlEditor';
 import PipelineConfigModal from './PipelineConfigModal';
 import {
-  Job,
   OutputData,
   PipelineNode,
   StopType,
   useJobCheckpoints,
-  useJobMetrics,
   useJobOutput,
+  useJobMetrics,
   useOperatorErrors,
   usePipeline,
   usePipelineJobs,
@@ -65,14 +64,10 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
 
   const { pipeline, pipelineError, updatePipeline } = usePipeline(id, true);
   const { jobs, jobsError } = usePipelineJobs(id, true);
-  let job: Job | undefined;
-  if (jobs?.length) {
-    job = jobs[0];
-  }
-
-  const { metrics } = useJobMetrics(client, job?.id);
+  const job = jobs?.length ? jobs[0] : undefined;
   const { checkpoints } = useJobCheckpoints(id, job?.id);
   const { operatorErrors } = useOperatorErrors(id, job?.id);
+  const { operatorMetricGroups } = useJobMetrics(id, job?.id);
 
   if (pipelineError || jobsError) {
     return (
@@ -118,7 +113,7 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
   let operatorDetail = undefined;
   if (activeOperator) {
     operatorDetail = (
-      <OperatorDetail operator_id={activeOperator} graph={pipeline.graph} metrics={metrics} />
+      <OperatorDetail pipelineId={pipeline.id} jobId={job.id} operatorId={activeOperator} />
     );
   }
 
@@ -127,7 +122,7 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
       <Flex flex="1" height={'100%'}>
         <PipelineGraphViewer
           graph={pipeline.graph}
-          metrics={metrics}
+          operatorMetricGroups={operatorMetricGroups}
           setActiveOperator={setActiveOperator}
           activeOperator={activeOperator}
         />

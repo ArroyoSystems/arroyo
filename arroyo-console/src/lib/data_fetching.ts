@@ -3,7 +3,6 @@ import {
   GetConnectionsReq,
   GetConnectionTablesReq,
   GetConnectorsReq,
-  JobMetricsReq,
 } from '../gen/api_pb';
 import { ApiClient } from '../main';
 import useSWR, { mutate as globalMutate } from 'swr';
@@ -18,6 +17,9 @@ export type PipelineGraph = schemas['PipelineGraph'];
 export type JobLogMessage = schemas['JobLogMessage'];
 export type PipelineNode = schemas['PipelineNode'];
 export type OutputData = schemas['OutputData'];
+export type MetricGroup = schemas['MetricGroup'];
+export type Metric = schemas['Metric'];
+export type OperatorMetricGroup = schemas['OperatorMetricGroup'];
 
 const BASE_URL = 'http://localhost:8000/api';
 export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
@@ -45,8 +47,8 @@ const connectionTablesKey = () => {
   return { key: 'ConnectionTables' };
 };
 
-const jobMetricsKey = (jobId?: string) => {
-  return jobId ? { key: 'JobMetrics', jobId } : null;
+const jobMetricsKey = (pipelineId?: string, jobId?: string) => {
+  return pipelineId && jobId ? { key: 'JobMetrics', pipelineId, jobId } : null;
 };
 
 const jobCheckpointsKey = (pipelineId?: string, jobId?: string) => {
@@ -170,29 +172,33 @@ export const useJobs = () => {
   };
 };
 
-// JobMetricsReq
+// Job Metrics
 
-const jobMetricsFetcher = (client: ApiClient) => {
-  return async (params: { jobId: string }) => {
-    return await (
-      await (
-        await client
-      )()
-    ).getJobMetrics(
-      new JobMetricsReq({
-        jobId: params.jobId,
-      })
+const jobMetricsFetcher = () => {
+  return async (params: { key: string; pipelineId: string; jobId: string }) => {
+    const { data, error } = await get(
+      '/v1/pipelines/{pipeline_id}/jobs/{job_id}/operator_metric_groups',
+      {
+        params: {
+          path: {
+            pipeline_id: params.pipelineId,
+            job_id: params.jobId,
+          },
+        },
+      }
     );
+
+    return processResponse(data, error);
   };
 };
 
-export const useJobMetrics = (client: ApiClient, jobId?: string) => {
-  const { data } = useSWR(jobMetricsKey(jobId), jobMetricsFetcher(client), {
-    refreshInterval: 5000,
+export const useJobMetrics = (pipelineId?: string, jobId?: string) => {
+  const { data } = useSWR(jobMetricsKey(pipelineId, jobId), jobMetricsFetcher(), {
+    refreshInterval: 1000,
   });
 
   return {
-    metrics: data,
+    operatorMetricGroups: data?.data as OperatorMetricGroup[],
   };
 };
 

@@ -1,22 +1,25 @@
+use axum::extract::{Path, State};
+use axum::Json;
 use base64::engine::general_purpose;
 use base64::Engine;
-use cornucopia_async::GenericClient;
 use std::str::FromStr;
 use std::{collections::HashMap, env, time::SystemTime};
 
-use arroyo_rpc::grpc::api::{job_metrics_resp::OperatorMetrics, JobMetricsResp};
-use arroyo_rpc::grpc::api::{Metric, SubtaskMetrics};
+use crate::pipelines::query_job_by_pub_id;
+use crate::rest::AppState;
+use crate::rest_types::{
+    Metric, MetricGroup, MetricNames, OperatorMetricGroup, OperatorMetricGroupCollection,
+    SubtaskMetrics,
+};
+use crate::rest_utils::{authenticate, client, BearerAuth, ErrorResp};
 use arroyo_types::{
     to_millis, API_METRICS_RATE_ENV, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
     TX_QUEUE_REM, TX_QUEUE_SIZE,
 };
+use http::StatusCode;
 use http::{header::AUTHORIZATION, HeaderMap, HeaderValue};
 use once_cell::sync::Lazy;
 use prometheus_http_query::Client;
-use tonic::Status;
-
-use crate::queries::api_queries;
-use crate::{jobs, log_and_map, AuthData};
 
 const METRICS_GRANULARITY_SECS: f64 = 5.0;
 
@@ -41,41 +44,41 @@ static METRICS_CLIENT: Lazy<Client> = Lazy::new(|| {
     prometheus_http_query::Client::from(client, &prometheus_endpoint).unwrap()
 });
 
-pub(crate) async fn get_metrics(
-    job_pub_id: String,
-    auth: AuthData,
-    client: &impl GenericClient,
-) -> Result<JobMetricsResp, Status> {
-    let job_id = api_queries::get_pipeline_job()
-        .bind(client, &auth.organization_id, &job_pub_id)
-        .one()
-        .await
-        .map_err(log_and_map)?
-        .id;
+/// Get a job's metrics
+#[utoipa::path(
+    get,
+    path = "/v1/pipelines/{pipeline_id}/jobs/{job_id}/operator_metric_groups",
+    tag = "metrics",
+    params(
+        ("pipeline_id" = String, Path, description = "Pipeline id"),
+        ("job_id" = String, Path, description = "Job id"),
+    ),
+    responses(
+        (status = 200, description = "Got metric groups", body = OperatorMetricGroupCollection),
+    ),
+)]
+pub async fn get_operator_metric_groups(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
+) -> Result<Json<OperatorMetricGroupCollection>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    // validate that the job exists and user can access it
-    let job_details = jobs::get_job_details(&job_id, &auth, client).await?;
-
+    let job = query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
     let rate = env::var(API_METRICS_RATE_ENV).unwrap_or_else(|_| "15s".to_string());
+    let end = (to_millis(SystemTime::now()) / 1000) as i64;
+    let start = end - 5 * 60;
 
-    #[derive(Copy, Clone)]
-    enum QueryMetrics {
-        BytesRecv,
-        BytesSent,
-        MessagesRecv,
-        MessagesSent,
-        Backpressure,
-    }
-
-    impl QueryMetrics {
-        fn simple_query(&self, metric: &str, job_id: &str, run_id: u64, rate: &str) -> String {
+    impl MetricNames {
+        fn simple_query(&self, metric: &str, job_id: &str, run_id: &u64, rate: &str) -> String {
             format!(
                 "rate({}{{job_id=\"{}\",run_id=\"{}\"}}[{}])",
                 metric, job_id, run_id, rate
             )
         }
 
-        fn backpressure_query(&self, job_id: &str, run_id: u64) -> String {
+        fn backpressure_query(&self, job_id: &str, run_id: &u64) -> String {
             let tx_queue_size: String = format!(
                 "{}{{job_id=\"{}\",run_id=\"{}\"}}",
                 TX_QUEUE_SIZE, job_id, run_id
@@ -89,27 +92,21 @@ pub(crate) async fn get_metrics(
             format!("1 - (({} + 1) / ({} + 1))", tx_queue_rem, tx_queue_size)
         }
 
-        fn get_query(&self, job_id: &str, run_id: u64, rate: &str) -> String {
+        fn get_query(&self, job_id: &str, run_id: &u64, rate: &str) -> String {
             match self {
-                BytesRecv => self.simple_query(BYTES_RECV, job_id, run_id, rate),
-                BytesSent => self.simple_query(BYTES_SENT, job_id, run_id, rate),
-                MessagesRecv => self.simple_query(MESSAGES_RECV, job_id, run_id, rate),
-                MessagesSent => self.simple_query(MESSAGES_SENT, job_id, run_id, rate),
-                Backpressure => self.backpressure_query(job_id, run_id),
+                MetricNames::BytesRecv => self.simple_query(BYTES_RECV, job_id, run_id, rate),
+                MetricNames::BytesSent => self.simple_query(BYTES_SENT, job_id, run_id, rate),
+                MetricNames::MessagesRecv => self.simple_query(MESSAGES_RECV, job_id, run_id, rate),
+                MetricNames::MessagesSent => self.simple_query(MESSAGES_SENT, job_id, run_id, rate),
+                MetricNames::Backpressure => self.backpressure_query(job_id, run_id),
             }
         }
     }
 
-    use QueryMetrics::*;
-
-    let end = (to_millis(SystemTime::now()) / 1000) as i64;
-    let start = end - 5 * 60;
-    let run_id = job_details.job_status.unwrap().run_id;
-
     let result = tokio::try_join!(
         METRICS_CLIENT
             .query_range(
-                BytesRecv.get_query(&job_id, run_id, &rate),
+                MetricNames::BytesRecv.get_query(&job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -117,7 +114,7 @@ pub(crate) async fn get_metrics(
             .get(),
         METRICS_CLIENT
             .query_range(
-                BytesSent.get_query(&job_id, run_id, &rate),
+                MetricNames::BytesSent.get_query(&job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -125,7 +122,7 @@ pub(crate) async fn get_metrics(
             .get(),
         METRICS_CLIENT
             .query_range(
-                MessagesRecv.get_query(&job_id, run_id, &rate),
+                MetricNames::MessagesRecv.get_query(&job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -133,7 +130,7 @@ pub(crate) async fn get_metrics(
             .get(),
         METRICS_CLIENT
             .query_range(
-                MessagesSent.get_query(&job_id, run_id, &rate),
+                MetricNames::MessagesSent.get_query(&job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -141,7 +138,7 @@ pub(crate) async fn get_metrics(
             .get(),
         METRICS_CLIENT
             .query_range(
-                Backpressure.get_query(&job_id, run_id, &rate),
+                MetricNames::Backpressure.get_query(&job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -149,24 +146,30 @@ pub(crate) async fn get_metrics(
             .get(),
     );
 
+    let mut collection = OperatorMetricGroupCollection {
+        data: vec![],
+        has_more: false,
+    };
+
     match result {
         Ok((r1, r2, r3, r4, r5)) => {
             let mut metrics = HashMap::new();
 
-            for (q, r) in [
-                (BytesRecv, r1),
-                (BytesSent, r2),
-                (MessagesRecv, r3),
-                (MessagesSent, r4),
-                (Backpressure, r5),
+            for (metric_name, query_result) in [
+                (MetricNames::BytesRecv, r1),
+                (MetricNames::BytesSent, r2),
+                (MetricNames::MessagesRecv, r3),
+                (MetricNames::MessagesSent, r4),
+                (MetricNames::Backpressure, r5),
             ] {
-                for v in r.data().as_matrix().unwrap() {
+                // for each metric query
+
+                for v in query_result.data().as_matrix().unwrap() {
+                    // for each operator/subtask pair
+
                     let operator_id = v.metric().get("operator_id").unwrap().clone();
                     let subtask_idx =
                         u32::from_str(v.metric().get("subtask_idx").unwrap()).unwrap();
-                    let op = metrics.entry(operator_id).or_insert(OperatorMetrics {
-                        subtasks: HashMap::new(),
-                    });
 
                     let data = v
                         .samples()
@@ -177,33 +180,45 @@ pub(crate) async fn get_metrics(
                         })
                         .collect();
 
-                    let entry = op.subtasks.entry(subtask_idx).or_insert(SubtaskMetrics {
-                        bytes_recv: vec![],
-                        bytes_sent: vec![],
-                        messages_recv: vec![],
-                        messages_sent: vec![],
-                        backpressure: vec![],
-                    });
-
-                    match q {
-                        BytesRecv => entry.bytes_recv = data,
-                        BytesSent => entry.bytes_sent = data,
-                        MessagesRecv => entry.messages_recv = data,
-                        MessagesSent => entry.messages_sent = data,
-                        Backpressure => entry.backpressure = data,
-                    };
+                    metrics
+                        .entry(operator_id)
+                        .or_insert(HashMap::new())
+                        .entry(metric_name.clone())
+                        .or_insert(vec![])
+                        .push(SubtaskMetrics {
+                            idx: subtask_idx,
+                            metrics: data,
+                        });
                 }
             }
-            Ok(JobMetricsResp {
-                job_id,
-                start_time: start as u64 * 1000,
-                end_time: end as u64 * 1000,
-                metrics,
-            })
+
+            for (operator_id, metric_groups) in metrics.iter_mut() {
+                let mut o = OperatorMetricGroup {
+                    operator_id: operator_id.clone(),
+                    metric_groups: vec![],
+                };
+
+                for (metric_name, subtask_metrics) in metric_groups.iter_mut() {
+                    let m = MetricGroup {
+                        name: metric_name.clone(),
+                        subtasks: subtask_metrics.clone(),
+                    };
+
+                    if !m.subtasks.is_empty() {
+                        o.metric_groups.push(m);
+                    }
+                }
+
+                if !o.metric_groups.is_empty() {
+                    collection.data.push(o);
+                }
+            }
+
+            Ok(Json(collection))
         }
-        Err(err) => Err(Status::internal(format!(
-            "Failed to query prometheus: {}",
-            err
-        ))),
+        Err(_) => Err(ErrorResp {
+            status_code: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "Failed to query Prometheus".to_string(),
+        }),
     }
 }

@@ -18,6 +18,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::jobs::{get_job_checkpoints, get_job_errors, get_job_output, get_jobs};
+use crate::metrics::get_operator_metric_groups;
 use crate::pipelines::{
     delete_pipeline, get_pipeline, get_pipeline_jobs, get_pipelines, patch_pipeline, post_pipeline,
     validate_pipeline,
@@ -87,7 +88,11 @@ pub fn create_rest_app(server: ApiServer, pool: Pool) -> Router {
         .route("/", get(get_pipeline_jobs))
         .route("/:job_id/errors", get(get_job_errors))
         .route("/:job_id/checkpoints", get(get_job_checkpoints))
-        .route("/:job_id/output", get(get_job_output));
+        .route("/:job_id/output", get(get_job_output))
+        .route(
+            "/:job_id/operator_metric_groups",
+            get(get_operator_metric_groups),
+        );
 
     let api_routes = Router::new()
         .route("/ping", get(ping))
