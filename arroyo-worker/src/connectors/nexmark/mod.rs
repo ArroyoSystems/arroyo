@@ -19,8 +19,6 @@ use tracing::debug;
 use tracing::{info, log::warn};
 use typify::import_types;
 
-use super::OperatorConfig;
-
 import_types!(schema = "../connector-schemas/nexmark/table.json");
 
 #[cfg(test)]

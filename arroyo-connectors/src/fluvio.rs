@@ -3,12 +3,12 @@ use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, TestSourceMessage},
 };
+use arroyo_types::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
 use crate::{
-    pull_opt, serialization_mode, Connection, ConnectionType, Connector, EmptyConfig,
-    OperatorConfig,
+    pull_opt, format, Connection, ConnectionType, Connector, EmptyConfig,
 };
 
 pub struct FluvioConnector {}
@@ -141,7 +141,7 @@ impl Connector for FluvioConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
+            format: Some(format(schema.as_ref().unwrap())),
         };
 
         Ok(Connection {

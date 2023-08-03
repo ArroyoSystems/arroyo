@@ -1,4 +1,3 @@
-use crate::connectors::OperatorConfig;
 use crate::engine::{Context, StreamNode};
 use anyhow::Result;
 use arroyo_macro::process_fn;

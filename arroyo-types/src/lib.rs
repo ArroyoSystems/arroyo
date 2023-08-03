@@ -1,8 +1,10 @@
 use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
 use bincode::{config, Decode, Encode};
+use formats::Format;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Debug;
@@ -10,6 +12,8 @@ use std::hash::Hash;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+pub mod formats;
 
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
 pub struct Window {
@@ -249,6 +253,35 @@ pub struct Record<K: Key, T: Data> {
     pub key: Option<K>,
     pub value: T,
 }
+
+pub struct UserError {
+    pub name: String,
+    pub details: String,
+}
+
+impl UserError {
+    pub fn new(name: impl Into<String>, details: impl Into<String>) -> UserError {
+        UserError {
+            name: name.into(),
+            details: details.into(),
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RateLimit {
+    pub messages_per_second: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OperatorConfig {
+    pub connection: Value,
+    pub table: Value,
+    pub format: Option<Format>,
+    pub rate_limit: Option<RateLimit>,
+}
+
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Serialize, Deserialize)]
 pub enum UpdatingData<T: Data> {

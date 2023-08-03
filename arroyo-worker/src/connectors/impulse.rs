@@ -13,8 +13,6 @@ use std::time::{Duration, SystemTime};
 use tracing::{debug, info};
 use typify::import_types;
 
-use super::OperatorConfig;
-
 import_types!(schema = "../connector-schemas/impulse/table.json");
 
 #[derive(Encode, Decode, Debug, Copy, Clone, Eq, PartialEq)]

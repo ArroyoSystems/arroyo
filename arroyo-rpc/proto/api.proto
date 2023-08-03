@@ -158,13 +158,6 @@ message Operator {
   }
 }
 
-enum SerializationMode {
-  JSON = 0;
-  JSON_SCHEMA_REGISTRY = 1;
-  RAW = 2;
-  PARQUET = 3;
-}
-
 message WasmUdfs {
   string name = 1;
   repeated WasmFunction wasm_functions = 2;
@@ -673,6 +666,7 @@ enum Format {
 
 message FormatOptions {
   bool confluent_schema_registry = 1;
+  bool include_schema = 2;
 }
 
 message ConnectionSchema {

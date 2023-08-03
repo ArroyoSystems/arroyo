@@ -2,8 +2,9 @@ use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, Format, FormatOptions, TestSourceMessage},
 };
+use arroyo_types::OperatorConfig;
 
-use crate::{Connection, ConnectionType, Connector, EmptyConfig, OperatorConfig};
+use crate::{Connection, ConnectionType, Connector, EmptyConfig};
 
 pub struct BlackholeConnector {}
 
@@ -91,7 +92,7 @@ impl Connector for BlackholeConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: None,
+            format: None,
         };
 
         Ok(Connection {

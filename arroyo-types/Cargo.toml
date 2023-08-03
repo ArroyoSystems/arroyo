@@ -6,5 +6,6 @@ edition = "2021"
 [dependencies]
 bincode = "2.0.0-rc.3"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
 arrow = { workspace = true }
 arrow-array = { workspace = true }

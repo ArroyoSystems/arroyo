@@ -5,7 +5,7 @@ use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, TestSourceMessage},
 };
-use arroyo_types::string_to_map;
+use arroyo_types::{string_to_map, OperatorConfig};
 use eventsource_client::Client;
 use futures::StreamExt;
 use tokio::sync::mpsc::Sender;
@@ -15,7 +15,7 @@ use typify::import_types;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    pull_opt, serialization_mode, Connection, ConnectionType, EmptyConfig, OperatorConfig,
+    pull_opt, format, Connection, ConnectionType, EmptyConfig,
 };
 
 use super::Connector;
@@ -91,7 +91,7 @@ impl Connector for SSEConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
+            format: Some(format(schema.as_ref().unwrap())),
         };
 
         Ok(Connection {

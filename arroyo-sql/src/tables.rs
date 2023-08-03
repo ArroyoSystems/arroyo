@@ -3,8 +3,8 @@ use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
-use arroyo_connectors::{connector_for_type, serialization_mode, Connection, ConnectionType};
-use arroyo_datastream::{ConnectorOp, Operator, SerializationMode};
+use arroyo_connectors::{connector_for_type, format, Connection, ConnectionType};
+use arroyo_datastream::{ConnectorOp, Operator};
 use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, Format, FormatOptions, SourceField},
@@ -110,7 +110,7 @@ impl From<Connection> for ConnectorTable {
             operator: value.operator,
             config: value.config,
             description: value.description,
-            serialization_mode: serialization_mode(&value.schema).into(),
+            serialization_mode: format(&value.schema).into(),
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,

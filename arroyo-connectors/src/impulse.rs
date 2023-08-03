@@ -3,12 +3,13 @@ use arroyo_rpc::grpc::{
     self,
     api::{source_field_type, ConnectionSchema, TestSourceMessage},
 };
+use arroyo_types::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use typify::import_types;
 
 use crate::{
-    pull_opt, source_field, Connection, ConnectionType, Connector, EmptyConfig, OperatorConfig,
+    pull_opt, source_field, Connection, ConnectionType, Connector, EmptyConfig,
 };
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/impulse/table.json");
@@ -159,7 +160,7 @@ impl Connector for ImpulseConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: None,
+            format: None,
         };
 
         Ok(Connection {

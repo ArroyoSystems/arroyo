@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use arroyo_datastream::SerializationMode;
 use arroyo_rpc::{
     grpc::{
         self,
@@ -12,6 +11,7 @@ use arroyo_rpc::{
     },
     primitive_to_sql,
 };
+use arroyo_types::formats::{Format, JsonFormat, ParquetFormat};
 use blackhole::BlackholeConnector;
 use fluvio::FluvioConnector;
 use impulse::ImpulseConnector;
@@ -20,7 +20,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sse::SSEConnector;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
-use typify::import_types;
 use websocket::WebsocketConnector;
 
 use self::kafka::KafkaConnector;
@@ -33,8 +32,6 @@ pub mod kafka;
 pub mod nexmark;
 pub mod sse;
 pub mod websocket;
-
-import_types!(schema = "../connector-schemas/common.json",);
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
@@ -264,49 +261,45 @@ pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
     connectors().remove(t)
 }
 
-pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializationMode {
-    let confluent = schema
+pub fn format(schema: &ConnectionSchema) -> Format {
+    let confluent_schema_registry = schema
         .format_options
         .as_ref()
         .filter(|t| t.confluent_schema_registry)
         .is_some();
+    let include_schema = schema
+        .format_options
+        .as_ref()
+        .filter(|t| t.include_schema)
+        .is_some();
+
     match &schema.format() {
-        grpc::api::Format::JsonFormat => {
-            if confluent {
-                OperatorConfigSerializationMode::JsonSchemaRegistry
-            } else if matches!(schema.definition, Some(Definition::RawSchema { .. })) {
-                OperatorConfigSerializationMode::RawJson
-            } else {
-                OperatorConfigSerializationMode::Json
-            }
+        grpc::api::Format::JsonFormat | grpc::api::Format::DebeziumJsonFormat => {
+            Format::Json(
+                JsonFormat {
+                    confluent_schema_registry,
+                    include_schema,
+                    debezium: matches!(schema.format(), grpc::api::Format::DebeziumJsonFormat),
+                    unstructured: matches!(schema.definition, Some(Definition::RawSchema { .. })),
+                }
+            )
+        }
+        grpc::api::Format::RawStringFormat => {
+            Format::Json(JsonFormat {
+                confluent_schema_registry: false,
+                include_schema,
+                debezium: false,
+                unstructured: true,
+            })
+        }
+        grpc::api::Format::ParquetFormat => {
+            Format::Parquet(ParquetFormat{})
         }
         grpc::api::Format::ProtobufFormat => todo!(),
         grpc::api::Format::AvroFormat => todo!(),
-        grpc::api::Format::RawStringFormat => {
-            if confluent {
-                todo!("support raw json schemas with confluent schema registry decoding")
-            } else {
-                OperatorConfigSerializationMode::RawJson
-            }
-        }
-        grpc::api::Format::DebeziumJsonFormat => OperatorConfigSerializationMode::DebeziumJson,
-        grpc::api::Format::ParquetFormat => OperatorConfigSerializationMode::Parquet,
     }
 }
 
-impl From<OperatorConfigSerializationMode> for SerializationMode {
-    fn from(value: OperatorConfigSerializationMode) -> Self {
-        match value {
-            OperatorConfigSerializationMode::Json => SerializationMode::Json,
-            OperatorConfigSerializationMode::JsonSchemaRegistry => {
-                SerializationMode::JsonSchemaRegistry
-            }
-            OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
-            OperatorConfigSerializationMode::DebeziumJson => SerializationMode::DebeziumJson,
-            OperatorConfigSerializationMode::Parquet => SerializationMode::Parquet,
-        }
-    }
-}
 
 pub(crate) fn source_field(name: &str, field_type: source_field_type::Type) -> SourceField {
     SourceField {

@@ -279,70 +279,7 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-#[derive(Clone, Copy, Encode, Debug, Decode, Serialize, Deserialize, PartialEq, Eq)]
-pub enum SerializationMode {
-    Json,
-    // https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#wire-format
-    JsonSchemaRegistry,
-    RawJson,
-    DebeziumJson,
-    Parquet,
-}
-impl SerializationMode {
-    pub fn from_has_registry_flag(has_registry: bool) -> Self {
-        if has_registry {
-            Self::JsonSchemaRegistry
-        } else {
-            Self::Json
-        }
-    }
-    pub fn from_config_value(config_value: Option<&str>) -> Self {
-        match config_value {
-            Some("json") => Self::Json,
-            Some("json_schema_registry") => Self::JsonSchemaRegistry,
-            Some("raw_json") => Self::RawJson,
-            Some("debezium_json") => Self::DebeziumJson,
-            _ => Self::Json,
-        }
-    }
 
-    pub fn is_updating(&self) -> bool {
-        matches!(self, Self::DebeziumJson)
-    }
-}
-
-impl ToTokens for SerializationMode {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let serialization_mode = match self {
-            SerializationMode::Json => {
-                quote::quote!(arroyo_worker::operators::SerializationMode::Json)
-            }
-            SerializationMode::JsonSchemaRegistry => {
-                quote::quote!(arroyo_worker::operators::SerializationMode::JsonSchemaRegistry)
-            }
-            SerializationMode::RawJson => {
-                quote::quote!(arroyo_worker::operators::SerializationMode::RawJson)
-            }
-            SerializationMode::DebeziumJson => {
-                quote::quote!(arroyo_worker::operators::SerializationMode::Json)
-            }
-            SerializationMode::Parquet => unimplemented!(),
-        };
-
-        tokens.append_all(serialization_mode);
-    }
-}
-
-impl From<GrpcApi::SerializationMode> for SerializationMode {
-    fn from(mode: GrpcApi::SerializationMode) -> Self {
-        match mode {
-            GrpcApi::SerializationMode::Json => Self::Json,
-            GrpcApi::SerializationMode::JsonSchemaRegistry => Self::JsonSchemaRegistry,
-            GrpcApi::SerializationMode::Raw => Self::RawJson,
-            GrpcApi::SerializationMode::Parquet => Self::Parquet,
-        }
-    }
-}
 
 #[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
 pub struct ConnectorOp {
@@ -2107,17 +2044,6 @@ impl From<Operator> for GrpcApi::operator::Operator {
     }
 }
 
-impl From<SerializationMode> for GrpcApi::SerializationMode {
-    fn from(value: SerializationMode) -> Self {
-        match value {
-            SerializationMode::Json => GrpcApi::SerializationMode::Json,
-            SerializationMode::JsonSchemaRegistry => GrpcApi::SerializationMode::JsonSchemaRegistry,
-            SerializationMode::RawJson => GrpcApi::SerializationMode::Raw,
-            SerializationMode::DebeziumJson => GrpcApi::SerializationMode::Json,
-            SerializationMode::Parquet => GrpcApi::SerializationMode::Parquet,
-        }
-    }
-}
 
 impl From<WasmUDF> for WasmFunction {
     fn from(udf: WasmUDF) -> Self {

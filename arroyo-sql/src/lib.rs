@@ -6,7 +6,8 @@ use arrow_schema::TimeUnit;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaConnector, KafkaTable};
 use arroyo_connectors::{Connection, Connector};
 use arroyo_datastream::Program;
-use arroyo_rpc::grpc::api::{ConnectionSchema, Format, FormatOptions};
+use arroyo_rpc::grpc::api::{ConnectionSchema, FormatOptions};
+use arroyo_types::formats::{Format, JsonFormat};
 use datafusion::physical_plan::functions::make_scalar_function;
 
 mod expressions;
@@ -342,9 +343,12 @@ pub fn parse_and_get_program_sync(
             config: "{}".to_string(),
             description: "WebSink".to_string(),
             serialization_mode: if insert.is_updating() {
-                arroyo_datastream::SerializationMode::DebeziumJson
+                Format::Json(JsonFormat {
+                    debezium: true,
+                    ..Default::default()
+                })
             } else {
-                arroyo_datastream::SerializationMode::Json
+                Format::Json(JsonFormat::default())
             },
             event_time_field: None,
             watermark_field: None,
@@ -515,7 +519,7 @@ pub fn get_test_expression(
 ) -> syn::ItemFn {
     let struct_def = test_struct_def();
     let schema = ConnectionSchema {
-        format: Some(Format::JsonFormat as i32),
+        format: Some(arroyo_rpc::grpc::api::Format::JsonFormat as i32),
         format_options: Some(FormatOptions::default()),
         struct_name: struct_def.name.clone(),
         fields: struct_def

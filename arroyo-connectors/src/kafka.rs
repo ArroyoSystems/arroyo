@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail};
+use arroyo_types::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
@@ -17,9 +18,9 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
 
-use crate::{pull_opt, serialization_mode, Connection, ConnectionType};
+use crate::{pull_opt, format, Connection, ConnectionType};
 
-use super::{Connector, OperatorConfig};
+use super::{Connector};
 
 const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/kafka/connection.json");
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/kafka/table.json");
@@ -84,7 +85,7 @@ impl Connector for KafkaConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
+            format: Some(format(schema.as_ref().unwrap())),
         };
 
         Ok(Connection {

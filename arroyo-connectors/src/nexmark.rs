@@ -3,12 +3,12 @@ use arroyo_rpc::grpc::{
     self,
     api::{source_field_type, ConnectionSchema, StructType, TestSourceMessage},
 };
+use arroyo_types::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
 use crate::{
     nullable_field, source_field, Connection, ConnectionType, Connector, EmptyConfig,
-    OperatorConfig,
 };
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/nexmark/table.json");
@@ -183,7 +183,7 @@ impl Connector for NexmarkConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: None,
+            format: None,
         };
 
         Ok(Connection {

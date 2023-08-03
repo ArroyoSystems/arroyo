@@ -9,7 +9,7 @@ use arroyo_rpc::{
     ControlMessage,
 };
 use arroyo_state::tables::GlobalKeyedState;
-use arroyo_types::{Data, Message, Record, Watermark};
+use arroyo_types::{Data, Message, Record, Watermark, OperatorConfig, UserError, formats::Format};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -21,11 +21,8 @@ use typify::import_types;
 
 use crate::{
     engine::{Context, StreamNode},
-    operators::{SerializationMode, UserError},
     SourceFinishType,
 };
-
-use super::{OperatorConfig, OperatorConfigSerializationMode};
 
 import_types!(schema = "../connector-schemas/websocket/table.json");
 
@@ -40,7 +37,7 @@ where
 {
     url: String,
     subscription_message: Option<String>,
-    serialization_mode: SerializationMode,
+    format: Format,
     state: WebsocketSourceState,
     _t: PhantomData<(K, T)>,
 }
@@ -60,17 +57,7 @@ where
         Self {
             url: table.endpoint,
             subscription_message: table.subscription_message.map(|s| s.into()),
-            serialization_mode: match config.serialization_mode.unwrap() {
-                OperatorConfigSerializationMode::Json
-                | OperatorConfigSerializationMode::DebeziumJson => SerializationMode::Json,
-                OperatorConfigSerializationMode::JsonSchemaRegistry => {
-                    SerializationMode::JsonSchemaRegistry
-                }
-                OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
-                OperatorConfigSerializationMode::Parquet => {
-                    unimplemented!("parquet out of websocket source doesn't make sense")
-                }
-            },
+            format: config.format.expect("WebsocketSource requires a format"),
             state: WebsocketSourceState::default(),
             _t: PhantomData,
         }
@@ -169,10 +156,10 @@ where
                             Some(Ok(msg)) => {
                                 let data = match msg {
                                     tungstenite::Message::Text(t) => {
-                                        self.serialization_mode.deserialize_str(&t).map(|t| Some(t))
+                                        self.format.deserialize_slice(&t.as_bytes()).map(|t| Some(t))
                                     },
                                     tungstenite::Message::Binary(bs) => {
-                                        self.serialization_mode.deserialize_slice(&bs).map(|t| Some(t))
+                                        self.format.deserialize_slice(&bs).map(|t| Some(t))
                                     },
                                     tungstenite::Message::Ping(d) => {
                                         tx.send(tungstenite::Message::Pong(d)).await

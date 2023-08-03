@@ -13,8 +13,6 @@ use arroyo_types::{
     UpdatingData, Watermark, Window,
 };
 use bincode::{config, Decode, Encode};
-use serde::de::DeserializeOwned;
-use serde_json::json;
 use std::time::{Duration, SystemTime};
 use tracing::{debug, info};
 use wasmtime::{
@@ -32,86 +30,6 @@ pub mod tumbling_top_n_window;
 pub mod updating_aggregate;
 pub mod windows;
 
-pub struct UserError {
-    pub name: String,
-    pub details: String,
-}
-
-impl UserError {
-    pub fn new(name: impl Into<String>, details: impl Into<String>) -> UserError {
-        UserError {
-            name: name.into(),
-            details: details.into(),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum SerializationMode {
-    Json,
-    // https://docs.confluent.io/platform/current/schema-registry/serdes-develop/index.html#wire-format
-    JsonSchemaRegistry,
-    RawJson,
-}
-
-impl SerializationMode {
-    pub fn deserialize_slice<T: DeserializeOwned>(&self, msg: &[u8]) -> Result<T, UserError> {
-        match self {
-            SerializationMode::Json => serde_json::from_slice(msg)
-                .map_err(|err|
-                    UserError::new("Deserialization error", format!("Failed to deserialize message '{}' from json, with error {}",
-                        String::from_utf8_lossy(msg), err))),
-            SerializationMode::JsonSchemaRegistry => serde_json::from_slice(&msg[5..])
-                .map_err(|err|
-                    UserError::new("Deserialization error", format!("Failed to deserialize message '{}' from confluent schema registry json, with error {}",
-                        String::from_utf8_lossy(msg), err))),
-            SerializationMode::RawJson => {
-                let s = String::from_utf8_lossy(msg);
-                let j = json! {
-                    { "value": s }
-                };
-
-                // TODO: this is inefficient, because we know that T is RawJson in this case and can much more directly
-                //  produce that value. However, without specialization I don't know how to get the compiler to emit
-                //  the optimized code that case.
-                serde_json::from_value(j)
-                    .map_err(|e| UserError::new("Deserialization error", format!("Could not represent data as RawJson: {:?}", e)))
-            },
-        }
-    }
-
-    pub fn deserialize_str<T: DeserializeOwned>(&self, msg: &str) -> Result<T, UserError> {
-        match self {
-            SerializationMode::Json => serde_json::from_str(msg).map_err(|err| {
-                UserError::new(
-                    "Deserialization error",
-                    format!(
-                        "Failed to deserialize message '{}' from json, with error {}",
-                        msg, err
-                    ),
-                )
-            }),
-            SerializationMode::JsonSchemaRegistry => {
-                panic!("cannot read json schema registry data from str")
-            }
-            SerializationMode::RawJson => {
-                let j = json! {
-                    { "value": msg }
-                };
-
-                // TODO: this is inefficient, because we know that T is RawJson in this case and can much more directly
-                //  produce that value. However, without specialization I don't know how to get the compiler to emit
-                //  the optimized code that case.
-                serde_json::from_value(j).map_err(|e| {
-                    UserError::new(
-                        "Deserialization error",
-                        format!("Could not represent data as RawJson: {:?}", e),
-                    )
-                })
-            }
-        }
-    }
-}
 
 #[cfg(test)]
 mod test {

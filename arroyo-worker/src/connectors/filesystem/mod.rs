@@ -37,10 +37,7 @@ use self::{
     parquet::{FixedSizeRecordBatchBuilder, ParquetLocalWriter, RecordBatchBufferingWriter},
 };
 
-use super::{
-    two_phase_committer::{TwoPhaseCommitter, TwoPhaseCommitterOperator},
-    OperatorConfig,
-};
+use super::two_phase_committer::{TwoPhaseCommitter, TwoPhaseCommitterOperator};
 
 pub struct FileSystemSink<
     K: Key,

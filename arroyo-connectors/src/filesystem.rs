@@ -5,11 +5,12 @@ use arroyo_rpc::grpc::{
     self,
     api::{ConnectionSchema, Format, TestSourceMessage},
 };
+use arroyo_types::OperatorConfig;
 use typify::import_types;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{serialization_mode, Connection, ConnectionType, EmptyConfig, OperatorConfig};
+use crate::{format, Connection, ConnectionType, EmptyConfig};
 
 use super::Connector;
 
@@ -95,7 +96,7 @@ impl Connector for FileSystemConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
+            format: Some(format(schema.as_ref().unwrap())),
         };
 
         Ok(Connection {
