@@ -23,12 +23,13 @@ const PREVIEW_TTL: Duration = Duration::from_secs(60);
 
 use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
-use crate::rest_types::{
-    Checkpoint, CheckpointCollection, JobCollection, JobLogMessage, JobLogMessageCollection,
-    OutputData,
-};
 use crate::rest_utils::{authenticate, client, log_and_map_rest, BearerAuth, ErrorResp};
+use crate::types::public::LogLevel;
 use crate::{log_and_map, queries::api_queries, to_micros, types::public, AuthData};
+use arroyo_rpc::types::{
+    Checkpoint, CheckpointCollection, JobCollection, JobLogLevel, JobLogMessage,
+    JobLogMessageCollection, OutputData,
+};
 
 pub(crate) async fn create_job<'a>(
     request: CreateJobReq,
@@ -269,11 +270,17 @@ pub async fn get_job_errors(
 
 impl Into<JobLogMessage> for DbLogMessage {
     fn into(self) -> JobLogMessage {
+        let level: JobLogLevel = match self.log_level {
+            LogLevel::info => JobLogLevel::Info,
+            LogLevel::warn => JobLogLevel::Warn,
+            LogLevel::error => JobLogLevel::Error,
+        };
+
         JobLogMessage {
             created_at: to_micros(self.created_at),
             operator_id: self.operator_id,
             task_index: self.task_index.map(|i| i as u64),
-            level: self.log_level.into(),
+            level,
             message: self.message,
             details: self.details,
         }

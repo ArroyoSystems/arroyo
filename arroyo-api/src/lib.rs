@@ -9,12 +9,6 @@ use crate::pipelines::{
     __path_validate_pipeline,
 };
 use crate::rest::__path_ping;
-use crate::rest_types::{
-    Checkpoint, CheckpointCollection, Job, JobCollection, JobLogLevel, JobLogMessage,
-    JobLogMessageCollection, Metric, MetricGroup, MetricNames, OperatorMetricGroup, OutputData,
-    Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
-    PipelinePost, StopType as StopTypeRest, SubtaskMetrics, Udf, UdfLanguage, ValidatePipelinePost,
-};
 use crate::rest_utils::ErrorResp;
 use arroyo_connectors::connectors;
 use arroyo_rpc::grpc::api::{
@@ -31,6 +25,12 @@ use arroyo_rpc::grpc::api::{
     DeleteConnectionTableReq, DeleteConnectionTableResp, DeleteJobReq, DeleteJobResp,
     GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp,
     PipelineProgram, TestSchemaReq, TestSchemaResp,
+};
+use arroyo_rpc::types::{
+    Checkpoint, CheckpointCollection, Job, JobCollection, JobLogLevel, JobLogMessage,
+    JobLogMessageCollection, Metric, MetricGroup, MetricNames, OperatorMetricGroup, OutputData,
+    Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
+    PipelinePost, StopType as StopTypeRest, SubtaskMetrics, Udf, UdfLanguage, ValidatePipelinePost,
 };
 use arroyo_server_common::log_event;
 use cornucopia_async::GenericClient;
@@ -55,7 +55,6 @@ mod metrics;
 mod optimizations;
 mod pipelines;
 pub mod rest;
-mod rest_types;
 mod rest_utils;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
