@@ -214,7 +214,8 @@ pub struct Checkpoint {
     PipelineCollection = Collection<Pipeline>,
     JobLogMessageCollection = Collection<JobLogMessage>,
     CheckpointCollection = Collection<Checkpoint>,
-    OperatorMetricGroupCollection = Collection<OperatorMetricGroup>
+    OperatorMetricGroupCollection = Collection<OperatorMetricGroup>,
+    ConnectorCollection = Collection<Connector>,
 )]
 pub struct Collection<T> {
     pub data: Vec<T>,
@@ -277,4 +278,21 @@ pub struct MetricGroup {
 pub struct OperatorMetricGroup {
     pub operator_id: String,
     pub metric_groups: Vec<MetricGroup>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Connector {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub description: String,
+    pub table_config: String,
+    pub enabled: bool,
+    pub source: bool,
+    pub sink: bool,
+    pub custom_schemas: bool,
+    pub testing: bool,
+    pub hidden: bool,
+    pub connection_config: Option<String>,
 }

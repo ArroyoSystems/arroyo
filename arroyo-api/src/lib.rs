@@ -1,3 +1,4 @@
+use crate::connectors::__path_get_connectors;
 use crate::jobs::{
     __path_get_job_checkpoints, __path_get_job_errors, __path_get_job_output, __path_get_jobs,
 };
@@ -10,7 +11,6 @@ use crate::pipelines::{
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::ErrorResp;
-use arroyo_connectors::connectors;
 use arroyo_rpc::grpc::api::{
     api_grpc_server::ApiGrpc, CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq,
     ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp,
@@ -27,10 +27,11 @@ use arroyo_rpc::grpc::api::{
     PipelineProgram, TestSchemaReq, TestSchemaResp,
 };
 use arroyo_rpc::types::{
-    Checkpoint, CheckpointCollection, Job, JobCollection, JobLogLevel, JobLogMessage,
-    JobLogMessageCollection, Metric, MetricGroup, MetricNames, OperatorMetricGroup, OutputData,
-    Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
-    PipelinePost, StopType as StopTypeRest, SubtaskMetrics, Udf, UdfLanguage, ValidatePipelinePost,
+    Checkpoint, CheckpointCollection, Connector, ConnectorCollection, Job, JobCollection,
+    JobLogLevel, JobLogMessage, JobLogMessageCollection, Metric, MetricGroup, MetricNames,
+    OperatorMetricGroup, OutputData, Pipeline, PipelineCollection, PipelineEdge, PipelineGraph,
+    PipelineNode, PipelinePatch, PipelinePost, StopType as StopTypeRest, SubtaskMetrics, Udf,
+    UdfLanguage, ValidatePipelinePost,
 };
 use arroyo_server_common::log_event;
 use cornucopia_async::GenericClient;
@@ -50,6 +51,7 @@ use utoipa::OpenApi;
 mod cloud;
 mod connection_tables;
 mod connections;
+mod connectors;
 mod jobs;
 mod metrics;
 mod optimizations;
@@ -209,19 +211,11 @@ impl ApiGrpc for ApiServer {
     // connections
     async fn get_connectors(
         &self,
-        request: Request<GetConnectorsReq>,
+        _request: Request<GetConnectorsReq>,
     ) -> Result<Response<GetConnectorsResp>, Status> {
-        let (_request, _auth) = self.authenticate(request).await?;
-
-        let mut connectors: Vec<_> = connectors()
-            .values()
-            .map(|c| c.metadata())
-            .filter(|metadata| !metadata.hidden)
-            .collect();
-
-        connectors.sort_by_cached_key(|c| c.name.clone());
-
-        Ok(Response::new(GetConnectorsResp { connectors }))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn create_connection(
@@ -544,6 +538,7 @@ impl ApiGrpc for ApiServer {
         get_job_checkpoints,
         get_job_output,
         get_operator_metric_groups,
+        get_connectors,
     ),
     components(schemas(
         ValidatePipelinePost,
@@ -570,6 +565,8 @@ impl ApiGrpc for ApiServer {
         SubtaskMetrics,
         MetricGroup,
         OperatorMetricGroup,
+        ConnectorCollection,
+        Connector
     )),
     tags(
         (name = "pipelines", description = "Pipeline management endpoints"),

@@ -36,8 +36,8 @@ impl Connector for SSEConnector {
         "sse"
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
-        grpc::api::Connector {
+    fn metadata(&self) -> arroyo_rpc::types::Connector {
+        arroyo_rpc::types::Connector {
             id: "sse".to_string(),
             name: "Server-Sent Events".to_string(),
             icon: ICON.to_string(),

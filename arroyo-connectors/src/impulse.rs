@@ -41,8 +41,8 @@ impl Connector for ImpulseConnector {
         "impulse"
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
-        grpc::api::Connector {
+    fn metadata(&self) -> arroyo_rpc::types::Connector {
+        arroyo_rpc::types::Connector {
             id: "impulse".to_string(),
             name: "Impulse".to_string(),
             icon: ICON.to_string(),

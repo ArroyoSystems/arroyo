@@ -1,9 +1,4 @@
-import {
-  CheckpointDetailsReq,
-  GetConnectionsReq,
-  GetConnectionTablesReq,
-  GetConnectorsReq,
-} from '../gen/api_pb';
+import { CheckpointDetailsReq, GetConnectionsReq, GetConnectionTablesReq } from '../gen/api_pb';
 import { ApiClient } from '../main';
 import useSWR, { mutate as globalMutate } from 'swr';
 import { components, paths } from '../gen/api-types';
@@ -20,6 +15,8 @@ export type OutputData = schemas['OutputData'];
 export type MetricGroup = schemas['MetricGroup'];
 export type Metric = schemas['Metric'];
 export type OperatorMetricGroup = schemas['OperatorMetricGroup'];
+export type Connector = schemas['Connector'];
+export type Checkpoint = schemas['Checkpoint'];
 
 const BASE_URL = 'http://localhost:8000/api';
 export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
@@ -102,17 +99,19 @@ export const usePing = () => {
 };
 
 // Connectors
-const connectorsFetcher = (client: ApiClient) => {
-  return async () => {
-    return await (await client()).getConnectors(new GetConnectorsReq({}));
-  };
+const connectorsFetcher = async () => {
+  const { data, error } = await get('/v1/connectors', {});
+  return processResponse(data, error);
 };
 
-export const useConnectors = (client: ApiClient) => {
-  const { data, isLoading } = useSWR(connectorsKey(), connectorsFetcher(client));
+export const useConnectors = () => {
+  const { data, isLoading } = useSWR<schemas['ConnectorCollection']>(
+    connectorsKey(),
+    connectorsFetcher
+  );
 
   return {
-    connectors: data,
+    connectors: data?.data,
     connectorsLoading: isLoading,
   };
 };
@@ -165,7 +164,7 @@ const jobsFetcher = async () => {
 };
 
 export const useJobs = () => {
-  const { data, isLoading } = useSWR('jobs', jobsFetcher);
+  const { data, isLoading } = useSWR<schemas['JobCollection']>('jobs', jobsFetcher);
   return {
     jobs: data?.data,
     jobsLoading: isLoading,
@@ -193,12 +192,16 @@ const jobMetricsFetcher = () => {
 };
 
 export const useJobMetrics = (pipelineId?: string, jobId?: string) => {
-  const { data } = useSWR(jobMetricsKey(pipelineId, jobId), jobMetricsFetcher(), {
-    refreshInterval: 1000,
-  });
+  const { data } = useSWR<schemas['OperatorMetricGroupCollection']>(
+    jobMetricsKey(pipelineId, jobId),
+    jobMetricsFetcher(),
+    {
+      refreshInterval: 1000,
+    }
+  );
 
   return {
-    operatorMetricGroups: data?.data as OperatorMetricGroup[],
+    operatorMetricGroups: data?.data,
   };
 };
 
@@ -220,9 +223,13 @@ const jobCheckpointsFetcher = () => {
 };
 
 export const useJobCheckpoints = (pipelineId?: string, jobId?: string) => {
-  const { data } = useSWR(jobCheckpointsKey(pipelineId, jobId), jobCheckpointsFetcher(), {
-    refreshInterval: 5000,
-  });
+  const { data } = useSWR<schemas['CheckpointCollection']>(
+    jobCheckpointsKey(pipelineId, jobId),
+    jobCheckpointsFetcher(),
+    {
+      refreshInterval: 5000,
+    }
+  );
 
   return {
     checkpoints: data?.data,
@@ -271,7 +278,10 @@ const pipelineGraphFetcher = () => {
 };
 
 export const usePipelineGraph = (query?: string, udfsInput?: string) => {
-  const { data, error } = useSWR(pipelineGraphKey(query, udfsInput), pipelineGraphFetcher());
+  const { data, error } = useSWR<schemas['PipelineGraph']>(
+    pipelineGraphKey(query, udfsInput),
+    pipelineGraphFetcher()
+  );
 
   return {
     pipelineGraph: data,
@@ -285,7 +295,9 @@ const pipelinesFetcher = async () => {
 };
 
 export const usePipelines = () => {
-  const { data, error } = useSWR(pipelinesKey(), pipelinesFetcher, { refreshInterval: 2000 });
+  const { data, error } = useSWR<schemas['PipelineCollection']>(pipelinesKey(), pipelinesFetcher, {
+    refreshInterval: 2000,
+  });
   return { pipelines: data?.data, piplinesError: error };
 };
 
@@ -300,7 +312,7 @@ const pipelineFetcher = () => {
 
 export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
   const options = refresh ? { refreshInterval: 2000 } : {};
-  const { data, error, isLoading, mutate } = useSWR(
+  const { data, error, isLoading, mutate } = useSWR<schemas['Pipeline']>(
     pipelineKey(pipelineId),
     pipelineFetcher(),
     options
@@ -342,7 +354,11 @@ const pipelineJobsFetcher = () => {
 
 export const usePipelineJobs = (pipelineId?: string, refresh: boolean = false) => {
   const options = refresh ? { refreshInterval: 2000 } : {};
-  const { data, error } = useSWR(pipelineJobsKey(pipelineId), pipelineJobsFetcher(), options);
+  const { data, error } = useSWR<schemas['JobCollection']>(
+    pipelineJobsKey(pipelineId),
+    pipelineJobsFetcher(),
+    options
+  );
 
   return { jobs: data?.data, jobsError: error };
 };
@@ -363,9 +379,13 @@ const operatorErrorsFetcher = () => {
 };
 
 export const useOperatorErrors = (pipelineId?: string, jobId?: string) => {
-  const { data } = useSWR(operatorErrorsKey(pipelineId, jobId), operatorErrorsFetcher(), {
-    refreshInterval: 5000,
-  });
+  const { data } = useSWR<schemas['JobLogMessageCollection']>(
+    operatorErrorsKey(pipelineId, jobId),
+    operatorErrorsFetcher(),
+    {
+      refreshInterval: 5000,
+    }
+  );
 
   return {
     operatorErrors: data?.data,

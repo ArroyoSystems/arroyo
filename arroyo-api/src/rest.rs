@@ -17,6 +17,7 @@ use tower_http::services::ServeDir;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::connectors::get_connectors;
 use crate::jobs::{get_job_checkpoints, get_job_errors, get_job_output, get_jobs};
 use crate::metrics::get_operator_metric_groups;
 use crate::pipelines::{
@@ -96,6 +97,7 @@ pub fn create_rest_app(server: ApiServer, pool: Pool) -> Router {
 
     let api_routes = Router::new()
         .route("/ping", get(ping))
+        .route("/connectors", get(get_connectors))
         .route("/pipelines", post(post_pipeline))
         .route("/pipelines", get(get_pipelines))
         .route("/jobs", get(get_jobs))

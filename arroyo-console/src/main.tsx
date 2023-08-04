@@ -43,7 +43,7 @@ export function Router(): JSX.Element {
     },
     {
       path: 'connections/new',
-      element: <ChooseConnector client={client} />,
+      element: <ChooseConnector />,
     },
     {
       path: 'connections/new/:connectorId',

@@ -88,8 +88,8 @@ impl Connector for NexmarkConnector {
         "nexmark"
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
-        grpc::api::Connector {
+    fn metadata(&self) -> arroyo_rpc::types::Connector {
+        arroyo_rpc::types::Connector {
             id: "nexmark".to_string(),
             name: "Nexmark".to_string(),
             icon: ICON.to_string(),

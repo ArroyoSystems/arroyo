@@ -89,7 +89,7 @@ pub trait Connector: Send {
         serde_json::from_str(s)
     }
 
-    fn metadata(&self) -> grpc::api::Connector;
+    fn metadata(&self) -> arroyo_rpc::types::Connector;
 
     fn table_type(&self, config: Self::ConfigT, table: Self::TableT) -> TableType;
 
@@ -132,7 +132,7 @@ pub trait Connector: Send {
 pub trait ErasedConnector: Send {
     fn name(&self) -> &'static str;
 
-    fn metadata(&self) -> grpc::api::Connector;
+    fn metadata(&self) -> arroyo_rpc::types::Connector;
 
     fn validate_config(&self, s: &str) -> Result<(), serde_json::Error>;
 
@@ -180,7 +180,7 @@ impl<C: Connector> ErasedConnector for C {
         self.name()
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
+    fn metadata(&self) -> arroyo_rpc::types::Connector {
         self.metadata()
     }
 

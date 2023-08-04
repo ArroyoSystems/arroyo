@@ -5,6 +5,13 @@
 
 
 export interface paths {
+  "/v1/connectors": {
+    /**
+     * List all connectors 
+     * @description List all connectors
+     */
+    get: operations["get_connectors"];
+  };
   "/v1/jobs": {
     /**
      * Get all jobs 
@@ -105,6 +112,24 @@ export interface components {
     };
     CheckpointCollection: {
       data: (components["schemas"]["Checkpoint"])[];
+      hasMore: boolean;
+    };
+    Connector: {
+      connectionConfig?: string | null;
+      customSchemas: boolean;
+      description: string;
+      enabled: boolean;
+      hidden: boolean;
+      icon: string;
+      id: string;
+      name: string;
+      sink: boolean;
+      source: boolean;
+      tableConfig: string;
+      testing: boolean;
+    };
+    ConnectorCollection: {
+      data: (components["schemas"]["Connector"])[];
       hasMore: boolean;
     };
     Job: {
@@ -251,6 +276,20 @@ export type external = Record<string, never>;
 
 export interface operations {
 
+  /**
+   * List all connectors 
+   * @description List all connectors
+   */
+  get_connectors: {
+    responses: {
+      /** @description Got connectors collection */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConnectorCollection"];
+        };
+      };
+    };
+  };
   /**
    * Get all jobs 
    * @description Get all jobs

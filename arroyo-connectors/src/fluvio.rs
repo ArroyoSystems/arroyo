@@ -26,8 +26,8 @@ impl Connector for FluvioConnector {
         "fluvio"
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
-        grpc::api::Connector {
+    fn metadata(&self) -> arroyo_rpc::types::Connector {
+        arroyo_rpc::types::Connector {
             id: "fluvio".to_string(),
             name: "Fluvio".to_string(),
             icon: ICON.to_string(),

@@ -18,13 +18,13 @@ import {
   Stepper,
   useSteps,
 } from '@chakra-ui/react';
-import { useConnectors } from '../../lib/data_fetching';
+import { Connector, useConnectors } from '../../lib/data_fetching';
 import { useEffect, useState } from 'react';
-import { ConnectionSchema, Connector } from '../../gen/api_pb';
 
 import { ConfigureConnection } from './ConfigureConnection';
 import { DefineSchema } from './DefineSchema';
 import { ConnectionTester } from './ConnectionTester';
+import { ConnectionSchema } from '../../gen/api_pb';
 
 export type CreateConnectionState = {
   name: string | undefined;
@@ -129,11 +129,11 @@ export const ConnectionCreator = ({
 
 export const CreateConnection = ({ client }: { client: ApiClient }) => {
   let { connectorId } = useParams();
-  let { connectors, connectorsLoading } = useConnectors(client);
+  let { connectors, connectorsLoading } = useConnectors();
 
   let navigate = useNavigate();
 
-  let connector = connectors?.connectors.find(c => c.id === connectorId);
+  let connector = connectors?.find(c => c.id === connectorId);
 
   useEffect(() => {
     if (connectors != null && connector == null) {

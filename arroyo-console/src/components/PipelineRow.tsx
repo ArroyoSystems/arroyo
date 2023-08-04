@@ -1,5 +1,5 @@
 import React from 'react';
-import { Job, Pipeline, usePipelineJobs } from '../lib/data_fetching';
+import { Pipeline, usePipelineJobs } from '../lib/data_fetching';
 import { IconButton, Link, Td, Tr } from '@chakra-ui/react';
 import { JobStatus } from '../gen/api_pb';
 import JobCard from './JobCard';
@@ -74,7 +74,7 @@ const PipelineRow: React.FC<PipelineRowProps> = ({
         />
       </Td>
       <Td key={'job'}>
-        {(jobs as Job[]).map(job => (
+        {jobs.map(job => (
           <JobCard key={job.id} job={job} />
         ))}
       </Td>
