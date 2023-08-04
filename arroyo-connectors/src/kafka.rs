@@ -5,10 +5,7 @@ use typify::import_types;
 
 use std::time::{Duration, Instant};
 
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, TestSourceMessage},
-};
+use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     message::BorrowedMessage,
@@ -18,9 +15,9 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
 
-use crate::{pull_opt, format, Connection, ConnectionType};
+use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType};
 
-use super::{Connector};
+use super::Connector;
 
 const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/kafka/connection.json");
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/kafka/table.json");
@@ -85,7 +82,7 @@ impl Connector for KafkaConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            format: Some(format(schema.as_ref().unwrap())),
+            format: Some(schema.as_ref().unwrap().format.as_ref().unwrap().clone()),
         };
 
         Ok(Connection {

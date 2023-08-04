@@ -30,7 +30,6 @@ pub mod tumbling_top_n_window;
 pub mod updating_aggregate;
 pub mod windows;
 
-
 #[cfg(test)]
 mod test {
     use crate::operators::WasmOperator;

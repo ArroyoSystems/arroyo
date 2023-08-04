@@ -9,7 +9,7 @@ use arroyo_rpc::{
     ControlMessage,
 };
 use arroyo_state::tables::GlobalKeyedState;
-use arroyo_types::{Data, Message, Record, Watermark, OperatorConfig, UserError, formats::Format};
+use arroyo_types::{formats::Format, Data, Message, OperatorConfig, Record, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;

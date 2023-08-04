@@ -1,14 +1,15 @@
 use anyhow::bail;
 use arroyo_rpc::grpc::{
     self,
-    api::{source_field_type, ConnectionSchema, StructType, TestSourceMessage},
+    api::{source_field_type, StructType, TestSourceMessage},
 };
 use arroyo_types::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
 use crate::{
-    nullable_field, source_field, Connection, ConnectionType, Connector, EmptyConfig,
+    nullable_field, source_field, Connection, ConnectionSchema, ConnectionType, Connector,
+    EmptyConfig,
 };
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/nexmark/table.json");
@@ -73,7 +74,6 @@ pub fn nexmark_schema() -> ConnectionSchema {
                 }),
             ),
         ],
-        format_options: None,
         definition: None,
     }
 }
@@ -123,7 +123,7 @@ impl Connector for NexmarkConnector {
         _: &str,
         _: Self::ConfigT,
         _: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        _: Option<&ConnectionSchema>,
         tx: tokio::sync::mpsc::Sender<
             Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
         >,
@@ -143,7 +143,7 @@ impl Connector for NexmarkConnector {
         &self,
         _: &str,
         _: &mut std::collections::HashMap<String, String>,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        _: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         // let event_rate =
         //     f64::from_str(&pull_opt("event_rate", options)?)
@@ -167,7 +167,7 @@ impl Connector for NexmarkConnector {
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        _: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         let description = format!(
             "{}Nexmark<{} eps>",

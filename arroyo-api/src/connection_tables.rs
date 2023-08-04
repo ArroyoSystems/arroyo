@@ -1,10 +1,10 @@
 use anyhow::anyhow;
 use arrow_schema::DataType;
-use arroyo_connectors::{connector_for_type, ErasedConnector};
+use arroyo_connectors::{connector_for_type, ConnectionSchema, ErasedConnector};
 use arroyo_rpc::grpc::api::{
     connection_schema::Definition, ConfluentSchemaReq, ConfluentSchemaResp, Connection,
-    ConnectionSchema, ConnectionTable, CreateConnectionTableReq, DeleteConnectionTableReq,
-    TableType, TestSchemaReq, TestSourceMessage,
+    ConnectionTable, CreateConnectionTableReq, DeleteConnectionTableReq, TestSchemaReq,
+    TestSourceMessage,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_sql::{
@@ -14,7 +14,7 @@ use arroyo_sql::{
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Pool;
 use http::StatusCode;
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::mpsc::Receiver;
 use tonic::Status;
 use tracing::warn;
 
@@ -73,7 +73,14 @@ async fn get_and_validate_connector<E: GenericClient>(
         .validate_table(&req.config)
         .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
 
-    let schema = if let Some(schema) = &req.schema {
+    let schema: Option<ConnectionSchema> = req
+        .schema
+        .as_ref()
+        .map(|t| t.clone().try_into())
+        .transpose()
+        .map_err(|e| Status::failed_precondition(format!("Invalid schema: {}", e)))?;
+
+    let schema = if let Some(schema) = &schema {
         Some(expand_schema(&req.name, schema)?)
     } else {
         None
@@ -157,15 +164,7 @@ pub(crate) async fn test(
 ) -> Result<Receiver<Result<TestSourceMessage, Status>>, Status> {
     let (connector, _, config, schema) = get_and_validate_connector(&req, &auth, client).await?;
 
-    let (tx, rx) = channel(8);
-
-    connector
-        .test(&req.name, &config, &req.config, schema.as_ref(), tx)
-        .map_err(|e| {
-            Status::invalid_argument(format!("Failed to parse config or schema: {:?}", e))
-        })?;
-
-    Ok(rx)
+    todo!()
 }
 
 fn get_connection(c: &GetConnectionTables, connector: &dyn ErasedConnector) -> Option<Connection> {
@@ -189,45 +188,7 @@ pub(crate) async fn get<C: GenericClient>(
         .await
         .map_err(log_and_map)?;
 
-    Ok(tables
-        .into_iter()
-        .filter_map(|t| {
-            let Some(connector) = connector_for_type(&t.connector) else {
-                warn!("invalid connector {} in saved ConnectionTable {}", t.connector, t.id);
-                return None;
-            };
-
-            let connection = get_connection(&t, &*connector);
-
-            let table = serde_json::to_string(&t.config).unwrap();
-            let schema = t.schema.map(|s| serde_json::from_value(s).unwrap());
-            let schema = match connector.get_schema(
-                &connection
-                    .as_ref()
-                    .map(|t| t.config.as_str())
-                    .unwrap_or("{}"),
-                &table,
-                schema.as_ref(),
-            ) {
-                Ok(schema) => schema,
-                Err(e) => {
-                    warn!("Invalid connector config for {}: {:?}", t.id, e);
-                    return None;
-                }
-            };
-
-            Some(ConnectionTable {
-                id: t.id,
-                name: t.name,
-                connection,
-                connector: t.connector,
-                table_type: TableType::from_str_name(&t.table_type).unwrap() as i32,
-                config: table,
-                schema,
-                consumers: t.consumer_count as i32,
-            })
-        })
-        .collect())
+    todo!()
 }
 
 // attempts to fill in the SQL schema from a schema object that may just have a json-schema or

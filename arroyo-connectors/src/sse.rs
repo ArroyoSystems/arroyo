@@ -1,10 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, TestSourceMessage},
-};
+use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use arroyo_types::{string_to_map, OperatorConfig};
 use eventsource_client::Client;
 use futures::StreamExt;
@@ -14,9 +11,7 @@ use typify::import_types;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    pull_opt, format, Connection, ConnectionType, EmptyConfig,
-};
+use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, EmptyConfig};
 
 use super::Connector;
 
@@ -91,7 +86,7 @@ impl Connector for SSEConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            format: Some(format(schema.as_ref().unwrap())),
+            format: Some(schema.as_ref().unwrap().format.as_ref().unwrap().clone()),
         };
 
         Ok(Connection {

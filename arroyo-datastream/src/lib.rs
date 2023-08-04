@@ -279,8 +279,6 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-
-
 #[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
 pub struct ConnectorOp {
     // path of the operator that this will compile into (like `crate::sources::kafka::KafkaSource`)
@@ -2043,7 +2041,6 @@ impl From<Operator> for GrpcApi::operator::Operator {
         }
     }
 }
-
 
 impl From<WasmUDF> for WasmFunction {
     fn from(udf: WasmUDF) -> Self {

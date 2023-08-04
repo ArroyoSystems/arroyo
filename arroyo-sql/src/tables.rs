@@ -3,12 +3,10 @@ use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
-use arroyo_connectors::{connector_for_type, format, Connection, ConnectionType};
+use arroyo_connectors::{connector_for_type, Connection, ConnectionSchema, ConnectionType};
 use arroyo_datastream::{ConnectorOp, Operator};
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, Format, FormatOptions, SourceField},
-};
+use arroyo_rpc::grpc::{self, api::SourceField};
+use arroyo_types::formats::Format;
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -21,8 +19,8 @@ use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
 };
 
-use crate::DEFAULT_IDLE_TIME;
 use crate::external::SinkUpdateType;
+use crate::DEFAULT_IDLE_TIME;
 use crate::{
     expressions::{Column, ColumnExpression, Expression, ExpressionContext},
     external::{ProcessingMode, SqlSink, SqlSource},
@@ -43,7 +41,7 @@ pub struct ConnectorTable {
     pub operator: String,
     pub config: String,
     pub description: String,
-    pub serialization_mode: SerializationMode,
+    pub format: Option<Format>,
     pub event_time_field: Option<String>,
     pub watermark_field: Option<String>,
     pub idle_time: Option<Duration>,
@@ -110,7 +108,7 @@ impl From<Connection> for ConnectorTable {
             operator: value.operator,
             config: value.config,
             description: value.description,
-            serialization_mode: format(&value.schema).into(),
+            format: value.schema.format.clone(),
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
@@ -128,23 +126,8 @@ impl ConnectorTable {
         let connector = connector_for_type(connector)
             .ok_or_else(|| anyhow!("Unknown connector '{}'", connector))?;
 
-        let mut format = None;
-        if let Some(f) = options.remove("format") {
-            format = Some(match f.as_str() {
-                "json" => Format::JsonFormat,
-                "debezium_json" => Format::DebeziumJsonFormat,
-                "protobuf" => Format::ProtobufFormat,
-                "avro" => Format::AvroFormat,
-                "raw_string" => Format::RawStringFormat,
-                "parquet" => Format::ParquetFormat,
-                f => bail!("Unknown format '{}'", f),
-            });
-        }
-
-        let schema_registry = options
-            .remove("format_options.confluent_schema_registry")
-            .map(|f| f == "true")
-            .unwrap_or(false);
+        let mut format =
+            Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
 
         let schema_fields: Result<Vec<SourceField>> = fields
             .iter()
@@ -160,10 +143,7 @@ impl ConnectorTable {
             .collect();
 
         let schema = ConnectionSchema {
-            format: format.map(|f| f as i32),
-            format_options: Some(FormatOptions {
-                confluent_schema_registry: schema_registry,
-            }),
+            format,
             struct_name: None,
             fields: schema_fields?,
             definition: None,
@@ -201,7 +181,10 @@ impl ConnectorTable {
     }
 
     fn is_update(&self) -> bool {
-        self.serialization_mode == SerializationMode::DebeziumJson
+        self.format
+            .as_ref()
+            .map(|f| f.is_updating())
+            .unwrap_or(false)
     }
 
     fn virtual_field_projection(&self) -> Option<Projection> {
@@ -298,9 +281,10 @@ impl ConnectorTable {
     }
 
     fn processing_mode(&self) -> ProcessingMode {
-        match self.serialization_mode {
-            SerializationMode::DebeziumJson => ProcessingMode::Update,
-            _ => ProcessingMode::Append,
+        if self.is_update() {
+            ProcessingMode::Update
+        } else {
+            ProcessingMode::Append
         }
     }
 
@@ -353,7 +337,7 @@ impl ConnectorTable {
             bail!("Virtual fields are not currently supported in sinks");
         }
 
-        let updating_type = if self.serialization_mode.is_updating() {
+        let updating_type = if self.is_update() {
             SinkUpdateType::Force
         } else {
             SinkUpdateType::Allow

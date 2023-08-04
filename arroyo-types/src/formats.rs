@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use serde_json::{Value, json};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use crate::UserError;
 
@@ -10,7 +10,6 @@ pub struct SchemaJson {
     pub schema: Value,
     pub payload: Value,
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct JsonFormat {
@@ -40,8 +39,10 @@ impl JsonFormat {
                 // we need to deserialize it to pull out the payload
                 let v: Value = serde_json::from_slice(&msg)
                     .map_err(|e| format!("Failed to deserialize json: {:?}", e))?;
-                let payload = v.get("payload")
-                    .ok_or_else(|| "`include_schema` set to true, but record does not have a payload field".to_string())?;
+                let payload = v.get("payload").ok_or_else(|| {
+                    "`include_schema` set to true, but record does not have a payload field"
+                        .to_string()
+                })?;
 
                 json! {
                     { "value": serde_json::to_string(payload).unwrap() }
@@ -63,16 +64,23 @@ impl JsonFormat {
     }
 
     fn deserialize_slice<T: DeserializeOwned>(&self, msg: &[u8]) -> Result<T, UserError> {
-        self.deserialize_slice_int(msg)
-            .map_err(|e| UserError::new("Deserialization failed",
-                format!("Failed to deserialize: '{}': {}", String::from_utf8_lossy(&msg), e)))
+        self.deserialize_slice_int(msg).map_err(|e| {
+            UserError::new(
+                "Deserialization failed",
+                format!(
+                    "Failed to deserialize: '{}': {}",
+                    String::from_utf8_lossy(&msg),
+                    e
+                ),
+            )
+        })
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RawEncoding {
     None,
-    Utf8
+    Utf8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -81,12 +89,10 @@ pub struct RawFormat {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AvroFormat {
-}
+pub struct AvroFormat {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ParquetFormat {
-}
+pub struct ParquetFormat {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Format {
@@ -97,17 +103,34 @@ pub enum Format {
 }
 
 impl Format {
-    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
+    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Option<Self>, String> {
+        /*         if let Some(f) = options.remove("format") {
+                   format = Some(match f.as_str() {
+                       "json" => Format::JsonFormat,
+                       "debezium_json" => Format::DebeziumJsonFormat,
+                       "protobuf" => Format::ProtobufFormat,
+                       "avro" => Format::AvroFormat,
+                       "raw_string" => Format::RawStringFormat,
+                       "parquet" => Format::ParquetFormat,
+                       f => bail!("Unknown format '{}'", f),
+                   });
+               }
+
+               let schema_registry = options
+                   .remove("format_options.confluent_schema_registry")
+                   .map(|f| f == "true")
+                   .unwrap_or(false);
+        */
+
         todo!()
     }
 
     pub fn is_updating(&self) -> bool {
         match self {
-            Format::Json(JsonFormat{debezium: true, ..}) => true,
+            Format::Json(JsonFormat { debezium: true, .. }) => true,
             Format::Json(_) | Format::Avro(_) | Format::Parquet(_) | Format::Raw(_) => false,
         }
     }
-
 
     pub fn deserialize_slice<T: DeserializeOwned>(&self, msg: &[u8]) -> Result<T, UserError> {
         match self {
@@ -118,4 +141,3 @@ impl Format {
         }
     }
 }
-

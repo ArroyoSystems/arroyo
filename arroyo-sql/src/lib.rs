@@ -4,9 +4,8 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaConnector, KafkaTable};
-use arroyo_connectors::{Connection, Connector};
+use arroyo_connectors::{Connection, ConnectionSchema, Connector};
 use arroyo_datastream::Program;
-use arroyo_rpc::grpc::api::{ConnectionSchema, FormatOptions};
 use arroyo_types::formats::{Format, JsonFormat};
 use datafusion::physical_plan::functions::make_scalar_function;
 
@@ -342,14 +341,14 @@ pub fn parse_and_get_program_sync(
             operator: "GrpcSink::<#in_k, #in_t>".to_string(),
             config: "{}".to_string(),
             description: "WebSink".to_string(),
-            serialization_mode: if insert.is_updating() {
+            format: Some(if insert.is_updating() {
                 Format::Json(JsonFormat {
                     debezium: true,
                     ..Default::default()
                 })
             } else {
                 Format::Json(JsonFormat::default())
-            },
+            }),
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
@@ -519,8 +518,8 @@ pub fn get_test_expression(
 ) -> syn::ItemFn {
     let struct_def = test_struct_def();
     let schema = ConnectionSchema {
-        format: Some(arroyo_rpc::grpc::api::Format::JsonFormat as i32),
-        format_options: Some(FormatOptions::default()),
+        format: Some(Format::Json(JsonFormat::default())),
+
         struct_name: struct_def.name.clone(),
         fields: struct_def
             .fields

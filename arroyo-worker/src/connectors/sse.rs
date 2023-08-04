@@ -5,8 +5,8 @@ use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::formats::Format;
-use arroyo_types::{string_to_map, Data, Message, Record, Watermark, OperatorConfig};
-use bincode::{Decode, Encode, config};
+use arroyo_types::{string_to_map, Data, Message, OperatorConfig, Record, Watermark};
+use bincode::{config, Decode, Encode};
 use eventsource_client::{Client, SSE};
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
@@ -45,12 +45,7 @@ where
     K: DeserializeOwned + Data,
     T: DeserializeOwned + Data,
 {
-    pub fn new(
-        url: &str,
-        headers: Vec<(&str, &str)>,
-        events: Vec<&str>,
-        format: Format,
-    ) -> Self {
+    pub fn new(url: &str, headers: Vec<(&str, &str)>, events: Vec<&str>, format: Format) -> Self {
         SSESourceFunc {
             url: url.to_string(),
             headers: headers

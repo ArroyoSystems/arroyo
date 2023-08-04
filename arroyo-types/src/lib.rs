@@ -268,7 +268,6 @@ impl UserError {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RateLimit {
     pub messages_per_second: u32,
@@ -281,7 +280,6 @@ pub struct OperatorConfig {
     pub format: Option<Format>,
     pub rate_limit: Option<RateLimit>,
 }
-
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Serialize, Deserialize)]
 pub enum UpdatingData<T: Data> {

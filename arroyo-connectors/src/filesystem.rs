@@ -1,16 +1,13 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Context, Result};
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, Format, TestSourceMessage},
-};
-use arroyo_types::OperatorConfig;
+use arroyo_rpc::grpc::{self, api::TestSourceMessage};
+use arroyo_types::{formats::Format, OperatorConfig};
 use typify::import_types;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{format, Connection, ConnectionType, EmptyConfig};
+use crate::{Connection, ConnectionSchema, ConnectionType, EmptyConfig};
 
 use super::Connector;
 
@@ -51,7 +48,7 @@ impl Connector for FileSystemConnector {
         _: &str,
         _: Self::ConfigT,
         _: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        _: Option<&ConnectionSchema>,
         tx: tokio::sync::mpsc::Sender<
             Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
         >,
@@ -96,7 +93,7 @@ impl Connector for FileSystemConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            format: Some(format(schema.as_ref().unwrap())),
+            format: Some(schema.as_ref().unwrap().format.as_ref().unwrap().clone()),
         };
 
         Ok(Connection {
@@ -147,8 +144,13 @@ impl Connector for FileSystemConnector {
             target_file_size,
             target_part_size,
         });
-        let format_settings = match schema.ok_or(anyhow!("require schema"))?.format() {
-            Format::ParquetFormat => {
+        let format_settings = match schema
+            .ok_or(anyhow!("require schema"))?
+            .format
+            .as_ref()
+            .unwrap()
+        {
+            Format::Parquet(..) => {
                 let compression = opts
                     .remove("parquet_compression")
                     .map(|value| {
@@ -165,7 +167,7 @@ impl Connector for FileSystemConnector {
                     row_group_size,
                 })
             }
-            Format::JsonFormat => Some(FormatSettings::Json {}),
+            Format::Json(..) => Some(FormatSettings::Json {}),
             other => bail!("Unsupported format: {:?}", other),
         };
 

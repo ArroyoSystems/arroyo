@@ -1,15 +1,10 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, TestSourceMessage},
-};
+use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use arroyo_types::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-use crate::{
-    pull_opt, format, Connection, ConnectionType, Connector, EmptyConfig,
-};
+use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig};
 
 pub struct FluvioConnector {}
 
@@ -64,10 +59,8 @@ impl Connector for FluvioConnector {
         _: &str,
         _: Self::ConfigT,
         _: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        _: Option<&ConnectionSchema>,
+        tx: tokio::sync::mpsc::Sender<Result<TestSourceMessage, tonic::Status>>,
     ) {
         tokio::task::spawn(async move {
             tx.send(Ok(TestSourceMessage {
@@ -84,7 +77,7 @@ impl Connector for FluvioConnector {
         &self,
         name: &str,
         options: &mut std::collections::HashMap<String, String>,
-        schema: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         let endpoint = options.remove("endpoint");
         let topic = pull_opt("topic", options)?;
@@ -141,7 +134,7 @@ impl Connector for FluvioConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            format: Some(format(schema.as_ref().unwrap())),
+            format: Some(schema.as_ref().unwrap().format.as_ref().unwrap().clone()),
         };
 
         Ok(Connection {
