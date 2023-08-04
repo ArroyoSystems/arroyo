@@ -632,6 +632,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-build",
+ "utoipa",
 ]
 
 [[package]]

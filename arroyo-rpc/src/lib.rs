@@ -1,4 +1,5 @@
 pub mod public_ids;
+pub mod types;
 
 use std::{fs, time::SystemTime};
 

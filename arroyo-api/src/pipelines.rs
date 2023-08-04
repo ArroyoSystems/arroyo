@@ -6,14 +6,11 @@ use axum_extra::extract::WithRejection;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::{Object, Transaction};
 use http::StatusCode;
+use petgraph::visit::EdgeRef;
 use prost::Message;
 use tonic::{Request, Status};
 use tracing::warn;
 
-use crate::rest_types::{
-    Job, JobCollection, Pipeline, PipelineCollection, PipelineGraph, PipelinePatch, PipelinePost,
-    ValidatePipelinePost,
-};
 use arroyo_datastream::{ConnectorOp, Operator, Program};
 use arroyo_rpc::grpc::api::api_grpc_server::ApiGrpc;
 use arroyo_rpc::grpc::api::{
@@ -21,6 +18,10 @@ use arroyo_rpc::grpc::api::{
     UdfLanguage, UpdateJobReq,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::types::{
+    Job, JobCollection, Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode,
+    PipelinePatch, PipelinePost, StopType, ValidatePipelinePost,
+};
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
 use crate::jobs::get_action;
@@ -250,15 +251,23 @@ impl TryInto<Pipeline> for DbPipeline {
                 .collect(),
         );
 
+        let stop = match self.stop {
+            StopMode::none => StopType::None,
+            StopMode::checkpoint => StopType::Checkpoint,
+            StopMode::graceful => StopType::Graceful,
+            StopMode::immediate => StopType::Immediate,
+            StopMode::force => StopType::Force,
+        };
+
         Ok(Pipeline {
             id: self.pub_id,
             name: self.name,
             query: self.textual_repr,
             udfs: udfs.into_iter().map(|v| v.into()).collect(),
             checkpoint_interval_micros: self.checkpoint_interval_micros as u64,
-            stop: self.stop.into(),
+            stop,
             created_at: to_micros(self.created_at),
-            graph: program.into(),
+            graph: program.as_job_graph().into(),
             action: action.map(|a| a.into()),
             action_text,
             action_in_progress,
@@ -320,7 +329,33 @@ pub async fn validate_pipeline(
 
     let (mut program, _) = compile_sql(&sql, &auth_data, &client).await?;
     optimizations::optimize(&mut program.graph);
-    Ok(Json(program.into()))
+
+    let nodes = program
+        .graph
+        .node_weights()
+        .map(|node| PipelineNode {
+            node_id: node.operator_id.to_string(),
+            operator: format!("{:?}", node),
+            parallelism: node.clone().parallelism as u32,
+        })
+        .collect();
+    let edges = program
+        .graph
+        .edge_references()
+        .map(|edge| {
+            let src = program.graph.node_weight(edge.source()).unwrap();
+            let target = program.graph.node_weight(edge.target()).unwrap();
+            PipelineEdge {
+                src_id: src.operator_id.to_string(),
+                dest_id: target.operator_id.to_string(),
+                key_type: edge.weight().key.to_string(),
+                value_type: edge.weight().value.to_string(),
+                edge_type: format!("{:?}", edge.weight().typ),
+            }
+        })
+        .collect();
+
+    Ok(Json(PipelineGraph { nodes, edges }))
 }
 
 /// Create a new pipeline

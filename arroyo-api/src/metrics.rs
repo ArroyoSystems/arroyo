@@ -7,11 +7,11 @@ use std::{collections::HashMap, env, time::SystemTime};
 
 use crate::pipelines::query_job_by_pub_id;
 use crate::rest::AppState;
-use crate::rest_types::{
+use crate::rest_utils::{authenticate, client, BearerAuth, ErrorResp};
+use arroyo_rpc::types::{
     Metric, MetricGroup, MetricNames, OperatorMetricGroup, OperatorMetricGroupCollection,
     SubtaskMetrics,
 };
-use crate::rest_utils::{authenticate, client, BearerAuth, ErrorResp};
 use arroyo_types::{
     to_millis, API_METRICS_RATE_ENV, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
     TX_QUEUE_REM, TX_QUEUE_SIZE,
@@ -44,6 +44,37 @@ static METRICS_CLIENT: Lazy<Client> = Lazy::new(|| {
     prometheus_http_query::Client::from(client, &prometheus_endpoint).unwrap()
 });
 
+fn simple_query(metric: &str, job_id: &str, run_id: &u64, rate: &str) -> String {
+    format!(
+        "rate({}{{job_id=\"{}\",run_id=\"{}\"}}[{}])",
+        metric, job_id, run_id, rate
+    )
+}
+
+fn backpressure_query(job_id: &str, run_id: &u64) -> String {
+    let tx_queue_size: String = format!(
+        "{}{{job_id=\"{}\",run_id=\"{}\"}}",
+        TX_QUEUE_SIZE, job_id, run_id
+    );
+    let tx_queue_rem: String = format!(
+        "{}{{job_id=\"{}\",run_id=\"{}\"}}",
+        TX_QUEUE_REM, job_id, run_id
+    );
+    // add 1 to each value to account for uninitialized values (which report 0); this can happen when a task
+    // never reads any data
+    format!("1 - (({} + 1) / ({} + 1))", tx_queue_rem, tx_queue_size)
+}
+
+fn get_query(metric_name: MetricNames, job_id: &str, run_id: &u64, rate: &str) -> String {
+    match metric_name {
+        MetricNames::BytesRecv => simple_query(BYTES_RECV, job_id, run_id, rate),
+        MetricNames::BytesSent => simple_query(BYTES_SENT, job_id, run_id, rate),
+        MetricNames::MessagesRecv => simple_query(MESSAGES_RECV, job_id, run_id, rate),
+        MetricNames::MessagesSent => simple_query(MESSAGES_SENT, job_id, run_id, rate),
+        MetricNames::Backpressure => backpressure_query(job_id, run_id),
+    }
+}
+
 /// Get a job's metrics
 #[utoipa::path(
     get,
@@ -70,43 +101,10 @@ pub async fn get_operator_metric_groups(
     let end = (to_millis(SystemTime::now()) / 1000) as i64;
     let start = end - 5 * 60;
 
-    impl MetricNames {
-        fn simple_query(&self, metric: &str, job_id: &str, run_id: &u64, rate: &str) -> String {
-            format!(
-                "rate({}{{job_id=\"{}\",run_id=\"{}\"}}[{}])",
-                metric, job_id, run_id, rate
-            )
-        }
-
-        fn backpressure_query(&self, job_id: &str, run_id: &u64) -> String {
-            let tx_queue_size: String = format!(
-                "{}{{job_id=\"{}\",run_id=\"{}\"}}",
-                TX_QUEUE_SIZE, job_id, run_id
-            );
-            let tx_queue_rem: String = format!(
-                "{}{{job_id=\"{}\",run_id=\"{}\"}}",
-                TX_QUEUE_REM, job_id, run_id
-            );
-            // add 1 to each value to account for uninitialized values (which report 0); this can happen when a task
-            // never reads any data
-            format!("1 - (({} + 1) / ({} + 1))", tx_queue_rem, tx_queue_size)
-        }
-
-        fn get_query(&self, job_id: &str, run_id: &u64, rate: &str) -> String {
-            match self {
-                MetricNames::BytesRecv => self.simple_query(BYTES_RECV, job_id, run_id, rate),
-                MetricNames::BytesSent => self.simple_query(BYTES_SENT, job_id, run_id, rate),
-                MetricNames::MessagesRecv => self.simple_query(MESSAGES_RECV, job_id, run_id, rate),
-                MetricNames::MessagesSent => self.simple_query(MESSAGES_SENT, job_id, run_id, rate),
-                MetricNames::Backpressure => self.backpressure_query(job_id, run_id),
-            }
-        }
-    }
-
     let result = tokio::try_join!(
         METRICS_CLIENT
             .query_range(
-                MetricNames::BytesRecv.get_query(&job.id, &job.run_id, &rate),
+                get_query(MetricNames::BytesRecv, &job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -114,7 +112,7 @@ pub async fn get_operator_metric_groups(
             .get(),
         METRICS_CLIENT
             .query_range(
-                MetricNames::BytesSent.get_query(&job.id, &job.run_id, &rate),
+                get_query(MetricNames::BytesSent, &job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -122,7 +120,7 @@ pub async fn get_operator_metric_groups(
             .get(),
         METRICS_CLIENT
             .query_range(
-                MetricNames::MessagesRecv.get_query(&job.id, &job.run_id, &rate),
+                get_query(MetricNames::MessagesRecv, &job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -130,7 +128,7 @@ pub async fn get_operator_metric_groups(
             .get(),
         METRICS_CLIENT
             .query_range(
-                MetricNames::MessagesSent.get_query(&job.id, &job.run_id, &rate),
+                get_query(MetricNames::MessagesSent, &job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
@@ -138,7 +136,7 @@ pub async fn get_operator_metric_groups(
             .get(),
         METRICS_CLIENT
             .query_range(
-                MetricNames::Backpressure.get_query(&job.id, &job.run_id, &rate),
+                get_query(MetricNames::Backpressure, &job.id, &job.run_id, &rate),
                 start,
                 end,
                 METRICS_GRANULARITY_SECS
