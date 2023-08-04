@@ -1,10 +1,10 @@
 use arroyo_rpc::grpc::{
     self,
-    api::{ConnectionSchema, Format, FormatOptions, TestSourceMessage},
+    api::{Format, FormatOptions, TestSourceMessage},
 };
 use arroyo_types::OperatorConfig;
 
-use crate::{Connection, ConnectionType, Connector, EmptyConfig};
+use crate::{Connection, ConnectionType, Connector, EmptyConfig, ConnectionSchema};
 
 pub struct BlackholeConnector {}
 

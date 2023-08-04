@@ -5,7 +5,7 @@ use arroyo_rpc::{
     grpc::{
         self,
         api::{
-            connection_schema::Definition, source_field_type, ConnectionSchema, SourceField,
+            connection_schema::Definition, source_field_type, SourceField,
             SourceFieldType, TableType, TestSourceMessage,
         },
     },
@@ -65,6 +65,77 @@ pub struct Connection {
     pub operator: String,
     pub config: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum SchemaDefinition {
+    JsonSchema(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectionSchema {
+    pub format: Option<Format>,
+    pub struct_name: Option<String>,
+    pub fields: Vec<SourceField>,
+    pub definition: Option<SchemaDefinition>,
+}
+
+impl TryFrom<grpc::api::ConnectionSchema> for ConnectionSchema {
+    type Error = String;
+
+    fn try_from(schema: grpc::api::ConnectionSchema) -> Result<Self, Self::Error> {
+        let confluent_schema_registry = schema
+            .format_options
+            .as_ref()
+            .filter(|t| t.confluent_schema_registry)
+            .is_some();
+        let include_schema = schema
+            .format_options
+            .as_ref()
+            .filter(|t| t.include_schema)
+            .is_some();
+
+        let format = schema.format().map(|format| match format {
+            grpc::api::Format::JsonFormat | grpc::api::Format::DebeziumJsonFormat  => {
+                Ok(Format::Json(
+                    JsonFormat {
+                        confluent_schema_registry,
+                        include_schema,
+                        debezium: matches!(schema.format(), grpc::api::Format::DebeziumJsonFormat),
+                        unstructured: matches!(schema.definition, Some(Definition::RawSchema { .. })),
+                    }
+                ))
+            }
+            grpc::api::Format::RawStringFormat => {
+                Ok(Format::Json(JsonFormat {
+                    confluent_schema_registry: false,
+                    include_schema,
+                    debezium: false,
+                    unstructured: true,
+                }))
+            }
+            grpc::api::Format::ParquetFormat => {
+                Ok(Format::Parquet(ParquetFormat{}))
+            }
+            grpc::api::Format::ProtobufFormat => {
+                Err("Protobuf is not yet supported".to_string())
+            },
+            grpc::api::Format::AvroFormat => {
+                Err("Avro is not yet supported".to_string())
+            },
+        }).transpose()?;
+
+        let definition = match schema.definition {
+
+        };
+
+        Ok(ConnectionSchema {
+            format,
+            struct_name: (),
+            fields: (),
+            definition: ()
+        })
+    }
 }
 
 pub trait Connector: Send {
@@ -261,47 +332,7 @@ pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
     connectors().remove(t)
 }
 
-pub fn format(schema: &ConnectionSchema) -> Format {
-    let confluent_schema_registry = schema
-        .format_options
-        .as_ref()
-        .filter(|t| t.confluent_schema_registry)
-        .is_some();
-    let include_schema = schema
-        .format_options
-        .as_ref()
-        .filter(|t| t.include_schema)
-        .is_some();
-
-    match &schema.format() {
-        grpc::api::Format::JsonFormat | grpc::api::Format::DebeziumJsonFormat => {
-            Format::Json(
-                JsonFormat {
-                    confluent_schema_registry,
-                    include_schema,
-                    debezium: matches!(schema.format(), grpc::api::Format::DebeziumJsonFormat),
-                    unstructured: matches!(schema.definition, Some(Definition::RawSchema { .. })),
-                }
-            )
-        }
-        grpc::api::Format::RawStringFormat => {
-            Format::Json(JsonFormat {
-                confluent_schema_registry: false,
-                include_schema,
-                debezium: false,
-                unstructured: true,
-            })
-        }
-        grpc::api::Format::ParquetFormat => {
-            Format::Parquet(ParquetFormat{})
-        }
-        grpc::api::Format::ProtobufFormat => todo!(),
-        grpc::api::Format::AvroFormat => todo!(),
-    }
-}
-
-
-pub(crate) fn source_field(name: &str, field_type: source_field_type::Type) -> SourceField {
+ pub(crate) fn source_field(name: &str, field_type: source_field_type::Type) -> SourceField {
     SourceField {
         field_name: name.to_string(),
         field_type: Some(SourceFieldType {
