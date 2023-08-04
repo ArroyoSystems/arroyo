@@ -1,4 +1,3 @@
-import { CheckpointOverview } from '../gen/api_pb';
 import React, { useState } from 'react';
 import {
   Badge,
@@ -15,7 +14,7 @@ import {
   UnorderedList,
 } from '@chakra-ui/react';
 import * as util from '../lib/util';
-import { Job, Pipeline, useCheckpointDetails } from '../lib/data_fetching';
+import { Checkpoint, Job, Pipeline, useCheckpointDetails } from '../lib/data_fetching';
 import { ApiClient } from '../main';
 import CheckpointDetails from './CheckpointDetails';
 
@@ -23,7 +22,7 @@ export interface CheckpointsProps {
   client: ApiClient;
   pipeline: Pipeline;
   job: Job;
-  checkpoints: Array<CheckpointOverview>;
+  checkpoints: Array<Checkpoint>;
 }
 
 function formatDurationHMS(micros: number): string {

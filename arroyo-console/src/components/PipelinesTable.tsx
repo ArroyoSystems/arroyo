@@ -21,7 +21,7 @@ import {
   useDisclosure,
 } from '@chakra-ui/react';
 import React, { useRef, useState } from 'react';
-import { usePipelines, usePipeline, Pipeline } from '../lib/data_fetching';
+import { usePipelines, usePipeline } from '../lib/data_fetching';
 import PipelineRow from './PipelineRow';
 import { formatError } from '../lib/util';
 
@@ -119,7 +119,7 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
 
   const tableBody = (
     <Tbody>
-      {(pipelines as Pipeline[])?.flatMap(pipeline => (
+      {pipelines?.flatMap(pipeline => (
         <PipelineRow
           key={pipeline.id}
           pipeline={pipeline}

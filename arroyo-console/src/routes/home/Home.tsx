@@ -11,7 +11,7 @@ import {
   useColorModeValue,
 } from '@chakra-ui/react';
 import { useNavigate } from 'react-router-dom';
-import { Job, useJobs } from '../../lib/data_fetching';
+import { useJobs } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 
 interface Props {
@@ -56,11 +56,11 @@ export function Home() {
   }
 
   if (jobs) {
-    runningJobs = (jobs as Job[]).filter(
+    runningJobs = jobs.filter(
       j => j.state == 'Running' || j.state == 'Checkpointing' || j.state == 'Compacting'
     ).length;
     allJobs = jobs.length;
-    failedJobs = (jobs as Job[]).filter(j => j.state == 'Failed').length;
+    failedJobs = jobs.filter(j => j.state == 'Failed').length;
   }
 
   return (

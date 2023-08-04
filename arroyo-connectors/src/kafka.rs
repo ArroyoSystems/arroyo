@@ -38,8 +38,8 @@ impl Connector for KafkaConnector {
         "kafka"
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
-        grpc::api::Connector {
+    fn metadata(&self) -> arroyo_rpc::types::Connector {
+        arroyo_rpc::types::Connector {
             id: "kafka".to_string(),
             name: "Kafka".to_string(),
             icon: ICON.to_string(),

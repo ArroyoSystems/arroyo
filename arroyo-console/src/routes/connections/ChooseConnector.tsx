@@ -16,15 +16,14 @@ import {
   Stack,
   Text,
 } from '@chakra-ui/react';
-import { ApiClient } from '../../main';
 import { useNavigate } from 'react-router-dom';
 import { useConnectors } from '../../lib/data_fetching';
 
-export function ChooseConnector({ client }: { client: ApiClient }) {
+export function ChooseConnector() {
   const navigate = useNavigate();
-  const { connectors } = useConnectors(client);
+  const { connectors } = useConnectors();
 
-  const connectorCards = connectors?.connectors.map(c => {
+  const connectorCards = connectors?.map(c => {
     return (
       <Card key={c.name} size={'md'} maxW={400}>
         <Text fontSize={'12px'} p={2} w={'100%'} bgColor={'gray.600'} color={'blue.100'}>

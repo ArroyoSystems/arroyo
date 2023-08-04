@@ -3,7 +3,7 @@ import { getCurrentMaxMetric, transformMetricGroup } from '../lib/util';
 import React from 'react';
 import { TimeSeriesGraph } from './TimeSeriesGraph';
 import Loading from './Loading';
-import { PipelineNode, useJobMetrics, usePipeline } from '../lib/data_fetching';
+import { useJobMetrics, usePipeline } from '../lib/data_fetching';
 
 export interface OperatorDetailProps {
   pipelineId: string;
@@ -15,11 +15,11 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, oper
   const { pipeline } = usePipeline(pipelineId);
   const { operatorMetricGroups } = useJobMetrics(pipelineId, jobId);
 
-  if (!operatorMetricGroups) {
+  if (!pipeline || !operatorMetricGroups) {
     return <Loading size={'lg'} />;
   }
 
-  const node = (pipeline.graph.nodes as PipelineNode[]).find(n => n.nodeId == operatorId);
+  const node = pipeline.graph.nodes.find(n => n.nodeId == operatorId);
   const operatorMetricGroup = operatorMetricGroups.find(o => o.operatorId == operatorId);
 
   if (!operatorMetricGroup) {

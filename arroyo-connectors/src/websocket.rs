@@ -35,8 +35,8 @@ impl Connector for WebsocketConnector {
         "websocket"
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
-        grpc::api::Connector {
+    fn metadata(&self) -> arroyo_rpc::types::Connector {
+        arroyo_rpc::types::Connector {
             id: "websocket".to_string(),
             name: "Websocket".to_string(),
             icon: ICON.to_string(),

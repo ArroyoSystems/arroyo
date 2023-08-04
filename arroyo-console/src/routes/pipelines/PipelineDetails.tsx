@@ -31,7 +31,6 @@ import { CodeEditor } from './SqlEditor';
 import PipelineConfigModal from './PipelineConfigModal';
 import {
   OutputData,
-  PipelineNode,
   StopType,
   useJobCheckpoints,
   useJobOutput,
@@ -161,8 +160,7 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
   const outputsTab = (
     <TabPanel w={'100%'}>
       {outputs.length == 0 ? (
-        (pipeline.graph.nodes as PipelineNode[]).find(n => n.operator.includes('WebSink')) !=
-        null ? (
+        pipeline.graph.nodes.find(n => n.operator.includes('WebSink')) != null ? (
           <Button isLoading={subscribed} onClick={subscribe} width={150} size="sm">
             Read output
           </Button>
@@ -242,9 +240,7 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
 
   let configModal = <></>;
   if (pipeline.graph.nodes) {
-    const parallelism = Math.max(
-      ...(pipeline.graph.nodes as PipelineNode[]).map(({ parallelism }) => parallelism)
-    );
+    const parallelism = Math.max(...pipeline.graph.nodes.map(({ parallelism }) => parallelism));
 
     configModal = (
       <PipelineConfigModal

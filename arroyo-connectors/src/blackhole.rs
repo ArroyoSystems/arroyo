@@ -17,8 +17,8 @@ impl Connector for BlackholeConnector {
         "null"
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
-        grpc::api::Connector {
+    fn metadata(&self) -> arroyo_rpc::types::Connector {
+        arroyo_rpc::types::Connector {
             id: "blackhole".to_string(),
             name: "Blackhole".to_string(),
             icon: ICON.to_string(),

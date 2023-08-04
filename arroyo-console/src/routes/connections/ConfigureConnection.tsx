@@ -1,5 +1,5 @@
 import { JSONSchema7 } from 'json-schema';
-import { Connection, Connector, CreateConnectionReq } from '../../gen/api_pb';
+import { Connection, CreateConnectionReq } from '../../gen/api_pb';
 import { ApiClient } from '../../main';
 import {
   Button,
@@ -23,7 +23,7 @@ import { useState } from 'react';
 import { JsonForm } from './JsonForm';
 import { ConnectError } from '@bufbuild/connect-web';
 import { AddIcon } from '@chakra-ui/icons';
-import { useConnections } from '../../lib/data_fetching';
+import { Connector, useConnections } from '../../lib/data_fetching';
 import { CreateConnectionState } from './CreateConnection';
 
 const ClusterEditor = ({

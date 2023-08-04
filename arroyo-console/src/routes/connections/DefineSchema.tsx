@@ -2,9 +2,10 @@ import { Button, Code, FormControl, FormLabel, Link, Select, Stack, Text } from 
 import React, { Dispatch } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { ApiClient } from '../../main';
-import { ConnectionSchema, Connector, Format, FormatOptions } from '../../gen/api_pb';
+import { ConnectionSchema, Format, FormatOptions } from '../../gen/api_pb';
 import { ConfluentSchemaEditor } from './ConfluentSchemaEditor';
 import { JsonSchemaEditor } from './JsonSchemaEditor';
+import { Connector } from '../../lib/data_fetching';
 
 const JsonEditor = ({
   connector,

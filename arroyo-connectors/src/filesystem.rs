@@ -28,8 +28,8 @@ impl Connector for FileSystemConnector {
         "filesystem"
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
-        grpc::api::Connector {
+    fn metadata(&self) -> arroyo_rpc::types::Connector {
+        arroyo_rpc::types::Connector {
             id: "filesystem".to_string(),
             name: "FileSystem Sink".to_string(),
             icon: "".to_string(),
