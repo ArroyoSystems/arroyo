@@ -31,7 +31,7 @@ impl Connector for FileSystemConnector {
             id: "filesystem".to_string(),
             name: "FileSystem Sink".to_string(),
             icon: "".to_string(),
-            description: "Write to a filesystem (S3)".to_string(),
+            description: "Write to a filesystem (like S3)".to_string(),
             enabled: true,
             source: false,
             sink: true,
@@ -82,10 +82,22 @@ impl Connector for FileSystemConnector {
             Destination::LocalFilesystem { .. } => true,
         };
         let (description, operator) = match (&table.format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) => ("LocalFileSystem<Parquet>".to_string(), "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"),
-            (Some(FormatSettings::Parquet { .. }), false) => ("FileSystem<Parquet>".to_string(), "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"),
-            (Some(FormatSettings::Json {  }), true) => ("LocalFileSystem<JSON>".to_string(), "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>"),
-            (Some(FormatSettings::Json {  }), false) => ("FileSystem<JSON>".to_string(), "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"),
+            (Some(FormatSettings::Parquet { .. }), true) => (
+                "LocalFileSystem<Parquet>".to_string(),
+                "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
+            ),
+            (Some(FormatSettings::Parquet { .. }), false) => (
+                "FileSystem<Parquet>".to_string(),
+                "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
+            ),
+            (Some(FormatSettings::Json {  }), true) => (
+                "LocalFileSystem<JSON>".to_string(),
+                "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>"
+            ),
+            (Some(FormatSettings::Json {  }), false) => (
+                "FileSystem<JSON>".to_string(),
+                "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"
+            ),
             (None, _) => bail!("have to have some format settings"),
         };
 

@@ -40,6 +40,7 @@ pub use ordered_float::OrderedFloat;
 
 pub mod connectors;
 pub mod engine;
+mod formats;
 mod inq_reader;
 mod network_manager;
 pub mod operators;

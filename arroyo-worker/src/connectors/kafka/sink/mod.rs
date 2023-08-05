@@ -1,4 +1,5 @@
 use crate::engine::{Context, StreamNode};
+use crate::formats::FormatSerializer;
 use anyhow::Result;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
@@ -28,6 +29,7 @@ mod test;
 #[derive(StreamNode)]
 pub struct KafkaSinkFunc<K: Key + Serialize, T: Data + Serialize> {
     topic: String,
+    serializer: Box<dyn FormatSerializer<T>>,
     bootstrap_servers: String,
     consistency_mode: ConsistencyMode,
     producer: Option<FutureProducer>,
@@ -57,7 +59,12 @@ impl From<SinkCommitMode> for ConsistencyMode {
 }
 
 impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
-    pub fn new(servers: &str, topic: &str, client_config: Vec<(&str, &str)>) -> Self {
+    pub fn new(
+        servers: &str,
+        topic: &str,
+        client_config: Vec<(&str, &str)>,
+        serializer: Box<dyn FormatSerializer<T>>,
+    ) -> Self {
         KafkaSinkFunc {
             topic: topic.to_string(),
             bootstrap_servers: servers.to_string(),
@@ -68,6 +75,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
                 .collect(),
+            serializer,
             _t: PhantomData,
         }
     }
