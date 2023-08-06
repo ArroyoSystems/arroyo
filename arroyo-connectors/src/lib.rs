@@ -101,6 +101,7 @@ impl TryFrom<grpc::api::ConnectionSchema> for ConnectionSchema {
                             schema.definition,
                             Some(Definition::RawSchema { .. })
                         ),
+                        timestamp_format: arroyo_types::formats::TimestampFormat::default(),
                     })
                 }
                 grpc::api::Format::RawStringFormat => Format::Json(JsonFormat {
@@ -108,6 +109,7 @@ impl TryFrom<grpc::api::ConnectionSchema> for ConnectionSchema {
                     include_schema,
                     debezium: false,
                     unstructured: true,
+                    timestamp_format: arroyo_types::formats::TimestampFormat::default(),
                 }),
                 grpc::api::Format::ParquetFormat => Format::Parquet(ParquetFormat {}),
                 grpc::api::Format::ProtobufFormat => {

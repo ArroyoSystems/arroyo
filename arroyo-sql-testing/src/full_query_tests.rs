@@ -47,6 +47,7 @@ full_pipeline_codegen! {"watermark_test",
   bootstrap_servers = 'localhost:9092',
   type = 'source',
   topic = 'person',
+  format = 'json',
   event_time_field = 'datetime',
   watermark_field = 'watermark'
 );

@@ -157,20 +157,28 @@ impl Connector for WebsocketConnector {
     ) -> anyhow::Result<crate::Connection> {
         let description = format!("WebsocketSource<{}>", table.endpoint);
 
+        let schema = schema
+            .map(|s| s.to_owned())
+            .ok_or_else(|| anyhow!("no schema defined for WebSocket connection"))?;
+
+        let format = schema
+            .format
+            .as_ref()
+            .map(|t| t.to_owned())
+            .ok_or_else(|| anyhow!("'format' must be set for WebSocket connection"))?;
+
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            format: Some(schema.as_ref().unwrap().format.as_ref().unwrap().clone()),
+            format: Some(format),
         };
 
         Ok(Connection {
             id,
             name: name.to_string(),
             connection_type: ConnectionType::Source,
-            schema: schema
-                .map(|s| s.to_owned())
-                .ok_or_else(|| anyhow!("No schema defined for Websocket source"))?,
+            schema,
             operator: "connectors::websocket::WebsocketSourceFunc".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,

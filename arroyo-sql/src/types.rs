@@ -17,6 +17,7 @@ use arroyo_rpc::{
     grpc::api::{source_field_type, PrimitiveType, SourceField, SourceFieldType, StructType},
     primitive_to_sql,
 };
+use arroyo_types::formats::{Format, JsonFormat, TimestampFormat};
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
 use datafusion_common::ScalarValue;
@@ -277,6 +278,7 @@ pub struct StructField {
     pub renamed_from: Option<String>,
     pub original_type: Option<String>,
     pub expression: Option<Box<Expression>>,
+    pub format: Option<Arc<Format>>,
 }
 
 impl StructField {
@@ -288,6 +290,7 @@ impl StructField {
             renamed_from: None,
             original_type: None,
             expression: None,
+            format: None,
         }
     }
 
@@ -305,6 +308,24 @@ impl StructField {
             renamed_from,
             original_type,
             expression: None,
+            format: None,
+        }
+    }
+
+    pub fn with_format(
+        name: String,
+        alias: Option<String>,
+        data_type: TypeDef,
+        format: Option<Arc<Format>>,
+    ) -> Self {
+        Self {
+            name,
+            alias,
+            data_type,
+            renamed_from: None,
+            original_type: None,
+            expression: None,
+            format,
         }
     }
 
@@ -321,6 +342,7 @@ impl StructField {
             renamed_from: None,
             original_type: None,
             expression: Some(Box::new(expression)),
+            format: None,
         }
     }
 }
@@ -591,16 +613,38 @@ impl StructField {
         let type_string = self.get_type();
         // special case time fields
         if let TypeDef::DataType(DataType::Timestamp(_, _), nullable) = self.data_type {
-            if nullable {
-                return quote!(
-                #[serde(default)]
-                #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime_opt")]
-                pub #name: #type_string
-                );
-            } else {
-                return quote!(
-                #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime")]
-                pub #name: #type_string);
+            match self.format.as_ref().map(|t| &**t) {
+                Some(Format::Json(JsonFormat {
+                    timestamp_format: TimestampFormat::UnixMillis,
+                    ..
+                })) => {
+                    if nullable {
+                        return quote! {
+                            #[default]
+                            #[serde(with = "arroyo_worker::formats::timestamp_as_millis")]
+                            pub #name: #type_string
+                        };
+                    } else {
+                        return quote! {
+                            #[serde(with = "arroyo_worker::formats::timestamp_as_millis")]
+                            pub #name: #type_string
+                        };
+                    }
+                }
+                _ => {
+                    if nullable {
+                        return quote!(
+                            #[serde(default)]
+                            #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime_opt")]
+                            pub #name: #type_string
+                        );
+                    } else {
+                        return quote!(
+                            #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime")]
+                            pub #name: #type_string
+                        );
+                    }
+                }
             }
         }
         quote!(pub #name: #type_string)

@@ -112,6 +112,61 @@ impl<T: SchemaData + Serialize> DataSerializer<T> {
     }
 }
 
+#[derive(Debug)]
+pub struct MilliSecondsSystemTimeVisitor;
+
+// Custom datetime serializer for use with Debezium JSON
+pub mod timestamp_as_millis {
+    use std::{fmt, time::SystemTime};
+
+    use arroyo_types::{from_millis, to_millis};
+    use serde::{de, Deserializer, Serializer};
+
+    use super::MilliSecondsSystemTimeVisitor;
+
+    pub fn serialize<S>(t: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u64(to_millis(*t))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_i64(MilliSecondsSystemTimeVisitor)
+    }
+
+    impl<'de> de::Visitor<'de> for MilliSecondsSystemTimeVisitor {
+        type Value = SystemTime;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a unix timestamp in milliseconds")
+        }
+
+        /// Deserialize a timestamp in milliseconds since the epoch
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if value >= 0 {
+                Ok(from_millis(value as u64))
+            } else {
+                Err(serde::de::Error::custom("millis must be positive"))
+            }
+        }
+
+        /// Deserialize a timestamp in milliseconds since the epoch
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(from_millis(value))
+        }
+    }
+}
+
 fn field_to_json_schema(field: &Field) -> Value {
     match field.data_type() {
         arrow::datatypes::DataType::Null => {
@@ -200,14 +255,28 @@ fn field_to_kafka_json(field: &Field) -> Value {
         Int64 | UInt64 => "uint64",
         Float16 | Float32 => "float",
         Float64 => "double",
-        Timestamp(_, _) | Utf8 | LargeUtf8 => "string",
+        Utf8 | LargeUtf8 => "string",
         Binary | FixedSizeBinary(_) | LargeBinary => "bytes",
-        Date32 => todo!(),
-        Date64 => todo!(),
-        Time32(_) => todo!(),
-        Time64(_) => todo!(),
-        Duration(_) => todo!(),
-        Interval(_) => todo!(),
+        Time32(_) | Time64(_) | Timestamp(_, _) => {
+            // as far as I can tell, this is the only way to get timestamps from Arroyo into
+            // Kafka connect
+            return json! {{
+                "type": "int64",
+                "field": field.name().clone(),
+                "optional": field.is_nullable(),
+                "name": "org.apache.kafka.connect.data.Timestamp"
+            }};
+        }
+        Date32 | Date64 => {
+            return json! {{
+                "type": "int64",
+                "field": field.name().clone(),
+                "optional": field.is_nullable(),
+                "name": "org.apache.kafka.connect.data.Date"
+            }}
+        }
+        Duration(_) => "int64",
+        Interval(_) => "int64",
         List(t) | FixedSizeList(t, _) | LargeList(t) => {
             return json! {{
                 "type": "array",

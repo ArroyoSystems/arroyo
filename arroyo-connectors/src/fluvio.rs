@@ -130,20 +130,28 @@ impl Connector for FluvioConnector {
             ),
         };
 
+        let schema = schema
+            .map(|s| s.to_owned())
+            .ok_or_else(|| anyhow!("no schema defined for Fluvio connection"))?;
+
+        let format = schema
+            .format
+            .as_ref()
+            .map(|t| t.to_owned())
+            .ok_or_else(|| anyhow!("'format' must be set for Fluvio connection"))?;
+
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            format: Some(schema.as_ref().unwrap().format.as_ref().unwrap().clone()),
+            format: Some(format),
         };
 
         Ok(Connection {
             id,
             name: name.to_string(),
             connection_type: typ,
-            schema: schema
-                .map(|s| s.to_owned())
-                .ok_or_else(|| anyhow!("No schema defined for Fluvio connection"))?,
+            schema,
             operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description: desc,

@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
@@ -120,14 +121,20 @@ impl ConnectorTable {
     fn from_options(
         name: &str,
         connector: &str,
-        fields: Vec<StructField>,
+        schema_provider: &ArroyoSchemaProvider,
+        columns: &Vec<ColumnDef>,
         options: &mut HashMap<String, String>,
     ) -> Result<Self> {
         let connector = connector_for_type(connector)
             .ok_or_else(|| anyhow!("Unknown connector '{}'", connector))?;
 
-        let mut format =
-            Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
+        let format = Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
+
+        let fields = Table::schema_from_columns(
+            columns,
+            schema_provider,
+            format.clone().map(|t| Arc::new(t)),
+        )?;
 
         let schema_fields: Result<Vec<SourceField>> = fields
             .iter()
@@ -382,6 +389,7 @@ impl Table {
     fn schema_from_columns(
         columns: &Vec<ColumnDef>,
         schema_provider: &ArroyoSchemaProvider,
+        format: Option<Arc<Format>>,
     ) -> Result<Vec<StructField>> {
         let struct_field_pairs = columns
             .iter()
@@ -393,8 +401,12 @@ impl Table {
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
 
-                let struct_field =
-                    StructField::new(name, None, TypeDef::DataType(data_type, nullable));
+                let struct_field = StructField::with_format(
+                    name,
+                    None,
+                    TypeDef::DataType(data_type, nullable),
+                    format.clone(),
+                );
 
                 let generating_expression = column.options.iter().find_map(|option| {
                     if let ColumnOption::Generated {
@@ -486,12 +498,11 @@ impl Table {
                 );
             }
 
-            let fields = Self::schema_from_columns(columns, schema_provider)?;
-
             let connector = with_map.remove("connector");
 
             match connector.as_ref().map(|c| c.as_str()) {
                 Some("memory") | None => {
+                    let fields = Self::schema_from_columns(columns, schema_provider, None)?;
                     if fields.iter().any(|f| f.expression.is_some()) {
                         bail!("Virtual fields are not supported in memory tables; instead write a query");
                     }
@@ -507,8 +518,14 @@ impl Table {
                     Ok(Some(Table::MemoryTable { name, fields }))
                 }
                 Some(connector) => Ok(Some(Table::ConnectorTable(
-                    ConnectorTable::from_options(&name, connector, fields, &mut with_map)
-                        .map_err(|e| anyhow!("Failed to construct table '{}': {:?}", name, e))?,
+                    ConnectorTable::from_options(
+                        &name,
+                        connector,
+                        schema_provider,
+                        columns,
+                        &mut with_map,
+                    )
+                    .map_err(|e| anyhow!("Failed to construct table '{}': {:?}", name, e))?,
                 ))),
             }
         } else {
