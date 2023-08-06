@@ -5,6 +5,7 @@ extern crate core;
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
+use arrow::datatypes::Field;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -14,8 +15,8 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::ControlMessage;
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    from_millis, from_nanos, grpc_port, ports, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV,
-    RUN_ID_ENV,
+    from_millis, from_nanos, grpc_port, ports, CheckpointBarrier, Data, Debezium, NodeId, WorkerId,
+    JOB_ID_ENV, RUN_ID_ENV,
 };
 use chrono::{DateTime, Utc};
 use engine::RunningEngine;
@@ -52,6 +53,37 @@ pub const METRICS_PUSH_INTERVAL: Duration = Duration::from_secs(1);
 lazy_static! {
     pub static ref LOCAL_CONTROLLER_ADDR: String =
         format!("http://localhost:{}", ports::CONTROLLER_GRPC);
+}
+
+pub trait SchemaData: Data {
+    fn name() -> &'static str;
+    fn schema() -> arrow::datatypes::Schema;
+}
+
+impl<T: SchemaData> SchemaData for Debezium<T> {
+    fn name() -> &'static str {
+        "debezium"
+    }
+
+    fn schema() -> arrow::datatypes::Schema {
+        let subschema = T::schema();
+
+        let fields = vec![
+            Field::new(
+                "before",
+                arrow::datatypes::DataType::Struct(subschema.fields.clone()),
+                true,
+            ),
+            Field::new(
+                "after",
+                arrow::datatypes::DataType::Struct(subschema.fields),
+                true,
+            ),
+            Field::new("op", arrow::datatypes::DataType::Utf8, false),
+        ];
+
+        arrow::datatypes::Schema::new(fields)
+    }
 }
 
 // A custom deserializer for json, that takes a json::Value and reserializes it as a string

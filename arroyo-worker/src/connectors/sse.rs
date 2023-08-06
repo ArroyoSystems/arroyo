@@ -1,11 +1,11 @@
 use crate::engine::Context;
-use crate::SourceFinishType;
+use crate::{formats, SourceFinishType};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
-use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::formats::Format;
-use arroyo_types::{string_to_map, Data, Message, OperatorConfig, Record, Watermark};
+use arroyo_types::{string_to_map, Data, Message, Record, Watermark};
 use bincode::{config, Decode, Encode};
 use eventsource_client::{Client, SSE};
 use futures::StreamExt;
@@ -164,7 +164,7 @@ where
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            match self.format.deserialize_slice(&event.data.as_bytes()) {
+                                            match formats::deserialize_slice(&self.format, &event.data.as_bytes()) {
                                                 Ok(value) => {
                                                     ctx.collector.collect(Record {
                                                         timestamp: SystemTime::now(),

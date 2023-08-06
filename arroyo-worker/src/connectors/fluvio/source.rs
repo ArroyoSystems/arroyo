@@ -3,6 +3,7 @@ use crate::SourceFinishType;
 use anyhow::anyhow;
 use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::TableDescriptor;
+use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage};
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::formats::Format;
@@ -196,7 +197,7 @@ where
                             ctx.collector.collect(Record {
                                 timestamp: from_millis(msg.timestamp().max(0) as u64),
                                 key: None,
-                                value: self.format.deserialize_slice(msg.value())?,
+                                value: crate::formats::deserialize_slice(&self.format, msg.value())?,
                             }).await;
                             offsets.insert(msg.partition(), msg.offset());
                         },

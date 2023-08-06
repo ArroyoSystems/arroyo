@@ -1,5 +1,6 @@
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
+use arroyo_rpc::OperatorConfig;
 use arroyo_types::*;
 use fluvio::{Fluvio, FluvioConfig, TopicProducer};
 use std::marker::PhantomData;

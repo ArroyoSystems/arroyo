@@ -1,7 +1,9 @@
 use crate::engine::{Context, StreamNode};
+use crate::formats;
 use crate::SourceFinishType;
 use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::TableDescriptor;
+use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::formats::Format;
@@ -227,7 +229,7 @@ where
                                 ctx.collector.collect(Record {
                                     timestamp: from_millis(timestamp as u64),
                                     key: None,
-                                    value: self.format.deserialize_slice(v)?,
+                                    value: formats::deserialize_slice(&self.format, v)?,
                                 }).await;
                                 offsets.insert(msg.partition(), msg.offset());
                                 rate_limiter.until_ready().await;

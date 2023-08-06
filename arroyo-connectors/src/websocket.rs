@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use arroyo_rpc::grpc::{self, api::TestSourceMessage};
-use arroyo_types::OperatorConfig;
+use arroyo_rpc::OperatorConfig;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::{connect_async, tungstenite};

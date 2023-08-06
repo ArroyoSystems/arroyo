@@ -6,10 +6,10 @@ use std::{
 use arroyo_macro::source_fn;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
-    ControlMessage,
+    ControlMessage, OperatorConfig,
 };
 use arroyo_state::tables::GlobalKeyedState;
-use arroyo_types::{formats::Format, Data, Message, OperatorConfig, Record, UserError, Watermark};
+use arroyo_types::{formats::Format, Data, Message, Record, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -21,7 +21,7 @@ use typify::import_types;
 
 use crate::{
     engine::{Context, StreamNode},
-    SourceFinishType,
+    formats, SourceFinishType,
 };
 
 import_types!(schema = "../connector-schemas/websocket/table.json");
@@ -156,10 +156,10 @@ where
                             Some(Ok(msg)) => {
                                 let data = match msg {
                                     tungstenite::Message::Text(t) => {
-                                        self.format.deserialize_slice(&t.as_bytes()).map(|t| Some(t))
+                                        formats::deserialize_slice(&self.format, &t.as_bytes()).map(|t| Some(t))
                                     },
                                     tungstenite::Message::Binary(bs) => {
-                                        self.format.deserialize_slice(&bs).map(|t| Some(t))
+                                        formats::deserialize_slice(&self.format, &bs).map(|t| Some(t))
                                     },
                                     tungstenite::Message::Ping(d) => {
                                         tx.send(tungstenite::Message::Pong(d)).await

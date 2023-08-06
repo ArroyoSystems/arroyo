@@ -1,10 +1,8 @@
 use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
 use bincode::{config, Decode, Encode};
-use formats::Format;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Debug;
@@ -266,19 +264,6 @@ impl UserError {
             details: details.into(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RateLimit {
-    pub messages_per_second: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct OperatorConfig {
-    pub connection: Value,
-    pub table: Value,
-    pub format: Option<Format>,
-    pub rate_limit: Option<RateLimit>,
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Serialize, Deserialize)]

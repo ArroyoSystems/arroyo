@@ -150,7 +150,7 @@ impl StructDef {
         StructDef { name: None, fields }
     }
 
-    pub fn generate_record_batch_builder(&self) -> TokenStream {
+    pub fn generate_serializer_items(&self) -> TokenStream {
         let struct_type = self.get_type();
         let builder_name = format!("{}RecordBatchBuilder", self.struct_name_ident());
         let builder_ident: Ident = parse_str(&builder_name).expect(&builder_name);
@@ -200,7 +200,28 @@ impl StructDef {
             })
             .collect();
 
+        let schema_data_impl = if self.name.is_none() {
+            // generate a SchemaData impl but only for generated types
+            let name = self.struct_name();
+            Some(quote! {
+                impl arroyo_worker::SchemaData for #struct_type {
+                    fn name() -> &'static str {
+                        #name
+                    }
+
+                    fn schema() -> arrow::datatypes::Schema {
+                        let fields: Vec<arrow::datatypes::Field> = vec![#(#schema_initializations,)*];
+                        arrow::datatypes::Schema::new(fields)
+                    }
+                }
+            })
+        } else {
+            None
+        };
+
         quote! {
+            #schema_data_impl
+
             #[derive(Debug)]
             pub struct #builder_ident {
                 schema: std::sync::Arc<arrow::datatypes::Schema>,
@@ -209,7 +230,7 @@ impl StructDef {
 
             impl Default for #builder_ident {
                 fn default() -> Self {
-                    let fields :Vec<arrow::datatypes::Field> = vec![#(#schema_initializations,)*];
+                    let fields: Vec<arrow::datatypes::Field> = vec![#(#schema_initializations,)*];
                     #builder_ident {
                         schema: std::sync::Arc::new(arrow::datatypes::Schema::new(fields)),
                         #(#field_initializations,)*

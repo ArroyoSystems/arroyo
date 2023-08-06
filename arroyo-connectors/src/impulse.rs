@@ -3,7 +3,7 @@ use arroyo_rpc::grpc::{
     self,
     api::{source_field_type, TestSourceMessage},
 };
-use arroyo_types::OperatorConfig;
+use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use typify::import_types;

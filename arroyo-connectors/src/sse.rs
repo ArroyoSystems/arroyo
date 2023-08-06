@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use arroyo_rpc::grpc::{self, api::TestSourceMessage};
-use arroyo_types::{string_to_map, OperatorConfig};
+use arroyo_rpc::OperatorConfig;
+use arroyo_types::string_to_map;
 use eventsource_client::Client;
 use futures::StreamExt;
 use tokio::sync::mpsc::Sender;

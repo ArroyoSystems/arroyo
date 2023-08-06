@@ -188,7 +188,7 @@ pub(crate) async fn get<C: GenericClient>(
         .await
         .map_err(log_and_map)?;
 
-    todo!()
+    Ok(vec![])
 }
 
 // attempts to fill in the SQL schema from a schema object that may just have a json-schema or

@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail};
-use arroyo_types::OperatorConfig;
+use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 

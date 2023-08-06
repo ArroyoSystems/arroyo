@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
+use arroyo_rpc::OperatorConfig;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::{stream::FuturesUnordered, Future};

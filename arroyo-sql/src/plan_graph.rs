@@ -1814,7 +1814,7 @@ pub fn get_program(
     other_defs.extend(
         all_types
             .iter()
-            .map(|s| s.generate_record_batch_builder().to_string()),
+            .map(|s| s.generate_serializer_items().to_string()),
     );
 
     other_defs.extend(

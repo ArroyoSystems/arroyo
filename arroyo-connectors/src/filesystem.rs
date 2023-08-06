@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_rpc::grpc::{self, api::TestSourceMessage};
-use arroyo_types::{formats::Format, OperatorConfig};
+use arroyo_rpc::OperatorConfig;
+use arroyo_types::formats::Format;
 use typify::import_types;
 
 use serde::{Deserialize, Serialize};
