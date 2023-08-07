@@ -262,7 +262,7 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
     editPipelineButton = <Button onClick={onConfigModalOpen}>Edit</Button>;
     actionButton = (
       <Button
-        isDisabled={pipeline.action == null || pipeline.actionInProgress}
+        isDisabled={pipeline.action == null}
         onClick={async () => {
           await updateJobState(pipeline.action!);
         }}
