@@ -1,7 +1,4 @@
-use arroyo_rpc::grpc::{
-    self,
-    api::{Format, FormatOptions, TestSourceMessage},
-};
+use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 
 use crate::{Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig};

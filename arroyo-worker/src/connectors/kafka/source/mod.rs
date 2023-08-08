@@ -20,7 +20,7 @@ use std::time::Duration;
 use tokio::select;
 use tracing::{debug, error, info, warn};
 
-use super::{client_configs, KafkaConfig, KafkaTable, SourceReadMode, TableType};
+use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, TableType};
 
 #[cfg(test)]
 mod test;
@@ -89,7 +89,7 @@ where
             panic!("found non-source kafka config in source operator");
         };
         let mut client_configs = client_configs(&connection);
-        if let Some(SourceReadMode::ReadCommitted) = read_mode {
+        if let Some(ReadMode::ReadCommitted) = read_mode {
             client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
         }
 

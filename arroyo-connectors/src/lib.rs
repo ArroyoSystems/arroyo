@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use arroyo_rpc::{
     grpc::{
         self,
         api::{
-            connection_schema::Definition, source_field_type, SourceField, SourceFieldType,
-            TableType, TestSourceMessage,
+            connection_schema::Definition, source_field_type, FormatOptions, SourceField,
+            SourceFieldType, TableType, TestSourceMessage,
         },
     },
     primitive_to_sql,
@@ -73,6 +73,47 @@ pub struct ConnectionSchema {
     pub struct_name: Option<String>,
     pub fields: Vec<SourceField>,
     pub definition: Option<Definition>,
+}
+
+impl TryFrom<ConnectionSchema> for grpc::api::ConnectionSchema {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ConnectionSchema) -> Result<Self, Self::Error> {
+        let mut format_options = FormatOptions::default();
+        let format = value
+            .format
+            .map(|f| {
+                Ok(match f {
+                    Format::Json(json) => {
+                        if json.confluent_schema_registry {
+                            format_options.confluent_schema_registry = true;
+                        }
+                        if json.include_schema {
+                            format_options.include_schema = true;
+                        }
+
+                        match (json.debezium, json.unstructured) {
+                            (true, false) => grpc::api::Format::DebeziumJsonFormat,
+                            (false, true) => grpc::api::Format::RawStringFormat,
+                            (true, true) => bail!("debezium and raw cannot both be set"),
+                            (false, false) => grpc::api::Format::JsonFormat,
+                        }
+                    }
+                    Format::Avro(_) => grpc::api::Format::AvroFormat,
+                    Format::Parquet(_) => grpc::api::Format::ParquetFormat,
+                    Format::Raw(_) => grpc::api::Format::RawStringFormat,
+                })
+            })
+            .transpose()?;
+
+        Ok(Self {
+            format: format.map(|f| f as i32),
+            format_options: Some(format_options),
+            struct_name: value.struct_name,
+            fields: value.fields,
+            definition: value.definition,
+        })
+    }
 }
 
 impl TryFrom<grpc::api::ConnectionSchema> for ConnectionSchema {

@@ -25,7 +25,8 @@
                         },
                         "read_mode": {
                             "type": "string",
-                            "description": "Type of reading behavior for Kafka Source",
+                            "title": "read mode",
+                            "description": "Controls whether the source will wait for messages to be committed; use `read_committed` for transactional sources.",
                             "enum": [
                                 "read_committed",
                                 "read_uncommitted"

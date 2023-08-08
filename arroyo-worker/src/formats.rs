@@ -41,7 +41,7 @@ fn deserialize_slice_json<T: DeserializeOwned>(
         // TODO: this is inefficient, because we know that T is RawJson in this case and can much more directly
         //  produce that value. However, without specialization I don't know how to get the compiler to emit
         //  the optimized code for that case.
-        serde_json::from_value(j).unwrap()
+        Ok(serde_json::from_value(j).unwrap())
     } else {
         serde_json::from_slice(msg)
             .map_err(|e| format!("Failed to deserialize JSON into schema: {:?}", e))

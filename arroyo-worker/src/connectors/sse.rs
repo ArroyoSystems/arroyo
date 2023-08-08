@@ -6,7 +6,7 @@ use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::formats::Format;
 use arroyo_types::{string_to_map, Data, Message, Record, Watermark};
-use bincode::{config, Decode, Encode};
+use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
 use futures::StreamExt;
 use serde::de::DeserializeOwned;

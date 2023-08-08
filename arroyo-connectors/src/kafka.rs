@@ -164,8 +164,8 @@ impl Connector for KafkaConnector {
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
                     },
                     read_mode: match opts.remove("source.read_mode").as_ref().map(|f| f.as_str()) {
-                        Some("read_committed") => Some(SourceReadMode::ReadCommitted),
-                        Some("read_uncommitted") | None => Some(SourceReadMode::ReadUncommitted),
+                        Some("read_committed") => Some(ReadMode::ReadCommitted),
+                        Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
                         Some(other) => bail!("invalid value for source.read_mode '{}'", other),
                     },
                 }
