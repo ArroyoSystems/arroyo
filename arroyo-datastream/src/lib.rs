@@ -1328,7 +1328,7 @@ impl Program {
                             };
 
                             quote! {
-                                WindowOperation::#operation(|mut arg: Vec<_>| {
+                                WindowOperation::#operation(|key: #in_k, window: Window, mut arg: Vec<_>| {
                                     #expr
                                 })
                             }

@@ -416,6 +416,7 @@ impl Optimizer for WindowTopNOptimization {
                             WindowType::Tumbling { width } => (width, width),
                             WindowType::Sliding { width, slide } => (width, slide),
                             WindowType::Instant => (Duration::ZERO, Duration::ZERO),
+                            WindowType::Session { .. } => { return false; },
                         };
                         if width.as_micros() % slide.as_micros() != 0 {
                             self.clear();
