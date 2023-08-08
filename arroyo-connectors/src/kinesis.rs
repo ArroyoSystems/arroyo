@@ -1,7 +1,10 @@
 use anyhow::{anyhow, bail, Result};
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, TestSourceMessage},
+use arroyo_rpc::{
+    grpc::{
+        self,
+        api::{ConnectionSchema, TestSourceMessage},
+    },
+    types,
 };
 use typify::import_types;
 
@@ -29,8 +32,8 @@ impl Connector for KinesisConnector {
         "kinesis"
     }
 
-    fn metadata(&self) -> grpc::api::Connector {
-        grpc::api::Connector {
+    fn metadata(&self) -> types::Connector {
+        arroyo_rpc::types::Connector {
             id: "kinesis".to_string(),
             name: "Kinesis Connector".to_string(),
             icon: ICON.to_string(),
