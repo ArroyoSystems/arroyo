@@ -14,25 +14,25 @@ use super::{
 pub mod aggregators {
     use std::ops::Add;
 
-    use arroyo_types::Data;
+    use arroyo_types::{Data, Window, Key};
 
-    pub fn vec_aggregator<T: Data>(vs: Vec<&T>) -> Vec<T> {
+    pub fn vec_aggregator<K: Key, T: Data>(_: &K, _: Window, vs: Vec<&T>) -> Vec<T> {
         vs.into_iter().cloned().collect()
     }
 
-    pub fn count_aggregator<T: Data>(vs: Vec<&T>) -> usize {
+    pub fn count_aggregator<K: Key, T: Data>(_: &K, _: Window, vs: Vec<&T>) -> usize {
         vs.len()
     }
 
-    pub fn max_aggregator<N: Ord + Copy + Data>(vs: Vec<&N>) -> Option<N> {
+    pub fn max_aggregator<K: Key, N: Ord + Copy + Data>(_: &K, _: Window, vs: Vec<&N>) -> Option<N> {
         vs.into_iter().max().copied()
     }
 
-    pub fn min_aggregator<N: Ord + Copy + Data>(vs: Vec<&N>) -> Option<N> {
+    pub fn min_aggregator<K: Key, N: Ord + Copy + Data>(_: &K, _: Window, vs: Vec<&N>) -> Option<N> {
         vs.into_iter().min().copied()
     }
 
-    pub fn sum_aggregator<N: Add<Output = N> + Ord + Copy + Data>(vs: Vec<&N>) -> Option<N> {
+    pub fn sum_aggregator<K: Key, N: Add<Output = N> + Ord + Copy + Data>(_: &K, _: Window, vs: Vec<&N>) -> Option<N> {
         if vs.is_empty() {
             None
         } else {
@@ -41,13 +41,13 @@ pub mod aggregators {
     }
 }
 
-pub enum WindowOperation<T: Data, OutT: Data> {
-    Aggregate(fn(Vec<&T>) -> OutT),
-    Flatten(fn(Vec<&T>) -> Vec<OutT>),
+pub enum WindowOperation<K: Key, T: Data, OutT: Data> {
+    Aggregate(fn(&K, Window, Vec<&T>) -> OutT),
+    Flatten(fn(&K, Window, Vec<&T>) -> Vec<OutT>),
 }
 
-impl <T: Data, OutT: Data> WindowOperation<T, OutT> {
-    async fn operate<K: Key>(&self, key: &mut K, window: Window, table: char, ctx: &mut Context<K, OutT>) {
+impl <K: Key, T: Data, OutT: Data> WindowOperation<K, T, OutT> {
+    async fn operate(&self, key: &mut K, window: Window, table: char, ctx: &mut Context<K, OutT>) {
         let mut state = ctx.state.get_key_time_multi_map(table).await;
 
         match self {
@@ -56,7 +56,7 @@ impl <T: Data, OutT: Data> WindowOperation<T, OutT> {
                     let vs: Vec<&T> = state
                         .get_time_range(key, window.start, window.end)
                         .await;
-                    (aggregator)(vs)
+                    (aggregator)(key, window, vs)
                 };
 
                 let record = Record {
@@ -72,7 +72,7 @@ impl <T: Data, OutT: Data> WindowOperation<T, OutT> {
                     let vs: Vec<&T> = state
                         .get_time_range(key, window.start, window.end)
                         .await;
-                    (flatten)(vs)
+                    (flatten)(&key, window, vs)
                 };
 
                 for v in values {
@@ -92,7 +92,7 @@ impl <T: Data, OutT: Data> WindowOperation<T, OutT> {
 #[derive(StreamNode)]
 pub struct KeyedWindowFunc<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> {
     assigner: W,
-    operation: WindowOperation<T, OutT>,
+    operation: WindowOperation<K, T, OutT>,
     _phantom: PhantomData<(K, T, OutT)>,
 }
 
@@ -100,7 +100,7 @@ pub struct KeyedWindowFunc<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K,
 impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K, T, OutT, W> {
     pub fn tumbling_window(
         size: Duration,
-        operation: WindowOperation<T, OutT>,
+        operation: WindowOperation<K, T, OutT>,
     ) -> KeyedWindowFunc<K, T, OutT, TumblingWindowAssigner> {
         KeyedWindowFunc {
             assigner: TumblingWindowAssigner { size },
@@ -112,7 +112,7 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
     pub fn sliding_window(
         size: Duration,
         slide: Duration,
-        operation: WindowOperation<T, OutT>,
+        operation: WindowOperation<K, T, OutT>,
     ) -> KeyedWindowFunc<K, T, OutT, SlidingWindowAssigner> {
         KeyedWindowFunc {
             assigner: SlidingWindowAssigner { size, slide },
@@ -121,7 +121,7 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
         }
     }
     pub fn instant_window(
-        operation: WindowOperation<T, OutT>,
+        operation: WindowOperation<K, T, OutT>,
     ) -> KeyedWindowFunc<K, T, OutT, InstantWindowAssigner> {
         KeyedWindowFunc {
             assigner: InstantWindowAssigner {},
@@ -188,7 +188,7 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
 
 #[derive(StreamNode)]
 pub struct SessionWindowFunc<K: Key, T: Data, OutT: Data> {
-    operation: WindowOperation<T, OutT>,
+    operation: WindowOperation<K, T, OutT>,
     gap_size: Duration,
     _t: PhantomData<K>,
 }
@@ -199,7 +199,7 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
         "SessionWindow".to_string()
     }
 
-    pub async fn new(operation: WindowOperation<T, OutT>, gap_size: Duration) -> Self {
+    pub async fn new(operation: WindowOperation<K, T, OutT>, gap_size: Duration) -> Self {
         Self {
             operation,
             gap_size,
