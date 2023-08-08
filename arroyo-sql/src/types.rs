@@ -33,6 +33,7 @@ use crate::expressions::Expression;
 pub struct StructDef {
     pub name: Option<String>,
     pub fields: Vec<StructField>,
+    pub format: Option<Format>,
 }
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructPair {
@@ -41,6 +42,44 @@ pub struct StructPair {
 }
 
 impl StructDef {
+    pub fn for_fields(fields: Vec<StructField>) -> Self {
+        Self {
+            name: None,
+            fields,
+            format: None,
+        }
+    }
+
+    pub fn for_name(name: Option<String>, fields: Vec<StructField>) -> Self {
+        Self {
+            name,
+            fields,
+            format: None,
+        }
+    }
+
+    pub fn for_format(fields: Vec<StructField>, format: Option<Format>) -> Self {
+        Self {
+            name: None,
+            fields,
+            format,
+        }
+    }
+
+    pub fn new(name: Option<String>, fields: Vec<StructField>, format: Option<Format>) -> Self {
+        Self {
+            name,
+            fields,
+            format,
+        }
+    }
+
+    pub fn with_format(&self, format: Option<Format>) -> Self {
+        let mut new = self.clone();
+        new.format = format;
+        new
+    }
+
     pub fn struct_name(&self) -> String {
         match &self.name {
             Some(name) => name.clone(),
@@ -51,13 +90,14 @@ impl StructDef {
             }
         }
     }
+
     pub fn struct_name_ident(&self) -> String {
         let name = self.struct_name();
         name.replace(":", "_")
     }
 
     pub fn def(&self, is_key: bool) -> String {
-        let fields = self.fields.iter().map(|field| field.def());
+        let fields = self.fields.iter().map(|field| field.def(&self.format));
         let schema_name: Type = parse_str(&self.struct_name()).unwrap();
         let extra_derives = if is_key {
             quote!(#[derive(Eq,  Hash,  Ord)])
@@ -148,7 +188,7 @@ impl StructDef {
     // this is a hack
     pub fn truncated_return_type(&self, terms: usize) -> StructDef {
         let fields = self.fields.iter().take(terms).cloned().collect();
-        StructDef { name: None, fields }
+        StructDef::for_fields(fields)
     }
 
     pub fn generate_serializer_items(&self) -> TokenStream {
@@ -278,7 +318,6 @@ pub struct StructField {
     pub renamed_from: Option<String>,
     pub original_type: Option<String>,
     pub expression: Option<Box<Expression>>,
-    pub format: Option<Arc<Format>>,
 }
 
 impl StructField {
@@ -290,7 +329,6 @@ impl StructField {
             renamed_from: None,
             original_type: None,
             expression: None,
-            format: None,
         }
     }
 
@@ -308,24 +346,6 @@ impl StructField {
             renamed_from,
             original_type,
             expression: None,
-            format: None,
-        }
-    }
-
-    pub fn with_format(
-        name: String,
-        alias: Option<String>,
-        data_type: TypeDef,
-        format: Option<Arc<Format>>,
-    ) -> Self {
-        Self {
-            name,
-            alias,
-            data_type,
-            renamed_from: None,
-            original_type: None,
-            expression: None,
-            format,
         }
     }
 
@@ -342,7 +362,6 @@ impl StructField {
             renamed_from: None,
             original_type: None,
             expression: Some(Box::new(expression)),
-            format: None,
         }
     }
 }
@@ -376,6 +395,41 @@ impl From<StructField> for Field {
             TypeDef::DataType(dt, nullable) => (dt, nullable),
         };
         Field::new(&struct_field.name, dt, nullable)
+    }
+}
+
+impl From<SourceField> for StructField {
+    fn from(f: SourceField) -> Self {
+        let t = match f.field_type.unwrap().r#type.unwrap() {
+            source_field_type::Type::Primitive(pt) => TypeDef::DataType(
+                match PrimitiveType::from_i32(pt).unwrap() {
+                    PrimitiveType::Int32 => DataType::Int32,
+                    PrimitiveType::Int64 => DataType::Int64,
+                    PrimitiveType::UInt32 => DataType::UInt32,
+                    PrimitiveType::UInt64 => DataType::UInt64,
+                    PrimitiveType::F32 => DataType::Float32,
+                    PrimitiveType::F64 => DataType::Float64,
+                    PrimitiveType::Bool => DataType::Boolean,
+                    PrimitiveType::String => DataType::Utf8,
+                    PrimitiveType::Bytes => DataType::Binary,
+                    PrimitiveType::UnixMillis => DataType::Timestamp(TimeUnit::Millisecond, None),
+                    PrimitiveType::UnixMicros => DataType::Timestamp(TimeUnit::Microsecond, None),
+                    PrimitiveType::UnixNanos => DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    PrimitiveType::DateTime => DataType::Timestamp(TimeUnit::Microsecond, None),
+                    PrimitiveType::Json => DataType::Utf8,
+                },
+                f.nullable,
+            ),
+            source_field_type::Type::Struct(s) => TypeDef::StructDef(
+                StructDef::for_name(
+                    s.name.clone(),
+                    s.fields.into_iter().map(|t| t.into()).collect(),
+                ),
+                f.nullable,
+            ),
+        };
+
+        StructField::new(f.field_name.clone(), None, t)
     }
 }
 
@@ -608,20 +662,20 @@ impl StructField {
         }
     }
 
-    fn def(&self) -> TokenStream {
+    fn def(&self, format: &Option<Format>) -> TokenStream {
         let name: Ident = self.field_ident();
         let type_string = self.get_type();
         // special case time fields
         if let TypeDef::DataType(DataType::Timestamp(_, _), nullable) = self.data_type {
-            match self.format.as_ref().map(|t| &**t) {
+            match format.as_ref().map(|t| &*t) {
                 Some(Format::Json(JsonFormat {
                     timestamp_format: TimestampFormat::UnixMillis,
                     ..
                 })) => {
                     if nullable {
                         return quote! {
-                            #[default]
-                            #[serde(with = "arroyo_worker::formats::timestamp_as_millis")]
+                            #[serde(default)]
+                            #[serde(with = "arroyo_worker::formats::opt_timestamp_as_millis")]
                             pub #name: #type_string
                         };
                     } else {
@@ -635,12 +689,12 @@ impl StructField {
                     if nullable {
                         return quote!(
                             #[serde(default)]
-                            #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime_opt")]
+                            #[serde(with = "arroyo_worker::formats::opt_timestamp_as_rfc3339")]
                             pub #name: #type_string
                         );
                     } else {
                         return quote!(
-                            #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime")]
+                            #[serde(with = "arroyo_worker::formats::timestamp_as_rfc3339")]
                             pub #name: #type_string
                         );
                     }
@@ -1134,7 +1188,7 @@ impl TryFrom<StructField> for SourceField {
         let field_name = f.name();
         let nullable = f.nullable();
         let field_type = match f.data_type {
-            TypeDef::StructDef(StructDef { fields, name }, _) => {
+            TypeDef::StructDef(StructDef { name, fields, .. }, _) => {
                 let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
 
                 let t = source_field_type::Type::Struct(StructType {
@@ -1176,40 +1230,5 @@ impl TryFrom<StructField> for SourceField {
             field_type: Some(field_type),
             nullable,
         })
-    }
-}
-
-impl From<SourceField> for StructField {
-    fn from(f: SourceField) -> Self {
-        let t = match f.field_type.unwrap().r#type.unwrap() {
-            source_field_type::Type::Primitive(pt) => TypeDef::DataType(
-                match PrimitiveType::from_i32(pt).unwrap() {
-                    PrimitiveType::Int32 => DataType::Int32,
-                    PrimitiveType::Int64 => DataType::Int64,
-                    PrimitiveType::UInt32 => DataType::UInt32,
-                    PrimitiveType::UInt64 => DataType::UInt64,
-                    PrimitiveType::F32 => DataType::Float32,
-                    PrimitiveType::F64 => DataType::Float64,
-                    PrimitiveType::Bool => DataType::Boolean,
-                    PrimitiveType::String => DataType::Utf8,
-                    PrimitiveType::Bytes => DataType::Binary,
-                    PrimitiveType::UnixMillis => DataType::Timestamp(TimeUnit::Millisecond, None),
-                    PrimitiveType::UnixMicros => DataType::Timestamp(TimeUnit::Microsecond, None),
-                    PrimitiveType::UnixNanos => DataType::Timestamp(TimeUnit::Nanosecond, None),
-                    PrimitiveType::DateTime => DataType::Timestamp(TimeUnit::Microsecond, None),
-                    PrimitiveType::Json => DataType::Utf8,
-                },
-                f.nullable,
-            ),
-            source_field_type::Type::Struct(s) => TypeDef::StructDef(
-                StructDef {
-                    fields: s.fields.into_iter().map(|t| t.into()).collect(),
-                    name: s.name,
-                },
-                f.nullable,
-            ),
-        };
-
-        StructField::new(f.field_name, None, t)
     }
 }

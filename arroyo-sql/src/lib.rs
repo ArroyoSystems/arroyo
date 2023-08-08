@@ -341,14 +341,10 @@ pub fn parse_and_get_program_sync(
             operator: "GrpcSink::<#in_k, #in_t>".to_string(),
             config: "{}".to_string(),
             description: "WebSink".to_string(),
-            format: Some(if insert.is_updating() {
-                Format::Json(JsonFormat {
-                    debezium: true,
-                    ..Default::default()
-                })
-            } else {
-                Format::Json(JsonFormat::default())
-            }),
+            format: Some(Format::Json(JsonFormat {
+                debezium: insert.is_updating(),
+                ..Default::default()
+            })),
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
@@ -408,9 +404,9 @@ impl Default for TestStruct {
 }
 
 fn test_struct_def() -> StructDef {
-    StructDef {
-        name: Some("TestStruct".to_string()),
-        fields: vec![
+    StructDef::for_name(
+        Some("TestStruct".to_string()),
+        vec![
             StructField::new(
                 "non_nullable_i32".to_string(),
                 None,
@@ -492,7 +488,7 @@ fn test_struct_def() -> StructDef {
                 TypeDef::DataType(DataType::Binary, true),
             ),
         ],
-    }
+    )
 }
 
 pub fn generate_test_code(

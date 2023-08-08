@@ -1,5 +1,4 @@
 use std::str::FromStr;
-use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
@@ -121,20 +120,13 @@ impl ConnectorTable {
     fn from_options(
         name: &str,
         connector: &str,
-        schema_provider: &ArroyoSchemaProvider,
-        columns: &Vec<ColumnDef>,
+        fields: Vec<StructField>,
         options: &mut HashMap<String, String>,
     ) -> Result<Self> {
         let connector = connector_for_type(connector)
             .ok_or_else(|| anyhow!("Unknown connector '{}'", connector))?;
 
         let format = Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
-
-        let fields = Table::schema_from_columns(
-            columns,
-            schema_provider,
-            format.clone().map(|t| Arc::new(t)),
-        )?;
 
         let schema_fields: Result<Vec<SourceField>> = fields
             .iter()
@@ -216,10 +208,7 @@ impl ConnectorTable {
                 })
                 .unzip();
 
-            Some(Projection {
-                field_names,
-                field_computations,
-            })
+            Some(Projection::new(field_names, field_computations))
         } else {
             None
         }
@@ -313,10 +302,11 @@ impl ConnectorTable {
 
         let source = SqlSource {
             id: self.id,
-            struct_def: StructDef {
-                name: self.type_name.clone(),
-                fields: self.fields.clone(),
-            },
+            struct_def: StructDef::new(
+                self.type_name.clone(),
+                self.fields.clone(),
+                self.format.clone(),
+            ),
             operator: Operator::ConnectorSource(self.connector_op()),
             processing_mode: self.processing_mode(),
             idle_time: self.idle_time,
@@ -331,7 +321,7 @@ impl ConnectorTable {
         }))
     }
 
-    pub fn as_sql_sink(&self, input: SqlOperator) -> Result<SqlOperator> {
+    pub fn as_sql_sink(&self, mut input: SqlOperator) -> Result<SqlOperator> {
         match self.connection_type {
             ConnectionType::Source => {
                 bail!("Inserting into a source is not allowed")
@@ -347,8 +337,40 @@ impl ConnectorTable {
         let updating_type = if self.is_update() {
             SinkUpdateType::Force
         } else {
-            SinkUpdateType::Allow
+            SinkUpdateType::Disallow
         };
+
+        if updating_type == SinkUpdateType::Disallow && input.is_updating() {
+            bail!("Sink does not support update messages, cannot be used with an updating query");
+        }
+
+        if let Some(format) = &self.format {
+            let output_struct: StructDef = input.return_type();
+            // we may need to copy the record into a new struct, that has the appropriate annotations
+            // for serializing into our format
+            let mut projection = Projection::new(
+                output_struct
+                    .fields
+                    .iter()
+                    .map(|t| Column {
+                        relation: None,
+                        name: t.name(),
+                    })
+                    .collect(),
+                output_struct
+                    .fields
+                    .iter()
+                    .map(|t| Expression::Column(ColumnExpression::new(t.clone())))
+                    .collect(),
+            );
+
+            projection.format = Some(format.clone());
+
+            input = SqlOperator::RecordTransform(
+                Box::new(input),
+                crate::pipeline::RecordTransform::ValueProjection(projection),
+            );
+        }
 
         Ok(SqlOperator::Sink(
             self.name.clone(),
@@ -389,7 +411,6 @@ impl Table {
     fn schema_from_columns(
         columns: &Vec<ColumnDef>,
         schema_provider: &ArroyoSchemaProvider,
-        format: Option<Arc<Format>>,
     ) -> Result<Vec<StructField>> {
         let struct_field_pairs = columns
             .iter()
@@ -401,12 +422,8 @@ impl Table {
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
 
-                let struct_field = StructField::with_format(
-                    name,
-                    None,
-                    TypeDef::DataType(data_type, nullable),
-                    format.clone(),
-                );
+                let struct_field =
+                    StructField::new(name, None, TypeDef::DataType(data_type, nullable));
 
                 let generating_expression = column.options.iter().find_map(|option| {
                     if let ColumnOption::Generated {
@@ -423,9 +440,8 @@ impl Table {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let physical_struct: StructDef = StructDef {
-            name: None,
-            fields: struct_field_pairs
+        let physical_struct: StructDef = StructDef::for_fields(
+            struct_field_pairs
                 .iter()
                 .filter_map(
                     |(field, generating_expression)| match generating_expression {
@@ -434,7 +450,7 @@ impl Table {
                     },
                 )
                 .collect(),
-        };
+        );
 
         let physical_schema = DFSchema::new_with_metadata(
             physical_struct
@@ -499,10 +515,10 @@ impl Table {
             }
 
             let connector = with_map.remove("connector");
+            let fields = Self::schema_from_columns(columns, schema_provider)?;
 
             match connector.as_ref().map(|c| c.as_str()) {
                 Some("memory") | None => {
-                    let fields = Self::schema_from_columns(columns, schema_provider, None)?;
                     if fields.iter().any(|f| f.expression.is_some()) {
                         bail!("Virtual fields are not supported in memory tables; instead write a query");
                     }
@@ -518,14 +534,8 @@ impl Table {
                     Ok(Some(Table::MemoryTable { name, fields }))
                 }
                 Some(connector) => Ok(Some(Table::ConnectorTable(
-                    ConnectorTable::from_options(
-                        &name,
-                        connector,
-                        schema_provider,
-                        columns,
-                        &mut with_map,
-                    )
-                    .map_err(|e| anyhow!("Failed to construct table '{}': {:?}", name, e))?,
+                    ConnectorTable::from_options(&name, connector, fields, &mut with_map)
+                        .map_err(|e| anyhow!("Failed to construct table '{}': {:?}", name, e))?,
                 ))),
             }
         } else {

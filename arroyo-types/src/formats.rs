@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd)]
 pub enum TimestampFormat {
     #[default]
-    ISO8601,
+    RFC3339,
     UnixMillis,
 }
 
@@ -14,7 +14,7 @@ impl TryFrom<&str> for TimestampFormat {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-            "ISO8610" => Ok(TimestampFormat::ISO8601),
+            "RFC3339" => Ok(TimestampFormat::RFC3339),
             "UnixMillis" | "unix_millis" => Ok(TimestampFormat::UnixMillis),
             _ => Err(()),
         }
@@ -60,7 +60,7 @@ impl JsonFormat {
             .remove("json.timestamp_format")
             .map(|t| t.as_str().try_into())
             .transpose()
-            .map_err(|_| "invalid `json.timestamp_format`".to_string())?
+            .map_err(|_| "json.timestamp_format".to_string())?
             .unwrap_or_else(|| {
                 if debezium {
                     TimestampFormat::UnixMillis

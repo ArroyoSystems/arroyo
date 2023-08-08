@@ -167,6 +167,117 @@ pub mod timestamp_as_millis {
     }
 }
 
+#[derive(Debug)]
+pub struct OptMilliSecondsSystemTimeVisitor;
+
+// Custom datetime serializer for use with Debezium JSON
+pub mod opt_timestamp_as_millis {
+    use std::{fmt, time::SystemTime};
+
+    use arroyo_types::to_millis;
+    use serde::{de, Deserializer, Serializer};
+
+    use super::{MilliSecondsSystemTimeVisitor, OptMilliSecondsSystemTimeVisitor};
+
+    pub fn serialize<S>(t: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let Some(t) = t {
+            serializer.serialize_some(&to_millis(*t))
+        } else {
+            serializer.serialize_none()
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_option(OptMilliSecondsSystemTimeVisitor)
+    }
+
+    impl<'de> de::Visitor<'de> for OptMilliSecondsSystemTimeVisitor {
+        type Value = Option<SystemTime>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a unix timestamp in milliseconds")
+        }
+
+        /// Deserialize a timestamp in milliseconds since the epoch
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Ok(Some(
+                deserializer.deserialize_any(MilliSecondsSystemTimeVisitor)?,
+            ))
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+    }
+}
+
+// Custom deserializer for fields encoded as RFC3339 date time strings, relying on Chrono's deserialization
+// capabilities (note we can't use chrono::DateTime as the field type currently, because all times in SQL-land
+// currently need to be SystemTime)
+pub mod timestamp_as_rfc3339 {
+    use std::time::SystemTime;
+
+    use arroyo_types::from_nanos;
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(t: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let dt: DateTime<Utc> = (*t).into();
+        serializer.serialize_str(&dt.to_rfc3339())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw: chrono::DateTime<Utc> = DateTime::deserialize(deserializer)?;
+        Ok(from_nanos(raw.timestamp_nanos() as u128))
+    }
+}
+
+pub mod opt_timestamp_as_rfc3339 {
+    use std::time::SystemTime;
+
+    use arroyo_types::from_nanos;
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(t: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let Some(t) = *t {
+            let dt: DateTime<Utc> = t.into();
+            serializer.serialize_some(&dt.to_rfc3339())
+        } else {
+            serializer.serialize_none()
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = Option::<DateTime<Utc>>::deserialize(deserializer)?;
+        Ok(raw.map(|raw| from_nanos(raw.timestamp_nanos() as u128)))
+    }
+}
+
 fn field_to_json_schema(field: &Field) -> Value {
     match field.data_type() {
         arrow::datatypes::DataType::Null => {
