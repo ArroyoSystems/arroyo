@@ -18,7 +18,7 @@ export type OperatorMetricGroup = schemas['OperatorMetricGroup'];
 export type Connector = schemas['Connector'];
 export type Checkpoint = schemas['Checkpoint'];
 
-const BASE_URL = 'http://localhost:8000/api';
+const BASE_URL = '/api';
 export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
 
 const processResponse = (data: any | undefined, error: any | undefined) => {
