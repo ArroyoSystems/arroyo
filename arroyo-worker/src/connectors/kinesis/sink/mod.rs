@@ -2,6 +2,7 @@ use std::{marker::PhantomData, time::SystemTime};
 
 use anyhow::Result;
 use arroyo_macro::{process_fn, StreamNode};
+use arroyo_rpc::OperatorConfig;
 use arroyo_types::{CheckpointBarrier, Data, Key, Record};
 use aws_config::load_from_env;
 use aws_sdk_kinesis::{
@@ -12,7 +13,7 @@ use serde::Serialize;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::{connectors::OperatorConfig, engine::Context};
+use crate::engine::Context;
 
 use super::{KinesisTable, TableType};
 

@@ -11,10 +11,10 @@ use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
-    ControlMessage, ControlResp,
+    ControlMessage, ControlResp, OperatorConfig,
 };
 use arroyo_state::tables::GlobalKeyedState;
-use arroyo_types::{from_nanos, Data, Record};
+use arroyo_types::{formats::Format, from_nanos, Data, Record, UserError};
 use aws_config::load_from_env;
 use aws_sdk_kinesis::{
     client::fluent_builders::GetShardIterator,
@@ -33,12 +33,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::{
-    connectors::{OperatorConfig, OperatorConfigSerializationMode},
-    engine::Context,
-    operators::{SerializationMode, UserError},
-    SourceFinishType,
-};
+use crate::{engine::Context, formats, SourceFinishType};
 
 use super::{KinesisTable, SourceOffset, TableType};
 
@@ -52,7 +47,7 @@ pub enum KinesisOffset {
 #[derive(StreamNode)]
 pub struct KinesisSourceFunc<K: Data, T: Data + DeserializeOwned> {
     stream_name: String,
-    serialization_mode: SerializationMode,
+    format: Format,
     kinesis_client: Option<KinesisClient>,
     shards: HashMap<String, ShardState>,
     read_mode: SourceOffset,
@@ -177,17 +172,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
             stream_name: table.stream_name,
             kinesis_client: None,
             shards: HashMap::new(),
-            serialization_mode: match config.serialization_mode.unwrap() {
-                OperatorConfigSerializationMode::Json => SerializationMode::Json,
-                OperatorConfigSerializationMode::JsonSchemaRegistry => {
-                    SerializationMode::JsonSchemaRegistry
-                }
-                OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
-                OperatorConfigSerializationMode::DebeziumJson => SerializationMode::Json,
-                OperatorConfigSerializationMode::Parquet => {
-                    unimplemented!("parquet out of kafka source doesn't make sense")
-                }
-            },
+            format: config.format.unwrap(),
             read_mode,
             _phantom: PhantomData,
         }
@@ -446,7 +431,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         let records = get_records_output.records.unwrap_or_default();
         for record in records {
             let data = record.data.unwrap().into_inner();
-            let value = self.serialization_mode.deserialize_slice(&data)?;
+            let value = formats::deserialize_slice(&self.format, &data)?;
             let timestamp = record.approximate_arrival_timestamp.unwrap();
             let output_record = Record {
                 timestamp: from_nanos(timestamp.as_nanos() as u128),

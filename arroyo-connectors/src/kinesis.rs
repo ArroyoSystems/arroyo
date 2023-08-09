@@ -1,18 +1,13 @@
 use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::{
-    grpc::{
-        self,
-        api::{ConnectionSchema, TestSourceMessage},
-    },
-    types,
+    grpc::{self, api::TestSourceMessage},
+    types, OperatorConfig,
 };
 use typify::import_types;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    pull_opt, serialization_mode, Connection, ConnectionType, EmptyConfig, OperatorConfig,
-};
+use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, EmptyConfig};
 
 use super::Connector;
 
@@ -54,7 +49,7 @@ impl Connector for KinesisConnector {
         _: &str,
         _: Self::ConfigT,
         _: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        _: Option<&ConnectionSchema>,
         tx: tokio::sync::mpsc::Sender<
             Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
         >,
@@ -97,21 +92,28 @@ impl Connector for KinesisConnector {
                 format!("KinesisSink<{}>", table.stream_name),
             ),
         };
+        let schema = schema
+            .map(|s| s.to_owned())
+            .ok_or_else(|| anyhow!("No schema defined for Kinesis"))?;
+
+        let format = schema
+            .format
+            .as_ref()
+            .map(|format| format.to_owned())
+            .ok_or_else(|| anyhow!("'format' must be set for kinesis connections"))?;
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
+            format: Some(format),
         };
 
         Ok(Connection {
             id,
             name: name.to_string(),
             connection_type,
-            schema: schema
-                .map(|s| s.to_owned())
-                .ok_or_else(|| anyhow!("No schema defined for Kinesis"))?,
+            schema: schema,
             operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
