@@ -13,11 +13,10 @@ use arrow::{
     datatypes::{Field, IntervalDayTimeType},
 };
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
-use arroyo_rpc::{
-    grpc::api::{source_field_type, PrimitiveType, SourceField, SourceFieldType, StructType},
-    primitive_to_sql,
+use arroyo_rpc::types::{
+    FieldType, Format, JsonFormat, PrimitiveType, SourceField, SourceFieldType, StructType,
+    TimestampFormat,
 };
-use arroyo_types::formats::{Format, JsonFormat, TimestampFormat};
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
 use datafusion_common::ScalarValue;
@@ -400,9 +399,9 @@ impl From<StructField> for Field {
 
 impl From<SourceField> for StructField {
     fn from(f: SourceField) -> Self {
-        let t = match f.field_type.unwrap().r#type.unwrap() {
-            source_field_type::Type::Primitive(pt) => TypeDef::DataType(
-                match PrimitiveType::from_i32(pt).unwrap() {
+        let t = match f.field_type.r#type {
+            FieldType::Primitive(pt) => TypeDef::DataType(
+                match pt {
                     PrimitiveType::Int32 => DataType::Int32,
                     PrimitiveType::Int64 => DataType::Int64,
                     PrimitiveType::UInt32 => DataType::UInt32,
@@ -420,7 +419,7 @@ impl From<SourceField> for StructField {
                 },
                 f.nullable,
             ),
-            source_field_type::Type::Struct(s) => TypeDef::StructDef(
+            FieldType::Struct(s) => TypeDef::StructDef(
                 StructDef::for_name(
                     s.name.clone(),
                     s.fields.into_iter().map(|t| t.into()).collect(),
@@ -429,7 +428,7 @@ impl From<SourceField> for StructField {
             ),
         };
 
-        StructField::new(f.field_name.clone(), None, t)
+        StructField::new(f.field_name, None, t)
     }
 }
 
@@ -1191,15 +1190,12 @@ impl TryFrom<StructField> for SourceField {
             TypeDef::StructDef(StructDef { name, fields, .. }, _) => {
                 let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
 
-                let t = source_field_type::Type::Struct(StructType {
+                let st = StructType {
                     name,
                     fields: fields?,
-                });
+                };
 
-                SourceFieldType {
-                    sql_name: None,
-                    r#type: Some(t),
-                }
+                FieldType::Struct(st)
             }
             TypeDef::DataType(dt, _) => {
                 let pt = match dt {
@@ -1218,16 +1214,16 @@ impl TryFrom<StructField> for SourceField {
                     dt => Err(format!("Unsupported data type {:?}", dt)),
                 }?;
 
-                SourceFieldType {
-                    r#type: Some(source_field_type::Type::Primitive(pt.into())),
-                    sql_name: Some(primitive_to_sql(pt).to_string()),
-                }
+                FieldType::Primitive(pt)
             }
         };
 
         Ok(SourceField {
             field_name,
-            field_type: Some(field_type),
+            field_type: SourceFieldType {
+                r#type: field_type,
+                sql_name: None,
+            },
             nullable,
         })
     }

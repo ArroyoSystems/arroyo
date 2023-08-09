@@ -4,9 +4,8 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaConnector, KafkaTable};
-use arroyo_connectors::{Connection, ConnectionSchema, Connector};
+use arroyo_connectors::{Connection, Connector};
 use arroyo_datastream::Program;
-use arroyo_types::formats::{Format, JsonFormat};
 use datafusion::physical_plan::functions::make_scalar_function;
 
 mod expressions;
@@ -37,6 +36,7 @@ use schemas::window_arrow_struct;
 use tables::{schema_defs, ConnectorTable, Insert, Table};
 
 use crate::types::{StructDef, StructField, TypeDef};
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, JsonFormat};
 use quote::ToTokens;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
@@ -345,7 +345,7 @@ pub fn parse_and_get_program_sync(
         let sink = Table::ConnectorTable(ConnectorTable {
             id: None,
             name: "web".to_string(),
-            connection_type: arroyo_connectors::ConnectionType::Sink,
+            connection_type: ConnectionType::Sink,
             fields: struct_def.fields.clone(),
             type_name: None,
             operator: "GrpcSink::<#in_k, #in_t>".to_string(),
@@ -525,7 +525,6 @@ pub fn get_test_expression(
     let struct_def = test_struct_def();
     let schema = ConnectionSchema {
         format: Some(Format::Json(JsonFormat::default())),
-
         struct_name: struct_def.name.clone(),
         fields: struct_def
             .fields

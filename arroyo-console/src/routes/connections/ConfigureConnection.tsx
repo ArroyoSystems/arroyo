@@ -1,6 +1,4 @@
 import { JSONSchema7 } from 'json-schema';
-import { Connection, CreateConnectionReq } from '../../gen/api_pb';
-import { ApiClient } from '../../main';
 import {
   Button,
   FormControl,
@@ -21,10 +19,10 @@ import {
 } from '@chakra-ui/react';
 import { useState } from 'react';
 import { JsonForm } from './JsonForm';
-import { ConnectError } from '@bufbuild/connect-web';
 import { AddIcon } from '@chakra-ui/icons';
-import { Connector, useConnections } from '../../lib/data_fetching';
+import { ConnectionProfile, Connector, post, useConnectionProfiles } from '../../lib/data_fetching';
 import { CreateConnectionState } from './CreateConnection';
+import { formatError } from '../../lib/util';
 
 const ClusterEditor = ({
   connector,
@@ -33,17 +31,15 @@ const ClusterEditor = ({
   setConnectionId,
   clusterError,
   schema,
-  client,
-  addCluster,
+  addConnectionProfile,
 }: {
   connector: string;
-  connections: Array<Connection>;
+  connections: Array<ConnectionProfile>;
   connectionId: string | null;
   setConnectionId: (id: string) => void;
   clusterError: string | null;
   schema: JSONSchema7;
-  client: ApiClient;
-  addCluster: (c: Connection) => void;
+  addConnectionProfile: (c: ConnectionProfile) => void;
 }) => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [error, setError] = useState<string | null>(null);
@@ -53,28 +49,25 @@ const ClusterEditor = ({
       schema={schema}
       hasName={true}
       error={error}
-      onSubmit={async data => {
+      onSubmit={async d => {
         setError(null);
-        try {
-          const resp = await (
-            await client()
-          ).createConnection(
-            new CreateConnectionReq({
-              name: data.name,
-              connector: connector,
-              config: JSON.stringify(data),
-            })
-          );
+        const { data: connectionProfile, error } = await post('/v1/connection_profiles', {
+          body: {
+            name: d.name,
+            connector: connector,
+            config: JSON.stringify(d),
+          },
+        });
 
-          addCluster(resp.connection!);
-          onClose();
-        } catch (e) {
-          if (e instanceof ConnectError) {
-            setError(e.rawMessage);
-          } else {
-            setError('Something went wrong: ' + e);
-          }
+        if (connectionProfile) {
+          addConnectionProfile(connectionProfile);
         }
+
+        if (error) {
+          setError(formatError(error));
+        }
+
+        onClose();
       }}
     />
   );
@@ -127,49 +120,47 @@ const ClusterEditor = ({
 };
 
 export const ConfigureConnection = ({
-  client,
   connector,
   onSubmit,
   state,
   setState,
 }: {
-  client: ApiClient;
   connector: Connector;
   onSubmit: () => void;
   state: CreateConnectionState;
   setState: (s: CreateConnectionState) => void;
 }) => {
-  let { connections, connectionsLoading, mutateConnections } = useConnections(client);
+  let { connectionProfiles, connectionProfilesLoading, mutateConnectionProfiles } =
+    useConnectionProfiles();
   const [clusterError, setClusterError] = useState<string | null>(null);
 
-  if (connectionsLoading) {
+  if (connectionProfilesLoading) {
     return <></>;
   }
 
   return (
     <Stack spacing={8}>
-      {connector?.connectionConfig && (
+      {connector.connectionConfig && (
         <ClusterEditor
-          client={client}
-          connectionId={state.connectionId}
-          setConnectionId={c => setState({ ...state, connectionId: c })}
+          connectionId={state.connectionProfileId}
+          setConnectionId={c => setState({ ...state, connectionProfileId: c })}
           connector={connector.id}
-          connections={connections!}
+          connections={connectionProfiles!}
           clusterError={clusterError}
           schema={JSON.parse(connector.connectionConfig)}
-          addCluster={c => {
-            mutateConnections([...connections!, c]);
-            setState({ ...state, connectionId: c.id });
+          addConnectionProfile={c => {
+            mutateConnectionProfiles();
+            setState({ ...state, connectionProfileId: c.id });
           }}
         />
       )}
 
       <Stack spacing="4" maxW={800}>
         <JsonForm
-          schema={JSON.parse(connector!.tableConfig)}
+          schema={JSON.parse(connector.tableConfig)}
           initial={state.table || {}}
           onSubmit={async table => {
-            if (connector?.connectionConfig && state.connectionId == null) {
+            if (connector?.connectionConfig && state.connectionProfileId == null) {
               setClusterError('Cluster is required');
               return;
             }

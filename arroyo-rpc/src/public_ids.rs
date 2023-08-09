@@ -11,7 +11,7 @@ const ALPHABET: [char; 62] = [
 
 pub enum IdTypes {
     ApiKey,
-    Connection,
+    ConnectionProfile,
     Schema,
     Pipeline,
     JobConfig,
@@ -26,11 +26,11 @@ pub enum IdTypes {
 pub fn generate_id(id_type: IdTypes) -> String {
     let prefix = match id_type {
         IdTypes::ApiKey => "ak",
-        IdTypes::Connection => "conn",
+        IdTypes::ConnectionProfile => "cp",
         IdTypes::Schema => "sch",
         IdTypes::Pipeline => "pl",
         IdTypes::JobConfig => "job",
-        IdTypes::Checkpoint => "cp",
+        IdTypes::Checkpoint => "chk",
         IdTypes::JobStatus => "js",
         IdTypes::ClusterInfo => "ci",
         IdTypes::JobLogMessage => "jlm",

@@ -4,7 +4,64 @@
  */
 
 
+/** OneOf type helpers */
+type Without<T, U> = { [P in Exclude<keyof T, keyof U>]?: never };
+type XOR<T, U> = (T | U) extends object ? (Without<T, U> & U) | (Without<U, T> & T) : T | U;
+type OneOf<T extends any[]> = T extends [infer Only] ? Only : T extends [infer A, infer B, ...infer Rest] ? OneOf<[XOR<A, B>, ...Rest]> : never;
+
 export interface paths {
+  "/v1/connection_profiles": {
+    /**
+     * List all connection profiles 
+     * @description List all connection profiles
+     */
+    get: operations["get_connection_profiles"];
+    /**
+     * Create connection profile 
+     * @description Create connection profile
+     */
+    post: operations["create_connection_profile"];
+  };
+  "/v1/connection_tables": {
+    /**
+     * List all connection tables 
+     * @description List all connection tables
+     */
+    get: operations["get_connection_tables"];
+    /**
+     * Create a new connection table 
+     * @description Create a new connection table
+     */
+    post: operations["create_connection_table"];
+  };
+  "/v1/connection_tables/schemas/confluent": {
+    /**
+     * Get a Confluent Schema 
+     * @description Get a Confluent Schema
+     */
+    get: operations["get_confluent_schema"];
+  };
+  "/v1/connection_tables/schemas/test": {
+    /**
+     * Test a Connection Schema 
+     * @description Test a Connection Schema
+     */
+    post: operations["test_schema"];
+  };
+  "/v1/connection_tables/test": {
+    /**
+     * Test a Connection Table 
+     * @description Test a Connection Table
+     */
+    post: operations["test_connection_table"];
+  };
+  "/v1/connection_tables/{id}": {
+    /**
+     * Delete a Connection Table 
+     * @description Delete a Connection Table
+     */
+    delete: operations["delete_connection_table"];
+  };
   "/v1/connectors": {
     /**
      * List all connectors 
@@ -20,6 +77,10 @@ export interface paths {
     get: operations["get_jobs"];
   };
   "/v1/ping": {
+    /**
+     * Ping endpoint 
+     * @description Ping endpoint
+     */
     get: operations["ping"];
   };
   "/v1/pipelines": {
@@ -101,6 +162,7 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    AvroFormat: Record<string, never>;
     Checkpoint: {
       backend: string;
       /** Format: int32 */
@@ -114,6 +176,55 @@ export interface components {
       data: (components["schemas"]["Checkpoint"])[];
       hasMore: boolean;
     };
+    ConfluentSchema: {
+      schema: string;
+    };
+    ConnectionProfile: {
+      config: unknown;
+      connector: string;
+      description: string;
+      id: string;
+      name: string;
+    };
+    ConnectionProfileCollection: {
+      data: (components["schemas"]["ConnectionProfile"])[];
+      hasMore: boolean;
+    };
+    ConnectionProfilePost: {
+      config: unknown;
+      connector: string;
+      name: string;
+    };
+    ConnectionSchema: {
+      definition?: components["schemas"]["SchemaDefinition"] | null;
+      fields: (components["schemas"]["SourceField"])[];
+      format?: components["schemas"]["Format"] | null;
+      structName?: string | null;
+    };
+    ConnectionTable: {
+      config: unknown;
+      connectionProfile?: components["schemas"]["ConnectionProfile"] | null;
+      connector: string;
+      /** Format: int32 */
+      consumers: number;
+      id: string;
+      name: string;
+      schema: components["schemas"]["ConnectionSchema"];
+      tableType: components["schemas"]["ConnectionType"];
+    };
+    ConnectionTableCollection: {
+      data: (components["schemas"]["ConnectionTable"])[];
+      hasMore: boolean;
+    };
+    ConnectionTablePost: {
+      config: unknown;
+      connectionProfileId?: string | null;
+      connector: string;
+      name: string;
+      schema?: components["schemas"]["ConnectionSchema"] | null;
+    };
+    /** @enum {string} */
+    ConnectionType: "source" | "sink";
     Connector: {
       connectionConfig?: string | null;
       customSchemas: boolean;
@@ -132,6 +243,20 @@ export interface components {
       data: (components["schemas"]["Connector"])[];
       hasMore: boolean;
     };
+    FieldType: OneOf<[{
+      primitive: components["schemas"]["PrimitiveType"];
+    }, {
+      struct: components["schemas"]["StructType"];
+    }]>;
+    Format: OneOf<[{
+      json: components["schemas"]["JsonFormat"];
+    }, {
+      avro: components["schemas"]["AvroFormat"];
+    }, {
+      parquet: components["schemas"]["ParquetFormat"];
+    }, {
+      raw_string: components["schemas"]["RawStringFormat"];
+    }]>;
     Job: {
       /** Format: int64 */
       createdAt: number;
@@ -168,6 +293,13 @@ export interface components {
       data: (components["schemas"]["JobLogMessage"])[];
       hasMore: boolean;
     };
+    JsonFormat: {
+      confluentSchemaRegistry?: boolean;
+      debezium?: boolean;
+      includeSchema?: boolean;
+      timestampFormat?: components["schemas"]["TimestampFormat"];
+      unstructured?: boolean;
+    };
     Metric: {
       /** Format: int64 */
       time: number;
@@ -195,6 +327,7 @@ export interface components {
       timestamp: number;
       value: string;
     };
+    ParquetFormat: Record<string, never>;
     Pipeline: {
       action?: components["schemas"]["StopType"] | null;
       actionInProgress: boolean;
@@ -245,15 +378,47 @@ export interface components {
       parallelism: number;
       preview?: boolean | null;
       query: string;
-      udfs: (components["schemas"]["Udf"])[];
+      udfs?: (components["schemas"]["Udf"])[] | null;
+    };
+    /** @enum {string} */
+    PrimitiveType: "int32" | "int64" | "u_int32" | "u_int64" | "f32" | "f64" | "bool" | "string" | "bytes" | "unix_millis" | "unix_micros" | "unix_nanos" | "date_time" | "json";
+    RawStringFormat: Record<string, never>;
+    SchemaDefinition: OneOf<[{
+      json_schema: string;
+    }, {
+      protobuf_schema: string;
+    }, {
+      avro_schema: string;
+    }, {
+      raw_schema: string;
+    }]>;
+    SourceField: {
+      fieldName: string;
+      fieldType: components["schemas"]["SourceFieldType"];
+      nullable: boolean;
+    };
+    SourceFieldType: {
+      sqlName?: string | null;
+      type: components["schemas"]["FieldType"];
     };
     /** @enum {string} */
     StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
+    StructType: {
+      fields: (components["schemas"]["SourceField"])[];
+      name?: string | null;
+    };
     SubtaskMetrics: {
       /** Format: int32 */
       idx: number;
       metrics: (components["schemas"]["Metric"])[];
     };
+    TestSourceMessage: {
+      done: boolean;
+      error: boolean;
+      message: string;
+    };
+    /** @enum {string} */
+    TimestampFormat: "rfc3339" | "unix_millis";
     Udf: {
       definition: string;
       language: components["schemas"]["UdfLanguage"];
@@ -262,7 +427,7 @@ export interface components {
     UdfLanguage: "rust";
     ValidatePipelinePost: {
       query: string;
-      udfs: (components["schemas"]["Udf"])[];
+      udfs?: (components["schemas"]["Udf"])[] | null;
     };
   };
   responses: never;
@@ -276,6 +441,140 @@ export type external = Record<string, never>;
 
 export interface operations {
 
+  /**
+   * List all connection profiles 
+   * @description List all connection profiles
+   */
+  get_connection_profiles: {
+    responses: {
+      /** @description Got connections collection */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConnectionProfileCollection"];
+        };
+      };
+    };
+  };
+  /**
+   * Create connection profile 
+   * @description Create connection profile
+   */
+  create_connection_profile: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionProfilePost"];
+      };
+    };
+    responses: {
+      /** @description Created connection profile */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConnectionProfile"];
+        };
+      };
+    };
+  };
+  /**
+   * List all connection tables 
+   * @description List all connection tables
+   */
+  get_connection_tables: {
+    responses: {
+      /** @description Got connection table collection */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConnectionTableCollection"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a new connection table 
+   * @description Create a new connection table
+   */
+  create_connection_table: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionTablePost"];
+      };
+    };
+    responses: {
+      /** @description Created connection table */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConnectionTable"];
+        };
+      };
+    };
+  };
+  /**
+   * Get a Confluent Schema 
+   * @description Get a Confluent Schema
+   */
+  get_confluent_schema: {
+    parameters: {
+      query: {
+        /** @description Confluent topic name */
+        topic: string;
+        /** @description Confluent schema registry endpoint */
+        endpoint: string;
+      };
+    };
+    responses: {
+      /** @description Got Confluent Schema */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConfluentSchema"];
+        };
+      };
+    };
+  };
+  /**
+   * Test a Connection Schema 
+   * @description Test a Connection Schema
+   */
+  test_schema: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionSchema"];
+      };
+    };
+    responses: {
+      /** @description Schema is valid */
+      200: never;
+    };
+  };
+  /**
+   * Test a Connection Table 
+   * @description Test a Connection Table
+   */
+  test_connection_table: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionTablePost"];
+      };
+    };
+    responses: {
+      /** @description Job output as 'text/event-stream' */
+      200: never;
+    };
+  };
+  /**
+   * Delete a Connection Table 
+   * @description Delete a Connection Table
+   */
+  delete_connection_table: {
+    parameters: {
+      path: {
+        /** @description Connection Table id */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Deleted connection table */
+      200: never;
+    };
+  };
   /**
    * List all connectors 
    * @description List all connectors
@@ -304,6 +603,10 @@ export interface operations {
       };
     };
   };
+  /**
+   * Ping endpoint 
+   * @description Ping endpoint
+   */
   ping: {
     responses: {
       /** @description Ping endpoint */

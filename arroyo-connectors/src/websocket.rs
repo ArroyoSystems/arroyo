@@ -1,17 +1,18 @@
+use std::convert::Infallible;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
+use axum::response::sse::Event;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::{connect_async, tungstenite};
-use tonic::Status;
 use typify::import_types;
 
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, EmptyConfig};
+use crate::{pull_opt, Connection, EmptyConfig};
 
 use super::Connector;
 
@@ -23,7 +24,7 @@ const ICON: &str = include_str!("../resources/websocket.svg");
 pub struct WebsocketConnector {}
 
 impl Connector for WebsocketConnector {
-    type ConfigT = EmptyConfig;
+    type ProfileT = EmptyConfig;
 
     type TableT = WebsocketTable;
 
@@ -51,22 +52,23 @@ impl Connector for WebsocketConnector {
     fn test(
         &self,
         _: &str,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: Sender<Result<TestSourceMessage, Status>>,
+        tx: Sender<Result<Event, Infallible>>,
     ) {
         tokio::task::spawn(async move {
             let send = |error: bool, done: bool, message: String| {
                 let tx = tx.clone();
                 async move {
-                    tx.send(Ok(TestSourceMessage {
+                    let msg = TestSourceMessage {
                         error,
                         done,
                         message,
-                    }))
-                    .await
-                    .unwrap();
+                    };
+                    tx.send(Ok(Event::default().json_data(msg).unwrap()))
+                        .await
+                        .unwrap();
                 }
             };
 
@@ -143,15 +145,15 @@ impl Connector for WebsocketConnector {
         });
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn from_config(
         &self,
         id: Option<i64>,
         name: &str,
-        config: Self::ConfigT,
+        config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {

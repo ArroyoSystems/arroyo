@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Result};
-use arroyo_rpc::{
-    grpc::{self, api::TestSourceMessage},
-    types, OperatorConfig,
-};
+use axum::response::sse::Event;
+use std::convert::Infallible;
 use typify::import_types;
 
+use arroyo_rpc::types::TestSourceMessage;
+use arroyo_rpc::{types, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -21,7 +21,7 @@ import_types!(schema = "../connector-schemas/kinesis/table.json");
 pub struct KinesisConnector {}
 
 impl Connector for KinesisConnector {
-    type ConfigT = EmptyConfig;
+    type ProfileT = EmptyConfig;
 
     type TableT = KinesisTable;
 
@@ -30,7 +30,7 @@ impl Connector for KinesisConnector {
     }
 
     fn metadata(&self) -> types::Connector {
-        arroyo_rpc::types::Connector {
+        types::Connector {
             id: "kinesis".to_string(),
             name: "Kinesis Connector".to_string(),
             icon: ICON.to_string(),
@@ -49,28 +49,27 @@ impl Connector for KinesisConnector {
     fn test(
         &self,
         _: &str,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
     ) {
         tokio::task::spawn(async move {
-            tx.send(Ok(TestSourceMessage {
+            let message = TestSourceMessage {
                 error: false,
                 done: true,
                 message: "Successfully validated connection".to_string(),
-            }))
-            .await
-            .unwrap();
+            };
+            tx.send(Ok(Event::default().json_data(message).unwrap()))
+                .await
+                .unwrap();
         });
     }
 
-    fn table_type(&self, _: Self::ConfigT, table: Self::TableT) -> grpc::api::TableType {
+    fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
         return match table.type_ {
-            TableType::Source { .. } => grpc::api::TableType::Source,
-            TableType::Sink { .. } => grpc::api::TableType::Sink,
+            TableType::Source { .. } => ConnectionType::Source,
+            TableType::Sink { .. } => ConnectionType::Sink,
         };
     }
 
@@ -78,7 +77,7 @@ impl Connector for KinesisConnector {
         &self,
         id: Option<i64>,
         name: &str,
-        config: Self::ConfigT,
+        config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {

@@ -11,7 +11,6 @@ use axum::Json;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::Transaction;
 use futures_util::stream::Stream;
-use http::StatusCode;
 use std::convert::Infallible;
 use std::{collections::HashMap, time::Duration};
 use tokio_stream::wrappers::ReceiverStream;
@@ -23,7 +22,9 @@ const PREVIEW_TTL: Duration = Duration::from_secs(60);
 
 use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
-use crate::rest_utils::{authenticate, client, log_and_map_rest, BearerAuth, ErrorResp};
+use crate::rest_utils::{
+    authenticate, bad_request, client, log_and_map_rest, BearerAuth, ErrorResp,
+};
 use crate::types::public::LogLevel;
 use crate::{log_and_map, queries::api_queries, to_micros, types::public, AuthData};
 use arroyo_rpc::types::{
@@ -47,10 +48,9 @@ pub(crate) async fn create_job<'a>(
     if checkpoint_interval < Duration::from_secs(1)
         || checkpoint_interval > Duration::from_secs(24 * 60 * 60)
     {
-        return Err(ErrorResp {
-            status_code: StatusCode::BAD_REQUEST,
-            message: "checkpoint_interval_micros must be between 1 second and 1 day".to_string(),
-        });
+        return Err(bad_request(
+            "Checkpoint_interval_micros must be between 1 second and 1 day.".to_string(),
+        ));
     }
 
     let running_jobs = get_job_statuses(&auth, client)
@@ -64,10 +64,7 @@ pub(crate) async fn create_job<'a>(
             of running jobs in your plan ({}). Stop an existing job or contact support@arroyo.systems for
             an increase", auth.org_metadata.max_running_jobs);
 
-        return Err(ErrorResp {
-            status_code: StatusCode::BAD_REQUEST,
-            message,
-        });
+        return Err(bad_request(message));
     }
 
     let job_id = generate_id(IdTypes::JobConfig);
@@ -356,10 +353,7 @@ pub async fn get_job_output(
         .any(|n| n.operator.contains("WebSink"))
     {
         // TODO: make this check more robust
-        return Err(ErrorResp {
-            status_code: StatusCode::BAD_REQUEST,
-            message: "Job does not have a web sink".to_string(),
-        });
+        return Err(bad_request("Job does not have a web sink".to_string()));
     }
     let (tx, rx) = tokio::sync::mpsc::channel(32);
 
@@ -392,8 +386,10 @@ pub async fn get_job_output(
             };
 
             let output_data: OutputData = v.into();
-            let json = serde_json::to_string(&output_data).unwrap();
-            let e = Ok(Event::default().data(json).id(message_count.to_string()));
+            let e = Ok(Event::default()
+                .json_data(output_data)
+                .unwrap()
+                .id(message_count.to_string()));
 
             if tx.send(e).await.is_err() {
                 break;

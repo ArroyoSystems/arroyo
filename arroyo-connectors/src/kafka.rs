@@ -1,11 +1,13 @@
 use anyhow::{anyhow, bail};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use typify::import_types;
 
+use axum::response::sse::Event;
 use std::time::{Duration, Instant};
 
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
+use arroyo_rpc::types::{ConnectionSchema, TestSourceMessage};
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     message::BorrowedMessage,
@@ -15,7 +17,7 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
 
-use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType};
+use crate::{pull_opt, Connection, ConnectionType};
 
 use super::Connector;
 
@@ -29,7 +31,7 @@ import_types!(schema = "../connector-schemas/kafka/table.json");
 pub struct KafkaConnector {}
 
 impl Connector for KafkaConnector {
-    type ConfigT = KafkaConfig;
+    type ProfileT = KafkaConfig;
     type TableT = KafkaTable;
 
     fn name(&self) -> &'static str {
@@ -53,7 +55,7 @@ impl Connector for KafkaConnector {
         }
     }
 
-    fn config_description(&self, config: Self::ConfigT) -> String {
+    fn config_description(&self, config: Self::ProfileT) -> String {
         (*config.bootstrap_servers).clone()
     }
 
@@ -109,10 +111,10 @@ impl Connector for KafkaConnector {
     fn test(
         &self,
         _: &str,
-        config: Self::ConfigT,
+        config: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: Sender<Result<TestSourceMessage, Status>>,
+        tx: Sender<Result<Event, Infallible>>,
     ) {
         let tester = KafkaTester {
             connection: config,
@@ -123,10 +125,10 @@ impl Connector for KafkaConnector {
         tester.start();
     }
 
-    fn table_type(&self, _: Self::ConfigT, table: Self::TableT) -> grpc::api::TableType {
+    fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
         match table.type_ {
-            TableType::Source { .. } => grpc::api::TableType::Source,
-            TableType::Sink { .. } => grpc::api::TableType::Sink,
+            TableType::Source { .. } => ConnectionType::Source,
+            TableType::Sink { .. } => ConnectionType::Sink,
         }
     }
 
@@ -197,7 +199,7 @@ impl Connector for KafkaConnector {
 struct KafkaTester {
     connection: KafkaConfig,
     table: KafkaTable,
-    tx: Sender<Result<TestSourceMessage, Status>>,
+    tx: Sender<Result<Event, Infallible>>,
 }
 
 pub struct TopicMetadata {
@@ -375,7 +377,12 @@ impl KafkaTester {
     }
 
     async fn send(&self, msg: TestSourceMessage) {
-        if self.tx.send(Ok(msg)).await.is_err() {
+        if self
+            .tx
+            .send(Ok(Event::default().json_data(msg).unwrap()))
+            .await
+            .is_err()
+        {
             warn!("Test API rx closed while sending message");
         }
     }

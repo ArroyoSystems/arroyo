@@ -1,14 +1,16 @@
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
+use axum::response::sse::Event;
+use std::convert::Infallible;
 
-use crate::{Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig};
+use crate::{Connection, Connector, EmptyConfig};
 
 pub struct BlackholeConnector {}
 
 const ICON: &str = include_str!("../resources/blackhole.svg");
 
 impl Connector for BlackholeConnector {
-    type ConfigT = EmptyConfig;
+    type ProfileT = EmptyConfig;
     type TableT = EmptyConfig;
 
     fn name(&self) -> &'static str {
@@ -32,13 +34,13 @@ impl Connector for BlackholeConnector {
         }
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> arroyo_rpc::grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn get_schema(
         &self,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         _: Self::TableT,
         s: Option<&ConnectionSchema>,
     ) -> Option<ConnectionSchema> {
@@ -48,21 +50,20 @@ impl Connector for BlackholeConnector {
     fn test(
         &self,
         _: &str,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
     ) {
         tokio::task::spawn(async move {
-            tx.send(Ok(TestSourceMessage {
+            let message = TestSourceMessage {
                 error: false,
                 done: true,
                 message: "Successfully validated connection".to_string(),
-            }))
-            .await
-            .unwrap();
+            };
+            tx.send(Ok(Event::default().json_data(message).unwrap()))
+                .await
+                .unwrap();
         });
     }
 
@@ -79,7 +80,7 @@ impl Connector for BlackholeConnector {
         &self,
         id: Option<i64>,
         name: &str,
-        config: Self::ConfigT,
+        config: Self::ProfileT,
         table: Self::TableT,
         s: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
@@ -106,13 +107,5 @@ impl Connector for BlackholeConnector {
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
-    }
-
-    fn parse_config(&self, s: &str) -> Result<Self::ConfigT, serde_json::Error> {
-        serde_json::from_str(if s.is_empty() { "{}" } else { s })
-    }
-
-    fn parse_table(&self, s: &str) -> Result<Self::TableT, serde_json::Error> {
-        serde_json::from_str(s)
     }
 }

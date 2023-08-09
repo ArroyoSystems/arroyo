@@ -1,5 +1,4 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ApiClient } from '../../main';
 import {
   Box,
   Breadcrumb,
@@ -18,31 +17,24 @@ import {
   Stepper,
   useSteps,
 } from '@chakra-ui/react';
-import { Connector, useConnectors } from '../../lib/data_fetching';
+import { ConnectionSchema, Connector, useConnectors } from '../../lib/data_fetching';
 import { useEffect, useState } from 'react';
 
 import { ConfigureConnection } from './ConfigureConnection';
 import { DefineSchema } from './DefineSchema';
 import { ConnectionTester } from './ConnectionTester';
-import { ConnectionSchema } from '../../gen/api_pb';
 
 export type CreateConnectionState = {
   name: string | undefined;
-  connectionId: string | null;
+  connectionProfileId: string | null;
   table: any;
   schema: ConnectionSchema | null;
 };
 
-export const ConnectionCreator = ({
-  client,
-  connector,
-}: {
-  client: ApiClient;
-  connector: Connector;
-}) => {
+export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
   const [state, setState] = useState<CreateConnectionState>({
     name: undefined,
-    connectionId: null,
+    connectionProfileId: null,
     table: null,
     schema: null,
   });
@@ -57,7 +49,6 @@ export const ConnectionCreator = ({
       title: 'Configure connection',
       el: (
         <ConfigureConnection
-          client={client}
           connector={connector}
           state={state}
           setState={setState}
@@ -71,7 +62,6 @@ export const ConnectionCreator = ({
       title: 'Define schema',
       el: (
         <DefineSchema
-          client={client}
           connector={connector}
           state={state}
           setState={setState}
@@ -83,9 +73,7 @@ export const ConnectionCreator = ({
     },
     {
       title: 'Create',
-      el: (
-        <ConnectionTester client={client} connector={connector} state={state} setState={setState} />
-      ),
+      el: <ConnectionTester connector={connector} state={state} setState={setState} />,
     },
   ];
 
@@ -127,7 +115,7 @@ export const ConnectionCreator = ({
   );
 };
 
-export const CreateConnection = ({ client }: { client: ApiClient }) => {
+export const CreateConnection = () => {
   let { connectorId } = useParams();
   let { connectors, connectorsLoading } = useConnectors();
 
@@ -167,7 +155,7 @@ export const CreateConnection = ({ client }: { client: ApiClient }) => {
             <Heading size="sm">Create {connector?.name} connection</Heading>
           </Stack>
 
-          <ConnectionCreator client={client} connector={connector!} />
+          <ConnectionCreator connector={connector!} />
         </Stack>
       </Container>
     );

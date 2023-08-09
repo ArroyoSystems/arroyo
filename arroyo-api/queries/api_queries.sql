@@ -4,44 +4,36 @@ SELECT user_id, organization_id
 FROM api_keys
 WHERE api_key = :api_key;
 
------------ connections ----------------
---! create_connection
-INSERT INTO connections (pub_id, organization_id, created_by, name, type, config)
+----------- connection profiles ----------------
+--! create_connection_profile
+INSERT INTO connection_profiles (pub_id, organization_id, created_by, name, type, config)
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :config)
 RETURNING id;
 
---! get_connections : DbConnection()
+--! get_connection_profiles : DbConnectionProfile()
 SELECT
     id,
+    pub_id,
     name,
     type,
     config
-FROM connections
-WHERE connections.organization_id = :organization_id
-ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
+FROM connection_profiles
+WHERE connection_profiles.organization_id = :organization_id
+ORDER BY COALESCE(connection_profiles.updated_at, connection_profiles.created_at) DESC;
 
---! get_connection : DbConnection()
+--! get_connection_profile_by_pub_id: DbConnectionProfile()
 SELECT
     id,
+    pub_id,
     name,
     type,
     config
-FROM connections
-WHERE connections.organization_id = :organization_id AND connections.name = :name
-ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
+FROM connection_profiles
+WHERE connection_profiles.organization_id = :organization_id AND connection_profiles.pub_id = :pub_id
+ORDER BY COALESCE(connection_profiles.updated_at, connection_profiles.created_at) DESC;
 
---! get_connection_by_id: DbConnection()
-SELECT
-    id,
-    name,
-    type,
-    config
-FROM connections
-WHERE connections.organization_id = :organization_id AND connections.id = :id
-ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
-
---! delete_connection
-DELETE FROM connections
+--! delete_connection_profile
+DELETE FROM connection_profiles
 WHERE organization_id = :organization_id AND name = :name;
 
 ----------- schemas --------------------
@@ -57,29 +49,51 @@ INSERT INTO connection_tables
 (pub_id, organization_id, created_by, name, table_type, connector, connection_id, config, schema)
 VALUES (:pub_id, :organization_id, :created_by, :name, :table_type, :connector, :connection_id, :config, :schema);
 
---! get_connection_tables: (connection_id?, connection_name?, connection_type?, connection_config?, schema?)
+--: DbConnectionTable (connection_id?, connection_name?, connection_type?, connection_config?, schema?)
+
+--! get_connection_tables: DbConnectionTable
 SELECT connection_tables.id as id,
+    connection_tables.pub_id as pub_id,
     connection_tables.name as name,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
     connection_tables.config as config,
     connection_tables.schema as schema,
     connection_tables.connection_id as connection_id,
-    connections.name as connection_name,
-    connections.type as connection_type,
-    connections.config as connection_config,
+    connection_profiles.name as connection_name,
+    connection_profiles.type as connection_type,
+    connection_profiles.config as connection_config,
     (SELECT count(*) as pipeline_count
         FROM connection_table_pipelines
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
     ) as consumer_count
-
 FROM connection_tables
-LEFT JOIN connections ON connections.id = connection_tables.connection_id
+LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id;
+
+--! get_connection_table: DbConnectionTable
+SELECT connection_tables.id as id,
+    connection_tables.pub_id as pub_id,
+    connection_tables.name as name,
+    connection_tables.connector as connector,
+    connection_tables.table_type as table_type,
+    connection_tables.config as config,
+    connection_tables.schema as schema,
+    connection_tables.connection_id as connection_id,
+    connection_profiles.name as connection_name,
+    connection_profiles.type as connection_type,
+    connection_profiles.config as connection_config,
+    (SELECT count(*) as pipeline_count
+        FROM connection_table_pipelines
+        WHERE connection_table_pipelines.connection_table_id = connection_tables.id
+    ) as consumer_count
+FROM connection_tables
+LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
+WHERE connection_tables.organization_id = :organization_id AND connection_tables.pub_id = :pub_id;
 
 --! delete_connection_table
 DELETE FROM connection_tables
-WHERE organization_id = :organization_id AND id = :id;
+WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 
 ----------- pipelines -------------------

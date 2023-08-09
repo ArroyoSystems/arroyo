@@ -107,7 +107,7 @@ function App() {
   }
 
   return (
-    <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px 1fr'} h="100vh">
+    <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px minmax(0, 1fr)'} h="100vh">
       <Sidebar />
       {content}
     </Grid>
