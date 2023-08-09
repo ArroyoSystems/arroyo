@@ -1,11 +1,11 @@
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::formats::JsonFormat;
 use rand::Rng;
 use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
 use crate::engine::{Context, OutQueue, QueueItem};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
+use arroyo_rpc::types::{Format, JsonFormat};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
 use arroyo_types::{to_micros, CheckpointBarrier, Message, TaskInfo};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
@@ -64,7 +64,7 @@ impl KafkaTopicTester {
             &self.server,
             &self.topic,
             crate::connectors::kafka::SourceOffset::Earliest,
-            arroyo_types::formats::Format::Json(JsonFormat::default()),
+            Format::Json(JsonFormat::default()),
             100,
             vec![],
         );

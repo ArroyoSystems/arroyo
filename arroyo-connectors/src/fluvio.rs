@@ -1,10 +1,12 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
+use arroyo_rpc::types::{ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
+use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use typify::import_types;
 
-use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig};
+use crate::{pull_opt, Connection, ConnectionType, Connector, EmptyConfig};
 
 pub struct FluvioConnector {}
 
@@ -14,7 +16,7 @@ const ICON: &str = include_str!("../resources/fluvio.svg");
 import_types!(schema = "../connector-schemas/fluvio/table.json");
 
 impl Connector for FluvioConnector {
-    type ConfigT = EmptyConfig;
+    type ProfileT = EmptyConfig;
     type TableT = FluvioTable;
 
     fn name(&self) -> &'static str {
@@ -38,16 +40,16 @@ impl Connector for FluvioConnector {
         }
     }
 
-    fn table_type(&self, _: Self::ConfigT, t: Self::TableT) -> arroyo_rpc::grpc::api::TableType {
+    fn table_type(&self, _: Self::ProfileT, t: Self::TableT) -> ConnectionType {
         match t.type_ {
-            TableType::Source { .. } => grpc::api::TableType::Source,
-            TableType::Sink {} => grpc::api::TableType::Sink,
+            TableType::Source { .. } => ConnectionType::Source,
+            TableType::Sink {} => ConnectionType::Sink,
         }
     }
 
     fn get_schema(
         &self,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         _: Self::TableT,
         s: Option<&ConnectionSchema>,
     ) -> Option<ConnectionSchema> {
@@ -57,19 +59,20 @@ impl Connector for FluvioConnector {
     fn test(
         &self,
         _: &str,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<TestSourceMessage, tonic::Status>>,
+        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
     ) {
         tokio::task::spawn(async move {
-            tx.send(Ok(TestSourceMessage {
+            let message = TestSourceMessage {
                 error: false,
                 done: true,
                 message: "Successfully validated connection".to_string(),
-            }))
-            .await
-            .unwrap();
+            };
+            tx.send(Ok(Event::default().json_data(message).unwrap()))
+                .await
+                .unwrap();
         });
     }
 

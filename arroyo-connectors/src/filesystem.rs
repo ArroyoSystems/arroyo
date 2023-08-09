@@ -1,12 +1,13 @@
 use anyhow::{anyhow, bail, Result};
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
-use arroyo_rpc::OperatorConfig;
-use arroyo_types::formats::Format;
+use axum::response::sse::Event;
+use std::convert::Infallible;
 use typify::import_types;
 
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, TestSourceMessage};
+use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_option_to_i64, Connection, ConnectionSchema, ConnectionType, EmptyConfig};
+use crate::{pull_option_to_i64, Connection, EmptyConfig};
 
 use super::Connector;
 
@@ -17,7 +18,7 @@ import_types!(schema = "../connector-schemas/filesystem/table.json");
 pub struct FileSystemConnector {}
 
 impl Connector for FileSystemConnector {
-    type ConfigT = EmptyConfig;
+    type ProfileT = EmptyConfig;
 
     type TableT = FileSystemTable;
 
@@ -45,33 +46,32 @@ impl Connector for FileSystemConnector {
     fn test(
         &self,
         _: &str,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
     ) {
         tokio::task::spawn(async move {
-            tx.send(Ok(TestSourceMessage {
+            let message = TestSourceMessage {
                 error: false,
                 done: true,
                 message: "Successfully validated connection".to_string(),
-            }))
-            .await
-            .unwrap();
+            };
+            tx.send(Ok(Event::default().json_data(message).unwrap()))
+                .await
+                .unwrap();
         });
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn from_config(
         &self,
         id: Option<i64>,
         name: &str,
-        config: Self::ConfigT,
+        config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {

@@ -1,6 +1,5 @@
 import { Dispatch, useRef, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
-import { ApiClient } from '../../main';
 import {
   Alert,
   AlertDescription,
@@ -24,32 +23,35 @@ import {
   Text,
   useDisclosure,
 } from '@chakra-ui/react';
-import { CreateConnectionTableReq, TestSourceMessage } from '../../gen/api_pb';
-import { ConnectError } from '@bufbuild/connect-web';
 import { useNavigate } from 'react-router-dom';
-import { Connector } from '../../lib/data_fetching';
+import {
+  ConnectionTablePost,
+  Connector,
+  post,
+  TestSourceMessage,
+  useConnectionTableTest,
+} from '../../lib/data_fetching';
+import { formatError } from '../../lib/util';
 
 export function ConnectionTester({
   connector,
   state,
   setState,
-  client,
 }: {
   connector: Connector;
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
-  client: ApiClient;
 }) {
   const [testing, setTesting] = useState<boolean>(false);
-  const [messages, setMessages] = useState<Array<TestSourceMessage> | null>(null);
+  const [messages, setMessages] = useState<Array<TestSourceMessage>>([]);
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = useRef<any>();
   const [touched, setTouched] = useState<boolean>(false);
   const [error, setError] = useState<{ title: string; body: string } | null>(null);
   const navigate = useNavigate();
 
-  const done = messages != null && messages.length > 0 && messages[messages?.length - 1].done;
-  const errored = messages != null && messages.find(m => m.error) != null;
+  const done = messages.length > 0 && messages[messages?.length - 1].done;
+  const errored = messages.find(m => m.error) != null;
 
   let config = JSON.parse(JSON.stringify(state.table));
   delete config.__meta;
@@ -60,55 +62,41 @@ export function ConnectionTester({
     return name && /^[_a-zA-Z][a-zA-Z0-9_]*$/.test(name);
   };
 
-  const createRequest = new CreateConnectionTableReq({
-    name: state.name,
+  const sseHandler = (event: any) => {
+    try {
+      const parsed = JSON.parse(event) as TestSourceMessage;
+      messages.push(parsed);
+      setMessages(messages);
+    } catch {
+      console.log('Failed to parse event');
+    }
+  };
+
+  const createRequest: ConnectionTablePost = {
+    name: state.name!,
     connector: connector.id,
-    connectionId: state.connectionId || undefined,
-    config: JSON.stringify(config),
+    connectionProfileId: state.connectionProfileId,
+    config: config,
     schema: state.schema || undefined,
-  });
+  };
 
   const onClickTest = async () => {
     setTesting(true);
     setError(null);
     console.log('config', state);
+
     if (!testing) {
-      try {
-        let m: Array<TestSourceMessage> = [];
-        setMessages(m);
-        for await (const res of (await client()).testConnectionTable(createRequest)) {
-          m = [...m, res];
-          setMessages(m);
-          await new Promise(r => setTimeout(r, 300));
-        }
-      } catch (e) {
-        if (e instanceof ConnectError) {
-          setError({ title: 'Failed to test connection', body: e.rawMessage });
-        } else {
-          setError({
-            title: 'Failed to test connection',
-            body: 'Something went wrong... try again',
-          });
-        }
-      }
+      await useConnectionTableTest(sseHandler, createRequest);
       setTesting(false);
     }
   };
 
   const submit = async () => {
     setError(null);
-    try {
-      await (await client()).createConnectionTable(createRequest);
-      navigate('/connections');
-    } catch (e) {
-      if (e instanceof ConnectError) {
-        setError({ title: 'Failed to create connection', body: e.rawMessage });
-      } else {
-        setError({
-          title: 'Failed to create connection',
-          body: 'Something went wrong... try again',
-        });
-      }
+    const { error } = await post('/v1/connection_tables', { body: createRequest });
+    navigate('/connections');
+    if (error) {
+      setError({ title: 'Failed to create connection', body: formatError(error) });
     }
   };
 
@@ -121,7 +109,7 @@ export function ConnectionTester({
   };
 
   let messageBox = null;
-  if (messages != null) {
+  if (messages.length) {
     messageBox = (
       <Box bg="bg-surface">
         <Stack divider={<StackDivider />} spacing="0">

@@ -5,10 +5,11 @@ use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::GenericClient;
 use deadpool_postgres::{Object, Transaction};
-use http::StatusCode;
+
 use petgraph::visit::EdgeRef;
 use prost::Message;
-use tonic::{Request, Status};
+use serde_json::json;
+use tonic::Request;
 use tracing::warn;
 
 use arroyo_datastream::{ConnectorOp, Operator, Program};
@@ -28,17 +29,20 @@ use crate::jobs::get_action;
 use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob};
 use crate::rest::AppState;
-use crate::rest_utils::{authenticate, client, log_and_map_rest, ApiError, BearerAuth, ErrorResp};
+use crate::rest_utils::{
+    authenticate, bad_request, client, log_and_map_rest, not_found, required_field, unauthorized,
+    ApiError, BearerAuth, ErrorResp,
+};
 use crate::types::public::{PipelineType, StopMode};
 use crate::{connection_tables, to_micros};
-use crate::{handle_db_error, log_and_map, optimizations, required_field, AuthData};
+use crate::{handle_db_error, log_and_map, optimizations, AuthData};
 use create_pipeline_req::Config::Sql;
 
 async fn compile_sql<'e, E>(
     sql: &CreateSqlJob,
     auth_data: &AuthData,
     tx: &E,
-) -> Result<(Program, Vec<i64>), Status>
+) -> Result<(Program, Vec<i64>), ErrorResp>
 where
     E: GenericClient,
 {
@@ -47,9 +51,9 @@ where
     for (i, udf) in sql.udfs.iter().enumerate() {
         match UdfLanguage::from_i32(udf.language) {
             Some(UdfLanguage::Rust) => {
-                schema_provider.add_rust_udf(&udf.definition).map_err(|e| {
-                    Status::invalid_argument(format!("Could not process UDF: {:?}", e))
-                })?;
+                schema_provider
+                    .add_rust_udf(&udf.definition)
+                    .map_err(|e| bad_request(format!("Could not process UDF: {:?}", e)))?;
             }
             None => {
                 return Err(required_field(&format!("udfs[{}].language", i)));
@@ -57,7 +61,7 @@ where
         }
     }
 
-    for table in connection_tables::get(auth_data, tx).await? {
+    for table in connection_tables::get_all_connection_tables(auth_data, tx).await? {
         let Some(connector) = connector_for_type(&table.connector) else {
             warn!("Saved table found with unknown connector {}", table.connector);
             continue;
@@ -68,15 +72,11 @@ where
                 Some(table.id),
                 &table.name,
                 &table
-                    .connection
+                    .connection_profile
                     .map(|c| c.config.clone())
-                    .unwrap_or_else(|| "{}".to_string()),
+                    .unwrap_or(json!({})),
                 &table.config,
-                table
-                    .schema
-                    .as_ref()
-                    .map(|s| s.clone().try_into().unwrap())
-                    .as_ref(),
+                Some(&table.schema),
             )
             .map_err(log_and_map)?;
 
@@ -94,7 +94,7 @@ where
     .with_context(|| "failed to generate SQL program")
     .map_err(|err| {
         warn!("{:?}", err);
-        Status::invalid_argument(format!("{}", err.root_cause()))
+        bad_request(format!("{}", err.root_cause()))
     })?;
 
     Ok((program, connections))
@@ -111,7 +111,7 @@ pub(crate) async fn create_pipeline<'a>(
     pub_id: &str,
     auth: AuthData,
     tx: &Transaction<'a>,
-) -> Result<i64, Status> {
+) -> Result<i64, ErrorResp> {
     let pipeline_type;
     let mut program;
     let connections;
@@ -122,8 +122,8 @@ pub(crate) async fn create_pipeline<'a>(
     match req.config.clone().ok_or_else(|| required_field("config"))? {
         create_pipeline_req::Config::Program(bytes) => {
             if !auth.org_metadata.can_create_programs {
-                return Err(Status::invalid_argument(
-                    "Your plan does not allow you to call this API.",
+                return Err(unauthorized(
+                    "Your plan does not allow you to call this API.".to_string(),
                 ));
             }
             pipeline_type = PipelineType::rust;
@@ -138,7 +138,7 @@ pub(crate) async fn create_pipeline<'a>(
         }
         Sql(sql) => {
             if sql.parallelism > auth.org_metadata.max_parallelism as u64 {
-                return Err(Status::invalid_argument(format!(
+                return Err(bad_request(format!(
                     "Your plan allows you to run pipelines up to parallelism {};
                     contact support@arroyo.systems for an increase",
                     auth.org_metadata.max_parallelism
@@ -164,7 +164,7 @@ pub(crate) async fn create_pipeline<'a>(
     optimizations::optimize(&mut program.graph);
 
     if program.graph.node_count() > auth.org_metadata.max_operators as usize {
-        return Err(Status::invalid_argument(
+        return Err(bad_request(
             format!("This pipeline is too large to create under your plan, which only allows pipelines up to {} nodes;
                 contact support@arroyo.systems for an increase", auth.org_metadata.max_operators)));
     }
@@ -173,7 +173,7 @@ pub(crate) async fn create_pipeline<'a>(
     if !errors.is_empty() {
         let errs: Vec<String> = errors.iter().map(|s| format!("  * {}\n", s)).collect();
 
-        return Err(Status::failed_precondition(format!(
+        return Err(bad_request(format!(
             "Program validation failed:\n{}",
             errs.join("")
         )));
@@ -553,11 +553,9 @@ pub async fn delete_pipeline(
         .iter()
         .any(|job| job.state != "Stopped" && job.state != "Finished" && job.state != "Failed")
     {
-        return Err(ErrorResp {
-            status_code: StatusCode::BAD_REQUEST,
-            message: "Pipeline's jobs must be in a terminal state (stopped, finished, or failed) before it can be deleted"
-                .to_string(),
-        });
+        return Err(bad_request("Pipeline's jobs must be in a terminal state (stopped, finished, or failed) before it can be deleted"
+                .to_string()
+        ));
     }
 
     let count = api_queries::delete_pipeline()
@@ -566,10 +564,7 @@ pub async fn delete_pipeline(
         .map_err(log_and_map_rest)?;
 
     if count != 1 {
-        return Err(ErrorResp {
-            status_code: StatusCode::NOT_FOUND,
-            message: "Pipeline not found".to_string(),
-        });
+        return Err(not_found("Pipeline".to_string()));
     }
 
     Ok(())
@@ -620,10 +615,7 @@ pub async fn query_pipeline_by_pub_id(
         .await
         .map_err(log_and_map_rest)?;
 
-    let res = pipeline.ok_or_else(|| ErrorResp {
-        status_code: StatusCode::NOT_FOUND,
-        message: "Pipeline not found".to_string(),
-    })?;
+    let res = pipeline.ok_or_else(|| not_found("Pipeline".to_string()))?;
 
     res.try_into()
 }
@@ -643,10 +635,7 @@ pub async fn query_job_by_pub_id(
         .await
         .map_err(log_and_map_rest)?;
 
-    let res: DbPipelineJob = job.ok_or_else(|| ErrorResp {
-        status_code: StatusCode::NOT_FOUND,
-        message: "Job not found".to_string(),
-    })?;
+    let res: DbPipelineJob = job.ok_or_else(|| not_found("Job".to_string()))?;
 
     Ok(res.into())
 }

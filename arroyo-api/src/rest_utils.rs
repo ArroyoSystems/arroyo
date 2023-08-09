@@ -103,3 +103,28 @@ pub(crate) async fn authenticate(
     let client = client(pool).await?;
     cloud::authenticate_rest(client, bearer_auth).await
 }
+
+pub(crate) fn bad_request(message: String) -> ErrorResp {
+    ErrorResp {
+        status_code: StatusCode::BAD_REQUEST,
+        message: message.to_string(),
+    }
+}
+
+pub(crate) fn unauthorized(message: String) -> ErrorResp {
+    ErrorResp {
+        status_code: StatusCode::UNAUTHORIZED,
+        message: message.to_string(),
+    }
+}
+
+pub(crate) fn not_found(object: String) -> ErrorResp {
+    ErrorResp {
+        status_code: StatusCode::NOT_FOUND,
+        message: format!("{} not found", object),
+    }
+}
+
+pub(crate) fn required_field(field: &str) -> ErrorResp {
+    bad_request(format!("Field {} must be set", field))
+}

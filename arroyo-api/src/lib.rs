@@ -1,3 +1,52 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
+use cornucopia_async::GenericClient;
+use deadpool_postgres::{Object, Pool};
+use prost::Message;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use time::OffsetDateTime;
+use tokio_postgres::error::SqlState;
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::{Request, Response, Status};
+use tracing::{error, warn};
+use utoipa::OpenApi;
+
+use arroyo_rpc::grpc::api::{
+    api_grpc_server::ApiGrpc, CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq,
+    ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateConnectionTableReq,
+    CreateConnectionTableResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp,
+    DeleteConnectionReq, DeleteConnectionResp, DeleteConnectionTableReq, DeleteConnectionTableResp,
+    GetConnectionTablesReq, GetConnectionTablesResp, GetConnectionsReq, GetConnectionsResp,
+    GetConnectorsReq, GetConnectorsResp, GetJobsReq, GetJobsResp, GetPipelineReq,
+    GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp,
+    JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes,
+    OutputData as OutputDataProto, PipelineDef, PipelineGraphReq, PipelineGraphResp, StopType,
+    TestSchemaReq, TestSchemaResp, TestSourceMessage as TestSourceMessageProto, UpdateJobReq,
+    UpdateJobResp,
+};
+use arroyo_rpc::grpc::api::{DeleteJobReq, DeleteJobResp, PipelineProgram};
+use arroyo_rpc::types::{
+    AvroFormat, Checkpoint, CheckpointCollection, ConfluentSchema, ConnectionProfile,
+    ConnectionProfileCollection, ConnectionProfilePost, ConnectionSchema, ConnectionTable,
+    ConnectionTableCollection, ConnectionTablePost, ConnectionType, Connector, ConnectorCollection,
+    FieldType, Format, Job, JobCollection, JobLogLevel, JobLogMessage, JobLogMessageCollection,
+    JsonFormat, Metric, MetricGroup, MetricNames, OperatorMetricGroup, OutputData, ParquetFormat,
+    Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
+    PipelinePost, PrimitiveType, RawStringFormat, SchemaDefinition, SourceField, SourceFieldType,
+    StopType as StopTypeRest, StructType, SubtaskMetrics, TestSourceMessage, TimestampFormat, Udf,
+    UdfLanguage, ValidatePipelinePost,
+};
+use arroyo_server_common::log_event;
+
+use crate::connection_profiles::{
+    __path_create_connection_profile, __path_get_connection_profiles,
+};
+use crate::connection_tables::{
+    __path_create_connection_table, __path_delete_connection_table, __path_get_confluent_schema,
+    __path_get_connection_tables, __path_test_connection_table, __path_test_schema,
+};
 use crate::connectors::__path_get_connectors;
 use crate::jobs::{
     __path_get_job_checkpoints, __path_get_job_errors, __path_get_job_output, __path_get_jobs,
@@ -11,46 +60,10 @@ use crate::pipelines::{
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::ErrorResp;
-use arroyo_rpc::grpc::api::{
-    api_grpc_server::ApiGrpc, CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq,
-    ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateJobReq, CreateJobResp,
-    CreatePipelineReq, CreatePipelineResp, GetConnectionsReq, GetConnectionsResp, GetJobsReq,
-    GetJobsResp, GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp,
-    JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq,
-    OperatorErrorsRes, OutputData as OutputDataProto, PipelineDef, PipelineGraphReq,
-    PipelineGraphResp, StopType, TestSourceMessage, UpdateJobReq, UpdateJobResp,
-};
-use arroyo_rpc::grpc::api::{
-    CreateConnectionTableReq, CreateConnectionTableResp, DeleteConnectionReq, DeleteConnectionResp,
-    DeleteConnectionTableReq, DeleteConnectionTableResp, DeleteJobReq, DeleteJobResp,
-    GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp,
-    PipelineProgram, TestSchemaReq, TestSchemaResp,
-};
-use arroyo_rpc::types::{
-    Checkpoint, CheckpointCollection, Connector, ConnectorCollection, Job, JobCollection,
-    JobLogLevel, JobLogMessage, JobLogMessageCollection, Metric, MetricGroup, MetricNames,
-    OperatorMetricGroup, OutputData, Pipeline, PipelineCollection, PipelineEdge, PipelineGraph,
-    PipelineNode, PipelinePatch, PipelinePost, StopType as StopTypeRest, SubtaskMetrics, Udf,
-    UdfLanguage, ValidatePipelinePost,
-};
-use arroyo_server_common::log_event;
-use cornucopia_async::GenericClient;
-use deadpool_postgres::{Object, Pool};
-use prost::Message;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::collections::HashMap;
-use std::time::Duration;
-use time::OffsetDateTime;
-use tokio_postgres::error::SqlState;
-use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status};
-use tracing::{error, warn};
-use utoipa::OpenApi;
 
 mod cloud;
+mod connection_profiles;
 mod connection_tables;
-mod connections;
 mod connectors;
 mod jobs;
 mod metrics;
@@ -157,11 +170,6 @@ pub struct ApiServer {
     pub controller_addr: String,
 }
 
-// TODO: look in to using gRPC rich errors
-pub fn required_field(field: &str) -> Status {
-    Status::invalid_argument(format!("Field {} must be set", field))
-}
-
 impl ApiServer {
     async fn authenticate<T>(&self, request: Request<T>) -> Result<(Request<T>, AuthData), Status> {
         cloud::authenticate(self.client().await?, request).await
@@ -220,104 +228,85 @@ impl ApiGrpc for ApiServer {
 
     async fn create_connection(
         &self,
-        request: Request<CreateConnectionReq>,
+        _request: Request<CreateConnectionReq>,
     ) -> Result<Response<CreateConnectionResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        let resp =
-            connections::create_connection(request.into_inner(), auth, &self.client().await?)
-                .await?;
-
-        Ok(Response::new(resp))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn get_connections(
         &self,
-        request: Request<GetConnectionsReq>,
+        _request: Request<GetConnectionsReq>,
     ) -> Result<Response<GetConnectionsResp>, Status> {
-        let (_, auth) = self.authenticate(request).await?;
-
-        Ok(Response::new(GetConnectionsResp {
-            connections: connections::get_connections(&auth, &self.client().await?).await?,
-        }))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn delete_connection(
         &self,
-        request: Request<DeleteConnectionReq>,
+        _request: Request<DeleteConnectionReq>,
     ) -> Result<Response<DeleteConnectionResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        connections::delete_connection(request.into_inner(), auth, &self.client().await?).await?;
-
-        Ok(Response::new(DeleteConnectionResp {}))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn create_connection_table(
         &self,
-        request: Request<CreateConnectionTableReq>,
+        _request: Request<CreateConnectionTableReq>,
     ) -> Result<Response<CreateConnectionTableResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        connection_tables::create(request.into_inner(), auth, &self.pool).await?;
-
-        Ok(Response::new(CreateConnectionTableResp {}))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     // connection tables
-    type TestConnectionTableStream = ReceiverStream<Result<TestSourceMessage, Status>>;
+    type TestConnectionTableStream = ReceiverStream<Result<TestSourceMessageProto, Status>>;
 
     async fn test_connection_table(
         &self,
-        request: Request<CreateConnectionTableReq>,
+        _request: Request<CreateConnectionTableReq>,
     ) -> Result<Response<Self::TestConnectionTableStream>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-
-        let rx = connection_tables::test(request.into_inner(), auth, &self.client().await?).await?;
-        Ok(Response::new(ReceiverStream::new(rx)))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn get_connection_tables(
         &self,
-        request: Request<GetConnectionTablesReq>,
+        _request: Request<GetConnectionTablesReq>,
     ) -> Result<Response<GetConnectionTablesResp>, Status> {
-        let (_, auth) = self.authenticate(request).await?;
-
-        let tables = connection_tables::get(&auth, &self.client().await?).await?;
-        Ok(Response::new(GetConnectionTablesResp { tables }))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn delete_connection_table(
         &self,
-        request: Request<DeleteConnectionTableReq>,
+        _request: Request<DeleteConnectionTableReq>,
     ) -> Result<Response<DeleteConnectionTableResp>, Status> {
-        let (req, auth) = self.authenticate(request).await?;
-
-        connection_tables::delete(req.into_inner(), auth, &self.client().await?).await?;
-        Ok(Response::new(DeleteConnectionTableResp {}))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn test_schema(
         &self,
-        request: Request<TestSchemaReq>,
+        _request: Request<TestSchemaReq>,
     ) -> Result<Response<TestSchemaResp>, Status> {
-        let (request, _auth) = self.authenticate(request).await?;
-
-        let errors = connection_tables::test_schema(request.into_inner()).await?;
-        Ok(Response::new(TestSchemaResp {
-            valid: errors.is_empty(),
-            errors,
-        }))
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn get_confluent_schema(
         &self,
-        request: Request<ConfluentSchemaReq>,
+        _request: Request<ConfluentSchemaReq>,
     ) -> Result<Response<ConfluentSchemaResp>, Status> {
-        let (request, _) = self.authenticate(request).await?;
-
-        Ok(Response::new(
-            connection_tables::get_confluent_schema(request.into_inner()).await?,
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
         ))
     }
 
@@ -539,6 +528,14 @@ impl ApiGrpc for ApiServer {
         get_job_output,
         get_operator_metric_groups,
         get_connectors,
+        get_connection_profiles,
+        get_connection_tables,
+        create_connection_table,
+        create_connection_profile,
+        delete_connection_table,
+        test_connection_table,
+        test_schema,
+        get_confluent_schema,
     ),
     components(schemas(
         ValidatePipelinePost,
@@ -566,13 +563,37 @@ impl ApiGrpc for ApiServer {
         MetricGroup,
         OperatorMetricGroup,
         ConnectorCollection,
-        Connector
+        Connector,
+        ConnectionProfile,
+        ConnectionProfilePost,
+        ConnectionProfileCollection,
+        ConnectionTable,
+        ConnectionTablePost,
+        ConnectionTableCollection,
+        ConnectionSchema,
+        ConnectionType,
+        SourceField,
+        Format,
+        SourceFieldType,
+        FieldType,
+        StructType,
+        PrimitiveType,
+        SchemaDefinition,
+        TestSourceMessage,
+        ConfluentSchema,
+        JsonFormat,
+        AvroFormat,
+        ParquetFormat,
+        RawStringFormat,
+        TimestampFormat,
     )),
     tags(
+        (name = "ping", description = "Ping endpoint"),
+        (name = "connection_profiles", description = "Connection profiles management endpoints"),
+        (name = "connection_tables", description = "Connection tables management endpoints"),
         (name = "pipelines", description = "Pipeline management endpoints"),
         (name = "jobs", description = "Job management endpoints"),
         (name = "connectors", description = "Connector management endpoints"),
-        (name = "ping", description = "Ping endpoint"),
     )
 )]
 pub struct ApiDoc;

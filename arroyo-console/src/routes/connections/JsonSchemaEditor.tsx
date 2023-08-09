@@ -1,20 +1,18 @@
 import { Dispatch, useEffect, useRef, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
-import { ApiClient } from '../../main';
 import { Alert, AlertIcon, Box, Button, List, ListItem, Stack } from '@chakra-ui/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { ConnectionSchema, TestSchemaReq } from '../../gen/api_pb';
+import { post } from '../../lib/data_fetching';
+import { formatError } from '../../lib/util';
 
 export function JsonSchemaEditor({
   state,
   setState,
   next,
-  client,
 }: {
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
   next: () => void;
-  client: ApiClient;
 }) {
   const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoEl = useRef(null);
@@ -26,15 +24,16 @@ export function JsonSchemaEditor({
   const valid = tested == editor?.getValue() && errors?.length == 0;
 
   const testSchema = async () => {
+    console.log('testing schema');
     setTesting(true);
     setErrors(null);
-    try {
-      let req = new TestSchemaReq({ schema: state.schema! });
-      let resp = await (await client()).testSchema(req);
-
-      setErrors(resp.errors);
-    } catch (e) {
-      setErrors(['Something went wrong... try again']);
+    const { error } = await post('/v1/connection_tables/schemas/test', {
+      body: state.schema!,
+    });
+    if (error) {
+      setErrors([formatError(error)]);
+    } else {
+      setErrors([]);
     }
 
     setTested(editor?.getValue());
@@ -69,9 +68,14 @@ export function JsonSchemaEditor({
   }
 
   useEffect(() => {
-    if (monacoEl && !editor && !created.current) {
+    if (
+      monacoEl &&
+      !editor &&
+      !created.current &&
+      state.schema?.format?.json?.unstructured === false
+    ) {
       let e = monaco.editor.create(monacoEl.current!, {
-        value: state.schema?.definition?.value,
+        // value: state.schema?.definition,
         language: 'json',
         theme: 'vs-dark',
         minimap: {
@@ -82,10 +86,12 @@ export function JsonSchemaEditor({
       e?.getModel()?.onDidChangeContent(_ => {
         setState({
           ...state,
-          schema: new ConnectionSchema({
+          schema: {
             ...state.schema,
-            definition: { case: 'jsonSchema', value: e.getValue() },
-          }),
+            definition: { json_schema: e.getValue() },
+            fields: [],
+            format: { json: { confluentSchemaRegistry: false } },
+          },
         });
       });
 

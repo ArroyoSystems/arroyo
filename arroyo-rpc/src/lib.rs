@@ -4,10 +4,9 @@ pub mod types;
 use std::{fs, time::SystemTime};
 
 use crate::grpc::SubtaskCheckpointMetadata;
-use arroyo_types::{formats::Format, CheckpointBarrier, API_ADDR_ENV};
-use grpc::{
-    api::api_grpc_client::ApiGrpcClient, api::PrimitiveType, StopMode, TaskCheckpointEventType,
-};
+use crate::types::{Format, PrimitiveType};
+use arroyo_types::{CheckpointBarrier, API_ADDR_ENV};
+use grpc::{api::api_grpc_client::ApiGrpcClient, StopMode, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tonic::{

@@ -1,10 +1,8 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use arrow::datatypes::{Field, Fields};
-use arroyo_types::{
-    formats::{Format, JsonFormat},
-    UserError,
-};
+use arroyo_rpc::types::{Format, JsonFormat};
+use arroyo_types::UserError;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 

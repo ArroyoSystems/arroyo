@@ -20,8 +20,6 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ConnectionTable, TableType } from '../../gen/api_pb';
-import { ApiClient } from '../../main';
 import { Catalog } from './Catalog';
 import { PipelineGraphViewer } from './PipelineGraph';
 import { PipelineOutputs } from './PipelineOutputs';
@@ -37,6 +35,7 @@ import {
   usePipeline,
   usePipelineGraph,
   usePipelineJobs,
+  ConnectionTable,
 } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';
@@ -49,7 +48,7 @@ function useQuery() {
   return useMemo(() => new URLSearchParams(search), [search]);
 }
 
-export function CreatePipeline({ client }: { client: ApiClient }) {
+export function CreatePipeline() {
   const [pipelineId, setPipelineId] = useState<string | undefined>(undefined);
   const { pipeline, updatePipeline } = usePipeline(pipelineId);
   const { jobs } = usePipelineJobs(pipelineId, true);
@@ -71,7 +70,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   const [startError, setStartError] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState<number>(0);
   const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
-  const { connectionTables, connectionTablesLoading } = useConnectionTables(client);
+  const { connectionTables, connectionTablesLoading } = useConnectionTables();
   const queryParams = useQuery();
   const { pipeline: copyFrom, pipelineLoading: copyFromLoading } = usePipeline(
     queryParams.get('from') ?? undefined
@@ -204,8 +203,8 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     }
   };
 
-  const sources = (connectionTables || []).filter(s => s.tableType == TableType.SOURCE);
-  const sinks = (connectionTables || []).filter(s => s.tableType == TableType.SINK);
+  const sources = (connectionTables || []).filter(s => s.tableType == 'source');
+  const sinks = (connectionTables || []).filter(s => s.tableType == 'sink');
 
   const startPipelineModal = (
     <StartPipelineModal
@@ -444,10 +443,16 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   let errorComponent = <></>;
   if (errorMessage) {
     errorComponent = (
-      <Alert status="error">
-        <AlertIcon />
-        <AlertDescription>{errorMessage}</AlertDescription>
-      </Alert>
+      <div>
+        <Alert status="error">
+          <AlertIcon />
+          <AlertDescription>
+            <Text noOfLines={2} textOverflow={'ellipsis'} wordBreak={'break-all'}>
+              {errorMessage}
+            </Text>
+          </AlertDescription>
+        </Alert>
+      </div>
     );
   }
 
@@ -479,7 +484,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
   return (
     <Flex height={'100vh'}>
       <Flex>{catalog}</Flex>
-      <Flex direction={'column'} flex={1}>
+      <Flex direction={'column'} flex={1} minWidth={0}>
         {editorTabs}
         {actionBar}
         {errorComponent}

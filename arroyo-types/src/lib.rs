@@ -11,8 +11,6 @@ use std::ops::{Range, RangeInclusive};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub mod formats;
-
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
 pub struct Window {
     pub start: SystemTime,

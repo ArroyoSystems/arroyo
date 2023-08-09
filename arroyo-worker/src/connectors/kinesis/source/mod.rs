@@ -9,12 +9,13 @@ use std::{
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
 use arroyo_macro::{source_fn, StreamNode};
+use arroyo_rpc::types::Format;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
 };
 use arroyo_state::tables::GlobalKeyedState;
-use arroyo_types::{formats::Format, from_nanos, Data, Record, UserError};
+use arroyo_types::{from_nanos, Data, Record, UserError};
 use aws_config::load_from_env;
 use aws_sdk_kinesis::{
     client::fluent_builders::GetShardIterator,

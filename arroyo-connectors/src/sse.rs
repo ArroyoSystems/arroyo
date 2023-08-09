@@ -1,18 +1,19 @@
+use std::convert::Infallible;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::string_to_map;
+use axum::response::sse::Event;
 use eventsource_client::Client;
 use futures::StreamExt;
 use tokio::sync::mpsc::Sender;
-use tonic::Status;
 use typify::import_types;
 
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, EmptyConfig};
+use crate::{pull_opt, Connection, EmptyConfig};
 
 use super::Connector;
 
@@ -24,7 +25,7 @@ const ICON: &str = include_str!("../resources/sse.svg");
 pub struct SSEConnector {}
 
 impl Connector for SSEConnector {
-    type ConfigT = EmptyConfig;
+    type ProfileT = EmptyConfig;
 
     type TableT = SseTable;
 
@@ -52,23 +53,23 @@ impl Connector for SSEConnector {
     fn test(
         &self,
         _: &str,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: Sender<Result<TestSourceMessage, Status>>,
+        tx: Sender<Result<Event, Infallible>>,
     ) {
         SseTester { config: table, tx }.start();
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn from_config(
         &self,
         id: Option<i64>,
         name: &str,
-        config: Self::ConfigT,
+        config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
@@ -137,25 +138,27 @@ impl Connector for SSEConnector {
 
 struct SseTester {
     config: SseTable,
-    tx: Sender<Result<TestSourceMessage, Status>>,
+    tx: Sender<Result<Event, Infallible>>,
 }
 
 impl SseTester {
     pub fn start(self) {
         tokio::task::spawn(async move {
             self.tx
-                .send(Ok(match self.test_internal().await {
-                    Ok(_) => TestSourceMessage {
-                        error: false,
-                        done: true,
-                        message: "Successfully validated SSE connection".to_string(),
-                    },
-                    Err(e) => TestSourceMessage {
-                        error: true,
-                        done: true,
-                        message: e.to_string(),
-                    },
-                }))
+                .send(Ok(Event::default()
+                    .json_data(match self.test_internal().await {
+                        Ok(_) => TestSourceMessage {
+                            error: false,
+                            done: true,
+                            message: "Successfully validated SSE connection".to_string(),
+                        },
+                        Err(e) => TestSourceMessage {
+                            error: true,
+                            done: true,
+                            message: e.to_string(),
+                        },
+                    })
+                    .unwrap()))
                 .await
                 .unwrap();
         });
@@ -184,12 +187,13 @@ impl SseTester {
 
         let timeout = Duration::from_secs(30);
 
+        let message = TestSourceMessage {
+            error: false,
+            done: false,
+            message: "Constructed SSE client".to_string(),
+        };
         self.tx
-            .send(Ok(TestSourceMessage {
-                error: false,
-                done: false,
-                message: "Constructed SSE client".to_string(),
-            }))
+            .send(Ok(Event::default().json_data(message).unwrap()))
             .await
             .unwrap();
 
@@ -198,11 +202,12 @@ impl SseTester {
                 // TODO: validate schema
                 match val {
                     Some(Ok(_)) => {
-                        self.tx.send(Ok(TestSourceMessage {
+                        let message = TestSourceMessage {
                             error: false,
                             done: false,
                             message: "Received message from SSE server".to_string()
-                        })).await.unwrap();
+                        };
+                        self.tx.send(Ok(Event::default().json_data(message).unwrap())).await.unwrap();
                     }
                     Some(Err(e)) => {
                         bail!("Received error from server: {:?}", e);

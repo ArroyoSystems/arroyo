@@ -1,16 +1,14 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::{
-    self,
-    api::{source_field_type, TestSourceMessage},
-};
+use arroyo_rpc::types::FieldType::Primitive;
+use arroyo_rpc::types::{ConnectionSchema, PrimitiveType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
+use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::str::FromStr;
 use typify::import_types;
 
-use crate::{
-    pull_opt, source_field, Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig,
-};
+use crate::{pull_opt, source_field, Connection, ConnectionType, Connector, EmptyConfig};
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/impulse/table.json");
 
@@ -18,14 +16,14 @@ import_types!(schema = "../connector-schemas/impulse/table.json");
 const ICON: &str = include_str!("../resources/impulse.svg");
 
 pub fn impulse_schema() -> ConnectionSchema {
-    use grpc::api::PrimitiveType::*;
-    use source_field_type::Type::Primitive;
+    // use grpc::api::PrimitiveType::*;
+    // use source_field_type::Type::Primitive;
     ConnectionSchema {
         format: None,
         struct_name: Some("arroyo_types::ImpulseEvent".to_string()),
         fields: vec![
-            source_field("counter", Primitive(UInt64 as i32)),
-            source_field("subtask_index", Primitive(UInt64 as i32)),
+            source_field("counter", Primitive(PrimitiveType::Int64)),
+            source_field("subtask_index", Primitive(PrimitiveType::Int64)),
         ],
         definition: None,
     }
@@ -34,7 +32,7 @@ pub fn impulse_schema() -> ConnectionSchema {
 pub struct ImpulseConnector {}
 
 impl Connector for ImpulseConnector {
-    type ConfigT = EmptyConfig;
+    type ProfileT = EmptyConfig;
     type TableT = ImpulseTable;
 
     fn name(&self) -> &'static str {
@@ -58,13 +56,13 @@ impl Connector for ImpulseConnector {
         }
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> arroyo_rpc::grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn get_schema(
         &self,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
     ) -> Option<ConnectionSchema> {
@@ -74,21 +72,20 @@ impl Connector for ImpulseConnector {
     fn test(
         &self,
         _: &str,
-        _: Self::ConfigT,
+        _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
     ) {
         tokio::task::spawn(async move {
-            tx.send(Ok(TestSourceMessage {
+            let message = TestSourceMessage {
                 error: false,
                 done: true,
                 message: "Successfully validated connection".to_string(),
-            }))
-            .await
-            .unwrap();
+            };
+            tx.send(Ok(Event::default().json_data(message).unwrap()))
+                .await
+                .unwrap();
         });
     }
 
@@ -137,7 +134,7 @@ impl Connector for ImpulseConnector {
         &self,
         id: Option<i64>,
         name: &str,
-        config: Self::ConfigT,
+        config: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
@@ -171,13 +168,5 @@ impl Connector for ImpulseConnector {
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
-    }
-
-    fn parse_config(&self, s: &str) -> Result<Self::ConfigT, serde_json::Error> {
-        serde_json::from_str(if s.is_empty() { "{}" } else { s })
-    }
-
-    fn parse_table(&self, s: &str) -> Result<Self::TableT, serde_json::Error> {
-        serde_json::from_str(s)
     }
 }

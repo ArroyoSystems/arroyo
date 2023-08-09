@@ -4,12 +4,13 @@ use std::{
 };
 
 use arroyo_macro::source_fn;
+use arroyo_rpc::types::Format;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
 };
 use arroyo_state::tables::GlobalKeyedState;
-use arroyo_types::{formats::Format, Data, Message, Record, UserError, Watermark};
+use arroyo_types::{Data, Message, Record, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;

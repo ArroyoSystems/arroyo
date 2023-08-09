@@ -482,6 +482,7 @@ dependencies = [
  "arroyo-datastream",
  "arroyo-rpc",
  "arroyo-types",
+ "axum",
  "eventsource-client",
  "futures",
  "rdkafka",
@@ -699,6 +700,7 @@ dependencies = [
  "arroyo-sql",
  "proc-macro2",
  "quote",
+ "serde_json",
  "syn 2.0.26",
 ]
 
@@ -4213,6 +4215,7 @@ dependencies = [
  "arroyo-types",
  "rand",
  "refinery",
+ "serde_json",
  "tokio",
  "tokio-postgres",
  "tonic",

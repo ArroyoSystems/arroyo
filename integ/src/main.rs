@@ -1,18 +1,17 @@
 use std::time::{Duration, Instant};
 
 use arroyo_openapi::apis::configuration::Configuration;
+use arroyo_openapi::apis::connection_tables_api::create_connection_table;
 use arroyo_openapi::apis::jobs_api::get_job_checkpoints;
 use arroyo_openapi::apis::pipelines_api::{get_pipeline_jobs, patch_pipeline, post_pipeline};
-use arroyo_openapi::models::{PipelinePatch, PipelinePost, StopType};
+use arroyo_openapi::models::{ConnectionTablePost, PipelinePatch, PipelinePost, StopType};
 
 use anyhow::Result;
-use arroyo_rpc::grpc::api::{
-    api_grpc_client::ApiGrpcClient, CreateConnectionTableReq, GetConnectionTablesReq,
-};
+use arroyo_openapi::apis::ping_api::ping;
 use arroyo_types::DatabaseConfig;
 use rand::RngCore;
+use serde_json::json;
 use tokio_postgres::NoTls;
-use tonic::transport::Channel;
 use tracing::{info, warn};
 
 mod embedded {
@@ -62,8 +61,17 @@ async fn wait_for_state(api_conf: &Configuration, pipeline_id: &str, expected_st
     }
 }
 
-async fn connect() -> ApiGrpcClient<Channel> {
+async fn connect() {
     let start = Instant::now();
+    let api_conf = Configuration {
+        base_path: "http://localhost:8000/api".to_string(),
+        user_agent: None,
+        client: Default::default(),
+        basic_auth: None,
+        oauth_access_token: None,
+        bearer_access_token: None,
+        api_key: None,
+    };
 
     loop {
         if start.elapsed() > CONNECT_TIMEOUT {
@@ -75,16 +83,9 @@ async fn connect() -> ApiGrpcClient<Channel> {
 
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let Ok(mut client) = ApiGrpcClient::connect("http://localhost:8001").await else {
-            continue;
-        };
-
-        if client
-            .get_connection_tables(GetConnectionTablesReq {})
-            .await
-            .is_ok()
-        {
-            return client;
+        if ping(&api_conf).await.is_ok() {
+            info!("Connected to API server");
+            return;
         }
     }
 }
@@ -146,7 +147,7 @@ pub async fn main() {
     )
     .expect("Failed to run compiler service");
 
-    let mut client = connect().await;
+    connect().await;
     let api_conf = Configuration {
         base_path: "http://localhost:8000/api".to_string(),
         user_agent: None,
@@ -160,16 +161,21 @@ pub async fn main() {
     // create a source
     let source_name = format!("source_{}", run_id);
     info!("Creating source {}", source_name);
-    client
-        .create_connection_table(CreateConnectionTableReq {
+
+    let _ = create_connection_table(
+        &api_conf,
+        ConnectionTablePost {
+            config: Some(json!({"event_rate": 10})),
+            connection_profile_id: None,
+            connector: "nexmark".to_string(),
             name: source_name.clone(),
             schema: None,
-            connector: "nexmark".to_string(),
-            connection_id: None,
-            config: "{\"event_rate\": 10.0}".to_string(),
-        })
-        .await
-        .unwrap();
+        },
+    )
+    .await;
+    // This generated client unfortunately does not support OpenAPI objects that use 'oneOf',
+    // so the above call will always return an Err, even when the request succeeds.
+
     info!("Created connection table");
 
     // create a pipeline
