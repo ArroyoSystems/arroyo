@@ -1,16 +1,12 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::{
-    self,
-    api::{source_field_type, TestSourceMessage},
-};
+use arroyo_rpc::types::SourceFieldType::Primitive;
+use arroyo_rpc::types::{ConnectionSchema, PrimitiveType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use typify::import_types;
 
-use crate::{
-    pull_opt, source_field, Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig,
-};
+use crate::{pull_opt, source_field, Connection, ConnectionType, Connector, EmptyConfig};
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/impulse/table.json");
 
@@ -18,14 +14,14 @@ import_types!(schema = "../connector-schemas/impulse/table.json");
 const ICON: &str = include_str!("../resources/impulse.svg");
 
 pub fn impulse_schema() -> ConnectionSchema {
-    use grpc::api::PrimitiveType::*;
-    use source_field_type::Type::Primitive;
+    // use grpc::api::PrimitiveType::*;
+    // use source_field_type::Type::Primitive;
     ConnectionSchema {
         format: None,
         struct_name: Some("arroyo_types::ImpulseEvent".to_string()),
         fields: vec![
-            source_field("counter", Primitive(UInt64 as i32)),
-            source_field("subtask_index", Primitive(UInt64 as i32)),
+            source_field("counter", Primitive(PrimitiveType::Int64)),
+            source_field("subtask_index", Primitive(PrimitiveType::Int64)),
         ],
         definition: None,
     }
@@ -58,8 +54,8 @@ impl Connector for ImpulseConnector {
         }
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> arroyo_rpc::grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn get_schema(
@@ -77,9 +73,7 @@ impl Connector for ImpulseConnector {
         _: Self::ConfigT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        tx: tokio::sync::mpsc::Sender<Result<TestSourceMessage, tonic::Status>>,
     ) {
         tokio::task::spawn(async move {
             tx.send(Ok(TestSourceMessage {

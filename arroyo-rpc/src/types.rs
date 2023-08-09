@@ -1,7 +1,8 @@
 use crate::grpc as grpc_proto;
 use crate::grpc::api as api_proto;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use std::collections::HashMap;
+use utoipa::{IntoParams, ToSchema};
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -216,6 +217,8 @@ pub struct Checkpoint {
     CheckpointCollection = Collection<Checkpoint>,
     OperatorMetricGroupCollection = Collection<OperatorMetricGroup>,
     ConnectorCollection = Collection<Connector>,
+    ConnectionProfileCollection = Collection<ConnectionProfile>,
+    ConnectionTableCollection = Collection<ConnectionTable>,
 )]
 pub struct Collection<T> {
     pub data: Vec<T>,
@@ -295,4 +298,292 @@ pub struct Connector {
     pub testing: bool,
     pub hidden: bool,
     pub connection_config: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionProfile {
+    pub id: String,
+    pub name: String,
+    pub connector: String,
+    pub config: String,
+    pub description: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionProfilePost {
+    pub name: String,
+    pub connector: String,
+    pub config: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionType {
+    Source,
+    Sink,
+}
+
+impl Into<String> for ConnectionType {
+    fn into(self) -> String {
+        match self {
+            ConnectionType::Source => "SOURCE".to_string(),
+            ConnectionType::Sink => "SINK".to_string(),
+        }
+    }
+}
+
+impl From<String> for ConnectionType {
+    fn from(value: String) -> Self {
+        match value.to_lowercase().as_str() {
+            "source" => ConnectionType::Source,
+            "sink" => ConnectionType::Sink,
+            _ => panic!("invalid table type {}", value.to_lowercase().as_str()),
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TimestampFormat {
+    #[default]
+    #[serde(rename = "rfc3339")]
+    RFC3339,
+    UnixMillis,
+}
+
+impl TryFrom<&str> for TimestampFormat {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "RFC3339" => Ok(TimestampFormat::RFC3339),
+            "UnixMillis" | "unix_millis" => Ok(TimestampFormat::UnixMillis),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct JsonFormat {
+    #[serde(default)]
+    pub confluent_schema_registry: bool,
+
+    #[serde(default)]
+    pub include_schema: bool,
+
+    #[serde(default)]
+    pub debezium: bool,
+
+    #[serde(default)]
+    pub unstructured: bool,
+
+    #[serde(default)]
+    pub timestamp_format: TimestampFormat,
+}
+
+impl JsonFormat {
+    fn from_opts(debezium: bool, opts: &mut HashMap<String, String>) -> Result<Self, String> {
+        let confluent_schema_registry = opts
+            .remove("json.confluent_schema_registry")
+            .filter(|t| t == "true")
+            .is_some();
+
+        let include_schema = opts
+            .remove("json.include_schema")
+            .filter(|t| t == "true")
+            .is_some();
+
+        let unstructured = opts
+            .remove("json.unstructured")
+            .filter(|t| t == "true")
+            .is_some();
+
+        let timestamp_format: TimestampFormat = opts
+            .remove("json.timestamp_format")
+            .map(|t| t.as_str().try_into())
+            .transpose()
+            .map_err(|_| "json.timestamp_format".to_string())?
+            .unwrap_or_else(|| {
+                if debezium {
+                    TimestampFormat::UnixMillis
+                } else {
+                    TimestampFormat::default()
+                }
+            });
+
+        Ok(Self {
+            confluent_schema_registry,
+            include_schema,
+            debezium,
+            unstructured,
+            timestamp_format,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RawEncoding {
+    None,
+    Utf8,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RawFormat {
+    encoding: RawEncoding,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AvroFormat {}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ParquetFormat {}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Format {
+    Json(JsonFormat),
+    Avro(AvroFormat),
+    Parquet(ParquetFormat),
+    Raw(RawFormat),
+}
+
+impl Format {
+    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Option<Self>, String> {
+        let Some(name) = opts.remove("format") else {
+            return Ok(None);
+        };
+
+        Ok(Some(match name.as_str() {
+            "json" => Format::Json(JsonFormat::from_opts(false, opts)?),
+            "debezium_json" => Format::Json(JsonFormat::from_opts(true, opts)?),
+            "protobuf" => return Err("protobuf is not yet supported".to_string()),
+            "avro" => return Err("avro is not yet supported".to_string()),
+            "raw_string" => return Err("raw_string is not yet supported".to_string()),
+            "parquet" => Format::Parquet(ParquetFormat {}),
+            f => return Err(format!("Unknown format '{}'", f)),
+        }))
+    }
+
+    pub fn is_updating(&self) -> bool {
+        match self {
+            Format::Json(JsonFormat { debezium: true, .. }) => true,
+            Format::Json(_) | Format::Avro(_) | Format::Parquet(_) | Format::Raw(_) => false,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrimitiveType {
+    Int32,
+    Int64,
+    UInt32,
+    UInt64,
+    F32,
+    F64,
+    Bool,
+    String,
+    Bytes,
+    UnixMillis,
+    UnixMicros,
+    UnixNanos,
+    DateTime,
+    Json,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StructType {
+    pub name: Option<String>,
+    pub fields: Vec<SourceField>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SourceFieldType {
+    Primitive(PrimitiveType),
+    Struct(StructType),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceField {
+    pub field_name: String,
+    pub field_type: SourceFieldType,
+    pub sql_name: Option<String>,
+    pub nullable: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SchemaDefinition {
+    Json(String),
+    Protobuf(String),
+    Avro(String),
+    Raw(String),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionSchema {
+    pub format: Option<Format>,
+    pub struct_name: Option<String>,
+    pub fields: Vec<SourceField>,
+    pub definition: Option<SchemaDefinition>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionTable {
+    pub id: i64, // TODO: remove
+    pub pub_id: String,
+    pub name: String,
+    pub connector: String,
+    pub connection: Option<ConnectionProfile>,
+    pub table_type: ConnectionType,
+    pub config: String,
+    pub schema: ConnectionSchema,
+    pub consumers: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionTablePost {
+    pub name: String,
+    pub connector: String,
+    pub connection_profile_id: Option<String>,
+    pub config: String,
+    pub schema: Option<ConnectionSchema>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TestSourceMessage {
+    pub error: bool,
+    pub done: bool,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfluentSchema {
+    pub schema: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfluentSchemaQueryParams {
+    pub endpoint: String,
+    pub topic: String,
 }

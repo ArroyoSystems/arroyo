@@ -8,36 +8,36 @@ import {
   Flex,
   Text,
 } from '@chakra-ui/react';
-import { ConnectionTable, SourceField } from '../../gen/api_pb';
+import { ConnectionTable, SourceField } from '../../lib/data_fetching';
 
 function CatalogField({ field, nesting }: { field: SourceField; nesting: number }) {
-  switch (field.fieldType!.type.case) {
-    case 'primitive':
-      return (
-        <Flex>
-          <Box flex="1" textAlign="left">
-            {field.fieldName}
-          </Box>
-          <Box flex="1" textAlign="right">
-            {field.fieldType?.sqlName}
-          </Box>
-        </Flex>
-      );
-    case 'struct':
-      return (
-        <Box mr={1} mb={2}>
-          <Box>{field.fieldName}</Box>
-          {field.fieldType!.type.value.fields.map(f => {
-            return (
-              <Box pl={(nesting + 1) * 4} key={f.fieldName} fontFamily="monospace">
-                <CatalogField field={f} nesting={nesting + 1} />
-              </Box>
-            );
-          })}
+  if (field.fieldType!.primitive) {
+    return (
+      <Flex>
+        <Box flex="1" textAlign="left">
+          {field.fieldName}
         </Box>
-      );
-    default:
-      return <Box></Box>;
+        <Box flex="1" textAlign="right">
+          {field.sqlName}
+        </Box>
+      </Flex>
+    );
+  }
+  if (field.fieldType!.struct) {
+    return (
+      <Box mr={1} mb={2}>
+        <Box>{field.fieldName}</Box>
+        {field.fieldType.struct.fields.map(f => {
+          return (
+            <Box pl={(nesting + 1) * 4} key={f.fieldName} fontFamily="monospace">
+              <CatalogField field={f} nesting={nesting + 1} />
+            </Box>
+          );
+        })}
+      </Box>
+    );
+  } else {
+    return <Box></Box>;
   }
 }
 

@@ -3,10 +3,9 @@ use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
-use arroyo_connectors::{connector_for_type, Connection, ConnectionSchema, ConnectionType};
+use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::{ConnectorOp, Operator};
-use arroyo_rpc::grpc::{self, api::SourceField};
-use arroyo_types::formats::Format;
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, SchemaDefinition, SourceField};
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -49,30 +48,24 @@ pub struct ConnectorTable {
 
 fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
     schema.struct_name.as_ref().cloned().or_else(|| {
-        let def = schema.definition.as_ref()?;
+        let def = &schema.definition.as_ref()?;
         match def {
-            grpc::api::connection_schema::Definition::JsonSchema(_) => {
-                Some(format!("{}::{}", name, json_schema::ROOT_NAME))
-            }
-            grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
-            grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
-            grpc::api::connection_schema::Definition::RawSchema(_) => {
-                Some("arroyo_types::RawJson".to_string())
-            }
+            SchemaDefinition::Json(_) => Some(format!("{}::{}", name, json_schema::ROOT_NAME)),
+            SchemaDefinition::Protobuf(_) => todo!(),
+            SchemaDefinition::Avro(_) => todo!(),
+            SchemaDefinition::Raw(_) => Some("arroyo_types::RawJson".to_string()),
         }
     })
 }
 
 pub fn schema_defs(name: &str, schema: &ConnectionSchema) -> Option<String> {
-    let def = schema.definition.as_ref()?;
+    let def = &schema.definition.as_ref()?;
 
     match def {
-        grpc::api::connection_schema::Definition::JsonSchema(s) => {
-            Some(json_schema::get_defs(&name, &s).unwrap())
-        }
-        grpc::api::connection_schema::Definition::ProtobufSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::AvroSchema(_) => todo!(),
-        grpc::api::connection_schema::Definition::RawSchema(_) => None,
+        SchemaDefinition::Json(s) => Some(json_schema::get_defs(&name, &s).unwrap()),
+        SchemaDefinition::Protobuf(_) => todo!(),
+        SchemaDefinition::Avro(_) => todo!(),
+        SchemaDefinition::Raw(_) => None,
     }
 }
 

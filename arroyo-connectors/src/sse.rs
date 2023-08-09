@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::string_to_map;
 use eventsource_client::Client;
@@ -10,9 +9,10 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use typify::import_types;
 
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, EmptyConfig};
+use crate::{pull_opt, Connection, EmptyConfig};
 
 use super::Connector;
 
@@ -60,8 +60,8 @@ impl Connector for SSEConnector {
         SseTester { config: table, tx }.start();
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn from_config(

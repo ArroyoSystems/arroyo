@@ -9,7 +9,7 @@ use crate::{
 use anyhow::Result;
 use arrow_schema::DataType;
 use arroyo_datastream::WindowType;
-use arroyo_types::formats::Format;
+use arroyo_rpc::types::Format;
 use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};

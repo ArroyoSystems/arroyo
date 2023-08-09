@@ -39,7 +39,7 @@ export function Router(): JSX.Element {
     },
     {
       path: 'connections',
-      element: <Connections client={client} />,
+      element: <Connections />,
     },
     {
       path: 'connections/new',
@@ -47,7 +47,7 @@ export function Router(): JSX.Element {
     },
     {
       path: 'connections/new/:connectorId',
-      element: <CreateConnection client={client} />,
+      element: <CreateConnection />,
     },
     {
       path: 'pipelines',
@@ -55,7 +55,7 @@ export function Router(): JSX.Element {
     },
     {
       path: 'pipelines/new',
-      element: <CreatePipeline client={client} />,
+      element: <CreatePipeline />,
     },
     {
       path: 'pipelines/:pipelineId',

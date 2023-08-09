@@ -17,6 +17,11 @@ use tower_http::services::ServeDir;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::connection_profiles::{create_connection_profile, get_connection_profiles};
+use crate::connection_tables::{
+    create_connection_table, delete_connection_table, get_confluent_schema, get_connection_tables,
+    test_connection_table, test_schema,
+};
 use crate::connectors::get_connectors;
 use crate::jobs::{get_job_checkpoints, get_job_errors, get_job_output, get_jobs};
 use crate::metrics::get_operator_metric_groups;
@@ -98,6 +103,17 @@ pub fn create_rest_app(server: ApiServer, pool: Pool) -> Router {
     let api_routes = Router::new()
         .route("/ping", get(ping))
         .route("/connectors", get(get_connectors))
+        .route("/connection_profiles", post(create_connection_profile))
+        .route("/connection_profiles", get(get_connection_profiles))
+        .route("/connection_tables", get(get_connection_tables))
+        .route("/connection_tables", post(create_connection_table))
+        .route("/connection_tables/test", post(test_connection_table))
+        .route("/connection_tables/schemas/test", post(test_schema))
+        .route(
+            "/connection_tables/schemas/confluent",
+            get(get_confluent_schema),
+        )
+        .route("/connection_tables/:id", delete(delete_connection_table))
         .route("/pipelines", post(post_pipeline))
         .route("/pipelines", get(get_pipelines))
         .route("/jobs", get(get_jobs))

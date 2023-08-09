@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
+use arroyo_rpc::types::{ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig};
+use crate::{pull_opt, Connection, ConnectionType, Connector, EmptyConfig};
 
 pub struct FluvioConnector {}
 
@@ -38,10 +38,10 @@ impl Connector for FluvioConnector {
         }
     }
 
-    fn table_type(&self, _: Self::ConfigT, t: Self::TableT) -> arroyo_rpc::grpc::api::TableType {
+    fn table_type(&self, _: Self::ConfigT, t: Self::TableT) -> ConnectionType {
         match t.type_ {
-            TableType::Source { .. } => grpc::api::TableType::Source,
-            TableType::Sink {} => grpc::api::TableType::Sink,
+            TableType::Source { .. } => ConnectionType::Source,
+            TableType::Sink {} => ConnectionType::Sink,
         }
     }
 

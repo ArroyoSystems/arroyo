@@ -33,9 +33,7 @@ import { FaGlobeAmericas, FaStream } from 'react-icons/fa';
 import { FiInfo, FiXCircle } from 'react-icons/fi';
 import { SiApachekafka } from 'react-icons/si';
 import { useLinkClickHandler } from 'react-router-dom';
-import { ConnectionTable, TableType, Format, DeleteConnectionTableReq } from '../../gen/api_pb';
-import { ApiClient } from '../../main';
-import { useConnectionTables } from '../../lib/data_fetching';
+import { ConnectionTable, del, Format, useConnectionTables } from '../../lib/data_fetching';
 
 interface ColumnDef {
   name: string;
@@ -49,21 +47,16 @@ const icons = {
 };
 
 const format = (f: Format | undefined) => {
-  switch (f) {
-    case Format.AvroFormat:
-      return 'Avro';
-    case Format.JsonFormat:
-      return 'JSON';
-    case Format.ProtobufFormat:
-      return 'Protobuf';
-    case Format.RawStringFormat:
-      return 'Raw';
-    case Format.DebeziumJsonFormat:
-      return 'Debezium JSON';
-    case undefined:
-      return 'built-in';
-    default:
-      return 'unknown';
+  if (f?.json) {
+    return 'JSON';
+  } else if (f?.raw) {
+    return 'Raw';
+  } else if (f?.parquet) {
+    return 'Parquet';
+  } else if (f?.avro) {
+    return 'Avro';
+  } else {
+    return 'Unknown';
   }
 };
 
@@ -78,11 +71,11 @@ const columns: Array<ColumnDef> = [
   },
   {
     name: 'table type',
-    accessor: s => <Text>{TableType[s.tableType].toLowerCase()}</Text>,
+    accessor: s => <Text>{s.tableType}</Text>,
   },
   {
     name: 'format',
-    accessor: s => <Text>{s.schema ? format(s.schema!.format) : 'built-in'}</Text>,
+    accessor: s => <Text>{s.schema ? format(s.schema.format!) : 'built-in'}</Text>,
   },
   {
     name: 'pipelines',
@@ -90,23 +83,17 @@ const columns: Array<ColumnDef> = [
   },
 ];
 
-function ConnectionTableTable({ client }: { client: ApiClient }) {
+function ConnectionTableTable() {
   const [message, setMessage] = useState<string | null>();
   const [isError, setIsError] = useState<boolean>(false);
   const [selected, setSelected] = useState<ConnectionTable | null>(null);
   const { connectionTables, connectionTablesLoading, mutateConnectionTables } =
-    useConnectionTables(client);
+    useConnectionTables();
 
   const deleteTable = async (connection: ConnectionTable) => {
     try {
-      await (
-        await client()
-      ).deleteConnectionTable(
-        new DeleteConnectionTableReq({
-          id: connection.id,
-        })
-      );
-      mutateConnectionTables(connectionTables!.filter(c => c.id !== connection.id));
+      await del('/v1/connection_tables/{id}', { params: { path: { id: connection.pubId } } });
+      mutateConnectionTables();
       setMessage(`Connection ${connection.name} successfully deleted`);
     } catch (e) {
       setIsError(true);
@@ -197,7 +184,7 @@ function ConnectionTableTable({ client }: { client: ApiClient }) {
   );
 }
 
-export function Connections({ client }: { client: ApiClient }) {
+export function Connections() {
   return (
     <Container py="8" flex="1">
       <Stack spacing={{ base: '8', lg: '6' }}>
@@ -224,7 +211,7 @@ export function Connections({ client }: { client: ApiClient }) {
           borderRadius="lg"
         >
           <Stack spacing={{ base: '5', lg: '6' }}>
-            <ConnectionTableTable client={client} />
+            <ConnectionTableTable />
           </Stack>
         </Box>
       </Stack>

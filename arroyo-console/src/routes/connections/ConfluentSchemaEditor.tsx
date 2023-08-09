@@ -1,7 +1,5 @@
 import { Dispatch, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
-import { ApiClient } from '../../main';
-import { ConnectError } from '@bufbuild/connect-web';
 import {
   Alert,
   AlertIcon,
@@ -15,20 +13,19 @@ import {
   Input,
   Stack,
 } from '@chakra-ui/react';
-import { ConfluentSchemaReq, ConnectionSchema, FormatOptions } from '../../gen/api_pb';
+import { get } from '../../lib/data_fetching';
+import { formatError } from '../../lib/util';
 
 export function ConfluentSchemaEditor({
   state,
   setState,
-  client,
   next,
 }: {
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
-  client: ApiClient;
   next: () => void;
 }) {
-  const [host, setHost] = useState<string>('');
+  const [endpoint, setEndpoint] = useState<string>('');
   const [schema, setSchema] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -37,35 +34,31 @@ export function ConfluentSchemaEditor({
 
   const fetchSchema = async () => {
     setError(null);
-    try {
-      setLoading(true);
-      const resp = await (
-        await client()
-      ).getConfluentSchema(
-        new ConfluentSchemaReq({
-          endpoint: host,
-          topic: topic,
-        })
-      );
+    setLoading(true);
+    const { data, error } = await get('/v1/connection_tables/schemas/confluent', {
+      params: {
+        query: {
+          endpoint,
+          topic,
+        },
+      },
+    });
 
-      setSchema(resp.schema);
+    if (error) {
+      setError(formatError(error));
+    }
 
+    if (data) {
+      setSchema(data.schema);
       setState({
         ...state,
-        schema: new ConnectionSchema({
+        schema: {
           ...state.schema,
-          definition: { case: 'jsonSchema', value: resp.schema },
-          formatOptions: new FormatOptions({
-            confluentSchemaRegistry: true,
-          }),
-        }),
+          definition: { json: data.schema },
+          fields: [],
+          format: { json: { confluentSchemaRegistry: true } },
+        },
       });
-    } catch (e) {
-      if (e instanceof ConnectError) {
-        setError(e.rawMessage);
-      } else {
-        setError('Something went wrong... try again');
-      }
     }
     setLoading(false);
   };
@@ -101,15 +94,20 @@ export function ConfluentSchemaEditor({
         <Input
           type="text"
           placeholder="http://localhost:8081"
-          value={host}
-          onChange={e => setHost(e.target.value)}
+          value={endpoint}
+          onChange={e => setEndpoint(e.target.value)}
         />
         <FormHelperText>Provide the endpoint for your Confluent Schema Registry</FormHelperText>
       </FormControl>
 
       {errorBox}
 
-      <Button variant="primary" isDisabled={host == ''} isLoading={loading} onClick={fetchSchema}>
+      <Button
+        variant="primary"
+        isDisabled={endpoint == ''}
+        isLoading={loading}
+        onClick={fetchSchema}
+      >
         Fetch Schema
       </Button>
 

@@ -3,7 +3,7 @@
 /* eslint-disable */
 /* @ts-nocheck */
 
-import {CheckpointDetailsReq, CheckpointDetailsResp, ConfluentSchemaReq, ConfluentSchemaResp, CreateConnectionReq, CreateConnectionResp, CreateConnectionTableReq, CreateConnectionTableResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, DeleteConnectionReq, DeleteConnectionResp, DeleteConnectionTableReq, DeleteConnectionTableResp, DeleteJobReq, DeleteJobResp, GetConnectionsReq, GetConnectionsResp, GetConnectionTablesReq, GetConnectionTablesResp, GetConnectorsReq, GetConnectorsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, TestSchemaReq, TestSchemaResp, TestSourceMessage, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
+import {CheckpointDetailsReq, CheckpointDetailsResp, CreateJobReq, CreateJobResp, CreatePipelineReq, CreatePipelineResp, DeleteConnectionReq, DeleteConnectionResp, DeleteJobReq, DeleteJobResp, GetConnectionsReq, GetConnectionsResp, GetConnectorsReq, GetConnectorsResp, GetJobsReq, GetJobsResp, GetPipelineReq, GrpcOutputSubscription, JobCheckpointsReq, JobCheckpointsResp, JobDetailsReq, JobDetailsResp, JobMetricsReq, JobMetricsResp, OperatorErrorsReq, OperatorErrorsRes, OutputData, PipelineDef, PipelineGraphReq, PipelineGraphResp, UpdateJobReq, UpdateJobResp} from "./api_pb.js";
 import {MethodKind} from "@bufbuild/protobuf";
 
 /**
@@ -22,15 +22,8 @@ export const ApiGrpc = {
       kind: MethodKind.Unary,
     },
     /**
-     * @generated from rpc arroyo_api.ApiGrpc.CreateConnection
-     */
-    createConnection: {
-      name: "CreateConnection",
-      I: CreateConnectionReq,
-      O: CreateConnectionResp,
-      kind: MethodKind.Unary,
-    },
-    /**
+     *  rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp);
+     *
      * @generated from rpc arroyo_api.ApiGrpc.GetConnections
      */
     getConnections: {
@@ -46,60 +39,6 @@ export const ApiGrpc = {
       name: "DeleteConnection",
       I: DeleteConnectionReq,
       O: DeleteConnectionResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.CreateConnectionTable
-     */
-    createConnectionTable: {
-      name: "CreateConnectionTable",
-      I: CreateConnectionTableReq,
-      O: CreateConnectionTableResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.TestConnectionTable
-     */
-    testConnectionTable: {
-      name: "TestConnectionTable",
-      I: CreateConnectionTableReq,
-      O: TestSourceMessage,
-      kind: MethodKind.ServerStreaming,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.GetConnectionTables
-     */
-    getConnectionTables: {
-      name: "GetConnectionTables",
-      I: GetConnectionTablesReq,
-      O: GetConnectionTablesResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.DeleteConnectionTable
-     */
-    deleteConnectionTable: {
-      name: "DeleteConnectionTable",
-      I: DeleteConnectionTableReq,
-      O: DeleteConnectionTableResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.TestSchema
-     */
-    testSchema: {
-      name: "TestSchema",
-      I: TestSchemaReq,
-      O: TestSchemaResp,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * @generated from rpc arroyo_api.ApiGrpc.GetConfluentSchema
-     */
-    getConfluentSchema: {
-      name: "GetConfluentSchema",
-      I: ConfluentSchemaReq,
-      O: ConfluentSchemaResp,
       kind: MethodKind.Unary,
     },
     /**

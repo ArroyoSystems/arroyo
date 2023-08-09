@@ -1,17 +1,10 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, bail};
-use arroyo_rpc::{
-    grpc::{
-        self,
-        api::{
-            connection_schema::Definition, source_field_type, FormatOptions, SourceField,
-            SourceFieldType, TableType, TestSourceMessage,
-        },
-    },
-    primitive_to_sql,
+use anyhow::anyhow;
+use arroyo_rpc::primitive_to_sql;
+use arroyo_rpc::types::{
+    ConnectionSchema, ConnectionType, SourceField, SourceFieldType, TestSourceMessage,
 };
-use arroyo_types::formats::{Format, JsonFormat, ParquetFormat};
 use blackhole::BlackholeConnector;
 use fluvio::FluvioConnector;
 use impulse::ImpulseConnector;
@@ -50,12 +43,6 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
 #[derive(Serialize, Deserialize)]
 pub struct EmptyConfig {}
 
-#[derive(Debug, Copy, Clone)]
-pub enum ConnectionType {
-    Source,
-    Sink,
-}
-
 #[derive(Debug, Clone)]
 pub struct Connection {
     pub id: Option<i64>,
@@ -65,112 +52,6 @@ pub struct Connection {
     pub operator: String,
     pub config: String,
     pub description: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionSchema {
-    pub format: Option<Format>,
-    pub struct_name: Option<String>,
-    pub fields: Vec<SourceField>,
-    pub definition: Option<Definition>,
-}
-
-impl TryFrom<ConnectionSchema> for grpc::api::ConnectionSchema {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ConnectionSchema) -> Result<Self, Self::Error> {
-        let mut format_options = FormatOptions::default();
-        let format = value
-            .format
-            .map(|f| {
-                Ok(match f {
-                    Format::Json(json) => {
-                        if json.confluent_schema_registry {
-                            format_options.confluent_schema_registry = true;
-                        }
-                        if json.include_schema {
-                            format_options.include_schema = true;
-                        }
-
-                        match (json.debezium, json.unstructured) {
-                            (true, false) => grpc::api::Format::DebeziumJsonFormat,
-                            (false, true) => grpc::api::Format::RawStringFormat,
-                            (true, true) => bail!("debezium and raw cannot both be set"),
-                            (false, false) => grpc::api::Format::JsonFormat,
-                        }
-                    }
-                    Format::Avro(_) => grpc::api::Format::AvroFormat,
-                    Format::Parquet(_) => grpc::api::Format::ParquetFormat,
-                    Format::Raw(_) => grpc::api::Format::RawStringFormat,
-                })
-            })
-            .transpose()?;
-
-        Ok(Self {
-            format: format.map(|f| f as i32),
-            format_options: Some(format_options),
-            struct_name: value.struct_name,
-            fields: value.fields,
-            definition: value.definition,
-        })
-    }
-}
-
-impl TryFrom<grpc::api::ConnectionSchema> for ConnectionSchema {
-    type Error = String;
-
-    fn try_from(schema: grpc::api::ConnectionSchema) -> Result<Self, Self::Error> {
-        let confluent_schema_registry = schema
-            .format_options
-            .as_ref()
-            .filter(|t| t.confluent_schema_registry)
-            .is_some();
-        let include_schema = schema
-            .format_options
-            .as_ref()
-            .filter(|t| t.include_schema)
-            .is_some();
-
-        let format = if schema.format.is_some() {
-            Some(match schema.format() {
-                grpc::api::Format::JsonFormat | grpc::api::Format::DebeziumJsonFormat => {
-                    Format::Json(JsonFormat {
-                        confluent_schema_registry,
-                        include_schema,
-                        debezium: matches!(schema.format(), grpc::api::Format::DebeziumJsonFormat),
-                        unstructured: matches!(
-                            schema.definition,
-                            Some(Definition::RawSchema { .. })
-                        ),
-                        timestamp_format: arroyo_types::formats::TimestampFormat::default(),
-                    })
-                }
-                grpc::api::Format::RawStringFormat => Format::Json(JsonFormat {
-                    confluent_schema_registry: false,
-                    include_schema,
-                    debezium: false,
-                    unstructured: true,
-                    timestamp_format: arroyo_types::formats::TimestampFormat::default(),
-                }),
-                grpc::api::Format::ParquetFormat => Format::Parquet(ParquetFormat {}),
-                grpc::api::Format::ProtobufFormat => {
-                    return Err("Protobuf is not yet supported".to_string());
-                }
-                grpc::api::Format::AvroFormat => {
-                    return Err("Avro is not yet supported".to_string());
-                }
-            })
-        } else {
-            None
-        };
-
-        Ok(ConnectionSchema {
-            format,
-            struct_name: schema.struct_name,
-            fields: schema.fields,
-            definition: schema.definition,
-        })
-    }
 }
 
 pub trait Connector: Send {
@@ -194,7 +75,7 @@ pub trait Connector: Send {
 
     fn metadata(&self) -> arroyo_rpc::types::Connector;
 
-    fn table_type(&self, config: Self::ConfigT, table: Self::TableT) -> TableType;
+    fn table_type(&self, config: Self::ConfigT, table: Self::TableT) -> ConnectionType;
 
     #[allow(unused)]
     fn get_schema(
@@ -241,7 +122,7 @@ pub trait ErasedConnector: Send {
 
     fn validate_table(&self, s: &str) -> Result<(), serde_json::Error>;
 
-    fn table_type(&self, config: &str, table: &str) -> Result<TableType, serde_json::Error>;
+    fn table_type(&self, config: &str, table: &str) -> Result<ConnectionType, serde_json::Error>;
 
     fn config_description(&self, s: &str) -> Result<String, serde_json::Error>;
 
@@ -299,7 +180,7 @@ impl<C: Connector> ErasedConnector for C {
         self.parse_table(s).map(|_| ())
     }
 
-    fn table_type(&self, config: &str, table: &str) -> Result<TableType, serde_json::Error> {
+    fn table_type(&self, config: &str, table: &str) -> Result<ConnectionType, serde_json::Error> {
         Ok(self.table_type(self.parse_config(config)?, self.parse_table(table)?))
     }
 
@@ -367,29 +248,23 @@ pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
     connectors().remove(t)
 }
 
-pub(crate) fn source_field(name: &str, field_type: source_field_type::Type) -> SourceField {
+pub(crate) fn source_field(name: &str, field_type: SourceFieldType) -> SourceField {
     SourceField {
         field_name: name.to_string(),
-        field_type: Some(SourceFieldType {
-            sql_name: match field_type {
-                source_field_type::Type::Primitive(p) => Some(
-                    primitive_to_sql(grpc::api::PrimitiveType::from_i32(p).unwrap()).to_string(),
-                ),
-                source_field_type::Type::Struct(_) => None,
-            },
-            r#type: Some(field_type),
-        }),
+        field_type: field_type.clone(),
+        sql_name: match field_type {
+            SourceFieldType::Primitive(p) => Some(primitive_to_sql(p).to_string()),
+            SourceFieldType::Struct(_) => None,
+        },
         nullable: false,
     }
 }
 
-pub(crate) fn nullable_field(name: &str, field_type: source_field_type::Type) -> SourceField {
+pub(crate) fn nullable_field(name: &str, field_type: SourceFieldType) -> SourceField {
     SourceField {
         field_name: name.to_string(),
-        field_type: Some(SourceFieldType {
-            sql_name: None,
-            r#type: Some(field_type),
-        }),
+        field_type,
         nullable: true,
+        sql_name: None,
     }
 }

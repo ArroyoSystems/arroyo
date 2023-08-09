@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 use crate::engine::{Context, OutQueue};
 use crate::SchemaData;
 use arrow::datatypes::Field;
-use arroyo_types::formats::{Format, JsonFormat};
+use arroyo_rpc::types::{Format, JsonFormat};
 use arroyo_types::CheckpointBarrier;
 use arroyo_types::*;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};

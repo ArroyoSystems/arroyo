@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Context, Result};
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
-use arroyo_types::formats::Format;
 use typify::import_types;
 
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
-use crate::{Connection, ConnectionSchema, ConnectionType, EmptyConfig};
+use crate::{Connection, EmptyConfig};
 
 use super::Connector;
 
@@ -50,9 +49,7 @@ impl Connector for FileSystemConnector {
         _: Self::ConfigT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        tx: tokio::sync::mpsc::Sender<Result<TestSourceMessage, tonic::Status>>,
     ) {
         tokio::task::spawn(async move {
             tx.send(Ok(TestSourceMessage {
@@ -65,8 +62,8 @@ impl Connector for FileSystemConnector {
         });
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn from_config(

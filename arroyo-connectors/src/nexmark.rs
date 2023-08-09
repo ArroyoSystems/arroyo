@@ -1,16 +1,13 @@
 use anyhow::bail;
-use arroyo_rpc::grpc::{
-    self,
-    api::{source_field_type, StructType, TestSourceMessage},
+use arroyo_rpc::types::SourceFieldType::Primitive;
+use arroyo_rpc::types::{
+    ConnectionSchema, ConnectionType, SourceFieldType, StructType, TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-use crate::{
-    nullable_field, source_field, Connection, ConnectionSchema, ConnectionType, Connector,
-    EmptyConfig,
-};
+use crate::{nullable_field, source_field, Connection, Connector, EmptyConfig};
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/nexmark/table.json");
 const ICON: &str = include_str!("../resources/nexmark.svg");
@@ -18,58 +15,57 @@ const ICON: &str = include_str!("../resources/nexmark.svg");
 import_types!(schema = "../connector-schemas/nexmark/table.json");
 
 pub fn nexmark_schema() -> ConnectionSchema {
-    use grpc::api::PrimitiveType::*;
-    use source_field_type::Type::Primitive;
+    use arroyo_rpc::types::PrimitiveType::*;
     ConnectionSchema {
         format: None,
         struct_name: Some("arroyo_types::nexmark::Event".to_string()),
         fields: vec![
             nullable_field(
                 "person",
-                source_field_type::Type::Struct(StructType {
+                SourceFieldType::Struct(StructType {
                     name: Some("arroyo_types::nexmark::Person".to_string()),
                     fields: vec![
-                        source_field("id", Primitive(Int64 as i32)),
-                        source_field("name", Primitive(String as i32)),
-                        source_field("email_address", Primitive(String as i32)),
-                        source_field("credit_card", Primitive(String as i32)),
-                        source_field("city", Primitive(String as i32)),
-                        source_field("state", Primitive(String as i32)),
-                        source_field("datetime", Primitive(UnixMillis as i32)),
-                        source_field("extra", Primitive(String as i32)),
+                        source_field("id", Primitive(Int64)),
+                        source_field("name", Primitive(String)),
+                        source_field("email_address", Primitive(String)),
+                        source_field("credit_card", Primitive(String)),
+                        source_field("city", Primitive(String)),
+                        source_field("state", Primitive(String)),
+                        source_field("datetime", Primitive(UnixMillis)),
+                        source_field("extra", Primitive(String)),
                     ],
                 }),
             ),
             nullable_field(
                 "bid",
-                source_field_type::Type::Struct(StructType {
+                SourceFieldType::Struct(StructType {
                     name: Some("arroyo_types::nexmark::Bid".to_string()),
                     fields: vec![
-                        source_field("auction", Primitive(Int64 as i32)),
-                        source_field("bidder", Primitive(Int64 as i32)),
-                        source_field("price", Primitive(Int64 as i32)),
-                        source_field("channel", Primitive(String as i32)),
-                        source_field("url", Primitive(String as i32)),
-                        source_field("datetime", Primitive(UnixMillis as i32)),
-                        source_field("extra", Primitive(String as i32)),
+                        source_field("auction", Primitive(Int64)),
+                        source_field("bidder", Primitive(Int64)),
+                        source_field("price", Primitive(Int64)),
+                        source_field("channel", Primitive(String)),
+                        source_field("url", Primitive(String)),
+                        source_field("datetime", Primitive(UnixMillis)),
+                        source_field("extra", Primitive(String)),
                     ],
                 }),
             ),
             nullable_field(
                 "auction",
-                source_field_type::Type::Struct(StructType {
+                SourceFieldType::Struct(StructType {
                     name: Some("arroyo_types::nexmark::Auction".to_string()),
                     fields: vec![
-                        source_field("id", Primitive(Int64 as i32)),
-                        source_field("description", Primitive(String as i32)),
-                        source_field("item_name", Primitive(String as i32)),
-                        source_field("initial_bid", Primitive(Int64 as i32)),
-                        source_field("reserve", Primitive(Int64 as i32)),
-                        source_field("datetime", Primitive(UnixMillis as i32)),
-                        source_field("expires", Primitive(UnixMillis as i32)),
-                        source_field("seller", Primitive(Int64 as i32)),
-                        source_field("category", Primitive(Int64 as i32)),
-                        source_field("extra", Primitive(String as i32)),
+                        source_field("id", Primitive(Int64)),
+                        source_field("description", Primitive(String)),
+                        source_field("item_name", Primitive(String)),
+                        source_field("initial_bid", Primitive(Int64)),
+                        source_field("reserve", Primitive(Int64)),
+                        source_field("datetime", Primitive(UnixMillis)),
+                        source_field("expires", Primitive(UnixMillis)),
+                        source_field("seller", Primitive(Int64)),
+                        source_field("category", Primitive(Int64)),
+                        source_field("extra", Primitive(String)),
                     ],
                 }),
             ),
@@ -105,8 +101,8 @@ impl Connector for NexmarkConnector {
         }
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> arroyo_rpc::grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn get_schema(
@@ -124,9 +120,7 @@ impl Connector for NexmarkConnector {
         _: Self::ConfigT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        tx: tokio::sync::mpsc::Sender<Result<TestSourceMessage, tonic::Status>>,
     ) {
         tokio::task::spawn(async move {
             tx.send(Ok(TestSourceMessage {

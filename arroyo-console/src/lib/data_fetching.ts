@@ -1,4 +1,4 @@
-import { CheckpointDetailsReq, GetConnectionsReq, GetConnectionTablesReq } from '../gen/api_pb';
+import { CheckpointDetailsReq } from '../gen/api_pb';
 import { ApiClient } from '../main';
 import useSWR, { mutate as globalMutate } from 'swr';
 import { components, paths } from '../gen/api-types';
@@ -17,6 +17,13 @@ export type Metric = schemas['Metric'];
 export type OperatorMetricGroup = schemas['OperatorMetricGroup'];
 export type Connector = schemas['Connector'];
 export type Checkpoint = schemas['Checkpoint'];
+export type ConnectionProfile = schemas['ConnectionProfile'];
+export type ConnectionTable = schemas['ConnectionTable'];
+export type Format = schemas['Format'];
+export type TestSourceMessage = schemas['TestSourceMessage'];
+export type ConnectionTablePost = schemas['ConnectionTablePost'];
+export type ConnectionSchema = schemas['ConnectionSchema'];
+export type SourceField = schemas['SourceField'];
 
 const BASE_URL = '/api';
 export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
@@ -36,7 +43,7 @@ const connectorsKey = () => {
   return { key: 'Connectors' };
 };
 
-const connectionsKey = () => {
+const connectionProfilesKey = () => {
   return { key: 'Connections' };
 };
 
@@ -117,40 +124,41 @@ export const useConnectors = () => {
 };
 
 // Connections
-const connectionsFetcher = (client: ApiClient) => {
-  return async () => {
-    return (await (await client()).getConnections(new GetConnectionsReq({}))).connections;
-  };
+const connectionProfilesFetcher = async () => {
+  const { data, error } = await get('/v1/connection_profiles', {});
+  return processResponse(data, error);
 };
 
-export const useConnections = (client: ApiClient) => {
-  const { data, isLoading, mutate } = useSWR(connectionsKey(), connectionsFetcher(client));
+export const useConnectionProfiles = () => {
+  const { data, isLoading, mutate } = useSWR<schemas['ConnectionProfileCollection']>(
+    connectionProfilesKey(),
+    connectionProfilesFetcher
+  );
 
   return {
-    connections: data,
-    connectionsLoading: isLoading,
-    mutateConnections: mutate,
+    connectionProfiles: data?.data,
+    connectionProfilesLoading: isLoading,
+    mutateConnectionProfiles: mutate,
   };
 };
 
 // ConnectionTables
-const connectionTablesFetcher = (client: ApiClient) => {
-  return async () => {
-    return (await (await client()).getConnectionTables(new GetConnectionTablesReq({}))).tables;
-  };
+const connectionTablesFetcher = async () => {
+  const { data, error } = await get('/v1/connection_tables', {});
+  return processResponse(data, error);
 };
 
-export const useConnectionTables = (client: ApiClient) => {
-  const { data, isLoading, mutate } = useSWR(
+export const useConnectionTables = () => {
+  const { data, isLoading, mutate } = useSWR<schemas['ConnectionTableCollection']>(
     connectionTablesKey(),
-    connectionTablesFetcher(client),
+    connectionTablesFetcher,
     {
       refreshInterval: 5000,
     }
   );
 
   return {
-    connectionTables: data,
+    connectionTables: data?.data,
     connectionTablesLoading: isLoading,
     mutateConnectionTables: mutate,
   };
@@ -400,4 +408,47 @@ export const useJobOutput = (
   const url = `${BASE_URL}/v1/pipelines/${pipelineId}/jobs/${jobId}/output`;
   const eventSource = new EventSource(url);
   eventSource.addEventListener('message', handler);
+};
+
+export const useConnectionTableTest = async (
+  handler: (event: any) => void,
+  req: ConnectionTablePost
+) => {
+  const url = `${BASE_URL}/v1/connection_tables/test`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify(req),
+  });
+
+  if (!response.ok || !response.body) {
+    console.log('Error subscribing to test output');
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const textDecoder = new TextDecoder();
+
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    buffer += textDecoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const value = line.substring('data:'.length);
+      if (value) {
+        handler(value);
+      }
+    }
+  }
 };

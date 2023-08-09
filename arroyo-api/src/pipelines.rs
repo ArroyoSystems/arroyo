@@ -72,11 +72,7 @@ where
                     .map(|c| c.config.clone())
                     .unwrap_or_else(|| "{}".to_string()),
                 &table.config,
-                table
-                    .schema
-                    .as_ref()
-                    .map(|s| s.clone().try_into().unwrap())
-                    .as_ref(),
+                Some(&table.schema),
             )
             .map_err(log_and_map)?;
 

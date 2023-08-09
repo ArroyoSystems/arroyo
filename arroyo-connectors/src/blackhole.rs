@@ -1,7 +1,7 @@
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 
-use crate::{Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig};
+use crate::{Connection, Connector, EmptyConfig};
 
 pub struct BlackholeConnector {}
 
@@ -32,8 +32,8 @@ impl Connector for BlackholeConnector {
         }
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> arroyo_rpc::grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn get_schema(
@@ -51,9 +51,7 @@ impl Connector for BlackholeConnector {
         _: Self::ConfigT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        tx: tokio::sync::mpsc::Sender<Result<TestSourceMessage, tonic::Status>>,
     ) {
         tokio::task::spawn(async move {
             tx.send(Ok(TestSourceMessage {

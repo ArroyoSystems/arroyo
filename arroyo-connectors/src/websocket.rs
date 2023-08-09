@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use anyhow::anyhow;
-use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc::Sender;
@@ -9,9 +8,10 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tonic::Status;
 use typify::import_types;
 
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, EmptyConfig};
+use crate::{pull_opt, Connection, EmptyConfig};
 
 use super::Connector;
 
@@ -143,8 +143,8 @@ impl Connector for WebsocketConnector {
         });
     }
 
-    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> grpc::api::TableType {
-        return grpc::api::TableType::Source;
+    fn table_type(&self, _: Self::ConfigT, _: Self::TableT) -> ConnectionType {
+        return ConnectionType::Source;
     }
 
     fn from_config(

@@ -13,6 +13,7 @@ RETURNING id;
 --! get_connections : DbConnection()
 SELECT
     id,
+    pub_id,
     name,
     type,
     config
@@ -23,6 +24,7 @@ ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 --! get_connection : DbConnection()
 SELECT
     id,
+    pub_id,
     name,
     type,
     config
@@ -30,14 +32,15 @@ FROM connections
 WHERE connections.organization_id = :organization_id AND connections.name = :name
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
---! get_connection_by_id: DbConnection()
+--! get_connection_by_pub_id: DbConnection()
 SELECT
     id,
+    pub_id,
     name,
     type,
     config
 FROM connections
-WHERE connections.organization_id = :organization_id AND connections.id = :id
+WHERE connections.organization_id = :organization_id AND connections.pub_id = :pub_id
 ORDER BY COALESCE(connections.updated_at, connections.created_at) DESC;
 
 --! delete_connection
@@ -57,8 +60,11 @@ INSERT INTO connection_tables
 (pub_id, organization_id, created_by, name, table_type, connector, connection_id, config, schema)
 VALUES (:pub_id, :organization_id, :created_by, :name, :table_type, :connector, :connection_id, :config, :schema);
 
---! get_connection_tables: (connection_id?, connection_name?, connection_type?, connection_config?, schema?)
+--: DbConnectionTable (connection_id?, connection_name?, connection_type?, connection_config?, schema?)
+
+--! get_connection_tables: DbConnectionTable
 SELECT connection_tables.id as id,
+    connection_tables.pub_id as pub_id,
     connection_tables.name as name,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
@@ -72,14 +78,33 @@ SELECT connection_tables.id as id,
         FROM connection_table_pipelines
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
     ) as consumer_count
-
 FROM connection_tables
 LEFT JOIN connections ON connections.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id;
 
+--! get_connection_table: DbConnectionTable
+SELECT connection_tables.id as id,
+    connection_tables.pub_id as pub_id,
+    connection_tables.name as name,
+    connection_tables.connector as connector,
+    connection_tables.table_type as table_type,
+    connection_tables.config as config,
+    connection_tables.schema as schema,
+    connection_tables.connection_id as connection_id,
+    connections.name as connection_name,
+    connections.type as connection_type,
+    connections.config as connection_config,
+    (SELECT count(*) as pipeline_count
+        FROM connection_table_pipelines
+        WHERE connection_table_pipelines.connection_table_id = connection_tables.id
+    ) as consumer_count
+FROM connection_tables
+LEFT JOIN connections ON connections.id = connection_tables.connection_id
+WHERE connection_tables.organization_id = :organization_id AND connection_tables.pub_id = :pub_id;
+
 --! delete_connection_table
 DELETE FROM connection_tables
-WHERE organization_id = :organization_id AND id = :id;
+WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 
 ----------- pipelines -------------------
