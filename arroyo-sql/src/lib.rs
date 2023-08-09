@@ -4,9 +4,9 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::TimeUnit;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaConnector, KafkaTable};
-use arroyo_connectors::{Connection, Connector};
+use arroyo_connectors::{Connection, ConnectionSchema, Connector};
 use arroyo_datastream::Program;
-use arroyo_rpc::grpc::api::{ConnectionSchema, Format, FormatOptions};
+use arroyo_types::formats::{Format, JsonFormat};
 use datafusion::physical_plan::functions::make_scalar_function;
 
 mod expressions;
@@ -341,11 +341,10 @@ pub fn parse_and_get_program_sync(
             operator: "GrpcSink::<#in_k, #in_t>".to_string(),
             config: "{}".to_string(),
             description: "WebSink".to_string(),
-            serialization_mode: if insert.is_updating() {
-                arroyo_datastream::SerializationMode::DebeziumJson
-            } else {
-                arroyo_datastream::SerializationMode::Json
-            },
+            format: Some(Format::Json(JsonFormat {
+                debezium: insert.is_updating(),
+                ..Default::default()
+            })),
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
@@ -405,9 +404,9 @@ impl Default for TestStruct {
 }
 
 fn test_struct_def() -> StructDef {
-    StructDef {
-        name: Some("TestStruct".to_string()),
-        fields: vec![
+    StructDef::for_name(
+        Some("TestStruct".to_string()),
+        vec![
             StructField::new(
                 "non_nullable_i32".to_string(),
                 None,
@@ -489,7 +488,7 @@ fn test_struct_def() -> StructDef {
                 TypeDef::DataType(DataType::Binary, true),
             ),
         ],
-    }
+    )
 }
 
 pub fn generate_test_code(
@@ -515,8 +514,8 @@ pub fn get_test_expression(
 ) -> syn::ItemFn {
     let struct_def = test_struct_def();
     let schema = ConnectionSchema {
-        format: Some(Format::JsonFormat as i32),
-        format_options: Some(FormatOptions::default()),
+        format: Some(Format::Json(JsonFormat::default())),
+
         struct_name: struct_def.name.clone(),
         fields: struct_def
             .fields
@@ -539,7 +538,7 @@ pub fn get_test_expression(
                 topic: "test_topic".to_string(),
                 type_: arroyo_connectors::kafka::TableType::Source {
                     offset: arroyo_connectors::kafka::SourceOffset::Latest,
-                    read_mode: Some(arroyo_connectors::kafka::SourceReadMode::ReadUncommitted),
+                    read_mode: Some(arroyo_connectors::kafka::ReadMode::ReadUncommitted),
                 },
             },
             Some(&schema),

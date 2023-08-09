@@ -1,10 +1,10 @@
 use anyhow::anyhow;
 use arrow_schema::DataType;
-use arroyo_connectors::{connector_for_type, ErasedConnector};
+use arroyo_connectors::{connector_for_type, ConnectionSchema, ErasedConnector};
 use arroyo_rpc::grpc::api::{
     connection_schema::Definition, ConfluentSchemaReq, ConfluentSchemaResp, Connection,
-    ConnectionSchema, ConnectionTable, CreateConnectionTableReq, DeleteConnectionTableReq,
-    TableType, TestSchemaReq, TestSourceMessage,
+    ConnectionTable, CreateConnectionTableReq, DeleteConnectionTableReq, TableType, TestSchemaReq,
+    TestSourceMessage,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_sql::{
@@ -73,7 +73,14 @@ async fn get_and_validate_connector<E: GenericClient>(
         .validate_table(&req.config)
         .map_err(|e| Status::invalid_argument(&format!("Failed to parse config: {:?}", e)))?;
 
-    let schema = if let Some(schema) = &req.schema {
+    let schema: Option<ConnectionSchema> = req
+        .schema
+        .as_ref()
+        .map(|t| t.clone().try_into())
+        .transpose()
+        .map_err(|e| Status::failed_precondition(format!("Invalid schema: {}", e)))?;
+
+    let schema = if let Some(schema) = &schema {
         Some(expand_schema(&req.name, schema)?)
     } else {
         None
@@ -223,7 +230,7 @@ pub(crate) async fn get<C: GenericClient>(
                 connector: t.connector,
                 table_type: TableType::from_str_name(&t.table_type).unwrap() as i32,
                 config: table,
-                schema,
+                schema: schema.map(|t| t.try_into()).transpose().ok()?,
                 consumers: t.consumer_count as i32,
             })
         })

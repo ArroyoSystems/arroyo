@@ -11,6 +11,8 @@ use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub mod formats;
+
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
 pub struct Window {
     pub start_time: SystemTime,
@@ -248,6 +250,20 @@ pub struct Record<K: Key, T: Data> {
     pub timestamp: SystemTime,
     pub key: Option<K>,
     pub value: T,
+}
+
+pub struct UserError {
+    pub name: String,
+    pub details: String,
+}
+
+impl UserError {
+    pub fn new(name: impl Into<String>, details: impl Into<String>) -> UserError {
+        UserError {
+            name: name.into(),
+            details: details.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Serialize, Deserialize)]

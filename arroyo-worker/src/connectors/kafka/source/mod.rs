@@ -1,10 +1,12 @@
-use crate::connectors::{OperatorConfig, OperatorConfigSerializationMode};
 use crate::engine::{Context, StreamNode};
+use crate::formats;
 use crate::SourceFinishType;
 use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::TableDescriptor;
+use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::GlobalKeyedState;
+use arroyo_types::formats::Format;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
 use governor::{Quota, RateLimiter};
@@ -18,9 +20,7 @@ use std::time::Duration;
 use tokio::select;
 use tracing::{debug, error, info, warn};
 
-use crate::operators::{SerializationMode, UserError};
-
-use super::{client_configs, KafkaConfig, KafkaTable, SourceReadMode, TableType};
+use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, TableType};
 
 #[cfg(test)]
 mod test;
@@ -34,7 +34,7 @@ where
     topic: String,
     bootstrap_servers: String,
     offset_mode: super::SourceOffset,
-    serialization_mode: SerializationMode,
+    format: Format,
     client_configs: HashMap<String, String>,
     messages_per_second: NonZeroU32,
     _t: PhantomData<(K, T)>,
@@ -60,7 +60,7 @@ where
         servers: &str,
         topic: &str,
         offset_mode: super::SourceOffset,
-        serialization_mode: SerializationMode,
+        format: Format,
         messages_per_second: u32,
         client_configs: Vec<(&str, &str)>,
     ) -> Self {
@@ -68,7 +68,7 @@ where
             topic: topic.to_string(),
             bootstrap_servers: servers.to_string(),
             offset_mode,
-            serialization_mode,
+            format,
             client_configs: client_configs
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
@@ -89,7 +89,7 @@ where
             panic!("found non-source kafka config in source operator");
         };
         let mut client_configs = client_configs(&connection);
-        if let Some(SourceReadMode::ReadCommitted) = read_mode {
+        if let Some(ReadMode::ReadCommitted) = read_mode {
             client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
         }
 
@@ -97,22 +97,12 @@ where
             topic: table.topic,
             bootstrap_servers: connection.bootstrap_servers.to_string(),
             offset_mode: *offset,
-            serialization_mode: match config.serialization_mode.unwrap() {
-                OperatorConfigSerializationMode::Json => SerializationMode::Json,
-                OperatorConfigSerializationMode::JsonSchemaRegistry => {
-                    SerializationMode::JsonSchemaRegistry
-                }
-                OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
-                OperatorConfigSerializationMode::DebeziumJson => SerializationMode::Json,
-                OperatorConfigSerializationMode::Parquet => {
-                    unimplemented!("parquet out of kafka source doesn't make sense")
-                }
-            },
+            format: config.format.expect("Format must be set for Kafka source"),
             client_configs,
             messages_per_second: NonZeroU32::new(
                 config
                     .rate_limit
-                    .and_then(|l| l.messages_per_second.map(|l| l as u32))
+                    .map(|l| l.messages_per_second)
                     .unwrap_or(u32::MAX),
             )
             .unwrap(),
@@ -239,7 +229,7 @@ where
                                 ctx.collector.collect(Record {
                                     timestamp: from_millis(timestamp as u64),
                                     key: None,
-                                    value: self.serialization_mode.deserialize_slice(v)?,
+                                    value: formats::deserialize_slice(&self.format, v)?,
                                 }).await;
                                 offsets.insert(msg.partition(), msg.offset());
                                 rate_limiter.until_ready().await;

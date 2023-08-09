@@ -1,10 +1,10 @@
 use crate::engine::Context;
-use crate::operators::SerializationMode;
-use crate::SourceFinishType;
+use crate::{formats, SourceFinishType};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
-use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::GlobalKeyedState;
+use arroyo_types::formats::Format;
 use arroyo_types::{string_to_map, Data, Message, Record, Watermark};
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
@@ -17,8 +17,6 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::select;
 use tracing::{debug, info};
 use typify::import_types;
-
-use super::{OperatorConfig, OperatorConfigSerializationMode};
 
 import_types!(schema = "../connector-schemas/sse/table.json");
 
@@ -36,7 +34,7 @@ where
     url: String,
     headers: Vec<(String, String)>,
     events: Vec<String>,
-    serialization_mode: SerializationMode,
+    format: Format,
     state: SSESourceState,
     _t: PhantomData<(K, T)>,
 }
@@ -47,12 +45,7 @@ where
     K: DeserializeOwned + Data,
     T: DeserializeOwned + Data,
 {
-    pub fn new(
-        url: &str,
-        headers: Vec<(&str, &str)>,
-        events: Vec<&str>,
-        serialization_mode: SerializationMode,
-    ) -> Self {
+    pub fn new(url: &str, headers: Vec<(&str, &str)>, events: Vec<&str>, format: Format) -> Self {
         SSESourceFunc {
             url: url.to_string(),
             headers: headers
@@ -60,7 +53,7 @@ where
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             events: events.into_iter().map(|s| s.to_string()).collect(),
-            serialization_mode,
+            format,
             state: SSESourceState::default(),
             _t: PhantomData,
         }
@@ -82,17 +75,7 @@ where
                 .events
                 .map(|e| e.split(',').map(|e| e.to_string()).collect())
                 .unwrap_or_else(std::vec::Vec::new),
-            serialization_mode: match config.serialization_mode.unwrap() {
-                OperatorConfigSerializationMode::Json => SerializationMode::Json,
-                OperatorConfigSerializationMode::JsonSchemaRegistry => {
-                    SerializationMode::JsonSchemaRegistry
-                }
-                OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
-                OperatorConfigSerializationMode::DebeziumJson => todo!(),
-                OperatorConfigSerializationMode::Parquet => {
-                    unimplemented!("parquet out of SSE source doesn't make sense")
-                }
-            },
+            format: config.format.expect("SSESource requires a format"),
             state: SSESourceState::default(),
             _t: PhantomData,
         }
@@ -181,7 +164,7 @@ where
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            match self.serialization_mode.deserialize_str(&event.data) {
+                                            match formats::deserialize_slice(&self.format, &event.data.as_bytes()) {
                                                 Ok(value) => {
                                                     ctx.collector.collect(Record {
                                                         timestamp: SystemTime::now(),

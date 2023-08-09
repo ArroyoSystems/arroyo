@@ -1,9 +1,7 @@
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, Format, FormatOptions, TestSourceMessage},
-};
+use arroyo_rpc::grpc::{self, api::TestSourceMessage};
+use arroyo_rpc::OperatorConfig;
 
-use crate::{Connection, ConnectionType, Connector, EmptyConfig, OperatorConfig};
+use crate::{Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig};
 
 pub struct BlackholeConnector {}
 
@@ -52,7 +50,7 @@ impl Connector for BlackholeConnector {
         _: &str,
         _: Self::ConfigT,
         _: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        _: Option<&ConnectionSchema>,
         tx: tokio::sync::mpsc::Sender<
             Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
         >,
@@ -72,7 +70,7 @@ impl Connector for BlackholeConnector {
         &self,
         name: &str,
         _: &mut std::collections::HashMap<String, String>,
-        s: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        s: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         self.from_config(None, name, EmptyConfig {}, EmptyConfig {}, s)
     }
@@ -83,7 +81,7 @@ impl Connector for BlackholeConnector {
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
-        s: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        s: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         let description = "Blackhole".to_string();
 
@@ -91,7 +89,7 @@ impl Connector for BlackholeConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: None,
+            format: None,
         };
 
         Ok(Connection {
@@ -99,8 +97,7 @@ impl Connector for BlackholeConnector {
             name: name.to_string(),
             connection_type: ConnectionType::Sink,
             schema: s.cloned().unwrap_or_else(|| ConnectionSchema {
-                format: Some(Format::JsonFormat as i32),
-                format_options: Some(FormatOptions::default()),
+                format: None,
                 struct_name: None,
                 fields: vec![],
                 definition: None,

@@ -1,4 +1,5 @@
 use arroyo_state::{BackingStore, StateBackend};
+use arroyo_types::formats::JsonFormat;
 use rand::Rng;
 use std::time::{Duration, SystemTime};
 
@@ -63,7 +64,7 @@ impl KafkaTopicTester {
             &self.server,
             &self.topic,
             crate::connectors::kafka::SourceOffset::Earliest,
-            source::SerializationMode::Json,
+            arroyo_types::formats::Format::Json(JsonFormat::default()),
             100,
             vec![],
         );

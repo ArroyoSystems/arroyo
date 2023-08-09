@@ -1,14 +1,15 @@
 use anyhow::{anyhow, bail};
 use arroyo_rpc::grpc::{
     self,
-    api::{source_field_type, ConnectionSchema, TestSourceMessage},
+    api::{source_field_type, TestSourceMessage},
 };
+use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use typify::import_types;
 
 use crate::{
-    pull_opt, source_field, Connection, ConnectionType, Connector, EmptyConfig, OperatorConfig,
+    pull_opt, source_field, Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig,
 };
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/impulse/table.json");
@@ -26,7 +27,6 @@ pub fn impulse_schema() -> ConnectionSchema {
             source_field("counter", Primitive(UInt64 as i32)),
             source_field("subtask_index", Primitive(UInt64 as i32)),
         ],
-        format_options: None,
         definition: None,
     }
 }
@@ -76,7 +76,7 @@ impl Connector for ImpulseConnector {
         _: &str,
         _: Self::ConfigT,
         _: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        _: Option<&ConnectionSchema>,
         tx: tokio::sync::mpsc::Sender<
             Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
         >,
@@ -96,7 +96,7 @@ impl Connector for ImpulseConnector {
         &self,
         name: &str,
         options: &mut std::collections::HashMap<String, String>,
-        s: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        s: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         let event_rate = f64::from_str(&pull_opt("event_rate", options)?)
             .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;
@@ -139,7 +139,7 @@ impl Connector for ImpulseConnector {
         name: &str,
         config: Self::ConfigT,
         table: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        _: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         let description = format!(
             "{}Impulse<{} eps{}>",
@@ -159,7 +159,7 @@ impl Connector for ImpulseConnector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: None,
+            format: None,
         };
 
         Ok(Connection {

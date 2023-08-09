@@ -22,9 +22,9 @@ pub(crate) fn window_arrow_struct() -> DataType {
 
 pub(crate) fn window_type_def() -> TypeDef {
     TypeDef::StructDef(
-        StructDef {
-            name: Some("arroyo_types::Window".to_string()),
-            fields: vec![
+        StructDef::for_name(
+            Some("arroyo_types::Window".to_string()),
+            vec![
                 StructField::new(
                     "start_time".to_string(),
                     None,
@@ -36,7 +36,7 @@ pub(crate) fn window_type_def() -> TypeDef {
                     TypeDef::DataType(DataType::Timestamp(TimeUnit::Millisecond, None), false),
                 ),
             ],
-        },
+        ),
         false,
     )
 }
@@ -49,9 +49,9 @@ pub fn nexmark_fields() -> Vec<StructField> {
             "person".to_string(),
             None,
             TypeDef::StructDef(
-                StructDef {
-                    name: Some("arroyo_types::nexmark::Person".to_string()),
-                    fields: vec![
+                StructDef::for_name(
+                    Some("arroyo_types::nexmark::Person".to_string()),
+                    vec![
                         StructField::new(
                             "id".to_string(),
                             None,
@@ -96,7 +96,7 @@ pub fn nexmark_fields() -> Vec<StructField> {
                             TypeDef::DataType(DataType::Utf8, false),
                         ),
                     ],
-                },
+                ),
                 true,
             ),
         ),
@@ -104,9 +104,9 @@ pub fn nexmark_fields() -> Vec<StructField> {
             "bid".to_string(),
             None,
             TypeDef::StructDef(
-                StructDef {
-                    name: Some("arroyo_types::nexmark::Bid".to_string()),
-                    fields: vec![
+                StructDef::for_name(
+                    Some("arroyo_types::nexmark::Bid".to_string()),
+                    vec![
                         StructField::new(
                             "auction".to_string(),
                             None,
@@ -146,7 +146,7 @@ pub fn nexmark_fields() -> Vec<StructField> {
                             TypeDef::DataType(DataType::Utf8, false),
                         ),
                     ],
-                },
+                ),
                 true,
             ),
         ),
@@ -154,9 +154,9 @@ pub fn nexmark_fields() -> Vec<StructField> {
             "auction".to_string(),
             None,
             TypeDef::StructDef(
-                StructDef {
-                    name: Some("arroyo_types::nexmark::Auction".to_string()),
-                    fields: vec![
+                StructDef::for_name(
+                    Some("arroyo_types::nexmark::Auction".to_string()),
+                    vec![
                         StructField::new(
                             "id".to_string(),
                             None,
@@ -209,7 +209,7 @@ pub fn nexmark_fields() -> Vec<StructField> {
                             TypeDef::DataType(DataType::Utf8, false),
                         ),
                     ],
-                },
+                ),
                 true,
             ),
         ),

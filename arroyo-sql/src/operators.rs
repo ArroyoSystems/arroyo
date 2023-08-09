@@ -9,6 +9,7 @@ use crate::{
 use anyhow::Result;
 use arrow_schema::DataType;
 use arroyo_datastream::WindowType;
+use arroyo_types::formats::Format;
 use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -18,9 +19,18 @@ use syn::{parse_quote, parse_str, Ident, LitInt};
 pub struct Projection {
     pub field_names: Vec<Column>,
     pub field_computations: Vec<Expression>,
+    pub format: Option<Format>,
 }
 
 impl Projection {
+    pub fn new(field_names: Vec<Column>, field_computations: Vec<Expression>) -> Self {
+        Self {
+            field_names,
+            field_computations,
+            format: None,
+        }
+    }
+
     pub fn without_window(self) -> Self {
         let (field_names, field_computations) = self
             .field_computations
@@ -38,6 +48,7 @@ impl Projection {
         Self {
             field_names,
             field_computations,
+            format: self.format,
         }
     }
 
@@ -52,7 +63,7 @@ impl Projection {
                 StructField::new(field_name.name, field_name.relation, field_type)
             })
             .collect();
-        StructDef { name: None, fields }
+        StructDef::new(None, fields, self.format.clone())
     }
     pub fn to_truncated_syn_expression(&self, terms: usize) -> syn::Expr {
         let assignments: Vec<_> = self
@@ -91,7 +102,7 @@ impl Projection {
                 StructField::new(field_name.name, field_name.relation, field_type)
             })
             .collect();
-        StructDef { name: None, fields }
+        StructDef::for_fields(fields)
     }
 
     pub fn to_syn_expression(&self) -> syn::Expr {
@@ -141,7 +152,7 @@ impl AggregateProjection {
                 StructField::new(field_name.name, field_name.relation, field_type)
             })
             .collect();
-        StructDef { name: None, fields }
+        StructDef::for_fields(fields)
     }
 
     pub fn to_syn_expression(&self) -> syn::Expr {
@@ -221,7 +232,7 @@ impl GroupByKind {
                         }
                     })
                     .collect();
-                StructDef { name: None, fields }
+                StructDef::for_fields(fields)
             }
             GroupByKind::Basic | GroupByKind::Updating => {
                 let fields = (0..(key_fields + aggregate_fields))
@@ -233,7 +244,7 @@ impl GroupByKind {
                         }
                     })
                     .collect();
-                StructDef { name: None, fields }
+                StructDef::for_fields(fields)
             }
         }
     }
@@ -431,7 +442,7 @@ impl TwoPhaseAggregateProjection {
                 StructField::new(field_name.name, field_name.relation, field_type)
             })
             .collect();
-        StructDef { name: None, fields }
+        StructDef::for_fields(fields)
     }
 
     fn trailing_comma(&self) -> Option<TokenStream> {

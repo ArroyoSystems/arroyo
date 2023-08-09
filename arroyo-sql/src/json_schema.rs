@@ -5,7 +5,7 @@ use std::{
 
 use arrow_schema::DataType;
 use quote::{format_ident, quote};
-use schemars::schema::{RootSchema, Schema};
+use schemars::schema::{Metadata, RootSchema, Schema};
 use syn::{parse_str, Type};
 use tracing::warn;
 use typify::{TypeDetails, TypeSpace, TypeSpaceSettings};
@@ -18,12 +18,11 @@ fn get_type_space(schema: &str) -> Result<TypeSpace, String> {
     let mut root_schema: RootSchema =
         serde_json::from_str(schema).map_err(|e| format!("Invalid json schema: {:?}", e))?;
 
-    root_schema
-        .schema
-        .metadata
-        .as_mut()
-        .ok_or_else(|| "Schema metadata is missing".to_string())?
-        .title = Some(ROOT_NAME.to_string());
+    if root_schema.schema.metadata.is_none() {
+        root_schema.schema.metadata = Some(Box::new(Metadata::default()));
+    }
+
+    root_schema.schema.metadata.as_mut().unwrap().title = Some(ROOT_NAME.to_string());
 
     let mut type_space = TypeSpace::new(
         TypeSpaceSettings::default()
@@ -59,6 +58,7 @@ pub fn convert_json_schema(name: &str, schema: &str) -> Result<Vec<StructField>,
         StructDef {
             name: Some(_),
             fields,
+            ..
         },
         _,
     ) = to_schema_type(&type_space, name, s.name(), s.details())
@@ -189,10 +189,7 @@ fn to_schema_type(
 
             Some((
                 TypeDef::StructDef(
-                    StructDef {
-                        name: Some(format!("{}::{}", source_name, type_name)),
-                        fields,
-                    },
+                    StructDef::for_name(Some(format!("{}::{}", source_name, type_name)), fields),
                     false,
                 ),
                 None,

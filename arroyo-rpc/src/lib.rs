@@ -4,10 +4,12 @@ pub mod types;
 use std::{fs, time::SystemTime};
 
 use crate::grpc::SubtaskCheckpointMetadata;
-use arroyo_types::{CheckpointBarrier, API_ADDR_ENV};
+use arroyo_types::{formats::Format, CheckpointBarrier, API_ADDR_ENV};
 use grpc::{
     api::api_grpc_client::ApiGrpcClient, api::PrimitiveType, StopMode, TaskCheckpointEventType,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tonic::{
     codegen::InterceptedService,
     metadata::{Ascii, MetadataValue},
@@ -125,4 +127,17 @@ pub fn primitive_to_sql(primitive_type: PrimitiveType) -> &'static str {
         | PrimitiveType::DateTime => "TIMESTAMP",
         PrimitiveType::Json => "JSONB",
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RateLimit {
+    pub messages_per_second: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OperatorConfig {
+    pub connection: Value,
+    pub table: Value,
+    pub format: Option<Format>,
+    pub rate_limit: Option<RateLimit>,
 }

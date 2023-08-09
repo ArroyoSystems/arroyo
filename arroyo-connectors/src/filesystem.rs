@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Context, Result};
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, Format, TestSourceMessage},
-};
+use arroyo_rpc::grpc::{self, api::TestSourceMessage};
+use arroyo_rpc::OperatorConfig;
+use arroyo_types::formats::Format;
 use typify::import_types;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{serialization_mode, Connection, ConnectionType, EmptyConfig, OperatorConfig};
+use crate::{Connection, ConnectionSchema, ConnectionType, EmptyConfig};
 
 use super::Connector;
 
@@ -33,7 +32,7 @@ impl Connector for FileSystemConnector {
             id: "filesystem".to_string(),
             name: "FileSystem Sink".to_string(),
             icon: "".to_string(),
-            description: "Write to a filesystem (S3)".to_string(),
+            description: "Write to a filesystem (like S3)".to_string(),
             enabled: true,
             source: false,
             sink: true,
@@ -50,7 +49,7 @@ impl Connector for FileSystemConnector {
         _: &str,
         _: Self::ConfigT,
         _: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        _: Option<&ConnectionSchema>,
         tx: tokio::sync::mpsc::Sender<
             Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
         >,
@@ -84,27 +83,47 @@ impl Connector for FileSystemConnector {
             Destination::LocalFilesystem { .. } => true,
         };
         let (description, operator) = match (&table.format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) => ("LocalFileSystem<Parquet>".to_string(), "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"),
-            (Some(FormatSettings::Parquet { .. }), false) => ("FileSystem<Parquet>".to_string(), "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"),
-            (Some(FormatSettings::Json {  }), true) => ("LocalFileSystem<JSON>".to_string(), "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>"),
-            (Some(FormatSettings::Json {  }), false) => ("FileSystem<JSON>".to_string(), "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"),
+            (Some(FormatSettings::Parquet { .. }), true) => (
+                "LocalFileSystem<Parquet>".to_string(),
+                "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
+            ),
+            (Some(FormatSettings::Parquet { .. }), false) => (
+                "FileSystem<Parquet>".to_string(),
+                "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
+            ),
+            (Some(FormatSettings::Json {  }), true) => (
+                "LocalFileSystem<JSON>".to_string(),
+                "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>"
+            ),
+            (Some(FormatSettings::Json {  }), false) => (
+                "FileSystem<JSON>".to_string(),
+                "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"
+            ),
             (None, _) => bail!("have to have some format settings"),
         };
+
+        let schema = schema
+            .map(|s| s.to_owned())
+            .ok_or_else(|| anyhow!("no schema defined for FileSystem connection"))?;
+
+        let format = schema
+            .format
+            .as_ref()
+            .map(|t| t.to_owned())
+            .ok_or_else(|| anyhow!("'format' must be set for FileSystem connection"))?;
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
+            format: Some(format),
         };
 
         Ok(Connection {
             id,
             name: name.to_string(),
             connection_type: ConnectionType::Sink,
-            schema: schema
-                .map(|s| s.to_owned())
-                .ok_or_else(|| anyhow!("No schema defined for FileSystemSink"))?,
+            schema,
             operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
@@ -146,8 +165,13 @@ impl Connector for FileSystemConnector {
             target_file_size,
             target_part_size,
         });
-        let format_settings = match schema.ok_or(anyhow!("require schema"))?.format() {
-            Format::ParquetFormat => {
+        let format_settings = match schema
+            .ok_or(anyhow!("require schema"))?
+            .format
+            .as_ref()
+            .unwrap()
+        {
+            Format::Parquet(..) => {
                 let compression = opts
                     .remove("parquet_compression")
                     .map(|value| {
@@ -164,7 +188,7 @@ impl Connector for FileSystemConnector {
                     row_group_size,
                 })
             }
-            Format::JsonFormat => Some(FormatSettings::Json {}),
+            Format::Json(..) => Some(FormatSettings::Json {}),
             other => bail!("Unsupported format: {:?}", other),
         };
 

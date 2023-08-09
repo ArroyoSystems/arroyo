@@ -1,11 +1,12 @@
-use crate::connectors::{OperatorConfig, OperatorConfigSerializationMode};
 use crate::engine::{Context, StreamNode};
 use crate::SourceFinishType;
 use anyhow::anyhow;
 use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::TableDescriptor;
+use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage};
 use arroyo_state::tables::GlobalKeyedState;
+use arroyo_types::formats::Format;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
 use fluvio::dataplane::link::ErrorCode;
@@ -19,8 +20,6 @@ use tokio::select;
 use tokio_stream::{Stream, StreamExt, StreamMap};
 use tracing::{debug, error, info, warn};
 
-use crate::operators::{SerializationMode, UserError};
-
 use super::{FluvioTable, SourceOffset, TableType};
 
 #[derive(StreamNode, Clone)]
@@ -32,7 +31,7 @@ where
     topic: String,
     endpoint: Option<String>,
     offset_mode: SourceOffset,
-    serialization_mode: SerializationMode,
+    format: Format,
     _t: PhantomData<(K, T)>,
 }
 
@@ -56,13 +55,13 @@ where
         endpoint: Option<&str>,
         topic: &str,
         offset_mode: SourceOffset,
-        serialization_mode: SerializationMode,
+        format: Format,
     ) -> Self {
         Self {
             topic: topic.to_string(),
             endpoint: endpoint.map(|e| e.to_string()),
             offset_mode,
-            serialization_mode,
+            format,
             _t: PhantomData,
         }
     }
@@ -80,17 +79,7 @@ where
             topic: table.topic,
             endpoint: table.endpoint.clone(),
             offset_mode: *offset,
-            serialization_mode: match config.serialization_mode.unwrap() {
-                OperatorConfigSerializationMode::Json => SerializationMode::Json,
-                OperatorConfigSerializationMode::JsonSchemaRegistry => {
-                    SerializationMode::JsonSchemaRegistry
-                }
-                OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
-                OperatorConfigSerializationMode::DebeziumJson => SerializationMode::Json,
-                OperatorConfigSerializationMode::Parquet => {
-                    unreachable!("Parquet in Fluvio doesn't make sense")
-                }
-            },
+            format: config.format.expect("Format must be specified for fluvio"),
             _t: PhantomData,
         }
     }
@@ -208,7 +197,7 @@ where
                             ctx.collector.collect(Record {
                                 timestamp: from_millis(msg.timestamp().max(0) as u64),
                                 key: None,
-                                value: self.serialization_mode.deserialize_slice(msg.value())?,
+                                value: crate::formats::deserialize_slice(&self.format, msg.value())?,
                             }).await;
                             offsets.insert(msg.partition(), msg.offset());
                         },

@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
+use arroyo_rpc::OperatorConfig;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::{stream::FuturesUnordered, Future};
@@ -37,10 +38,7 @@ use self::{
     parquet::{FixedSizeRecordBatchBuilder, ParquetLocalWriter, RecordBatchBufferingWriter},
 };
 
-use super::{
-    two_phase_committer::{TwoPhaseCommitter, TwoPhaseCommitterOperator},
-    OperatorConfig,
-};
+use super::two_phase_committer::{TwoPhaseCommitter, TwoPhaseCommitterOperator};
 
 pub struct FileSystemSink<
     K: Key,

@@ -1,9 +1,11 @@
-use crate::connectors::OperatorConfig;
 use crate::engine::{Context, StreamNode};
+use crate::formats::DataSerializer;
+use crate::SchemaData;
 use anyhow::Result;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
-use arroyo_rpc::{CheckpointEvent, ControlMessage};
+use arroyo_rpc::{CheckpointEvent, ControlMessage, OperatorConfig};
+use arroyo_types::formats::Format;
 use arroyo_types::*;
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -27,14 +29,15 @@ use super::{client_configs, KafkaConfig, KafkaTable, SinkCommitMode, TableType};
 mod test;
 
 #[derive(StreamNode)]
-pub struct KafkaSinkFunc<K: Key + Serialize, T: Data + Serialize> {
+pub struct KafkaSinkFunc<K: Key + Serialize, T: SchemaData + Serialize> {
     topic: String,
     bootstrap_servers: String,
     consistency_mode: ConsistencyMode,
     producer: Option<FutureProducer>,
     write_futures: Vec<DeliveryFuture>,
     client_config: HashMap<String, String>,
-    _t: PhantomData<(K, T)>,
+    serializer: DataSerializer<T>,
+    _t: PhantomData<K>,
 }
 
 enum ConsistencyMode {
@@ -57,8 +60,13 @@ impl From<SinkCommitMode> for ConsistencyMode {
     }
 }
 
-impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
-    pub fn new(servers: &str, topic: &str, client_config: Vec<(&str, &str)>) -> Self {
+impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
+    pub fn new(
+        servers: &str,
+        topic: &str,
+        format: Format,
+        client_config: Vec<(&str, &str)>,
+    ) -> Self {
         KafkaSinkFunc {
             topic: topic.to_string(),
             bootstrap_servers: servers.to_string(),
@@ -69,6 +77,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
                 .collect(),
+            serializer: DataSerializer::new(format),
             _t: PhantomData,
         }
     }
@@ -91,13 +100,16 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
             consistency_mode: commit_mode.unwrap_or(SinkCommitMode::AtLeastOnce).into(),
             write_futures: vec![],
             client_config: client_configs(&connection),
+            serializer: DataSerializer::new(
+                config.format.expect("Format must be defined for KafkaSink"),
+            ),
             _t: PhantomData,
         }
     }
 }
 
 #[process_fn(in_k = K, in_t = T)]
-impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
+impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
     fn name(&self) -> String {
         format!("kafka-producer-{}", self.topic)
     }
@@ -199,7 +211,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
         }
     }
 
-    async fn publish(&mut self, k: Option<String>, v: String) {
+    async fn publish(&mut self, k: Option<String>, v: Vec<u8>) {
         let mut rec = {
             if let Some(k) = k.as_ref() {
                 FutureRecord::to(&self.topic).key(k).payload(&v)
@@ -232,7 +244,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KafkaSinkFunc<K, T> {
             .key
             .as_ref()
             .map(|k| serde_json::to_string(k).unwrap());
-        let v = serde_json::to_string(&record.value).unwrap();
+        let v = self.serializer.to_vec(&record.value);
 
         self.publish(k, v).await;
     }

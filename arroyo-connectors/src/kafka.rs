@@ -1,13 +1,11 @@
 use anyhow::{anyhow, bail};
+use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
 use std::time::{Duration, Instant};
 
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, TestSourceMessage},
-};
+use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     message::BorrowedMessage,
@@ -17,9 +15,9 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
 
-use crate::{pull_opt, serialization_mode, Connection, ConnectionType};
+use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType};
 
-use super::{Connector, OperatorConfig};
+use super::Connector;
 
 const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/kafka/connection.json");
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/kafka/table.json");
@@ -80,20 +78,28 @@ impl Connector for KafkaConnector {
             ),
         };
 
+        let schema = schema
+            .map(|s| s.to_owned())
+            .ok_or_else(|| anyhow!("No schema defined for Kafka connection"))?;
+
+        let format = schema
+            .format
+            .as_ref()
+            .map(|t| t.to_owned())
+            .ok_or_else(|| anyhow!("'format' must be set for Kafka connection"))?;
+
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
+            format: Some(format),
         };
 
         Ok(Connection {
             id,
             name: name.to_string(),
             connection_type: typ,
-            schema: schema
-                .map(|s| s.to_owned())
-                .ok_or_else(|| anyhow!("No schema defined for Kafka connection"))?,
+            schema,
             operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description: desc,
@@ -158,8 +164,8 @@ impl Connector for KafkaConnector {
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
                     },
                     read_mode: match opts.remove("source.read_mode").as_ref().map(|f| f.as_str()) {
-                        Some("read_committed") => Some(SourceReadMode::ReadCommitted),
-                        Some("read_uncommitted") | None => Some(SourceReadMode::ReadUncommitted),
+                        Some("read_committed") => Some(ReadMode::ReadCommitted),
+                        Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
                         Some(other) => bail!("invalid value for source.read_mode '{}'", other),
                     },
                 }

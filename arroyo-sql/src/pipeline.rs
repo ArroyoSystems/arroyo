@@ -229,25 +229,22 @@ impl JoinType {
         } else {
             fields.append(&mut right_struct.fields.clone());
         }
-        StructDef { name: None, fields }
+        StructDef::for_fields(fields)
     }
 
     pub fn join_struct_type(&self, left_struct: &StructDef, right_struct: &StructDef) -> StructDef {
-        StructDef {
-            name: None,
-            fields: vec![
-                StructField::new(
-                    "left".to_string(),
-                    None,
-                    TypeDef::StructDef(left_struct.clone(), self.left_nullable()),
-                ),
-                StructField::new(
-                    "right".to_string(),
-                    None,
-                    TypeDef::StructDef(right_struct.clone(), self.right_nullable()),
-                ),
-            ],
-        }
+        StructDef::for_fields(vec![
+            StructField::new(
+                "left".to_string(),
+                None,
+                TypeDef::StructDef(left_struct.clone(), self.left_nullable()),
+            ),
+            StructField::new(
+                "right".to_string(),
+                None,
+                TypeDef::StructDef(right_struct.clone(), self.right_nullable()),
+            ),
+        ])
     }
 
     pub fn left_nullable(&self) -> bool {
@@ -337,29 +334,26 @@ impl SqlOperator {
     }
 
     pub fn merge_struct_type(key_struct: &StructDef, aggregate_struct: &StructDef) -> StructDef {
-        StructDef {
-            name: None,
-            fields: vec![
-                StructField::new(
-                    "key".to_string(),
-                    None,
-                    TypeDef::StructDef(key_struct.clone(), false),
+        StructDef::for_fields(vec![
+            StructField::new(
+                "key".to_string(),
+                None,
+                TypeDef::StructDef(key_struct.clone(), false),
+            ),
+            StructField::new(
+                "aggregate".to_string(),
+                None,
+                TypeDef::StructDef(aggregate_struct.clone(), false),
+            ),
+            StructField::new(
+                "timestamp".to_string(),
+                None,
+                TypeDef::DataType(
+                    DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None),
+                    false,
                 ),
-                StructField::new(
-                    "aggregate".to_string(),
-                    None,
-                    TypeDef::StructDef(aggregate_struct.clone(), false),
-                ),
-                StructField::new(
-                    "timestamp".to_string(),
-                    None,
-                    TypeDef::DataType(
-                        DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None),
-                        false,
-                    ),
-                ),
-            ],
-        }
+            ),
+        ])
     }
 
     pub fn has_window(&self) -> bool {
@@ -539,10 +533,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             .map(|field| Column::convert(&field.qualified_column()))
             .collect();
 
-        let projection = Projection {
-            field_names: names,
-            field_computations: functions,
-        };
+        let projection = Projection::new(names, functions);
 
         Ok(SqlOperator::RecordTransform(
             Box::new(input),
@@ -577,6 +568,7 @@ impl<'a> SqlPipelineBuilder<'a> {
                 }
             })
             .collect();
+
         let aggregating = self.aggregate_calculation(
             &aggregate.aggr_expr,
             aggregate_fields,
@@ -624,16 +616,16 @@ impl<'a> SqlPipelineBuilder<'a> {
             })
             .collect::<Result<Vec<_>>>()?;
         let field_pairs: Vec<_> = field_pairs.into_iter().flatten().collect();
-        let projection = Projection {
-            field_names: field_pairs
+        let projection = Projection::new(
+            field_pairs
                 .iter()
                 .map(|(column, _)| column.clone())
                 .collect(),
-            field_computations: field_pairs
+            field_pairs
                 .into_iter()
                 .map(|(_, computation)| computation)
                 .collect(),
-        };
+        );
 
         Ok(projection)
     }
@@ -758,15 +750,9 @@ impl<'a> SqlPipelineBuilder<'a> {
             .into_iter()
             .unzip();
 
-        let left_key = Projection {
-            field_names: join_projection_field_names.clone(),
-            field_computations: left_computations,
-        };
+        let left_key = Projection::new(join_projection_field_names.clone(), left_computations);
 
-        let right_key = Projection {
-            field_names: join_projection_field_names,
-            field_computations: right_computations,
-        };
+        let right_key = Projection::new(join_projection_field_names, right_computations);
 
         if right_key.output_struct() != left_key.output_struct() {
             bail!("join key types must match. Try casting?");
@@ -826,10 +812,7 @@ impl<'a> SqlPipelineBuilder<'a> {
 
             return Ok(SqlOperator::RecordTransform(
                 Box::new(source),
-                RecordTransform::ValueProjection(Projection {
-                    field_names,
-                    field_computations,
-                }),
+                RecordTransform::ValueProjection(Projection::new(field_names, field_computations)),
             ));
         }
 
@@ -893,11 +876,8 @@ impl<'a> SqlPipelineBuilder<'a> {
                         .map(|expression| ctx.compile_expr(expression))
                         .collect::<Result<Vec<_>>>()?;
 
-                    let partition = Projection {
-                        field_names,
-                        field_computations,
-                    }
-                    .without_window();
+                    let partition =
+                        Projection::new(field_names, field_computations).without_window();
                     let field_name = window.schema.field_names().last().cloned().unwrap();
                     let window = self.window(&w.partition_by)?;
 
@@ -945,10 +925,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             .map(|field| Column::convert(&field.qualified_column()))
             .collect();
 
-        let projection = Projection {
-            field_names,
-            field_computations,
-        };
+        let projection = Projection::new(field_names, field_computations);
         Ok(SqlOperator::RecordTransform(
             Box::new(input),
             RecordTransform::ValueProjection(projection),
@@ -995,20 +972,20 @@ impl<'a> SqlPipelineBuilder<'a> {
                         }
                         let input_struct = input.return_type();
                         // insert into is done column-wise, and DataFusion will have already coerced all the types.
-                        let mapping = RecordTransform::ValueProjection(Projection {
-                            field_names: fields
+                        let mapping = RecordTransform::ValueProjection(Projection::new(
+                            fields
                                 .iter()
                                 .map(|f| Column {
                                     relation: None,
                                     name: f.name.clone(),
                                 })
                                 .collect(),
-                            field_computations: input_struct
+                            input_struct
                                 .fields
                                 .iter()
                                 .map(|f| Expression::Column(ColumnExpression::new(f.clone())))
                                 .collect(),
-                        });
+                        ));
                         self.planned_tables.insert(
                             name.clone(),
                             SqlOperator::RecordTransform(Box::new(input), mapping),

@@ -2,6 +2,9 @@
 use std::time::{Duration, SystemTime};
 
 use crate::engine::{Context, OutQueue};
+use crate::SchemaData;
+use arrow::datatypes::Field;
+use arroyo_types::formats::{Format, JsonFormat};
 use arroyo_types::CheckpointBarrier;
 use arroyo_types::*;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
@@ -45,7 +48,12 @@ impl KafkaTopicTester {
     }
 
     async fn get_sink_with_writes(&self) -> KafkaSinkWithWrites {
-        let mut kafka = KafkaSinkFunc::new(&self.server, &self.topic, vec![]);
+        let mut kafka = KafkaSinkFunc::new(
+            &self.server,
+            &self.topic,
+            Format::Json(JsonFormat::default()),
+            vec![],
+        );
         let (_, control_rx) = channel(128);
         let (command_tx, _) = channel(128);
         let (data_tx, _recv) = channel(128);
@@ -99,8 +107,41 @@ async fn get_data(consumer: &mut StreamConsumer) -> Record<String, String> {
     }
 }
 
+#[derive(
+    Clone,
+    Debug,
+    bincode::Encode,
+    bincode::Decode,
+    PartialEq,
+    PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+struct TestOutStruct {
+    t: String,
+}
+
+impl From<String> for TestOutStruct {
+    fn from(value: String) -> Self {
+        TestOutStruct { t: value }
+    }
+}
+
+impl SchemaData for TestOutStruct {
+    fn name() -> &'static str {
+        "test_out_struct"
+    }
+    fn schema() -> arrow::datatypes::Schema {
+        arrow::datatypes::Schema::new(vec![Field::new(
+            "t",
+            arrow::datatypes::DataType::Utf8,
+            false,
+        )])
+    }
+}
+
 struct KafkaSinkWithWrites {
-    sink: KafkaSinkFunc<String, String>,
+    sink: KafkaSinkFunc<String, TestOutStruct>,
     ctx: Context<(), ()>,
 }
 
@@ -120,7 +161,7 @@ async fn test_kafka_checkpoint_flushes() {
         let mut record = Record {
             timestamp: SystemTime::now(),
             key: Some(payload_and_key.to_owned()),
-            value: payload_and_key,
+            value: payload_and_key.into(),
         };
 
         sink_with_writes
@@ -141,9 +182,8 @@ async fn test_kafka_checkpoint_flushes() {
 
     for message in 1u32..200 {
         let record = get_data(&mut consumer).await.value;
-        let result: String = serde_json::from_str(&record).unwrap();
-        let encoded = format!("{}", message);
-        assert_eq!(encoded, result, "{} {:?}", message, record);
+        let result: TestOutStruct = serde_json::from_str(&record).unwrap();
+        assert_eq!(message.to_string(), result.t, "{} {:?}", message, record);
     }
 }
 
@@ -163,7 +203,7 @@ async fn test_kafka() {
         let mut record = Record {
             timestamp: SystemTime::now(),
             key: Some(payload_and_key.to_owned()),
-            value: payload_and_key,
+            value: payload_and_key.into(),
         };
 
         sink_with_writes
@@ -177,7 +217,8 @@ async fn test_kafka() {
             .unwrap()
             .flush(Duration::from_secs(1))
             .unwrap();
-        let result: String = serde_json::from_str(&get_data(&mut consumer).await.value).unwrap();
+        let result: TestOutStruct =
+            serde_json::from_str(&get_data(&mut consumer).await.value).unwrap();
         assert_eq!(record.value, result);
     }
 }

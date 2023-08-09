@@ -3,12 +3,10 @@ use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
-use arroyo_connectors::{connector_for_type, serialization_mode, Connection, ConnectionType};
-use arroyo_datastream::{ConnectorOp, Operator, SerializationMode};
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, Format, FormatOptions, SourceField},
-};
+use arroyo_connectors::{connector_for_type, Connection, ConnectionSchema, ConnectionType};
+use arroyo_datastream::{ConnectorOp, Operator};
+use arroyo_rpc::grpc::{self, api::SourceField};
+use arroyo_types::formats::Format;
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -21,6 +19,7 @@ use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
 };
 
+use crate::external::SinkUpdateType;
 use crate::DEFAULT_IDLE_TIME;
 use crate::{
     expressions::{Column, ColumnExpression, Expression, ExpressionContext},
@@ -42,7 +41,7 @@ pub struct ConnectorTable {
     pub operator: String,
     pub config: String,
     pub description: String,
-    pub serialization_mode: SerializationMode,
+    pub format: Option<Format>,
     pub event_time_field: Option<String>,
     pub watermark_field: Option<String>,
     pub idle_time: Option<Duration>,
@@ -109,7 +108,7 @@ impl From<Connection> for ConnectorTable {
             operator: value.operator,
             config: value.config,
             description: value.description,
-            serialization_mode: serialization_mode(&value.schema).into(),
+            format: value.schema.format.clone(),
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
@@ -127,23 +126,7 @@ impl ConnectorTable {
         let connector = connector_for_type(connector)
             .ok_or_else(|| anyhow!("Unknown connector '{}'", connector))?;
 
-        let mut format = None;
-        if let Some(f) = options.remove("format") {
-            format = Some(match f.as_str() {
-                "json" => Format::JsonFormat,
-                "debezium_json" => Format::DebeziumJsonFormat,
-                "protobuf" => Format::ProtobufFormat,
-                "avro" => Format::AvroFormat,
-                "raw_string" => Format::RawStringFormat,
-                "parquet" => Format::ParquetFormat,
-                f => bail!("Unknown format '{}'", f),
-            });
-        }
-
-        let schema_registry = options
-            .remove("format_options.confluent_schema_registry")
-            .map(|f| f == "true")
-            .unwrap_or(false);
+        let format = Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
 
         let schema_fields: Result<Vec<SourceField>> = fields
             .iter()
@@ -159,10 +142,7 @@ impl ConnectorTable {
             .collect();
 
         let schema = ConnectionSchema {
-            format: format.map(|f| f as i32),
-            format_options: Some(FormatOptions {
-                confluent_schema_registry: schema_registry,
-            }),
+            format,
             struct_name: None,
             fields: schema_fields?,
             definition: None,
@@ -200,7 +180,10 @@ impl ConnectorTable {
     }
 
     fn is_update(&self) -> bool {
-        self.serialization_mode == SerializationMode::DebeziumJson
+        self.format
+            .as_ref()
+            .map(|f| f.is_updating())
+            .unwrap_or(false)
     }
 
     fn virtual_field_projection(&self) -> Option<Projection> {
@@ -225,10 +208,7 @@ impl ConnectorTable {
                 })
                 .unzip();
 
-            Some(Projection {
-                field_names,
-                field_computations,
-            })
+            Some(Projection::new(field_names, field_computations))
         } else {
             None
         }
@@ -297,9 +277,10 @@ impl ConnectorTable {
     }
 
     fn processing_mode(&self) -> ProcessingMode {
-        match self.serialization_mode {
-            SerializationMode::DebeziumJson => ProcessingMode::Update,
-            _ => ProcessingMode::Append,
+        if self.is_update() {
+            ProcessingMode::Update
+        } else {
+            ProcessingMode::Append
         }
     }
 
@@ -321,10 +302,11 @@ impl ConnectorTable {
 
         let source = SqlSource {
             id: self.id,
-            struct_def: StructDef {
-                name: self.type_name.clone(),
-                fields: self.fields.clone(),
-            },
+            struct_def: StructDef::new(
+                self.type_name.clone(),
+                self.fields.clone(),
+                self.format.clone(),
+            ),
             operator: Operator::ConnectorSource(self.connector_op()),
             processing_mode: self.processing_mode(),
             idle_time: self.idle_time,
@@ -339,7 +321,7 @@ impl ConnectorTable {
         }))
     }
 
-    pub fn as_sql_sink(&self, input: SqlOperator) -> Result<SqlOperator> {
+    pub fn as_sql_sink(&self, mut input: SqlOperator) -> Result<SqlOperator> {
         match self.connection_type {
             ConnectionType::Source => {
                 bail!("Inserting into a source is not allowed")
@@ -352,12 +334,50 @@ impl ConnectorTable {
             bail!("Virtual fields are not currently supported in sinks");
         }
 
+        let updating_type = if self.is_update() {
+            SinkUpdateType::Force
+        } else {
+            SinkUpdateType::Disallow
+        };
+
+        if updating_type == SinkUpdateType::Disallow && input.is_updating() {
+            bail!("Sink does not support update messages, cannot be used with an updating query");
+        }
+
+        if let Some(format) = &self.format {
+            let output_struct: StructDef = input.return_type();
+            // we may need to copy the record into a new struct, that has the appropriate annotations
+            // for serializing into our format
+            let mut projection = Projection::new(
+                output_struct
+                    .fields
+                    .iter()
+                    .map(|t| Column {
+                        relation: None,
+                        name: t.name(),
+                    })
+                    .collect(),
+                output_struct
+                    .fields
+                    .iter()
+                    .map(|t| Expression::Column(ColumnExpression::new(t.clone())))
+                    .collect(),
+            );
+
+            projection.format = Some(format.clone());
+
+            input = SqlOperator::RecordTransform(
+                Box::new(input),
+                crate::pipeline::RecordTransform::ValueProjection(projection),
+            );
+        }
+
         Ok(SqlOperator::Sink(
             self.name.clone(),
             SqlSink {
                 id: self.id,
                 struct_def: input.return_type(),
-                updating_type: crate::external::SinkUpdateType::Disallow,
+                updating_type,
                 operator: Operator::ConnectorSink(self.connector_op()),
             },
             Box::new(input),
@@ -420,9 +440,8 @@ impl Table {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let physical_struct: StructDef = StructDef {
-            name: None,
-            fields: struct_field_pairs
+        let physical_struct: StructDef = StructDef::for_fields(
+            struct_field_pairs
                 .iter()
                 .filter_map(
                     |(field, generating_expression)| match generating_expression {
@@ -431,7 +450,7 @@ impl Table {
                     },
                 )
                 .collect(),
-        };
+        );
 
         let physical_schema = DFSchema::new_with_metadata(
             physical_struct
@@ -495,9 +514,8 @@ impl Table {
                 );
             }
 
-            let fields = Self::schema_from_columns(columns, schema_provider)?;
-
             let connector = with_map.remove("connector");
+            let fields = Self::schema_from_columns(columns, schema_provider)?;
 
             match connector.as_ref().map(|c| c.as_str()) {
                 Some("memory") | None => {

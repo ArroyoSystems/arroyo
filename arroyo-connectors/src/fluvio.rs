@@ -1,15 +1,10 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::{
-    self,
-    api::{ConnectionSchema, TestSourceMessage},
-};
+use arroyo_rpc::grpc::{self, api::TestSourceMessage};
+use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-use crate::{
-    pull_opt, serialization_mode, Connection, ConnectionType, Connector, EmptyConfig,
-    OperatorConfig,
-};
+use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, Connector, EmptyConfig};
 
 pub struct FluvioConnector {}
 
@@ -64,10 +59,8 @@ impl Connector for FluvioConnector {
         _: &str,
         _: Self::ConfigT,
         _: Self::TableT,
-        _: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<
-            Result<arroyo_rpc::grpc::api::TestSourceMessage, tonic::Status>,
-        >,
+        _: Option<&ConnectionSchema>,
+        tx: tokio::sync::mpsc::Sender<Result<TestSourceMessage, tonic::Status>>,
     ) {
         tokio::task::spawn(async move {
             tx.send(Ok(TestSourceMessage {
@@ -84,7 +77,7 @@ impl Connector for FluvioConnector {
         &self,
         name: &str,
         options: &mut std::collections::HashMap<String, String>,
-        schema: Option<&arroyo_rpc::grpc::api::ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
         let endpoint = options.remove("endpoint");
         let topic = pull_opt("topic", options)?;
@@ -137,20 +130,28 @@ impl Connector for FluvioConnector {
             ),
         };
 
+        let schema = schema
+            .map(|s| s.to_owned())
+            .ok_or_else(|| anyhow!("no schema defined for Fluvio connection"))?;
+
+        let format = schema
+            .format
+            .as_ref()
+            .map(|t| t.to_owned())
+            .ok_or_else(|| anyhow!("'format' must be set for Fluvio connection"))?;
+
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
-            serialization_mode: Some(serialization_mode(schema.as_ref().unwrap())),
+            format: Some(format),
         };
 
         Ok(Connection {
             id,
             name: name.to_string(),
             connection_type: typ,
-            schema: schema
-                .map(|s| s.to_owned())
-                .ok_or_else(|| anyhow!("No schema defined for Fluvio connection"))?,
+            schema,
             operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description: desc,

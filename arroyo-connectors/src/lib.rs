@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 
-use anyhow::anyhow;
-use arroyo_datastream::SerializationMode;
+use anyhow::{anyhow, bail};
 use arroyo_rpc::{
     grpc::{
         self,
         api::{
-            connection_schema::Definition, source_field_type, ConnectionSchema, SourceField,
+            connection_schema::Definition, source_field_type, FormatOptions, SourceField,
             SourceFieldType, TableType, TestSourceMessage,
         },
     },
     primitive_to_sql,
 };
+use arroyo_types::formats::{Format, JsonFormat, ParquetFormat};
 use blackhole::BlackholeConnector;
 use fluvio::FluvioConnector;
 use impulse::ImpulseConnector;
@@ -20,7 +20,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sse::SSEConnector;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
-use typify::import_types;
 use websocket::WebsocketConnector;
 
 use self::kafka::KafkaConnector;
@@ -33,8 +32,6 @@ pub mod kafka;
 pub mod nexmark;
 pub mod sse;
 pub mod websocket;
-
-import_types!(schema = "../connector-schemas/common.json",);
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
@@ -68,6 +65,112 @@ pub struct Connection {
     pub operator: String,
     pub config: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionSchema {
+    pub format: Option<Format>,
+    pub struct_name: Option<String>,
+    pub fields: Vec<SourceField>,
+    pub definition: Option<Definition>,
+}
+
+impl TryFrom<ConnectionSchema> for grpc::api::ConnectionSchema {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ConnectionSchema) -> Result<Self, Self::Error> {
+        let mut format_options = FormatOptions::default();
+        let format = value
+            .format
+            .map(|f| {
+                Ok(match f {
+                    Format::Json(json) => {
+                        if json.confluent_schema_registry {
+                            format_options.confluent_schema_registry = true;
+                        }
+                        if json.include_schema {
+                            format_options.include_schema = true;
+                        }
+
+                        match (json.debezium, json.unstructured) {
+                            (true, false) => grpc::api::Format::DebeziumJsonFormat,
+                            (false, true) => grpc::api::Format::RawStringFormat,
+                            (true, true) => bail!("debezium and raw cannot both be set"),
+                            (false, false) => grpc::api::Format::JsonFormat,
+                        }
+                    }
+                    Format::Avro(_) => grpc::api::Format::AvroFormat,
+                    Format::Parquet(_) => grpc::api::Format::ParquetFormat,
+                    Format::Raw(_) => grpc::api::Format::RawStringFormat,
+                })
+            })
+            .transpose()?;
+
+        Ok(Self {
+            format: format.map(|f| f as i32),
+            format_options: Some(format_options),
+            struct_name: value.struct_name,
+            fields: value.fields,
+            definition: value.definition,
+        })
+    }
+}
+
+impl TryFrom<grpc::api::ConnectionSchema> for ConnectionSchema {
+    type Error = String;
+
+    fn try_from(schema: grpc::api::ConnectionSchema) -> Result<Self, Self::Error> {
+        let confluent_schema_registry = schema
+            .format_options
+            .as_ref()
+            .filter(|t| t.confluent_schema_registry)
+            .is_some();
+        let include_schema = schema
+            .format_options
+            .as_ref()
+            .filter(|t| t.include_schema)
+            .is_some();
+
+        let format = if schema.format.is_some() {
+            Some(match schema.format() {
+                grpc::api::Format::JsonFormat | grpc::api::Format::DebeziumJsonFormat => {
+                    Format::Json(JsonFormat {
+                        confluent_schema_registry,
+                        include_schema,
+                        debezium: matches!(schema.format(), grpc::api::Format::DebeziumJsonFormat),
+                        unstructured: matches!(
+                            schema.definition,
+                            Some(Definition::RawSchema { .. })
+                        ),
+                        timestamp_format: arroyo_types::formats::TimestampFormat::default(),
+                    })
+                }
+                grpc::api::Format::RawStringFormat => Format::Json(JsonFormat {
+                    confluent_schema_registry: false,
+                    include_schema,
+                    debezium: false,
+                    unstructured: true,
+                    timestamp_format: arroyo_types::formats::TimestampFormat::default(),
+                }),
+                grpc::api::Format::ParquetFormat => Format::Parquet(ParquetFormat {}),
+                grpc::api::Format::ProtobufFormat => {
+                    return Err("Protobuf is not yet supported".to_string());
+                }
+                grpc::api::Format::AvroFormat => {
+                    return Err("Avro is not yet supported".to_string());
+                }
+            })
+        } else {
+            None
+        };
+
+        Ok(ConnectionSchema {
+            format,
+            struct_name: schema.struct_name,
+            fields: schema.fields,
+            definition: schema.definition,
+        })
+    }
 }
 
 pub trait Connector: Send {
@@ -262,50 +365,6 @@ pub(crate) fn pull_opt(name: &str, opts: &mut HashMap<String, String>) -> anyhow
 
 pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
     connectors().remove(t)
-}
-
-pub fn serialization_mode(schema: &ConnectionSchema) -> OperatorConfigSerializationMode {
-    let confluent = schema
-        .format_options
-        .as_ref()
-        .filter(|t| t.confluent_schema_registry)
-        .is_some();
-    match &schema.format() {
-        grpc::api::Format::JsonFormat => {
-            if confluent {
-                OperatorConfigSerializationMode::JsonSchemaRegistry
-            } else if matches!(schema.definition, Some(Definition::RawSchema { .. })) {
-                OperatorConfigSerializationMode::RawJson
-            } else {
-                OperatorConfigSerializationMode::Json
-            }
-        }
-        grpc::api::Format::ProtobufFormat => todo!(),
-        grpc::api::Format::AvroFormat => todo!(),
-        grpc::api::Format::RawStringFormat => {
-            if confluent {
-                todo!("support raw json schemas with confluent schema registry decoding")
-            } else {
-                OperatorConfigSerializationMode::RawJson
-            }
-        }
-        grpc::api::Format::DebeziumJsonFormat => OperatorConfigSerializationMode::DebeziumJson,
-        grpc::api::Format::ParquetFormat => OperatorConfigSerializationMode::Parquet,
-    }
-}
-
-impl From<OperatorConfigSerializationMode> for SerializationMode {
-    fn from(value: OperatorConfigSerializationMode) -> Self {
-        match value {
-            OperatorConfigSerializationMode::Json => SerializationMode::Json,
-            OperatorConfigSerializationMode::JsonSchemaRegistry => {
-                SerializationMode::JsonSchemaRegistry
-            }
-            OperatorConfigSerializationMode::RawJson => SerializationMode::RawJson,
-            OperatorConfigSerializationMode::DebeziumJson => SerializationMode::DebeziumJson,
-            OperatorConfigSerializationMode::Parquet => SerializationMode::Parquet,
-        }
-    }
 }
 
 pub(crate) fn source_field(name: &str, field_type: source_field_type::Type) -> SourceField {

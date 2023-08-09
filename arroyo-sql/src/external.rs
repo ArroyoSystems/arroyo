@@ -27,7 +27,7 @@ pub struct SqlSink {
     pub updating_type: SinkUpdateType,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SinkUpdateType {
     Allow,
     Disallow,

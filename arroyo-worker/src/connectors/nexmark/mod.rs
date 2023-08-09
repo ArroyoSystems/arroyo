@@ -2,7 +2,7 @@ use crate::engine::{Context, StreamNode};
 use crate::SourceFinishType;
 use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
-use arroyo_rpc::ControlMessage;
+use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::nexmark::*;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
@@ -18,8 +18,6 @@ use tokio::{sync::mpsc::error::TryRecvError, time::sleep};
 use tracing::debug;
 use tracing::{info, log::warn};
 use typify::import_types;
-
-use super::OperatorConfig;
 
 import_types!(schema = "../connector-schemas/nexmark/table.json");
 
