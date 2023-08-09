@@ -94,7 +94,7 @@ function Sidebar() {
 }
 
 function App() {
-  const { pingError } = usePing();
+  const { ping, pingError } = usePing();
 
   let content = (
     <GridItem className="main" area={'main'}>
@@ -102,7 +102,7 @@ function App() {
     </GridItem>
   );
 
-  if (pingError) {
+  if (!ping || pingError) {
     content = <ApiUnavailable />;
   }
 
