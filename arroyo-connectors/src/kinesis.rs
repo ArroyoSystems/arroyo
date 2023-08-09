@@ -7,7 +7,9 @@ use typify::import_types;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, Connection, ConnectionSchema, ConnectionType, EmptyConfig};
+use crate::{
+    pull_opt, pull_option_to_i64, Connection, ConnectionSchema, ConnectionType, EmptyConfig,
+};
 
 use super::Connector;
 
@@ -68,7 +70,7 @@ impl Connector for KinesisConnector {
     fn table_type(&self, _: Self::ConfigT, table: Self::TableT) -> grpc::api::TableType {
         return match table.type_ {
             TableType::Source { .. } => grpc::api::TableType::Source,
-            TableType::Sink {} => grpc::api::TableType::Sink,
+            TableType::Sink { .. } => grpc::api::TableType::Sink,
         };
     }
 
@@ -138,7 +140,17 @@ impl Connector for KinesisConnector {
                     },
                 }
             }
-            "sink" => TableType::Sink {},
+            "sink" => {
+                let batch_flush_interval_millis =
+                    pull_option_to_i64("sink.flush-buffer.timeout", opts)?;
+                let batch_max_buffer_size = pull_option_to_i64("sink.flush-buffer.size", opts)?;
+                let records_per_batch = pull_option_to_i64("sink.batch.max-size", opts)?;
+                TableType::Sink {
+                    batch_flush_interval_millis,
+                    batch_max_buffer_size,
+                    records_per_batch,
+                }
+            }
             _ => {
                 bail!("type must be one of 'source' or 'sink")
             }

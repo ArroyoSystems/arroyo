@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use arroyo_rpc::{
     grpc::{
         self,
@@ -363,6 +363,20 @@ impl<C: Connector> ErasedConnector for C {
 pub(crate) fn pull_opt(name: &str, opts: &mut HashMap<String, String>) -> anyhow::Result<String> {
     opts.remove(name)
         .ok_or_else(|| anyhow!("required option '{}' not set", name))
+}
+
+pub(crate) fn pull_option_to_i64(
+    name: &str,
+    opts: &mut HashMap<String, String>,
+) -> anyhow::Result<Option<i64>> {
+    opts.remove(name)
+        .map(|value| {
+            value.parse::<i64>().context(format!(
+                "failed to parse {} as a number for option {}",
+                value, name
+            ))
+        })
+        .transpose()
 }
 
 pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {

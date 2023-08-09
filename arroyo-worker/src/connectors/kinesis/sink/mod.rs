@@ -1,4 +1,7 @@
-use std::{marker::PhantomData, time::SystemTime};
+use std::{
+    marker::PhantomData,
+    time::{Duration, SystemTime},
+};
 
 use anyhow::Result;
 use arroyo_macro::{process_fn, StreamNode};
@@ -21,25 +24,24 @@ use super::{KinesisTable, TableType};
 pub struct KinesisSinkFunc<K: Key + Serialize, T: Data + Serialize> {
     client: Option<KinesisClient>,
     in_progress_batch: Option<BatchRecordPreparer>,
+    flush_config: FlushConfig,
     name: String,
     _phantom: PhantomData<(K, T)>,
 }
 
-#[process_fn(in_k = K, in_t = T, tick_ms=500)]
+#[process_fn(in_k = K, in_t = T, tick_ms=10)]
 impl<K: Key + Serialize, T: Data + Serialize> KinesisSinkFunc<K, T> {
     pub fn from_config(config: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config).expect("Invalid config for KafkaSink");
         let table: KinesisTable =
             serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let TableType::Sink{ .. } = &table.type_ else {
-            panic!("found non-sink kafka config in sink operator");
-        };
-
+        let flush_config = FlushConfig::new_from_table(&table);
         Self {
             client: None,
             in_progress_batch: None,
             name: table.stream_name,
+            flush_config,
             _phantom: PhantomData,
         }
     }
@@ -82,7 +84,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KinesisSinkFunc<K, T> {
             Some(batch_preparer) => batch_preparer,
         };
         batch_preparer.add_record(k, v);
-        if batch_preparer.should_flush() {
+        if self.flush_config.should_flush(&batch_preparer) {
             self.flush_with_retries(batch_preparer)
                 .await
                 .expect("failed to flush batch during processing");
@@ -99,7 +101,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KinesisSinkFunc<K, T> {
             return
         };
 
-        if !batch_preparer.should_flush() {
+        if !self.flush_config.should_flush(batch_preparer) {
             return;
         }
         let in_progress_batch = self.in_progress_batch.take().unwrap();
@@ -154,6 +156,31 @@ struct BatchRecordPreparer {
     creation_time: SystemTime,
 }
 
+struct FlushConfig {
+    max_record_count: usize,
+    max_data_size: usize,
+    max_age: Duration,
+}
+
+impl FlushConfig {
+    fn new_from_table(table: &KinesisTable) -> Self {
+        let TableType::Sink { batch_flush_interval_millis, batch_max_buffer_size, records_per_batch } = &table.type_ else {
+            panic!("found non-sink kafka config in sink operator");
+        };
+        Self {
+            max_record_count: records_per_batch.unwrap_or(500) as usize,
+            max_data_size: batch_max_buffer_size.unwrap_or(4_500_000) as usize,
+            max_age: Duration::from_millis(batch_flush_interval_millis.unwrap_or(1000) as u64),
+        }
+    }
+
+    fn should_flush(&self, batch_preparer: &BatchRecordPreparer) -> bool {
+        batch_preparer.record_count >= self.max_record_count
+            || batch_preparer.data_size >= self.max_data_size
+            || batch_preparer.creation_time.elapsed().unwrap_or_default() >= self.max_age
+    }
+}
+
 impl BatchRecordPreparer {
     fn new(put_records_call: PutRecords) -> Self {
         Self {
@@ -177,12 +204,6 @@ impl BatchRecordPreparer {
             .take()
             .map(|call| call.records(put_record_request));
         self.record_count += 1;
-    }
-
-    fn should_flush(&self) -> bool {
-        self.record_count >= 500
-            || self.data_size >= 4_500_000
-            || self.creation_time.elapsed().unwrap().as_secs() >= 1
     }
 
     async fn flush(mut self) -> Result<Vec<(String, String)>> {
