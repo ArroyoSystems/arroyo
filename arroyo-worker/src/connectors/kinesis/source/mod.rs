@@ -11,7 +11,7 @@ use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
-    ControlMessage, ControlResp, OperatorConfig,
+    ControlMessage, OperatorConfig,
 };
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::{formats::Format, from_nanos, Data, Record, UserError};
@@ -29,7 +29,7 @@ use futures::{stream::FuturesUnordered, Future};
 use serde::de::DeserializeOwned;
 use tokio::{
     select,
-    time::{sleep, Duration},
+    time::{Duration, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
 
@@ -50,8 +50,27 @@ pub struct KinesisSourceFunc<K: Data, T: Data + DeserializeOwned> {
     format: Format,
     kinesis_client: Option<KinesisClient>,
     shards: HashMap<String, ShardState>,
-    read_mode: SourceOffset,
+    config: KinesisSourceConfig,
     _phantom: PhantomData<(K, T)>,
+}
+
+struct KinesisSourceConfig {
+    read_mode: SourceOffset,
+    shard_poll_interval: Duration,
+}
+
+impl KinesisSourceConfig {
+    fn new_from_table(table: &KinesisTable) -> Self {
+        let TableType::Source{offset: read_mode, poll_shard_interval_seconds } = table.type_ else {
+            panic!("found non-source kinesis table in KinesisSource");
+        };
+        let shard_poll_interval =
+            Duration::from_secs(poll_shard_interval_seconds.unwrap_or(10) as u64);
+        Self {
+            read_mode,
+            shard_poll_interval,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -97,8 +116,14 @@ impl ShardState {
             closed: false,
         }
     }
-    fn set_shard_iterator(&self, shard_iterator_call: GetShardIterator) -> GetShardIterator {
-        match &self.offset {
+    fn get_update_shard_iterator_future(
+        &self,
+        kinesis_client: &KinesisClient,
+    ) -> BoxedFuture<AsyncNamedResult<AsyncResult>> {
+        let shard_iterator_call: GetShardIterator = kinesis_client
+            .get_shard_iterator()
+            .set_shard_id(Some(self.shard_id.clone()));
+        let shard_iterator_call = match &self.offset {
             KinesisOffset::Earliest => {
                 shard_iterator_call.shard_iterator_type(ShardIteratorType::TrimHorizon)
             }
@@ -111,17 +136,11 @@ impl ShardState {
             KinesisOffset::Timestamp(timestamp) => shard_iterator_call
                 .shard_iterator_type(ShardIteratorType::AtTimestamp)
                 .timestamp((*timestamp).into()),
-        }
-    }
-
-    fn update_shard_iterator(
-        &self,
-        get_shard_iterator_call: GetShardIterator,
-    ) -> BoxedFuture<AsyncNamedResult<AsyncResult>> {
+        };
         let shard_id = self.shard_id.clone();
         Box::pin(AsyncNamedResult::wrap_future(shard_id, async move {
             Ok(AsyncResult::ShardIteratorIdUpdate(
-                get_shard_iterator_call
+                shard_iterator_call
                     .send()
                     .await
                     .context("failed to get shard iterator")?
@@ -161,19 +180,17 @@ enum AsyncResult {
 impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
     pub fn from_config(config: &str) -> Self {
         let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for KafkaSink");
+            serde_json::from_str(config).expect("Invalid config for KinesisSource");
         let table: KinesisTable =
-            serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let TableType::Source{offset: read_mode} = table.type_ else {
-            panic!("found non-sink kafka config in sink operator");
-        };
+            serde_json::from_value(config.table).expect("Invalid table config for KinesisSource");
+        let kinesis_config = KinesisSourceConfig::new_from_table(&table);
 
         Self {
             stream_name: table.stream_name,
             kinesis_client: None,
+            config: kinesis_config,
             shards: HashMap::new(),
             format: config.format.unwrap(),
-            read_mode,
             _phantom: PhantomData,
         }
     }
@@ -185,18 +202,9 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(r) => r,
-            Err(e) => {
-                ctx.control_tx
-                    .send(ControlResp::Error {
-                        operator_id: ctx.task_info.operator_id.clone(),
-                        task_index: ctx.task_info.task_index,
-                        message: e.name.clone(),
-                        details: e.details.clone(),
-                    })
-                    .await
-                    .unwrap();
-
-                panic!("{}: {}", e.name, e.details);
+            Err(UserError { name, details }) => {
+                ctx.report_error(name.clone(), details.clone()).await;
+                panic!("{}: {}", name, details);
             }
         }
     }
@@ -212,10 +220,15 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         }
     }
 
-    async fn init_shards(&mut self, ctx: &mut Context<(), T>) -> anyhow::Result<()> {
+    async fn init_shards(
+        &mut self,
+        ctx: &mut Context<(), T>,
+    ) -> anyhow::Result<Vec<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
+        let mut futures = Vec::new();
         let mut s: GlobalKeyedState<String, ShardState, _> =
             ctx.state.get_global_keyed_state('k').await;
-        s.get_all()
+        for (shard_id, shard_state) in s
+            .get_all()
             .into_iter()
             .map(|shard_state| (shard_state.shard_id.clone(), shard_state.clone()))
             .filter(|(shard_id, _shard_state)| {
@@ -224,13 +237,18 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
                 let shard_hash = hasher.finish() as usize;
                 shard_hash % ctx.task_info.parallelism == ctx.task_info.task_index
             })
-            .for_each(|(shard_id, shard_state)| {
-                self.shards.insert(shard_id, shard_state);
-            });
-        self.sync_shards(ctx).await?;
+        {
+            futures.push(
+                shard_state.get_update_shard_iterator_future(self.kinesis_client.as_ref().unwrap()),
+            );
+            self.shards.insert(shard_id, shard_state);
+        }
+        let new_futures = self.sync_shards(ctx).await?;
+        futures.extend(new_futures.into_iter());
 
-        Ok(())
+        Ok(futures)
     }
+
     fn tables(&self) -> Vec<TableDescriptor> {
         vec![arroyo_state::global_table("k", "kinesis source state")]
     }
@@ -346,11 +364,10 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         &mut self,
         shard_id: String,
     ) -> Result<Option<BoxedFuture<AsyncNamedResult<AsyncResult>>>, UserError> {
-        let get_shard_iterator_call = self.get_shard_iterator_call();
         let shard_state = self.shards.get_mut(&shard_id).unwrap();
-        Ok(Some(
-            shard_state.update_shard_iterator(get_shard_iterator_call),
-        ))
+        Ok(Some(shard_state.get_update_shard_iterator_future(
+            self.kinesis_client.as_ref().unwrap(),
+        )))
     }
 
     fn get_shard_iterator_call(&self) -> GetShardIterator {
@@ -360,15 +377,17 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
     async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
         let config = load_from_env().await;
         self.kinesis_client = Some(KinesisClient::new(&config));
+        let starting_futures = self.init_shards(ctx).await.map_err(|e| {
+            UserError::new(
+                "failed to initialize shards. Underlying error:",
+                e.to_string(),
+            )
+        })?;
         let mut futures = FuturesUnordered::new();
-        let get_shard_iterator_call = self.get_shard_iterator_call();
-        for shard in self.shards.values_mut() {
-            if shard.closed {
-                continue;
-            }
-            let get_shard_iterator_call = shard.set_shard_iterator(get_shard_iterator_call.clone());
-            futures.push(shard.update_shard_iterator(get_shard_iterator_call));
-        }
+        futures.extend(starting_futures.into_iter());
+
+        let mut shard_poll_interval = tokio::time::interval(self.config.shard_poll_interval);
+        shard_poll_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
             select! {
@@ -382,10 +401,16 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
                         None => {}
                     }
                 },
-                _ = sleep(Duration::from_secs(60)) => {
-                    if self.sync_shards(ctx).await.is_err() {
-                        warn!("failed to sync shards");
-                    }
+                _ = shard_poll_interval.tick() => {
+                    match self.sync_shards(ctx).await {
+                        Err(err) => {
+                            warn!("failed to sync shards: {}", err);
+                            ctx.report_error("failed to sync shards".to_string(), err.to_string()).await;
+                        },
+                        Ok(new_futures) => {
+                            futures.extend(new_futures.into_iter());
+                        }
+                     }
                 }
                 control_message = ctx.control_rx.recv() => {
                     match control_message {
@@ -435,7 +460,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
             let timestamp = record.approximate_arrival_timestamp.unwrap();
             let output_record = Record {
                 timestamp: from_nanos(timestamp.as_nanos() as u128),
-                key: Some(()),
+                key: None,
                 value,
             };
             ctx.collect(output_record).await;
@@ -443,24 +468,32 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         Ok(get_records_output.next_shard_iterator)
     }
 
-    async fn sync_shards(&mut self, ctx: &mut Context<(), T>) -> Result<()> {
+    async fn sync_shards(
+        &mut self,
+        ctx: &mut Context<(), T>,
+    ) -> Result<Vec<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
+        let mut futures = Vec::new();
         for shard in self.get_splits().await? {
             // check hash
+            let shard_id = shard.shard_id().unwrap().to_string();
             let mut hasher = DefaultHasher::new();
-            shard.shard_id.hash(&mut hasher);
+            shard_id.hash(&mut hasher);
             let shard_hash = hasher.finish() as usize;
-            if shard_hash % ctx.task_info.parallelism != ctx.task_info.task_index {
+
+            if self.shards.contains_key(&shard_id)
+                || shard_hash % ctx.task_info.parallelism != ctx.task_info.task_index
+            {
                 continue;
             }
-            self.shards
-                .entry(shard.shard_id.as_ref().unwrap().clone())
-                .or_insert(ShardState::new(
-                    self.stream_name.clone(),
-                    shard,
-                    self.read_mode.clone(),
-                ));
+            let shard_state =
+                ShardState::new(self.stream_name.clone(), shard, self.config.read_mode);
+
+            futures.push(
+                shard_state.get_update_shard_iterator_future(self.kinesis_client.as_ref().unwrap()),
+            );
+            self.shards.insert(shard_id, shard_state);
         }
-        Ok(())
+        Ok(futures)
     }
 
     async fn get_splits(&mut self) -> Result<Vec<Shard>> {

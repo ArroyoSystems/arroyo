@@ -22,6 +22,11 @@
                                 "earliest",
                                 "latest"
                             ]
+                        },
+                        "poll_shard_interval_seconds": {
+                            "type": "integer",
+                            "title": "Poll Shard Interval (seconds)",
+                            "description": "The number of seconds to wait between polling for new shards"
                         }
                     },
                     "required": [
