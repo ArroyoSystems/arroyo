@@ -14,7 +14,7 @@ use super::{
 pub mod aggregators {
     use std::ops::Add;
 
-    use arroyo_types::{Data, Window, Key};
+    use arroyo_types::{Data, Key, Window};
 
     pub fn vec_aggregator<K: Key, T: Data>(_: &K, _: Window, vs: Vec<&T>) -> Vec<T> {
         vs.into_iter().cloned().collect()
@@ -24,15 +24,27 @@ pub mod aggregators {
         vs.len()
     }
 
-    pub fn max_aggregator<K: Key, N: Ord + Copy + Data>(_: &K, _: Window, vs: Vec<&N>) -> Option<N> {
+    pub fn max_aggregator<K: Key, N: Ord + Copy + Data>(
+        _: &K,
+        _: Window,
+        vs: Vec<&N>,
+    ) -> Option<N> {
         vs.into_iter().max().copied()
     }
 
-    pub fn min_aggregator<K: Key, N: Ord + Copy + Data>(_: &K, _: Window, vs: Vec<&N>) -> Option<N> {
+    pub fn min_aggregator<K: Key, N: Ord + Copy + Data>(
+        _: &K,
+        _: Window,
+        vs: Vec<&N>,
+    ) -> Option<N> {
         vs.into_iter().min().copied()
     }
 
-    pub fn sum_aggregator<K: Key, N: Add<Output = N> + Ord + Copy + Data>(_: &K, _: Window, vs: Vec<&N>) -> Option<N> {
+    pub fn sum_aggregator<K: Key, N: Add<Output = N> + Ord + Copy + Data>(
+        _: &K,
+        _: Window,
+        vs: Vec<&N>,
+    ) -> Option<N> {
         if vs.is_empty() {
             None
         } else {
@@ -46,16 +58,14 @@ pub enum WindowOperation<K: Key, T: Data, OutT: Data> {
     Flatten(fn(&K, Window, Vec<&T>) -> Vec<OutT>),
 }
 
-impl <K: Key, T: Data, OutT: Data> WindowOperation<K, T, OutT> {
+impl<K: Key, T: Data, OutT: Data> WindowOperation<K, T, OutT> {
     async fn operate(&self, key: &mut K, window: Window, table: char, ctx: &mut Context<K, OutT>) {
         let mut state = ctx.state.get_key_time_multi_map(table).await;
 
         match self {
             WindowOperation::Aggregate(aggregator) => {
                 let value = {
-                    let vs: Vec<&T> = state
-                        .get_time_range(key, window.start, window.end)
-                        .await;
+                    let vs: Vec<&T> = state.get_time_range(key, window.start, window.end).await;
                     (aggregator)(key, window, vs)
                 };
 
@@ -69,9 +79,7 @@ impl <K: Key, T: Data, OutT: Data> WindowOperation<K, T, OutT> {
             }
             WindowOperation::Flatten(flatten) => {
                 let values = {
-                    let vs: Vec<&T> = state
-                        .get_time_range(key, window.start, window.end)
-                        .await;
+                    let vs: Vec<&T> = state.get_time_range(key, window.start, window.end).await;
                     (flatten)(&key, window, vs)
                 };
 
@@ -85,7 +93,6 @@ impl <K: Key, T: Data, OutT: Data> WindowOperation<K, T, OutT> {
                 }
             }
         }
-
     }
 }
 
@@ -185,7 +192,6 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
     }
 }
 
-
 #[derive(StreamNode)]
 pub struct SessionWindowFunc<K: Key, T: Data, OutT: Data> {
     operation: WindowOperation<K, T, OutT>,
@@ -260,9 +266,12 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
         };
 
         let (remove, add) = if let Some(windows) = windows.as_mut() {
-            if let Some((i, window)) = windows.iter().enumerate()
+            if let Some((i, window)) = windows
+                .iter()
+                .enumerate()
                 .find(|(_, w)| w.contains(timestamp))
-                .map(|(i, w)| (i, *w)) {
+                .map(|(i, w)| (i, *w))
+            {
                 // there's an existing window this record falls into
                 let our_end = timestamp + self.gap_size;
                 if our_end > window.end {
@@ -276,7 +285,10 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
                 // otherwise the window is unchanged, we don't need to do anything
             } else {
                 // there's no existing window, we need to add one
-                (None, Self::handle_new_window(windows, Window::session(timestamp, self.gap_size)))
+                (
+                    None,
+                    Self::handle_new_window(windows, Window::session(timestamp, self.gap_size)),
+                )
             }
         } else {
             // no existing window, create one
@@ -292,13 +304,15 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
         if let Some(add) = add {
             // we use UNIX_EPOCH as the start of our windows to aovid having to update them when we extend
             // the beginning; this works because windows are always handled in order
-            ctx.schedule_timer(&mut key, add, Window::new(SystemTime::UNIX_EPOCH, add)).await;
+            ctx.schedule_timer(&mut key, add, Window::new(SystemTime::UNIX_EPOCH, add))
+                .await;
         }
 
         if add.is_some() || remove.is_some() {
             let key = key.clone();
             ctx.state
-                .get_key_state('s').await
+                .get_key_state('s')
+                .await
                 // I have no idea if this timestamp is correct -- this datastructure does not make sense to me
                 .insert(timestamp, key, windows.unwrap())
                 .await;
@@ -323,7 +337,9 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
             .await;
 
         let mut t: KeyedState<'_, K, Vec<Window>, _> = ctx.state.get_key_state('s').await;
-        let mut windows: Vec<Window> = t.get(&key).map(|t| t.iter().map(|w| *w).collect())
+        let mut windows: Vec<Window> = t
+            .get(&key)
+            .map(|t| t.iter().map(|w| *w).collect())
             .expect("there must be a window for this key in state");
 
         windows.retain(|w| w.end != window.end);

@@ -14,8 +14,7 @@ use datafusion_expr::expr::ScalarUDF;
 use datafusion_expr::{BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp};
 
 use quote::{format_ident, quote};
-use syn::punctuated::Punctuated;
-use syn::{parse_quote, Type, ExprPath, Path};
+use syn::{parse_quote, Type};
 
 use crate::expressions::ExpressionContext;
 use crate::external::{ProcessingMode, SqlSink, SqlSource};
@@ -559,7 +558,8 @@ impl<'a> SqlPipelineBuilder<'a> {
         let source_return_type = source.return_type();
         let mut ctx = self.ctx(&source_return_type);
 
-        let group_bys = aggregate.group_expr
+        let group_bys = aggregate
+            .group_expr
             .iter()
             .zip(aggregate.schema.fields().iter())
             .map(|(expr, field)| {
@@ -571,22 +571,18 @@ impl<'a> SqlPipelineBuilder<'a> {
 
                     let ident = format_ident!("window");
 
-                    (
-                        column,
-                        parse_quote!(#ident),
-                        window_type_def()
-                    )
+                    (column, parse_quote!(#ident), window_type_def())
                 } else {
-                    let typ = TypeDef::DataType(field.data_type().clone(), ctx.compile_expr(expr)?.nullable());
-                    let field_ident = StructField::new(column.name.clone(), column.relation.clone(), typ.clone()).field_ident();
+                    let typ = ctx.compile_expr(expr)?.return_type();
 
-                    (
-                        column,
-                        parse_quote!(key.#field_ident),
-                        typ
-                    )
+                    let field_ident =
+                        StructField::new(column.name.clone(), column.relation.clone(), typ.clone())
+                            .field_ident();
+
+                    (column, parse_quote!(key.#field_ident.clone()), typ)
                 })
-            }).collect::<Result<Vec<_>>>()?;
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let aggregates = aggregate
             .schema
@@ -597,10 +593,10 @@ impl<'a> SqlPipelineBuilder<'a> {
             .map(|(field, expr)| {
                 Ok((
                     Column::convert(&field.qualified_column()),
-                    AggregationExpression::try_from_expression(&mut ctx, expr)?
+                    AggregationExpression::try_from_expression(&mut ctx, expr)?,
                 ))
-            }).collect::<Result<Vec<_>>>()?;
-
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let aggregating = AggregateProjection {
             aggregates,

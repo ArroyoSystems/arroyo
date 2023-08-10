@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, time::SystemTime};
+use std::time::SystemTime;
 
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
@@ -10,10 +10,9 @@ use tracing::debug;
 #[derive(StreamNode)]
 pub struct TumblingAggregatingWindowFunc<K: Key, T: Data, BinA: Data, OutT: Data> {
     width: Duration,
-    aggregator: fn(&BinA) -> OutT,
+    aggregator: fn(&K, Window, &BinA) -> OutT,
     bin_merger: fn(&T, Option<&BinA>) -> BinA,
     state: TumblingWindowState,
-    _t: PhantomData<K>,
 }
 
 #[derive(Debug)]
@@ -27,13 +26,13 @@ enum TumblingWindowState {
 #[process_fn(in_k = K, in_t = T, out_k = K, out_t = OutT)]
 impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T, BinA, OutT> {
     fn name(&self) -> String {
-        "KeyWindow".to_string()
+        "TumblingAggregatingWindow".to_string()
     }
 
     pub fn new(
         width: Duration,
         // TODO: this can consume the bin, as we drop it right after.
-        aggregator: fn(&BinA) -> OutT,
+        aggregator: fn(&K, Window, &BinA) -> OutT,
         bin_merger: fn(&T, Option<&BinA>) -> BinA,
     ) -> Self {
         TumblingAggregatingWindowFunc {
@@ -41,7 +40,6 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
             aggregator,
             bin_merger,
             state: TumblingWindowState::NoData,
-            _t: PhantomData,
         }
     }
 
@@ -148,7 +146,11 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
             records.push(Record {
                 timestamp: window_end,
                 key: Some(key.clone()),
-                value: (self.aggregator)(&value),
+                value: (self.aggregator)(
+                    &key,
+                    Window::new(bin_start, bin_start + self.width),
+                    &value,
+                ),
             });
         }
         self.state = match aggregating_map.get_min_time() {

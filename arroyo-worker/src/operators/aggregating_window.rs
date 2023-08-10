@@ -198,7 +198,14 @@ impl<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data>
         let window_end = bin_end - Duration::from_nanos(1);
         let mut records = vec![];
         for (key, in_memory) in self.memory_view.iter() {
-            let value = (self.aggregator)(key, Window { start: bin_start, end: bin_end },  in_memory);
+            let value = (self.aggregator)(
+                key,
+                Window {
+                    start: bin_start,
+                    end: bin_end,
+                },
+                in_memory,
+            );
             records.push(Record {
                 timestamp: window_end,
                 key: Some(key.clone()),

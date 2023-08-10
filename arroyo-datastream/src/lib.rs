@@ -109,7 +109,7 @@ pub enum WindowType {
     Tumbling { width: Duration },
     Sliding { width: Duration, slide: Duration },
     Instant,
-    Session { gap: Duration, }
+    Session { gap: Duration },
 }
 
 fn format_duration(duration: Duration) -> String {
@@ -2114,7 +2114,9 @@ impl From<WindowType> for GrpcApi::window::Window {
                 GrpcApi::window::Window::InstantWindow(GrpcApi::InstantWindow {})
             }
             WindowType::Session { gap } => {
-                GrpcApi::window::Window::SessionWindow(GrpcApi::SessionWindow { gap_micros: gap.as_micros() as u64 })
+                GrpcApi::window::Window::SessionWindow(GrpcApi::SessionWindow {
+                    gap_micros: gap.as_micros() as u64,
+                })
             }
         }
     }
@@ -2405,7 +2407,9 @@ impl From<arroyo_rpc::grpc::api::Window> for WindowType {
             }
             Some(arroyo_rpc::grpc::api::window::Window::InstantWindow(_)) => WindowType::Instant,
             Some(arroyo_rpc::grpc::api::window::Window::SessionWindow(session)) => {
-                WindowType::Session { gap: Duration::from_micros(session.gap_micros) }
+                WindowType::Session {
+                    gap: Duration::from_micros(session.gap_micros),
+                }
             }
             None => todo!(),
         }

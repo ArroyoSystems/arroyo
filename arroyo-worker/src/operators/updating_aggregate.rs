@@ -10,7 +10,7 @@ use std::time::Duration;
 #[derive(StreamNode)]
 pub struct UpdatingAggregateOperator<K: Key, T: Data, BinA: Data, OutT: Data> {
     expiration: Duration,
-    aggregator: fn(&BinA) -> OutT,
+    aggregator: fn(&K, &BinA) -> OutT,
     bin_merger: fn(&T, Option<&BinA>) -> Option<BinA>,
     _t: PhantomData<K>,
 }
@@ -34,7 +34,7 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> UpdatingAggregateOperator<K, T, Bi
     pub fn new(
         expiration: Duration,
         // TODO: this can consume the bin, as we drop it right after.
-        aggregator: fn(&BinA) -> OutT,
+        aggregator: fn(&K, &BinA) -> OutT,
         bin_merger: fn(&T, Option<&BinA>) -> Option<BinA>,
     ) -> Self {
         UpdatingAggregateOperator {
@@ -73,11 +73,11 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> UpdatingAggregateOperator<K, T, Bi
             let bin_aggregate = aggregating_map.get(&mut mut_key);
             match bin_aggregate {
                 Some(bin_aggregate) => {
-                    let old_aggregate = (self.aggregator)(bin_aggregate);
+                    let old_aggregate = (self.aggregator)(&key, bin_aggregate);
                     let new_bin = (self.bin_merger)(&record.value, Some(bin_aggregate));
                     match new_bin {
                         Some(new_bin) => {
-                            let new_aggregate = (self.aggregator)(&new_bin);
+                            let new_aggregate = (self.aggregator)(&key, &new_bin);
                             if new_aggregate != old_aggregate {
                                 (
                                     Some(UpdatingData::Update {
@@ -111,7 +111,7 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> UpdatingAggregateOperator<K, T, Bi
                     let new_bin = (self.bin_merger)(&record.value, None);
                     match new_bin {
                         Some(new_bin) => {
-                            let new_aggregate = (self.aggregator)(&new_bin);
+                            let new_aggregate = (self.aggregator)(&key, &new_bin);
                             (
                                 Some(UpdatingData::Append(new_aggregate)),
                                 Some(StateOp::Set(new_bin)),
