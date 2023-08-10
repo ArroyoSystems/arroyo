@@ -220,6 +220,9 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         }
     }
 
+    /// Initializes the shards for the operator. First shards are read out of state,
+    /// then `sync_shards()` is called to find any new shards.
+    /// It returns a future for each shard to fetch the next shard iterator id.
     async fn init_shards(
         &mut self,
         ctx: &mut Context<(), T>,
@@ -299,6 +302,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
             ),
         ))
     }
+
     async fn read_data_from_shard_iterator(
         kinesis_client: KinesisClient,
         shard_iterator: String,
@@ -374,6 +378,13 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         self.kinesis_client.as_ref().unwrap().get_shard_iterator()
     }
 
+    /// Runs the Kinesis source, handling incoming records and control messages.
+    ///
+    /// This method initializes the Kinesis client, initializes the shards, and enters a loop to handle incoming
+    /// records and control messages. There are three prongs to the tokio select loop:
+    /// * A `FuturesUnordered` tha contains futures for reading off of shards.
+    /// * An interval that periodically polls for new shards, initializing their futures.
+    /// * Polling off of the control queue, to perform checkpointing and stop the operator.
     async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
         let config = load_from_env().await;
         self.kinesis_client = Some(KinesisClient::new(&config));

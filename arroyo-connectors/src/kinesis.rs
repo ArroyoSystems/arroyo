@@ -145,9 +145,9 @@ impl Connector for KinesisConnector {
             }
             "sink" => {
                 let batch_flush_interval_millis =
-                    pull_option_to_i64("sink.flush-buffer.timeout", opts)?;
-                let batch_max_buffer_size = pull_option_to_i64("sink.flush-buffer.size", opts)?;
-                let records_per_batch = pull_option_to_i64("sink.batch.max-size", opts)?;
+                    pull_option_to_i64("sink.flush_interval_millis", opts)?;
+                let batch_max_buffer_size = pull_option_to_i64("sink.max_bytes_per_batch", opts)?;
+                let records_per_batch = pull_option_to_i64("sink.max_records_per_batch", opts)?;
                 TableType::Sink {
                     batch_flush_interval_millis,
                     batch_max_buffer_size,
