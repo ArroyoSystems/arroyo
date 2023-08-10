@@ -14,10 +14,12 @@ use datafusion_expr::expr::ScalarUDF;
 use datafusion_expr::{BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp};
 
 use quote::{format_ident, quote};
-use syn::{parse_quote, Type};
+use syn::punctuated::Punctuated;
+use syn::{parse_quote, Type, ExprPath, Path};
 
 use crate::expressions::ExpressionContext;
 use crate::external::{ProcessingMode, SqlSink, SqlSource};
+use crate::schemas::window_type_def;
 use crate::tables::{Insert, Table};
 use crate::{
     expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
@@ -136,8 +138,7 @@ pub struct AggregateOperator {
 
 impl AggregateOperator {
     pub fn output_struct(&self) -> StructDef {
-        self.merge
-            .output_struct(&self.key.output_struct(), &self.aggregating.output_struct())
+        self.aggregating.output_struct()
     }
 }
 
@@ -308,10 +309,7 @@ impl SqlOperator {
         match self {
             SqlOperator::Source(source_operator) => source_operator.return_type(),
             SqlOperator::Aggregator(_input, aggregate_operator) => {
-                aggregate_operator.merge.output_struct(
-                    &aggregate_operator.key.output_struct(),
-                    &aggregate_operator.aggregating.output_struct(),
-                )
+                aggregate_operator.aggregating.output_struct()
             }
             SqlOperator::JoinOperator(left, right, operator) => operator
                 .join_type
@@ -558,40 +556,71 @@ impl<'a> SqlPipelineBuilder<'a> {
 
         let window = self.window(&aggregate.group_expr)?;
 
-        let group_count = aggregate.group_expr.len();
-        let aggregate_fields: Vec<_> = aggregate
+        let source_return_type = source.return_type();
+        let mut ctx = self.ctx(&source_return_type);
+
+        let group_bys = aggregate.group_expr
+            .iter()
+            .zip(aggregate.schema.fields().iter())
+            .map(|(expr, field)| {
+                let column = Column::convert(&field.qualified_column());
+                Ok(if let Some(window) = Self::find_window(expr)? {
+                    if let WindowType::Instant = window {
+                        bail!("don't support instant window in return type yet");
+                    }
+
+                    let ident = format_ident!("window");
+
+                    (
+                        column,
+                        parse_quote!(#ident),
+                        window_type_def()
+                    )
+                } else {
+                    let typ = TypeDef::DataType(field.data_type().clone(), ctx.compile_expr(expr)?.nullable());
+                    let field_ident = StructField::new(column.name.clone(), column.relation.clone(), typ.clone()).field_ident();
+
+                    (
+                        column,
+                        parse_quote!(key.#field_ident),
+                        typ
+                    )
+                })
+            }).collect::<Result<Vec<_>>>()?;
+
+        let aggregates = aggregate
             .schema
             .fields()
             .iter()
-            .enumerate()
-            .filter_map(|(i, field)| {
-                if i >= group_count {
-                    Some(field.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
+            .skip(aggregate.group_expr.len()) // the group bys always come first
+            .zip(aggregate.aggr_expr.iter())
+            .map(|(field, expr)| {
+                Ok((
+                    Column::convert(&field.qualified_column()),
+                    AggregationExpression::try_from_expression(&mut ctx, expr)?
+                ))
+            }).collect::<Result<Vec<_>>>()?;
 
-        let aggregating = self.aggregate_calculation(
-            &aggregate.aggr_expr,
-            aggregate_fields,
-            &source.return_type(),
-        )?;
+
+        let aggregating = AggregateProjection {
+            aggregates,
+            group_bys,
+        };
+
         if !source.has_window()
             && matches!(window, WindowType::Instant)
             && !aggregating.supports_two_phase()
         {
             bail!("updating aggregates only support two phase aggregations. Currently count distinct is not supported");
         }
-        let merge = self.window_field(&aggregate.group_expr, aggregate.schema.fields())?;
+
         Ok(SqlOperator::Aggregator(
             Box::new(source),
             AggregateOperator {
                 key,
                 window,
                 aggregating,
-                merge,
+                merge: GroupByKind::InAggregation,
             },
         ))
     }
@@ -646,26 +675,6 @@ impl<'a> SqlPipelineBuilder<'a> {
             1 => Ok(windows[0].clone()),
             multiple => bail!("{} windows detected, must be one or zero.", multiple),
         }
-    }
-
-    fn window_field(
-        &mut self,
-        group_expressions: &[Expr],
-        fields: &[DFField],
-    ) -> Result<GroupByKind> {
-        for (i, expr) in group_expressions.iter().enumerate() {
-            if let Some(window) = Self::find_window(expr)? {
-                if let WindowType::Instant = window {
-                    bail!("don't support instant window in return type yet");
-                }
-                return Ok(GroupByKind::WindowOutput {
-                    index: i,
-                    column: Column::convert(&fields[i].qualified_column()),
-                    window_type: window,
-                });
-            }
-        }
-        Ok(GroupByKind::Basic)
     }
 
     fn is_window(expression: &Expr) -> bool {
@@ -938,29 +947,6 @@ impl<'a> SqlPipelineBuilder<'a> {
             Box::new(input),
             RecordTransform::ValueProjection(projection),
         ))
-    }
-
-    fn aggregate_calculation(
-        &mut self,
-        aggr_expr: &[Expr],
-        aggregate_fields: Vec<DFField>,
-        input_struct: &StructDef,
-    ) -> Result<AggregateProjection> {
-        let mut ctx = self.ctx(input_struct);
-
-        let field_names = aggregate_fields
-            .iter()
-            .map(|field| Column::convert(&field.qualified_column()))
-            .collect();
-
-        let field_computations = aggr_expr
-            .iter()
-            .map(|expr| AggregationExpression::try_from_expression(&mut ctx, expr))
-            .collect::<Result<Vec<_>>>()?;
-        Ok(AggregateProjection {
-            field_names,
-            field_computations,
-        })
     }
 
     pub(crate) fn add_insert(&mut self, insert: Insert) -> Result<()> {
