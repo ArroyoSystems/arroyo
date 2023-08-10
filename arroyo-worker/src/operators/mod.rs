@@ -237,9 +237,7 @@ pub trait TimeWindowAssigner<K: Key, T: Data>: Copy + Clone + Send + 'static {
     fn safe_retention_duration(&self) -> Option<Duration>;
 }
 
-pub trait WindowAssigner<K: Key, T: Data>: Clone + Send {
-
-}
+pub trait WindowAssigner<K: Key, T: Data>: Clone + Send {}
 
 #[derive(Clone, Copy)]
 pub struct TumblingWindowAssigner {

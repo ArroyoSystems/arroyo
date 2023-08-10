@@ -76,8 +76,6 @@ pub enum PlanOperator {
         width: Duration,
         slide: Duration,
         aggregating_projection: TwoPhaseAggregateProjection,
-        group_by_projection: Projection,
-        group_by_kind: GroupByKind,
         order_by: Vec<SortExpression>,
         partition_projection: Projection,
         converting_projection: Projection,
@@ -479,7 +477,7 @@ impl PlanNode {
                 let bin_type = projection.bin_type();
                 arroyo_datastream::Operator::TumblingWindowAggregator(TumblingWindowAggregator {
                     width: *tumble_width,
-                    aggregator: quote!(|arg| {#aggregate_expr}).to_string(),
+                    aggregator: quote!(|key, window, arg| {#aggregate_expr}).to_string(),
                     bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
                     bin_type: quote!(#bin_type).to_string(),
                 })
@@ -631,7 +629,7 @@ impl PlanNode {
                 let bin_type = projection.bin_type();
                 arroyo_datastream::Operator::TumblingWindowAggregator(TumblingWindowAggregator {
                     width: *width,
-                    aggregator: quote!(|arg| { arg.clone() }).to_string(),
+                    aggregator: quote!(|key, window, arg| { arg.clone() }).to_string(),
                     bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
                     bin_type: quote!(#bin_type).to_string(),
                 })
@@ -640,8 +638,6 @@ impl PlanNode {
                 width,
                 slide,
                 aggregating_projection,
-                group_by_projection,
-                group_by_kind,
                 order_by,
                 partition_projection,
                 converting_projection,
@@ -662,31 +658,26 @@ impl PlanNode {
 
                 let sort_tokens = SortExpression::sort_tuple_expression(order_by);
 
-                let aggregate_struct = aggregating_projection.output_struct();
-                let key_struct = group_by_projection.output_struct();
-                let merge_struct = SqlOperator::merge_struct_type(&key_struct, &aggregate_struct);
-                let merge_expr = group_by_kind.to_syn_expression(&key_struct, &aggregate_struct);
-                let merge_struct_ident = merge_struct.get_type();
-
                 let extractor = quote!(
                     |key, arg| {
-                        let key = key.clone();
-                        let arg = #merge_struct_ident{key, aggregate: { #aggregate_expr}, timestamp: std::time::UNIX_EPOCH};
-                        let arg = #merge_expr;
+                        // this window is just there because the aggregate expression depends on it, but it is an
+                        // error for the key extract to rely on it
+                        let window = arroyo_types::Window::new(std::time::UNIX_EPOCH, std::time::UNIX_EPOCH);
+                        let arg = #aggregate_expr;
                         let arg = #projection_expr;
 
                         #sort_tokens
                     }
                 ).to_string();
 
-                let aggregator = quote!(|timestamp, key, aggregate_value|
+                let aggregator = quote!(|key, window, arg|
                     {
+                        let arg = #aggregate_expr;
                         let key = key.clone();
-                        let arg = #merge_struct_ident{key, aggregate: {let arg = aggregate_value; #aggregate_expr}, timestamp};
-                        let arg = #merge_expr;
                         #projection_expr
                     }
-                ).to_string();
+                )
+                .to_string();
 
                 arroyo_datastream::Operator::SlidingAggregatingTopN(SlidingAggregatingTopN {
                     width: *width,
@@ -804,7 +795,7 @@ impl PlanNode {
 
                     arroyo_datastream::Operator::NonWindowAggregator(NonWindowAggregator {
                         expiration: *expiration,
-                        aggregator: quote!(|arg| {#sliding}).to_string(),
+                        aggregator: quote!(|key, arg| {#sliding}).to_string(),
                         bin_merger: quote!(|arg, current| {
                             let current_bin: Option<#bin_type> = None;
                             let updating_bin = arg.map_over_inner(|arg| #bin_merger);
@@ -840,7 +831,7 @@ impl PlanNode {
                     let bin_type = projection.bin_type();
                     arroyo_datastream::Operator::NonWindowAggregator(NonWindowAggregator {
                         expiration: *expiration,
-                        aggregator: quote!(|arg| {#aggregate_expr}).to_string(),
+                        aggregator: quote!(|key, arg| {#aggregate_expr}).to_string(),
                         bin_merger: quote!(|arg, current_bin| {Some(#bin_merger)}).to_string(),
                         bin_type: quote!(#bin_type).to_string(),
                     })
@@ -875,33 +866,14 @@ impl PlanNode {
                 width: _,
                 slide: _,
                 aggregating_projection,
-                group_by_projection,
-                group_by_kind,
                 order_by: _,
                 partition_projection,
                 converting_projection,
                 max_elements: _,
             } => {
                 output_types.extend(aggregating_projection.output_struct().all_structs());
-                output_types.extend(group_by_projection.output_struct().all_structs());
                 output_types.extend(partition_projection.output_struct().all_structs());
                 output_types.extend(converting_projection.output_struct().all_structs());
-/*                 output_types.extend(
-                    converting_projection
-                        .truncated_return_type(aggregating_projection.field_names.len())
-                        .all_structs(),
-                );
- */
-                todo!();
-                let aggregate_struct = aggregating_projection.output_struct();
-                let key_struct = group_by_projection.output_struct();
-                let merge_struct = SqlOperator::merge_struct_type(&key_struct, &aggregate_struct);
-                output_types.extend(
-                    group_by_kind
-                        .output_struct(&key_struct, &aggregate_struct)
-                        .all_structs(),
-                );
-                output_types.extend(merge_struct.all_structs());
             }
             PlanOperator::NonWindowAggregate {
                 input_is_update: _,
@@ -1355,9 +1327,7 @@ impl PlanGraph {
             .add_edge(key_index, aggregate_index, aggregate_edge);
 
         match aggregate.merge {
-            GroupByKind::InAggregation => {
-                aggregate_index
-            },
+            GroupByKind::InAggregation => aggregate_index,
             GroupByKind::Basic | GroupByKind::WindowOutput { .. } | GroupByKind::Updating => {
                 let merge_node = PlanOperator::WindowMerge {
                     key_struct: key_struct.clone(),
@@ -1383,7 +1353,6 @@ impl PlanGraph {
                 merge_index
             }
         }
-
     }
 
     fn add_join(
@@ -1734,7 +1703,6 @@ impl PlanGraph {
         let input_node = self.get_plan_node(input_index);
         let input_updating = input_node.output_type.is_updating();
 
-        let output_type = aggregate.output_struct();
         let key_struct = aggregate.key.output_struct();
         let key_operator =
             PlanOperator::RecordTransform(RecordTransform::KeyProjection(aggregate.key));
@@ -1768,22 +1736,8 @@ impl PlanGraph {
         };
         self.graph
             .add_edge(key_index, aggregate_index, aggregate_edge);
-        let merge_node = PlanOperator::WindowMerge {
-            key_struct,
-            value_struct: aggregate_struct,
-            group_by_kind: aggregate.merge,
-        };
-        let merge_index = self.insert_operator(
-            merge_node,
-            PlanType::Updating(Box::new(PlanType::Unkeyed(output_type))),
-        );
-        let merge_edge = PlanEdge {
-            edge_type: EdgeType::Forward,
-        };
-        self.graph
-            .add_edge(aggregate_index, merge_index, merge_edge);
 
-        merge_index
+        aggregate_index
     }
 }
 

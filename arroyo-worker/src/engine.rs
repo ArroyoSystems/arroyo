@@ -479,13 +479,12 @@ impl<K: Key, T: Data> Context<K, T> {
     pub async fn cancel_timer<D: Data + PartialEq + Eq>(
         &mut self,
         key: &mut K,
-        event_time: SystemTime
+        event_time: SystemTime,
     ) -> Option<D> {
         let mut timer_state: TimeKeyMap<K, TimerValue<K, D>, _> =
             self.state.get_time_key_map(TIMER_TABLE, None).await;
 
-        timer_state.remove(event_time, key)
-            .map(|v| v.data)
+        timer_state.remove(event_time, key).map(|v| v.data)
     }
 
     pub async fn collect(&mut self, record: Record<K, T>) {

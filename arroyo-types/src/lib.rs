@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::ops::{RangeInclusive, Range};
+use std::ops::{Range, RangeInclusive};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -21,10 +21,7 @@ pub struct Window {
 
 impl Window {
     pub fn new(start: SystemTime, end: SystemTime) -> Self {
-        Self {
-            start,
-            end
-        }
+        Self { start, end }
     }
 
     pub fn session(start: SystemTime, gap: Duration) -> Self {
