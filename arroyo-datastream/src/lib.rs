@@ -1328,7 +1328,7 @@ impl Program {
                             };
 
                             quote! {
-                                WindowOperation::#operation(|key: #in_k, window: Window, mut arg: Vec<_>| {
+                                WindowOperation::#operation(|key: &#in_k, window: arroyo_types::Window, mut arg: Vec<_>| {
                                     #expr
                                 })
                             }

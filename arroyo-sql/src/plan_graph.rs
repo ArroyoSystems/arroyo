@@ -1327,13 +1327,17 @@ impl PlanGraph {
         let key_edge = PlanEdge {
             edge_type: EdgeType::Forward,
         };
+
         self.graph.add_edge(input_index, key_index, key_edge);
+
         let aggregate_projection = aggregate.aggregating;
         let aggregate_struct = aggregate_projection.output_struct();
+
         let aggregate_operator = PlanOperator::WindowAggregate {
             window: aggregate.window,
             projection: aggregate_projection,
         };
+
         let aggregate_index = self.insert_operator(
             aggregate_operator,
             PlanType::Keyed {
@@ -1341,30 +1345,44 @@ impl PlanGraph {
                 value: aggregate_struct.clone(),
             },
         );
+
         let aggregate_edge = PlanEdge {
             edge_type: EdgeType::Shuffle,
         };
+
         self.graph
             .add_edge(key_index, aggregate_index, aggregate_edge);
-        let merge_node = PlanOperator::WindowMerge {
-            key_struct: key_struct.clone(),
-            value_struct: aggregate_struct,
-            group_by_kind: aggregate.merge,
-        };
-        let merge_index = self.insert_operator(
-            merge_node,
-            PlanType::Keyed {
-                key: key_struct,
-                value: output_type,
-            },
-        );
-        let merge_edge = PlanEdge {
-            edge_type: EdgeType::Forward,
-        };
-        self.graph
-            .add_edge(aggregate_index, merge_index, merge_edge);
 
-        merge_index
+        match aggregate.merge {
+            GroupByKind::InAggregation => {
+                aggregate_index
+            },
+            GroupByKind::Basic | GroupByKind::WindowOutput { .. } | GroupByKind::Updating => {
+                let merge_node = PlanOperator::WindowMerge {
+                    key_struct: key_struct.clone(),
+                    value_struct: aggregate_struct,
+                    group_by_kind: aggregate.merge,
+                };
+
+                let merge_index = self.insert_operator(
+                    merge_node,
+                    PlanType::Keyed {
+                        key: key_struct,
+                        value: output_type,
+                    },
+                );
+
+                let merge_edge = PlanEdge {
+                    edge_type: EdgeType::Forward,
+                };
+
+                self.graph
+                    .add_edge(aggregate_index, merge_index, merge_edge);
+
+                merge_index
+            }
+        }
+
     }
 
     fn add_join(

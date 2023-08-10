@@ -136,46 +136,56 @@ impl Projection {
 
 #[derive(Debug, Clone)]
 pub struct AggregateProjection {
-    pub field_names: Vec<Column>,
-    pub field_computations: Vec<AggregationExpression>,
+    pub aggregates: Vec<(Column, AggregationExpression)>,
+    pub group_bys: Vec<(Column, syn::Expr, TypeDef)>,
 }
 
 impl AggregateProjection {
     pub fn output_struct(&self) -> StructDef {
-        let fields = self
-            .field_computations
+        let mut fields: Vec<StructField> = self
+            .aggregates
             .iter()
-            .enumerate()
-            .map(|(i, computation)| {
-                let field_name = self.field_names[i].clone();
+            .map(|(column, computation)| {
                 let field_type = computation.return_type();
-                StructField::new(field_name.name, field_name.relation, field_type)
+                StructField::new(column.name.clone(), column.relation.clone(), field_type)
             })
             .collect();
+        fields.extend(self.group_bys.iter()
+            .map(|(column, _, typ)| {
+                StructField::new(column.name.clone(), column.relation.clone(), typ.clone())
+            }));
         StructDef::for_fields(fields)
     }
 
     pub fn to_syn_expression(&self) -> syn::Expr {
         let assignments: Vec<_> = self
-            .field_computations
+            .aggregates
             .iter()
-            .enumerate()
-            .map(|(i, field_computation)| {
-                let field_name = self.field_names[i].clone();
-                let name = field_name.name;
-                let alias = field_name.relation;
+            .map(|(column, field_computation)| {
                 let data_type = field_computation.return_type();
                 let expr = field_computation.to_syn_expression();
-                let field_ident = StructField::new(name, alias, data_type).field_ident();
+                let field_ident = StructField::new(column.name.clone(), column.relation.clone(), data_type).field_ident();
                 quote!(#field_ident: #expr)
             })
             .collect();
+
+        let group_bys: Vec<_> = self.group_bys
+            .iter()
+            .map(|(column, expr, typ)| {
+                let field_ident = StructField::new(column.name.clone(), column.relation.clone(), typ.clone()).field_ident();
+                quote! {
+                    #field_ident: #expr
+                }
+            }).collect();
+
+
         let output_type = self.return_type().return_type();
         parse_quote!(
             {
                 #output_type {
-                    #(#assignments)
-                    ,*
+                    #(#assignments),*
+                    ,
+                    #(#group_bys),*
                 }
             }
         )
@@ -186,15 +196,17 @@ impl AggregateProjection {
     }
 
     pub(crate) fn supports_two_phase(&self) -> bool {
-        self.field_computations
+        self.aggregates
             .iter()
-            .all(|computation| computation.allows_two_phase())
+            .all(|(_, computation)| computation.allows_two_phase())
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum GroupByKind {
     Basic,
+    // The aggregation is responsible for building the final struct
+    InAggregation,
     WindowOutput {
         index: usize,
         column: Column,
@@ -246,6 +258,9 @@ impl GroupByKind {
                     .collect();
                 StructDef::for_fields(fields)
             }
+            GroupByKind::InAggregation => {
+                aggregate_struct.clone()
+            },
         }
     }
 
@@ -260,28 +275,28 @@ impl GroupByKind {
             let field_name: Ident = format_ident!("{}", field.field_name());
             assignments.push(quote!(#field_name : arg.key.#field_name.clone()));
         });
-
         aggregate_struct.fields.iter().for_each(|field| {
             let field_name: Ident = format_ident!("{}", field.field_name());
             assignments.push(quote!(#field_name : arg.aggregate.#field_name.clone()));
         });
-
         let return_struct = self.output_struct(key_struct, aggregate_struct);
-
         if let GroupByKind::WindowOutput {
             index,
-            ..
+            column: _,
+            window_type,
         } = self
         {
+            let width = match window_type {
+                WindowType::Tumbling { width } | WindowType::Sliding { width, .. } => width,
+                WindowType::Instant => &Duration::ZERO,
+                WindowType::Session { .. } => panic!("session windows cannot be planned with GroupByKind::WindowOutput"),
+            };
             let field_name = format_ident!("{}", return_struct.fields[*index].field_name());
-            assignments.push(quote! {
-                #field_name: arroyo_types::Window {
-                    start: arg.timestamp,
-                    end: arg.timestamp
-                }
-            });
+            let width_literal: LitInt = parse_str(&width.as_millis().to_string()).unwrap();
+            assignments.push(quote!(#field_name: arroyo_types::Window{
+                        start_time: arg.timestamp - std::time::Duration::from_millis(#width_literal) + std::time::Duration::from_nanos(1),
+                        end_time: arg.timestamp + std::time::Duration::from_nanos(1)}));
         }
-
         let return_type = return_struct.get_type();
         let struct_expression = parse_quote!(
             #return_type {
@@ -289,7 +304,6 @@ impl GroupByKind {
                     ,*
                 }
         );
-
         if matches!(self, GroupByKind::Updating) {
             parse_quote!(
                 arg.aggregate.map(|subfield| {
@@ -313,13 +327,16 @@ impl TryFrom<AggregateProjection> for TwoPhaseAggregateProjection {
     type Error = anyhow::Error;
 
     fn try_from(aggregate_projection: AggregateProjection) -> Result<Self> {
+        let ags = aggregate_projection.aggregates
+            .into_iter()
+            .map(|(c, expr)| Ok((c, expr.try_into()?)))
+            .collect::<Result<Vec<(Column, TwoPhaseAggregation)>>>()?;
+
+        let ags = ags.into_iter().unzip();
+
         Ok(Self {
-            field_names: aggregate_projection.field_names,
-            field_computations: aggregate_projection
-                .field_computations
-                .into_iter()
-                .map(|computation| computation.try_into())
-                .collect::<Result<Vec<_>>>()?,
+            field_names: ags.0,
+            field_computations: ags.1,
         })
     }
 }
