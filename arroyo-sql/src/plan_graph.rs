@@ -498,7 +498,7 @@ impl PlanNode {
                 arroyo_datastream::Operator::SlidingWindowAggregator(SlidingWindowAggregator {
                     width: *width,
                     slide: *slide,
-                    aggregator: quote!(|arg| {#aggregate_expr}).to_string(),
+                    aggregator: quote!(|key, window, arg| {#aggregate_expr}).to_string(),
                     bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
                     in_memory_add: quote!(|current, bin_value| {#in_memory_add}).to_string(),
                     in_memory_remove: quote!(|current, bin_value| {#in_memory_remove}).to_string(),
@@ -886,12 +886,13 @@ impl PlanNode {
                 output_types.extend(group_by_projection.output_struct().all_structs());
                 output_types.extend(partition_projection.output_struct().all_structs());
                 output_types.extend(converting_projection.output_struct().all_structs());
-                output_types.extend(
+/*                 output_types.extend(
                     converting_projection
                         .truncated_return_type(aggregating_projection.field_names.len())
                         .all_structs(),
                 );
-
+ */
+                todo!();
                 let aggregate_struct = aggregating_projection.output_struct();
                 let key_struct = group_by_projection.output_struct();
                 let merge_struct = SqlOperator::merge_struct_type(&key_struct, &aggregate_struct);

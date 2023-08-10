@@ -28,7 +28,7 @@ enum StateOp<T: Data> {
 #[process_fn(in_k = K, in_t = T, out_k = K, out_t = UpdatingData<OutT>)]
 impl<K: Key, T: Data, BinA: Data, OutT: Data> UpdatingAggregateOperator<K, T, BinA, OutT> {
     fn name(&self) -> String {
-        "KeyWindow".to_string()
+        "UpdatingAggregate".to_string()
     }
 
     pub fn new(
