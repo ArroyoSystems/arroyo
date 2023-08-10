@@ -22,7 +22,7 @@ use crate::schemas::window_type_def;
 use crate::tables::{Insert, Table};
 use crate::{
     expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
-    operators::{AggregateProjection, GroupByKind, Projection},
+    operators::{AggregateProjection, Projection},
     types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
@@ -132,7 +132,6 @@ pub struct AggregateOperator {
     pub key: Projection,
     pub window: WindowType,
     pub aggregating: AggregateProjection,
-    pub merge: GroupByKind,
 }
 
 impl AggregateOperator {
@@ -616,7 +615,6 @@ impl<'a> SqlPipelineBuilder<'a> {
                 key,
                 window,
                 aggregating,
-                merge: GroupByKind::InAggregation,
             },
         ))
     }
