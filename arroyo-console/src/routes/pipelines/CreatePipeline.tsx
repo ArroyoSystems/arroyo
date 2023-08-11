@@ -116,7 +116,7 @@ export function CreatePipeline({ client }: { client: ApiClient }) {
     if (outputs.length > 20) {
       outputs.shift();
     }
-    setOutputs(outputs);
+    setOutputs(outputs.slice());
   };
 
   useEffect(() => {
