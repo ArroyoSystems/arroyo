@@ -205,7 +205,7 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
         "SessionWindow".to_string()
     }
 
-    pub async fn new(operation: WindowOperation<K, T, OutT>, gap_size: Duration) -> Self {
+    pub fn new(operation: WindowOperation<K, T, OutT>, gap_size: Duration) -> Self {
         Self {
             operation,
             gap_size,
@@ -299,10 +299,10 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
         };
 
         if let Some(remove) = remove {
-            let _: Option<SystemTime> = ctx.cancel_timer(&mut key, remove).await;
+            let _: Option<Window> = ctx.cancel_timer(&mut key, remove).await;
         }
         if let Some(add) = add {
-            // we use UNIX_EPOCH as the start of our windows to aovid having to update them when we extend
+            // we use UNIX_EPOCH as the start of our windows to avoid having to update them when we extend
             // the beginning; this works because windows are always handled in order
             ctx.schedule_timer(&mut key, add, Window::new(SystemTime::UNIX_EPOCH, add))
                 .await;
@@ -326,6 +326,33 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
     }
 
     async fn handle_timer(&mut self, mut key: K, window: Window, ctx: &mut Context<K, OutT>) {
+        println!("Handling timer for {:?}, {:?}", key, window);
+        let window = {
+            // get the actual window (as the timer one doesn't have the actual start time)
+            let mut t: KeyedState<'_, K, Vec<Window>, _> = ctx.state.get_key_state('s').await;
+            let mut windows: Vec<Window> = t
+                .get(&key)
+                .map(|t| t.iter().map(|w| *w).collect())
+                .expect("there must be a window for this key in state");
+
+            let window = *windows
+                .iter()
+                .find(|w| w.end == window.end)
+                .expect("this window must be in state");
+
+            windows.retain(|w| w.end != window.end);
+
+            if windows.is_empty() {
+                t.remove(&mut key).await;
+            } else {
+                let key = key.clone();
+                t.insert(windows.iter().map(|w| w.end).max().unwrap(), key, windows)
+                    .await;
+            }
+
+            window
+        };
+
         self.operation.operate(&mut key, window, 'w', ctx).await;
 
         // clear this window and everything before it -- we're guaranteed that windows are executed in order and are
@@ -335,20 +362,5 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
         state
             .clear_time_range(&mut key, window.start, window.end)
             .await;
-
-        let mut t: KeyedState<'_, K, Vec<Window>, _> = ctx.state.get_key_state('s').await;
-        let mut windows: Vec<Window> = t
-            .get(&key)
-            .map(|t| t.iter().map(|w| *w).collect())
-            .expect("there must be a window for this key in state");
-
-        windows.retain(|w| w.end != window.end);
-
-        if windows.is_empty() {
-            t.remove(key).await;
-        } else {
-            t.insert(windows.iter().map(|w| w.end).max().unwrap(), key, windows)
-                .await;
-        }
     }
 }

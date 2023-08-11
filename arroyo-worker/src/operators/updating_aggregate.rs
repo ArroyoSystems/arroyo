@@ -130,7 +130,7 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> UpdatingAggregateOperator<K, T, Bi
                         .await;
                 }
                 StateOp::Delete => {
-                    aggregating_map.remove(mut_key).await;
+                    aggregating_map.remove(&mut mut_key).await;
                 }
                 StateOp::Update { new, old: _ } => {
                     aggregating_map.insert(record.timestamp, mut_key, new).await;

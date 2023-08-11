@@ -674,7 +674,7 @@ impl<'a> SqlPipelineBuilder<'a> {
     fn is_window(expression: &Expr) -> bool {
         match expression {
             Expr::ScalarUDF(ScalarUDF { fun, args: _ }) => {
-                matches!(fun.name.as_str(), "hop" | "tumble")
+                matches!(fun.name.as_str(), "hop" | "tumble" | "session")
             }
             Expr::Alias(datafusion_expr::expr::Alias { expr, name: _ }) => Self::is_window(expr),
             _ => false,
@@ -698,6 +698,13 @@ impl<'a> SqlPipelineBuilder<'a> {
                     }
                     let width = Self::get_duration(&args[0])?;
                     Ok(Some(WindowType::Tumbling { width }))
+                }
+                "session" => {
+                    if args.len() != 1 {
+                        unreachable!("wrong number of arguments for session(), expected one");
+                    }
+                    let gap = Self::get_duration(&args[0])?;
+                    Ok(Some(WindowType::Session { gap }))
                 }
                 _ => Ok(None),
             },

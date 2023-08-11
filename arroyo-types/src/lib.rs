@@ -32,7 +32,7 @@ impl Window {
     }
 
     pub fn contains(&self, t: SystemTime) -> bool {
-        self.start >= t && t < self.end
+        self.start <= t && t < self.end
     }
 }
 

@@ -502,10 +502,10 @@ impl<'a, K: Key, V: Data, S: BackingStore> KeyedState<'a, K, V, S> {
         self.cache.insert(key, wrapped.unwrap());
     }
 
-    pub async fn remove(&mut self, mut key: K) {
+    pub async fn remove(&mut self, key: &mut K) {
         self.cache.remove(&key);
         self.backing_state
-            .write_key_value::<K, Option<V>>(self.table, &mut key, &mut None)
+            .write_key_value::<K, Option<V>>(self.table, key, &mut None)
             .await;
     }
 
