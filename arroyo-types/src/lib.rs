@@ -274,14 +274,50 @@ pub enum UpdatingData<T: Data> {
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(try_from = "DebeziumShadow<T>")]
 pub struct Debezium<T: Data> {
     before: Option<T>,
     after: Option<T>,
     op: DebeziumOp,
 }
 
+// Use a shadow type to perform post-deserialization validation that the expected fields
+// are set; see https://github.com/serde-rs/serde/issues/642#issuecomment-683276351
+#[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
+struct DebeziumShadow<T: Data> {
+    before: Option<T>,
+    after: Option<T>,
+    op: DebeziumOp,
+}
+
+impl<T: Data> TryFrom<DebeziumShadow<T>> for Debezium<T> {
+    type Error = &'static str;
+
+    fn try_from(value: DebeziumShadow<T>) -> Result<Self, Self::Error> {
+        match (value.op, &value.before, &value.after) {
+            (DebeziumOp::Create, _, None) => {
+                return Err("`after` must be set for Debezium create messages");
+            }
+            (DebeziumOp::Update, None, _) => {
+                return Err("`before` must be set for Debezium update messages; you may need to set REPLICA IDENTIFY FULL on your database");
+            }
+            (DebeziumOp::Update, _, None) => {
+                return Err("`after` must be set for Debezium update messages");
+            }
+            (DebeziumOp::Delete, None, _) => {
+                return Err("`before` must be set for Debezium delete messages");
+            }
+            _ => Ok(Debezium {
+                before: value.before,
+                after: value.after,
+                op: value.op,
+            }),
+        }
+    }
+}
+
 //Debezium ops with single character serialization
-#[derive(Clone, Encode, Decode, Debug, PartialEq)]
+#[derive(Copy, Clone, Encode, Decode, Debug, PartialEq)]
 pub enum DebeziumOp {
     Create,
     Update,
