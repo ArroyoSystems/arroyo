@@ -1363,7 +1363,7 @@ impl Program {
                             let gap = duration_to_syn_expr(*gap);
                             quote! {
                                 Box::new(SessionWindowFunc::<#in_k, #in_t, #out_t>::new(
-                                    #gap, #agg
+                                    #agg, #gap
                                 ))
                             }
                         }

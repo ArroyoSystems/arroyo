@@ -221,7 +221,10 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
     async fn handle_tick(&mut self, _: u64, ctx: &mut Context<K, D>) {
         if let Some(idle_time) = self.idle_time {
             if self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
-                info!("Setting partition {} to idle", ctx.task_info.task_index);
+                info!(
+                    "Setting partition {} to idle after {:?}",
+                    ctx.task_info.task_index, idle_time
+                );
                 ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
                 self.idle = true;
             }
