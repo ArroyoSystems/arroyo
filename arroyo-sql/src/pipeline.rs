@@ -385,7 +385,8 @@ impl SqlOperator {
                     || (!right.has_window() && join_operator.join_type.right_nullable())
             }
             SqlOperator::Window(input, sql_window_operator) => {
-                input.is_updating() || sql_window_operator.window == WindowType::Instant
+                input.is_updating()
+                    || (!input.has_window() && sql_window_operator.window == WindowType::Instant)
             }
             SqlOperator::RecordTransform(input, _) => input.is_updating(),
             SqlOperator::Sink(_, _, input) => input.is_updating(),
@@ -546,6 +547,9 @@ impl<'a> SqlPipelineBuilder<'a> {
         aggregate: &datafusion_expr::logical_plan::Aggregate,
     ) -> Result<SqlOperator> {
         let source = self.insert_sql_plan(&aggregate.input)?;
+        if source.is_updating() {
+            bail!("can't aggregate over updating inputs");
+        }
         let key = self.aggregation_key(
             &aggregate.group_expr,
             aggregate.schema.fields(),
@@ -822,84 +826,88 @@ impl<'a> SqlPipelineBuilder<'a> {
     fn insert_window(&mut self, window: &Window) -> Result<SqlOperator> {
         let input = self.insert_sql_plan(&window.input)?;
 
+        if input.is_updating() {
+            bail!("don't support window functions over updating inputs");
+        }
+
         if let Some(expr) = window.window_expr.get(0) {
-            match expr {
-                Expr::WindowFunction(w) => {
-                    let window_fn = match &w.fun {
-                        datafusion_expr::WindowFunction::AggregateFunction(_) => {
-                            bail!("window aggregate functions not yet supported")
-                        }
-                        datafusion_expr::WindowFunction::BuiltInWindowFunction(
-                            BuiltInWindowFunction::RowNumber,
-                        ) => WindowFunction::RowNumber,
-                        datafusion_expr::WindowFunction::BuiltInWindowFunction(w) => {
-                            bail!("Window function {} not yet supported", w);
-                        }
-                        datafusion_expr::WindowFunction::AggregateUDF(_) => {
-                            bail!("Window UDAFs not yet supported");
-                        }
-                        datafusion_expr::WindowFunction::WindowUDF(_) => {
-                            bail!("Window UDFs not yet supported");
-                        }
-                    };
+            let w = match expr {
+                Expr::Alias(datafusion_expr::expr::Alias { expr, name: _ }) => match **expr {
+                    Expr::WindowFunction(ref w) => w,
+                    _ => bail!("expected window function"),
+                },
+                Expr::WindowFunction(window_function) => window_function,
+                _ => bail!("expected window function"),
+            };
+            let window_fn = match &w.fun {
+                datafusion_expr::WindowFunction::AggregateFunction(_) => {
+                    bail!("window aggregate functions not yet supported")
+                }
+                datafusion_expr::WindowFunction::BuiltInWindowFunction(
+                    BuiltInWindowFunction::RowNumber,
+                ) => WindowFunction::RowNumber,
+                datafusion_expr::WindowFunction::BuiltInWindowFunction(w) => {
+                    bail!("Window function {} not yet supported", w);
+                }
+                datafusion_expr::WindowFunction::AggregateUDF(_) => {
+                    bail!("Window UDAFs not yet supported");
+                }
+                datafusion_expr::WindowFunction::WindowUDF(_) => {
+                    bail!("Window UDFs not yet supported");
+                }
+            };
 
-                    let input_struct = input.return_type();
-                    let mut ctx = self.ctx(&input_struct);
+            let input_struct = input.return_type();
+            let mut ctx = self.ctx(&input_struct);
 
-                    let order_by: Vec<_> = w
-                        .order_by
-                        .iter()
-                        .map(|expr| {
-                            if let Expr::Sort(sort) = expr {
-                                SortExpression::from_expression(&mut ctx, sort)
-                            } else {
-                                panic!("expected sort expression, found {:?}", expr);
-                            }
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-
-                    let field_names = w
-                        .partition_by
-                        .iter()
-                        .filter(|expr| !Self::is_window(expr))
-                        .enumerate()
-                        .map(|(i, _t)| Column {
-                            relation: None,
-                            name: format!("_{}", i),
-                        })
-                        .collect();
-
-                    let field_computations = w
-                        .partition_by
-                        .iter()
-                        .filter(|expr| !Self::is_window(expr))
-                        .map(|expression| ctx.compile_expr(expression))
-                        .collect::<Result<Vec<_>>>()?;
-
-                    let partition =
-                        Projection::new(field_names, field_computations).without_window();
-                    let field_name = window.schema.field_names().last().cloned().unwrap();
-                    let window = self.window(&w.partition_by)?;
-
-                    if !input.has_window() && window == WindowType::Instant {
-                        bail!("window functions have to be partitioned by a time window")
+            let order_by: Vec<_> = w
+                .order_by
+                .iter()
+                .map(|expr| {
+                    if let Expr::Sort(sort) = expr {
+                        SortExpression::from_expression(&mut ctx, sort)
+                    } else {
+                        panic!("expected sort expression, found {:?}", expr);
                     }
+                })
+                .collect::<Result<Vec<_>>>()?;
 
-                    return Ok(SqlOperator::Window(
-                        Box::new(input),
-                        SqlWindowOperator {
-                            window_fn,
-                            partition,
-                            order_by,
-                            field_name,
-                            window,
-                        },
-                    ));
-                }
-                _ => {
-                    bail!("non window expression for window: {:?}", expr);
-                }
+            let field_names = w
+                .partition_by
+                .iter()
+                .filter(|expr| !Self::is_window(expr))
+                .enumerate()
+                .map(|(i, _t)| Column {
+                    relation: None,
+                    name: format!("_{}", i),
+                })
+                .collect();
+
+            let field_computations = w
+                .partition_by
+                .iter()
+                .filter(|expr| !Self::is_window(expr))
+                .map(|expression| ctx.compile_expr(expression))
+                .collect::<Result<Vec<_>>>()?;
+
+            let partition = Projection::new(field_names, field_computations).without_window();
+            let field_name = window.schema.field_names().last().cloned().unwrap();
+            let window = self.window(&w.partition_by)?;
+
+            if !input.has_window() && window == WindowType::Instant {
+                bail!("window functions have to be partitioned by a time window")
             }
+
+            return Ok(SqlOperator::Window(
+                Box::new(input),
+                SqlWindowOperator {
+                    window_fn,
+                    partition,
+                    order_by,
+                    field_name,
+                    window,
+                },
+            ));
         }
 
         bail!("no expression for window");
