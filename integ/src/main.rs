@@ -7,6 +7,7 @@ use arroyo_openapi::apis::pipelines_api::{get_pipeline_jobs, patch_pipeline, pos
 use arroyo_openapi::models::{ConnectionTablePost, PipelinePatch, PipelinePost, StopType};
 
 use anyhow::Result;
+use arroyo_openapi::apis::ping_api::ping;
 use arroyo_types::DatabaseConfig;
 use rand::RngCore;
 use tokio_postgres::NoTls;
@@ -57,6 +58,38 @@ async fn wait_for_state(api_conf: &Configuration, pipeline_id: &str, expected_st
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn connect() {
+    let start = Instant::now();
+    let api_conf = Configuration {
+        base_path: "http://localhost:8000/api".to_string(),
+        user_agent: None,
+        client: Default::default(),
+        basic_auth: None,
+        oauth_access_token: None,
+        bearer_access_token: None,
+        api_key: None,
+    };
+
+    loop {
+        if start.elapsed() > CONNECT_TIMEOUT {
+            panic!(
+                "Failed to connect to API server after {:?}",
+                CONNECT_TIMEOUT
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let Ok(()) = ping(&api_conf).await else {
+            continue;
+        };
+
+        if ping(&api_conf).await.is_ok() {
+            return;
+        }
     }
 }
 
@@ -117,6 +150,7 @@ pub async fn main() {
     )
     .expect("Failed to run compiler service");
 
+    connect().await;
     let api_conf = Configuration {
         base_path: "http://localhost:8000/api".to_string(),
         user_agent: None,
@@ -141,8 +175,7 @@ pub async fn main() {
             schema: None,
         },
     )
-    .await
-    .unwrap();
+    .await;
 
     info!("Created connection table");
 
@@ -169,46 +202,46 @@ pub async fn main() {
     .id;
 
     info!("Created pipeline {}", pipeline_id);
-    //
-    // // wait for job to enter running phase
-    // info!("Waiting until running");
-    // wait_for_state(&api_conf, &pipeline_id, "Running").await;
-    //
-    // let jobs = get_pipeline_jobs(&api_conf, &pipeline_id).await.unwrap();
-    // let job = jobs.data.first().unwrap();
-    //
-    // // wait for a checkpoint
-    // info!("Waiting for 10 successful checkpoints");
-    // loop {
-    //     let checkpoints = get_job_checkpoints(&api_conf, &pipeline_id, &job.id)
-    //         .await
-    //         .unwrap();
-    //
-    //     if let Some(checkpoint) = checkpoints.data.iter().find(|c| c.epoch == 10) {
-    //         if checkpoint.finish_time.is_some() {
-    //             break;
-    //         }
-    //     }
-    //
-    //     tokio::time::sleep(Duration::from_millis(50)).await;
-    // }
-    //
-    // // stop job
-    // info!("Stopping job");
-    // patch_pipeline(
-    //     &api_conf,
-    //     &pipeline_id,
-    //     PipelinePatch {
-    //         checkpoint_interval_micros: None,
-    //         parallelism: None,
-    //         stop: Some(Some(StopType::Checkpoint)),
-    //     },
-    // )
-    // .await
-    // .unwrap();
-    //
-    // info!("Waiting for stop");
-    // wait_for_state(&api_conf, &pipeline_id, "Stopped").await;
-    //
-    // info!("Test successful ✅")
+
+    // wait for job to enter running phase
+    info!("Waiting until running");
+    wait_for_state(&api_conf, &pipeline_id, "Running").await;
+
+    let jobs = get_pipeline_jobs(&api_conf, &pipeline_id).await.unwrap();
+    let job = jobs.data.first().unwrap();
+
+    // wait for a checkpoint
+    info!("Waiting for 10 successful checkpoints");
+    loop {
+        let checkpoints = get_job_checkpoints(&api_conf, &pipeline_id, &job.id)
+            .await
+            .unwrap();
+
+        if let Some(checkpoint) = checkpoints.data.iter().find(|c| c.epoch == 10) {
+            if checkpoint.finish_time.is_some() {
+                break;
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // stop job
+    info!("Stopping job");
+    patch_pipeline(
+        &api_conf,
+        &pipeline_id,
+        PipelinePatch {
+            checkpoint_interval_micros: None,
+            parallelism: None,
+            stop: Some(Some(StopType::Checkpoint)),
+        },
+    )
+    .await
+    .unwrap();
+
+    info!("Waiting for stop");
+    wait_for_state(&api_conf, &pipeline_id, "Stopped").await;
+
+    info!("Test successful ✅")
 }
