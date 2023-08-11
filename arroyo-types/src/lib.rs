@@ -299,7 +299,7 @@ impl<T: Data> TryFrom<DebeziumShadow<T>> for Debezium<T> {
                 return Err("`after` must be set for Debezium create messages");
             }
             (DebeziumOp::Update, None, _) => {
-                return Err("`before` must be set for Debezium update messages; you may need to set REPLICA IDENTIFY FULL on your database");
+                return Err("`before` must be set for Debezium update messages; for Postgres you may need to set REPLICA IDENTIFY FULL on your database");
             }
             (DebeziumOp::Update, _, None) => {
                 return Err("`after` must be set for Debezium update messages");
