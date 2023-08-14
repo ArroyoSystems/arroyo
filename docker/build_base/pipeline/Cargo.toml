@@ -12,6 +12,8 @@ bincode_derive = "=2.0.0-rc.3"
 chrono = "0.4"
 serde = "1.0"
 serde_json = "1.0"
+arrow = { workspace = true}
+arrow-array = { workspace = true}
 arroyo-types = { path = "/opt/arroyo/src/arroyo-types" }
 arroyo-worker = { path = "/opt/arroyo/src/arroyo-worker", features = ["kafka-sasl"] }
 [package.metadata.wasm-pack.profile.release]
