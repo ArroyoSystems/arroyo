@@ -15,7 +15,7 @@ use tracing::warn;
 pub struct AggregatingWindowFunc<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data> {
     width: Duration,
     slide: Duration,
-    aggregator: fn(&MemA) -> OutT,
+    aggregator: fn(&K, Window, &MemA) -> OutT,
     bin_merger: fn(&T, Option<&BinA>) -> BinA,
     in_memory_add: fn(Option<MemA>, BinA) -> MemA,
     in_memory_remove: fn(MemA, BinA) -> Option<MemA>,
@@ -44,7 +44,7 @@ impl<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data>
     pub fn new(
         width: Duration,
         slide: Duration,
-        aggregator: fn(&MemA) -> OutT,
+        aggregator: fn(&K, Window, &MemA) -> OutT,
         bin_merger: fn(&T, Option<&BinA>) -> BinA,
         in_memory_add: fn(Option<MemA>, BinA) -> MemA,
         in_memory_remove: fn(MemA, BinA) -> Option<MemA>,
@@ -198,7 +198,14 @@ impl<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data>
         let window_end = bin_end - Duration::from_nanos(1);
         let mut records = vec![];
         for (key, in_memory) in self.memory_view.iter() {
-            let value = (self.aggregator)(in_memory);
+            let value = (self.aggregator)(
+                key,
+                Window {
+                    start: bin_start,
+                    end: bin_end,
+                },
+                in_memory,
+            );
             records.push(Record {
                 timestamp: window_end,
                 key: Some(key.clone()),

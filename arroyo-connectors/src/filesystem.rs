@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::grpc::{self, api::TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::formats::Format;
@@ -8,7 +6,7 @@ use typify::import_types;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Connection, ConnectionSchema, ConnectionType, EmptyConfig};
+use crate::{pull_option_to_i64, Connection, ConnectionSchema, ConnectionType, EmptyConfig};
 
 use super::Connector;
 
@@ -204,15 +202,4 @@ impl Connector for FileSystemConnector {
             schema,
         )
     }
-}
-
-fn pull_option_to_i64(name: &str, opts: &mut HashMap<String, String>) -> Result<Option<i64>> {
-    opts.remove(name)
-        .map(|value| {
-            value.parse::<i64>().context(format!(
-                "failed to parse {} as a number for option {}",
-                value, name
-            ))
-        })
-        .transpose()
 }

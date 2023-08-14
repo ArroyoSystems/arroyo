@@ -194,6 +194,7 @@ message Window {
     SlidingWindow sliding_window = 2;
     TumblingWindow tumbling_window = 3;
     InstantWindow instant_window = 4;
+    SessionWindow session_window = 5;
   }
 }
 
@@ -206,6 +207,10 @@ message TumblingWindow {
   uint64 size_micros = 1;
 }
 message InstantWindow {}
+
+message SessionWindow {
+  uint64 gap_micros = 1;
+}
 
 enum Aggregator {
   NONE = 0;

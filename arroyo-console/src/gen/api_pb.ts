@@ -76,12 +76,18 @@ export enum SerializationMode {
    * @generated from enum value: RAW = 2;
    */
   RAW = 2,
+
+  /**
+   * @generated from enum value: PARQUET = 3;
+   */
+  PARQUET = 3,
 }
 // Retrieve enum metadata with: proto3.getEnumType(SerializationMode)
 proto3.util.setEnumType(SerializationMode, "arroyo_api.SerializationMode", [
   { no: 0, name: "JSON" },
   { no: 1, name: "JSON_SCHEMA_REGISTRY" },
   { no: 2, name: "RAW" },
+  { no: 3, name: "PARQUET" },
 ]);
 
 /**
@@ -331,6 +337,11 @@ export enum TaskCheckpointEventType {
    * @generated from enum value: CHECKPOINT_SYNC_FINISHED = 3;
    */
   CHECKPOINT_SYNC_FINISHED = 3,
+
+  /**
+   * @generated from enum value: CHECKPOINT_PRE_COMMIT = 4;
+   */
+  CHECKPOINT_PRE_COMMIT = 4,
 }
 // Retrieve enum metadata with: proto3.getEnumType(TaskCheckpointEventType)
 proto3.util.setEnumType(TaskCheckpointEventType, "arroyo_api.TaskCheckpointEventType", [
@@ -338,6 +349,7 @@ proto3.util.setEnumType(TaskCheckpointEventType, "arroyo_api.TaskCheckpointEvent
   { no: 1, name: "CHECKPOINT_STARTED" },
   { no: 2, name: "CHECKPOINT_OPERATOR_FINISHED" },
   { no: 3, name: "CHECKPOINT_SYNC_FINISHED" },
+  { no: 4, name: "CHECKPOINT_PRE_COMMIT" },
 ]);
 
 /**
@@ -480,6 +492,11 @@ export enum Format {
    * @generated from enum value: RawStringFormat = 4;
    */
   RawStringFormat = 4,
+
+  /**
+   * @generated from enum value: ParquetFormat = 5;
+   */
+  ParquetFormat = 5,
 }
 // Retrieve enum metadata with: proto3.getEnumType(Format)
 proto3.util.setEnumType(Format, "arroyo_api.Format", [
@@ -488,6 +505,7 @@ proto3.util.setEnumType(Format, "arroyo_api.Format", [
   { no: 2, name: "ProtobufFormat" },
   { no: 3, name: "AvroFormat" },
   { no: 4, name: "RawStringFormat" },
+  { no: 5, name: "ParquetFormat" },
 ]);
 
 /**
@@ -1977,6 +1995,11 @@ export class PeriodicWatermark extends Message<PeriodicWatermark> {
    */
   maxLatenessMicros = protoInt64.zero;
 
+  /**
+   * @generated from field: optional uint64 idle_time_micros = 3;
+   */
+  idleTimeMicros?: bigint;
+
   constructor(data?: PartialMessage<PeriodicWatermark>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1987,6 +2010,7 @@ export class PeriodicWatermark extends Message<PeriodicWatermark> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "period_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 2, name: "max_lateness_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "idle_time_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeriodicWatermark {
@@ -2020,6 +2044,11 @@ export class ExpressionWatermark extends Message<ExpressionWatermark> {
    */
   expression = "";
 
+  /**
+   * @generated from field: optional uint64 idle_time_micros = 3;
+   */
+  idleTimeMicros?: bigint;
+
   constructor(data?: PartialMessage<ExpressionWatermark>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2030,6 +2059,7 @@ export class ExpressionWatermark extends Message<ExpressionWatermark> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "period_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 2, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "idle_time_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExpressionWatermark {
@@ -4013,6 +4043,11 @@ export class Connector extends Message<Connector> {
   testing = false;
 
   /**
+   * @generated from field: bool hidden = 12;
+   */
+  hidden = false;
+
+  /**
    * @generated from field: optional string connection_config = 10;
    */
   connectionConfig?: string;
@@ -4039,6 +4074,7 @@ export class Connector extends Message<Connector> {
     { no: 7, name: "sink", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 8, name: "custom_schemas", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 9, name: "testing", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 12, name: "hidden", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 10, name: "connection_config", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 11, name: "table_config", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);

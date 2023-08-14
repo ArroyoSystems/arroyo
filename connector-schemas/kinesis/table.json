@@ -1,0 +1,63 @@
+{
+    "type": "object",
+    "title": "KinesisTable",
+    "properties": {
+        "stream_name": {
+            "title": "Stream Name",
+            "type": "string",
+            "description": "The Kinesis stream name for this table"
+        },
+        "type": {
+            "type": "object",
+            "title": "Table Type",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Source",
+                    "properties": {
+                        "offset": {
+                            "type": "string",
+                            "description": "The offset to start reading from",
+                            "enum": [
+                                "earliest",
+                                "latest"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "offset"
+                    ],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "title": "Sink",
+                    "properties": {
+                        "records_per_batch": {
+                            "type": "integer",
+                            "title": "Records Per Batch",
+                            "description": "The number of records to batch together before writing to Kinesis",
+                            "maximum": 500
+                        },
+                        "batch_max_buffer_size": {
+                            "type": "integer",
+                            "title": "Batch Max Size (bytes)",
+                            "description": "The maximum size of a batch of records to write to Kinesis",
+                            "maximum": 5000000
+                        },
+                        "batch_flush_interval_millis": {
+                            "type": "integer",
+                            "title": "Batch Flush Interval (ms)",
+                            "description": "The number of milliseconds to wait before flushing a batch of records to Kinesis"
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            ]
+        }
+    },
+    "required": [
+        "stream_name",
+        "type"
+    ]
+}

@@ -20,7 +20,7 @@ fn main() {
         .arg("-o")
         .arg("client")
         .output()
-        .expect("Failed to run OpenAPI Generator");
+        .expect("Failed to run OpenAPI Generator, have you installed openapi-generator-cli?");
 
     if !output.status.success() {
         let error_message = String::from_utf8_lossy(&output.stderr);
