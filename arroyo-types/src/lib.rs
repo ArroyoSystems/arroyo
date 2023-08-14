@@ -34,6 +34,22 @@ impl Window {
     pub fn contains(&self, t: SystemTime) -> bool {
         self.start <= t && t < self.end
     }
+
+    pub fn size(&self) -> Duration {
+        self.end.duration_since(self.start).unwrap_or_default()
+    }
+
+    pub fn extend(&self, new_end: SystemTime, max_size: Duration) -> Window {
+        let new_end = self.end.max(new_end);
+        Window {
+            start: self.start,
+            end: if new_end.duration_since(self.start).unwrap_or_default() > max_size {
+                self.start + max_size
+            } else {
+                new_end
+            },
+        }
+    }
 }
 
 impl From<Range<SystemTime>> for Window {
