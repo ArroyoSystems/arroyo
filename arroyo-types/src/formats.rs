@@ -80,15 +80,7 @@ impl JsonFormat {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
-pub enum RawEncoding {
-    None,
-    Utf8,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
-pub struct RawFormat {
-    encoding: RawEncoding,
-}
+pub struct RawStringFormat {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
 pub struct AvroFormat {}
@@ -101,7 +93,7 @@ pub enum Format {
     Json(JsonFormat),
     Avro(AvroFormat),
     Parquet(ParquetFormat),
-    Raw(RawFormat),
+    RawString(RawStringFormat),
 }
 
 impl Format {
@@ -115,7 +107,7 @@ impl Format {
             "debezium_json" => Format::Json(JsonFormat::from_opts(true, opts)?),
             "protobuf" => return Err("protobuf is not yet supported".to_string()),
             "avro" => return Err("avro is not yet supported".to_string()),
-            "raw_string" => return Err("raw_string is not yet supported".to_string()),
+            "raw_string" => Format::RawString(RawStringFormat {}),
             "parquet" => Format::Parquet(ParquetFormat {}),
             f => return Err(format!("Unknown format '{}'", f)),
         }))
@@ -124,7 +116,7 @@ impl Format {
     pub fn is_updating(&self) -> bool {
         match self {
             Format::Json(JsonFormat { debezium: true, .. }) => true,
-            Format::Json(_) | Format::Avro(_) | Format::Parquet(_) | Format::Raw(_) => false,
+            Format::Json(_) | Format::Avro(_) | Format::Parquet(_) | Format::RawString(_) => false,
         }
     }
 }
