@@ -16,21 +16,22 @@ use serde::Serialize;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::engine::Context;
+use crate::{engine::Context, formats::DataSerializer, SchemaData};
 
 use super::{KinesisTable, TableType};
 
 #[derive(StreamNode)]
-pub struct KinesisSinkFunc<K: Key + Serialize, T: Data + Serialize> {
+pub struct KinesisSinkFunc<K: Key + Serialize, T: SchemaData + Serialize> {
     client: Option<KinesisClient>,
     in_progress_batch: Option<BatchRecordPreparer>,
     flush_config: FlushConfig,
+    serializer: DataSerializer<T>,
     name: String,
     _phantom: PhantomData<(K, T)>,
 }
 
 #[process_fn(in_k = K, in_t = T, tick_ms=10)]
-impl<K: Key + Serialize, T: Data + Serialize> KinesisSinkFunc<K, T> {
+impl<K: Key + Serialize, T: SchemaData + Serialize> KinesisSinkFunc<K, T> {
     pub fn from_config(config: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config).expect("Invalid config for KafkaSink");
@@ -41,6 +42,11 @@ impl<K: Key + Serialize, T: Data + Serialize> KinesisSinkFunc<K, T> {
             client: None,
             in_progress_batch: None,
             name: table.stream_name,
+            serializer: DataSerializer::new(
+                config
+                    .format
+                    .expect("Format must be defined for KinesisSink"),
+            ),
             flush_config,
             _phantom: PhantomData,
         }
@@ -71,7 +77,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KinesisSinkFunc<K, T> {
             .as_ref()
             .map(|k| serde_json::to_string(k).unwrap())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let v = serde_json::to_string(&record.value).unwrap();
+        let v = self.serializer.to_vec(&record.value);
 
         let mut batch_preparer = match self.in_progress_batch.take() {
             None => BatchRecordPreparer::new(
@@ -94,9 +100,6 @@ impl<K: Key + Serialize, T: Data + Serialize> KinesisSinkFunc<K, T> {
     }
 
     async fn handle_tick(&mut self, _: u64, _ctx: &mut Context<(), ()>) {
-        if self.in_progress_batch.is_none() {
-            return;
-        }
         let Some(batch_preparer) = &self.in_progress_batch else {
             return
         };
@@ -150,7 +153,7 @@ impl<K: Key + Serialize, T: Data + Serialize> KinesisSinkFunc<K, T> {
 struct BatchRecordPreparer {
     // TODO: figure out how to not need an option
     put_records_call: Option<PutRecords>,
-    buffered_records: Vec<(String, String)>,
+    buffered_records: Vec<(String, Vec<u8>)>,
     record_count: usize,
     data_size: usize,
     creation_time: SystemTime,
@@ -165,7 +168,7 @@ struct FlushConfig {
 impl FlushConfig {
     fn new_from_table(table: &KinesisTable) -> Self {
         let TableType::Sink { batch_flush_interval_millis, batch_max_buffer_size, records_per_batch } = &table.type_ else {
-            panic!("found non-sink kafka config in sink operator");
+            panic!("found non-sink kinesis config in sink operator");
         };
         Self {
             max_record_count: records_per_batch.unwrap_or(500) as usize,
@@ -191,7 +194,7 @@ impl BatchRecordPreparer {
             creation_time: SystemTime::now(),
         }
     }
-    fn add_record(&mut self, key: String, value: String) {
+    fn add_record(&mut self, key: String, value: Vec<u8>) {
         self.buffered_records.push((key.clone(), value.clone()));
         let blob = Blob::new(value);
         self.data_size += blob.as_ref().len();
@@ -206,7 +209,7 @@ impl BatchRecordPreparer {
         self.record_count += 1;
     }
 
-    async fn flush(mut self) -> Result<Vec<(String, String)>> {
+    async fn flush(mut self) -> Result<Vec<(String, Vec<u8>)>> {
         if self.record_count == 0 {
             return Ok(Vec::new());
         }
