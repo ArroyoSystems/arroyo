@@ -186,6 +186,22 @@ async fn test_no_inserting_updates_into_non_updating() {
 }
 
 #[tokio::test]
+async fn test_no_aggregates_in_window() {
+    let schema_provider = get_test_schema_provider();
+    let sql = "WITH bids as (
+  SELECT bid.auction as auction, bid.price as price, bid.bidder as bidder, bid.extra as extra, bid.datetime as datetime
+  FROM nexmark where bid is not null)
+
+SELECT * FROM (
+SELECT bidder, COUNT( distinct auction) as distinct_auctions
+FROM bids B1
+GROUP BY bidder, HOP(INTERVAL '3 second', INTERVAL '10' minute)) WHERE distinct_auctions > 2";
+    let _ = parse_and_get_program(sql, schema_provider, SqlConfig::default())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn test_udf() {
     let mut schema_provider = get_test_schema_provider();
 

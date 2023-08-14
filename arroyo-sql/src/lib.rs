@@ -90,6 +90,16 @@ impl ArroyoSchemaProvider {
             Arc::new(create_udf(
                 "tumble",
                 vec![DataType::Interval(datatypes::IntervalUnit::MonthDayNano)],
+                window_return_type.clone(),
+                Volatility::Volatile,
+                make_scalar_function(fn_impl),
+            )),
+        );
+        functions.insert(
+            "session".to_string(),
+            Arc::new(create_udf(
+                "session",
+                vec![DataType::Interval(datatypes::IntervalUnit::MonthDayNano)],
                 window_return_type,
                 Volatility::Volatile,
                 make_scalar_function(fn_impl),

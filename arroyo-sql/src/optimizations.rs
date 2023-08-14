@@ -12,7 +12,7 @@ use petgraph::Direction::{self, Incoming, Outgoing};
 
 use quote::quote;
 
-use crate::operators::{AggregateProjection, GroupByKind, Projection, TwoPhaseAggregateProjection};
+use crate::operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection};
 use crate::pipeline::RecordTransform;
 use crate::plan_graph::{
     FusedRecordTransform, PlanEdge, PlanNode, PlanOperator, PlanType, WindowFunctionOperator,
@@ -250,6 +250,7 @@ impl Optimizer for TwoPhaseOptimization {
             WindowType::Tumbling { width } => (width, width),
             WindowType::Sliding { width, slide } => (width, slide),
             WindowType::Instant => (Duration::ZERO, Duration::ZERO),
+            WindowType::Session { .. } => return false,
         };
         if !slide.is_zero() && width.as_micros() % slide.as_micros() != 0 {
             return false;
@@ -288,7 +289,6 @@ impl Optimizer for TwoPhaseOptimization {
 struct WindowTopNOptimization {
     aggregate_key: Option<Projection>,
     window_aggregate: Option<(WindowType, AggregateProjection)>,
-    merge: Option<GroupByKind>,
     partition_projection: Option<Projection>,
     window_function_operator: Option<WindowFunctionOperator>,
     projection: Option<Projection>,
@@ -300,7 +300,6 @@ enum SearchTarget {
     #[default]
     AggregateKey,
     WindowAggregate,
-    GroupByKind,
     PartitionProjection,
     PartitionKeyProjection,
     WindowFunctionOperator,
@@ -329,18 +328,9 @@ impl Optimizer for WindowTopNOptimization {
                 if let PlanOperator::WindowAggregate { window, projection } = node.operator {
                     self.window_aggregate = Some((window, projection));
                     self.nodes.push(node_index);
-                    self.search_target = SearchTarget::GroupByKind;
-                } else {
-                    self.clear();
-                }
-            }
-            SearchTarget::GroupByKind => {
-                if let PlanOperator::WindowMerge { group_by_kind, .. } = node.operator {
-                    self.merge = Some(group_by_kind);
-                    self.nodes.push(node_index);
                     self.search_target = SearchTarget::PartitionProjection;
                 } else {
-                    self.clear()
+                    self.clear();
                 }
             }
             SearchTarget::PartitionProjection => {
@@ -415,6 +405,9 @@ impl Optimizer for WindowTopNOptimization {
                             WindowType::Tumbling { width } => (width, width),
                             WindowType::Sliding { width, slide } => (width, slide),
                             WindowType::Instant => (Duration::ZERO, Duration::ZERO),
+                            WindowType::Session { .. } => {
+                                return false;
+                            }
                         };
                         if width.as_micros() % slide.as_micros() != 0 {
                             self.clear();
@@ -460,8 +453,7 @@ impl Optimizer for WindowTopNOptimization {
                                 partition_projection: partition_projection.clone(),
                                 converting_projection: converting_projection.clone(),
                                 max_elements: max_value as usize,
-                                group_by_projection: key_projection,
-                                group_by_kind: self.merge.take().unwrap(),
+                                //group_by_projection: key_projection,
                             };
 
                         let sliding_aggregating_top_n_node = PlanNode {
@@ -524,7 +516,6 @@ impl Optimizer for WindowTopNOptimization {
         self.window_aggregate = None;
         self.window_function_operator = None;
         self.partition_projection = None;
-        self.merge = None;
         self.projection = None;
         self.search_target = SearchTarget::AggregateKey;
     }

@@ -129,3 +129,8 @@ INSERT INTO Bids select bid.auction, bid.bidder, bid.price , bid.datetime FROM n
 full_pipeline_codegen! {"cast_bug",
 "SELECT CAST(1 as FLOAT)
 from nexmark; "}
+
+full_pipeline_codegen! {"session_window",
+"SELECT count(*), session(INTERVAL '10' SECOND) AS window
+from nexmark
+group by window, auction.id; "}

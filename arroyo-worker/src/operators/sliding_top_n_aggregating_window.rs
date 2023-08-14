@@ -29,7 +29,7 @@ pub struct SlidingAggregatingTopNWindowFunc<
     in_memory_remove: fn(MemA, BinA) -> Option<MemA>,
     partitioning_func: fn(&K) -> PK,
     extractor: fn(&K, &MemA) -> SK,
-    aggregator: fn(SystemTime, &K, &MemA) -> OutT,
+    aggregator: fn(&K, Window, &MemA) -> OutT,
     max_elements: usize,
     partition_heaps: HashMap<PK, PartitionSortedStore<K, SK, MemA>>,
     state: SlidingWindowState,
@@ -82,7 +82,7 @@ impl<
         in_memory_remove: fn(MemA, BinA) -> Option<MemA>,
         partitioning_func: fn(&K) -> PK,
         extractor: fn(&K, &MemA) -> SK,
-        aggregator: fn(SystemTime, &K, &MemA) -> OutT,
+        aggregator: fn(&K, Window, &MemA) -> OutT,
         max_elements: usize,
     ) -> Self {
         Self {
@@ -287,7 +287,14 @@ impl<
         for (partition, partition_store) in &self.partition_heaps {
             for (_sort_key, key) in partition_store.elements.iter().take(self.max_elements) {
                 let (_, in_memory) = partition_store.memory_view.get(key).unwrap();
-                let value = (self.aggregator)(window_end, key, in_memory);
+                let value = (self.aggregator)(
+                    key,
+                    Window {
+                        start: bin_start,
+                        end: bin_end,
+                    },
+                    in_memory,
+                );
                 records.push(Record {
                     timestamp: window_end,
                     key: Some(partition.clone()),

@@ -103,7 +103,7 @@ impl TryFrom<ConnectionSchema> for grpc::api::ConnectionSchema {
                     }
                     Format::Avro(_) => grpc::api::Format::AvroFormat,
                     Format::Parquet(_) => grpc::api::Format::ParquetFormat,
-                    Format::Raw(_) => grpc::api::Format::RawStringFormat,
+                    Format::RawString(_) => grpc::api::Format::RawStringFormat,
                 })
             })
             .transpose()?;

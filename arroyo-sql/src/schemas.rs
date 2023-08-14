@@ -6,12 +6,12 @@ pub(crate) fn window_arrow_struct() -> DataType {
     DataType::Struct(
         vec![
             Arc::new(arrow::datatypes::Field::new(
-                "start_time",
+                "start",
                 DataType::Timestamp(TimeUnit::Millisecond, None),
                 false,
             )),
             Arc::new(arrow::datatypes::Field::new(
-                "end_time",
+                "end",
                 DataType::Timestamp(TimeUnit::Millisecond, None),
                 false,
             )),
@@ -26,12 +26,12 @@ pub(crate) fn window_type_def() -> TypeDef {
             Some("arroyo_types::Window".to_string()),
             vec![
                 StructField::new(
-                    "start_time".to_string(),
+                    "start".to_string(),
                     None,
                     TypeDef::DataType(DataType::Timestamp(TimeUnit::Millisecond, None), false),
                 ),
                 StructField::new(
-                    "end_time".to_string(),
+                    "end".to_string(),
                     None,
                     TypeDef::DataType(DataType::Timestamp(TimeUnit::Millisecond, None), false),
                 ),
