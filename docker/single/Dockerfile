@@ -8,7 +8,7 @@ ARG PROM_ARCH
 ARG GIT_SHA
 
 RUN apt-get update
-RUN apt-get -y install git curl pkg-config unzip build-essential libssl-dev openssl \
+RUN apt-get -y install git curl pkg-config unzip build-essential libssl-dev openssl libsasl2-dev \
     cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash
 
 RUN wget https://github.com/rui314/mold/releases/download/v1.11.0/mold-1.11.0-${MOLD_ARCH}-linux.tar.gz && \
@@ -85,7 +85,7 @@ ENV VERGEN_GIT_SHA=$GIT_SHA
 
 # Build Arroyo
 RUN service postgresql start && \
-    cargo build --release -p arroyo-compiler-service -p arroyo-controller -p arroyo-api && \
+    cargo build --release --all-features -p arroyo-compiler-service -p arroyo-controller -p arroyo-api && \
     mv target/release/arroyo-* /usr/bin && \
     rm -rf target/release && \
     service postgresql stop
