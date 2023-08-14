@@ -56,20 +56,14 @@ pub struct KinesisSourceFunc<K: Data, T: Data + DeserializeOwned> {
 
 struct KinesisSourceConfig {
     read_mode: SourceOffset,
-    shard_poll_interval: Duration,
 }
 
 impl KinesisSourceConfig {
     fn new_from_table(table: &KinesisTable) -> Self {
-        let TableType::Source{offset: read_mode, poll_shard_interval_seconds } = table.type_ else {
+        let TableType::Source{offset: read_mode} = table.type_ else {
             panic!("found non-source kinesis table in KinesisSource");
         };
-        let shard_poll_interval =
-            Duration::from_secs(poll_shard_interval_seconds.unwrap_or(10) as u64);
-        Self {
-            read_mode,
-            shard_poll_interval,
-        }
+        Self { read_mode }
     }
 }
 
@@ -392,7 +386,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         let mut futures = FuturesUnordered::new();
         futures.extend(starting_futures.into_iter());
 
-        let mut shard_poll_interval = tokio::time::interval(self.config.shard_poll_interval);
+        let mut shard_poll_interval = tokio::time::interval(Duration::from_secs(1));
         shard_poll_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {

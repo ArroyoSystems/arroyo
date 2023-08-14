@@ -132,15 +132,12 @@ impl Connector for KinesisConnector {
         let table_type = match typ.as_str() {
             "source" => {
                 let offset: Option<String> = opts.remove("source.offset");
-                let poll_shard_interval_seconds =
-                    pull_option_to_i64("source.poll_shard_interval_seconds", opts)?;
                 TableType::Source {
                     offset: match offset.as_ref().map(|f| f.as_str()) {
                         Some("earliest") => SourceOffset::Earliest,
                         None | Some("latest") => SourceOffset::Latest,
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
                     },
-                    poll_shard_interval_seconds,
                 }
             }
             "sink" => {

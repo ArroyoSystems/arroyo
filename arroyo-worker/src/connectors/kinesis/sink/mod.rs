@@ -6,7 +6,7 @@ use std::{
 use anyhow::Result;
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::OperatorConfig;
-use arroyo_types::{CheckpointBarrier, Data, Key, Record};
+use arroyo_types::{CheckpointBarrier, Key, Record};
 use aws_config::load_from_env;
 use aws_sdk_kinesis::{
     client::fluent_builders::PutRecords, model::PutRecordsRequestEntry, types::Blob,
