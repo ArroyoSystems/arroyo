@@ -79,7 +79,7 @@ fn get_query(metric_name: MetricNames, job_id: &str, run_id: &u64, rate: &str) -
 #[utoipa::path(
     get,
     path = "/v1/pipelines/{pipeline_id}/jobs/{job_id}/operator_metric_groups",
-    tag = "metrics",
+    tag = "jobs",
     params(
         ("pipeline_id" = String, Path, description = "Pipeline id"),
         ("job_id" = String, Path, description = "Job id"),
