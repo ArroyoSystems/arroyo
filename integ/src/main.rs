@@ -187,7 +187,7 @@ pub async fn main() {
                 by hop(interval '2 seconds', interval '10 seconds')",
                 source_name
             ),
-            udfs: vec![],
+            udfs: None,
         },
     )
     .await
