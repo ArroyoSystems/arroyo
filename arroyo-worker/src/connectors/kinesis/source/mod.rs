@@ -122,6 +122,7 @@ impl ShardState {
     ) -> BoxedFuture<AsyncNamedResult<AsyncResult>> {
         let shard_iterator_call: GetShardIterator = kinesis_client
             .get_shard_iterator()
+            .stream_name(&self.stream_name)
             .set_shard_id(Some(self.shard_id.clone()));
         let shard_iterator_call = match &self.offset {
             KinesisOffset::Earliest => {
