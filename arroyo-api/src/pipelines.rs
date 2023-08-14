@@ -322,6 +322,7 @@ pub async fn validate_pipeline(
         parallelism: 1,
         udfs: validate_pipeline_post
             .udfs
+            .unwrap_or(vec![])
             .into_iter()
             .map(|u| CreateUdf {
                 language: 0,
@@ -389,6 +390,7 @@ pub async fn post_pipeline(
             parallelism: pipeline_post.parallelism,
             udfs: pipeline_post
                 .udfs
+                .unwrap_or(vec![])
                 .into_iter()
                 .map(|u| CreateUdf {
                     language: 0,

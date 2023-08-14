@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 #[serde(rename_all = "camelCase")]
 pub struct ValidatePipelinePost {
     pub query: String,
-    pub udfs: Vec<Udf>,
+    pub udfs: Option<Vec<Udf>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -15,7 +15,7 @@ pub struct ValidatePipelinePost {
 pub struct PipelinePost {
     pub name: String,
     pub query: String,
-    pub udfs: Vec<Udf>,
+    pub udfs: Option<Vec<Udf>>,
     pub preview: Option<bool>,
     pub parallelism: u64,
 }
