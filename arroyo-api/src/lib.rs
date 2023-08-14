@@ -571,6 +571,7 @@ impl ApiGrpc for ApiServer {
     tags(
         (name = "pipelines", description = "Pipeline management endpoints"),
         (name = "jobs", description = "Job management endpoints"),
+        (name = "connectors", description = "Connector management endpoints"),
         (name = "ping", description = "Ping endpoint"),
     )
 )]

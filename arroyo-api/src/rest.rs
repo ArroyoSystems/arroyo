@@ -35,6 +35,7 @@ pub struct AppState {
     pub(crate) pool: Pool,
 }
 
+/// Ping endpoint
 #[utoipa::path(
     get,
     path = "/v1/ping",
