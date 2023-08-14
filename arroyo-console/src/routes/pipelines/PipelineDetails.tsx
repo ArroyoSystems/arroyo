@@ -87,7 +87,7 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
     if (outputs.length > 20) {
       outputs.shift();
     }
-    setOutputs(outputs);
+    setOutputs(outputs.slice());
   };
 
   const subscribe = async () => {

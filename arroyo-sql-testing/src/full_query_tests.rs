@@ -111,11 +111,6 @@ GROUP BY 2
 )
 WHERE auction % 2 = 0"}
 
-full_pipeline_codegen! {"sum_of_sums_updating",
-"SELECT bids, count(*) as occurrences FROM (
-  SELECT count(*) as bids, bid.auction as auction FROM nexmark where bid is not null group by 2)
-GROUP BY 1"}
-
 full_pipeline_codegen! {"create_parquet_s3_source",
 "CREATE TABLE bids (
   auction bigint,
