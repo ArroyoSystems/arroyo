@@ -6,7 +6,7 @@ ARG MOLD_ARCH
 ARG GIT_SHA
 
 RUN apt-get update && \
-    apt-get -y install curl git pkg-config unzip build-essential libssl-dev openssl cmake clang wget && \
+    apt-get -y install curl git pkg-config unzip build-essential libssl-dev libsasl2-dev openssl cmake clang wget && \
     # Install mold
     wget https://github.com/rui314/mold/releases/download/v1.11.0/mold-1.11.0-${MOLD_ARCH}-linux.tar.gz && \
     tar xvfz mold*.tar.gz && \
