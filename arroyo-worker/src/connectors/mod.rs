@@ -3,6 +3,7 @@ pub mod filesystem;
 pub mod fluvio;
 pub mod impulse;
 pub mod kafka;
+pub mod kinesis;
 pub mod nexmark;
 pub mod sse;
 pub mod two_phase_committer;

@@ -54,6 +54,7 @@ pub struct SourceOperator {
     pub timestamp_override: Option<Expression>,
     pub watermark_column: Option<Expression>,
 }
+
 impl SourceOperator {
     fn return_type(&self) -> StructDef {
         if let Some(ref projection) = self.virtual_field_projection {

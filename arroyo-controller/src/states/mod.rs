@@ -580,7 +580,9 @@ impl StateMachine {
             "Stopped" => Some(Box::new(Stopped {})),
             "Finished" => Some(Box::new(Finished {})),
             "Failed" => Some(Box::new(Failed {})),
-            "Compiling" | "Scheduling" | "Running" | "Recovering" => Some(Box::new(Compiling {})),
+            "Compiling" | "Scheduling" | "Running" | "Recovering" | "Rescaling" => {
+                Some(Box::new(Compiling {}))
+            }
             "Stopping" | "CheckpointStopping" => {
                 // TODO: do we need to handle a failure in CheckpointStopping specially?
                 if status.finish_time.is_none() {
