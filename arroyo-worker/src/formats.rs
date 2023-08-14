@@ -48,12 +48,19 @@ fn deserialize_slice_json<T: DeserializeOwned>(
     }
 }
 
+pub fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> {
+    let json = json! {
+        { "value": String::from_utf8_lossy(msg) }
+    };
+    Ok(serde_json::from_value(json).unwrap())
+}
+
 pub fn deserialize_slice<T: DeserializeOwned>(format: &Format, msg: &[u8]) -> Result<T, UserError> {
     match format {
         Format::Json(json) => deserialize_slice_json(json, msg),
         Format::Avro(_) => todo!(),
         Format::Parquet(_) => todo!(),
-        Format::Raw(_) => todo!(),
+        Format::RawString(_) => deserialize_raw_string(msg),
     }
     .map_err(|e| {
         UserError::new(
@@ -107,7 +114,7 @@ impl<T: SchemaData + Serialize> DataSerializer<T> {
             }
             Format::Avro(_) => todo!(),
             Format::Parquet(_) => todo!(),
-            Format::Raw(_) => todo!(),
+            Format::RawString(_) => todo!(),
         }
     }
 }
