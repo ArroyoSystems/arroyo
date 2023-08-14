@@ -375,10 +375,6 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         )))
     }
 
-    fn get_shard_iterator_call(&self) -> GetShardIterator {
-        self.kinesis_client.as_ref().unwrap().get_shard_iterator()
-    }
-
     /// Runs the Kinesis source, handling incoming records and control messages.
     ///
     /// This method initializes the Kinesis client, initializes the shards, and enters a loop to handle incoming
@@ -389,12 +385,10 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
     async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
         let config = load_from_env().await;
         self.kinesis_client = Some(KinesisClient::new(&config));
-        let starting_futures = self.init_shards(ctx).await.map_err(|e| {
-            UserError::new(
-                "failed to initialize shards. Underlying error:",
-                e.to_string(),
-            )
-        })?;
+        let starting_futures = self
+            .init_shards(ctx)
+            .await
+            .map_err(|e| UserError::new("failed to initialize shards.", e.to_string()))?;
         let mut futures = FuturesUnordered::new();
         futures.extend(starting_futures.into_iter());
 
