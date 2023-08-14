@@ -85,7 +85,7 @@ ENV VERGEN_GIT_SHA=$GIT_SHA
 
 # Build Arroyo
 RUN service postgresql start && \
-    cargo build --release -p arroyo-compiler-service -p arroyo-controller -p arroyo-api && \
+    cargo build --release --all-features -p arroyo-compiler-service -p arroyo-controller -p arroyo-api && \
     mv target/release/arroyo-* /usr/bin && \
     rm -rf target/release && \
     service postgresql stop
