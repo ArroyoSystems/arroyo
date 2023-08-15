@@ -59,38 +59,6 @@ proto3.util.setEnumType(StopType, "arroyo_api.StopType", [
 ]);
 
 /**
- * @generated from enum arroyo_api.SerializationMode
- */
-export enum SerializationMode {
-  /**
-   * @generated from enum value: JSON = 0;
-   */
-  JSON = 0,
-
-  /**
-   * @generated from enum value: JSON_SCHEMA_REGISTRY = 1;
-   */
-  JSON_SCHEMA_REGISTRY = 1,
-
-  /**
-   * @generated from enum value: RAW = 2;
-   */
-  RAW = 2,
-
-  /**
-   * @generated from enum value: PARQUET = 3;
-   */
-  PARQUET = 3,
-}
-// Retrieve enum metadata with: proto3.getEnumType(SerializationMode)
-proto3.util.setEnumType(SerializationMode, "arroyo_api.SerializationMode", [
-  { no: 0, name: "JSON" },
-  { no: 1, name: "JSON_SCHEMA_REGISTRY" },
-  { no: 2, name: "RAW" },
-  { no: 3, name: "PARQUET" },
-]);
-
-/**
  * @generated from enum arroyo_api.WasmBehavior
  */
 export enum WasmBehavior {
@@ -1795,6 +1763,12 @@ export class Window extends Message<Window> {
      */
     value: InstantWindow;
     case: "instantWindow";
+  } | {
+    /**
+     * @generated from field: arroyo_api.SessionWindow session_window = 5;
+     */
+    value: SessionWindow;
+    case: "sessionWindow";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<Window>) {
@@ -1808,6 +1782,7 @@ export class Window extends Message<Window> {
     { no: 2, name: "sliding_window", kind: "message", T: SlidingWindow, oneof: "window" },
     { no: 3, name: "tumbling_window", kind: "message", T: TumblingWindow, oneof: "window" },
     { no: 4, name: "instant_window", kind: "message", T: InstantWindow, oneof: "window" },
+    { no: 5, name: "session_window", kind: "message", T: SessionWindow, oneof: "window" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Window {
@@ -1935,6 +1910,43 @@ export class InstantWindow extends Message<InstantWindow> {
 
   static equals(a: InstantWindow | PlainMessage<InstantWindow> | undefined, b: InstantWindow | PlainMessage<InstantWindow> | undefined): boolean {
     return proto3.util.equals(InstantWindow, a, b);
+  }
+}
+
+/**
+ * @generated from message arroyo_api.SessionWindow
+ */
+export class SessionWindow extends Message<SessionWindow> {
+  /**
+   * @generated from field: uint64 gap_micros = 1;
+   */
+  gapMicros = protoInt64.zero;
+
+  constructor(data?: PartialMessage<SessionWindow>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime = proto3;
+  static readonly typeName = "arroyo_api.SessionWindow";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "gap_micros", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SessionWindow {
+    return new SessionWindow().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SessionWindow {
+    return new SessionWindow().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SessionWindow {
+    return new SessionWindow().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SessionWindow | PlainMessage<SessionWindow> | undefined, b: SessionWindow | PlainMessage<SessionWindow> | undefined): boolean {
+    return proto3.util.equals(SessionWindow, a, b);
   }
 }
 
@@ -4884,6 +4896,11 @@ export class FormatOptions extends Message<FormatOptions> {
    */
   confluentSchemaRegistry = false;
 
+  /**
+   * @generated from field: bool include_schema = 2;
+   */
+  includeSchema = false;
+
   constructor(data?: PartialMessage<FormatOptions>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4893,6 +4910,7 @@ export class FormatOptions extends Message<FormatOptions> {
   static readonly typeName = "arroyo_api.FormatOptions";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "confluent_schema_registry", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "include_schema", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FormatOptions {
