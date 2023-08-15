@@ -1,5 +1,4 @@
-use std::convert::Infallible;
-
+use crate::queries::api_queries::GetConnectionTablesParams;
 use anyhow::anyhow;
 use arrow_schema::DataType;
 use axum::extract::{Path, Query, State};
@@ -8,9 +7,11 @@ use axum::response::Sse;
 use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::GenericClient;
+use cornucopia_async::Params;
 use futures_util::stream::Stream;
 use http::StatusCode;
 use serde_json::json;
+use std::convert::Infallible;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
@@ -19,20 +20,21 @@ use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::types::{
     ConfluentSchema, ConfluentSchemaQueryParams, ConnectionProfile, ConnectionSchema,
-    ConnectionTable, ConnectionTableCollection, ConnectionTablePost, SchemaDefinition,
+    ConnectionTable, ConnectionTableCollection, ConnectionTablePost, PaginationQueryParams,
+    SchemaDefinition,
 };
 use arroyo_sql::json_schema::convert_json_schema;
 use arroyo_sql::types::{StructField, TypeDef};
 
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map_rest, not_found, required_field, ApiError,
-    BearerAuth, ErrorResp,
+    authenticate, bad_request, client, log_and_map_rest, not_found, paginate_results,
+    required_field, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
 use crate::{
     handle_db_error, handle_delete, log_and_map,
     queries::api_queries::{self, DbConnectionTable},
-    AuthData,
+    to_micros, AuthData,
 };
 
 async fn get_and_validate_connector<E: GenericClient>(
@@ -182,7 +184,7 @@ pub(crate) async fn get_all_connection_tables<C: GenericClient>(
     auth: &AuthData,
     client: &C,
 ) -> Result<Vec<ConnectionTable>, ErrorResp> {
-    let tables = api_queries::get_connection_tables()
+    let tables = api_queries::get_all_connection_tables()
         .bind(client, &auth.organization_id)
         .all()
         .await
@@ -190,71 +192,16 @@ pub(crate) async fn get_all_connection_tables<C: GenericClient>(
 
     let vec: Vec<ConnectionTable> = tables
         .into_iter()
-        .filter_map(|t| {
-            let Some(connector) = connector_for_type(&t.connector) else {
-                warn!("invalid connector {} in saved ConnectionTable {}", t.connector, t.id);
-                return None;
-            };
-
-            let connection_profile = get_connection_profile(&t, &*connector);
-
-            let schema: Option<ConnectionSchema> =
-                t.schema
-                    .and_then(|s| match serde_json::from_value(s.clone()) {
-                        Ok(schema) => Some(schema),
-                        Err(err) => {
-                            warn!("Schema deserialization failed: {}", err);
-                            None
-                        }
-                    });
-
-            let schema: Option<ConnectionSchema> = match connector.get_schema(
-                &connection_profile
-                    .as_ref()
-                    .map(|t| t.config.clone())
-                    .unwrap_or(json!({})),
-                &t.config,
-                schema.as_ref(),
-            ) {
-                Ok(schema) => schema,
-                Err(e) => {
-                    warn!("Invalid connector config for {}: {:?}", t.id, e);
-                    return None;
-                }
-            };
-
-            let schema = match schema {
-                Some(schema) => schema,
-                None => {
-                    warn!("No schema found for connection table {}", t.name);
-                    return None;
-                }
-            };
-
-            let connection_type = match t.table_type.clone().try_into() {
-                Ok(connection_type) => connection_type,
-                Err(_) => {
-                    warn!(
-                        "Invalid table type in database for connection table {}: {}",
-                        t.name, t.table_type
-                    );
-                    return None;
-                }
-            };
-
-            Some(ConnectionTable {
-                id: t.id,
-                pub_id: t.pub_id,
-                name: t.name,
-                connection_profile,
-                connector: t.connector,
-                table_type: connection_type,
-                config: t.config,
-                schema,
-                consumers: t.consumer_count as u32,
-            })
+        .map(|t| t.try_into())
+        .map(|result| {
+            if let Err(err) = &result {
+                warn!("Error building connection table: {}", err);
+            }
+            result
         })
+        .filter_map(Result::ok)
         .collect();
+
     Ok(vec)
 }
 
@@ -376,6 +323,7 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
             id: self.id,
             pub_id: self.pub_id,
             name: self.name,
+            created_at: to_micros(self.created_at),
             connection_profile: None,
             connector: self.connector,
             table_type: connection_type,
@@ -391,6 +339,9 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
     get,
     path = "/v1/connection_tables",
     tag = "connection_tables",
+    params(
+        PaginationQueryParams
+    ),
     responses(
         (status = 200, description = "Got connection table collection", body = ConnectionTableCollection),
     ),
@@ -398,13 +349,44 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
 pub(crate) async fn get_connection_tables(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
+    query_params: Query<PaginationQueryParams>,
 ) -> Result<Json<ConnectionTableCollection>, ErrorResp> {
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
+    let (starting_after, limit) =
+        validate_pagination_params(query_params.starting_after.clone(), query_params.limit)?;
+
+    let tables = api_queries::get_connection_tables()
+        .params(
+            &client,
+            &GetConnectionTablesParams {
+                organization_id: &auth_data.organization_id,
+                starting_after: starting_after.unwrap_or("".to_string()),
+                limit: limit as i32, // is 1 more than the requested limit
+            },
+        )
+        .all()
+        .await
+        .map_err(log_and_map)?;
+
+    let (tables, has_more) = paginate_results(tables, limit);
+
+    let tables: Vec<ConnectionTable> = tables
+        .into_iter()
+        .map(|t| t.try_into())
+        .map(|result| {
+            if let Err(err) = &result {
+                warn!("Error building connection table: {}", err);
+            }
+            result
+        })
+        .filter_map(Result::ok)
+        .collect();
+
     Ok(Json(ConnectionTableCollection {
-        data: get_all_connection_tables(&auth_data, &client).await?,
-        has_more: false,
+        data: tables,
+        has_more,
     }))
 }
 

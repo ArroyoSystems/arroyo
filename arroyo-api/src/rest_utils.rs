@@ -14,6 +14,8 @@ use tonic::Code;
 
 pub type BearerAuth = Option<TypedHeader<Authorization<Bearer>>>;
 
+const DEFAULT_ITEMS_PER_PAGE: u32 = 10;
+
 #[derive(Debug)]
 pub struct ErrorResp {
     pub(crate) status_code: StatusCode,
@@ -127,4 +129,35 @@ pub(crate) fn not_found(object: String) -> ErrorResp {
 
 pub(crate) fn required_field(field: &str) -> ErrorResp {
     bad_request(format!("Field {} must be set", field))
+}
+
+pub fn validate_pagination_params(
+    starting_after: Option<String>,
+    limit: Option<u32>,
+) -> Result<(Option<String>, u32), ErrorResp> {
+    // return ErrorResp if limit is less than 1
+    if let Some(limit) = limit {
+        if limit < 1 {
+            return Err(ErrorResp {
+                status_code: StatusCode::BAD_REQUEST,
+                message: "Limit must be greater than 0".to_string(),
+            });
+        }
+    }
+
+    // increase limit by 1 to determine if there are more results
+    let limit = limit.unwrap_or(DEFAULT_ITEMS_PER_PAGE) + 1;
+
+    Ok((starting_after.clone(), limit))
+}
+
+pub fn paginate_results<T>(results: Vec<T>, limit: u32) -> (Vec<T>, bool) {
+    // this limit is one more than the requested limit to determine if there are more results
+    let mut results = results;
+    let has_more = results.len() as u32 == limit;
+    if has_more {
+        results.pop();
+    }
+
+    (results, has_more)
 }

@@ -1,4 +1,3 @@
-import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   AlertDescription,
@@ -9,8 +8,11 @@ import {
   AlertDialogHeader,
   AlertDialogOverlay,
   AlertIcon,
+  Box,
   Button,
   CloseButton,
+  Flex,
+  IconButton,
   Stack,
   Table,
   Tbody,
@@ -18,27 +20,37 @@ import {
   Th,
   Thead,
   Tr,
+  useColorModeValue,
   useDisclosure,
 } from '@chakra-ui/react';
 import React, { useRef, useState } from 'react';
 import { usePipelines, usePipeline } from '../lib/data_fetching';
-import PipelineRow from './PipelineRow';
 import { formatError } from '../lib/util';
+import { ArrowBackIcon, ArrowForwardIcon } from '@chakra-ui/icons';
+import PipelineRow from './PipelineRow';
+import Loading from './Loading';
 
 export interface JobsTableProps {}
 
 const columns = ['Created at', 'Job'];
 
 const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
-  const navigate = useNavigate();
-  // const [state, setState] = useState<Array<JobStatus> | null>();
-
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [pipelineIdToBeDeleted, setPipelineIdToBeDeleted] = useState<string | undefined>(undefined);
   const { pipeline: pipelineToBeDeleted, deletePipeline } = usePipeline(pipelineIdToBeDeleted);
-  const { pipelines, piplinesError } = usePipelines();
+  const { pipelinePages, piplinesError, pipelineTotalPages, setPipelinesMaxPages } = usePipelines();
+  const [pageNum, setPageNum] = useState<number>(1);
+
+  setPipelinesMaxPages(Math.max(pageNum, pipelineTotalPages));
+
+  if (!pipelinePages || pipelinePages.length != pipelineTotalPages) {
+    return <Loading />;
+  }
+
+  const currentPage = pipelinePages[pageNum - 1];
+  const pipelines = currentPage.data;
 
   let messageBox = null;
   if (message != null) {
@@ -119,7 +131,7 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
 
   const tableBody = (
     <Tbody>
-      {pipelines?.flatMap(pipeline => (
+      {pipelines.map(pipeline => (
         <PipelineRow
           key={pipeline.id}
           pipeline={pipeline}
@@ -130,14 +142,43 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
     </Tbody>
   );
 
+  const pageButtons = (
+    <Flex justifyContent={'center'} gap={'5px'}>
+      <IconButton
+        aria-label="Previous page"
+        icon={<ArrowBackIcon />}
+        isDisabled={pageNum === 1}
+        onClick={() => setPageNum(pageNum - 1)}
+      />
+      <IconButton
+        aria-label="Search database"
+        icon={<ArrowForwardIcon />}
+        isDisabled={!currentPage.hasMore}
+        onClick={() => setPageNum(pageNum + 1)}
+      />
+    </Flex>
+  );
+
   return (
-    <Stack>
-      {alert}
-      {messageBox}
-      <Table>
-        {tableHeader}
-        {tableBody}
-      </Table>
+    <Stack
+      spacing={{
+        base: '8',
+        lg: '6',
+      }}
+    >
+      <Box
+        bg="bg-surface"
+        boxShadow={{ base: 'none', md: useColorModeValue('sm', 'sm-dark') }}
+        borderRadius="lg"
+      >
+        {alert}
+        {messageBox}
+        <Table>
+          {tableHeader}
+          {tableBody}
+        </Table>
+      </Box>
+      {pageButtons}
     </Stack>
   );
 };

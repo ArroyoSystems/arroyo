@@ -207,6 +207,8 @@ export interface components {
       connector: string;
       /** Format: int32 */
       consumers: number;
+      /** Format: int64 */
+      createdAt: number;
       id: string;
       name: string;
       schema: components["schemas"]["ConnectionSchema"];
@@ -326,6 +328,11 @@ export interface components {
       /** Format: int64 */
       timestamp: number;
       value: string;
+    };
+    PaginationQueryParams: {
+      /** Format: int32 */
+      limit?: number | null;
+      starting_after?: string | null;
     };
     ParquetFormat: Record<string, never>;
     Pipeline: {
@@ -479,6 +486,12 @@ export interface operations {
    * @description List all connection tables
    */
   get_connection_tables: {
+    parameters: {
+      query?: {
+        starting_after?: string | null;
+        limit?: number | null;
+      };
+    };
     responses: {
       /** @description Got connection table collection */
       200: {
@@ -618,6 +631,12 @@ export interface operations {
    * @description List all pipelines
    */
   get_pipelines: {
+    parameters: {
+      query?: {
+        starting_after?: string | null;
+        limit?: number | null;
+      };
+    };
     responses: {
       /** @description Got pipelines collection */
       200: {
