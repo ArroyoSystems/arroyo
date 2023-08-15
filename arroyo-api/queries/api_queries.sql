@@ -55,6 +55,7 @@ VALUES (:pub_id, :organization_id, :created_by, :name, :table_type, :connector, 
 SELECT connection_tables.id as id,
     connection_tables.pub_id as pub_id,
     connection_tables.name as name,
+    connection_tables.created_at as created_at,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
     connection_tables.config as config,
@@ -69,12 +70,41 @@ SELECT connection_tables.id as id,
     ) as consumer_count
 FROM connection_tables
 LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
-WHERE connection_tables.organization_id = :organization_id;
+WHERE connection_tables.organization_id = :organization_id
+    AND (connection_tables.created_at < (
+        SELECT created_at FROM connection_tables
+        WHERE pub_id = :starting_after
+    ) OR :starting_after = '')
+ORDER BY connection_tables.created_at DESC
+LIMIT CASE WHEN :limit > 0 THEN :limit ELSE NULL END;
+
+--! get_all_connection_tables: DbConnectionTable
+SELECT connection_tables.id as id,
+    connection_tables.pub_id as pub_id,
+    connection_tables.name as name,
+    connection_tables.created_at as created_at,
+    connection_tables.connector as connector,
+    connection_tables.table_type as table_type,
+    connection_tables.config as config,
+    connection_tables.schema as schema,
+    connection_tables.connection_id as connection_id,
+    connection_profiles.name as connection_name,
+    connection_profiles.type as connection_type,
+    connection_profiles.config as connection_config,
+    (SELECT count(*) as pipeline_count
+        FROM connection_table_pipelines
+        WHERE connection_table_pipelines.connection_table_id = connection_tables.id
+    ) as consumer_count
+FROM connection_tables
+LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
+WHERE connection_tables.organization_id = :organization_id
+ORDER BY connection_tables.created_at DESC;
 
 --! get_connection_table: DbConnectionTable
 SELECT connection_tables.id as id,
     connection_tables.pub_id as pub_id,
     connection_tables.name as name,
+    connection_tables.created_at as created_at,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
     connection_tables.config as config,
@@ -110,8 +140,15 @@ SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_int
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     LEFT JOIN job_statuses ON job_configs.id = job_statuses.id
-WHERE pipelines.organization_id = :organization_id AND pipelines.pub_id IS NOT NULL AND ttl_micros IS NULL
-ORDER BY pipelines.created_at DESC;
+WHERE pipelines.organization_id = :organization_id
+    AND pipelines.pub_id IS NOT NULL
+    AND ttl_micros IS NULL
+    AND (pipelines.created_at < (
+        SELECT created_at FROM pipelines
+        WHERE pub_id = :starting_after
+    ) OR :starting_after = '')
+ORDER BY pipelines.created_at DESC
+LIMIT :limit::integer;
 
 --! get_pipeline: DbPipeline
 SELECT pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros

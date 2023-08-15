@@ -1,9 +1,9 @@
 use anyhow::Context;
 use arroyo_connectors::connector_for_type;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
-use cornucopia_async::GenericClient;
+use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};
 
 use petgraph::visit::EdgeRef;
@@ -20,18 +20,18 @@ use arroyo_rpc::grpc::api::{
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::types::{
-    Job, JobCollection, Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode,
-    PipelinePatch, PipelinePost, StopType, ValidatePipelinePost,
+    Job, JobCollection, PaginationQueryParams, Pipeline, PipelineCollection, PipelineEdge,
+    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, StopType, ValidatePipelinePost,
 };
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
-use crate::queries::api_queries::{DbPipeline, DbPipelineJob};
+use crate::queries::api_queries::{DbPipeline, DbPipelineJob, GetPipelinesParams};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map_rest, not_found, required_field, unauthorized,
-    ApiError, BearerAuth, ErrorResp,
+    authenticate, bad_request, client, log_and_map_rest, not_found, paginate_results,
+    required_field, unauthorized, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
 use crate::types::public::{PipelineType, StopMode};
 use crate::{connection_tables, to_micros};
@@ -470,6 +470,9 @@ pub async fn patch_pipeline(
     get,
     path = "/v1/pipelines",
     tag = "pipelines",
+    params(
+        PaginationQueryParams
+    ),
     responses(
         (status = 200, description = "Got pipelines collection", body = PipelineCollection),
     ),
@@ -477,18 +480,31 @@ pub async fn patch_pipeline(
 pub async fn get_pipelines(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
+    query_params: Query<PaginationQueryParams>,
 ) -> Result<Json<PipelineCollection>, ErrorResp> {
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
+    let (starting_after, limit) =
+        validate_pagination_params(query_params.starting_after.clone(), query_params.limit)?;
+
     let pipelines: Vec<DbPipeline> = api_queries::get_pipelines()
-        .bind(&client, &auth_data.organization_id)
+        .params(
+            &client,
+            &GetPipelinesParams {
+                organization_id: &auth_data.organization_id,
+                starting_after: starting_after.unwrap_or_default(),
+                limit: limit as i32, // is 1 more than the requested limit
+            },
+        )
         .all()
         .await
         .map_err(log_and_map_rest)?;
 
+    let (pipelines, has_more) = paginate_results(pipelines, limit);
+
     Ok(Json(PipelineCollection {
-        has_more: false,
+        has_more,
         data: pipelines
             .into_iter()
             .map(|p| p.try_into().unwrap())

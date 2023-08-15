@@ -70,11 +70,18 @@ export function CreatePipeline() {
   const [startError, setStartError] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState<number>(0);
   const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
-  const { connectionTables, connectionTablesLoading } = useConnectionTables();
+  const { connectionTablePages, connectionTablesLoading } = useConnectionTables(50);
   const queryParams = useQuery();
   const { pipeline: copyFrom, pipelineLoading: copyFromLoading } = usePipeline(
     queryParams.get('from') ?? undefined
   );
+
+  let connectionTables: ConnectionTable[] = [];
+  let catalogTruncated = false;
+  if (connectionTablePages?.length) {
+    connectionTables = connectionTablePages[0].data;
+    catalogTruncated = connectionTablePages[0].hasMore;
+  }
 
   const updateQuery = (query: string) => {
     window.localStorage.setItem('query', query);
@@ -203,8 +210,8 @@ export function CreatePipeline() {
     }
   };
 
-  const sources = (connectionTables || []).filter(s => s.tableType == 'source');
-  const sinks = (connectionTables || []).filter(s => s.tableType == 'sink');
+  const sources = connectionTables.filter(s => s.tableType == 'source');
+  const sinks = connectionTables.filter(s => s.tableType == 'sink');
 
   const startPipelineModal = (
     <StartPipelineModal
@@ -240,6 +247,21 @@ export function CreatePipeline() {
     );
   };
 
+  // Since we only fetch the first page of connection tables,
+  // display a warning if there are too many to be shown.
+  let catalogTruncatedWarning = <></>;
+  if (catalogTruncated) {
+    catalogTruncatedWarning = (
+      <Alert flexShrink={0} status="warning">
+        <AlertIcon />
+        <AlertDescription>
+          The catalogue is too large to be shown in its entirety. Please see the Connections tab for
+          the complete listing.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
   let catalog = (
     <Stack
       width={300}
@@ -249,7 +271,9 @@ export function CreatePipeline() {
       pt={4}
       borderRight={'1px solid'}
       borderColor={'gray.500'}
+      overflow={'scroll'}
     >
+      {catalogTruncatedWarning}
       {catalogType('Source', sources)}
       {catalogType('Sink', sinks)}
 

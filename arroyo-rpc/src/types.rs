@@ -551,6 +551,7 @@ pub struct ConnectionTable {
     #[serde(rename = "id")]
     pub pub_id: String,
     pub name: String,
+    pub created_at: u64,
     pub connector: String,
     pub connection_profile: Option<ConnectionProfile>,
     pub table_type: ConnectionType,
@@ -588,4 +589,12 @@ pub struct ConfluentSchema {
 pub struct ConfluentSchemaQueryParams {
     pub endpoint: String,
     pub topic: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "snake_case")]
+pub struct PaginationQueryParams {
+    pub starting_after: Option<String>,
+    pub limit: Option<u32>,
 }

@@ -1,10 +1,13 @@
 import { CheckpointDetailsReq } from '../gen/api_pb';
 import { ApiClient } from '../main';
 import useSWR, { mutate as globalMutate } from 'swr';
+import useSWRInfinite from 'swr/infinite';
+
 import { components, paths } from '../gen/api-types';
 import createClient from 'openapi-fetch';
 
 type schemas = components['schemas'];
+
 export type Pipeline = schemas['Pipeline'];
 export type Job = schemas['Job'];
 export type StopType = schemas['StopType'];
@@ -47,8 +50,36 @@ const connectionProfilesKey = () => {
   return { key: 'Connections' };
 };
 
-const connectionTablesKey = () => {
-  return { key: 'ConnectionTables' };
+const connectionTablesKey = (limit: number) => {
+  return (pageIndex: number, previousPageData: schemas['ConnectionTableCollection']) => {
+    if (previousPageData && !previousPageData.hasMore) return null;
+
+    if (pageIndex === 0) {
+      return { key: 'ConnectionTables', startingAfter: undefined, limit };
+    }
+
+    return {
+      key: 'ConnectionTables',
+      startingAfter: previousPageData.data[previousPageData.data.length - 1].id,
+      limit,
+    };
+  };
+};
+
+const pipelinesKey = (
+  pageIndex: number,
+  previousPageData: schemas['PipelineCollection'] | undefined
+) => {
+  if (previousPageData && !previousPageData.hasMore) return null;
+
+  if (pageIndex === 0 || !previousPageData) {
+    return { key: 'Piplines', startingAfter: undefined };
+  }
+
+  return {
+    key: 'Piplines',
+    startingAfter: previousPageData.data[previousPageData.data.length - 1].id,
+  };
 };
 
 const jobMetricsKey = (pipelineId?: string, jobId?: string) => {
@@ -71,10 +102,6 @@ const pipelineGraphKey = (query?: string, udfsInput?: string) => {
   return query ? { key: 'PipelineGraph', query, udfsInput } : null;
 };
 
-const pipelinesKey = () => {
-  return { key: 'Pipelines' };
-};
-
 const pipelineKey = (pipelineId?: string) => {
   return pipelineId ? { key: 'Pipeline', pipelineId } : null;
 };
@@ -92,7 +119,7 @@ const pingFetcher = async () => {
 
 export const usePing = () => {
   const { data, error } = useSWR('ping', pingFetcher, {
-    refreshInterval: 1000,
+    // refreshInterval: 1000,
     onErrorRetry: (error, key, config, revalidate, {}) => {
       // explicitly define this function to override the exponential backoff
       setTimeout(() => revalidate(), 1000);
@@ -143,24 +170,34 @@ export const useConnectionProfiles = () => {
 };
 
 // ConnectionTables
-const connectionTablesFetcher = async () => {
-  const { data, error } = await get('/v1/connection_tables', {});
-  return processResponse(data, error);
+const connectionTablesFetcher = () => {
+  return async (params: { key: string; startingAfter?: string; limit: number }) => {
+    const { data, error } = await get('/v1/connection_tables', {
+      params: {
+        query: {
+          starting_after: params.startingAfter,
+          limit: params.limit,
+        },
+      },
+    });
+
+    return processResponse(data, error);
+  };
 };
 
-export const useConnectionTables = () => {
-  const { data, isLoading, mutate } = useSWR<schemas['ConnectionTableCollection']>(
-    connectionTablesKey(),
-    connectionTablesFetcher,
-    {
-      refreshInterval: 5000,
-    }
-  );
+export const useConnectionTables = (limit: number) => {
+  const { data, isLoading, mutate, size, setSize } = useSWRInfinite<
+    schemas['ConnectionTableCollection']
+  >(connectionTablesKey(limit), connectionTablesFetcher(), {
+    refreshInterval: 5000,
+  });
 
   return {
-    connectionTables: data?.data,
+    connectionTablePages: data,
     connectionTablesLoading: isLoading,
     mutateConnectionTables: mutate,
+    connectionTablesTotalPages: size,
+    setConnectionTablesMaxPages: setSize,
   };
 };
 
@@ -298,16 +335,36 @@ export const usePipelineGraph = (query?: string, udfsInput?: string) => {
   };
 };
 
-const pipelinesFetcher = async () => {
-  const { data, error } = await get('/v1/pipelines', {});
-  return processResponse(data, error);
+const pipelinesFetcher = () => {
+  return async (params: { key: string; startingAfter?: string }) => {
+    const { data, error } = await get('/v1/pipelines', {
+      params: {
+        query: {
+          starting_after: params.startingAfter,
+        },
+      },
+    });
+
+    return processResponse(data, error);
+  };
 };
 
 export const usePipelines = () => {
-  const { data, error } = useSWR<schemas['PipelineCollection']>(pipelinesKey(), pipelinesFetcher, {
-    refreshInterval: 2000,
-  });
-  return { pipelines: data?.data, piplinesError: error };
+  const { data, isLoading, error, size, setSize } = useSWRInfinite<schemas['PipelineCollection']>(
+    pipelinesKey,
+    pipelinesFetcher(),
+    {
+      refreshInterval: 2000,
+    }
+  );
+
+  return {
+    pipelinePages: data,
+    pipelinesLoading: isLoading,
+    piplinesError: error,
+    pipelineTotalPages: size,
+    setPipelinesMaxPages: setSize,
+  };
 };
 
 const pipelineFetcher = () => {
@@ -339,7 +396,7 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
     const { error } = await del('/v1/pipelines/{id}', {
       params: { path: { id: pipelineId! } },
     });
-    await globalMutate(pipelinesKey());
+    await globalMutate(pipelinesKey(1, undefined));
     return { error };
   };
 

@@ -52,7 +52,7 @@
     "react-router-dom": "^6.13.0",
     "react-test-renderer": "^18.2.0",
     "reactflow": "^11.7.2",
-    "swr": "^2.1.5"
+    "swr": "^2.2.1"
   },
   "devDependencies": {
     "@chakra-ui/cli": "^2.4.1",

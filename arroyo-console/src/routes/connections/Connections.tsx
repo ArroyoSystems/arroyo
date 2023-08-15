@@ -26,13 +26,16 @@ import {
   ModalCloseButton,
   ModalBody,
   ModalFooter,
+  Flex,
 } from '@chakra-ui/react';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { FiInfo, FiXCircle } from 'react-icons/fi';
 import { ConnectionTable, del, Format, useConnectionTables } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 import { useNavigate } from 'react-router-dom';
 import { formatError } from '../../lib/util';
+import { ArrowBackIcon, ArrowForwardIcon } from '@chakra-ui/icons';
+import { formatDate } from '../../lib/util';
 
 interface ColumnDef {
   name: string;
@@ -59,6 +62,10 @@ const columns: Array<ColumnDef> = [
     accessor: s => <Text>{s.name}</Text>,
   },
   {
+    name: 'created at',
+    accessor: s => <Text>{formatDate(BigInt(s.createdAt))}</Text>,
+  },
+  {
     name: 'connector',
     accessor: s => <Text>{s.connector}</Text>,
   },
@@ -81,8 +88,27 @@ export function Connections() {
   const [message, setMessage] = useState<string | null>();
   const [isError, setIsError] = useState<boolean>(false);
   const [selected, setSelected] = useState<ConnectionTable | null>(null);
-  const { connectionTables, connectionTablesLoading, mutateConnectionTables } =
-    useConnectionTables();
+  const {
+    connectionTablePages,
+    connectionTablesLoading,
+    mutateConnectionTables,
+    connectionTablesTotalPages,
+    setConnectionTablesMaxPages,
+  } = useConnectionTables(10);
+
+  const [pageNum, setPageNum] = useState<number>(1);
+
+  if (
+    !connectionTablePages ||
+    connectionTablesLoading ||
+    connectionTablePages.length != connectionTablesTotalPages
+  ) {
+    return <Loading />;
+  }
+
+  setConnectionTablesMaxPages(Math.max(pageNum, connectionTablesTotalPages));
+  const currentPage = connectionTablePages[pageNum - 1];
+  const connectionTables = currentPage.data;
 
   const deleteTable = async (connection: ConnectionTable) => {
     const { error } = await del('/v1/connection_tables/{id}', {
@@ -102,10 +128,6 @@ export function Connections() {
     setMessage(null);
     setIsError(false);
   };
-
-  if (!connectionTables || connectionTablesLoading) {
-    return <Loading />;
-  }
 
   let messageBox = null;
   if (message != null) {
@@ -199,6 +221,23 @@ export function Connections() {
     </Box>
   );
 
+  const pageButtons = (
+    <Flex justifyContent={'center'} gap={'5px'}>
+      <IconButton
+        aria-label="Previous page"
+        icon={<ArrowBackIcon />}
+        isDisabled={pageNum === 1}
+        onClick={() => setPageNum(pageNum - 1)}
+      />
+      <IconButton
+        aria-label="Search database"
+        icon={<ArrowForwardIcon />}
+        isDisabled={!currentPage.hasMore}
+        onClick={() => setPageNum(pageNum + 1)}
+      />
+    </Flex>
+  );
+
   return (
     <Container py="8" flex="1">
       <Stack
@@ -231,6 +270,7 @@ export function Connections() {
           </HStack>
         </Stack>
         {table}
+        {pageButtons}
       </Stack>
     </Container>
   );
