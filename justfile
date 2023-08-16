@@ -26,6 +26,14 @@ docker-services-arm64:
         --build-arg PROTO_ARCH=aarch_64 \
         --file docker/cluster/services/Dockerfile . -t ghcr.io/arroyosystems/arroyo-services:arm64
 
+docker-worker-amd64:
+    docker build \
+        --file docker/cluster/worker/Dockerfile . -t ghcr.io/arroyosystems/arroyo-worker:amd64
+
+docker-worker-arm64:
+    docker build \
+        --file docker/cluster/worker/Dockerfile . -t ghcr.io/arroyosystems/arroyo-worker:arm64
+
 docker-compiler-amd64:
     docker build \
         --build-arg MOLD_ARCH=x86_64 \
@@ -37,6 +45,7 @@ docker-compiler-arm64:
         --build-arg MOLD_ARCH=aarch64 \
         --build-arg PROTO_ARCH=aarch_64 \
         --file docker/cluster/compiler/Dockerfile . -t ghcr.io/arroyosystems/arroyo-compiler:arm64
+
 
 docker-amd64: docker-single-amd64 docker-services-amd64 docker-compiler-amd64
 
