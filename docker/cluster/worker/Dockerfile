@@ -12,7 +12,7 @@ RUN cargo build --release
 FROM debian:bookworm-slim as runner
 WORKDIR /app
 RUN apt-get update && \
-    apt-get -y install openssl ca-certificates
+    apt-get -y install openssl ca-certificates libsasl2-dev
 
 COPY --from=builder /build_dir/target/release/copy_artifacts /usr/local/bin
 COPY docker/cluster/worker/entrypoint.sh /entrypoint.sh

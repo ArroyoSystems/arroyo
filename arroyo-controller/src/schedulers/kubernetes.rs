@@ -165,7 +165,7 @@ impl Scheduler for KubernetesScheduler {
             "apiVersion": "apps/v1",
             "kind": "ReplicaSet",
             "metadata": {
-                "name": format!("{}-{}-{}", self.name, req.job_id, req.run_id),
+                "name": format!("{}-{}-{}", self.name, req.job_id.to_ascii_lowercase().replace("_", "-"), req.run_id),
                 "namespace": self.namespace,
                 "labels": labels,
                 "annotations": annotations,

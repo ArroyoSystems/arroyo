@@ -60,7 +60,7 @@ pub async fn main() {
                     Arc::new(Box::new(
                         LocalFileSystem::new_with_prefix(output_dir.clone()).unwrap(),
                     )),
-                    format!("file:///{}", output_dir.to_string_lossy()),
+                    format!("file://{}", output_dir.to_string_lossy()),
                 )
             }
             _ => {

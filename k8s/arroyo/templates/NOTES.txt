@@ -10,7 +10,7 @@ Once the release is fully deployed, you can navigate to the web ui by running
 
 If that doesn't work (for example on MacOS or a remote Kubernetes cluster), you can also try
 
-  $ kubectl port-forward service/{{ .Release.Name }}-api 8000:80
+  $ kubectl port-forward service/{{ .Release.Name }}-api 8000:80 8001:8001
 
 And opening http://localhost:8000 in your browser.
 
