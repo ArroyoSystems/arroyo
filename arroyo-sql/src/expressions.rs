@@ -1093,6 +1093,7 @@ impl AggregationExpression {
                     aggregator,
                 })
             }
+            Expr::Alias(alias) => Self::try_from_expression(ctx, &alias.expr),
             _ => bail!("expected aggregate function, not {}", expr),
         }
     }

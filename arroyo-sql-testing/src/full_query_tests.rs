@@ -134,3 +134,9 @@ full_pipeline_codegen! {"session_window",
 "SELECT count(*), session(INTERVAL '10' SECOND) AS window
 from nexmark
 group by window, auction.id; "}
+
+full_pipeline_codegen! {"count_over_case",
+"SELECT count(case when person.name = 'click' then 1 else null end) as clicks
+from nexmark
+group by tumble(interval '1 second');
+"}
