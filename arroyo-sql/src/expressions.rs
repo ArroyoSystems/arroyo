@@ -342,6 +342,7 @@ impl<'a> ExpressionContext<'a> {
             Expr::Cast(datafusion_expr::Cast { expr, data_type }) => Ok(CastExpression::new(
                 Box::new(self.compile_expr(expr)?),
                 data_type,
+                false,
             )?),
             Expr::TryCast(TryCast { expr, data_type }) => {
                 bail!(
@@ -444,18 +445,22 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::ToTimestamp => CastExpression::new(
                         Box::new(arg_expressions.remove(0)),
                         &DataType::Timestamp(TimeUnit::Nanosecond, None),
+                        false,
                     ),
                     BuiltinScalarFunction::ToTimestampMillis => CastExpression::new(
                         Box::new(arg_expressions.remove(0)),
                         &DataType::Timestamp(TimeUnit::Millisecond, None),
+                        false,
                     ),
                     BuiltinScalarFunction::ToTimestampMicros => CastExpression::new(
                         Box::new(arg_expressions.remove(0)),
                         &DataType::Timestamp(TimeUnit::Microsecond, None),
+                        false,
                     ),
                     BuiltinScalarFunction::ToTimestampSeconds => CastExpression::new(
                         Box::new(arg_expressions.remove(0)),
                         &DataType::Timestamp(TimeUnit::Second, None),
+                        false,
                     ),
                     BuiltinScalarFunction::FromUnixtime => Ok(Expression::Date(
                         DateTimeFunction::FromUnixTime(Box::new(arg_expressions.remove(0))),
@@ -1168,15 +1173,21 @@ impl AggregationExpression {
 pub struct CastExpression {
     input: Box<Expression>,
     data_type: DataType,
+    force_nullable: bool,
 }
 
 impl CastExpression {
-    fn new(input: Box<Expression>, data_type: &DataType) -> Result<Expression> {
+    pub fn new(
+        input: Box<Expression>,
+        data_type: &DataType,
+        force_nullable: bool,
+    ) -> Result<Expression> {
         if let TypeDef::DataType(input_type, _) = input.return_type() {
             if Self::allowed_types(&input_type, data_type) {
                 Ok(Expression::Cast(Self {
                     input,
                     data_type: data_type.clone(),
+                    force_nullable,
                 }))
             } else {
                 bail!(
@@ -1292,12 +1303,19 @@ impl CastExpression {
             parse_quote!(#sub_expr.map(|x| #cast_expr))
         } else {
             let cast_expr = Self::cast_expr(&input_type, &self.data_type, sub_expr);
-            parse_quote!(#cast_expr)
+            if self.force_nullable {
+                parse_quote!(Some(#cast_expr))
+            } else {
+                parse_quote!(#cast_expr)
+            }
         }
     }
 
     fn return_type(&self) -> TypeDef {
-        TypeDef::DataType(self.data_type.clone(), self.input.nullable())
+        TypeDef::DataType(
+            self.data_type.clone(),
+            self.input.nullable() || self.force_nullable,
+        )
     }
 }
 
