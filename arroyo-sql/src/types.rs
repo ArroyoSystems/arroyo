@@ -26,8 +26,6 @@ use regex::Regex;
 use syn::PathArguments::AngleBracketed;
 use syn::{parse_quote, parse_str, GenericArgument, Type};
 
-use crate::expressions::Expression;
-
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructDef {
     pub name: Option<String>,
@@ -316,7 +314,6 @@ pub struct StructField {
     pub data_type: TypeDef,
     pub renamed_from: Option<String>,
     pub original_type: Option<String>,
-    pub expression: Option<Box<Expression>>,
 }
 
 impl StructField {
@@ -327,7 +324,6 @@ impl StructField {
             data_type,
             renamed_from: None,
             original_type: None,
-            expression: None,
         }
     }
 
@@ -344,23 +340,6 @@ impl StructField {
             data_type,
             renamed_from,
             original_type,
-            expression: None,
-        }
-    }
-
-    pub fn generated_by(
-        name: String,
-        alias: Option<String>,
-        data_type: TypeDef,
-        expression: Expression,
-    ) -> Self {
-        Self {
-            name,
-            alias,
-            data_type,
-            renamed_from: None,
-            original_type: None,
-            expression: Some(Box::new(expression)),
         }
     }
 }

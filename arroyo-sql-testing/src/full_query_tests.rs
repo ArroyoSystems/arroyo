@@ -135,6 +135,22 @@ full_pipeline_codegen! {"session_window",
 from nexmark
 group by window, auction.id; "}
 
+full_pipeline_codegen! {"virtual_field_implicit_cast",
+"create table demo_stream (
+  timestamp BIGINT NOT NULL,
+  event_time TIMESTAMP GENERATED ALWAYS AS (CAST(from_unixtime(timestamp * 1000000000) as TIMESTAMP))
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  topic = 'demo-stream',
+  format = 'json',
+  type = 'source',
+  event_time_field = 'event_time'
+);
+
+select * from demo_stream;
+"}
+
 full_pipeline_codegen! {"count_over_case",
 "SELECT count(case when person.name = 'click' then 1 else null end) as clicks
 from nexmark

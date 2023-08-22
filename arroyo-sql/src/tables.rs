@@ -18,6 +18,7 @@ use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
 };
 
+use crate::expressions::CastExpression;
 use crate::external::SinkUpdateType;
 use crate::DEFAULT_IDLE_TIME;
 use crate::{
@@ -35,7 +36,7 @@ pub struct ConnectorTable {
     pub id: Option<i64>,
     pub name: String,
     pub connection_type: ConnectionType,
-    pub fields: Vec<StructField>,
+    pub fields: Vec<FieldSpec>,
     pub type_name: Option<String>,
     pub operator: String,
     pub config: String,
@@ -44,6 +45,36 @@ pub struct ConnectorTable {
     pub event_time_field: Option<String>,
     pub watermark_field: Option<String>,
     pub idle_time: Option<Duration>,
+}
+
+#[derive(Debug, Clone)]
+pub enum FieldSpec {
+    StructField(StructField),
+    VirtualField {
+        field: StructField,
+        expression: Expression,
+    },
+}
+
+impl FieldSpec {
+    fn is_virtual(&self) -> bool {
+        match self {
+            FieldSpec::StructField(_) => false,
+            FieldSpec::VirtualField { .. } => true,
+        }
+    }
+    fn struct_field(&self) -> &StructField {
+        match self {
+            FieldSpec::StructField(f) => f,
+            FieldSpec::VirtualField { field, .. } => field,
+        }
+    }
+}
+
+impl From<StructField> for FieldSpec {
+    fn from(value: StructField) -> Self {
+        FieldSpec::StructField(value)
+    }
 }
 
 fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
@@ -97,7 +128,10 @@ impl From<Connection> for ConnectorTable {
                 .schema
                 .fields
                 .iter()
-                .map(|f| f.clone().into())
+                .map(|f| {
+                    let struct_field: StructField = f.clone().into();
+                    struct_field.into()
+                })
                 .collect(),
             type_name: schema_type(&value.name, &value.schema),
             operator: value.operator,
@@ -115,7 +149,7 @@ impl ConnectorTable {
     fn from_options(
         name: &str,
         connector: &str,
-        fields: Vec<StructField>,
+        fields: Vec<FieldSpec>,
         options: &mut HashMap<String, String>,
     ) -> Result<Self> {
         let connector = connector_for_type(connector)
@@ -126,11 +160,12 @@ impl ConnectorTable {
         let schema_fields: Result<Vec<SourceField>> = fields
             .iter()
             .map(|f| {
-                f.clone().try_into().map_err(|_| {
+                let struct_field = f.struct_field();
+                struct_field.clone().try_into().map_err(|_| {
                     anyhow!(
                         "field '{}' has a type '{:?}' that cannot be used in a connection table",
-                        f.name,
-                        f.data_type
+                        struct_field.name,
+                        struct_field.data_type
                     )
                 })
             })
@@ -171,7 +206,7 @@ impl ConnectorTable {
     }
 
     fn has_virtual_fields(&self) -> bool {
-        self.fields.iter().any(|f| f.expression.is_some())
+        self.fields.iter().any(|f| f.is_virtual())
     }
 
     fn is_update(&self) -> bool {
@@ -181,31 +216,48 @@ impl ConnectorTable {
             .unwrap_or(false)
     }
 
-    fn virtual_field_projection(&self) -> Option<Projection> {
+    fn virtual_field_projection(&self) -> Result<Option<Projection>> {
         if self.has_virtual_fields() {
             let (field_names, field_computations) = self
                 .fields
                 .iter()
                 .map(|field| {
-                    (
-                        Column {
-                            relation: None,
-                            name: field.name.clone(),
-                        },
-                        field
-                            .expression
-                            .as_ref()
-                            .map(|expr| *(expr.clone()))
-                            .unwrap_or_else(|| {
-                                Expression::Column(ColumnExpression::new(field.clone()))
-                            }),
-                    )
-                })
-                .unzip();
+                    match field {
+                        FieldSpec::StructField(struct_field) => Ok((Column{relation: None, name: struct_field.name.clone()}, Expression::Column(ColumnExpression::new(struct_field.clone())))),
+                        FieldSpec::VirtualField { field, expression } => {
+                            let expression_type_def = expression.return_type();
+                            let expression_return_type = expression_type_def.as_datatype().expect("virtual fields shouldn't return structs");
+                            let expression_nullability = expression.nullable();
+                            let field_return_type = field.data_type.as_datatype().expect("virtual fields shouldn't return structs");
+                            let field_nullability = field.data_type.is_optional();
+                            if !field_nullability && expression_nullability {
+                                bail!("virtual field {} is not nullable, but the expression for calculating it is nullable", field.name);
+                            }
+                            if field_nullability == expression_nullability && expression_return_type == field_return_type {
+                                // no need to cast
+                                Ok((Column {
+                                    relation: None,
+                                    name: field.name.clone(),
+                                },
+                                    expression.clone()
+                                ))
+                            } else {
+                                let force_nullability = field_nullability && !expression_nullability;
+                                let cast_expr = CastExpression::new(Box::new(expression.clone()), field_return_type, force_nullability)?;
+                                Ok((
+                                    Column {
+                                        relation: None,
+                                        name: field.name.clone(),
+                                    },
+                                    cast_expr))
+                            }
+                    }
+                }
+                }).collect::<Result<Vec<_>>>()?.into_iter().unzip();
 
-            Some(Projection::new(field_names, field_computations))
+            Ok(Some(Projection::new(field_names, field_computations)))
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -219,9 +271,12 @@ impl ConnectorTable {
             let field = self
                 .fields
                 .iter()
-                .find(|f: &&StructField| {
-                    f.name == *field_name
-                        && matches!(f.data_type, TypeDef::DataType(DataType::Timestamp(..), _))
+                .find(|f| {
+                    f.struct_field().name == *field_name
+                        && matches!(
+                            f.struct_field().data_type,
+                            TypeDef::DataType(DataType::Timestamp(..), _)
+                        )
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -231,7 +286,7 @@ impl ConnectorTable {
                 })?;
 
             Ok(Some(Expression::Column(ColumnExpression::new(
-                field.clone(),
+                field.struct_field().clone(),
             ))))
         } else {
             Ok(None)
@@ -244,9 +299,12 @@ impl ConnectorTable {
             let field = self
                 .fields
                 .iter()
-                .find(|f: &&StructField| {
-                    f.name == *field_name
-                        && matches!(f.data_type, TypeDef::DataType(DataType::Timestamp(..), _))
+                .find(|f| {
+                    f.struct_field().name == *field_name
+                        && matches!(
+                            f.struct_field().data_type,
+                            TypeDef::DataType(DataType::Timestamp(..), _)
+                        )
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -256,7 +314,7 @@ impl ConnectorTable {
                 })?;
 
             Ok(Some(Expression::Column(ColumnExpression::new(
-                field.clone(),
+                field.struct_field().clone(),
             ))))
         } else {
             Ok(None)
@@ -291,7 +349,7 @@ impl ConnectorTable {
             bail!("can't read from a source with virtual fields and update mode.")
         }
 
-        let virtual_field_projection = self.virtual_field_projection();
+        let virtual_field_projection = self.virtual_field_projection()?;
         let timestamp_override = self.timestamp_override()?;
         let watermark_column = self.watermark_column()?;
 
@@ -299,7 +357,13 @@ impl ConnectorTable {
             id: self.id,
             struct_def: StructDef::new(
                 self.type_name.clone(),
-                self.fields.clone(),
+                self.fields
+                    .iter()
+                    .filter_map(|field| match field {
+                        FieldSpec::StructField(struct_field) => Some(struct_field.clone()),
+                        FieldSpec::VirtualField { .. } => None,
+                    })
+                    .collect(),
                 self.format.clone(),
             ),
             operator: Operator::ConnectorSource(self.connector_op()),
@@ -406,7 +470,7 @@ impl Table {
     fn schema_from_columns(
         columns: &Vec<ColumnDef>,
         schema_provider: &ArroyoSchemaProvider,
-    ) -> Result<Vec<StructField>> {
+    ) -> Result<Vec<FieldSpec>> {
         let struct_field_pairs = columns
             .iter()
             .map(|column| {
@@ -430,7 +494,6 @@ impl Table {
                         None
                     }
                 });
-
                 Ok((struct_field, generating_expression))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -469,7 +532,7 @@ impl Table {
         let sql_to_rel = SqlToRel::new(schema_provider);
         struct_field_pairs
             .into_iter()
-            .map(|(mut struct_field, generating_expression)| {
+            .map(|(struct_field, generating_expression)| {
                 if let Some(generating_expression) = generating_expression {
                     // TODO: Implement automatic type coercion here, as we have elsewhere.
                     // It is done by calling the Analyzer which inserts CAST operators where necessary.
@@ -479,11 +542,14 @@ impl Table {
                         &physical_schema,
                         &mut PlannerContext::default(),
                     )?;
-                    let expr = expression_context.compile_expr(&df_expr)?;
-                    struct_field.expression = Some(Box::new(expr));
+                    let expression = expression_context.compile_expr(&df_expr)?;
+                    Ok(FieldSpec::VirtualField {
+                        field: struct_field,
+                        expression,
+                    })
+                } else {
+                    Ok(FieldSpec::StructField(struct_field))
                 }
-
-                Ok(struct_field)
             })
             .collect::<Result<Vec<_>>>()
     }
@@ -514,7 +580,7 @@ impl Table {
 
             match connector.as_ref().map(|c| c.as_str()) {
                 Some("memory") | None => {
-                    if fields.iter().any(|f| f.expression.is_some()) {
+                    if fields.iter().any(|f| f.is_virtual()) {
                         bail!("Virtual fields are not supported in memory tables; instead write a query");
                     }
 
@@ -526,7 +592,13 @@ impl Table {
                         }
                     }
 
-                    Ok(Some(Table::MemoryTable { name, fields }))
+                    Ok(Some(Table::MemoryTable {
+                        name,
+                        fields: fields
+                            .into_iter()
+                            .map(|f| f.struct_field().clone())
+                            .collect(),
+                    }))
                 }
                 Some(connector) => Ok(Some(Table::ConnectorTable(
                     ConnectorTable::from_options(&name, connector, fields, &mut with_map)
@@ -562,11 +634,17 @@ impl Table {
 
     pub fn get_fields(&self) -> Result<Vec<Field>> {
         match self {
-            Table::MemoryTable { fields, .. }
-            | Table::ConnectorTable(ConnectorTable { fields, .. }) => fields
+            Table::MemoryTable { fields, .. } => fields
                 .iter()
                 .map(|field| {
                     let field: Field = field.clone().into();
+                    Ok(field)
+                })
+                .collect::<Result<Vec<_>>>(),
+            Table::ConnectorTable(ConnectorTable { fields, .. }) => fields
+                .iter()
+                .map(|field| {
+                    let field: Field = field.struct_field().clone().into();
                     Ok(field)
                 })
                 .collect::<Result<Vec<_>>>(),

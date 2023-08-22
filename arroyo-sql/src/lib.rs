@@ -346,7 +346,7 @@ pub fn parse_and_get_program_sync(
             id: None,
             name: "web".to_string(),
             connection_type: ConnectionType::Sink,
-            fields: struct_def.fields.clone(),
+            fields: struct_def.fields.into_iter().map(|f| f.into()).collect(),
             type_name: None,
             operator: "GrpcSink::<#in_k, #in_t>".to_string(),
             config: "{}".to_string(),
