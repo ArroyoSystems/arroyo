@@ -142,15 +142,21 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
 
         <Box className="field">
           <Box className="fieldName">Pipeline ID</Box>
-          <Box className="fieldValue">{pipeline.id}</Box>
+          <Box className="fieldValue">
+            <Text>{pipeline.id}</Text>
+          </Box>
         </Box>
         <Box className="field">
           <Box className="fieldName">Job ID</Box>
-          <Box className="fieldValue">{job.id}</Box>
+          <Box className="fieldValue">
+            <Text>{job.id}</Text>
+          </Box>
         </Box>
         <Box className="field">
           <Box className="fieldName">State</Box>
-          <Box className="fieldValue">{job.state}</Box>
+          <Box className="fieldValue">
+            <Text>{job.state}</Text>
+          </Box>
         </Box>
         {operatorDetail}
       </Stack>

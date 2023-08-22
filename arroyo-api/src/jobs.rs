@@ -1,7 +1,8 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
 use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::{
-    CheckpointDetailsResp, CheckpointOverview, CreateJobReq, JobStatus, StopType,
+    CreateJobReq, JobStatus, OperatorCheckpointDetail, StopType, TaskCheckpointDetail,
+    TaskCheckpointEventType,
 };
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
@@ -28,8 +29,9 @@ use crate::rest_utils::{
 use crate::types::public::LogLevel;
 use crate::{log_and_map, queries::api_queries, to_micros, types::public, AuthData};
 use arroyo_rpc::types::{
-    Checkpoint, CheckpointCollection, JobCollection, JobLogLevel, JobLogMessage,
-    JobLogMessageCollection, OutputData,
+    Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType, JobCollection,
+    JobLogLevel, JobLogMessage, JobLogMessageCollection, OperatorCheckpointGroup,
+    OperatorCheckpointGroupCollection, OutputData, SubtaskCheckpointGroup,
 };
 
 pub(crate) async fn create_job<'a>(
@@ -188,45 +190,6 @@ pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option
     (a.to_string(), s, in_progress)
 }
 
-pub(crate) async fn checkpoint_details(
-    job_pub_id: &str,
-    epoch: u32,
-    auth: AuthData,
-    client: &impl GenericClient,
-) -> Result<CheckpointDetailsResp, Status> {
-    let job_id = api_queries::get_pipeline_job()
-        .bind(client, &auth.organization_id, &job_pub_id)
-        .one()
-        .await
-        .map_err(log_and_map)?
-        .id;
-
-    let res = api_queries::get_checkpoint_details()
-        .bind(client, &job_id, &auth.organization_id, &(epoch as i32))
-        .opt()
-        .await
-        .map_err(log_and_map)?
-        .ok_or_else(|| {
-            Status::not_found(format!(
-                "There is no checkpoint with epoch {} for job '{}'",
-                epoch, job_id
-            ))
-        })?;
-
-    Ok(CheckpointDetailsResp {
-        overview: Some(CheckpointOverview {
-            epoch,
-            backend: res.state_backend,
-            start_time: to_micros(res.start_time),
-            finish_time: res.finish_time.map(to_micros),
-        }),
-        operators: res
-            .operators
-            .map(|o| serde_json::from_value(o).unwrap())
-            .unwrap_or_else(HashMap::new),
-    })
-}
-
 /// List a job's error messages
 #[utoipa::path(
     get,
@@ -320,6 +283,151 @@ pub async fn get_job_checkpoints(
         data: checkpoints,
         has_more: false,
     }))
+}
+
+fn get_event_spans(subtask_details: &TaskCheckpointDetail) -> Vec<CheckpointEventSpan> {
+    let alignment_started = subtask_details
+        .events
+        .iter()
+        .find(|e| e.event_type == TaskCheckpointEventType::AlignmentStarted as i32);
+
+    let checkpoint_started = subtask_details
+        .events
+        .iter()
+        .find(|e| e.event_type == TaskCheckpointEventType::CheckpointStarted as i32);
+
+    let operator_finished = subtask_details
+        .events
+        .iter()
+        .find(|e| e.event_type == TaskCheckpointEventType::CheckpointOperatorFinished as i32);
+
+    let sync_finished = subtask_details
+        .events
+        .iter()
+        .find(|e| e.event_type == TaskCheckpointEventType::CheckpointSyncFinished as i32);
+
+    let pre_commit = subtask_details
+        .events
+        .iter()
+        .find(|e| e.event_type == TaskCheckpointEventType::CheckpointPreCommit as i32);
+
+    let mut event_spans = vec![];
+
+    if let (Some(alignment_started), Some(checkpoint_started)) =
+        (alignment_started, checkpoint_started)
+    {
+        event_spans.push(CheckpointEventSpan {
+            span_type: CheckpointSpanType::Alignment,
+            description: "Time spent waiting for alignment barriers".to_string(),
+            start_time: alignment_started.time,
+            finish_time: checkpoint_started.time,
+        });
+    }
+
+    if let (Some(checkpoint_started), Some(sync_finished)) = (checkpoint_started, sync_finished) {
+        event_spans.push(CheckpointEventSpan {
+            span_type: CheckpointSpanType::Sync,
+            description: "The synchronous part of checkpointing.".to_string(),
+            start_time: checkpoint_started.time,
+            finish_time: sync_finished.time,
+        });
+    }
+
+    if let (Some(checkpoint_started), Some(operator_finished)) =
+        (checkpoint_started, operator_finished)
+    {
+        event_spans.push(CheckpointEventSpan {
+            span_type: CheckpointSpanType::Async,
+            description: "The asynchronous part of checkpointing.".to_string(),
+            start_time: checkpoint_started.time,
+            finish_time: operator_finished.time,
+        });
+    }
+
+    if let (Some(operator_finished), Some(pre_commit)) = (operator_finished, pre_commit) {
+        event_spans.push(CheckpointEventSpan {
+            span_type: CheckpointSpanType::Committing,
+            description: "Committing the checkpoint.".to_string(),
+            start_time: operator_finished.time,
+            finish_time: pre_commit.time,
+        });
+    }
+
+    event_spans
+}
+
+/// Get a checkpoint's details
+#[utoipa::path(
+    get,
+    path = "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints/{epoch}/operator_checkpoint_groups",
+    tag = "jobs",
+    params(
+        ("pipeline_id" = String, Path, description = "Pipeline id"),
+        ("job_id" = String, Path, description = "Job id"),
+        ("epoch" = u32, Path, description = "Epoch")
+    ),
+    responses(
+        (status = 200, description = "Got checkpoint's details", body = OperatorCheckpointGroupCollection),
+    ),
+)]
+pub async fn get_checkpoint_details(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path((pipeline_pub_id, job_pub_id, epoch)): Path<(String, String, u32)>,
+) -> Result<Json<OperatorCheckpointGroupCollection>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
+
+    let checkpoint_details = api_queries::get_checkpoint_details()
+        .bind(
+            &client,
+            &job_pub_id,
+            &auth_data.organization_id,
+            &(epoch as i32),
+        )
+        .opt()
+        .await
+        .map_err(log_and_map)?
+        .ok_or_else(|| {
+            Status::not_found(format!(
+                "There is no checkpoint with epoch {} for job '{}'",
+                epoch, job_pub_id
+            ))
+        })?;
+
+    let mut operators: Vec<OperatorCheckpointGroup> = vec![];
+
+    checkpoint_details
+        .operators
+        .map(|o| serde_json::from_value(o).unwrap())
+        .unwrap_or_else(HashMap::<String, OperatorCheckpointDetail>::new)
+        .iter()
+        .for_each(|(operator_id, operator_details)| {
+            let mut operator_bytes = 0;
+            let mut subtasks = vec![];
+
+            operator_details
+                .tasks
+                .iter()
+                .for_each(|(subtask_index, subtask_details)| {
+                    operator_bytes += subtask_details.bytes.unwrap_or(0);
+                    subtasks.push(SubtaskCheckpointGroup {
+                        index: subtask_index.clone(),
+                        bytes: subtask_details.bytes.unwrap_or(0),
+                        event_spans: get_event_spans(&subtask_details),
+                    });
+                });
+
+            operators.push(OperatorCheckpointGroup {
+                operator_id: operator_id.to_string(),
+                bytes: operator_bytes,
+                subtasks,
+            });
+        });
+
+    Ok(Json(OperatorCheckpointGroupCollection { data: operators }))
 }
 
 /// Subscribe to a job's output

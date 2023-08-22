@@ -28,15 +28,17 @@ use arroyo_rpc::grpc::api::{
 };
 use arroyo_rpc::grpc::api::{DeleteJobReq, DeleteJobResp, PipelineProgram};
 use arroyo_rpc::types::{
-    AvroFormat, Checkpoint, CheckpointCollection, ConfluentSchema, ConnectionProfile,
-    ConnectionProfileCollection, ConnectionProfilePost, ConnectionSchema, ConnectionTable,
-    ConnectionTableCollection, ConnectionTablePost, ConnectionType, Connector, ConnectorCollection,
-    FieldType, Format, Job, JobCollection, JobLogLevel, JobLogMessage, JobLogMessageCollection,
-    JsonFormat, Metric, MetricGroup, MetricNames, OperatorMetricGroup, OutputData, ParquetFormat,
-    Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
-    PipelinePost, PrimitiveType, RawStringFormat, SchemaDefinition, SourceField, SourceFieldType,
-    StopType as StopTypeRest, StructType, SubtaskMetrics, TestSourceMessage, TimestampFormat, Udf,
-    UdfLanguage, ValidatePipelinePost,
+    AvroFormat, Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType,
+    ConfluentSchema, ConnectionProfile, ConnectionProfileCollection, ConnectionProfilePost,
+    ConnectionSchema, ConnectionTable, ConnectionTableCollection, ConnectionTablePost,
+    ConnectionType, Connector, ConnectorCollection, FieldType, Format, Job, JobCollection,
+    JobLogLevel, JobLogMessage, JobLogMessageCollection, JsonFormat, Metric, MetricGroup,
+    MetricNames, OperatorCheckpointGroup, OperatorCheckpointGroupCollection, OperatorMetricGroup,
+    OutputData, PaginationQueryParams, ParquetFormat, Pipeline, PipelineCollection, PipelineEdge,
+    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, PrimitiveType, RawStringFormat,
+    SchemaDefinition, SourceField, SourceFieldType, StopType as StopTypeRest, StructType,
+    SubtaskCheckpointGroup, SubtaskMetrics, TestSourceMessage, TimestampFormat, Udf, UdfLanguage,
+    ValidatePipelinePost,
 };
 use arroyo_server_common::log_event;
 
@@ -49,7 +51,8 @@ use crate::connection_tables::{
 };
 use crate::connectors::__path_get_connectors;
 use crate::jobs::{
-    __path_get_job_checkpoints, __path_get_job_errors, __path_get_job_output, __path_get_jobs,
+    __path_get_checkpoint_details, __path_get_job_checkpoints, __path_get_job_errors,
+    __path_get_job_output, __path_get_jobs,
 };
 use crate::metrics::__path_get_operator_metric_groups;
 use crate::pipelines::__path_get_pipelines;
@@ -403,14 +406,11 @@ impl ApiGrpc for ApiServer {
 
     async fn get_checkpoint_detail(
         &self,
-        request: Request<CheckpointDetailsReq>,
+        _request: Request<CheckpointDetailsReq>,
     ) -> Result<Response<CheckpointDetailsResp>, Status> {
-        let (request, auth) = self.authenticate(request).await?;
-        let req = request.into_inner();
-
-        jobs::checkpoint_details(&req.job_id, req.epoch, auth, &self.client().await?)
-            .await
-            .map(Response::new)
+        Err(Status::unimplemented(
+            "This functionality has been moved to the REST API.",
+        ))
     }
 
     async fn get_operator_errors(
@@ -536,6 +536,7 @@ impl ApiGrpc for ApiServer {
         test_connection_table,
         test_schema,
         get_confluent_schema,
+        get_checkpoint_details,
     ),
     components(schemas(
         ValidatePipelinePost,
@@ -586,6 +587,12 @@ impl ApiGrpc for ApiServer {
         ParquetFormat,
         RawStringFormat,
         TimestampFormat,
+        PaginationQueryParams,
+        CheckpointEventSpan,
+        CheckpointSpanType,
+        OperatorCheckpointGroupCollection,
+        SubtaskCheckpointGroup,
+        OperatorCheckpointGroup,
     )),
     tags(
         (name = "ping", description = "Ping endpoint"),

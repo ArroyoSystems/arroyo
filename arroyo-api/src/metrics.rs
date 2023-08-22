@@ -184,7 +184,7 @@ pub async fn get_operator_metric_groups(
                         .entry(metric_name.clone())
                         .or_insert(vec![])
                         .push(SubtaskMetrics {
-                            idx: subtask_idx,
+                            index: subtask_idx,
                             metrics: data,
                         });
                 }

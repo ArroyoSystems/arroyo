@@ -210,20 +210,63 @@ pub struct Checkpoint {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckpointSpanType {
+    Alignment,
+    Sync,
+    Async,
+    Committing,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointEventSpan {
+    pub start_time: u64,
+    pub finish_time: u64,
+    pub span_type: CheckpointSpanType,
+    pub description: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtaskCheckpointGroup {
+    pub index: u32,
+    pub bytes: u64,
+    pub event_spans: Vec<CheckpointEventSpan>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorCheckpointGroup {
+    pub operator_id: String,
+    pub bytes: u64,
+    pub subtasks: Vec<SubtaskCheckpointGroup>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[aliases(
-    JobCollection = Collection<Job>,
-    PipelineCollection = Collection<Pipeline>,
-    JobLogMessageCollection = Collection<JobLogMessage>,
-    CheckpointCollection = Collection<Checkpoint>,
-    OperatorMetricGroupCollection = Collection<OperatorMetricGroup>,
-    ConnectorCollection = Collection<Connector>,
-    ConnectionProfileCollection = Collection<ConnectionProfile>,
-    ConnectionTableCollection = Collection<ConnectionTable>,
+    JobCollection = PaginatedCollection<Job>,
+    PipelineCollection = PaginatedCollection<Pipeline>,
+    JobLogMessageCollection = PaginatedCollection<JobLogMessage>,
+    CheckpointCollection = PaginatedCollection<Checkpoint>,
+    OperatorMetricGroupCollection = PaginatedCollection<OperatorMetricGroup>,
+    ConnectorCollection = PaginatedCollection<Connector>,
+    ConnectionProfileCollection = PaginatedCollection<ConnectionProfile>,
+    ConnectionTableCollection = PaginatedCollection<ConnectionTable>,
 )]
-pub struct Collection<T> {
+pub struct PaginatedCollection<T> {
     pub data: Vec<T>,
     pub has_more: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+#[aliases(
+    OperatorCheckpointGroupCollection = NonPaginatedCollection<OperatorCheckpointGroup>,
+)]
+pub struct NonPaginatedCollection<T> {
+    pub data: Vec<T>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -266,7 +309,7 @@ pub struct Metric {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubtaskMetrics {
-    pub idx: u32,
+    pub index: u32,
     pub metrics: Vec<Metric>,
 }
 

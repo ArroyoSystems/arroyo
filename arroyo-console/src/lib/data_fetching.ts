@@ -1,4 +1,3 @@
-import { CheckpointDetailsReq } from '../gen/api_pb';
 import { ApiClient } from '../main';
 import useSWR, { mutate as globalMutate } from 'swr';
 import useSWRInfinite from 'swr/infinite';
@@ -27,6 +26,9 @@ export type TestSourceMessage = schemas['TestSourceMessage'];
 export type ConnectionTablePost = schemas['ConnectionTablePost'];
 export type ConnectionSchema = schemas['ConnectionSchema'];
 export type SourceField = schemas['SourceField'];
+export type OperatorCheckpointGroup = schemas['OperatorCheckpointGroup'];
+export type SubtaskCheckpointGroup = schemas['SubtaskCheckpointGroup'];
+export type CheckpointSpanType = schemas['CheckpointSpanType'];
 
 const BASE_URL = '/api';
 export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
@@ -90,8 +92,10 @@ const jobCheckpointsKey = (pipelineId?: string, jobId?: string) => {
   return pipelineId && jobId ? { key: 'JobCheckpoints', pipelineId, jobId } : null;
 };
 
-const checkpointDetailsKey = (jobId?: string, epoch?: number) => {
-  return jobId && epoch ? { key: 'CheckpointDetails', jobId, epoch } : null;
+const checkpointDetailsKey = (pipelineId?: string, jobId?: string, epoch?: number) => {
+  return pipelineId && jobId && epoch
+    ? { key: 'CheckpointDetails', pipelineId, jobId, epoch }
+    : null;
 };
 
 const operatorErrorsKey = (pipelineId?: string, jobId?: string) => {
@@ -284,29 +288,33 @@ export const useJobCheckpoints = (pipelineId?: string, jobId?: string) => {
 
 // CheckpointDetailsReq
 
-const checkpointDetailsFetcher = (client: ApiClient) => {
-  return async (params: { key: string; jobId: string; epoch: number }) => {
-    return await (
-      await (
-        await client
-      )()
-    ).getCheckpointDetail(
-      new CheckpointDetailsReq({
-        jobId: params.jobId,
-        epoch: params.epoch,
-      })
+const checkpointDetailsFetcher = () => {
+  return async (params: { key: string; pipelineId: string; jobId: string; epoch: number }) => {
+    const { data, error } = await get(
+      '/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints/{epoch}/operator_checkpoint_groups',
+      {
+        params: {
+          path: { pipeline_id: params.pipelineId, job_id: params.jobId, epoch: params.epoch },
+        },
+      }
     );
+    return processResponse(data, error);
   };
 };
 
-export const useCheckpointDetails = (client: ApiClient, jobId?: string, epoch?: number) => {
-  const { data, isLoading } = useSWR(
-    checkpointDetailsKey(jobId, epoch),
-    checkpointDetailsFetcher(client)
+export const useCheckpointDetails = (
+  client: ApiClient,
+  pipelineId?: string,
+  jobId?: string,
+  epoch?: number
+) => {
+  const { data, isLoading } = useSWR<schemas['OperatorCheckpointGroupCollection']>(
+    checkpointDetailsKey(pipelineId, jobId, epoch),
+    checkpointDetailsFetcher()
   );
 
   return {
-    checkpoint: data,
+    checkpointDetails: data?.data,
     checkpointLoading: isLoading,
   };
 };
