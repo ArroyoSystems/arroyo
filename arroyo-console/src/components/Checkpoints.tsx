@@ -14,12 +14,10 @@ import {
   UnorderedList,
 } from '@chakra-ui/react';
 import { Checkpoint, Job, Pipeline, useCheckpointDetails } from '../lib/data_fetching';
-import { ApiClient } from '../main';
 import { dataFormat } from '../lib/util';
 import CheckpointDetails from './CheckpointDetails';
 
 export interface CheckpointsProps {
-  client: ApiClient;
   pipeline: Pipeline;
   job: Job;
   checkpoints: Array<Checkpoint>;
@@ -37,9 +35,9 @@ function formatDurationHMS(micros: number): string {
   )}`;
 }
 
-const Checkpoints: React.FC<CheckpointsProps> = ({ client, pipeline, job, checkpoints }) => {
+const Checkpoints: React.FC<CheckpointsProps> = ({ pipeline, job, checkpoints }) => {
   const [epoch, setEpoch] = useState<number | undefined>(undefined);
-  const { checkpointDetails } = useCheckpointDetails(client, pipeline.id, job.id, epoch);
+  const { checkpointDetails } = useCheckpointDetails(pipeline.id, job.id, epoch);
 
   if (!checkpoints.length) {
     return <Text textStyle="italic">No checkpoints</Text>;

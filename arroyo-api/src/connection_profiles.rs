@@ -8,11 +8,11 @@ use tracing::warn;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::types::{ConnectionProfile, ConnectionProfileCollection, ConnectionProfilePost};
 
+use crate::handle_db_error;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnectionProfile;
 use crate::rest::AppState;
-use crate::rest_utils::{authenticate, client, log_and_map_rest, ApiError, BearerAuth, ErrorResp};
-use crate::{handle_db_error, log_and_map};
+use crate::rest_utils::{authenticate, client, log_and_map, ApiError, BearerAuth, ErrorResp};
 
 impl TryFrom<DbConnectionProfile> for ConnectionProfile {
     type Error = String;
@@ -76,9 +76,9 @@ pub async fn create_connection_profile(
         .bind(&client, &auth_data.organization_id, &pub_id)
         .one()
         .await
-        .map_err(log_and_map_rest)?
+        .map_err(log_and_map)?
         .try_into()
-        .map_err(log_and_map_rest)?;
+        .map_err(log_and_map)?;
 
     Ok(Json(connection_profile))
 }

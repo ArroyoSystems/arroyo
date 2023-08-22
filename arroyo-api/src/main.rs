@@ -1,28 +1,16 @@
 use axum::{response::IntoResponse, Json};
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
-use http::HeaderName;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::{select, sync::broadcast};
 use tokio_postgres::NoTls;
-use tonic_web::GrpcWebLayer;
-use tower_http::cors::CorsLayer;
 use tracing::{debug, info};
 use uuid::Uuid;
 
 use arroyo_api::rest;
-use arroyo_api::ApiServer;
-use arroyo_rpc::grpc::api::api_grpc_server::ApiGrpcServer;
 use arroyo_server_common::{log_event, start_admin_server};
-use arroyo_types::{
-    grpc_port, ports, service_port, DatabaseConfig, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV,
-};
-
-const DEFAULT_EXPOSED_HEADERS: [&str; 3] =
-    ["grpc-status", "grpc-message", "grpc-status-details-bin"];
-const DEFAULT_ALLOW_HEADERS: [&str; 4] =
-    ["x-grpc-web", "content-type", "x-user-agent", "grpc-timeout"];
+use arroyo_types::{ports, service_port, DatabaseConfig, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV};
 
 #[tokio::main]
 pub async fn main() {
@@ -78,68 +66,24 @@ async fn server(pool: Pool) {
 
     log_event("service_startup", json!({"service": "api"}));
 
-    let reflection = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(arroyo_rpc::grpc::API_FILE_DESCRIPTOR_SET)
-        .build()
-        .unwrap();
-
     let controller_addr = std::env::var(CONTROLLER_ADDR_ENV)
         .unwrap_or_else(|_| format!("http://localhost:{}", ports::CONTROLLER_GRPC));
 
     let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
     let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
-    let api_server_pool = pool.clone();
-    let server = ApiServer {
-        pool: api_server_pool,
-        controller_addr,
-    };
 
-    let app = rest::create_rest_app(server.clone(), pool);
+    let app = rest::create_rest_app(pool, &controller_addr);
     let mut rest_shutdown_rx = shutdown_rx.resubscribe();
 
     info!("Starting rest api server on {:?}", addr);
-    tokio::spawn(async move {
-        select! {
-            result = axum::Server::bind(&addr)
-            .serve(app.into_make_service()) => {
-                result.unwrap();
-            }
-            _ = rest_shutdown_rx.recv() => {
-            }
+    select! {
+        result = axum::Server::bind(&addr)
+        .serve(app.into_make_service()) => {
+            result.unwrap();
         }
-    });
-
-    let addr = format!("0.0.0.0:{}", grpc_port("api", ports::API_GRPC))
-        .parse()
-        .unwrap();
-    info!("Starting gRPC server on {:?}", addr);
-
-    arroyo_server_common::grpc_server()
-        .accept_http1(true)
-        .layer(
-            CorsLayer::new()
-                .allow_origin(tower_http::cors::Any)
-                .expose_headers(
-                    DEFAULT_EXPOSED_HEADERS
-                        .iter()
-                        .cloned()
-                        .map(HeaderName::from_static)
-                        .collect::<Vec<HeaderName>>(),
-                )
-                .allow_headers(
-                    DEFAULT_ALLOW_HEADERS
-                        .iter()
-                        .cloned()
-                        .map(HeaderName::from_static)
-                        .collect::<Vec<HeaderName>>(),
-                ),
-        )
-        .layer(GrpcWebLayer::new())
-        .add_service(ApiGrpcServer::new(server))
-        .add_service(reflection)
-        .serve(addr)
-        .await
-        .unwrap();
+        _ = rest_shutdown_rx.recv() => {
+        }
+    }
 
     shutdown_tx.send(0).unwrap();
 }

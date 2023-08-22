@@ -1,4 +1,3 @@
-import { ApiClient } from '../main';
 import useSWR, { mutate as globalMutate } from 'swr';
 import useSWRInfinite from 'swr/infinite';
 
@@ -302,12 +301,7 @@ const checkpointDetailsFetcher = () => {
   };
 };
 
-export const useCheckpointDetails = (
-  client: ApiClient,
-  pipelineId?: string,
-  jobId?: string,
-  epoch?: number
-) => {
+export const useCheckpointDetails = (pipelineId?: string, jobId?: string, epoch?: number) => {
   const { data, isLoading } = useSWR<schemas['OperatorCheckpointGroupCollection']>(
     checkpointDetailsKey(pipelineId, jobId, epoch),
     checkpointDetailsFetcher()

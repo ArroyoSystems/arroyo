@@ -26,7 +26,6 @@ import {
 import React, { useState } from 'react';
 import 'reactflow/dist/style.css';
 import 'metrics-graphics/dist/mg.css';
-import { ApiClient } from '../../main';
 import { CodeEditor } from './SqlEditor';
 import PipelineConfigModal from './PipelineConfigModal';
 import {
@@ -49,7 +48,7 @@ import { QuestionOutlineIcon } from '@chakra-ui/icons';
 import { formatError } from '../../lib/util';
 import { PipelineOutputs } from './PipelineOutputs';
 
-export function PipelineDetails({ client }: { client: ApiClient }) {
+export function PipelineDetails() {
   const [activeOperator, setActiveOperator] = useState<string | undefined>(undefined);
   const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
   const [subscribed, setSubscribed] = useState<boolean>(false);
@@ -181,14 +180,7 @@ export function PipelineDetails({ client }: { client: ApiClient }) {
 
   const checkpointsTab = (
     <TabPanel>
-      {
-        <Checkpoints
-          client={client}
-          pipeline={pipeline}
-          job={job}
-          checkpoints={checkpoints ?? []}
-        />
-      }
+      {<Checkpoints pipeline={pipeline} job={job} checkpoints={checkpoints ?? []} />}
     </TabPanel>
   );
 

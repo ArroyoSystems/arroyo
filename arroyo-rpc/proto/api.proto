@@ -30,46 +30,9 @@ message CreatePipelineReq {
   }
 }
 
-message CreatePipelineResp {
-  string pipeline_id = 1;
-}
-
-message SqlError {
-  string message = 1;
-}
-
-message SqlErrors {
-  repeated SqlError errors = 1;
-}
-
-message PipelineGraphReq {
-  string query = 1;
-  repeated CreateUdf udfs = 2;
-}
-
-message PipelineGraphResp {
-  oneof result {
-    JobGraph job_graph = 1;
-    SqlErrors errors = 2;
-  }
-}
-
-message GetPipelineReq {
-  string pipeline_id = 1;
-}
-
 message Udf {
   UdfLanguage language = 1;
   string definition = 2;
-}
-
-message PipelineDef {
-  string pipeline_id = 1;
-  string name = 2;
-  string type = 3;
-  optional string definition = 4;
-  repeated Udf udfs = 6;
-  JobGraph job_graph = 5;
 }
 
 message CreateJobReq {
@@ -78,45 +41,13 @@ message CreateJobReq {
   bool preview = 3;
 }
 
-message CreateJobResp {
-  string job_id = 1;
-}
+// Program
 
-message DeleteJobReq {
-  string job_id = 1;
-}
-
-message DeleteJobResp {
-
-}
-
-// job Control
-
-enum StopType {
-  None = 0;
-  Checkpoint = 1;
-  Graceful = 2;
-  Immediate = 3;
-  Force = 4;
-}
-
-message UpdateJobReq {
-  string job_id = 1;
-  optional uint64 checkpoint_interval_micros = 2;
-  optional StopType stop = 3;
-  optional uint32 parallelism = 4;
-}
-
-message UpdateJobResp {
-}
-
-//
 message PipelineProgram {
   repeated string types = 1;
   repeated string other_defs = 2;
   repeated ProgramNode nodes = 3;
   repeated ProgramEdge edges = 4;
-
 }
 
 message ProgramNode {
@@ -132,6 +63,12 @@ message ProgramEdge {
   string key_type = 3;
   string value_type = 4;
   EdgeType edge_type = 5;
+}
+
+message ConnectorOp {
+  string operator = 1;
+  string config = 2;
+  string description = 3;
 }
 
 message Operator {
@@ -346,27 +283,6 @@ enum EdgeType {
 
 // job status
 
-message GetJobsReq {
-}
-
-message GetJobsResp {
-  repeated JobStatus jobs = 1;
-}
-
-message JobStatusReq {
-  string job_id = 1;
-}
-
-message JobDetailsResp {
-  JobStatus job_status = 1;
-  JobGraph job_graph = 2;
-
-  // these fields determine the behavior and appearance of the button that controls the pipeline
-  optional StopType action = 11; // the value that should be set against stop_mode if one is available
-  string action_text = 12; // the text of the button to take the action
-  bool in_progress = 13; // whether the button should be represented as a loading
-}
-
 message JobStatus {
   string job_id = 1;
   string pipeline_name = 2;
@@ -390,7 +306,6 @@ message JobDetailsReq {
   string job_id = 1;
 }
 
-
 message JobNode {
   string node_id = 1;
   string operator = 2;
@@ -410,30 +325,7 @@ message JobGraph {
   repeated JobEdge edges = 2;
 }
 
-enum JobLogLevel {
-  INFO = 0;
-  WARN = 1;
-  ERROR = 2;
-}
-
-message OperatorErrorsReq {
-    string job_id = 1;
-}
-
-message JobLogMessage {
-  uint64 created_at = 1;
-  optional string operator_id = 2;
-  optional int64 task_index = 3;
-  JobLogLevel level = 4;
-  string message = 5;
-  string details = 6;
-}
-
-message OperatorErrorsRes {
-  repeated JobLogMessage messages = 1;
-}
-
-// checkpoints
+// Checkpoints
 
 enum TaskCheckpointEventType {
   ALIGNMENT_STARTED = 0;
@@ -462,306 +354,4 @@ message OperatorCheckpointDetail {
   optional uint64 finish_time = 3;
   bool has_state = 4;
   map<uint32, TaskCheckpointDetail> tasks = 5;
-}
-
-message CheckpointOverview {
-  uint32 epoch = 1;
-  string backend = 2;
-  uint64 start_time = 3;
-  optional uint64 finish_time = 4;
-}
-
-message JobCheckpointsReq {
-  string job_id = 1;
-}
-
-message JobCheckpointsResp {
-  repeated CheckpointOverview checkpoints = 1;
-}
-
-message CheckpointDetailsReq {
-  string job_id = 1;
-  uint32 epoch = 2;
-}
-
-message CheckpointDetailsResp {
-  CheckpointOverview overview = 1;
-  map<string, OperatorCheckpointDetail> operators = 2;
-}
-
-// metrics
-
-message Metric {
-  uint64 time = 1;
-  double value = 2;
-}
-
-message SubtaskMetrics {
-  repeated Metric bytes_recv = 1;
-  repeated Metric bytes_sent = 2;
-  repeated Metric messages_recv = 3;
-  repeated Metric messages_sent = 4;
-  repeated Metric backpressure = 5;
-}
-
-message JobMetricsReq {
-  string job_id = 1;
-}
-
-message JobMetricsResp {
-  message OperatorMetrics {
-    map<uint32, SubtaskMetrics> subtasks = 1;
-  }
-
-  string job_id = 1;
-  uint64 start_time = 2;
-  uint64 end_time = 3;
-  map<string, OperatorMetrics> metrics = 4;;
-}
-
-// connections
-message GetConnectorsReq {
-}
-
-message Connector {
-  string id = 1;
-  string name = 2;
-  string icon = 3;
-  string description = 4;
-  bool enabled = 5;
-  bool source = 6;
-  bool sink = 7;
-  bool custom_schemas = 8;
-  bool testing = 9;
-  bool hidden = 12;
-
-  optional string connection_config = 10;
-  string table_config = 11;
-}
-
-message GetConnectorsResp {
-  repeated Connector connectors = 1;
-}
-
-
-message Connection {
-  string id = 1;
-  string name = 2;
-  string connector = 3;
-  string config = 4;
-  string description = 5;
-}
-
-message CreateConnectionReq {
-  string name = 1;
-  string connector = 2;
-  string config = 3;
-}
-
-message CreateConnectionResp {
-  Connection connection = 1;
-}
-
-message GetConnectionsReq {
-}
-
-message GetConnectionsResp {
-  repeated Connection connections = 1;
-}
-
-message DeleteConnectionReq {
-  string name = 1;
-}
-
-message DeleteConnectionResp {
-}
-
-enum TableType {
-  SOURCE = 0;
-  SINK = 1;
-}
-
-// Connection tables
-message CreateConnectionTableReq {
-  string name = 1;
-  string connector = 2;
-  optional string connection_id = 3;
-  string config = 5;
-  optional ConnectionSchema schema = 6;
-}
-
-message CreateConnectionTableResp {
-}
-
-message ConnectionTable {
-  int64 id = 1;
-  string name = 2;
-  string connector = 3;
-  optional Connection connection  = 4;
-  TableType table_type = 5;
-  string config = 6;
-  ConnectionSchema schema = 7;
-  int32 consumers = 8;
-}
-
-message GetConnectionTablesReq {
-}
-
-message GetConnectionTablesResp {
-  repeated ConnectionTable tables = 1;
-}
-
-
-message DeleteConnectionTableReq {
-  int64 id = 1;
-}
-
-message DeleteConnectionTableResp {
-}
-
-
-// Sources
-
-enum PrimitiveType {
-  Int32 = 0;
-  Int64 = 1;
-  UInt32 = 2;
-  UInt64 = 3;
-  F32 = 4;
-  F64 = 5;
-  Bool = 6;
-  String = 7;
-  Bytes = 8;
-  UnixMillis = 9;
-  UnixMicros = 12;
-  UnixNanos = 13;
-  DateTime = 10;
-  Json = 11;
-}
-
-message StructType {
-  optional string name = 1;
-  repeated SourceField fields = 2;
-}
-
-message SourceFieldType {
-  oneof type {
-    PrimitiveType primitive = 1;
-    StructType struct = 2;
-  }
-
-  // include a sql name if the type is PrimitiveType
-  optional string sql_name = 3;
-}
-
-message SourceField {
-  string field_name = 1;
-  SourceFieldType field_type = 2;
-  bool nullable = 3;
-}
-
-enum Format {
-  JsonFormat = 0;
-  DebeziumJsonFormat = 1;
-  ProtobufFormat = 2;
-  AvroFormat = 3;
-  RawStringFormat = 4;
-  ParquetFormat = 5;
-}
-
-message FormatOptions {
-  bool confluent_schema_registry = 1;
-  bool include_schema = 2;
-}
-
-message ConnectionSchema {
-  optional Format format = 1;
-  FormatOptions format_options = 2;
-  optional string struct_name = 8;
-  repeated SourceField fields = 3;
-
-  oneof definition {
-    string json_schema = 4;
-    string protobuf_schema = 5;
-    string avro_schema = 6;
-    string raw_schema = 7;
-  }
-}
-message ConnectorOp {
-  string operator = 1;
-  string config = 2;
-  string description = 3;
-}
-
-message TestSchemaReq {
-  ConnectionSchema schema = 1;
-}
-
-message TestSchemaResp {
-  bool valid = 1;
-  repeated string errors = 2;
-}
-
-message TestSourceMessage {
-  bool error = 1;
-  bool done = 2;
-  string message = 3;
-}
-
-message ConfluentSchemaReq {
-  string endpoint = 1;
-  string topic = 2;
-}
-
-message ConfluentSchemaResp {
-  string schema = 1;
-}
-
-
-// outputs
-
-message GrpcOutputSubscription {
-  string job_id = 1;
-}
-
-message OutputData {
-  string operator_id = 1;
-  uint64 timestamp = 2;
-  string key = 3;
-  string value = 4;
-}
-
-service ApiGrpc {
-  rpc GetConnectors(GetConnectorsReq) returns (GetConnectorsResp);
-  rpc CreateConnection(CreateConnectionReq) returns (CreateConnectionResp);
-  rpc GetConnections(GetConnectionsReq) returns (GetConnectionsResp);
-  rpc DeleteConnection(DeleteConnectionReq) returns (DeleteConnectionResp);
-
-  rpc CreateConnectionTable(CreateConnectionTableReq) returns (CreateConnectionTableResp);
-  rpc TestConnectionTable(CreateConnectionTableReq) returns (stream TestSourceMessage);
-  rpc GetConnectionTables(GetConnectionTablesReq) returns (GetConnectionTablesResp);
-  rpc DeleteConnectionTable(DeleteConnectionTableReq) returns (DeleteConnectionTableResp);
-  rpc TestSchema(TestSchemaReq) returns (TestSchemaResp);
-  rpc GetConfluentSchema(ConfluentSchemaReq) returns (ConfluentSchemaResp);
-
-  rpc CreatePipeline(CreatePipelineReq) returns (CreatePipelineResp);
-  rpc GraphForPipeline(PipelineGraphReq) returns (PipelineGraphResp);
-  rpc GetPipeline(GetPipelineReq) returns (PipelineDef);
-
-  rpc CreateJob(CreateJobReq) returns (CreateJobResp);
-  rpc DeleteJob(DeleteJobReq) returns (DeleteJobResp);
-  rpc StartPipeline(CreatePipelineReq) returns (CreateJobResp);
-  rpc PreviewPipeline(CreatePipelineReq) returns (CreateJobResp);
-
-  rpc GetJobs(GetJobsReq) returns (GetJobsResp);
-  rpc GetJobDetails(JobDetailsReq) returns (JobDetailsResp);
-  rpc GetCheckpoints(JobCheckpointsReq) returns (JobCheckpointsResp);
-  rpc GetCheckpointDetail(CheckpointDetailsReq) returns (CheckpointDetailsResp);
-  rpc GetOperatorErrors(OperatorErrorsReq) returns (OperatorErrorsRes);
-
-  rpc GetJobMetrics(JobMetricsReq) returns (JobMetricsResp);
-
-  rpc UpdateJob(UpdateJobReq) returns (UpdateJobResp);
-
-  rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
 }

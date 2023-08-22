@@ -5,38 +5,42 @@ use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};
+use std::collections::HashMap;
+use std::time::Duration;
 
-use petgraph::visit::EdgeRef;
-use prost::Message;
-use serde_json::json;
-use tonic::Request;
-use tracing::warn;
-
+use crate::{jobs, pipelines, types};
 use arroyo_datastream::{ConnectorOp, Operator, Program};
-use arroyo_rpc::grpc::api::api_grpc_server::ApiGrpc;
 use arroyo_rpc::grpc::api::{
-    self, create_pipeline_req, CreatePipelineReq, CreateSqlJob, CreateUdf, PipelineProgram, Udf,
-    UdfLanguage, UpdateJobReq,
+    create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, CreateUdf, PipelineProgram,
+    Udf, UdfLanguage,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::types::{
     Job, JobCollection, PaginationQueryParams, Pipeline, PipelineCollection, PipelineEdge,
     PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, StopType, ValidatePipelinePost,
 };
+use arroyo_server_common::log_event;
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
+use petgraph::visit::EdgeRef;
+use prost::Message;
+use serde_json::json;
+use time::OffsetDateTime;
+use tracing::warn;
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, GetPipelinesParams};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map_rest, not_found, paginate_results,
-    required_field, unauthorized, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
+    authenticate, bad_request, client, log_and_map, not_found, paginate_results, required_field,
+    unauthorized, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
 use crate::types::public::{PipelineType, StopMode};
 use crate::{connection_tables, to_micros};
-use crate::{handle_db_error, log_and_map, optimizations, AuthData};
+use crate::{handle_db_error, optimizations, AuthData};
 use create_pipeline_req::Config::Sql;
+
+const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
 
 async fn compile_sql<'e, E>(
     sql: &CreateSqlJob,
@@ -380,8 +384,10 @@ pub async fn post_pipeline(
     bearer_auth: BearerAuth,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
-    let client = client(&state.pool).await?;
+    let mut client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    let preview = pipeline_post.preview.unwrap_or(false);
 
     let create_pipeline_req = CreatePipelineReq {
         name: pipeline_post.name.to_string(),
@@ -397,21 +403,46 @@ pub async fn post_pipeline(
                     definition: u.definition.to_string(),
                 })
                 .collect(),
-            preview: pipeline_post.preview.unwrap_or(false),
+            preview,
         })),
     };
 
     let pipeline_pub_id = generate_id(IdTypes::Pipeline);
 
-    state
-        .grpc_api_server
-        .start_or_preview(
-            create_pipeline_req,
-            pipeline_pub_id.clone(),
-            pipeline_post.preview.unwrap_or(false),
-            auth_data.clone(),
-        )
-        .await?;
+    let transaction = client.transaction().await.map_err(log_and_map)?;
+    transaction
+        .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
+        .await
+        .map_err(log_and_map)?;
+
+    let pipeline_id = pipelines::create_pipeline(
+        &create_pipeline_req,
+        &pipeline_pub_id,
+        auth_data.clone(),
+        &transaction,
+    )
+    .await?;
+
+    let create_job = CreateJobReq {
+        pipeline_id: format!("{}", pipeline_id),
+        checkpoint_interval_micros: DEFAULT_CHECKPOINT_INTERVAL.as_micros() as u64,
+        preview,
+    };
+
+    let job_id = jobs::create_job(
+        create_job,
+        &pipeline_post.name,
+        &pipeline_id,
+        &auth_data,
+        &transaction,
+    )
+    .await?;
+
+    transaction.commit().await.map_err(log_and_map)?;
+    log_event(
+        "job_created",
+        json!({"service": "api", "is_preview": preview, "job_id": job_id}),
+    );
 
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
     Ok(Json(pipeline))
@@ -444,22 +475,66 @@ pub async fn patch_pipeline(
         .bind(&client, &auth_data.organization_id, &pipeline_pub_id)
         .one()
         .await
-        .map_err(log_and_map_rest)?
+        .map_err(log_and_map)?
         .id;
 
-    let stop: Option<api::StopType> = pipeline_patch.stop.map(|v| v.into());
+    let interval = pipeline_patch
+        .checkpoint_interval_micros
+        .map(Duration::from_micros);
 
-    let update_job_request = UpdateJobReq {
-        job_id,
-        checkpoint_interval_micros: pipeline_patch.checkpoint_interval_micros,
-        stop: stop.map(|v| v as i32),
-        parallelism: pipeline_patch.parallelism.map(|v| v as u32),
+    let stop = &pipeline_patch.stop.map(|s| match s {
+        StopType::None => types::public::StopMode::none,
+        StopType::Graceful => types::public::StopMode::graceful,
+        StopType::Immediate => types::public::StopMode::immediate,
+        StopType::Checkpoint => types::public::StopMode::checkpoint,
+        StopType::Force => types::public::StopMode::force,
+    });
+
+    if let Some(interval) = interval {
+        if interval < Duration::from_secs(1) || interval > Duration::from_secs(24 * 60 * 60) {
+            return Err(bad_request(
+                "checkpoint_interval_micros must be between 1 second and 1 day".to_string(),
+            ));
+        }
+    }
+
+    let parallelism_overrides = if let Some(parallelism) = pipeline_patch.parallelism {
+        let res = api_queries::get_job_details()
+            .bind(&client, &auth_data.organization_id, &job_id)
+            .opt()
+            .await
+            .map_err(log_and_map)?
+            .ok_or_else(|| not_found("Job".to_string()))?;
+
+        let program = PipelineProgram::decode(&res.program[..]).map_err(log_and_map)?;
+        let map: HashMap<String, u32> = program
+            .nodes
+            .into_iter()
+            .map(|node| (node.node_id, parallelism as u32))
+            .collect();
+
+        Some(serde_json::to_value(map).map_err(log_and_map)?)
+    } else {
+        None
     };
 
-    state
-        .grpc_api_server
-        .update_job(Request::new(update_job_request))
-        .await?;
+    let res = api_queries::update_job()
+        .bind(
+            &client,
+            &OffsetDateTime::now_utc(),
+            &auth_data.user_id,
+            &stop,
+            &interval.map(|i| i.as_micros() as i64),
+            &parallelism_overrides,
+            &job_id,
+            &auth_data.organization_id,
+        )
+        .await
+        .map_err(log_and_map)?;
+
+    if res == 0 {
+        return Err(not_found("Job".to_string()));
+    }
 
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
     Ok(Json(pipeline))
@@ -499,7 +574,7 @@ pub async fn get_pipelines(
         )
         .all()
         .await
-        .map_err(log_and_map_rest)?;
+        .map_err(log_and_map)?;
 
     let (pipelines, has_more) = paginate_results(pipelines, limit);
 
@@ -560,7 +635,7 @@ pub async fn delete_pipeline(
         .bind(&client, &auth_data.organization_id, &pipeline_pub_id)
         .all()
         .await
-        .map_err(log_and_map_rest)?
+        .map_err(log_and_map)?
         .into_iter()
         .map(|j| j.into())
         .collect();
@@ -577,7 +652,7 @@ pub async fn delete_pipeline(
     let count = api_queries::delete_pipeline()
         .bind(&client, &pipeline_pub_id, &auth_data.organization_id)
         .await
-        .map_err(log_and_map_rest)?;
+        .map_err(log_and_map)?;
 
     if count != 1 {
         return Err(not_found("Pipeline".to_string()));
@@ -612,7 +687,7 @@ pub async fn get_pipeline_jobs(
         .bind(&client, &auth_data.organization_id, &pipeline_pub_id)
         .all()
         .await
-        .map_err(log_and_map_rest)?;
+        .map_err(log_and_map)?;
 
     Ok(Json(JobCollection {
         has_more: false,
@@ -629,7 +704,7 @@ pub async fn query_pipeline_by_pub_id(
         .bind(client, pipeline_pub_id, &auth_data.organization_id)
         .opt()
         .await
-        .map_err(log_and_map_rest)?;
+        .map_err(log_and_map)?;
 
     let res = pipeline.ok_or_else(|| not_found("Pipeline".to_string()))?;
 
@@ -649,7 +724,7 @@ pub async fn query_job_by_pub_id(
         .bind(client, &auth_data.organization_id, &job_pub_id)
         .opt()
         .await
-        .map_err(log_and_map_rest)?;
+        .map_err(log_and_map)?;
 
     let res: DbPipelineJob = job.ok_or_else(|| not_found("Job".to_string()))?;
 

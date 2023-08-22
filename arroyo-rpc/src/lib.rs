@@ -5,15 +5,13 @@ use std::{fs, time::SystemTime};
 
 use crate::grpc::SubtaskCheckpointMetadata;
 use crate::types::{Format, PrimitiveType};
-use arroyo_types::{CheckpointBarrier, API_ADDR_ENV};
-use grpc::{api::api_grpc_client::ApiGrpcClient, StopMode, TaskCheckpointEventType};
+use arroyo_types::CheckpointBarrier;
+use grpc::{StopMode, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tonic::{
-    codegen::InterceptedService,
     metadata::{Ascii, MetadataValue},
     service::Interceptor,
-    transport::Channel,
 };
 
 pub mod grpc {
@@ -100,13 +98,6 @@ impl Interceptor for FileAuthInterceptor {
 
         Ok(request)
     }
-}
-
-pub async fn api_client() -> ApiGrpcClient<InterceptedService<Channel, FileAuthInterceptor>> {
-    let host = std::env::var(API_ADDR_ENV).unwrap_or_else(|_| "http://localhost:8001".to_string());
-    let channel = Channel::from_shared(host).unwrap().connect().await.unwrap();
-
-    ApiGrpcClient::with_interceptor(channel, FileAuthInterceptor::load())
 }
 
 pub fn primitive_to_sql(primitive_type: PrimitiveType) -> &'static str {

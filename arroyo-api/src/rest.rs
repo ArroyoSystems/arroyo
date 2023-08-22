@@ -33,12 +33,11 @@ use crate::pipelines::{
 };
 use crate::rest_utils::not_found;
 use crate::ApiDoc;
-use crate::ApiServer;
 use arroyo_types::{telemetry_enabled, API_ENDPOINT_ENV, ASSET_DIR_ENV};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub(crate) grpc_api_server: ApiServer,
+    pub(crate) controller_addr: String,
     pub(crate) pool: Pool,
 }
 
@@ -59,7 +58,7 @@ pub async fn api_fallback() -> impl IntoResponse {
     not_found("Route".to_string())
 }
 
-pub fn create_rest_app(server: ApiServer, pool: Pool) -> Router {
+pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
     let asset_dir = env::var(ASSET_DIR_ENV).unwrap_or_else(|_| "arroyo-console/dist".to_string());
 
     static INDEX_HTML: Lazy<String> = Lazy::new(|| {
@@ -137,7 +136,7 @@ pub fn create_rest_app(server: ApiServer, pool: Pool) -> Router {
         .route_service("/", fallback)
         .fallback_service(serve_dir)
         .with_state(AppState {
-            grpc_api_server: server,
+            controller_addr: controller_addr.to_string(),
             pool,
         })
         .layer(cors)

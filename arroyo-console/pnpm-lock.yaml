@@ -4,18 +4,6 @@ dependencies:
   '@babel/core':
     specifier: ^7.22.5
     version: 7.22.5
-  '@bufbuild/connect-web':
-    specifier: ^0.2.1
-    version: 0.2.1(@bufbuild/protobuf@0.1.1)
-  '@bufbuild/protobuf':
-    specifier: ^0.1.1
-    version: 0.1.1
-  '@bufbuild/protoc-gen-connect-web':
-    specifier: ^0.2.1
-    version: 0.2.1(@bufbuild/connect-web@0.2.1)(@bufbuild/protoc-gen-es@0.1.1)
-  '@bufbuild/protoc-gen-es':
-    specifier: ^0.1.1
-    version: 0.1.1(@bufbuild/protobuf@0.1.1)
   '@chakra-ui/icons':
     specifier: ^2.0.19
     version: 2.0.19(@chakra-ui/system@2.6.0)(react@18.2.0)
@@ -387,57 +375,6 @@ packages:
       '@babel/helper-string-parser': 7.22.5
       '@babel/helper-validator-identifier': 7.22.5
       to-fast-properties: 2.0.0
-
-  /@bufbuild/connect-web@0.2.1(@bufbuild/protobuf@0.1.1):
-    resolution: {integrity: sha512-L580cL9VZCXcjwXMCvIvdFBqdQofVBQcL+jmSis7m8ZxPj5NQ4p7fUhQRTsZMWHkyWINdlZnr7WsHQL0BT7wPQ==}
-    peerDependencies:
-      '@bufbuild/protobuf': 0.1.1
-    dependencies:
-      '@bufbuild/protobuf': 0.1.1
-    dev: false
-
-  /@bufbuild/protobuf@0.1.1:
-    resolution: {integrity: sha512-HAs82bdlN5aUsoTaJNsPd8driezDenOtAh7dVpO5xKEmyB6ibmRIV08MTlIVudnMYbFc1qw7RxhFHoQy0rSvgg==}
-    dev: false
-
-  /@bufbuild/protoc-gen-connect-web@0.2.1(@bufbuild/connect-web@0.2.1)(@bufbuild/protoc-gen-es@0.1.1):
-    resolution: {integrity: sha512-A/M/tXRe5LsdD8xeUBEBxhe8TCqzD6eqKbld9j0KNgsRbrRlYQEMtIBarXXb+dADg+dwcTGS9W/DcfdO9R+Icg==}
-    engines: {node: '>=14'}
-    deprecated: This package is no longer supported. Please switch to use https://www.npmjs.com/package/@bufbuild/protoc-gen-connect-es. Details for switching can be found at https://github.com/bufbuild/connect-es/discussions/647
-    hasBin: true
-    peerDependencies:
-      '@bufbuild/connect-web': 0.2.1
-      '@bufbuild/protoc-gen-es': 0.1.1
-    peerDependenciesMeta:
-      '@bufbuild/connect-web':
-        optional: true
-      '@bufbuild/protoc-gen-es':
-        optional: true
-    dependencies:
-      '@bufbuild/connect-web': 0.2.1(@bufbuild/protobuf@0.1.1)
-      '@bufbuild/protoc-gen-es': 0.1.1(@bufbuild/protobuf@0.1.1)
-      '@bufbuild/protoplugin': 0.1.1
-    dev: false
-
-  /@bufbuild/protoc-gen-es@0.1.1(@bufbuild/protobuf@0.1.1):
-    resolution: {integrity: sha512-FFY8GfbMgcgN/nt4DtB+IiLvLmfGjQ7dKYVb6ciKCMymXx5MsRxs4xnJXHtpEv2rDVpDYCOhPkjri8o4AYeSPQ==}
-    engines: {node: '>=14'}
-    hasBin: true
-    peerDependencies:
-      '@bufbuild/protobuf': 0.1.1
-    peerDependenciesMeta:
-      '@bufbuild/protobuf':
-        optional: true
-    dependencies:
-      '@bufbuild/protobuf': 0.1.1
-      '@bufbuild/protoplugin': 0.1.1
-    dev: false
-
-  /@bufbuild/protoplugin@0.1.1:
-    resolution: {integrity: sha512-+zCwqiq6xbeM6OG02+eNCd4Rinu1Mtn+HsjMF8U8h5FazOj1fEP9SnXEabOfImOR83vHfk2jocqzrB4IkSZV2Q==}
-    dependencies:
-      '@bufbuild/protobuf': 0.1.1
-    dev: false
 
   /@chakra-ui/accordion@2.2.0(@chakra-ui/system@2.5.8)(framer-motion@6.5.1)(react@18.2.0):
     resolution: {integrity: sha512-2IK1iLzTZ22u8GKPPPn65mqJdZidn4AvkgAbv17ISdKA07VHJ8jSd4QF1T5iCXjKfZ0XaXozmhP4kDhjwF2IbQ==}

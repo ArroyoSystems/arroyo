@@ -5,20 +5,16 @@ import { extendTheme, ThemeConfig } from '@chakra-ui/react';
 import { theme as proTheme } from '@chakra-ui/pro-theme';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { PipelinesIndex } from './routes/pipelines/PipelinesIndex';
-import { ApiGrpc } from './gen/api_connectweb';
-import { PromiseClient } from '@bufbuild/connect-web';
 import { PipelineDetails } from './routes/pipelines/PipelineDetails';
 import '@fontsource/inter/variable.css';
 import { Home } from './routes/home/Home';
 import { Connections } from './routes/connections/Connections';
 import { CreatePipeline } from './routes/pipelines/CreatePipeline';
 
-import { addCloudRoutes, createRoot, getClient, needsOrgSetup } from './lib/CloudComponents';
+import { addCloudRoutes, createRoot, needsOrgSetup } from './lib/CloudComponents';
 import PageNotFound from './routes/not_found/PageNotFound';
 import { ChooseConnector } from './routes/connections/ChooseConnector';
 import { CreateConnection } from './routes/connections/CreateConnection';
-
-export type ApiClient = () => Promise<PromiseClient<typeof ApiGrpc>>;
 
 const config: ThemeConfig = {
   initialColorMode: 'dark',
@@ -26,8 +22,6 @@ const config: ThemeConfig = {
 };
 
 export function Router(): JSX.Element {
-  const client = getClient();
-
   let routes = [
     {
       path: '*',
@@ -59,7 +53,7 @@ export function Router(): JSX.Element {
     },
     {
       path: 'pipelines/:pipelineId',
-      element: <PipelineDetails client={client} />,
+      element: <PipelineDetails />,
     },
   ];
 
