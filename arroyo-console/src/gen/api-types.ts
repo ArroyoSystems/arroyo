@@ -205,7 +205,6 @@ export interface components {
     };
     ConnectionProfileCollection: {
       data: (components["schemas"]["ConnectionProfile"])[];
-      hasMore: boolean;
     };
     ConnectionProfilePost: {
       config: unknown;
@@ -260,7 +259,6 @@ export interface components {
     };
     ConnectorCollection: {
       data: (components["schemas"]["Connector"])[];
-      hasMore: boolean;
     };
     FieldType: OneOf<[{
       primitive: components["schemas"]["PrimitiveType"];
@@ -294,7 +292,6 @@ export interface components {
     };
     JobCollection: {
       data: (components["schemas"]["Job"])[];
-      hasMore: boolean;
     };
     /** @enum {string} */
     JobLogLevel: "info" | "warn" | "error";
@@ -302,6 +299,7 @@ export interface components {
       /** Format: int64 */
       createdAt: number;
       details: string;
+      id: string;
       level: components["schemas"]["JobLogLevel"];
       message: string;
       operatorId?: string | null;
@@ -346,7 +344,6 @@ export interface components {
     };
     OperatorMetricGroupCollection: {
       data: (components["schemas"]["OperatorMetricGroup"])[];
-      hasMore: boolean;
     };
     OutputData: {
       key: string;
@@ -852,6 +849,12 @@ export interface operations {
    */
   get_job_errors: {
     parameters: {
+      query?: {
+        /** @description Starting after */
+        starting_after?: string | null;
+        /** @description Limit */
+        limit?: number | null;
+      };
       path: {
         /** @description Pipeline id */
         pipeline_id: string;

@@ -690,7 +690,6 @@ pub async fn get_pipeline_jobs(
         .map_err(log_and_map)?;
 
     Ok(Json(JobCollection {
-        has_more: false,
         data: jobs.into_iter().map(|p| p.into()).collect(),
     }))
 }

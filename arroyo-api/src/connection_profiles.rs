@@ -119,8 +119,5 @@ pub async fn get_connection_profiles(
         })
         .collect();
 
-    Ok(Json(ConnectionProfileCollection {
-        data,
-        has_more: false,
-    }))
+    Ok(Json(ConnectionProfileCollection { data }))
 }

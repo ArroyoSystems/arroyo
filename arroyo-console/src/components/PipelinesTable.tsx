@@ -8,11 +8,8 @@ import {
   AlertDialogHeader,
   AlertDialogOverlay,
   AlertIcon,
-  Box,
   Button,
   CloseButton,
-  Flex,
-  IconButton,
   Stack,
   Table,
   Tbody,
@@ -20,15 +17,13 @@ import {
   Th,
   Thead,
   Tr,
-  useColorModeValue,
   useDisclosure,
 } from '@chakra-ui/react';
 import React, { useRef, useState } from 'react';
-import { usePipelines, usePipeline } from '../lib/data_fetching';
+import { usePipelines, usePipeline, Pipeline } from '../lib/data_fetching';
 import { formatError } from '../lib/util';
-import { ArrowBackIcon, ArrowForwardIcon } from '@chakra-ui/icons';
 import PipelineRow from './PipelineRow';
-import Loading from './Loading';
+import PaginatedContent from './PaginatedContent';
 
 export interface JobsTableProps {}
 
@@ -41,16 +36,7 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
   const [pipelineIdToBeDeleted, setPipelineIdToBeDeleted] = useState<string | undefined>(undefined);
   const { pipeline: pipelineToBeDeleted, deletePipeline } = usePipeline(pipelineIdToBeDeleted);
   const { pipelinePages, piplinesError, pipelineTotalPages, setPipelinesMaxPages } = usePipelines();
-  const [pageNum, setPageNum] = useState<number>(1);
-
-  setPipelinesMaxPages(Math.max(pageNum, pipelineTotalPages));
-
-  if (!pipelinePages || pipelinePages.length != pipelineTotalPages) {
-    return <Loading />;
-  }
-
-  const currentPage = pipelinePages[pageNum - 1];
-  const pipelines = currentPage.data;
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
 
   let messageBox = null;
   if (message != null) {
@@ -142,21 +128,11 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
     </Tbody>
   );
 
-  const pageButtons = (
-    <Flex justifyContent={'center'} gap={'5px'}>
-      <IconButton
-        aria-label="Previous page"
-        icon={<ArrowBackIcon />}
-        isDisabled={pageNum === 1}
-        onClick={() => setPageNum(pageNum - 1)}
-      />
-      <IconButton
-        aria-label="Search database"
-        icon={<ArrowForwardIcon />}
-        isDisabled={!currentPage.hasMore}
-        onClick={() => setPageNum(pageNum + 1)}
-      />
-    </Flex>
+  const table = (
+    <Table>
+      {tableHeader}
+      {tableBody}
+    </Table>
   );
 
   return (
@@ -166,19 +142,15 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
         lg: '6',
       }}
     >
-      <Box
-        bg="bg-surface"
-        boxShadow={{ base: 'none', md: useColorModeValue('sm', 'sm-dark') }}
-        borderRadius="lg"
-      >
-        {alert}
-        {messageBox}
-        <Table>
-          {tableHeader}
-          {tableBody}
-        </Table>
-      </Box>
-      {pageButtons}
+      {alert}
+      {messageBox}
+      <PaginatedContent
+        pages={pipelinePages}
+        totalPages={pipelineTotalPages}
+        setMaxPages={setPipelinesMaxPages}
+        content={table}
+        setCurrentData={setPipelines}
+      />
     </Stack>
   );
 };

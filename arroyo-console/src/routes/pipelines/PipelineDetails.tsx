@@ -12,6 +12,7 @@ import {
   ButtonGroup,
   Flex,
   Heading,
+  Icon,
   Spacer,
   Spinner,
   Stack,
@@ -37,6 +38,7 @@ import {
   useOperatorErrors,
   usePipeline,
   usePipelineJobs,
+  JobLogMessage,
 } from '../../lib/data_fetching';
 import OperatorDetail from '../../components/OperatorDetail';
 import Checkpoints from '../../components/Checkpoints';
@@ -44,9 +46,10 @@ import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';
 import { PipelineGraphViewer } from './PipelineGraph';
 import PipelineNotFound from '../../components/PipelineNotFound';
-import { QuestionOutlineIcon } from '@chakra-ui/icons';
+import { QuestionOutlineIcon, WarningIcon } from '@chakra-ui/icons';
 import { formatError } from '../../lib/util';
 import { PipelineOutputs } from './PipelineOutputs';
+import PaginatedContent from '../../components/PaginatedContent';
 
 export function PipelineDetails() {
   const [activeOperator, setActiveOperator] = useState<string | undefined>(undefined);
@@ -64,8 +67,11 @@ export function PipelineDetails() {
   const { jobs, jobsError } = usePipelineJobs(id, true);
   const job = jobs?.length ? jobs[0] : undefined;
   const { checkpoints } = useJobCheckpoints(id, job?.id);
-  const { operatorErrors } = useOperatorErrors(id, job?.id);
+  const { operatorErrorsPages, operatorErrorsTotalPages, setOperatorErrorsMaxPages } =
+    useOperatorErrors(id, job?.id);
+  const [operatorErrors, setOperatorErrors] = useState<JobLogMessage[]>([]);
   const { operatorMetricGroups } = useJobMetrics(id, job?.id);
+  const hasErrors = operatorErrorsPages?.length && operatorErrorsPages[0].data.length > 0;
 
   if (pipelineError || jobsError) {
     return (
@@ -76,7 +82,7 @@ export function PipelineDetails() {
     );
   }
 
-  if (!pipeline || !job) {
+  if (!pipeline || !job || !operatorErrorsPages) {
     return <Loading />;
   }
 
@@ -202,7 +208,13 @@ export function PipelineDetails() {
 
   const errorsTab = (
     <TabPanel padding={5}>
-      <OperatorErrors operatorErrors={operatorErrors} />
+      <PaginatedContent
+        pages={operatorErrorsPages}
+        totalPages={operatorErrorsTotalPages}
+        setMaxPages={setOperatorErrorsMaxPages}
+        content={<OperatorErrors operatorErrors={operatorErrors} />}
+        setCurrentData={setOperatorErrors}
+      />
     </TabPanel>
   );
 
@@ -214,14 +226,7 @@ export function PipelineDetails() {
         <Tab>Checkpoints</Tab>
         <Tab>Query</Tab>
         <Tab>UDFs</Tab>
-        <Tab>
-          Errors{' '}
-          {(operatorErrors?.length || 0) > 0 && (
-            <Badge ml={2} colorScheme="red" size={'xs'}>
-              {operatorErrors!.length}
-            </Badge>
-          )}
-        </Tab>
+        <Tab>Errors {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}</Tab>
       </TabList>
       <Flex minH={0} flex={1}>
         <TabPanels>
