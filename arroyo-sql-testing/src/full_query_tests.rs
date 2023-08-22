@@ -150,3 +150,9 @@ full_pipeline_codegen! {"virtual_field_implicit_cast",
 
 select * from demo_stream;
 "}
+
+full_pipeline_codegen! {"count_over_case",
+"SELECT count(case when person.name = 'click' then 1 else null end) as clicks
+from nexmark
+group by tumble(interval '1 second');
+"}
