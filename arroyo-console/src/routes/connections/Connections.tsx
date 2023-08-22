@@ -26,16 +26,14 @@ import {
   ModalCloseButton,
   ModalBody,
   ModalFooter,
-  Flex,
 } from '@chakra-ui/react';
 import React, { useState } from 'react';
 import { FiInfo, FiXCircle } from 'react-icons/fi';
 import { ConnectionTable, del, Format, useConnectionTables } from '../../lib/data_fetching';
-import Loading from '../../components/Loading';
 import { useNavigate } from 'react-router-dom';
 import { formatError } from '../../lib/util';
-import { ArrowBackIcon, ArrowForwardIcon } from '@chakra-ui/icons';
 import { formatDate } from '../../lib/util';
+import PaginatedContent from '../../components/PaginatedContent';
 
 interface ColumnDef {
   name: string;
@@ -95,20 +93,7 @@ export function Connections() {
     connectionTablesTotalPages,
     setConnectionTablesMaxPages,
   } = useConnectionTables(10);
-
-  const [pageNum, setPageNum] = useState<number>(1);
-
-  if (
-    !connectionTablePages ||
-    connectionTablesLoading ||
-    connectionTablePages.length != connectionTablesTotalPages
-  ) {
-    return <Loading />;
-  }
-
-  setConnectionTablesMaxPages(Math.max(pageNum, connectionTablesTotalPages));
-  const currentPage = connectionTablePages[pageNum - 1];
-  const connectionTables = currentPage.data;
+  const [connectionTables, setConnectionTables] = useState<ConnectionTable[]>([]);
 
   const deleteTable = async (connection: ConnectionTable) => {
     const { error } = await del('/v1/connection_tables/{id}', {
@@ -221,23 +206,6 @@ export function Connections() {
     </Box>
   );
 
-  const pageButtons = (
-    <Flex justifyContent={'center'} gap={'5px'}>
-      <IconButton
-        aria-label="Previous page"
-        icon={<ArrowBackIcon />}
-        isDisabled={pageNum === 1}
-        onClick={() => setPageNum(pageNum - 1)}
-      />
-      <IconButton
-        aria-label="Search database"
-        icon={<ArrowForwardIcon />}
-        isDisabled={!currentPage.hasMore}
-        onClick={() => setPageNum(pageNum + 1)}
-      />
-    </Flex>
-  );
-
   return (
     <Container py="8" flex="1">
       <Stack
@@ -269,8 +237,14 @@ export function Connections() {
             </Button>
           </HStack>
         </Stack>
-        {table}
-        {pageButtons}
+        <PaginatedContent
+          pages={connectionTablePages}
+          loading={connectionTablesLoading}
+          totalPages={connectionTablesTotalPages}
+          setMaxPages={setConnectionTablesMaxPages}
+          setCurrentData={setConnectionTables}
+          content={table}
+        />
       </Stack>
     </Container>
   );

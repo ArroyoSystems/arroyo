@@ -144,10 +144,7 @@ pub async fn get_operator_metric_groups(
             .get(),
     );
 
-    let mut collection = OperatorMetricGroupCollection {
-        data: vec![],
-        has_more: false,
-    };
+    let mut collection = OperatorMetricGroupCollection { data: vec![] };
 
     match result {
         Ok((r1, r2, r3, r4, r5)) => {

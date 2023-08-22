@@ -2,11 +2,11 @@ import {
   Alert,
   AlertDescription,
   AlertIcon,
-  Badge,
   Box,
   Button,
   Flex,
   HStack,
+  Icon,
   Spacer,
   Spinner,
   Stack,
@@ -36,11 +36,14 @@ import {
   usePipelineGraph,
   usePipelineJobs,
   ConnectionTable,
+  JobLogMessage,
 } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';
 import StartPipelineModal from '../../components/StartPipelineModal';
 import { formatError } from '../../lib/util';
+import { WarningIcon } from '@chakra-ui/icons';
+import PaginatedContent from '../../components/PaginatedContent';
 
 function useQuery() {
   const { search } = useLocation();
@@ -53,7 +56,9 @@ export function CreatePipeline() {
   const { pipeline, updatePipeline } = usePipeline(pipelineId);
   const { jobs } = usePipelineJobs(pipelineId, true);
   const job = jobs?.length ? jobs[0] : undefined;
-  const { operatorErrors } = useOperatorErrors(pipelineId, job?.id);
+  const { operatorErrorsPages, operatorErrorsTotalPages, setOperatorErrorsMaxPages } =
+    useOperatorErrors(pipelineId, job?.id);
+  const [operatorErrors, setOperatorErrors] = useState<JobLogMessage[]>([]);
   const [queryInput, setQueryInput] = useState<string>('');
   const [queryInputToCheck, setQueryInputToCheck] = useState<string>('');
   const [udfsInput, setUdfsInput] = useState<string>('');
@@ -75,6 +80,7 @@ export function CreatePipeline() {
   const { pipeline: copyFrom, pipelineLoading: copyFromLoading } = usePipeline(
     queryParams.get('from') ?? undefined
   );
+  const hasErrors = operatorErrorsPages?.length && operatorErrorsPages[0].data.length > 0;
 
   let connectionTables: ConnectionTable[] = [];
   let catalogTruncated = false;
@@ -407,7 +413,7 @@ export function CreatePipeline() {
 
   const errorsTab = (
     <TabPanel overflowX="auto" height="100%" position="relative">
-      {operatorErrors ? (
+      {hasErrors ? (
         <Box
           style={{
             top: 0,
@@ -418,7 +424,13 @@ export function CreatePipeline() {
           }}
           overflow="auto"
         >
-          <OperatorErrors operatorErrors={operatorErrors} />
+          <PaginatedContent
+            pages={operatorErrorsPages}
+            totalPages={operatorErrorsTotalPages}
+            setMaxPages={setOperatorErrorsMaxPages}
+            content={<OperatorErrors operatorErrors={operatorErrors} />}
+            setCurrentData={setOperatorErrors}
+          />
         </Box>
       ) : (
         <Text>Job errors will appear here.</Text>
@@ -493,11 +505,7 @@ export function CreatePipeline() {
           </Tab>
           <Tab>
             <Text>Errors</Text>
-            {(operatorErrors?.length || 0) > 0 && (
-              <Badge ml={2} colorScheme="red" size={'xs'}>
-                {operatorErrors!.length}
-              </Badge>
-            )}
+            {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}
           </Tab>
         </TabList>
       }

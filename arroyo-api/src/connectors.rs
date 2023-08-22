@@ -20,8 +20,5 @@ pub async fn get_connectors() -> Result<Json<ConnectorCollection>, ErrorResp> {
         .collect();
 
     connectors.sort_by_cached_key(|c| c.name.clone());
-    Ok(Json(ConnectorCollection {
-        data: connectors,
-        has_more: false,
-    }))
+    Ok(Json(ConnectorCollection { data: connectors }))
 }

@@ -98,7 +98,20 @@ const checkpointDetailsKey = (pipelineId?: string, jobId?: string, epoch?: numbe
 };
 
 const operatorErrorsKey = (pipelineId?: string, jobId?: string) => {
-  return pipelineId && jobId ? { key: 'JobEvents', pipelineId, jobId } : null;
+  return (pageIndex: number, previousPageData: schemas['JobLogMessageCollection']) => {
+    if (previousPageData && !previousPageData.hasMore) return null;
+
+    if (pageIndex === 0) {
+      return { key: 'OperatorErrors', pipelineId, jobId, startingAfter: undefined };
+    }
+
+    return {
+      key: 'OperatorErrors',
+      pipelineId,
+      jobId,
+      startingAfter: previousPageData.data[previousPageData.data.length - 1].id,
+    };
+  };
 };
 
 const pipelineGraphKey = (query?: string, udfsInput?: string) => {
@@ -122,7 +135,7 @@ const pingFetcher = async () => {
 
 export const usePing = () => {
   const { data, error } = useSWR('ping', pingFetcher, {
-    // refreshInterval: 1000,
+    refreshInterval: 1000,
     onErrorRetry: (error, key, config, revalidate, {}) => {
       // explicitly define this function to override the exponential backoff
       setTimeout(() => revalidate(), 1000);
@@ -432,12 +445,20 @@ export const usePipelineJobs = (pipelineId?: string, refresh: boolean = false) =
 };
 
 const operatorErrorsFetcher = () => {
-  return async (params: { key: string; pipelineId: string; jobId: string }) => {
+  return async (params: {
+    key: string;
+    pipelineId: string;
+    jobId: string;
+    startingAfter?: string;
+  }) => {
     const { data, error } = await get('/v1/pipelines/{pipeline_id}/jobs/{job_id}/errors', {
       params: {
         path: {
           pipeline_id: params.pipelineId,
           job_id: params.jobId,
+        },
+        query: {
+          starting_after: params.startingAfter,
         },
       },
     });
@@ -447,7 +468,7 @@ const operatorErrorsFetcher = () => {
 };
 
 export const useOperatorErrors = (pipelineId?: string, jobId?: string) => {
-  const { data } = useSWR<schemas['JobLogMessageCollection']>(
+  const { data, isLoading, size, setSize } = useSWRInfinite<schemas['JobLogMessageCollection']>(
     operatorErrorsKey(pipelineId, jobId),
     operatorErrorsFetcher(),
     {
@@ -456,7 +477,10 @@ export const useOperatorErrors = (pipelineId?: string, jobId?: string) => {
   );
 
   return {
-    operatorErrors: data?.data,
+    operatorErrorsPages: data,
+    operatorErrorsLoading: isLoading,
+    operatorErrorsTotalPages: size,
+    setOperatorErrorsMaxPages: setSize,
   };
 };
 

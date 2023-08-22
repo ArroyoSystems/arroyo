@@ -168,6 +168,7 @@ pub enum JobLogLevel {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct JobLogMessage {
+    pub id: String,
     pub created_at: u64,
     pub operator_id: Option<String>,
     pub task_index: Option<u64>,
@@ -222,13 +223,8 @@ pub struct OperatorCheckpointGroup {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[aliases(
-    JobCollection = PaginatedCollection<Job>,
     PipelineCollection = PaginatedCollection<Pipeline>,
     JobLogMessageCollection = PaginatedCollection<JobLogMessage>,
-    CheckpointCollection = PaginatedCollection<Checkpoint>,
-    OperatorMetricGroupCollection = PaginatedCollection<OperatorMetricGroup>,
-    ConnectorCollection = PaginatedCollection<Connector>,
-    ConnectionProfileCollection = PaginatedCollection<ConnectionProfile>,
     ConnectionTableCollection = PaginatedCollection<ConnectionTable>,
 )]
 pub struct PaginatedCollection<T> {
@@ -239,7 +235,12 @@ pub struct PaginatedCollection<T> {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[aliases(
+    JobCollection = NonPaginatedCollection<Job>,
     OperatorCheckpointGroupCollection = NonPaginatedCollection<OperatorCheckpointGroup>,
+    CheckpointCollection = NonPaginatedCollection<Checkpoint>,
+    OperatorMetricGroupCollection = NonPaginatedCollection<OperatorMetricGroup>,
+    ConnectorCollection = NonPaginatedCollection<Connector>,
+    ConnectionProfileCollection = NonPaginatedCollection<ConnectionProfile>,
 )]
 pub struct NonPaginatedCollection<T> {
     pub data: Vec<T>,

@@ -1,4 +1,6 @@
-use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
+use crate::queries::api_queries::{
+    DbCheckpoint, DbLogMessage, DbPipelineJob, GetOperatorErrorsParams,
+};
 use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::{
     CreateJobReq, JobStatus, OperatorCheckpointDetail, TaskCheckpointDetail,
@@ -6,10 +8,11 @@ use arroyo_rpc::grpc::api::{
 };
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, Sse};
 use axum::Json;
 use cornucopia_async::GenericClient;
+use cornucopia_async::Params;
 use deadpool_postgres::Transaction;
 use futures_util::stream::Stream;
 use std::convert::Infallible;
@@ -24,14 +27,16 @@ const PREVIEW_TTL: Duration = Duration::from_secs(60);
 use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map, not_found, BearerAuth, ErrorResp,
+    authenticate, bad_request, client, log_and_map, not_found, paginate_results,
+    validate_pagination_params, BearerAuth, ErrorResp,
 };
 use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
 use arroyo_rpc::types::{
     Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType, JobCollection,
     JobLogLevel, JobLogMessage, JobLogMessageCollection, OperatorCheckpointGroup,
-    OperatorCheckpointGroupCollection, OutputData, StopType, SubtaskCheckpointGroup,
+    OperatorCheckpointGroupCollection, OutputData, PaginationQueryParams, StopType,
+    SubtaskCheckpointGroup,
 };
 
 pub(crate) async fn create_job<'a>(
@@ -197,7 +202,9 @@ pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option
     tag = "jobs",
     params(
         ("pipeline_id" = String, Path, description = "Pipeline id"),
-        ("job_id" = String, Path, description = "Job id")
+        ("job_id" = String, Path, description = "Job id"),
+        ("starting_after" = Option<String>, Query, description = "Starting after"),
+        ("limit" = Option<u32>, Query, description = "Limit"),
     ),
     responses(
         (status = 200, description = "Got job's error messages", body = JobLogMessageCollection),
@@ -207,14 +214,26 @@ pub async fn get_job_errors(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
     Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
+    query_params: Query<PaginationQueryParams>,
 ) -> Result<Json<JobLogMessageCollection>, ErrorResp> {
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
+    let (starting_after, limit) =
+        validate_pagination_params(query_params.starting_after.clone(), query_params.limit)?;
+
     query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &client, &auth_data).await?;
 
     let errors = api_queries::get_operator_errors()
-        .bind(&client, &auth_data.organization_id, &job_pub_id)
+        .params(
+            &client,
+            &GetOperatorErrorsParams {
+                organization_id: &auth_data.organization_id,
+                job_id: &job_pub_id,
+                starting_after: starting_after.unwrap_or_default(),
+                limit: limit as i32,
+            },
+        )
         .all()
         .await
         .map_err(log_and_map)?
@@ -222,9 +241,11 @@ pub async fn get_job_errors(
         .map(|m| m.into())
         .collect();
 
+    let (errors, has_more) = paginate_results(errors, limit);
+
     Ok(Json(JobLogMessageCollection {
         data: errors,
-        has_more: false,
+        has_more,
     }))
 }
 
@@ -237,6 +258,7 @@ impl Into<JobLogMessage> for DbLogMessage {
         };
 
         JobLogMessage {
+            id: self.pub_id,
             created_at: to_micros(self.created_at),
             operator_id: self.operator_id,
             task_index: self.task_index.map(|i| i as u64),
@@ -279,10 +301,7 @@ pub async fn get_job_checkpoints(
         .map(|m| m.into())
         .collect();
 
-    Ok(Json(CheckpointCollection {
-        data: checkpoints,
-        has_more: false,
-    }))
+    Ok(Json(CheckpointCollection { data: checkpoints }))
 }
 
 fn get_event_spans(subtask_details: &TaskCheckpointDetail) -> Vec<CheckpointEventSpan> {
@@ -534,7 +553,6 @@ pub async fn get_jobs(
         .map_err(log_and_map)?;
 
     Ok(Json(JobCollection {
-        has_more: false,
         data: jobs.into_iter().map(|p| p.into()).collect(),
     }))
 }
