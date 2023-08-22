@@ -548,10 +548,10 @@ impl TypeDef {
 
     pub fn get_literal(scalar: &ScalarValue) -> syn::Expr {
         if scalar.is_null() {
-            return parse_quote!("None");
+            return parse_quote!(None);
         }
         match scalar {
-            ScalarValue::Null => parse_quote!("None"),
+            ScalarValue::Null => parse_quote!(None),
             ScalarValue::Boolean(Some(value)) => parse_quote!(#value),
             ScalarValue::Float32(Some(value)) => parse_quote!(#value),
             ScalarValue::Float64(Some(value)) => parse_quote!(#value),
