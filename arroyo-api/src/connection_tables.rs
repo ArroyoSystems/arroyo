@@ -28,11 +28,11 @@ use arroyo_sql::types::{StructField, TypeDef};
 
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map_rest, not_found, paginate_results,
-    required_field, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
+    authenticate, bad_request, client, log_and_map, not_found, paginate_results, required_field,
+    validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
 use crate::{
-    handle_db_error, handle_delete, log_and_map,
+    handle_db_error, handle_delete,
     queries::api_queries::{self, DbConnectionTable},
     to_micros, AuthData,
 };
@@ -222,11 +222,11 @@ pub async fn create_connection_table(
 ) -> Result<Json<ConnectionTable>, ErrorResp> {
     let mut client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
-    let transaction = client.transaction().await.map_err(log_and_map_rest)?;
+    let transaction = client.transaction().await.map_err(log_and_map)?;
     transaction
         .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
         .await
-        .map_err(log_and_map_rest)?;
+        .map_err(log_and_map)?;
 
     let (connector, connection_id, config, schema) =
         get_and_validate_connector(&req, &auth_data, &transaction).await?;
@@ -262,15 +262,15 @@ pub async fn create_connection_table(
         .await
         .map_err(|err| handle_db_error("connection_table", err))?;
 
-    transaction.commit().await.map_err(log_and_map_rest)?;
+    transaction.commit().await.map_err(log_and_map)?;
 
     let table = api_queries::get_connection_table()
         .bind(&client, &auth_data.organization_id, &pub_id)
         .one()
         .await
-        .map_err(log_and_map_rest)?
+        .map_err(log_and_map)?
         .try_into()
-        .map_err(log_and_map_rest)?;
+        .map_err(log_and_map)?;
 
     Ok(Json(table))
 }

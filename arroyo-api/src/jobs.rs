@@ -1,7 +1,7 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
 use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::{
-    CreateJobReq, JobStatus, OperatorCheckpointDetail, StopType, TaskCheckpointDetail,
+    CreateJobReq, JobStatus, OperatorCheckpointDetail, TaskCheckpointDetail,
     TaskCheckpointEventType,
 };
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
@@ -16,7 +16,7 @@ use std::convert::Infallible;
 use std::{collections::HashMap, time::Duration};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
-use tonic::{Request, Status};
+use tonic::Request;
 use tracing::info;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
@@ -24,21 +24,21 @@ const PREVIEW_TTL: Duration = Duration::from_secs(60);
 use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map_rest, BearerAuth, ErrorResp,
+    authenticate, bad_request, client, log_and_map, not_found, BearerAuth, ErrorResp,
 };
 use crate::types::public::LogLevel;
-use crate::{log_and_map, queries::api_queries, to_micros, types::public, AuthData};
+use crate::{queries::api_queries, to_micros, types::public, AuthData};
 use arroyo_rpc::types::{
     Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType, JobCollection,
     JobLogLevel, JobLogMessage, JobLogMessageCollection, OperatorCheckpointGroup,
-    OperatorCheckpointGroupCollection, OutputData, SubtaskCheckpointGroup,
+    OperatorCheckpointGroupCollection, OutputData, StopType, SubtaskCheckpointGroup,
 };
 
 pub(crate) async fn create_job<'a>(
     request: CreateJobReq,
     pipeline_name: &str,
     pipeline_id: &i64,
-    auth: AuthData,
+    auth: &AuthData,
     client: &Transaction<'a>,
 ) -> Result<String, ErrorResp> {
     let checkpoint_interval = if request.preview {
@@ -106,7 +106,7 @@ pub(crate) async fn create_job<'a>(
 pub(crate) async fn get_job_statuses(
     auth: &AuthData,
     client: &impl GenericClient,
-) -> Result<Vec<JobStatus>, Status> {
+) -> Result<Vec<JobStatus>, ErrorResp> {
     let res = api_queries::get_jobs()
         .bind(client, &auth.organization_id)
         .all()
@@ -217,7 +217,7 @@ pub async fn get_job_errors(
         .bind(&client, &auth_data.organization_id, &job_pub_id)
         .all()
         .await
-        .map_err(log_and_map_rest)?
+        .map_err(log_and_map)?
         .into_iter()
         .map(|m| m.into())
         .collect();
@@ -274,7 +274,7 @@ pub async fn get_job_checkpoints(
         .bind(&client, &job_pub_id, &auth_data.organization_id)
         .all()
         .await
-        .map_err(log_and_map_rest)?
+        .map_err(log_and_map)?
         .into_iter()
         .map(|m| m.into())
         .collect();
@@ -391,8 +391,8 @@ pub async fn get_checkpoint_details(
         .await
         .map_err(log_and_map)?
         .ok_or_else(|| {
-            Status::not_found(format!(
-                "There is no checkpoint with epoch {} for job '{}'",
+            not_found(format!(
+                "Checkpoint with epoch {} for job '{}'",
                 epoch, job_pub_id
             ))
         })?;
@@ -465,10 +465,9 @@ pub async fn get_job_output(
     }
     let (tx, rx) = tokio::sync::mpsc::channel(32);
 
-    let mut controller =
-        ControllerGrpcClient::connect(state.grpc_api_server.controller_addr.clone())
-            .await
-            .unwrap();
+    let mut controller = ControllerGrpcClient::connect(state.controller_addr.clone())
+        .await
+        .unwrap();
 
     let mut stream = controller
         .subscribe_to_output(Request::new(grpc::GrpcOutputSubscription {
@@ -532,7 +531,7 @@ pub async fn get_jobs(
         .bind(&client, &auth_data.organization_id)
         .all()
         .await
-        .map_err(log_and_map_rest)?;
+        .map_err(log_and_map)?;
 
     Ok(Json(JobCollection {
         has_more: false,

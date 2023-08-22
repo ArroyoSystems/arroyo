@@ -113,30 +113,6 @@ pub enum StopType {
     Force,
 }
 
-impl Into<api_proto::StopType> for StopType {
-    fn into(self) -> api_proto::StopType {
-        match self {
-            StopType::None => api_proto::StopType::None,
-            StopType::Checkpoint => api_proto::StopType::Checkpoint,
-            StopType::Graceful => api_proto::StopType::Graceful,
-            StopType::Immediate => api_proto::StopType::Immediate,
-            StopType::Force => api_proto::StopType::Force,
-        }
-    }
-}
-
-impl From<api_proto::StopType> for StopType {
-    fn from(value: api_proto::StopType) -> Self {
-        match value {
-            api_proto::StopType::None => StopType::None,
-            api_proto::StopType::Checkpoint => StopType::Checkpoint,
-            api_proto::StopType::Graceful => StopType::Graceful,
-            api_proto::StopType::Immediate => StopType::Immediate,
-            api_proto::StopType::Force => StopType::Force,
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {

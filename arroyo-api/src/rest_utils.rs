@@ -10,7 +10,6 @@ use thiserror::Error;
 use tracing::error;
 
 use axum::headers::authorization::{Authorization, Bearer};
-use tonic::Code;
 
 pub type BearerAuth = Option<TypedHeader<Authorization<Bearer>>>;
 
@@ -44,36 +43,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-impl From<tonic::Status> for ErrorResp {
-    fn from(value: tonic::Status) -> Self {
-        let status_code = match value.code() {
-            Code::Cancelled => StatusCode::REQUEST_TIMEOUT,
-            Code::Unknown => StatusCode::INTERNAL_SERVER_ERROR,
-            Code::InvalidArgument => StatusCode::BAD_REQUEST,
-            Code::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,
-            Code::NotFound => StatusCode::NOT_FOUND,
-            Code::AlreadyExists => StatusCode::CONFLICT,
-            Code::PermissionDenied => StatusCode::FORBIDDEN,
-            Code::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
-            Code::FailedPrecondition => StatusCode::PRECONDITION_FAILED,
-            Code::Aborted => StatusCode::CONFLICT,
-            Code::OutOfRange => StatusCode::BAD_REQUEST,
-            Code::Unimplemented => StatusCode::NOT_IMPLEMENTED,
-            Code::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-            Code::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
-            Code::DataLoss => StatusCode::INTERNAL_SERVER_ERROR,
-            Code::Unauthenticated => StatusCode::UNAUTHORIZED,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
-        };
-
-        ErrorResp {
-            status_code,
-            message: value.message().to_string(),
-        }
-    }
-}
-
-pub fn log_and_map_rest<E>(err: E) -> ErrorResp
+pub fn log_and_map<E>(err: E) -> ErrorResp
 where
     E: core::fmt::Debug,
 {
@@ -95,7 +65,7 @@ impl IntoResponse for ErrorResp {
 }
 
 pub async fn client(pool: &Pool) -> Result<Object, ErrorResp> {
-    pool.get().await.map_err(log_and_map_rest)
+    pool.get().await.map_err(log_and_map)
 }
 
 pub(crate) async fn authenticate(
@@ -103,7 +73,7 @@ pub(crate) async fn authenticate(
     bearer_auth: BearerAuth,
 ) -> Result<AuthData, ErrorResp> {
     let client = client(pool).await?;
-    cloud::authenticate_rest(client, bearer_auth).await
+    cloud::authenticate(client, bearer_auth).await
 }
 
 pub(crate) fn bad_request(message: String) -> ErrorResp {

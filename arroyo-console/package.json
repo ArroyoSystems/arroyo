@@ -9,15 +9,10 @@
     "preview": "vite preview",
     "format": "npx prettier --write src/ && npx eslint --fix --ext .js,.jsx,.ts,.tsx src",
     "check": "npx prettier --check src/ && npx eslint --ext .js,.jsx,.ts,.tsx src",
-    "generate": "PATH=$PATH:$(pwd)/node_modules/.bin protoc -I $(pwd)/../arroyo-rpc/proto --es_out src/gen --es_opt target=ts --connect-web_out src/gen  --connect-web_opt target=ts api.proto",
     "openapi": "cargo build && npx openapi-typescript $(pwd)/../arroyo-openapi/api-spec.json --output $(pwd)/src/gen/api-types.ts"
   },
   "dependencies": {
     "@babel/core": "^7.22.5",
-    "@bufbuild/connect-web": "^0.2.1",
-    "@bufbuild/protobuf": "^0.1.1",
-    "@bufbuild/protoc-gen-connect-web": "^0.2.1",
-    "@bufbuild/protoc-gen-es": "^0.1.1",
     "@chakra-ui/icons": "^2.0.19",
     "@chakra-ui/pro-theme": "^0.0.57",
     "@chakra-ui/react": "^2.7.0",

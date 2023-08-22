@@ -9,10 +9,8 @@ use std::hash::Hasher;
 use std::marker::PhantomData;
 use std::ops::Add;
 use std::rc::Rc;
-use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
-use arroyo_rpc::grpc::api::create_pipeline_req::Config;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
 use arroyo_types::{Data, GlobalKey, JoinType, Key};
@@ -24,15 +22,12 @@ use quote::format_ident;
 use quote::quote;
 use serde::{Deserialize, Serialize};
 use syn::{parse_quote, parse_str, GenericArgument, PathArguments, Type, TypePath};
-use tonic::{Request, Status};
 
 use anyhow::{anyhow, bail, Result};
-use prost::Message;
 
 use crate::Operator::FusedWasmUDFs;
 use arroyo_rpc::grpc::api::{
-    Aggregator, CreateJobReq, CreatePipelineReq, JobEdge, JobGraph, JobNode, PipelineProgram,
-    ProgramNode, StopType, UpdateJobReq, WasmFunction,
+    Aggregator, JobEdge, JobGraph, JobNode, PipelineProgram, ProgramNode, WasmFunction,
 };
 use petgraph::{Direction, Graph};
 use rand::distributions::Alphanumeric;
@@ -1158,49 +1153,6 @@ impl Program {
             .collect()
     }
 
-    pub async fn run_async(&self, name: &str, restore: Option<String>) -> Result<String, Status> {
-        let mut client = arroyo_rpc::api_client().await;
-
-        let checkpoint_interval_micros = u64::from_str(
-            &std::env::var("CHECKPOINT_INTERVAL").unwrap_or_else(|_| "10".to_string()),
-        )
-        .unwrap()
-            * 1_000_000;
-
-        if let Some(restore_from) = restore {
-            client
-                .update_job(Request::new(UpdateJobReq {
-                    job_id: restore_from.to_string(),
-                    stop: Some(StopType::None as i32),
-                    checkpoint_interval_micros: Some(checkpoint_interval_micros),
-                    parallelism: None,
-                }))
-                .await?;
-            Ok(restore_from)
-        } else {
-            let proto_program: PipelineProgram = self
-                .clone()
-                .try_into()
-                .map_err(|_err| Status::internal("failed to convert program to protobuf"))?;
-            let res = client
-                .create_pipeline(Request::new(CreatePipelineReq {
-                    name: name.to_string(),
-                    config: Some(Config::Program(proto_program.encode_to_vec())),
-                }))
-                .await?;
-
-            let res = client
-                .create_job(Request::new(CreateJobReq {
-                    pipeline_id: res.into_inner().pipeline_id,
-                    checkpoint_interval_micros,
-                    preview: false,
-                }))
-                .await?;
-
-            Ok(res.into_inner().job_id)
-        }
-    }
-
     pub fn as_job_graph(&self) -> JobGraph {
         let nodes = self
             .graph
@@ -1259,11 +1211,6 @@ impl Program {
             .collect();
 
         JobGraph { nodes, edges }
-    }
-
-    #[tokio::main]
-    pub async fn run(&self, name: &str, restore: Option<String>) -> Result<String, Status> {
-        self.run_async(name, restore).await
     }
 
     pub fn make_graph_function(&self) -> syn::ItemFn {
