@@ -121,7 +121,7 @@ export function transformMetricGroup(metric_group: MetricGroup) {
   return metric_group.subtasks.map(s =>
     s.metrics.map(m => {
       return {
-        label: s.idx,
+        label: s.index,
         x: new Date(Number(m.time) / 1000),
         y: m.value + m.value * Math.random() * 0.01,
       };

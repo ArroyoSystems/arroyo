@@ -227,14 +227,25 @@ FROM job_configs
          INNER JOIN pipelines ON pipeline_id = pipelines.id
 WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_id;
 
---! get_job_checkpoints: DbCheckpoint(finish_time?)
-SELECT epoch, state_backend, start_time, finish_time FROM checkpoints
+--: DbCheckpoint (finish_time?, operators?)
+
+--! get_job_checkpoints: DbCheckpoint
+SELECT epoch, state_backend, start_time, finish_time, operators FROM checkpoints
 JOIN job_configs ON checkpoints.job_id = job_configs.id
 WHERE job_configs.id = :job_id
     AND checkpoints.organization_id = :organization_id
     AND state != 'compacted'
     AND state != 'failed'
 ORDER BY epoch;
+
+--! get_job_checkpoint: DbCheckpoint
+SELECT epoch, state_backend, start_time, finish_time, operators FROM checkpoints
+JOIN job_configs ON checkpoints.job_id = job_configs.id
+WHERE job_configs.id = :job_id
+    AND checkpoints.organization_id = :organization_id
+    AND state != 'compacted'
+    AND state != 'failed'
+    AND checkpoints.pub_id = :checkpoint_pub_id;
 
 --! get_checkpoint_details: (finish_time?, operators?)
 SELECT epoch, state_backend, start_time, finish_time, operators FROM checkpoints

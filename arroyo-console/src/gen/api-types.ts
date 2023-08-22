@@ -135,6 +135,13 @@ export interface paths {
      */
     get: operations["get_job_checkpoints"];
   };
+  "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints/{epoch}/operator_checkpoint_groups": {
+    /**
+     * Get a checkpoint's details 
+     * @description Get a checkpoint's details
+     */
+    get: operations["get_checkpoint_details"];
+  };
   "/v1/pipelines/{pipeline_id}/jobs/{job_id}/errors": {
     /**
      * List a job's error messages 
@@ -176,6 +183,16 @@ export interface components {
       data: (components["schemas"]["Checkpoint"])[];
       hasMore: boolean;
     };
+    CheckpointEventSpan: {
+      description: string;
+      /** Format: int64 */
+      finishTime: number;
+      spanType: components["schemas"]["CheckpointSpanType"];
+      /** Format: int64 */
+      startTime: number;
+    };
+    /** @enum {string} */
+    CheckpointSpanType: "alignment" | "sync" | "async" | "committing";
     ConfluentSchema: {
       schema: string;
     };
@@ -314,6 +331,15 @@ export interface components {
     };
     /** @enum {string} */
     MetricNames: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure";
+    OperatorCheckpointGroup: {
+      /** Format: int64 */
+      bytes: number;
+      operatorId: string;
+      subtasks: (components["schemas"]["SubtaskCheckpointGroup"])[];
+    };
+    OperatorCheckpointGroupCollection: {
+      data: (components["schemas"]["OperatorCheckpointGroup"])[];
+    };
     OperatorMetricGroup: {
       metricGroups: (components["schemas"]["MetricGroup"])[];
       operatorId: string;
@@ -414,9 +440,16 @@ export interface components {
       fields: (components["schemas"]["SourceField"])[];
       name?: string | null;
     };
+    SubtaskCheckpointGroup: {
+      /** Format: int64 */
+      bytes: number;
+      eventSpans: (components["schemas"]["CheckpointEventSpan"])[];
+      /** Format: int32 */
+      index: number;
+    };
     SubtaskMetrics: {
       /** Format: int32 */
-      idx: number;
+      index: number;
       metrics: (components["schemas"]["Metric"])[];
     };
     TestSourceMessage: {
@@ -785,6 +818,30 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["CheckpointCollection"];
+        };
+      };
+    };
+  };
+  /**
+   * Get a checkpoint's details 
+   * @description Get a checkpoint's details
+   */
+  get_checkpoint_details: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        pipeline_id: string;
+        /** @description Job id */
+        job_id: string;
+        /** @description Epoch */
+        epoch: number;
+      };
+    };
+    responses: {
+      /** @description Got checkpoint's details */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OperatorCheckpointGroupCollection"];
         };
       };
     };

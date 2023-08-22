@@ -13,9 +13,9 @@ import {
   Text,
   UnorderedList,
 } from '@chakra-ui/react';
-import * as util from '../lib/util';
 import { Checkpoint, Job, Pipeline, useCheckpointDetails } from '../lib/data_fetching';
 import { ApiClient } from '../main';
+import { dataFormat } from '../lib/util';
 import CheckpointDetails from './CheckpointDetails';
 
 export interface CheckpointsProps {
@@ -39,7 +39,7 @@ function formatDurationHMS(micros: number): string {
 
 const Checkpoints: React.FC<CheckpointsProps> = ({ client, pipeline, job, checkpoints }) => {
   const [epoch, setEpoch] = useState<number | undefined>(undefined);
-  const { checkpoint } = useCheckpointDetails(client, job.id, epoch);
+  const { checkpointDetails } = useCheckpointDetails(client, pipeline.id, job.id, epoch);
 
   if (!checkpoints.length) {
     return <Text textStyle="italic">No checkpoints</Text>;
@@ -47,35 +47,13 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ client, pipeline, job, checkp
 
   let details = <Text>Select checkpoint</Text>;
 
-  if (checkpoint != null) {
-    let start = Number(checkpoint.overview?.startTime);
-    let end = Number(
-      checkpoint.overview?.finishTime != undefined
-        ? checkpoint.overview?.finishTime
-        : new Date().getTime() * 1000
-    );
+  let checkpoint: Checkpoint | undefined = checkpoints.find(c => c.epoch == epoch);
 
-    let w = 500;
+  if (checkpoint && checkpointDetails) {
+    let start = Number(checkpoint.startTime);
+    let end = Number(checkpoint.finishTime ?? new Date().getTime() * 1000);
 
-    function scale(x: number): number {
-      return ((x - start) / (end - start)) * w;
-    }
-
-    let ops = pipeline.graph.nodes
-      .slice()
-      .map(n => {
-        return {
-          id: n.nodeId,
-          name: n.operator,
-          parallelism: n.parallelism,
-          checkpoint: checkpoint?.operators[n.nodeId],
-        };
-      })
-      .sort((a, b) => Number(a.id.split('_')[1]) - Number(b.id.split('_')[1]));
-
-    let checkpointBytes = Object.values(checkpoint.operators)
-      .flatMap(op => Object.values(op.tasks).map(t => (t.bytes == null ? 0 : Number(t.bytes))))
-      .reduce((a, b) => a + b, 0);
+    let checkpointBytes = checkpointDetails.map(d => d.bytes).reduce((a, b) => a + b, 0);
 
     const checkpointStats = (
       <StatGroup width={718} border="1px solid #666" borderRadius="5px" marginTop={5} padding={3}>
@@ -85,17 +63,17 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ client, pipeline, job, checkp
             {new Intl.DateTimeFormat('en-us', {
               dateStyle: undefined,
               timeStyle: 'medium',
-            }).format(new Date(Number(checkpoint.overview?.startTime) / 1000))}
+            }).format(new Date(Number(checkpoint.startTime) / 1000))}
           </StatNumber>
         </Stat>
         <Stat marginLeft={10}>
           <StatLabel>Finished</StatLabel>
           <StatNumber>
-            {checkpoint.overview?.finishTime != null
+            {checkpoint.finishTime != null
               ? new Intl.DateTimeFormat('en-us', {
                   dateStyle: undefined,
                   timeStyle: 'medium',
-                }).format(new Date(Number(checkpoint.overview?.finishTime) / 1000))
+                }).format(new Date(Number(checkpoint.finishTime) / 1000))
               : '-'}
           </StatNumber>
         </Stat>
@@ -105,7 +83,7 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ client, pipeline, job, checkp
         </Stat>
         <Stat marginLeft={10}>
           <StatLabel>Total Size</StatLabel>
-          <StatNumber> {util.dataFormat(checkpointBytes)} </StatNumber>
+          <StatNumber> {dataFormat(checkpointBytes)} </StatNumber>
         </Stat>
       </StatGroup>
     );
@@ -114,10 +92,10 @@ const Checkpoints: React.FC<CheckpointsProps> = ({ client, pipeline, job, checkp
       <Flex flexDirection={'column'} flexGrow={1}>
         <Heading size="md">
           Checkpoint {epoch}
-          <Badge marginLeft={2}>{checkpoint.overview?.backend}</Badge>
+          <Badge marginLeft={2}>{checkpoint.backend}</Badge>
         </Heading>
         {checkpointStats}
-        <CheckpointDetails checkpoint={checkpoint} ops={ops} scale={scale} w={w} />
+        <CheckpointDetails operators={checkpointDetails} />
       </Flex>
     );
   }

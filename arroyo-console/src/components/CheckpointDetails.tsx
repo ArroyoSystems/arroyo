@@ -1,27 +1,51 @@
-import { Table, TableContainer, Tbody, Td, Th, Thead, Tr, Text } from '@chakra-ui/react';
-import {
-  CheckpointDetailsResp,
-  OperatorCheckpointDetail,
-  TaskCheckpointDetail,
-} from '../gen/api_pb';
+import { Stack, Table, TableContainer, Tbody, Td, Text, Th, Thead, Tr } from '@chakra-ui/react';
 import React from 'react';
-import OperatorCheckpointTimeline from './OperatorCheckpointTimeline';
 import { dataFormat } from '../lib/util';
+import {
+  CheckpointSpanType,
+  OperatorCheckpointGroup,
+  SubtaskCheckpointGroup,
+} from '../lib/data_fetching';
 
 export interface CheckpointDetailsProps {
-  checkpoint: CheckpointDetailsResp;
-  ops:
-    | { id: string; name: string; parallelism: number; checkpoint: OperatorCheckpointDetail }[]
-    | undefined;
-  scale: (x: number) => number;
-  w: number;
+  operators: OperatorCheckpointGroup[];
 }
 
-const bytes = (tasks: TaskCheckpointDetail[]) => {
-  return tasks.map(t => (t.bytes == null ? 0 : Number(t.bytes))).reduce((a, b) => a + b, 0);
+function formatDuration(micros: number): string {
+  let millis = micros / 1000;
+  let secs = Math.floor(millis / 1000);
+  if (millis < 1000) {
+    return `${millis} ms`;
+  } else if (secs < 60) {
+    return `${secs} s`;
+  } else if (millis / 1000 < 60 * 60) {
+    let minutes = Math.floor(secs / 60);
+    let seconds = secs - minutes * 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  } else {
+    let hours = Math.floor(secs / (60 * 60));
+    let minutes = Math.floor((secs - hours * 60 * 60) / 60);
+    let seconds = secs - hours * 60 * 60 - minutes * 60;
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+}
+
+const spanDuration = (subtask: SubtaskCheckpointGroup, spanType: CheckpointSpanType) => {
+  const span = subtask.eventSpans.find(s => s.spanType == spanType);
+  return span ? formatDuration(span.finishTime - span.finishTime) : 'n/a';
 };
 
-const row = (operator: string, timeline: React.ReactElement, totalBytes: number) => {
+const spans = (subtasks: SubtaskCheckpointGroup[], spanType: CheckpointSpanType) => {
+  return (
+    <Stack>
+      {subtasks.map(s => (
+        <Text>{spanDuration(s, spanType)}</Text>
+      ))}
+    </Stack>
+  );
+};
+
+const row = (operator: string, totalBytes: number, subtasks: SubtaskCheckpointGroup[]) => {
   return (
     <Tr>
       <Td>
@@ -30,19 +54,24 @@ const row = (operator: string, timeline: React.ReactElement, totalBytes: number)
         </Text>
       </Td>
       <Td>{dataFormat(totalBytes)}</Td>
-      <Td>{timeline}</Td>
+      <Td>{spans(subtasks, 'alignment')}</Td>
+      <Td>{spans(subtasks, 'sync')}</Td>
+      <Td>{spans(subtasks, 'async')}</Td>
+      <Td>{spans(subtasks, 'committing')}</Td>
     </Tr>
   );
 };
 
-const CheckpointDetails: React.FC<CheckpointDetailsProps> = ({ checkpoint, ops, scale, w }) => {
+const CheckpointDetails: React.FC<CheckpointDetailsProps> = ({ operators }) => {
   const tableBody = (
     <Tbody>
-      {ops?.map(op => {
-        const size = bytes(Object.values(op.checkpoint?.tasks || []));
-        const timeline = <OperatorCheckpointTimeline op={op} scale={scale} w={w} />;
-        return row(op.name, timeline, size);
-      })}
+      {operators
+        .sort(
+          (a, b) => Number(a.operatorId.split('_').pop()) - Number(b.operatorId.split('_').pop())
+        )
+        .map(op => {
+          return row(op.operatorId, op.bytes, op.subtasks);
+        })}
     </Tbody>
   );
 
@@ -53,7 +82,10 @@ const CheckpointDetails: React.FC<CheckpointDetailsProps> = ({ checkpoint, ops, 
           <Tr>
             <Th>Operator</Th>
             <Th>Size</Th>
-            <Th>Timeline</Th>
+            <Th>Alignment</Th>
+            <Th>Sync</Th>
+            <Th>Async</Th>
+            <Th>Committing</Th>
           </Tr>
         </Thead>
         {tableBody}

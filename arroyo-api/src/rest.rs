@@ -23,7 +23,9 @@ use crate::connection_tables::{
     test_connection_table, test_schema,
 };
 use crate::connectors::get_connectors;
-use crate::jobs::{get_job_checkpoints, get_job_errors, get_job_output, get_jobs};
+use crate::jobs::{
+    get_checkpoint_details, get_job_checkpoints, get_job_errors, get_job_output, get_jobs,
+};
 use crate::metrics::get_operator_metric_groups;
 use crate::pipelines::{
     delete_pipeline, get_pipeline, get_pipeline_jobs, get_pipelines, patch_pipeline, post_pipeline,
@@ -92,6 +94,10 @@ pub fn create_rest_app(server: ApiServer, pool: Pool) -> Router {
         .route("/", get(get_pipeline_jobs))
         .route("/:job_id/errors", get(get_job_errors))
         .route("/:job_id/checkpoints", get(get_job_checkpoints))
+        .route(
+            "/:job_id/checkpoints/:checkpoint_id/operator_checkpoint_groups",
+            get(get_checkpoint_details),
+        )
         .route("/:job_id/output", get(get_job_output))
         .route(
             "/:job_id/operator_metric_groups",
