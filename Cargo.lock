@@ -700,6 +700,7 @@ dependencies = [
  "arroyo-sql",
  "proc-macro2",
  "quote",
+ "runtime-macros-derive",
  "serde_json",
  "syn 2.0.26",
 ]
@@ -6407,6 +6408,17 @@ dependencies = [
  "smallvec",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "runtime-macros-derive"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17cf6d9e3337e2f0a3280e4b0c7c7280f03ad044f5ebef295fe93d410d02a8a2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

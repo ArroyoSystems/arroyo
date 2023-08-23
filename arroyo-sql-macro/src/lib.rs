@@ -109,7 +109,11 @@ impl Parse for TestCase {
 /// ```
 #[proc_macro]
 pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
-    let pipeline_case = parse_macro_input!(input as PipelineCase);
+    full_pipeline_codegen_internal(input.into()).into()
+}
+
+fn full_pipeline_codegen_internal(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    let pipeline_case: PipelineCase  = syn::parse2(input).unwrap();
 
     let test_name = &pipeline_case.test_name.value();
     let query_string = &pipeline_case.query;
@@ -178,5 +182,26 @@ impl Parse for PipelineCase {
         input.parse::<Token![,]>()?;
         let query = input.parse()?;
         Ok(Self { test_name, query })
+    }
+}
+
+
+
+
+#[cfg(test)]
+mod tests {
+    use std::{env, path::PathBuf, fs};
+
+    use runtime_macros_derive::emulate_macro_expansion_fallible;
+
+    use crate::{full_pipeline_codegen, full_pipeline_codegen_internal};
+    #[test]
+    fn code_coverage() {
+        let mut path = env::current_dir().unwrap().parent().unwrap().to_path_buf();
+        path.push("arroyo-sql-testing");
+        path.push("src");
+        path.push("full_query_tests.rs");
+        let file = fs::File::open(path).unwrap();
+        emulate_macro_expansion_fallible(file, "full_pipeline_codegen", full_pipeline_codegen_internal).unwrap();
     }
 }
