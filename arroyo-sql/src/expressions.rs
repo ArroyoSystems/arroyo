@@ -1328,19 +1328,24 @@ impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for AggregationExpr
         let sub_expr = self.producing_expression.generate(&single_value_context);
         let single_value_ident = single_value_context.variable_ident();
         let vec_ident = input_context.variable_ident();
-        let (map_type, unwrap) = if self
+        let producing_expression_is_optional = self
             .producing_expression
             .expression_type(&single_value_context)
-            .is_optional()
-        {
-            (format_ident!("filter_map"), Some(quote!(.unwrap())))
+            .is_optional();
+        let map_type = if producing_expression_is_optional {
+            quote!(filter_map)
         } else {
-            (format_ident!("map"), None)
+            quote!(map)
+        };
+        let unwrap = if producing_expression_is_optional {
+            None
+        } else {
+            Some(quote!(.unwrap()))
         };
 
         match self.aggregator {
             Aggregator::Count => {
-                if unwrap.is_some() {
+                if producing_expression_is_optional {
                     parse_quote!({
                         #vec_ident.iter()
                             .filter_map(|#single_value_ident| #sub_expr)
@@ -1364,9 +1369,9 @@ impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for AggregationExpr
             }),
             Aggregator::Max => parse_quote!({
                 #vec_ident.iter()
-                    .map(|#single_value_ident| #sub_expr)
+                    .#map_type(|#single_value_ident| #sub_expr)
                     .reduce(|left, right| left.max(right))
-                    .unwrap()
+                    #unwrap
             }),
             Aggregator::Avg => parse_quote!({
                 #vec_ident.iter()

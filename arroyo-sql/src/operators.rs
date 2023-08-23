@@ -12,7 +12,7 @@ use crate::{
 use anyhow::Result;
 use arrow_schema::DataType;
 use arroyo_rpc::types::Format;
-use datafusion_expr::type_coercion::aggregates::sum_return_type;
+use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{parse_quote, parse_str};
@@ -393,7 +393,7 @@ impl TwoPhaseAggregateProjection {
             .aggregates
             .iter()
             .map(|(column, computation)| {
-                let field_type = computation.aggregate_type_def(&ValuePointerContext);
+                let field_type = computation.output_type_def(&ValuePointerContext);
                 StructField::new(column.name.clone(), column.relation.clone(), field_type)
             })
             .collect();
@@ -446,7 +446,7 @@ impl CodeGenerator<ValueBinMergingContext, BinType, syn::Expr> for TwoPhaseAggre
         let current_bin_ident = input_context.bin_context.current_bin_ident();
         // TODO: factor this out.
         let aggregate_type = data_type_as_syn_type(
-            self.aggregate_type_def(&input_context.value_context)
+            self.intermediate_type_def(&input_context.value_context)
                 .as_datatype()
                 .expect("aggregates shouldn't return structs"),
         );
@@ -592,7 +592,7 @@ impl CodeGenerator<MemoryAddingContext, BinType, syn::Expr> for TwoPhaseAggregat
             .expression_type(&input_context.value_context);
         let input_nullable = input_type.is_optional();
         let expr_type = data_type_as_syn_type(
-            self.aggregate_type_def(&input_context.value_context)
+            self.intermediate_type_def(&input_context.value_context)
                 .as_datatype()
                 .unwrap(),
         );
@@ -643,7 +643,7 @@ impl CodeGenerator<MemoryRemovingContext, BinType, syn::Expr> for TwoPhaseAggreg
             .expression_type(&input_context.value_context);
         let input_nullable = input_type.is_optional();
         let expr_type = data_type_as_syn_type(
-            self.aggregate_type_def(&input_context.value_context)
+            self.intermediate_type_def(&input_context.value_context)
                 .as_datatype()
                 .unwrap(),
         );
@@ -706,7 +706,7 @@ impl CodeGenerator<BinAggregatingContext, TypeDef, syn::Expr> for TwoPhaseAggreg
     }
 
     fn expression_type(&self, input_context: &BinAggregatingContext) -> TypeDef {
-        self.aggregate_type_def(&input_context.value_context)
+        self.output_type_def(&input_context.value_context)
     }
 }
 
@@ -755,32 +755,53 @@ impl CodeGenerator<MemoryAggregatingContext, TypeDef, syn::Expr> for TwoPhaseAgg
     }
 
     fn expression_type(&self, input_context: &MemoryAggregatingContext) -> TypeDef {
-        self.aggregate_type_def(&input_context.value_context)
+        self.output_type_def(&input_context.value_context)
     }
 }
 
 impl TwoPhaseAggregation {
-    fn aggregate_type_def(&self, input_context: &ValuePointerContext) -> TypeDef {
+    fn output_type_def(&self, input_context: &ValuePointerContext) -> TypeDef {
         let incoming_type = self.incoming_expression.expression_type(input_context);
-        let data_type = match incoming_type {
+        let (data_type, nullable) = match incoming_type {
             TypeDef::StructDef(_, _) => unreachable!(),
-            TypeDef::DataType(data_type, _) => data_type,
+            TypeDef::DataType(data_type, nullable) => (data_type, nullable),
         };
         let aggregate_type = match self.aggregator {
-            Aggregator::Count => DataType::Int64,
-            Aggregator::Sum | Aggregator::Avg => {
+            Aggregator::Count => return TypeDef::DataType(DataType::Int64, false),
+            Aggregator::Avg => {
+                avg_return_type(&data_type).expect("datafusion should've prevented this")
+            }
+            Aggregator::Sum => {
                 sum_return_type(&data_type).expect("datafusion should've prevented this")
             }
             Aggregator::Min | Aggregator::Max => data_type,
             Aggregator::CountDistinct => unimplemented!(),
         };
-        TypeDef::DataType(aggregate_type, false)
+        TypeDef::DataType(aggregate_type, nullable)
+    }
+
+    // the data type to be used in intermediate aggregations. Mainly relevant for average.
+    fn intermediate_type_def(&self, input_context: &ValuePointerContext) -> TypeDef {
+        let incoming_type = self.incoming_expression.expression_type(input_context);
+        let (data_type, nullable) = match incoming_type {
+            TypeDef::StructDef(_, _) => unreachable!(),
+            TypeDef::DataType(data_type, nullable) => (data_type, nullable),
+        };
+        let aggregate_type = match self.aggregator {
+            Aggregator::Count => return TypeDef::DataType(DataType::Int64, false),
+            Aggregator::Avg | Aggregator::Sum => {
+                sum_return_type(&data_type).expect("datafusion should've prevented this")
+            }
+            Aggregator::Min | Aggregator::Max => data_type,
+            Aggregator::CountDistinct => unimplemented!(),
+        };
+        TypeDef::DataType(aggregate_type, nullable)
     }
 
     fn bin_type(&self, input_context: &ValuePointerContext) -> BinType {
         let input_type = self.incoming_expression.expression_type(input_context);
         let aggregate_type = self
-            .aggregate_type_def(input_context)
+            .intermediate_type_def(input_context)
             .as_datatype()
             .expect("aggregates shouldn't return structs")
             .clone();
@@ -806,9 +827,14 @@ impl TwoPhaseAggregation {
     }
 
     fn mem_type(&self, input_context: &ValuePointerContext) -> BinType {
-        let aggregate_type_def = self.aggregate_type_def(input_context);
+        let aggregate_type_def = self.intermediate_type_def(input_context);
         let aggregate_data_type = aggregate_type_def.as_datatype().unwrap().clone();
-        match (&self.aggregator, aggregate_type_def.is_optional()) {
+        match (
+            &self.aggregator,
+            self.incoming_expression
+                .expression_type(input_context)
+                .is_optional(),
+        ) {
             (Aggregator::Count, _) => BinType::Tuple(vec![
                 BinType::DataType(DataType::Int64),
                 BinType::DataType(DataType::Int64),
@@ -822,7 +848,7 @@ impl TwoPhaseAggregation {
                 BinType::DataType(DataType::Int64),
                 BinType::BTreeMap(
                     Box::new(BinType::DataType(aggregate_data_type)),
-                    Box::new(BinType::DataType(DataType::Int64)),
+                    Box::new(BinType::Usize),
                 ),
             ]),
             (Aggregator::Sum, false) => BinType::Tuple(vec![
@@ -831,7 +857,7 @@ impl TwoPhaseAggregation {
             ]),
             (Aggregator::Min, false) | (Aggregator::Max, false) => BinType::BTreeMap(
                 Box::new(BinType::DataType(aggregate_data_type)),
-                Box::new(BinType::DataType(DataType::Int64)),
+                Box::new(BinType::Usize),
             ),
             (Aggregator::Avg, true) => BinType::Tuple(vec![
                 BinType::DataType(DataType::Int64),

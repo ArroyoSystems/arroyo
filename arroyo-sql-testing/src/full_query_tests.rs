@@ -156,3 +156,122 @@ full_pipeline_codegen! {"count_over_case",
 from nexmark
 group by tumble(interval '1 second');
 "}
+
+full_pipeline_codegen! {"aggregates_non_null",
+"create table demo_stream (
+  v BIGINT NOT NULL,
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  topic = 'test',
+  format = 'json',
+  type = 'source'
+);
+
+select
+  session('30 seconds') as window,
+  sum(v) as clicks
+from demo_stream
+group by window;
+"}
+
+full_pipeline_codegen! {"aggregates_null",
+"create table demo_stream (
+  v BIGINT,
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  topic = 'test',
+  format = 'json',
+  type = 'source'
+);
+
+select
+  session('30 seconds') as window,
+  sum(v) as clicks
+from demo_stream
+group by window;
+"}
+
+full_pipeline_codegen! {"two_phase_aggregates",
+"create table demo_stream (
+  nullable_int BIGINT,
+  non_nullable_int BIGINT NOT NULL,
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  topic = 'test',
+  format = 'json',
+  type = 'source'
+);
+
+select
+  hop(interval '10 seconds', interval '30 seconds') as window,
+  sum(nullable_int) as nullable_sum,
+  sum(non_nullable_int) as non_nullable_sum,
+  avg(nullable_int) as nullable_avg,
+  avg(non_nullable_int) as non_nullable_avg,
+  max(nullable_int) as nullable_max,
+  max(non_nullable_int) as non_nullable_max,
+  min(nullable_int) as nullable_min,
+  min(non_nullable_int) as non_nullable_min
+
+from demo_stream
+group by window;
+"}
+
+full_pipeline_codegen! {"two_phase_tumble",
+"create table demo_stream (
+  nullable_int BIGINT,
+  non_nullable_int BIGINT NOT NULL,
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  topic = 'test',
+  format = 'json',
+  type = 'source'
+);
+
+select
+  tumble(interval '10 seconds') as window,
+  sum(nullable_int) as nullable_sum,
+  sum(non_nullable_int) as non_nullable_sum,
+  avg(nullable_int) as nullable_avg,
+  avg(non_nullable_int) as non_nullable_avg,
+  max(nullable_int) as nullable_max,
+  max(non_nullable_int) as non_nullable_max,
+  min(nullable_int) as nullable_min,
+  min(non_nullable_int) as non_nullable_min
+
+from demo_stream
+group by window;
+"}
+
+full_pipeline_codegen! {"simple_aggregates",
+"create table demo_stream (
+  nullable_int BIGINT,
+  non_nullable_int BIGINT NOT NULL,
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  topic = 'test',
+  format = 'json',
+  type = 'source'
+);
+
+select
+  hop(interval '10 seconds', interval '30 seconds') as window,
+  sum(nullable_int) as nullable_sum,
+  sum(non_nullable_int) as non_nullable_sum,
+  avg(nullable_int) as nullable_avg,
+  avg(non_nullable_int) as non_nullable_avg,
+  max(nullable_int) as nullable_max,
+  max(non_nullable_int) as non_nullable_max,
+  min(nullable_int) as nullable_min,
+  min(non_nullable_int) as non_nullable_min,
+  count(distinct nullable_int) as nullable_distinct_count,
+  count(distinct non_nullable_int) as non_nullable_distinct_count
+
+from demo_stream
+group by window;
+"}

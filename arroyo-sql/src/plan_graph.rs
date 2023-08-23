@@ -13,6 +13,7 @@ use arroyo_datastream::{
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str};
+use tracing::info;
 
 use crate::{
     code_gen::{
@@ -842,6 +843,26 @@ impl PlanNode {
                 projection,
             } => {
                 output_types.extend(projection.output_struct().all_structs());
+            }
+            PlanOperator::SlidingWindowTwoPhaseAggregator {
+                width,
+                slide,
+                projection,
+            } => {
+                let node_struct = self
+                    .output_type
+                    .as_syn_type()
+                    .into_token_stream()
+                    .to_string();
+                let projection_struct = projection
+                    .expression_type(&MemoryAggregatingContext::new())
+                    .get_type()
+                    .into_token_stream()
+                    .to_string();
+                info!(
+                    "node struct: {}, projection_struct: {}",
+                    node_struct, projection_struct
+                );
             }
 
             _ => {}
