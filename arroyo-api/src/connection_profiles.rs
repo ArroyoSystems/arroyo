@@ -12,7 +12,9 @@ use crate::handle_db_error;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnectionProfile;
 use crate::rest::AppState;
-use crate::rest_utils::{authenticate, client, log_and_map, ApiError, BearerAuth, ErrorResp};
+use crate::rest_utils::{
+    authenticate, bad_request, client, log_and_map, ApiError, BearerAuth, ErrorResp,
+};
 
 impl TryFrom<DbConnectionProfile> for ConnectionProfile {
     type Error = String;
@@ -56,6 +58,11 @@ pub async fn create_connection_profile(
 ) -> Result<Json<ConnectionProfile>, ErrorResp> {
     let client = client(&state.pool).await.unwrap();
     let auth_data = authenticate(&state.pool, bearer_auth).await.unwrap();
+
+    connector_for_type(&req.connector)
+        .ok_or_else(|| bad_request("Unknown connector type".to_string()))?
+        .validate_config(&req.config)
+        .map_err(|e| bad_request(format!("Invalid config: {:?}", e)))?;
 
     let pub_id = generate_id(IdTypes::ConnectionProfile);
     api_queries::create_connection_profile()
