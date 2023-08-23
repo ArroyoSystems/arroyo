@@ -12,6 +12,7 @@ use petgraph::Direction::{self, Incoming, Outgoing};
 
 use quote::quote;
 
+use crate::code_gen::ValueBinMergingContext;
 use crate::operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection};
 use crate::pipeline::RecordTransform;
 use crate::plan_graph::{
@@ -425,7 +426,8 @@ impl Optimizer for WindowTopNOptimization {
                             width: slide,
                             projection: two_phase_projection.clone(),
                         };
-                        let bin_type = two_phase_projection.bin_type();
+                        let bin_merging_context = ValueBinMergingContext::new();
+                        let bin_type = bin_merging_context.bin_syn_type(&two_phase_projection);
                         let tumbling_local_node = PlanNode {
                             operator: tumbling_local_operator,
                             output_type: PlanType::KeyedLiteralTypeValue {

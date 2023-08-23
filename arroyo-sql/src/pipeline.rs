@@ -8,7 +8,6 @@ use anyhow::Result;
 use anyhow::{anyhow, bail};
 use arrow_schema::DataType;
 use arroyo_datastream::{Operator, WindowType};
-
 use datafusion_common::{DFField, ScalarValue};
 use datafusion_expr::expr::ScalarUDF;
 use datafusion_expr::{BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp};
@@ -16,7 +15,8 @@ use datafusion_expr::{BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, 
 use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
 
-use crate::expressions::ExpressionContext;
+use crate::code_gen::{CodeGenerator, ValuePointerContext, VecAggregationContext};
+use crate::expressions::{AggregateResultExtraction, ExpressionContext};
 use crate::external::{ProcessingMode, SqlSink, SqlSource};
 use crate::schemas::window_type_def;
 use crate::tables::{Insert, Table};
@@ -58,7 +58,7 @@ pub struct SourceOperator {
 impl SourceOperator {
     fn return_type(&self) -> StructDef {
         if let Some(ref projection) = self.virtual_field_projection {
-            projection.output_struct()
+            projection.expression_type(&ValuePointerContext::new())
         } else {
             self.source.struct_def.clone()
         }
@@ -68,7 +68,9 @@ impl SourceOperator {
 impl RecordTransform {
     pub fn output_struct(&self, input_struct: StructDef) -> StructDef {
         match self {
-            RecordTransform::ValueProjection(projection) => projection.output_struct(),
+            RecordTransform::ValueProjection(projection) => {
+                projection.expression_type(&ValuePointerContext::new())
+            }
             RecordTransform::KeyProjection(_) | RecordTransform::Filter(_) => input_struct,
             RecordTransform::TimestampAssignment(_) => input_struct,
         }
@@ -77,42 +79,50 @@ impl RecordTransform {
     pub fn as_operator(&self, is_updating: bool) -> Operator {
         match self {
             RecordTransform::ValueProjection(projection) => {
-                let map_method = projection.to_syn_expression();
                 if is_updating {
-                    MethodCompiler::updating_value_map_operator("updating_value_map", map_method)
+                    let updating_record_expression =
+                        ValuePointerContext.compile_updating_value_map_expression(projection);
+                    MethodCompiler::optional_record_expression_operator(
+                        "updating_value_map",
+                        updating_record_expression,
+                    )
                 } else {
-                    MethodCompiler::value_map_operator("value_map", map_method)
+                    let record_expression = ValuePointerContext.compile_value_map_expr(projection);
+                    MethodCompiler::record_expression_operator("value_map", record_expression)
                 }
             }
             RecordTransform::KeyProjection(projection) => {
                 if is_updating {
-                    let key_expr = projection.to_syn_expression();
-                    let expr: syn::ExprClosure = parse_quote!(|arg| {#key_expr});
-                    Operator::UpdatingKeyOperator {
-                        name: "key_map".into(),
-                        expression: quote!(#expr).to_string(),
-                    }
+                    let key_closure =
+                        ValuePointerContext.compile_updating_key_map_closure(projection);
+                    MethodCompiler::updating_key_operator("updating_key_map", key_closure)
                 } else {
-                    MethodCompiler::key_map_operator("key_map", projection.to_syn_expression())
+                    let record_expression =
+                        ValuePointerContext.compile_key_map_expression(projection);
+                    MethodCompiler::record_expression_operator("key_map", record_expression)
                 }
             }
             RecordTransform::Filter(expression) => {
-                let filter_method = expression.to_syn_expression();
                 if is_updating {
-                    MethodCompiler::updating_filter_operator(
+                    let updating_filter_optional_record_expr = ValuePointerContext
+                        .compile_updating_filter_optional_record_expression(expression);
+                    MethodCompiler::optional_record_expression_operator(
                         "updating_filter",
-                        filter_method,
-                        expression.nullable(),
+                        updating_filter_optional_record_expr,
                     )
                 } else {
-                    MethodCompiler::filter_operator("filter", filter_method, expression.nullable())
+                    let filter_expression =
+                        ValuePointerContext.compile_filter_expression(expression);
+                    MethodCompiler::predicate_expression_operator("value_filter", filter_expression)
                 }
             }
             RecordTransform::TimestampAssignment(timestamp_expression) => {
-                MethodCompiler::timestamp_assigning_operator(
-                    "timestamp",
-                    timestamp_expression.to_syn_expression(),
-                    timestamp_expression.nullable(),
+                let timestamp_record_expression =
+                    ValuePointerContext.compile_timestamp_record_expression(timestamp_expression);
+
+                MethodCompiler::record_expression_operator(
+                    "timestamp_assigner",
+                    timestamp_record_expression,
                 )
             }
         }
@@ -137,7 +147,8 @@ pub struct AggregateOperator {
 
 impl AggregateOperator {
     pub fn output_struct(&self) -> StructDef {
-        self.aggregating.output_struct()
+        self.aggregating
+            .expression_type(&VecAggregationContext::new())
     }
 }
 
@@ -271,24 +282,24 @@ impl JoinType {
                 let field_name = format_ident!("{}",field.field_name());
                 if self.left_nullable() {
                     if field.data_type.is_optional() {
-                        assignments.push(quote!(#field_name : arg.left.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
+                        assignments.push(quote!(#field_name : left.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
                     } else {
-                        assignments.push(quote!(#field_name : arg.left.as_ref().map(|inner| inner.#field_name.clone())));
+                        assignments.push(quote!(#field_name : left.as_ref().map(|inner| inner.#field_name.clone())));
                     }
                 } else {
-                    assignments.push(quote!(#field_name : arg.left.#field_name.clone()));
+                    assignments.push(quote!(#field_name : left.#field_name.clone()));
                 }
             });
         right_struct.fields.iter().for_each(|field| {
                 let field_name = format_ident!("{}",field.field_name());
                 if self.right_nullable() {
                     if field.data_type.is_optional() {
-                        assignments.push(quote!(#field_name : arg.right.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
+                        assignments.push(quote!(#field_name : right.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
                     } else {
-                        assignments.push(quote!(#field_name : arg.right.as_ref().map(|inner| inner.#field_name.clone())));
+                        assignments.push(quote!(#field_name : right.as_ref().map(|inner| inner.#field_name.clone())));
                     }
                 } else {
-                    assignments.push(quote!(#field_name : arg.right.#field_name.clone()));
+                    assignments.push(quote!(#field_name : right.#field_name.clone()));
                 }
             });
 
@@ -308,7 +319,7 @@ impl SqlOperator {
         match self {
             SqlOperator::Source(source_operator) => source_operator.return_type(),
             SqlOperator::Aggregator(_input, aggregate_operator) => {
-                aggregate_operator.aggregating.output_struct()
+                aggregate_operator.output_struct()
             }
             SqlOperator::JoinOperator(left, right, operator) => operator
                 .join_type
@@ -564,23 +575,24 @@ impl<'a> SqlPipelineBuilder<'a> {
             .zip(aggregate.schema.fields().iter())
             .map(|(expr, field)| {
                 let column = Column::convert(&field.qualified_column());
-                Ok(if let Some(window) = Self::find_window(expr)? {
+                let (data_type, extraction) = if let Some(window) = Self::find_window(expr)? {
                     if let WindowType::Instant = window {
                         bail!("don't support instant window in return type yet");
                     }
-
-                    let ident = format_ident!("window");
-
-                    (column, parse_quote!(#ident), window_type_def())
+                    (window_type_def(), AggregateResultExtraction::WindowTake)
                 } else {
-                    let typ = ctx.compile_expr(expr)?.return_type();
-
-                    let field_ident =
-                        StructField::new(column.name.clone(), column.relation.clone(), typ.clone())
-                            .field_ident();
-
-                    (column, parse_quote!(key.#field_ident.clone()), typ)
-                })
+                    let data_type = ctx
+                        .compile_expr(expr)?
+                        .expression_type(&ValuePointerContext);
+                    (data_type, AggregateResultExtraction::KeyColumn)
+                };
+                if let TypeDef::DataType(DataType::Struct(_), _) = &data_type {
+                    bail!("structs should be struct-defs {:?}", expr);
+                }
+                Ok((
+                    StructField::new(column.name, column.relation, data_type),
+                    extraction,
+                ))
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -769,9 +781,6 @@ impl<'a> SqlPipelineBuilder<'a> {
 
         let right_key = Projection::new(join_projection_field_names, right_computations);
 
-        if right_key.output_struct() != left_key.output_struct() {
-            bail!("join key types must match. Try casting?");
-        }
         let join_operator = SqlOperator::JoinOperator(
             Box::new(left_input),
             Box::new(right_input),
@@ -901,7 +910,7 @@ impl<'a> SqlPipelineBuilder<'a> {
                 .map(|expression| ctx.compile_expr(expression))
                 .collect::<Result<Vec<_>>>()?;
 
-            let partition = Projection::new(field_names, field_computations).without_window();
+            let partition = Projection::new(field_names, field_computations);
             let field_name = window.schema.field_names().last().cloned().unwrap();
             let window = self.window(&w.partition_by)?;
 
@@ -1012,64 +1021,15 @@ impl<'a> SqlPipelineBuilder<'a> {
 pub struct MethodCompiler {}
 
 impl MethodCompiler {
-    fn value_map_operator(name: impl ToString, map_expr: syn::Expr) -> Operator {
-        let expression = quote!(
-                {
-                    let arg = &record.value;
-                    let value = #map_expr;
-                    arroyo_types::Record {
-                    timestamp: record.timestamp,
-                    key: None,
-                    value
-            }
-        });
+    pub fn record_expression_operator(name: impl ToString, expression: syn::Expr) -> Operator {
         Operator::ExpressionOperator {
             name: name.to_string(),
-            expression: expression.to_string(),
+            expression: quote!(#expression).to_string(),
             return_type: arroyo_datastream::ExpressionReturnType::Record,
         }
     }
 
-    pub fn key_map_operator(name: impl ToString, key_expr: syn::Expr) -> Operator {
-        let expression = quote!(
-            {
-                let key = {
-                    let arg = &record.value;
-                    #key_expr
-                };
-                arroyo_types::Record {
-                timestamp: record.timestamp,
-                key: Some(key),
-                value: record.value.clone()
-        }
-        });
-        Operator::ExpressionOperator {
-            name: name.to_string(),
-            expression: expression.to_string(),
-            return_type: arroyo_datastream::ExpressionReturnType::Record,
-        }
-    }
-
-    pub fn filter_operator(
-        name: impl ToString,
-        filter_expr: syn::Expr,
-        expression_nullable: bool,
-    ) -> Operator {
-        let expression: syn::Expr = if expression_nullable {
-            parse_quote!(
-                {
-                    let arg = &record.value;
-                    (#filter_expr).unwrap_or(false)
-                }
-            )
-        } else {
-            parse_quote!(
-                {
-                    let arg = &record.value;
-                    #filter_expr
-                }
-            )
-        };
+    pub fn predicate_expression_operator(name: impl ToString, expression: syn::Expr) -> Operator {
         Operator::ExpressionOperator {
             name: name.to_string(),
             expression: quote!(#expression).to_string(),
@@ -1077,27 +1037,10 @@ impl MethodCompiler {
         }
     }
 
-    pub fn updating_filter_operator(
+    pub fn optional_record_expression_operator(
         name: impl ToString,
-        filter_expr: syn::Expr,
-        expression_nullable: bool,
+        expression: syn::Expr,
     ) -> Operator {
-        let unwrap = if expression_nullable {
-            quote!(.unwrap_or(false))
-        } else {
-            quote!()
-        };
-        let expression: syn::Expr = parse_quote!(
-            {
-                let arg = &record.value;
-                let value = arg.filter(|arg| #filter_expr #unwrap)?;
-                Some(arroyo_types::Record {
-                    timestamp: record.timestamp,
-                    key: record.key.clone(),
-                    value
-                })
-            }
-        );
         Operator::ExpressionOperator {
             name: name.to_string(),
             expression: quote!(#expression).to_string(),
@@ -1105,74 +1048,14 @@ impl MethodCompiler {
         }
     }
 
-    pub fn timestamp_assigning_operator(
+    pub fn value_updating_operator(
         name: impl ToString,
-        timestamp_expr: syn::Expr,
-        expression_nullable: bool,
+        updating_expression: syn::Expr,
     ) -> Operator {
-        let unwrap_tokens = if expression_nullable {
-            Some(quote!(.expect("require a non-null timestamp")))
-        } else {
-            None
-        };
-        let expression: syn::Expr = parse_quote!(
-            {
-                let arg = &record.value;
-                let timestamp = (#timestamp_expr)#unwrap_tokens;
-                arroyo_types::Record {
-                    timestamp,
-                    key: record.key.clone(),
-                    value: record.value.clone()
-                }
-            }
-        );
-        Operator::ExpressionOperator {
+        Operator::UpdatingOperator {
             name: name.to_string(),
-            expression: quote!(#expression).to_string(),
-            return_type: arroyo_datastream::ExpressionReturnType::Record,
+            expression: quote!(#updating_expression).to_string(),
         }
-    }
-
-    pub fn merge_pair_operator(
-        name: impl ToString,
-        merge_struct_name: Type,
-        merge_expr: syn::Expr,
-    ) -> Result<Operator> {
-        let expression: syn::Expr = parse_quote!({
-            let arg = #merge_struct_name {
-                left: record.value.0.clone(),
-                right: record.value.1.clone()
-            };
-            arroyo_types::Record {
-                timestamp: record.timestamp.clone(),
-                key: None,
-                value: #merge_expr
-            }
-        }
-        );
-        Ok(Operator::ExpressionOperator {
-            name: name.to_string(),
-            expression: quote!(#expression).to_string(),
-            return_type: arroyo_datastream::ExpressionReturnType::Record,
-        })
-    }
-
-    pub fn merge_pair_updating_operator(
-        name: impl ToString,
-        merge_struct_name: Type,
-        merge_expr: syn::Expr,
-    ) -> Result<Operator> {
-        let expression: syn::Expr = parse_quote!({
-            let arg = #merge_struct_name {
-                left: arg.0.clone(),
-                right: arg.1.clone()
-            };
-              Some(#merge_expr)
-        });
-        Ok(Operator::UpdatingOperator {
-            name: name.to_string(),
-            expression: quote!(#expression).to_string(),
-        })
     }
 
     pub fn join_merge_operator(
@@ -1184,13 +1067,9 @@ impl MethodCompiler {
         let expression = match join_type {
             JoinType::Inner => {
                 quote!({
-                    let record = record.clone();
-                    let lefts = record.value.0;
-                    let rights = record.value.1;
-                    let mut value = Vec::with_capacity(lefts.len() * rights.len());
-                    for left in lefts.clone() {
-                        for right in rights.clone() {
-                            let arg = #merge_struct_name{left: left.clone(), right};
+                    let mut value = Vec::with_capacity(record.value.0.len() * record.value.1.len());
+                    for left in &record.value.0 {
+                        for right in &record.value.1 {
                             value.push(#merge_expr);
                         }
                     }
@@ -1303,21 +1182,10 @@ impl MethodCompiler {
         })
     }
 
-    fn updating_value_map_operator(name: &str, map_expr: syn::Expr) -> Operator {
-        let expression = quote!(
-        {
-            let arg = &record.value;
-            let value = arg.map_over_inner(|arg| #map_expr)?;
-            Some(arroyo_types::Record {
-            timestamp: record.timestamp,
-            key: None,
-            value
-        })
-        });
-        Operator::ExpressionOperator {
+    fn updating_key_operator(name: impl ToString, key_closure: syn::ExprClosure) -> Operator {
+        Operator::UpdatingKeyOperator {
             name: name.to_string(),
-            expression: expression.to_string(),
-            return_type: arroyo_datastream::ExpressionReturnType::OptionalRecord,
+            expression: quote!(#key_closure).to_string(),
         }
     }
 }

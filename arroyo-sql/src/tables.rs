@@ -18,6 +18,7 @@ use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
 };
 
+use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::expressions::CastExpression;
 use crate::external::SinkUpdateType;
 use crate::DEFAULT_IDLE_TIME;
@@ -225,9 +226,9 @@ impl ConnectorTable {
                     match field {
                         FieldSpec::StructField(struct_field) => Ok((Column{relation: None, name: struct_field.name.clone()}, Expression::Column(ColumnExpression::new(struct_field.clone())))),
                         FieldSpec::VirtualField { field, expression } => {
-                            let expression_type_def = expression.return_type();
+                            let expression_type_def = expression.expression_type(&ValuePointerContext);
                             let expression_return_type = expression_type_def.as_datatype().expect("virtual fields shouldn't return structs");
-                            let expression_nullability = expression.nullable();
+                            let expression_nullability = expression_type_def.is_optional();
                             let field_return_type = field.data_type.as_datatype().expect("virtual fields shouldn't return structs");
                             let field_nullability = field.data_type.is_optional();
                             if !field_nullability && expression_nullability {
@@ -243,7 +244,7 @@ impl ConnectorTable {
                                 ))
                             } else {
                                 let force_nullability = field_nullability && !expression_nullability;
-                                let cast_expr = CastExpression::new(Box::new(expression.clone()), field_return_type, force_nullability)?;
+                                let cast_expr = CastExpression::new(Box::new(expression.clone()), field_return_type, &crate::code_gen::ValuePointerContext, force_nullability)?;
                                 Ok((
                                     Column {
                                         relation: None,
