@@ -1,3 +1,4 @@
+#![allow(warnings)]
 use arroyo_sql_macro::full_pipeline_codegen;
 
 full_pipeline_codegen! {"select_star", "SELECT * FROM nexmark"}
@@ -71,6 +72,35 @@ FROM nexmark WHERE bid is not null) bids
 
 RIGHT JOIN (SELECT auction.id as id, auction.initial_bid as initial_bid
 FROM nexmark where auction is not null) auctions on bids.auction = auctions.id;"}
+
+full_pipeline_codegen! {"inner_join",
+"SELECT *
+FROM (SELECT bid.auction as auction, bid.price as price
+FROM nexmark WHERE bid is not null) bids
+
+JOIN (SELECT auction.id as id, auction.initial_bid as initial_bid
+FROM nexmark where auction is not null) auctions on bids.auction = auctions.id;"}
+
+full_pipeline_codegen! {"left_join",
+"SELECT *
+FROM (SELECT bid.auction as auction, bid.price as price
+FROM nexmark WHERE bid is not null) bids
+
+LEFT JOIN (SELECT auction.id as id, auction.initial_bid as initial_bid
+FROM nexmark where auction is not null) auctions on bids.auction = auctions.id;"}
+
+full_pipeline_codegen! {"non_null_outer_join",
+"CREATE TABLE join_input (
+  key BIGINT NOT NULL,
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'source',
+  topic = 'join_input',
+  format = 'json'
+);
+SELECT * FROM join_input a
+full outer join join_input b on a.key =b.key;"}
 
 full_pipeline_codegen! {"debezium_source", "CREATE table debezium_source (
   bids_auction int,
@@ -274,4 +304,63 @@ select
 
 from demo_stream
 group by window;
+"}
+
+full_pipeline_codegen! {"top_n_tumbling",
+"SELECT * FROM (
+  SELECT *, ROW_NUMBER()  OVER (
+      PARTITION BY window
+      ORDER BY count DESC) as row_number
+  FROM (
+    SELECT bid.auction as auction,
+           hop(INTERVAL '1' minute, INTERVAL '1' minute ) as window,
+           count(*) as count
+      FROM nexmark
+      GROUP BY 1, 2)) where row_number = 1
+"}
+
+full_pipeline_codegen! {"top_n",
+"SELECT * FROM ( SELECT *, ROW_NUMBER()  OVER (
+  PARTITION BY window
+  ORDER BY price DESC) as row_number
+FROM (
+SELECT bid.auction as auction,
+       hop(INTERVAL '2' second, INTERVAL '10' second ) as window,
+       sum(bid.price) as price
+  FROM nexmark
+  GROUP BY 1, 2)) WHERE row_number < 4
+"}
+
+full_pipeline_codegen! {"top_n_offset",
+"SELECT * FROM (
+  SELECT *, ROW_NUMBER()  OVER (
+      PARTITION BY window
+      ORDER BY price DESC) as row_number
+  FROM (
+    SELECT bid.auction as auction,
+           hop(INTERVAL '2' second, INTERVAL '9' second ) as window,
+           sum(bid.price) as price
+      FROM nexmark
+      GROUP BY 1, 2)) where row_number = 1
+"}
+
+full_pipeline_codegen! {"row_number",
+"
+  SELECT ROW_NUMBER()  OVER (
+      PARTITION BY window
+      ORDER BY price DESC) as row_number, auction, price 
+  FROM (
+    SELECT bid.auction as auction,
+           hop(INTERVAL '2' second, INTERVAL '9' second ) as window,
+           sum(bid.price) as price
+      FROM nexmark
+      GROUP BY 1, 2)
+"}
+
+full_pipeline_codegen! {"updating_aggregate_with_changing_key",
+"
+SELECT sum(auction), total_price % 2 as price_mod_two FROM (
+SELECT sum(bid.price) as total_price, bid.auction as auction FROM nexmark
+GROUP BY 2)
+GROUP BY 2;
 "}

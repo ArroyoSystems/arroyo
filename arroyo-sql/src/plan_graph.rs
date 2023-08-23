@@ -13,13 +13,12 @@ use arroyo_datastream::{
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str};
-use tracing::info;
 
 use crate::{
     code_gen::{
-        BinAggregatingContext, CodeGenerator, JoinPairContext, MemoryAddingContext,
-        MemoryAggregatingContext, MemoryRemovingContext, ValueBinMergingContext,
-        ValuePointerContext, VecAggregationContext,
+        BinAggregatingContext, CodeGenerator, CombiningContext, JoinPairContext,
+        MemoryAddingContext, MemoryAggregatingContext, MemoryRemovingContext,
+        ValueBinMergingContext, ValuePointerContext, VecAggregationContext,
     },
     expressions::SortExpression,
     external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource},
@@ -256,7 +255,7 @@ impl FusedRecordTransform {
             Some(record)
         });
         Operator::ExpressionOperator {
-            name: format!("fused<{}>", names.join(",")),
+            name: format!("sql_fused<{}>", names.join(",")),
             expression: quote!(#combined).to_string(),
             return_type: ExpressionReturnType::OptionalRecord,
         }
@@ -469,6 +468,7 @@ impl PlanNode {
                     }
                 }
             }
+
             PlanOperator::WindowFunction(WindowFunctionOperator {
                 window_function,
                 order_by,
@@ -569,13 +569,13 @@ impl PlanNode {
                 converting_projection,
                 max_elements,
             } => {
-                let bin_merging_context = ValueBinMergingContext::new();
-                let bin_type = bin_merging_context
-                    .bin_syn_type(aggregating_projection)
+                let bin_merger = CombiningContext::new()
+                    .compile_closure(aggregating_projection)
                     .into_token_stream()
                     .to_string();
-                let bin_merger = bin_merging_context
-                    .compile_closure(aggregating_projection)
+                let bin_type = aggregating_projection
+                    .bin_type(&ValuePointerContext)
+                    .syn_type()
                     .into_token_stream()
                     .to_string();
 
@@ -596,10 +596,7 @@ impl PlanNode {
                     .to_string();
 
                 let memory_aggregate_context = MemoryAggregatingContext::new();
-                let aggregate_expr = memory_aggregate_context
-                    .compile_closure(aggregating_projection)
-                    .into_token_stream()
-                    .to_string();
+                let aggregate_expr = aggregating_projection.generate(&memory_aggregate_context);
 
                 let sort_tuple = SortExpression::sort_tuple_type(order_by);
                 let sort_key_type = quote!(#sort_tuple).to_string();
@@ -610,12 +607,13 @@ impl PlanNode {
                     parse_quote!(|#partition_arg| {#partition_expr});
                 let projection_expr = converting_projection.generate(&ValuePointerContext);
 
-                // TODO: fix this
-
                 let sort_tokens = SortExpression::sort_tuple_expression(order_by);
 
+                let mem_ident = memory_aggregate_context.bin_name();
+                let key_ident = memory_aggregate_context.key_ident();
+
                 let extractor = quote!(
-                    |key, arg| {
+                    |#key_ident, #mem_ident| {
                         // this window is just there because the aggregate expression depends on it, but it is an
                         // error for the key extract to rely on it
                         let window = arroyo_types::Window::new(std::time::UNIX_EPOCH, std::time::UNIX_EPOCH);
@@ -626,10 +624,11 @@ impl PlanNode {
                     }
                 ).to_string();
 
-                let aggregator = quote!(|key, window, arg|
+                let window_ident = memory_aggregate_context.window_ident();
+
+                let aggregator = quote!(|#key_ident, #window_ident, #mem_ident|
                     {
-                        let arg = #aggregate_expr;
-                        let key = key.clone();
+                        let #partition_arg = #aggregate_expr;
                         #projection_expr
                     }
                 )
@@ -638,14 +637,14 @@ impl PlanNode {
                 arroyo_datastream::Operator::SlidingAggregatingTopN(SlidingAggregatingTopN {
                     width: *width,
                     slide: *slide,
-                    bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
-                    in_memory_add: quote!(|current, bin_value| {#in_memory_add}).to_string(),
-                    in_memory_remove: quote!(|current, bin_value| {#in_memory_remove}).to_string(),
-                    partitioning_func: quote!(|arg| {#partition_function}).to_string(),
+                    bin_merger,
+                    in_memory_add,
+                    in_memory_remove,
+                    partitioning_func: partition_function.into_token_stream().to_string(),
                     extractor,
                     aggregator,
-                    bin_type: quote!(#bin_type).to_string(),
-                    mem_type: quote!(#mem_type).to_string(),
+                    bin_type,
+                    mem_type,
                     sort_key_type,
                     max_elements: *max_elements,
                 })
@@ -742,46 +741,60 @@ impl PlanNode {
                 expiration,
             } => {
                 if *input_is_update {
-                    todo!(); /*
-                             let sliding = projection.sliding_aggregation_syn_expression();
-                             let bin_merger = projection.bin_merger_syn_expression();
-                             let bin_type = projection.bin_type();
-                             let memory_type = projection.memory_type();
-                             let memory_add = projection.memory_add_syn_expression();
-                             let memory_remove = projection.memory_remove_syn_expression();
+                    let memory_aggregate_context = MemoryAggregatingContext::new();
 
-                             arroyo_datastream::Operator::NonWindowAggregator(NonWindowAggregator {
-                                 expiration: *expiration,
-                                 aggregator: quote!(|key, arg| {#sliding}).to_string(),
-                                 bin_merger: quote!(|arg, current| {
-                                     let current_bin: Option<#bin_type> = None;
-                                     let updating_bin = arg.map_over_inner(|arg| #bin_merger);
-                                     if let Some(updating_bin) = updating_bin {
-                                         match updating_bin {
-                                             arroyo_types::UpdatingData::Retract(retract) => {
-                                                 let bin_value = retract;
-                                                 let current = current.expect(&format!("retracting means there should be state for {:?}", retract)).clone();
-                                                 #memory_remove
-                                             },
-                                             arroyo_types::UpdatingData::Update { old, new } => {
-                                                 let current = current.expect("retracting means there should be state").clone();
-                                                 let bin_value = old;
-                                                 let current = #memory_remove;
-                                                 let bin_value = new;
-                                                 Some(#memory_add)
-                                             },
-                                             arroyo_types::UpdatingData::Append(append) => {
-                                                 let bin_value = append;
-                                                 let current = current.cloned();
-                                                 Some(#memory_add)
-                                             }
-                                         }
-                                     } else {
-                                         None
-                                     }
-                                 }).to_string(),
-                                 bin_type: quote!(#memory_type).to_string(),
-                             })*/
+                    let memory_aggregate_closure =
+                        memory_aggregate_context.compile_non_windowed_closure(projection);
+
+                    let bin_merge_context = ValueBinMergingContext::new();
+
+                    let current_bin_ident = bin_merge_context.bin_context.current_bin_ident();
+                    let arg_ident = bin_merge_context.value_context.variable_ident();
+
+                    let bin_merger_expr = projection.generate(&bin_merge_context);
+                    let bin_type = projection
+                        .expression_type(&ValueBinMergingContext::new())
+                        .syn_type();
+                    let memory_type = projection.memory_type(&ValuePointerContext).syn_type();
+                    let memory_add = projection.generate(&MemoryAddingContext::new());
+                    let memory_removing_context = MemoryRemovingContext::new();
+                    let memory_remove = projection.generate(&memory_removing_context);
+                    let bin_ident = memory_removing_context.bin_value_ident();
+                    let memory_ident = memory_removing_context.memory_value_ident();
+                    let bin_merger = quote!(|#arg_ident, #memory_ident| {
+                        let #current_bin_ident: Option<#bin_type> = None;
+                        let updating_bin = arg.map_over_inner(|#arg_ident| #bin_merger_expr);
+                        if let Some(updating_bin) = updating_bin {
+                            match updating_bin {
+                                arroyo_types::UpdatingData::Retract(retract) => {
+                                    let #bin_ident = retract;
+                                    let #memory_ident = #memory_ident.expect(&format!("retracting means there should be state for {:?}", retract)).clone();
+                                    #memory_remove
+                                },
+                                arroyo_types::UpdatingData::Update { old, new } => {
+                                    let #memory_ident = #memory_ident.expect("retracting means there should be state").clone();
+                                    let #bin_ident = old;
+                                    let #memory_ident = #memory_remove;
+                                    let #bin_ident = new;
+                                    Some(#memory_add)
+                                },
+                                arroyo_types::UpdatingData::Append(append) => {
+                                    let #bin_ident = append;
+                                    let #memory_ident = #memory_ident.cloned();
+                                    Some(#memory_add)
+                                }
+                            }
+                        } else {
+                            #memory_ident.map(|mem| mem.clone())
+                        }
+                    });
+
+                    arroyo_datastream::Operator::NonWindowAggregator(NonWindowAggregator {
+                        expiration: *expiration,
+                        aggregator: memory_aggregate_closure.into_token_stream().to_string(),
+                        bin_merger: bin_merger.into_token_stream().to_string(),
+                        bin_type: quote!(#memory_type).to_string(),
+                    })
                 } else {
                     let bin_merger_context = ValueBinMergingContext::new();
                     let bin_type = bin_merger_context
@@ -844,27 +857,6 @@ impl PlanNode {
             } => {
                 output_types.extend(projection.output_struct().all_structs());
             }
-            PlanOperator::SlidingWindowTwoPhaseAggregator {
-                width,
-                slide,
-                projection,
-            } => {
-                let node_struct = self
-                    .output_type
-                    .as_syn_type()
-                    .into_token_stream()
-                    .to_string();
-                let projection_struct = projection
-                    .expression_type(&MemoryAggregatingContext::new())
-                    .get_type()
-                    .into_token_stream()
-                    .to_string();
-                info!(
-                    "node struct: {}, projection_struct: {}",
-                    node_struct, projection_struct
-                );
-            }
-
             _ => {}
         }
         output_types

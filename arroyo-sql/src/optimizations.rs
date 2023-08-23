@@ -11,6 +11,7 @@ use petgraph::visit::Dfs;
 use petgraph::Direction::{self, Incoming, Outgoing};
 
 use quote::quote;
+use tracing::info;
 
 use crate::code_gen::ValueBinMergingContext;
 use crate::operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection};
@@ -378,6 +379,7 @@ impl Optimizer for WindowTopNOptimization {
                 }
             }
             SearchTarget::Limit => {
+                info!("looking for limit, current operator is {:?}", node.operator);
                 if let PlanOperator::RecordTransform(RecordTransform::Filter(filter)) =
                     node.operator
                 {

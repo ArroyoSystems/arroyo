@@ -14,6 +14,7 @@ use datafusion_expr::{BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, 
 
 use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
+use tracing::info;
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext, VecAggregationContext};
 use crate::expressions::{AggregateResultExtraction, ExpressionContext};
@@ -341,29 +342,6 @@ impl SqlOperator {
         }
     }
 
-    pub fn merge_struct_type(key_struct: &StructDef, aggregate_struct: &StructDef) -> StructDef {
-        StructDef::for_fields(vec![
-            StructField::new(
-                "key".to_string(),
-                None,
-                TypeDef::StructDef(key_struct.clone(), false),
-            ),
-            StructField::new(
-                "aggregate".to_string(),
-                None,
-                TypeDef::StructDef(aggregate_struct.clone(), false),
-            ),
-            StructField::new(
-                "timestamp".to_string(),
-                None,
-                TypeDef::DataType(
-                    DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None),
-                    false,
-                ),
-            ),
-        ])
-    }
-
     pub fn has_window(&self) -> bool {
         match self {
             SqlOperator::Source(_) => false,
@@ -555,9 +533,9 @@ impl<'a> SqlPipelineBuilder<'a> {
         aggregate: &datafusion_expr::logical_plan::Aggregate,
     ) -> Result<SqlOperator> {
         let source = self.insert_sql_plan(&aggregate.input)?;
-        if source.is_updating() {
+        /*if source.is_updating() {
             bail!("can't aggregate over updating inputs");
-        }
+        }*/
         let key = self.aggregation_key(
             &aggregate.group_expr,
             aggregate.schema.fields(),
@@ -910,7 +888,8 @@ impl<'a> SqlPipelineBuilder<'a> {
                 .map(|expression| ctx.compile_expr(expression))
                 .collect::<Result<Vec<_>>>()?;
 
-            let partition = Projection::new(field_names, field_computations);
+            let partition = Projection::new(field_names, field_computations).without_window();
+            info!("partition: {:?}", partition);
             let field_name = window.schema.field_names().last().cloned().unwrap();
             let window = self.window(&w.partition_by)?;
 

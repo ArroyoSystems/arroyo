@@ -413,7 +413,7 @@ impl ConnectorTable {
                     .fields
                     .iter()
                     .map(|t| Column {
-                        relation: None,
+                        relation: t.alias.clone(),
                         name: t.name(),
                     })
                     .collect(),

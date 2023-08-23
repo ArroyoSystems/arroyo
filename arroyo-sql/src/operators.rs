@@ -7,6 +7,7 @@ use crate::{
     expressions::{
         AggregateResultExtraction, AggregationExpression, Aggregator, Column, Expression,
     },
+    schemas::window_type_def,
     types::{data_type_as_syn_type, StructDef, StructField, TypeDef},
 };
 use anyhow::Result;
@@ -35,6 +36,27 @@ impl Projection {
 
     pub fn output_struct(&self) -> StructDef {
         self.expression_type(&ValuePointerContext)
+    }
+
+    pub fn without_window(self) -> Self {
+        let (field_names, field_computations) = self
+            .field_computations
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, computation)| {
+                let field_name = self.field_names[i].clone();
+                if window_type_def() == computation.expression_type(&ValuePointerContext) {
+                    None
+                } else {
+                    Some((field_name, computation))
+                }
+            })
+            .unzip();
+        Self {
+            field_names,
+            field_computations,
+            format: self.format,
+        }
     }
 }
 

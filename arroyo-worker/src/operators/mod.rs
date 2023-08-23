@@ -666,7 +666,7 @@ impl<T: Data, OutKey: Key> KeyMapUpdatingOperator<T, OutKey> {
                         key: Some(new_key),
                         value: UpdatingData::Append(new.clone()),
                     };
-                    vec![old_record, new_record]
+                    vec![new_record, old_record]
                 }
             }
             UpdatingData::Append(append) => {

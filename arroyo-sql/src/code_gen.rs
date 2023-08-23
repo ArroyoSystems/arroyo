@@ -362,11 +362,28 @@ pub struct CombiningContext {
 }
 
 impl CombiningContext {
+    pub fn new() -> Self {
+        CombiningContext {
+            value_context: ValuePointerContext::new(),
+            bin_context: BinContext,
+        }
+    }
+
     pub fn current_bin_ident(&self) -> syn::Ident {
         parse_quote!(current_bin)
     }
     pub fn new_bin_ident(&self) -> syn::Ident {
         parse_quote!(new_bin)
+    }
+
+    pub(crate) fn compile_closure<CG: CodeGenerator<Self, BinType, syn::Expr>>(
+        &self,
+        code_generator: &CG,
+    ) -> syn::ExprClosure {
+        let expr = code_generator.generate(self);
+        let current_bin_ident = self.current_bin_ident();
+        let new_bin_ident = self.new_bin_ident();
+        parse_quote!(|#new_bin_ident, #current_bin_ident| { #expr })
     }
 }
 
@@ -516,5 +533,14 @@ impl MemoryAggregatingContext {
         let key_ident = self.key_ident();
         let mem_ident = self.bin_name();
         parse_quote!(|#key_ident, #window_ident, #mem_ident| { #expr })
+    }
+    pub(crate) fn compile_non_windowed_closure<CG: CodeGenerator<Self, StructDef, syn::Expr>>(
+        &self,
+        code_generator: &CG,
+    ) -> syn::ExprClosure {
+        let expr = code_generator.generate(self);
+        let key_ident = self.key_ident();
+        let mem_ident = self.bin_name();
+        parse_quote!(|#key_ident, #mem_ident| { #expr })
     }
 }

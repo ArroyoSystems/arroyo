@@ -22,8 +22,8 @@ pub fn impulse_schema() -> ConnectionSchema {
         format: None,
         struct_name: Some("arroyo_types::ImpulseEvent".to_string()),
         fields: vec![
-            source_field("counter", Primitive(PrimitiveType::Int64)),
-            source_field("subtask_index", Primitive(PrimitiveType::Int64)),
+            source_field("counter", Primitive(PrimitiveType::UInt64)),
+            source_field("subtask_index", Primitive(PrimitiveType::UInt64)),
         ],
         definition: None,
     }

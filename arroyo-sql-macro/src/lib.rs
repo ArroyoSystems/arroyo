@@ -6,7 +6,7 @@ use arroyo_sql::{
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, parse_str, Expr, LitStr, Token};
+use syn::{parse_str, Expr, LitStr, Token};
 
 /// This macro is used to generate a test function for a single test case.
 /// Used in the `arroyo-sql-testing` crate.
@@ -35,8 +35,12 @@ use syn::{parse_macro_input, parse_str, Expr, LitStr, Token};
 /// );
 /// ```
 #[proc_macro]
-pub fn single_test_codegen(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let test_case = parse_macro_input!(input as TestCase);
+pub fn single_test_codegen(input: TokenStream) -> TokenStream {
+    single_test_codegen_internal(input.into()).into()
+}
+
+fn single_test_codegen_internal(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    let test_case: TestCase = syn::parse2(input).unwrap();
 
     let test_name = &test_case.test_name;
     let calculation_string = &test_case.calculation_string;
@@ -113,7 +117,7 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
 }
 
 fn full_pipeline_codegen_internal(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
-    let pipeline_case: PipelineCase  = syn::parse2(input).unwrap();
+    let pipeline_case: PipelineCase = syn::parse2(input).unwrap();
 
     let test_name = &pipeline_case.test_name.value();
     let query_string = &pipeline_case.query;
@@ -185,23 +189,35 @@ impl Parse for PipelineCase {
     }
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
-    use std::{env, path::PathBuf, fs};
+    use std::{env, fs};
 
     use runtime_macros_derive::emulate_macro_expansion_fallible;
 
-    use crate::{full_pipeline_codegen, full_pipeline_codegen_internal};
+    use crate::{full_pipeline_codegen_internal, single_test_codegen_internal};
     #[test]
-    fn code_coverage() {
+    fn full_query_code_coverage() {
         let mut path = env::current_dir().unwrap().parent().unwrap().to_path_buf();
         path.push("arroyo-sql-testing");
         path.push("src");
         path.push("full_query_tests.rs");
         let file = fs::File::open(path).unwrap();
-        emulate_macro_expansion_fallible(file, "full_pipeline_codegen", full_pipeline_codegen_internal).unwrap();
+        emulate_macro_expansion_fallible(
+            file,
+            "full_pipeline_codegen",
+            full_pipeline_codegen_internal,
+        )
+        .unwrap();
+    }
+    #[test]
+    fn single_test_code_coverage() {
+        let mut path = env::current_dir().unwrap().parent().unwrap().to_path_buf();
+        path.push("arroyo-sql-testing");
+        path.push("src");
+        path.push("lib.rs");
+        let file = fs::File::open(path).unwrap();
+        emulate_macro_expansion_fallible(file, "single_test_codegen", single_test_codegen_internal)
+            .unwrap();
     }
 }
