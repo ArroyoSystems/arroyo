@@ -277,7 +277,7 @@ export function CreatePipeline() {
       pt={4}
       borderRight={'1px solid'}
       borderColor={'gray.500'}
-      overflow={'scroll'}
+      overflow={'auto'}
     >
       {catalogTruncatedWarning}
       {catalogType('Source', sources)}
