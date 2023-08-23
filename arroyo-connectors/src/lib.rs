@@ -178,11 +178,13 @@ impl<C: Connector> ErasedConnector for C {
         Ok(self.config_description(self.parse_config(s)?))
     }
 
-    fn validate_config(&self, _: &serde_json::Value) -> Result<(), serde_json::Error> {
+    fn validate_config(&self, config: &serde_json::Value) -> Result<(), serde_json::Error> {
+        self.parse_config(config)?;
         Ok(())
     }
 
-    fn validate_table(&self, _: &serde_json::Value) -> Result<(), serde_json::Error> {
+    fn validate_table(&self, table: &serde_json::Value) -> Result<(), serde_json::Error> {
+        self.parse_table(table)?;
         Ok(())
     }
 

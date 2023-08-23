@@ -55,7 +55,7 @@ const ClusterEditor = ({
           body: {
             name: d.name,
             connector: connector,
-            config: JSON.stringify(d),
+            config: d,
           },
         });
 
@@ -65,6 +65,7 @@ const ClusterEditor = ({
 
         if (error) {
           setError(formatError(error));
+          return;
         }
 
         onClose();
