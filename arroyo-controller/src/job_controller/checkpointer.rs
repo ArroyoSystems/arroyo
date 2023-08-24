@@ -392,7 +392,7 @@ impl CheckpointState {
 
     fn backend_data_to_key(backend_data: BackendData) -> Option<((u32, String), BackendData)> {
         let Some(internal_data) = &backend_data.backend_data else {
-            return None
+            return None;
         };
         match &internal_data {
             backend_data::BackendData::ParquetStore(data) => {

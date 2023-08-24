@@ -85,7 +85,7 @@ where
             .expect("Invalid connection config for KafkaSource");
         let table: KafkaTable =
             serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let TableType::Source{ offset, read_mode } = &table.type_ else {
+        let TableType::Source { offset, read_mode } = &table.type_ else {
             panic!("found non-source kafka config in source operator");
         };
         let mut client_configs = client_configs(&connection);

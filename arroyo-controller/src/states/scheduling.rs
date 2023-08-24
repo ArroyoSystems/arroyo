@@ -363,7 +363,10 @@ impl State for Scheduling {
                         StateBackend::load_operator_metadata(&ctx.config.id, operator_id, epoch)
                             .await;
                     let Some(operator_metadata) = operator_metadata else {
-                        panic!("operator metadata for {} not found for job {}", operator_id, ctx.config.id);
+                        panic!(
+                            "operator metadata for {} not found for job {}",
+                            operator_id, ctx.config.id
+                        );
                     };
                     if operator_metadata.has_state
                         && operator_metadata

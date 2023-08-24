@@ -89,7 +89,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
             .expect("Invalid connection config for KafkaSink");
         let table: KafkaTable =
             serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let TableType::Sink{ commit_mode } = table.type_ else {
+        let TableType::Sink { commit_mode } = table.type_ else {
             panic!("found non-sink kafka config in sink operator");
         };
 
@@ -250,12 +250,16 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
     }
 
     async fn handle_commit(&mut self, epoch: u32, ctx: &mut crate::engine::Context<(), ()>) {
-        let ConsistencyMode::ExactlyOnce { next_transaction_index: _, producer_to_complete } = &mut self.consistency_mode else {
+        let ConsistencyMode::ExactlyOnce {
+            next_transaction_index: _,
+            producer_to_complete,
+        } = &mut self.consistency_mode
+        else {
             warn!("received commit but consistency mode is not exactly once");
-            return
+            return;
         };
 
-        let Some(committing_producer)= producer_to_complete.take() else {
+        let Some(committing_producer) = producer_to_complete.take() else {
             unimplemented!("received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented");
         };
         let mut commits_attempted = 0;

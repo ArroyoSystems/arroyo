@@ -96,8 +96,13 @@ async fn signal_process(signal: &str, pid: u32) -> bool {
 
 impl NodeServer {
     async fn start_worker_int(&self, mut s: Streaming<StartWorkerReq>) -> anyhow::Result<WorkerId> {
-        let start_worker_req::Msg::Header(header) = s.next().await
-                .ok_or_else(|| anyhow!("Didn't receive header"))??.msg.unwrap() else {
+        let start_worker_req::Msg::Header(header) = s
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("Didn't receive header"))??
+            .msg
+            .unwrap()
+        else {
             bail!("First message was not a header");
         };
 
@@ -254,7 +259,9 @@ impl NodeGrpc for NodeServer {
             let workers = self.workers.lock().unwrap();
 
             let Some(worker) = workers.get(&WorkerId(req.worker_id)) else {
-                return Ok(Response::new(StopWorkerResp { status: StopWorkerStatus::NotFound.into()}));
+                return Ok(Response::new(StopWorkerResp {
+                    status: StopWorkerStatus::NotFound.into(),
+                }));
             };
 
             (worker.running, worker.pid, worker.job_id.clone())

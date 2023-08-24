@@ -117,7 +117,7 @@ impl FusedRecordTransform {
         let mut predicates = Vec::new();
         let mut names = Vec::new();
         for expression in &self.expressions {
-            let RecordTransform::Filter(predicate)= expression else {
+            let RecordTransform::Filter(predicate) = expression else {
                 panic!("FusedRecordTransform.to_predicate_operator() called on non-predicate expression");
             };
             names.push("filter");

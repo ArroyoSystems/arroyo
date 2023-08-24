@@ -67,7 +67,10 @@ where
 
     for table in connection_tables::get_all_connection_tables(auth_data, tx).await? {
         let Some(connector) = connector_for_type(&table.connector) else {
-            warn!("Saved table found with unknown connector {}", table.connector);
+            warn!(
+                "Saved table found with unknown connector {}",
+                table.connector
+            );
             continue;
         };
 

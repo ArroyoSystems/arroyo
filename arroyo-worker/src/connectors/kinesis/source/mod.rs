@@ -61,7 +61,7 @@ struct KinesisSourceConfig {
 
 impl KinesisSourceConfig {
     fn new_from_table(table: &KinesisTable) -> Self {
-        let TableType::Source{offset: read_mode} = table.type_ else {
+        let TableType::Source { offset: read_mode } = table.type_ else {
             panic!("found non-source kinesis table in KinesisSource");
         };
         Self { read_mode }

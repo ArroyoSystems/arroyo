@@ -570,7 +570,12 @@ pub fn get_test_expression(
         };
     }
 
-    let Insert::Anonymous{logical_plan: LogicalPlan::Projection(projection)} = inserts.remove(0) else {panic!("expect projection")};
+    let Insert::Anonymous {
+        logical_plan: LogicalPlan::Projection(projection),
+    } = inserts.remove(0)
+    else {
+        panic!("expect projection")
+    };
     let ctx = ExpressionContext {
         schema_provider: &schema_provider,
         input_struct: &struct_def,

@@ -188,7 +188,9 @@ impl BackingStore for ParquetBackend {
             .map(|table| (table.name.clone().chars().next().unwrap(), table))
             .collect();
         for backend_data in operator_metadata.backend_data {
-            let Some(backend_data::BackendData::ParquetStore(parquet_data)) = backend_data.backend_data else {
+            let Some(backend_data::BackendData::ParquetStore(parquet_data)) =
+                backend_data.backend_data
+            else {
                 panic!("expect parquet data")
             };
             let table_descriptor = tables
@@ -405,8 +407,8 @@ impl ParquetBackend {
                 .backend_data
                 .iter()
                 .map(|backend_data| {
-                    let Some(BackendData::ParquetStore(parquet_store)) =
-                  &backend_data.backend_data else {
+                    let Some(BackendData::ParquetStore(parquet_store)) = &backend_data.backend_data
+                    else {
                         unreachable!("expect parquet backends")
                     };
                     parquet_store.file.clone()
@@ -417,12 +419,14 @@ impl ParquetBackend {
         let storage_client = StorageClient::new();
 
         for epoch_to_remove in old_min_epoch..new_min_epoch {
-            let Some(metadata) = Self::load_operator_metadata(&job_id, &operator, epoch_to_remove)
-            .await else {
+            let Some(metadata) =
+                Self::load_operator_metadata(&job_id, &operator, epoch_to_remove).await
+            else {
                 continue;
             };
             for backend_data in metadata.backend_data {
-                let Some(BackendData::ParquetStore(parquet_store)) = &backend_data.backend_data else {
+                let Some(BackendData::ParquetStore(parquet_store)) = &backend_data.backend_data
+                else {
                     unreachable!("expect parquet backends")
                 };
                 let file = parquet_store.file.clone();

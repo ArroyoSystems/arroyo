@@ -782,7 +782,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             },
         );
         let Some(join_filter) = &join.filter else {
-            return Ok(join_operator)
+            return Ok(join_operator);
         };
         let join_filter = self
             .ctx(&join_operator.return_type())

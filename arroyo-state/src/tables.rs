@@ -172,8 +172,7 @@ impl<'a, K: Key, V: Data + PartialEq, S: BackingStore> TimeKeyMap<'a, K, V, S> {
     }
 
     pub async fn flush(&mut self) {
-        let Some(timestamp) = self.cache.buffered_values
-        .keys().max() else {
+        let Some(timestamp) = self.cache.buffered_values.keys().max() else {
             return;
         };
         self.flush_at_watermark(*timestamp).await;

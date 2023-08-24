@@ -152,9 +152,15 @@ impl<K: Key, D: Data + Sync, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitt
             if task_info.task_index > 0 {
                 continue;
             }
-            let Some(CurrentFileRecovery { tmp_file, bytes_written, suffix, destination }) = current_file else {
+            let Some(CurrentFileRecovery {
+                tmp_file,
+                bytes_written,
+                suffix,
+                destination,
+            }) = current_file
+            else {
                 continue;
-             };
+            };
             let mut file = OpenOptions::new()
                 .write(true)
                 .open(tmp_file.clone())

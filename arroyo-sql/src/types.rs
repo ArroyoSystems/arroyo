@@ -460,11 +460,11 @@ impl TryFrom<&Type> for TypeDef {
                 let last = pat.path.segments.last().unwrap();
                 if last.ident == "Option" {
                     let AngleBracketed(args) = &last.arguments else {
-                        return Err(())
+                        return Err(());
                     };
 
                     let GenericArgument::Type(inner) = args.args.first().ok_or(())? else {
-                        return Err(())
+                        return Err(());
                     };
 
                     Ok(TypeDef::DataType(rust_to_arrow(inner)?, true))
