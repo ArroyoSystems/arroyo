@@ -370,7 +370,10 @@ impl NodeScheduler {
         };
 
         let Some(node) = state.nodes.get(&worker.node_id) else {
-            warn!(message = "node not found for stop worker", node_id = worker.node_id.0);
+            warn!(
+                message = "node not found for stop worker",
+                node_id = worker.node_id.0
+            );
             return Ok(Some(worker_id));
         };
 
@@ -397,10 +400,11 @@ impl NodeScheduler {
                 worker_id: worker_id.0,
                 force,
             }))
-            .await else {
-                warn!("Failed to connect to worker to stop; this likely means it is dead");
-                return Ok(Some(worker_id));
-            };
+            .await
+        else {
+            warn!("Failed to connect to worker to stop; this likely means it is dead");
+            return Ok(Some(worker_id));
+        };
 
         match (resp.get_ref().status(), force) {
             (StopWorkerStatus::NotFound, false) => {

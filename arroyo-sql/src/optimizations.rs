@@ -245,7 +245,9 @@ impl Optimizer for TwoPhaseOptimization {
         node: PlanNode,
         graph: &mut DiGraph<PlanNode, PlanEdge>,
     ) -> bool {
-        let PlanOperator::WindowAggregate { window, projection } = node.operator else { return false };
+        let PlanOperator::WindowAggregate { window, projection } = node.operator else {
+            return false;
+        };
         let (width, slide) = match window {
             WindowType::Tumbling { width } => (width, width),
             WindowType::Sliding { width, slide } => (width, slide),
@@ -378,7 +380,7 @@ impl Optimizer for WindowTopNOptimization {
                 if let PlanOperator::RecordTransform(RecordTransform::Filter(filter)) =
                     node.operator
                 {
-                    let  PlanType::Unkeyed(input_type) = node.output_type.clone() else {
+                    let PlanType::Unkeyed(input_type) = node.output_type.clone() else {
                         unreachable!("Filter must have unkeyed output type")
                     };
                     let field_name = &self.window_function_operator.as_ref().unwrap().field_name;
@@ -413,7 +415,9 @@ impl Optimizer for WindowTopNOptimization {
                             self.clear();
                             return false;
                         }
-                        let Ok(two_phase_projection) : Result<TwoPhaseAggregateProjection> = projection.try_into() else {
+                        let Ok(two_phase_projection): Result<TwoPhaseAggregateProjection> =
+                            projection.try_into()
+                        else {
                             self.clear();
                             return false;
                         };

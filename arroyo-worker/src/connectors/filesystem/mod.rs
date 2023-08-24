@@ -852,20 +852,20 @@ impl MultipartManager {
         if !self.closed {
             unreachable!("get_closed_file_checkpoint_data called on open file");
         }
-        let Some(ref multipart_id) =  self.multipart_id else  {
+        let Some(ref multipart_id) = self.multipart_id else {
             if self.pushed_size == 0 {
-            return FileCheckpointData::Empty;
+                return FileCheckpointData::Empty;
             } else {
-            return FileCheckpointData::MultiPartNotCreated {
-                parts_to_add: self
-                    .parts_to_add
-                    .iter()
-                    .map(|val| val.byte_data.clone())
-                    .collect(),
-                trailing_bytes: None,
-            };
-        }
-    };
+                return FileCheckpointData::MultiPartNotCreated {
+                    parts_to_add: self
+                        .parts_to_add
+                        .iter()
+                        .map(|val| val.byte_data.clone())
+                        .collect(),
+                    trailing_bytes: None,
+                };
+            }
+        };
         if self.all_uploads_finished() {
             return FileCheckpointData::MultiPartWriterUploadCompleted {
                 multi_part_upload_id: multipart_id.clone(),

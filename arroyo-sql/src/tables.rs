@@ -515,7 +515,7 @@ impl Table {
                 .fields
                 .iter()
                 .map(|f| {
-                    let TypeDef::DataType(data_type, nullable ) = f.data_type.clone() else {
+                    let TypeDef::DataType(data_type, nullable) = f.data_type.clone() else {
                         bail!("expect data type for generated column")
                     };
                     Ok(DFField::new_unqualified(&f.name, data_type, nullable))

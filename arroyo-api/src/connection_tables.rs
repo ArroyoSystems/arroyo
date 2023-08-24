@@ -279,8 +279,11 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
     type Error = String;
     fn try_into(self) -> Result<ConnectionTable, Self::Error> {
         let Some(connector) = connector_for_type(&self.connector) else {
-                return Err(format!("invalid connector {} in saved ConnectionTable {}", self.connector, self.id));
-            };
+            return Err(format!(
+                "invalid connector {} in saved ConnectionTable {}",
+                self.connector, self.id
+            ));
+        };
 
         let connection = get_connection_profile(&self, &*connector);
 
@@ -441,10 +444,9 @@ pub(crate) fn expand_schema(
 pub(crate) async fn test_schema(
     WithRejection(Json(req), _): WithRejection<Json<ConnectionSchema>, ApiError>,
 ) -> Result<(), ErrorResp> {
-    let Some(schema_def) = req
-        .definition else {
-            return Ok(());
-        };
+    let Some(schema_def) = req.definition else {
+        return Ok(());
+    };
 
     match schema_def {
         SchemaDefinition::JsonSchema(schema) => {

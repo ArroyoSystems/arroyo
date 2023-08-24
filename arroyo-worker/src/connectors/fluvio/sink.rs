@@ -26,7 +26,7 @@ impl<K: Key + Serialize, T: Data + Serialize> FluvioSinkFunc<K, T> {
             serde_json::from_str(config).expect("Invalid config for FluvioSink");
         let table: FluvioTable =
             serde_json::from_value(config.table).expect("Invalid table config for FluvioSource");
-        let TableType::Sink{ .. } = &table.type_ else {
+        let TableType::Sink { .. } = &table.type_ else {
             panic!("found non-sink fluvio config in sink operator");
         };
 

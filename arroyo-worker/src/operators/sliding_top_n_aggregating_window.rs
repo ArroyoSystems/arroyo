@@ -152,13 +152,15 @@ impl<
         let watermark = ctx.last_present_watermark();
         let map: TimeKeyMap<K, BinA, _> = ctx.state.get_time_key_map('a', watermark).await;
 
-        let Some(map_min_time) = map.get_min_time()  else {
+        let Some(map_min_time) = map.get_min_time() else {
             self.state = SlidingWindowState::NoData;
             return;
         };
         let map_min_bin = self.bin_start(map_min_time);
         let Some(watermark) = watermark else {
-            self.state = SlidingWindowState::OnlyBufferedData { earliest_bin_time: map_min_bin };
+            self.state = SlidingWindowState::OnlyBufferedData {
+                earliest_bin_time: map_min_bin,
+            };
             return;
         };
         let watermark_bin = self.bin_start(watermark);
