@@ -1,6 +1,7 @@
 use crate::{
+    code_gen::{CodeGenerator, JoinPairContext, ValuePointerContext, VecOfPointersContext},
     operators::TwoPhaseAggregation,
-    pipeline::SortDirection,
+    pipeline::{JoinType, SortDirection},
     types::{StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
@@ -45,82 +46,181 @@ pub enum Expression {
     Case(CaseExpression),
 }
 
+pub struct JoinedPairedStruct {
+    pub left: StructDef,
+    pub right: StructDef,
+    pub join_type: JoinType,
+}
+
+impl JoinedPairedStruct {}
+
+pub struct PairMerger;
+
+impl CodeGenerator<JoinPairContext, StructDef, syn::Expr> for JoinType {
+    fn generate(&self, input_context: &JoinPairContext) -> syn::Expr {
+        let left_struct = &input_context.left_struct;
+        let right_struct = &input_context.right_struct;
+        let left_ident = input_context.left_ident();
+        let right_ident = input_context.right_ident();
+
+        let mut assignments: Vec<_> = vec![];
+
+        left_struct.fields.iter().for_each(|field| {
+                let field_name = format_ident!("{}",field.field_name());
+                if self.left_nullable() {
+                    if field.data_type.is_optional() {
+                        assignments.push(quote!(#field_name : #left_ident.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
+                    } else {
+                        assignments.push(quote!(#field_name : #left_ident.as_ref().map(|inner| inner.#field_name.clone())));
+                    }
+                } else {
+                    assignments.push(quote!(#field_name : #left_ident.#field_name.clone()));
+                }
+            });
+        right_struct.fields.iter().for_each(|field| {
+                let field_name = format_ident!("{}",field.field_name());
+                if self.right_nullable() {
+                    if field.data_type.is_optional() {
+                        assignments.push(quote!(#field_name : #right_ident.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
+                    } else {
+                        assignments.push(quote!(#field_name : #right_ident.as_ref().map(|inner| inner.#field_name.clone())));
+                    }
+                } else {
+                    assignments.push(quote!(#field_name :#right_ident.#field_name.clone()));
+                }
+            });
+
+        let return_struct = self.expression_type(input_context);
+        let return_type = return_struct.get_type();
+        parse_quote!(
+                #return_type {
+                    #(#assignments)
+                    ,*
+                }
+        )
+    }
+
+    fn expression_type(&self, input_context: &JoinPairContext) -> StructDef {
+        let left_struct = &input_context.left_struct;
+        let right_struct = &input_context.right_struct;
+        // input to join should always be two structs. Nullability determined by join type.
+        let mut fields = if self.left_nullable() {
+            left_struct
+                .fields
+                .iter()
+                .map(|field| field.as_nullable())
+                .collect()
+        } else {
+            left_struct.fields.clone()
+        };
+        if self.right_nullable() {
+            right_struct
+                .fields
+                .iter()
+                .map(|field| field.as_nullable())
+                .for_each(|field| fields.push(field))
+        } else {
+            fields.append(&mut right_struct.fields.clone());
+        }
+        StructDef::for_fields(fields)
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        match self {
+            Expression::Column(column) => column.generate(input_context),
+            Expression::UnaryBoolean(unary_boolean) => unary_boolean.generate(input_context),
+            Expression::Literal(literal) => literal.generate(input_context),
+            Expression::BinaryComparison(comparison) => comparison.generate(input_context),
+            Expression::BinaryMath(math) => math.generate(input_context),
+            Expression::StructField(struct_field) => struct_field.generate(input_context),
+            Expression::Aggregation(_aggregation) => panic!("don't expect to reach here"),
+            Expression::Cast(cast) => cast.generate(input_context),
+            Expression::Numeric(numeric) => numeric.generate(input_context),
+            Expression::Date(date) => date.generate(input_context),
+            Expression::String(string) => string.generate(input_context),
+            Expression::Hash(hash) => hash.generate(input_context),
+            Expression::DataStructure(data_structure) => data_structure.generate(input_context),
+            Expression::Json(json) => json.generate(input_context),
+            Expression::RustUdf(udf) => udf.generate(input_context),
+            Expression::WrapType(wrap_type) => wrap_type.generate(input_context),
+            Expression::Case(case) => case.generate(input_context),
+        }
+    }
+
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
+        match self {
+            Expression::Column(column_expression) => {
+                column_expression.expression_type(input_context)
+            }
+            Expression::UnaryBoolean(unary_boolean_expression) => {
+                unary_boolean_expression.expression_type(input_context)
+            }
+            Expression::Literal(literal_expression) => {
+                literal_expression.expression_type(input_context)
+            }
+            Expression::BinaryComparison(comparison_expression) => {
+                comparison_expression.expression_type(input_context)
+            }
+            Expression::BinaryMath(math_expression) => {
+                math_expression.expression_type(input_context)
+            }
+            Expression::StructField(struct_field_expression) => {
+                struct_field_expression.expression_type(input_context)
+            }
+            Expression::Aggregation(_aggregation_expression) => {
+                unreachable!("aggregates shouldn't actually be expressions!")
+            }
+            Expression::Cast(cast_expression) => cast_expression.expression_type(input_context),
+            Expression::Numeric(numeric_expression) => {
+                numeric_expression.expression_type(input_context)
+            }
+            Expression::Date(date_function) => date_function.expression_type(input_context),
+            Expression::String(string_function) => string_function.expression_type(input_context),
+            Expression::Hash(hash_expression) => hash_expression.expression_type(input_context),
+            Expression::DataStructure(data_structure_expression) => {
+                data_structure_expression.expression_type(input_context)
+            }
+            Expression::Json(json_function) => json_function.expression_type(input_context),
+            Expression::RustUdf(t) => t.expression_type(input_context),
+            Expression::WrapType(t) => t.expression_type(input_context),
+            Expression::Case(case_statement) => case_statement.expression_type(input_context),
+        }
+    }
+}
+
 impl Expression {
-    pub fn to_syn_expression(&self) -> syn::Expr {
+    pub fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         match self {
-            Expression::Column(column_expression) => column_expression.to_syn_expression(),
+            Expression::Column(column_expression) => column_expression.generate(input_context),
             Expression::UnaryBoolean(unary_boolean_expression) => {
-                unary_boolean_expression.to_syn_expression()
+                unary_boolean_expression.generate(input_context)
             }
-            Expression::Literal(literal_expression) => literal_expression.to_syn_expression(),
+            Expression::Literal(literal_expression) => literal_expression.generate(input_context),
             Expression::BinaryComparison(comparison_expression) => {
-                comparison_expression.to_syn_expression()
+                comparison_expression.generate(input_context)
             }
-            Expression::BinaryMath(math_expression) => math_expression.to_syn_expression(),
+            Expression::BinaryMath(math_expression) => math_expression.generate(input_context),
             Expression::StructField(struct_field_expression) => {
-                struct_field_expression.to_syn_expression()
+                struct_field_expression.generate(input_context)
             }
-            Expression::Aggregation(aggregation_expression) => {
-                aggregation_expression.to_syn_expression()
+            Expression::Aggregation(_aggregation_expression) => {
+                unreachable!("aggregates shouldn't actually be expressions!")
             }
-            Expression::Cast(cast_expression) => cast_expression.to_syn_expression(),
-            Expression::Numeric(numeric_expression) => numeric_expression.to_syn_expression(),
-            Expression::String(string_function) => string_function.to_syn_expression(),
-            Expression::Hash(hash_expression) => hash_expression.to_syn_expression(),
+            Expression::Cast(cast_expression) => cast_expression.generate(input_context),
+            Expression::Numeric(numeric_expression) => numeric_expression.generate(input_context),
+            Expression::String(string_function) => string_function.generate(input_context),
+            Expression::Hash(hash_expression) => hash_expression.generate(input_context),
             Expression::DataStructure(data_structure_expression) => {
-                data_structure_expression.to_syn_expression()
+                data_structure_expression.generate(input_context)
             }
-            Expression::Json(json_function) => json_function.to_syn_expression(),
-            Expression::RustUdf(t) => t.to_syn_expression(),
-            Expression::WrapType(t) => t.to_syn_expression(),
-            Expression::Case(case_expression) => case_expression.to_syn_expression(),
-            Expression::Date(datetime_expr) => datetime_expr.to_syn_expression(),
+            Expression::Json(json_function) => json_function.generate(input_context),
+            Expression::RustUdf(t) => t.generate(input_context),
+            Expression::WrapType(t) => t.generate(input_context),
+            Expression::Case(case_expression) => case_expression.generate(input_context),
+            Expression::Date(datetime_expr) => datetime_expr.generate(input_context),
         }
-    }
-
-    fn syn_expression_with_nullity(&self, nullity: bool) -> syn::Expr {
-        let expr = self.to_syn_expression();
-        match (self.nullable(), nullity) {
-            (true, true) | (false, false) => expr,
-            (false, true) => parse_quote!(Some(#expr)),
-            (true, false) => unreachable!(
-                "Should not be possible to have a nullable expression with nullity=false"
-            ),
-        }
-    }
-
-    pub fn return_type(&self) -> TypeDef {
-        match self {
-            Expression::Column(column_expression) => column_expression.return_type(),
-            Expression::UnaryBoolean(unary_boolean_expression) => {
-                unary_boolean_expression.return_type()
-            }
-            Expression::Literal(literal_expression) => literal_expression.return_type(),
-            Expression::BinaryComparison(comparison_expression) => {
-                comparison_expression.return_type()
-            }
-            Expression::BinaryMath(math_expression) => math_expression.return_type(),
-            Expression::StructField(struct_field_expression) => {
-                struct_field_expression.return_type()
-            }
-            Expression::Aggregation(aggregation_expression) => aggregation_expression.return_type(),
-            Expression::Cast(cast_expression) => cast_expression.return_type(),
-            Expression::Numeric(numeric_expression) => numeric_expression.return_type(),
-            Expression::Date(date_function) => date_function.return_type(),
-            Expression::String(string_function) => string_function.return_type(),
-            Expression::Hash(hash_expression) => hash_expression.return_type(),
-            Expression::DataStructure(data_structure_expression) => {
-                data_structure_expression.return_type()
-            }
-            Expression::Json(json_function) => json_function.return_type(),
-            Expression::RustUdf(t) => t.return_type(),
-            Expression::WrapType(t) => t.return_type(),
-            Expression::Case(case_statement) => case_statement.return_type(),
-        }
-    }
-
-    pub fn nullable(&self) -> bool {
-        self.return_type().is_optional()
     }
 
     pub(crate) fn has_max_value(&self, field: &StructField) -> Option<u64> {
@@ -342,6 +442,7 @@ impl<'a> ExpressionContext<'a> {
             Expr::Cast(datafusion_expr::Cast { expr, data_type }) => Ok(CastExpression::new(
                 Box::new(self.compile_expr(expr)?),
                 data_type,
+                &ValuePointerContext::new(),
                 false,
             )?),
             Expr::TryCast(TryCast { expr, data_type }) => {
@@ -431,9 +532,10 @@ impl<'a> ExpressionContext<'a> {
                         }))
                     }
                     BuiltinScalarFunction::MakeArray => {
-                        if matches!(arg_expressions[0].return_type(), TypeDef::StructDef(_, _)) {
-                            bail!("make_array only supports primitive types");
-                        };
+                        // TODO: Figure out how to detect this
+                        //if matches!(arg_expressions[0].expression_type(input_context), TypeDef::StructDef(_, _)) {
+                        //    bail!("make_array only supports primitive types");
+                        //};
                         Ok(Expression::DataStructure(DataStructureFunction::MakeArray(
                             arg_expressions,
                         )))
@@ -445,21 +547,25 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::ToTimestamp => CastExpression::new(
                         Box::new(arg_expressions.remove(0)),
                         &DataType::Timestamp(TimeUnit::Nanosecond, None),
+                        &ValuePointerContext::new(),
                         false,
                     ),
                     BuiltinScalarFunction::ToTimestampMillis => CastExpression::new(
                         Box::new(arg_expressions.remove(0)),
                         &DataType::Timestamp(TimeUnit::Millisecond, None),
+                        &ValuePointerContext::new(),
                         false,
                     ),
                     BuiltinScalarFunction::ToTimestampMicros => CastExpression::new(
                         Box::new(arg_expressions.remove(0)),
                         &DataType::Timestamp(TimeUnit::Microsecond, None),
+                        &ValuePointerContext::new(),
                         false,
                     ),
                     BuiltinScalarFunction::ToTimestampSeconds => CastExpression::new(
                         Box::new(arg_expressions.remove(0)),
                         &DataType::Timestamp(TimeUnit::Second, None),
+                        &ValuePointerContext::new(),
                         false,
                     ),
                     BuiltinScalarFunction::FromUnixtime => Ok(Expression::Date(
@@ -637,6 +743,33 @@ impl Column {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum AggregateResultExtraction {
+    WindowTake,
+    KeyColumn,
+}
+
+impl AggregateResultExtraction {
+    // TODO: this should probably be in a code generator.
+    pub fn get_column_assignment(
+        &self,
+        struct_field: &StructField,
+        window_ident: syn::Ident,
+        key_ident: syn::Ident,
+    ) -> syn::FieldValue {
+        match self {
+            AggregateResultExtraction::WindowTake => {
+                let field_ident = struct_field.field_ident();
+                parse_quote!(#field_ident: #window_ident)
+            }
+            AggregateResultExtraction::KeyColumn => {
+                let key_field_ident = struct_field.field_ident();
+                parse_quote!(#key_field_ident: #key_ident.#key_field_ident.clone())
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct ColumnExpression {
     column_field: StructField,
@@ -656,13 +789,16 @@ impl ColumnExpression {
         )?;
         Ok(ColumnExpression { column_field })
     }
+}
 
-    fn to_syn_expression(&self) -> syn::Expr {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for ColumnExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let field_ident = self.column_field.field_ident();
-        parse_quote!(arg.#field_ident.clone())
+        let argument_ident = input_context.variable_ident();
+        parse_quote!(#argument_ident.#field_ident.clone())
     }
 
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, _input_context: &ValuePointerContext) -> TypeDef {
         self.column_field.data_type.clone()
     }
 }
@@ -687,9 +823,18 @@ pub struct UnaryBooleanExpression {
 }
 
 impl UnaryBooleanExpression {
-    fn to_syn_expression(&self) -> syn::Expr {
-        let argument_expr = self.input.to_syn_expression();
-        match (self.input.return_type().is_optional(), &self.operator) {
+    fn new(operator: UnaryOperator, input: Box<Expression>) -> Expression {
+        Expression::UnaryBoolean(UnaryBooleanExpression { operator, input })
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for UnaryBooleanExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let argument_expr = self.input.generate(input_context);
+        match (
+            self.input.expression_type(input_context).is_optional(),
+            &self.operator,
+        ) {
             (true, UnaryOperator::IsNotNull) => parse_quote!(#argument_expr.is_some()),
             (true, UnaryOperator::IsNull) => parse_quote!(#argument_expr.is_none()),
             (true, UnaryOperator::IsTrue) => parse_quote!(#argument_expr.unwrap_or(false)),
@@ -711,7 +856,7 @@ impl UnaryBooleanExpression {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         match &self.operator {
             UnaryOperator::IsNotNull
             | UnaryOperator::IsTrue
@@ -721,11 +866,8 @@ impl UnaryBooleanExpression {
             | UnaryOperator::IsNotFalse
             | UnaryOperator::IsNotUnknown
             | UnaryOperator::IsNull => TypeDef::DataType(DataType::Boolean, false),
-            UnaryOperator::Negative => self.input.return_type(),
+            UnaryOperator::Negative => self.input.expression_type(input_context),
         }
-    }
-    fn new(operator: UnaryOperator, input: Box<Expression>) -> Expression {
-        Expression::UnaryBoolean(UnaryBooleanExpression { operator, input })
     }
 }
 
@@ -735,16 +877,22 @@ pub struct LiteralExpression {
 }
 
 impl LiteralExpression {
-    fn to_syn_expression(&self) -> syn::Expr {
-        TypeDef::get_literal(&self.literal)
-    }
-
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, _input_context: &ValuePointerContext) -> TypeDef {
         TypeDef::DataType(self.literal.get_datatype(), self.literal.is_null())
     }
 
     fn new(literal: ScalarValue) -> Expression {
         Expression::Literal(Self { literal })
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for LiteralExpression {
+    fn generate(&self, _input_context: &ValuePointerContext) -> syn::Expr {
+        TypeDef::get_literal(&self.literal)
+    }
+
+    fn expression_type(&self, _input_context: &ValuePointerContext) -> TypeDef {
+        TypeDef::DataType(self.literal.get_datatype(), self.literal.is_null())
     }
 }
 
@@ -760,6 +908,14 @@ pub enum BinaryComparison {
     IsNotDistinctFrom,
     And,
     Or,
+}
+impl BinaryComparison {
+    fn never_null(&self) -> bool {
+        match self {
+            BinaryComparison::IsDistinctFrom | BinaryComparison::IsNotDistinctFrom => true,
+            _ => false,
+        }
+    }
 }
 
 impl TryFrom<datafusion_expr::Operator> for BinaryComparison {
@@ -802,9 +958,9 @@ impl BinaryComparisonExpression {
 }
 
 impl BinaryComparisonExpression {
-    fn to_syn_expression(&self) -> syn::Expr {
-        let left_expr = self.left.to_syn_expression();
-        let right_expr = self.right.to_syn_expression();
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let left_expr = self.left.generate(input_context);
+        let right_expr = self.right.generate(input_context);
 
         let op = match self.op {
             BinaryComparison::Eq => quote!(==),
@@ -819,8 +975,8 @@ impl BinaryComparisonExpression {
             BinaryComparison::Or => quote!(||),
         };
         match (
-            self.left.return_type().is_optional(),
-            self.right.return_type().is_optional(),
+            self.left.expression_type(input_context).is_optional(),
+            self.right.expression_type(input_context).is_optional(),
         ) {
             (true, true) => parse_quote!({
                 let left = #left_expr;
@@ -840,11 +996,62 @@ impl BinaryComparisonExpression {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         TypeDef::DataType(
             DataType::Boolean,
-            self.left.return_type().is_optional() || self.right.return_type().is_optional(),
+            self.left.expression_type(input_context).is_optional()
+                || self.right.expression_type(input_context).is_optional(),
         )
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for BinaryComparisonExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let left_expr = self.left.generate(input_context);
+        let right_expr = self.right.generate(input_context);
+
+        let op = match self.op {
+            BinaryComparison::Eq => quote!(==),
+            BinaryComparison::NotEq => quote!(!=),
+            BinaryComparison::Lt => quote!(<),
+            BinaryComparison::LtEq => quote!(<=),
+            BinaryComparison::Gt => quote!(>),
+            BinaryComparison::GtEq => quote!(>=),
+            BinaryComparison::IsNotDistinctFrom => return parse_quote!((#left_expr == #right_expr)),
+            BinaryComparison::IsDistinctFrom => return parse_quote!((#left_expr != #right_expr)),
+            BinaryComparison::And => quote!(&&),
+            BinaryComparison::Or => quote!(||),
+        };
+        match (
+            self.left.expression_type(input_context).is_optional(),
+            self.right.expression_type(input_context).is_optional(),
+        ) {
+            (true, true) => parse_quote!({
+                let left = #left_expr;
+                let right = #right_expr;
+                match (left, right) {
+                    (Some(left), Some(right)) => Some(left #op right),
+                    _ => None
+                }
+            }),
+            (true, false) => {
+                parse_quote!(#left_expr.map(|left| left #op #right_expr))
+            }
+            (false, true) => {
+                parse_quote!(#right_expr.map(|right| #left_expr #op right))
+            }
+            (false, false) => parse_quote!((#left_expr #op #right_expr)),
+        }
+    }
+
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
+        // non-nullable comparisons are never optional
+        if self.op.never_null() {
+            return TypeDef::DataType(DataType::Boolean, false);
+        }
+        let inputs_optional = self.left.expression_type(input_context).is_optional()
+            || self.right.expression_type(input_context).is_optional();
+        TypeDef::DataType(DataType::Boolean, inputs_optional)
     }
 }
 
@@ -904,12 +1111,15 @@ impl BinaryMathExpression {
     }
 }
 
-impl BinaryMathExpression {
-    fn to_syn_expression(&self) -> syn::Expr {
-        let left_expr = self.left.to_syn_expression();
-        let right_expr = self.right.to_syn_expression();
-        let op = self.op.as_tokens();
-        match (self.left.nullable(), self.right.nullable()) {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for BinaryMathExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let left_expr = self.left.generate(input_context);
+        let right_expr = self.right.generate(input_context);
+        let op: TokenStream = self.op.as_tokens();
+        match (
+            self.left.expression_type(input_context).is_optional(),
+            self.right.expression_type(input_context).is_optional(),
+        ) {
             (true, true) => parse_quote!({
                 let left = #left_expr;
                 let right = #right_expr;
@@ -928,45 +1138,45 @@ impl BinaryMathExpression {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
-        let nullable = self.left.nullable() || self.right.nullable();
-        self.left.return_type().with_nullity(nullable)
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
+        let nullable = self.left.expression_type(input_context).is_optional()
+            || self.right.expression_type(input_context).is_optional();
+        self.left
+            .expression_type(input_context)
+            .with_nullity(nullable)
     }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructFieldExpression {
+    // TODO: better type this as a struct producing expression
     struct_expression: Box<Expression>,
-    struct_field: StructField,
+    field_name: String,
 }
 
 impl StructFieldExpression {
     fn new(struct_expression: Box<Expression>, key: &ScalarValue) -> Result<Expression> {
-        if let TypeDef::StructDef(struct_type, _) = struct_expression.return_type() {
-            match key {
-                ScalarValue::Utf8(Some(column)) => {
-                    let struct_field = struct_type.get_field(None, column)?;
-                    Ok(Expression::StructField(Self {
-                        struct_expression,
-                        struct_field,
-                    }))
-                }
-                _ => bail!("don't support key {:?} for struct field lookup", key),
-            }
-        } else {
-            bail!("{:?} doesn't return a struct", struct_expression);
+        match key {
+            ScalarValue::Utf8(Some(column)) => Ok(Expression::StructField(Self {
+                struct_expression,
+                field_name: column.to_string(),
+            })),
+            _ => bail!("don't support key {:?} for struct field lookup", key),
         }
     }
 }
-
-impl StructFieldExpression {
-    fn to_syn_expression(&self) -> syn::Expr {
-        let struct_expression = self.struct_expression.to_syn_expression();
-        let field_ident = self.struct_field.field_ident();
-        match (
-            self.struct_expression.nullable(),
-            self.struct_field.nullable(),
-        ) {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StructFieldExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let struct_type = self.struct_expression.expression_type(input_context);
+        let TypeDef::StructDef(struct_def, struct_nullable) = struct_type else {
+            unreachable!("struct field expression should always be over a struct");
+        };
+        let struct_expression = self.struct_expression.generate(input_context);
+        let struct_field = struct_def
+            .get_field(None, &self.field_name)
+            .expect("should contain struct field");
+        let field_ident = struct_field.field_ident();
+        match (struct_nullable, struct_field.nullable()) {
             (true, true) => {
                 parse_quote!(#struct_expression.map(|arg| arg.#field_ident.clone()).flatten())
             }
@@ -976,10 +1186,18 @@ impl StructFieldExpression {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
-        match self.struct_expression.nullable() {
-            true => self.struct_field.data_type.as_nullable(),
-            false => self.struct_field.data_type.clone(),
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
+        let struct_type = self.struct_expression.expression_type(input_context);
+        let TypeDef::StructDef(struct_def, struct_nullable) = struct_type else {
+            unreachable!("struct field expression should always be over a struct");
+        };
+        let struct_field = struct_def
+            .get_field(None, &self.field_name)
+            .expect("should contain struct field");
+        if struct_nullable {
+            struct_field.data_type.as_nullable()
+        } else {
+            struct_field.data_type.clone()
         }
     }
 }
@@ -1102,70 +1320,89 @@ impl AggregationExpression {
             _ => bail!("expected aggregate function, not {}", expr),
         }
     }
+}
 
-    pub fn to_syn_expression(&self) -> syn::Expr {
-        let sub_expr = self.producing_expression.to_syn_expression();
-        let (map_type, unwrap) = if self.producing_expression.nullable() {
-            (format_ident!("filter_map"), None)
+impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for AggregationExpression {
+    fn generate(&self, input_context: &VecOfPointersContext) -> syn::Expr {
+        let single_value_context = ValuePointerContext::new();
+        let sub_expr = self.producing_expression.generate(&single_value_context);
+        let single_value_ident = single_value_context.variable_ident();
+        let vec_ident = input_context.variable_ident();
+        let producing_expression_is_optional = self
+            .producing_expression
+            .expression_type(&single_value_context)
+            .is_optional();
+        let map_type = if producing_expression_is_optional {
+            quote!(filter_map)
         } else {
-            (format_ident!("map"), Some(quote!(.unwrap())))
+            quote!(map)
         };
+        let unwrap = if producing_expression_is_optional {
+            None
+        } else {
+            Some(quote!(.unwrap()))
+        };
+
         match self.aggregator {
             Aggregator::Count => {
-                if self.producing_expression.nullable() {
+                if producing_expression_is_optional {
                     parse_quote!({
-                        arg.iter()
-                            .filter_map(|arg| #sub_expr)
+                        #vec_ident.iter()
+                            .filter_map(|#single_value_ident| #sub_expr)
                             .count() as i64
                     })
                 } else {
-                    parse_quote!((arg.len() as i64))
+                    parse_quote!((#vec_ident.len() as i64))
                 }
             }
             Aggregator::Sum => parse_quote!({
-                arg.iter()
-                    .#map_type(|arg| #sub_expr)
+                #vec_ident.iter()
+                    .#map_type(|#single_value_ident| #sub_expr)
                     .reduce(|left, right| left + right)
                     #unwrap
             }),
             Aggregator::Min => parse_quote!({
-                arg.iter()
-                    .#map_type(|arg| #sub_expr)
+                #vec_ident.iter()
+                    .#map_type(|#single_value_ident| #sub_expr)
                     .reduce( |left, right| left.min(right))
                     #unwrap
             }),
             Aggregator::Max => parse_quote!({
-                arg.iter()
-                    .map(|arg| #sub_expr)
+                #vec_ident.iter()
+                    .#map_type(|#single_value_ident| #sub_expr)
                     .reduce(|left, right| left.max(right))
-                    .unwrap()
+                    #unwrap
             }),
             Aggregator::Avg => parse_quote!({
-                arg.iter()
-                    .#map_type(|arg| #sub_expr)
+                #vec_ident.iter()
+                    .#map_type(|#single_value_ident| #sub_expr)
                     .map(|val| (1, val))
                     .reduce(|left, right| (left.0 + right.0, left.1+right.1))
                     .map(|result| (result.1 as f64)/(result.0 as f64))
                     #unwrap
             }),
             Aggregator::CountDistinct => parse_quote! ({
-                arg.iter()
-                    .#map_type(|arg| #sub_expr)
+                #vec_ident.iter()
+                    .#map_type(|#single_value_ident| #sub_expr)
                     .collect::<std::collections::HashSet<_>>()
                     .len() as i64
             }),
         }
     }
 
-    pub fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, _input_context: &VecOfPointersContext) -> TypeDef {
         match &self.aggregator {
             Aggregator::Count | Aggregator::CountDistinct => {
                 TypeDef::DataType(DataType::Int64, false)
             }
-            aggregator => TypeDef::DataType(
-                aggregator.return_data_type(self.producing_expression.return_type()),
-                self.producing_expression.nullable(),
-            ),
+            aggregator => {
+                let single_value_context = ValuePointerContext::new();
+                let input_type = self
+                    .producing_expression
+                    .expression_type(&single_value_context);
+                let is_optional = input_type.is_optional();
+                TypeDef::DataType(aggregator.return_data_type(input_type), is_optional)
+            }
         }
     }
 }
@@ -1181,9 +1418,10 @@ impl CastExpression {
     pub fn new(
         input: Box<Expression>,
         data_type: &DataType,
+        input_context: &ValuePointerContext,
         force_nullable: bool,
     ) -> Result<Expression> {
-        if let TypeDef::DataType(input_type, _) = input.return_type() {
+        if let TypeDef::DataType(input_type, _) = input.expression_type(input_context) {
             if Self::allowed_types(&input_type, data_type) {
                 Ok(Expression::Cast(Self {
                     input,
@@ -1293,10 +1531,13 @@ impl CastExpression {
             unreachable!("invalid cast from {:?} to {:?}", input_type, output_type)
         }
     }
+}
 
-    fn to_syn_expression(&self) -> syn::Expr {
-        let sub_expr = self.input.to_syn_expression();
-        let TypeDef::DataType(input_type, nullable) = self.input.return_type() else {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for CastExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let sub_expr = self.input.generate(input_context);
+        let TypeDef::DataType(input_type, nullable) = self.input.expression_type(input_context)
+        else {
             unreachable!()
         };
         if nullable {
@@ -1312,10 +1553,10 @@ impl CastExpression {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         TypeDef::DataType(
             self.data_type.clone(),
-            self.input.nullable() || self.force_nullable,
+            self.input.expression_type(input_context).is_optional() || self.force_nullable,
         )
     }
 }
@@ -1425,18 +1666,24 @@ impl NumericExpression {
         let function = function.try_into()?;
         Ok(Expression::Numeric(NumericExpression { function, input }))
     }
-    fn to_syn_expression(&self) -> syn::Expr {
+}
+
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for NumericExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let function_name = self.function.function_name();
-        let argument_expression = self.input.to_syn_expression();
-        if self.input.return_type().is_optional() {
+        let argument_expression = self.input.generate(input_context);
+        if self.input.expression_type(input_context).is_optional() {
             parse_quote!(#argument_expression.map(|val| (val as f64).#function_name()))
         } else {
             parse_quote!((#argument_expression as f64).#function_name())
         }
     }
 
-    fn return_type(&self) -> TypeDef {
-        TypeDef::DataType(DataType::Float64, self.input.return_type().is_optional())
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
+        TypeDef::DataType(
+            DataType::Float64,
+            self.input.expression_type(input_context).is_optional(),
+        )
     }
 }
 
@@ -1464,15 +1711,19 @@ impl SortExpression {
         })
     }
 
-    fn tuple_type(&self) -> syn::Type {
-        let value_type = if self.value.return_type().is_float() {
-            let t = self.value.return_type().return_type();
+    fn tuple_type(&self, input_context: &ValuePointerContext) -> syn::Type {
+        let value_type = if self.value.expression_type(input_context).is_float() {
+            let t = self.value.expression_type(input_context).return_type();
             parse_quote! { arroyo_worker::OrderedFloat<#t> }
         } else {
-            self.value.return_type().return_type()
+            self.value.expression_type(input_context).return_type()
         };
 
-        match (self.value.nullable(), &self.direction, self.nulls_first) {
+        match (
+            self.value.expression_type(input_context).is_optional(),
+            &self.direction,
+            self.nulls_first,
+        ) {
             (false, SortDirection::Asc, _) | (true, SortDirection::Asc, true) => {
                 parse_quote!(#value_type)
             }
@@ -1490,13 +1741,13 @@ impl SortExpression {
         match sort_expressions.len() {
             0 => parse_quote!(()),
             1 => {
-                let singleton_type = sort_expressions[0].tuple_type();
+                let singleton_type = sort_expressions[0].tuple_type(&ValuePointerContext);
                 parse_quote!((#singleton_type,))
             }
             _ => {
                 let tuple_types: Vec<syn::Type> = sort_expressions
                     .iter()
-                    .map(|sort_expression| sort_expression.tuple_type())
+                    .map(|sort_expression| sort_expression.tuple_type(&ValuePointerContext))
                     .collect();
                 parse_quote!((#(#tuple_types),*))
             }
@@ -1507,21 +1758,21 @@ impl SortExpression {
         match sort_expressions.len() {
             0 => parse_quote!(()),
             1 => {
-                let singleton_expr = sort_expressions[0].to_syn_expr();
+                let singleton_expr = sort_expressions[0].to_syn_expr(&ValuePointerContext);
                 parse_quote!((#singleton_expr,))
             }
             _ => {
                 let tuple_exprs: Vec<syn::Expr> = sort_expressions
                     .iter()
-                    .map(|sort_expression| sort_expression.to_syn_expr())
+                    .map(|sort_expression| sort_expression.to_syn_expr(&ValuePointerContext))
                     .collect();
                 parse_quote!((#(#tuple_exprs),*))
             }
         }
     }
 
-    fn to_syn_expr(&self) -> syn::Expr {
-        let value = if self.value.return_type().is_float() {
+    fn to_syn_expr(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let value = if self.value.expression_type(input_context).is_float() {
             Expression::WrapType(WrapTypeExpression::new(
                 "arroyo_worker::OrderedFloat",
                 self.value.clone(),
@@ -1530,8 +1781,12 @@ impl SortExpression {
             self.value.clone()
         };
 
-        let value_expr = value.to_syn_expression();
-        match (self.value.nullable(), &self.direction, self.nulls_first) {
+        let value_expr = value.generate(input_context);
+        match (
+            self.value.expression_type(input_context).is_optional(),
+            &self.direction,
+            self.nulls_first,
+        ) {
             (false, SortDirection::Asc, _) | (true, SortDirection::Asc, true) => {
                 parse_quote!(#value_expr)
             }
@@ -1644,19 +1899,21 @@ impl HashExpression {
             input,
         }))
     }
+}
 
-    fn to_syn_expression(&self) -> syn::Expr {
-        let input = self.input.to_syn_expression();
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for HashExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let input = self.input.generate(input_context);
         let hash_fn = format_ident!("{}", self.function.to_string());
 
-        let coerce = match self.input.return_type() {
+        let coerce = match self.input.expression_type(input_context) {
             TypeDef::StructDef(_, _) => unreachable!(),
             TypeDef::DataType(DataType::Utf8, _) => quote!(.as_bytes().to_vec()),
             TypeDef::DataType(DataType::Binary, _) => quote!(),
             TypeDef::DataType(_, _) => unreachable!(),
         };
 
-        match self.input.nullable() {
+        match self.input.expression_type(input_context).is_optional() {
             true => parse_quote!({
                 match #input {
                     Some(unwrapped) => Some(arroyo_worker::operators::functions::hash::#hash_fn(unwrapped #coerce)),
@@ -1669,9 +1926,12 @@ impl HashExpression {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         // this *can* be null because in SQL - MD5(NULL) = NULL
-        TypeDef::DataType(DataType::Utf8, self.input.nullable())
+        TypeDef::DataType(
+            DataType::Utf8,
+            self.input.expression_type(input_context).is_optional(),
+        )
     }
 }
 
@@ -1849,16 +2109,21 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
 }
 
 impl StringFunction {
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         match self {
             StringFunction::Ascii(expr)
             | StringFunction::BitLength(expr)
             | StringFunction::CharacterLength(expr)
             | StringFunction::OctetLength(expr)
-            | StringFunction::Reverse(expr) => TypeDef::DataType(DataType::Int32, expr.nullable()),
-            StringFunction::StartsWith(expr1, expr2) => {
-                TypeDef::DataType(DataType::Boolean, expr1.nullable() || expr2.nullable())
-            }
+            | StringFunction::Reverse(expr) => TypeDef::DataType(
+                DataType::Int32,
+                expr.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::StartsWith(expr1, expr2) => TypeDef::DataType(
+                DataType::Boolean,
+                expr1.expression_type(input_context).is_optional()
+                    || expr2.expression_type(input_context).is_optional(),
+            ),
             StringFunction::Left(expr1, expr2)
             | StringFunction::Repeat(expr1, expr2)
             | StringFunction::Right(expr1, expr2)
@@ -1868,9 +2133,11 @@ impl StringFunction {
             | StringFunction::Rtrim(expr1, Some(expr2))
             | StringFunction::Substr(expr1, expr2, None)
             | StringFunction::Lpad(expr1, expr2, None)
-            | StringFunction::Rpad(expr1, expr2, None) => {
-                TypeDef::DataType(DataType::Utf8, expr1.nullable() || expr2.nullable())
-            }
+            | StringFunction::Rpad(expr1, expr2, None) => TypeDef::DataType(
+                DataType::Utf8,
+                expr1.expression_type(input_context).is_optional()
+                    || expr2.expression_type(input_context).is_optional(),
+            ),
             StringFunction::Btrim(expr, None)
             | StringFunction::Lower(expr)
             | StringFunction::Upper(expr)
@@ -1878,9 +2145,10 @@ impl StringFunction {
             | StringFunction::InitCap(expr)
             | StringFunction::Ltrim(expr, None)
             | StringFunction::Rtrim(expr, None)
-            | StringFunction::Trim(expr, None) => {
-                TypeDef::DataType(DataType::Utf8, expr.nullable())
-            }
+            | StringFunction::Trim(expr, None) => TypeDef::DataType(
+                DataType::Utf8,
+                expr.expression_type(input_context).is_optional(),
+            ),
             StringFunction::Substr(expr1, expr2, Some(expr3))
             | StringFunction::Translate(expr1, expr2, expr3)
             | StringFunction::Lpad(expr1, expr2, Some(expr3))
@@ -1888,21 +2156,29 @@ impl StringFunction {
             | StringFunction::Replace(expr1, expr2, expr3)
             | StringFunction::SplitPart(expr1, expr2, expr3) => TypeDef::DataType(
                 DataType::Utf8,
-                expr1.nullable() || expr2.nullable() || expr3.nullable(),
+                expr1.expression_type(input_context).is_optional()
+                    || expr2.expression_type(input_context).is_optional()
+                    || expr3.expression_type(input_context).is_optional(),
             ),
             StringFunction::Concat(_exprs) => TypeDef::DataType(DataType::Utf8, false),
-            StringFunction::ConcatWithSeparator(expr, _exprs) => {
-                TypeDef::DataType(DataType::Utf8, expr.nullable())
-            }
-            StringFunction::RegexpReplace(expr1, _, expr3, _) => {
-                TypeDef::DataType(DataType::Utf8, expr1.nullable() || expr3.nullable())
-            }
-            StringFunction::RegexpMatch(expr1, _) => {
-                TypeDef::DataType(DataType::Utf8, expr1.nullable())
-            }
-            StringFunction::Strpos(expr1, expr2) => {
-                TypeDef::DataType(DataType::Int32, expr1.nullable() || expr2.nullable())
-            }
+            StringFunction::ConcatWithSeparator(expr, _exprs) => TypeDef::DataType(
+                DataType::Utf8,
+                expr.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::RegexpReplace(expr1, _, expr3, _) => TypeDef::DataType(
+                DataType::Utf8,
+                expr1.expression_type(input_context).is_optional()
+                    || expr3.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::RegexpMatch(expr1, _) => TypeDef::DataType(
+                DataType::Utf8,
+                expr1.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::Strpos(expr1, expr2) => TypeDef::DataType(
+                DataType::Int32,
+                expr1.expression_type(input_context).is_optional()
+                    || expr2.expression_type(input_context).is_optional(),
+            ),
         }
     }
     fn non_null_function_invocation(&self) -> syn::Expr {
@@ -2030,9 +2306,9 @@ impl StringFunction {
         }
     }
 
-    pub fn to_syn_expression(&self) -> syn::Expr {
+    pub fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let function = self.non_null_function_invocation();
-        let function = if self.return_type().is_optional() {
+        let function = if self.expression_type(input_context).is_optional() {
             parse_quote!(Some(#function))
         } else {
             function
@@ -2053,8 +2329,8 @@ impl StringFunction {
             | StringFunction::Ltrim(arg, None)
             | StringFunction::Rtrim(arg, None)
             | StringFunction::RegexpMatch(arg, _) => {
-                let expr = arg.to_syn_expression();
-                match arg.nullable() {
+                let expr = arg.generate(input_context);
+                match arg.expression_type(input_context).is_optional() {
                     true => parse_quote!({
                         if let Some(arg) = #expr {
                             #function
@@ -2082,9 +2358,12 @@ impl StringFunction {
             | StringFunction::Lpad(arg1, arg2, None)
             | StringFunction::Rpad(arg1, arg2, None)
             | StringFunction::RegexpReplace(arg1, _, arg2, None) => {
-                let expr1 = arg1.to_syn_expression();
-                let expr2 = arg2.to_syn_expression();
-                match (arg1.nullable(), arg2.nullable()) {
+                let expr1 = arg1.generate(input_context);
+                let expr2 = arg2.generate(input_context);
+                match (
+                    arg1.expression_type(input_context).is_optional(),
+                    arg2.expression_type(input_context).is_optional(),
+                ) {
                     (true, true) => parse_quote!({
                         if let (Some(arg1), Some(arg2)) = (#expr1, #expr2) {
                             #function
@@ -2121,11 +2400,15 @@ impl StringFunction {
             | StringFunction::Rpad(arg1, arg2, Some(arg3))
             | StringFunction::Replace(arg1, arg2, arg3)
             | StringFunction::SplitPart(arg1, arg2, arg3) => {
-                let expr1 = arg1.to_syn_expression();
-                let expr2 = arg2.to_syn_expression();
-                let expr3 = arg3.to_syn_expression();
+                let expr1 = arg1.generate(input_context);
+                let expr2 = arg2.generate(input_context);
+                let expr3 = arg3.generate(input_context);
 
-                match (arg1.nullable(), arg2.nullable(), arg3.nullable()) {
+                match (
+                    arg1.expression_type(input_context).is_optional(),
+                    arg2.expression_type(input_context).is_optional(),
+                    arg3.expression_type(input_context).is_optional(),
+                ) {
                     (true, true, true) => parse_quote!({
                         if let (Some(arg1), Some(arg2), Some(arg3)) = (#expr1, #expr2, #expr3) {
                             #function
@@ -2196,8 +2479,8 @@ impl StringFunction {
                 let pushes: Vec<syn::Expr> = args
                     .iter()
                     .map(|arg| {
-                        let expr = arg.to_syn_expression();
-                        if arg.nullable() {
+                        let expr = arg.generate(input_context);
+                        if arg.expression_type(input_context).is_optional() {
                             parse_quote!(if let Some(to_append) = #expr {
                                 result.push_str(&to_append);
                             })
@@ -2213,12 +2496,12 @@ impl StringFunction {
                 })
             }
             StringFunction::ConcatWithSeparator(arg, args) => {
-                let separator_expr = arg.to_syn_expression();
+                let separator_expr = arg.generate(input_context);
                 let pushes: Vec<syn::Expr> = args
                     .iter()
                     .map(|arg| {
-                        let expr = arg.to_syn_expression();
-                        if arg.nullable() {
+                        let expr = arg.generate(input_context);
+                        if arg.expression_type(input_context).is_optional() {
                             parse_quote!(if let Some(to_append) = #expr {
                                 if !result.is_empty() {
                                     result.push_str(&separator);
@@ -2237,7 +2520,7 @@ impl StringFunction {
                     #(#pushes;)*
                     result
                 });
-                if arg.nullable() {
+                if arg.expression_type(input_context).is_optional() {
                     parse_quote!({
                         if let Some(separator) = #separator_expr {
                             Some(#non_null_computation)
@@ -2256,6 +2539,313 @@ impl StringFunction {
         }
     }
 }
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StringFunction {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let function = self.non_null_function_invocation();
+        let function = if self.expression_type(input_context).is_optional() {
+            parse_quote!(Some(#function))
+        } else {
+            function
+        };
+        match self {
+            // Single argument: arg
+            StringFunction::Ascii(arg)
+            | StringFunction::BitLength(arg)
+            | StringFunction::CharacterLength(arg)
+            | StringFunction::Chr(arg)
+            | StringFunction::InitCap(arg)
+            | StringFunction::Lower(arg)
+            | StringFunction::Upper(arg)
+            | StringFunction::Reverse(arg)
+            | StringFunction::OctetLength(arg)
+            | StringFunction::Btrim(arg, None)
+            | StringFunction::Trim(arg, None)
+            | StringFunction::Ltrim(arg, None)
+            | StringFunction::Rtrim(arg, None)
+            | StringFunction::RegexpMatch(arg, _) => {
+                let expr = arg.generate(input_context);
+                match arg.expression_type(input_context).is_optional() {
+                    true => parse_quote!({
+                        if let Some(arg) = #expr {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    false => parse_quote!({
+                        let arg = #expr;
+                        #function
+                    }),
+                }
+            }
+            // Two arguments: arg1 and arg2
+            StringFunction::StartsWith(arg1, arg2)
+            | StringFunction::Strpos(arg1, arg2)
+            | StringFunction::Left(arg1, arg2)
+            | StringFunction::Repeat(arg1, arg2)
+            | StringFunction::Right(arg1, arg2)
+            | StringFunction::Btrim(arg1, Some(arg2))
+            | StringFunction::Trim(arg1, Some(arg2))
+            | StringFunction::Ltrim(arg1, Some(arg2))
+            | StringFunction::Rtrim(arg1, Some(arg2))
+            | StringFunction::Substr(arg1, arg2, None)
+            | StringFunction::Lpad(arg1, arg2, None)
+            | StringFunction::Rpad(arg1, arg2, None)
+            | StringFunction::RegexpReplace(arg1, _, arg2, None) => {
+                let expr1 = arg1.generate(input_context);
+                let expr2 = arg2.generate(input_context);
+                match (
+                    arg1.expression_type(input_context).is_optional(),
+                    arg2.expression_type(input_context).is_optional(),
+                ) {
+                    (true, true) => parse_quote!({
+                        if let (Some(arg1), Some(arg2)) = (#expr1, #expr2) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (true, false) => parse_quote!({
+                        let arg2 = #expr2;
+                        if let Some(arg1) = #expr1 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, true) => parse_quote!({
+                        let arg1 = #expr1;
+                        if let Some(arg2) = #expr2 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, false) => parse_quote!({
+                        let arg1 = #expr1;
+                        let arg2 = #expr2;
+                        #function
+                    }),
+                }
+            }
+            StringFunction::Substr(arg1, arg2, Some(arg3))
+            | StringFunction::Translate(arg1, arg2, arg3)
+            | StringFunction::Lpad(arg1, arg2, Some(arg3))
+            | StringFunction::Rpad(arg1, arg2, Some(arg3))
+            | StringFunction::Replace(arg1, arg2, arg3)
+            | StringFunction::SplitPart(arg1, arg2, arg3) => {
+                let expr1 = arg1.generate(input_context);
+                let expr2 = arg2.generate(input_context);
+                let expr3 = arg3.generate(input_context);
+
+                match (
+                    arg1.expression_type(input_context).is_optional(),
+                    arg2.expression_type(input_context).is_optional(),
+                    arg3.expression_type(input_context).is_optional(),
+                ) {
+                    (true, true, true) => parse_quote!({
+                        if let (Some(arg1), Some(arg2), Some(arg3)) = (#expr1, #expr2, #expr3) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (true, true, false) => parse_quote!({
+                        let arg3 = #expr3;
+                        if let (Some(arg1), Some(arg2)) = (#expr1, #expr2) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (true, false, true) => parse_quote!({
+                        let arg2 = #expr2;
+                        if let (Some(arg1), Some(arg3)) = (#expr1, #expr3) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (true, false, false) => parse_quote!({
+                        let arg2 = #expr2;
+                        let arg3 = #expr3;
+                        if let Some(arg1) = #expr1 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, true, true) => parse_quote!({
+                        let arg1 = #expr1;
+                        if let (Some(arg2), Some(arg3)) = (#expr2, #expr3) {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, true, false) => parse_quote!({
+                        let arg1 = #expr1;
+                        let arg3 = #expr3;
+                        if let Some(arg2) = #expr2 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, false, true) => parse_quote!({
+                        let arg1 = #expr1;
+                        let arg2 = #expr2;
+                        if let Some(arg3) = #expr3 {
+                            #function
+                        } else {
+                            None
+                        }
+                    }),
+                    (false, false, false) => parse_quote!({
+                        let arg1 = #expr1;
+                        let arg2 = #expr2;
+                        let arg3 = #expr3;
+                        #function
+                    }),
+                }
+            }
+            StringFunction::Concat(args) => {
+                let pushes: Vec<syn::Expr> = args
+                    .iter()
+                    .map(|arg| {
+                        let expr = arg.generate(input_context);
+                        if arg.expression_type(input_context).is_optional() {
+                            parse_quote!(if let Some(to_append) = #expr {
+                                result.push_str(&to_append);
+                            })
+                        } else {
+                            parse_quote!(result.push_str(&#expr))
+                        }
+                    })
+                    .collect();
+                parse_quote!({
+                    let mut result = String::new();
+                    #(#pushes;)*
+                    result
+                })
+            }
+            StringFunction::ConcatWithSeparator(arg, args) => {
+                let separator_expr = arg.generate(input_context);
+                let pushes: Vec<syn::Expr> = args
+                    .iter()
+                    .map(|arg| {
+                        let expr = arg.generate(input_context);
+                        if arg.expression_type(input_context).is_optional() {
+                            parse_quote!(if let Some(to_append) = #expr {
+                                if !result.is_empty() {
+                                    result.push_str(&separator);
+                                }
+                                result.push_str(&to_append);
+                            })
+                        } else {
+                            parse_quote!({if !result.is_empty() {
+                                result.push_str(&separator);
+                            };result.push_str(&#expr)})
+                        }
+                    })
+                    .collect();
+                let non_null_computation: syn::Expr = parse_quote!({
+                    let mut result = String::new();
+                    #(#pushes;)*
+                    result
+                });
+                if arg.expression_type(input_context).is_optional() {
+                    parse_quote!({
+                        if let Some(separator) = #separator_expr {
+                            Some(#non_null_computation)
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    parse_quote!({
+                        let separator = #separator_expr;
+                        #non_null_computation
+                    })
+                }
+            }
+            StringFunction::RegexpReplace(_, _, _, Some(_)) => unreachable!(),
+        }
+    }
+
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
+        match self {
+            StringFunction::Ascii(expr)
+            | StringFunction::BitLength(expr)
+            | StringFunction::CharacterLength(expr)
+            | StringFunction::OctetLength(expr)
+            | StringFunction::Reverse(expr) => TypeDef::DataType(
+                DataType::Int32,
+                expr.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::StartsWith(expr1, expr2) => TypeDef::DataType(
+                DataType::Boolean,
+                expr1.expression_type(input_context).is_optional()
+                    || expr2.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::Left(expr1, expr2)
+            | StringFunction::Repeat(expr1, expr2)
+            | StringFunction::Right(expr1, expr2)
+            | StringFunction::Btrim(expr1, Some(expr2))
+            | StringFunction::Trim(expr1, Some(expr2))
+            | StringFunction::Ltrim(expr1, Some(expr2))
+            | StringFunction::Rtrim(expr1, Some(expr2))
+            | StringFunction::Substr(expr1, expr2, None)
+            | StringFunction::Lpad(expr1, expr2, None)
+            | StringFunction::Rpad(expr1, expr2, None) => TypeDef::DataType(
+                DataType::Utf8,
+                expr1.expression_type(input_context).is_optional()
+                    || expr2.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::Btrim(expr, None)
+            | StringFunction::Lower(expr)
+            | StringFunction::Upper(expr)
+            | StringFunction::Chr(expr)
+            | StringFunction::InitCap(expr)
+            | StringFunction::Ltrim(expr, None)
+            | StringFunction::Rtrim(expr, None)
+            | StringFunction::Trim(expr, None) => TypeDef::DataType(
+                DataType::Utf8,
+                expr.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::Substr(expr1, expr2, Some(expr3))
+            | StringFunction::Translate(expr1, expr2, expr3)
+            | StringFunction::Lpad(expr1, expr2, Some(expr3))
+            | StringFunction::Rpad(expr1, expr2, Some(expr3))
+            | StringFunction::Replace(expr1, expr2, expr3)
+            | StringFunction::SplitPart(expr1, expr2, expr3) => TypeDef::DataType(
+                DataType::Utf8,
+                expr1.expression_type(input_context).is_optional()
+                    || expr2.expression_type(input_context).is_optional()
+                    || expr3.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::Concat(_exprs) => TypeDef::DataType(DataType::Utf8, false),
+            StringFunction::ConcatWithSeparator(expr, _exprs) => TypeDef::DataType(
+                DataType::Utf8,
+                expr.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::RegexpReplace(expr1, _, expr3, _) => TypeDef::DataType(
+                DataType::Utf8,
+                expr1.expression_type(input_context).is_optional()
+                    || expr3.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::RegexpMatch(expr1, _) => TypeDef::DataType(
+                DataType::Utf8,
+                expr1.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::Strpos(expr1, expr2) => TypeDef::DataType(
+                DataType::Int32,
+                expr1.expression_type(input_context).is_optional()
+                    || expr2.expression_type(input_context).is_optional(),
+            ),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum DataStructureFunction {
@@ -2267,13 +2857,18 @@ pub enum DataStructureFunction {
     MakeArray(Vec<Expression>),
 }
 
-impl DataStructureFunction {
-    fn to_syn_expression(&self) -> syn::Expr {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DataStructureFunction {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         match self {
             DataStructureFunction::Coalesce(terms) => {
                 let exprs: Vec<_> = terms
                     .iter()
-                    .map(|term| (term.to_syn_expression(), term.nullable()))
+                    .map(|term| {
+                        (
+                            term.generate(input_context),
+                            term.expression_type(input_context).is_optional(),
+                        )
+                    })
                     .collect();
                 // return the first Some() value, or None if all are None
                 let mut iterator = exprs.into_iter();
@@ -2291,10 +2886,10 @@ impl DataStructureFunction {
                 result
             }
             DataStructureFunction::NullIf { left, right } => {
-                let left_expr = left.to_syn_expression();
-                let right_expr = right.to_syn_expression();
-                let left_nullable = left.nullable();
-                let right_nullable = right.nullable();
+                let left_expr = left.generate(input_context);
+                let right_expr = right.generate(input_context);
+                let left_nullable = left.expression_type(input_context).is_optional();
+                let right_nullable = right.expression_type(input_context).is_optional();
                 match (left_nullable, right_nullable) {
                     (true, true) => parse_quote!({
                         let left = #left_expr;
@@ -2333,12 +2928,15 @@ impl DataStructureFunction {
                 }
             }
             DataStructureFunction::MakeArray(terms) => {
-                if terms.iter().any(|term| term.nullable()) {
+                if terms
+                    .iter()
+                    .any(|term| term.expression_type(input_context).is_optional())
+                {
                     let entries: Vec<syn::Expr> = terms
                         .iter()
                         .map(|term| {
-                            let expr = term.to_syn_expression();
-                            if term.nullable() {
+                            let expr = term.generate(input_context);
+                            if term.expression_type(input_context).is_optional() {
                                 parse_quote!(#expr)
                             } else {
                                 parse_quote!(Some(#expr))
@@ -2347,13 +2945,15 @@ impl DataStructureFunction {
                         .collect::<Vec<_>>();
                     parse_quote!(vec![#(#entries),*])
                 } else {
-                    let nullable = terms.iter().any(|term| term.nullable());
+                    let nullable = terms
+                        .iter()
+                        .any(|term| term.expression_type(input_context).is_optional());
                     if nullable {
                         let entries = terms
                             .iter()
                             .map(|term| {
-                                let expr = term.to_syn_expression();
-                                if term.nullable() {
+                                let expr = term.generate(input_context);
+                                if term.expression_type(input_context).is_optional() {
                                     parse_quote!(#expr)
                                 } else {
                                     parse_quote!(Some(#expr))
@@ -2362,25 +2962,34 @@ impl DataStructureFunction {
                             .collect::<Vec<syn::Expr>>();
                         parse_quote!(vec![#(#entries),*])
                     } else {
-                        let entries = terms.iter().map(|term| term.to_syn_expression());
+                        let entries = terms.iter().map(|term| term.generate(input_context));
                         parse_quote!(vec![#(#entries),*])
                     }
                 }
             }
         }
     }
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         match self {
             DataStructureFunction::Coalesce(terms) => {
-                let nullable = terms.iter().all(|term| term.nullable());
-                terms[0].return_type().with_nullity(nullable)
+                let nullable = terms
+                    .iter()
+                    .all(|term| term.expression_type(input_context).is_optional());
+                terms[0]
+                    .expression_type(input_context)
+                    .with_nullity(nullable)
             }
-            DataStructureFunction::NullIf { left, right: _ } => left.return_type().as_nullable(),
+            DataStructureFunction::NullIf { left, right: _ } => {
+                left.expression_type(input_context).as_nullable()
+            }
             DataStructureFunction::MakeArray(terms) => {
-                let TypeDef::DataType(primitive_type, _) = terms[0].return_type() else {
+                let TypeDef::DataType(primitive_type, _) = terms[0].expression_type(input_context)
+                else {
                     unreachable!("make_array should only be called on a primitive type")
                 };
-                let nullable = terms.iter().any(|term| term.nullable());
+                let nullable = terms
+                    .iter()
+                    .any(|term| term.expression_type(input_context).is_optional());
                 TypeDef::DataType(
                     DataType::List(Arc::new(Field::new("items", primitive_type, nullable))),
                     false,
@@ -2405,11 +3014,14 @@ pub struct JsonExpression {
 }
 
 impl JsonExpression {
-    fn to_syn_expression(&self) -> syn::Expr {
-        let path_nullable = self.path.nullable();
-        let json_nullable = self.json_string.nullable();
-        let path_expr = self.path.to_syn_expression();
-        let json_string_expr = self.json_string.to_syn_expression();
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let path_nullable = self.path.expression_type(input_context).is_optional();
+        let json_nullable = self
+            .json_string
+            .expression_type(input_context)
+            .is_optional();
+        let path_expr = self.path.generate(input_context);
+        let json_string_expr = self.json_string.generate(input_context);
         let function_tokens = match self.function {
             JsonFunction::GetFirstJsonObject => quote!(get_first_json_object),
             JsonFunction::GetJsonObjects => quote!(get_json_objects),
@@ -2448,7 +3060,7 @@ impl JsonExpression {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, _input_context: &ValuePointerContext) -> TypeDef {
         match self.function {
             JsonFunction::GetFirstJsonObject => TypeDef::DataType(DataType::Utf8, true),
             JsonFunction::GetJsonObjects => TypeDef::DataType(
@@ -2468,7 +3080,7 @@ pub struct RustUdfExpression {
 }
 
 impl RustUdfExpression {
-    fn to_syn_expression(&self) -> syn::Expr {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let name = format_ident!("{}", &self.name);
 
         let (defs, args): (Vec<_>, Vec<_>) = self
@@ -2476,9 +3088,12 @@ impl RustUdfExpression {
             .iter()
             .enumerate()
             .map(|(i, (def, expr))| {
-                let t = expr.to_syn_expression();
+                let t = expr.generate(input_context);
                 let id = format_ident!("__{}", i);
-                let def = match (def.is_optional(), expr.nullable()) {
+                let def = match (
+                    def.is_optional(),
+                    expr.expression_type(input_context).is_optional(),
+                ) {
                     (true, true) | (false, false) => quote!(let #id = #t),
                     (true, false) => quote!(let #id = Some(#t)),
                     (false, true) => quote!(let #id = (#t)?),
@@ -2489,7 +3104,7 @@ impl RustUdfExpression {
 
         let mut ret = quote!(udfs::#name(#(#args, )*));
 
-        if self.return_type().is_optional() && !self.ret_type.is_optional() {
+        if self.expression_type(input_context).is_optional() && !self.ret_type.is_optional() {
             // we have to wrap the result in Some
             ret = quote! { Some(#ret) }
         };
@@ -2502,14 +3117,16 @@ impl RustUdfExpression {
         })
     }
 
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         self.ret_type.with_nullity(
             self.ret_type.is_optional()
                 || self
                     .args
                     .iter()
                     // nullable if there are non-null UDF params with nullable arguments
-                    .any(|(t, e)| !t.is_optional() && e.nullable()),
+                    .any(|(t, e)| {
+                        !t.is_optional() && e.expression_type(input_context).is_optional()
+                    }),
         )
     }
 }
@@ -2518,31 +3135,31 @@ impl RustUdfExpression {
 pub struct WrapTypeExpression {
     name: String,
     arg: Box<Expression>,
-    ret_type: TypeDef,
 }
 
 impl WrapTypeExpression {
     fn new(name: &str, arg: Expression) -> Self {
         Self {
             name: name.to_string(),
-            ret_type: arg.return_type(),
             arg: Box::new(arg),
         }
     }
+}
 
-    fn to_syn_expression(&self) -> syn::Expr {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for WrapTypeExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let path: Path = parse_str(&self.name).unwrap();
-        let arg = self.arg.to_syn_expression();
+        let arg = self.arg.generate(input_context);
 
-        if self.arg.nullable() {
+        if self.arg.expression_type(input_context).is_optional() {
             parse_quote!(#arg.map_over_inner(|f| #path(f)))
         } else {
             parse_quote!(#path(#arg))
         }
     }
 
-    fn return_type(&self) -> TypeDef {
-        self.ret_type.clone()
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
+        self.arg.expression_type(input_context)
     }
 }
 
@@ -2583,8 +3200,53 @@ impl CaseExpression {
         }
     }
 
-    fn to_syn_expression(&self) -> syn::Expr {
-        let nullable = self.nullable();
+    fn syn_expression_with_nullity(
+        expression: &Expression,
+        input_context: &ValuePointerContext,
+        nullity: bool,
+    ) -> syn::Expr {
+        let expr = expression.generate(input_context);
+        match (
+            expression.expression_type(input_context).is_optional(),
+            nullity,
+        ) {
+            (true, true) | (false, false) => expr,
+            (false, true) => parse_quote!(Some(#expr)),
+            (true, false) => unreachable!(
+                "Should not be possible to have a nullable expression with nullity=false"
+            ),
+        }
+    }
+
+    fn nullable(&self, input_context: &ValuePointerContext) -> bool {
+        match self {
+            CaseExpression::Match {
+                value: _,
+                matches: pairs,
+                default,
+            }
+            | CaseExpression::When {
+                condition_pairs: pairs,
+                default,
+            } => {
+                // if there is a nullable default or it is missing, then it is nullable. Otherwise, it is not nullable
+                match default {
+                    Some(default) => {
+                        default.expression_type(input_context).is_optional()
+                            || pairs.iter().any(|(_when_expr, then_expr)| {
+                                then_expr.expression_type(input_context).is_optional()
+                            })
+                    }
+                    None => true,
+                }
+            }
+        }
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for CaseExpression {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let nullable = self.expression_type(input_context).is_optional();
         match self {
             CaseExpression::Match {
                 value,
@@ -2594,18 +3256,20 @@ impl CaseExpression {
                 // It's easier to have value always be option and then return default if it is None.
                 // It is possible to have more efficient code when all of the expressions are
                 // not nullable and the default is not nullable, but it's not worth the complexity.
-                let value = value.syn_expression_with_nullity(true);
+                let value = Self::syn_expression_with_nullity(value, input_context, true);
                 let if_clauses: Vec<syn::ExprIf> = matches
                     .iter()
                     .map(|(when_expr, then_expr)| {
-                        let when_expr = when_expr.syn_expression_with_nullity(true);
-                        let then_expr = then_expr.syn_expression_with_nullity(nullable);
+                        let when_expr =
+                            Self::syn_expression_with_nullity(when_expr, input_context, true);
+                        let then_expr =
+                            Self::syn_expression_with_nullity(then_expr, input_context, nullable);
                         parse_quote!(if #when_expr == value { #then_expr })
                     })
                     .collect();
                 let default_expr = default
                     .as_ref()
-                    .map(|d| d.syn_expression_with_nullity(nullable))
+                    .map(|d| Self::syn_expression_with_nullity(d, input_context, nullable))
                     // this is safe because if default is null the result is nullable.
                     .unwrap_or_else(|| parse_quote!(None));
                 parse_quote!({
@@ -2624,14 +3288,16 @@ impl CaseExpression {
                 let if_clauses: Vec<syn::ExprIf> = condition_pairs
                     .iter()
                     .map(|(when_expr, then_expr)| {
-                        let when_expr = when_expr.syn_expression_with_nullity(true);
-                        let then_expr = then_expr.syn_expression_with_nullity(nullable);
+                        let when_expr =
+                            Self::syn_expression_with_nullity(when_expr, input_context, true);
+                        let then_expr =
+                            Self::syn_expression_with_nullity(then_expr, input_context, nullable);
                         parse_quote!(if #when_expr.unwrap_or(false) { #then_expr })
                     })
                     .collect();
                 let default_expr = default
                     .as_ref()
-                    .map(|d| d.syn_expression_with_nullity(nullable))
+                    .map(|d| Self::syn_expression_with_nullity(d, input_context, nullable))
                     // this is safe because if default is null the result is nullable.
                     .unwrap_or_else(|| parse_quote!(None));
                 parse_quote!({
@@ -2643,32 +3309,7 @@ impl CaseExpression {
         }
     }
 
-    fn nullable(&self) -> bool {
-        match self {
-            CaseExpression::Match {
-                value: _,
-                matches: pairs,
-                default,
-            }
-            | CaseExpression::When {
-                condition_pairs: pairs,
-                default,
-            } => {
-                // if there is a nullable default or it is missing, then it is nullable. Otherwise, it is not nullable
-                match default {
-                    Some(default) => {
-                        default.nullable()
-                            || pairs
-                                .iter()
-                                .any(|(_when_expr, then_expr)| then_expr.nullable())
-                    }
-                    None => true,
-                }
-            }
-        }
-    }
-
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         match self {
             CaseExpression::Match {
                 value: _,
@@ -2680,7 +3321,10 @@ impl CaseExpression {
                 default: _,
             } => {
                 // guaranteed to have at least one pair.
-                pairs[0].1.return_type().with_nullity(self.nullable())
+                pairs[0]
+                    .1
+                    .expression_type(input_context)
+                    .with_nullity(self.nullable(input_context))
             }
         }
     }
@@ -2725,14 +3369,16 @@ impl DateTimeFunction {
             Box::new(expr),
         )))
     }
+}
 
-    fn to_syn_expression(&self) -> syn::Expr {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DateTimeFunction {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         match self {
             DateTimeFunction::DatePart(part, expr) => {
                 let part: syn::Expr =
                     parse_str(&format!("arroyo_types::DatePart::{:?}", part)).unwrap();
-                let arg = expr.to_syn_expression();
-                if expr.nullable() {
+                let arg = expr.generate(input_context);
+                if expr.expression_type(input_context).is_optional() {
                     parse_quote!(#arg.map(|e| arroyo_worker::operators::functions::datetime::date_part(#part, e)))
                 } else {
                     parse_quote!(arroyo_worker::operators::functions::datetime::date_part(#part, #arg))
@@ -2741,17 +3387,17 @@ impl DateTimeFunction {
             DateTimeFunction::DateTrunc(trunc, expr) => {
                 let trunc: syn::Expr =
                     parse_str(&format!("arroyo_types::DateTruncPrecision::{:?}", trunc)).unwrap();
-                let arg = expr.to_syn_expression();
-                if expr.nullable() {
+                let arg = expr.generate(input_context);
+                if expr.expression_type(input_context).is_optional() {
                     parse_quote!(#arg.map(|e| arroyo_worker::operators::functions::datetime::date_trunc(#trunc, e)))
                 } else {
                     parse_quote!(arroyo_worker::operators::functions::datetime::date_trunc(#trunc, #arg))
                 }
             }
             DateTimeFunction::FromUnixTime(arg) => {
-                let arg_expr = arg.to_syn_expression();
+                let arg_expr = arg.generate(input_context);
 
-                let expr = if arg.nullable() {
+                let expr = if arg.expression_type(input_context).is_optional() {
                     quote! {
                         #arg_expr.map(|e| chrono::Utc.timestamp_nanos(e as i64).to_rfc3339())
                     }
@@ -2771,18 +3417,20 @@ impl DateTimeFunction {
         }
     }
 
-    fn return_type(&self) -> TypeDef {
+    fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         match self {
-            DateTimeFunction::DatePart(_, expr) => {
-                TypeDef::DataType(DataType::UInt32, expr.nullable())
-            }
+            DateTimeFunction::DatePart(_, expr) => TypeDef::DataType(
+                DataType::UInt32,
+                expr.expression_type(input_context).is_optional(),
+            ),
             DateTimeFunction::DateTrunc(_, expr) => TypeDef::DataType(
                 DataType::Timestamp(TimeUnit::Nanosecond, None),
-                expr.nullable(),
+                expr.expression_type(input_context).is_optional(),
             ),
-            DateTimeFunction::FromUnixTime(expr) => {
-                TypeDef::DataType(DataType::Utf8, expr.nullable())
-            }
+            DateTimeFunction::FromUnixTime(expr) => TypeDef::DataType(
+                DataType::Utf8,
+                expr.expression_type(input_context).is_optional(),
+            ),
         }
     }
 }

@@ -11,10 +11,15 @@ use arroyo_datastream::{
 };
 
 use petgraph::graph::{DiGraph, NodeIndex};
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str};
 
 use crate::{
+    code_gen::{
+        BinAggregatingContext, CodeGenerator, CombiningContext, JoinPairContext,
+        MemoryAddingContext, MemoryAggregatingContext, MemoryRemovingContext,
+        ValueBinMergingContext, ValuePointerContext, VecAggregationContext,
+    },
     expressions::SortExpression,
     external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource},
     operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection},
@@ -121,7 +126,7 @@ impl FusedRecordTransform {
                 panic!("FusedRecordTransform.to_predicate_operator() called on non-predicate expression");
             };
             names.push("filter");
-            predicates.push(predicate.to_syn_expression());
+            predicates.push(predicate.generate(&ValuePointerContext));
         }
         let predicate: syn::Expr = parse_quote!( {
             let arg = &record.value;
@@ -143,52 +148,28 @@ impl FusedRecordTransform {
             match expression {
                 RecordTransform::ValueProjection(projection) => {
                     names.push("value_project");
-                    let expr = projection.to_syn_expression();
                     let record_type = output_type.record_type();
+                    let record_expression = ValuePointerContext.compile_value_map_expr(projection);
                     record_expressions.push(parse_quote!(
-
-                            let record: #record_type = { let arg = &record.value;
-                                arroyo_types::Record {
-                                timestamp: record.timestamp,
-                                key: None,
-                                value: #expr
-                        }
-                    };
+                            let record: #record_type =  #record_expression;
                     ));
                 }
                 RecordTransform::KeyProjection(projection) => {
                     names.push("key_project");
-                    let expr = projection.to_syn_expression();
                     let record_type = output_type.record_type();
+                    let record_expression =
+                        ValuePointerContext.compile_key_map_expression(projection);
                     record_expressions.push(parse_quote!(
-
-                            let record: #record_type = { let arg = &record.value;
-                                arroyo_types::Record {
-                                timestamp: record.timestamp,
-                                key: Some(#expr),
-                                value: record.value.clone()
-                        }
-                    };
+                            let record: #record_type = #record_expression;
                     ));
                 }
                 RecordTransform::TimestampAssignment(timestamp_expression) => {
                     names.push("timestamp_assignment");
-                    let expr = timestamp_expression.to_syn_expression();
                     let record_type = output_type.record_type();
-                    let unwrap_tokens = if timestamp_expression.nullable() {
-                        Some(quote!(.expect("require a non-null timestamp")))
-                    } else {
-                        None
-                    };
+                    let record_expression = ValuePointerContext
+                        .compile_timestamp_record_expression(timestamp_expression);
                     record_expressions.push(parse_quote!(
-
-                            let record: #record_type = { let arg = &record.value;
-                                arroyo_types::Record {
-                                timestamp: #expr #unwrap_tokens,
-                                key: record.key.clone(),
-                                value: record.value.clone()
-                        }
-                    };
+                            let record: #record_type = #record_expression;
                     ));
                 }
                 RecordTransform::Filter(_) => unreachable!(),
@@ -215,98 +196,55 @@ impl FusedRecordTransform {
             match (expression, is_updating) {
                 (RecordTransform::ValueProjection(projection), false) => {
                     names.push("value_project");
-                    let expr = projection.to_syn_expression();
                     let record_type = output_type.record_type();
+                    let record_expression = ValuePointerContext.compile_value_map_expr(projection);
                     record_expressions.push(parse_quote!(
-                            let record: #record_type = { let arg = &record.value;
-                                arroyo_types::Record {
-                                timestamp: record.timestamp,
-                                key: None,
-                                value: #expr
-                        }
-                    };
+                            let record: #record_type = #record_expression;
                     ));
                 }
                 (RecordTransform::ValueProjection(projection), true) => {
                     names.push("updating_value_project");
-                    let expr = projection.to_syn_expression();
                     let record_type = output_type.record_type();
+                    let record_expression =
+                        ValuePointerContext.compile_updating_value_map_expression(projection);
                     record_expressions.push(parse_quote!(
-                            let record: #record_type = { let arg = &record.value;
-                                arroyo_types::Record {
-                                timestamp: record.timestamp,
-                                key: None,
-                                value: arg.map_over_inner(|arg| #expr)?
-                        }
-                    };
+                            let record: #record_type = #record_expression?;
                     ));
                 }
                 (RecordTransform::KeyProjection(projection), false) => {
                     names.push("key_project");
-                    let expr = projection.to_syn_expression();
+                    let record_expression =
+                        ValuePointerContext.compile_key_map_expression(projection);
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
-
-                            let record: #record_type = { let arg = &record.value;
-                                arroyo_types::Record {
-                                timestamp: record.timestamp,
-                                key: Some(#expr),
-                                value: record.value.clone()
-                        }
-                    };
+                            let record: #record_type = #record_expression;
                     ));
                 }
                 (RecordTransform::Filter(predicate), false) => {
                     names.push("filter");
-                    let expr = predicate.to_syn_expression();
-                    let unwrap = if predicate.nullable() {
-                        quote!(.unwrap_or(false))
-                    } else {
-                        quote!()
-                    };
+                    let predicate_expression =
+                        ValuePointerContext.compile_filter_expression(predicate);
                     record_expressions.push(parse_quote!(
-                        if !{let arg = &record.value;#expr #unwrap} {
+                        if !#predicate_expression {
                             return None;
                         }
                     ));
                 }
                 (RecordTransform::Filter(predicate), true) => {
                     names.push("updating_filter");
-                    let expr = predicate.to_syn_expression();
+                    let record_expression = ValuePointerContext
+                        .compile_updating_filter_optional_record_expression(predicate);
                     let record_type = output_type.record_type();
-                    let unwrap = if predicate.nullable() {
-                        quote!(.unwrap_or(false))
-                    } else {
-                        quote!()
-                    };
                     record_expressions.push(parse_quote!(
-                            let record: #record_type = { let arg = &record.value;
-                                arroyo_types::Record {
-                                timestamp: record.timestamp,
-                                key: record.key.clone(),
-                                value: arg.filter(|arg| #expr #unwrap)?
-                        }
-                    };
-                        ));
+                            let record: #record_type = #record_expression?;));
                 }
                 (RecordTransform::TimestampAssignment(timestamp_expression), false) => {
                     names.push("timestamp_assignment");
-                    let expr = timestamp_expression.to_syn_expression();
-                    let unwrap_tokens = if timestamp_expression.nullable() {
-                        Some(quote!(.expect("require a non-null timestamp")))
-                    } else {
-                        None
-                    };
+                    let record_expression = ValuePointerContext
+                        .compile_timestamp_record_expression(timestamp_expression);
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
-
-                            let record: #record_type = { let arg = &record.value;
-                                arroyo_types::Record {
-                                timestamp: #expr #unwrap_tokens,
-                                key: record.key.clone(),
-                                value: record.value.clone()
-                        }
-                    };
+                            let record: #record_type = #record_expression;
                     ));
                 }
                 _ => unimplemented!(),
@@ -317,7 +255,7 @@ impl FusedRecordTransform {
             Some(record)
         });
         Operator::ExpressionOperator {
-            name: "fused".to_string(),
+            name: format!("sql_fused<{}>", names.join(",")),
             expression: quote!(#combined).to_string(),
             return_type: ExpressionReturnType::OptionalRecord,
         }
@@ -399,7 +337,8 @@ impl PlanNode {
                 record_transform.as_operator(self.output_type.is_updating())
             }
             PlanOperator::WindowAggregate { window, projection } => {
-                let aggregate_expr = projection.to_syn_expression();
+                let aggregating_context = VecAggregationContext::new();
+                let aggregate_expr = projection.generate(&aggregating_context);
                 arroyo_datastream::Operator::Window {
                     typ: window.clone(),
                     agg: Some(WindowAgg::Expression {
@@ -414,14 +353,27 @@ impl PlanNode {
                 tumble_width,
                 projection,
             } => {
-                let aggregate_expr = projection.tumbling_aggregation_syn_expression();
-                let bin_merger = projection.bin_merger_syn_expression();
-                let bin_type = projection.bin_type();
+                let value_bin_merging_context = ValueBinMergingContext::new();
+                let bin_type = value_bin_merging_context
+                    .bin_syn_type(projection)
+                    .into_token_stream()
+                    .to_string();
+                let bin_merger = value_bin_merging_context
+                    .compile_closure(projection)
+                    .into_token_stream()
+                    .to_string();
+
+                let aggregating_context = BinAggregatingContext::new();
+                let aggregator = aggregating_context
+                    .compile_closure(projection)
+                    .into_token_stream()
+                    .to_string();
+
                 arroyo_datastream::Operator::TumblingWindowAggregator(TumblingWindowAggregator {
                     width: *tumble_width,
-                    aggregator: quote!(|key, window, arg| {#aggregate_expr}).to_string(),
-                    bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
-                    bin_type: quote!(#bin_type).to_string(),
+                    aggregator,
+                    bin_merger,
+                    bin_type,
                 })
             }
             PlanOperator::SlidingWindowTwoPhaseAggregator {
@@ -429,21 +381,47 @@ impl PlanNode {
                 slide,
                 projection,
             } => {
-                let aggregate_expr = projection.sliding_aggregation_syn_expression();
-                let bin_merger = projection.bin_merger_syn_expression();
-                let in_memory_add = projection.memory_add_syn_expression();
-                let in_memory_remove = projection.memory_remove_syn_expression();
-                let bin_type = projection.bin_type();
-                let mem_type = projection.memory_type();
+                let value_bin_merger_context = ValueBinMergingContext::new();
+                let bin_type = value_bin_merger_context
+                    .bin_syn_type(projection)
+                    .into_token_stream()
+                    .to_string();
+                let bin_merger = value_bin_merger_context
+                    .compile_closure(projection)
+                    .into_token_stream()
+                    .to_string();
+
+                let memory_add_context = MemoryAddingContext::new();
+                let in_memory_add = memory_add_context
+                    .compile_closure(projection)
+                    .into_token_stream()
+                    .to_string();
+                let mem_type = memory_add_context
+                    .memory_type(projection)
+                    .into_token_stream()
+                    .to_string();
+
+                let memory_remove_context = MemoryRemovingContext::new();
+                let in_memory_remove = memory_remove_context
+                    .compile_closure(projection)
+                    .into_token_stream()
+                    .to_string();
+
+                let aggregating_context = MemoryAggregatingContext::new();
+                let aggregator = aggregating_context
+                    .compile_closure(projection)
+                    .into_token_stream()
+                    .to_string();
+
                 arroyo_datastream::Operator::SlidingWindowAggregator(SlidingWindowAggregator {
                     width: *width,
                     slide: *slide,
-                    aggregator: quote!(|key, window, arg| {#aggregate_expr}).to_string(),
-                    bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
-                    in_memory_add: quote!(|current, bin_value| {#in_memory_add}).to_string(),
-                    in_memory_remove: quote!(|current, bin_value| {#in_memory_remove}).to_string(),
-                    bin_type: quote!(#bin_type).to_string(),
-                    mem_type: quote!(#mem_type).to_string(),
+                    aggregator,
+                    bin_merger,
+                    in_memory_add,
+                    in_memory_remove,
+                    bin_type,
+                    mem_type,
                 })
             }
             PlanOperator::InstantJoin => Operator::WindowJoin {
@@ -472,27 +450,25 @@ impl PlanNode {
                 .unwrap()
             }
             PlanOperator::JoinPairMerge(join_type, struct_pair) => {
-                let merge_struct =
-                    join_type.join_struct_type(&struct_pair.left, &struct_pair.right);
-                let merge_expr =
-                    join_type.merge_syn_expression(&struct_pair.left, &struct_pair.right);
+                let context =
+                    JoinPairContext::new(struct_pair.left.clone(), struct_pair.right.clone());
                 match join_type {
-                    JoinType::Inner => MethodCompiler::merge_pair_operator(
-                        "join_merge",
-                        merge_struct.get_type(),
-                        merge_expr,
-                    )
-                    .unwrap(),
+                    JoinType::Inner => {
+                        let record_expression =
+                            context.compile_pair_merge_record_expression(join_type);
+                        MethodCompiler::record_expression_operator("join_merge", record_expression)
+                    }
                     JoinType::Left | JoinType::Right | JoinType::Full => {
-                        MethodCompiler::merge_pair_updating_operator(
+                        let value_expression =
+                            context.compile_updating_pair_merge_value_expression(join_type);
+                        MethodCompiler::value_updating_operator(
                             "updating_join_merge",
-                            merge_struct.get_type(),
-                            merge_expr,
+                            value_expression,
                         )
-                        .unwrap()
                     }
                 }
             }
+
             PlanOperator::WindowFunction(WindowFunctionOperator {
                 window_function,
                 order_by,
@@ -567,13 +543,21 @@ impl PlanNode {
                 return_type: arroyo_datastream::ExpressionReturnType::Record,
             },
             PlanOperator::TumblingLocalAggregator { width, projection } => {
-                let bin_merger = projection.bin_merger_syn_expression();
-                let bin_type = projection.bin_type();
+                let bin_merging_context = ValueBinMergingContext::new();
+                let bin_merger = bin_merging_context
+                    .compile_closure(projection)
+                    .into_token_stream()
+                    .to_string();
+                let bin_type = bin_merging_context
+                    .bin_syn_type(projection)
+                    .into_token_stream()
+                    .to_string();
+
                 arroyo_datastream::Operator::TumblingWindowAggregator(TumblingWindowAggregator {
                     width: *width,
                     aggregator: quote!(|key, window, arg| { arg.clone() }).to_string(),
-                    bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
-                    bin_type: quote!(#bin_type).to_string(),
+                    bin_merger,
+                    bin_type,
                 })
             }
             PlanOperator::SlidingAggregatingTopN {
@@ -585,23 +569,51 @@ impl PlanNode {
                 converting_projection,
                 max_elements,
             } => {
-                let bin_type = aggregating_projection.bin_type();
-                let bin_merger = aggregating_projection.combine_bin_syn_expr();
-                let in_memory_add = aggregating_projection.memory_add_syn_expression();
-                let in_memory_remove = aggregating_projection.memory_remove_syn_expression();
-                let aggregate_expr = aggregating_projection.sliding_aggregation_syn_expression();
-                let mem_type = aggregating_projection.memory_type();
+                let bin_merger = CombiningContext::new()
+                    .compile_closure(aggregating_projection)
+                    .into_token_stream()
+                    .to_string();
+                let bin_type = aggregating_projection
+                    .bin_type(&ValuePointerContext)
+                    .syn_type()
+                    .into_token_stream()
+                    .to_string();
+
+                let memory_add_context = MemoryAddingContext::new();
+                let mem_type = memory_add_context
+                    .memory_type(aggregating_projection)
+                    .into_token_stream()
+                    .to_string();
+                let in_memory_add = memory_add_context
+                    .compile_closure(aggregating_projection)
+                    .into_token_stream()
+                    .to_string();
+
+                let memory_remove_context = MemoryRemovingContext::new();
+                let in_memory_remove = memory_remove_context
+                    .compile_closure(aggregating_projection)
+                    .into_token_stream()
+                    .to_string();
+
+                let memory_aggregate_context = MemoryAggregatingContext::new();
+                let aggregate_expr = aggregating_projection.generate(&memory_aggregate_context);
 
                 let sort_tuple = SortExpression::sort_tuple_type(order_by);
                 let sort_key_type = quote!(#sort_tuple).to_string();
 
-                let partition_function = partition_projection.to_syn_expression();
-                let projection_expr = converting_projection.to_syn_expression();
+                let partition_expr = partition_projection.generate(&ValuePointerContext);
+                let partition_arg = ValuePointerContext.variable_ident();
+                let partition_function: syn::ExprClosure =
+                    parse_quote!(|#partition_arg| {#partition_expr});
+                let projection_expr = converting_projection.generate(&ValuePointerContext);
 
                 let sort_tokens = SortExpression::sort_tuple_expression(order_by);
 
+                let mem_ident = memory_aggregate_context.bin_name();
+                let key_ident = memory_aggregate_context.key_ident();
+
                 let extractor = quote!(
-                    |key, arg| {
+                    |#key_ident, #mem_ident| {
                         // this window is just there because the aggregate expression depends on it, but it is an
                         // error for the key extract to rely on it
                         let window = arroyo_types::Window::new(std::time::UNIX_EPOCH, std::time::UNIX_EPOCH);
@@ -612,10 +624,11 @@ impl PlanNode {
                     }
                 ).to_string();
 
-                let aggregator = quote!(|key, window, arg|
+                let window_ident = memory_aggregate_context.window_ident();
+
+                let aggregator = quote!(|#key_ident, #window_ident, #mem_ident|
                     {
-                        let arg = #aggregate_expr;
-                        let key = key.clone();
+                        let #partition_arg = #aggregate_expr;
                         #projection_expr
                     }
                 )
@@ -624,14 +637,14 @@ impl PlanNode {
                 arroyo_datastream::Operator::SlidingAggregatingTopN(SlidingAggregatingTopN {
                     width: *width,
                     slide: *slide,
-                    bin_merger: quote!(|arg, current_bin| {#bin_merger}).to_string(),
-                    in_memory_add: quote!(|current, bin_value| {#in_memory_add}).to_string(),
-                    in_memory_remove: quote!(|current, bin_value| {#in_memory_remove}).to_string(),
-                    partitioning_func: quote!(|arg| {#partition_function}).to_string(),
+                    bin_merger,
+                    in_memory_add,
+                    in_memory_remove,
+                    partitioning_func: partition_function.into_token_stream().to_string(),
                     extractor,
                     aggregator,
-                    bin_type: quote!(#bin_type).to_string(),
-                    mem_type: quote!(#mem_type).to_string(),
+                    bin_type,
+                    mem_type,
                     sort_key_type,
                     max_elements: *max_elements,
                 })
@@ -728,54 +741,82 @@ impl PlanNode {
                 expiration,
             } => {
                 if *input_is_update {
-                    let sliding = projection.sliding_aggregation_syn_expression();
-                    let bin_merger = projection.bin_merger_syn_expression();
-                    let bin_type = projection.bin_type();
-                    let memory_type = projection.memory_type();
-                    let memory_add = projection.memory_add_syn_expression();
-                    let memory_remove = projection.memory_remove_syn_expression();
+                    let memory_aggregate_context = MemoryAggregatingContext::new();
+
+                    let memory_aggregate_closure =
+                        memory_aggregate_context.compile_non_windowed_closure(projection);
+
+                    let bin_merge_context = ValueBinMergingContext::new();
+
+                    let current_bin_ident = bin_merge_context.bin_context.current_bin_ident();
+                    let arg_ident = bin_merge_context.value_context.variable_ident();
+
+                    let bin_merger_expr = projection.generate(&bin_merge_context);
+                    let bin_type = projection
+                        .expression_type(&ValueBinMergingContext::new())
+                        .syn_type();
+                    let memory_type = projection.memory_type(&ValuePointerContext).syn_type();
+                    let memory_add = projection.generate(&MemoryAddingContext::new());
+                    let memory_removing_context = MemoryRemovingContext::new();
+                    let memory_remove = projection.generate(&memory_removing_context);
+                    let bin_ident = memory_removing_context.bin_value_ident();
+                    let memory_ident = memory_removing_context.memory_value_ident();
+                    let bin_merger = quote!(|#arg_ident, #memory_ident| {
+                        let #current_bin_ident: Option<#bin_type> = None;
+                        let updating_bin = arg.map_over_inner(|#arg_ident| #bin_merger_expr);
+                        if let Some(updating_bin) = updating_bin {
+                            match updating_bin {
+                                arroyo_types::UpdatingData::Retract(retract) => {
+                                    let #bin_ident = retract;
+                                    let #memory_ident = #memory_ident.expect(&format!("retracting means there should be state for {:?}", retract)).clone();
+                                    #memory_remove
+                                },
+                                arroyo_types::UpdatingData::Update { old, new } => {
+                                    let #memory_ident = #memory_ident.expect("retracting means there should be state").clone();
+                                    let #bin_ident = old;
+                                    let #memory_ident = #memory_remove;
+                                    let #bin_ident = new;
+                                    Some(#memory_add)
+                                },
+                                arroyo_types::UpdatingData::Append(append) => {
+                                    let #bin_ident = append;
+                                    let #memory_ident = #memory_ident.cloned();
+                                    Some(#memory_add)
+                                }
+                            }
+                        } else {
+                            #memory_ident.map(|mem| mem.clone())
+                        }
+                    });
 
                     arroyo_datastream::Operator::NonWindowAggregator(NonWindowAggregator {
                         expiration: *expiration,
-                        aggregator: quote!(|key, arg| {#sliding}).to_string(),
-                        bin_merger: quote!(|arg, current| {
-                            let current_bin: Option<#bin_type> = None;
-                            let updating_bin = arg.map_over_inner(|arg| #bin_merger);
-                            if let Some(updating_bin) = updating_bin {
-                                match updating_bin {
-                                    arroyo_types::UpdatingData::Retract(retract) => {
-                                        let bin_value = retract;
-                                        let current = current.expect(&format!("retracting means there should be state for {:?}", retract)).clone();
-                                        #memory_remove
-                                    },
-                                    arroyo_types::UpdatingData::Update { old, new } => {
-                                        let current = current.expect("retracting means there should be state").clone();
-                                        let bin_value = old;
-                                        let current = #memory_remove;
-                                        let bin_value = new;
-                                        Some(#memory_add)
-                                    },
-                                    arroyo_types::UpdatingData::Append(append) => {
-                                        let bin_value = append;
-                                        let current = current.cloned();
-                                        Some(#memory_add)
-                                    }
-                                }
-                            } else {
-                                None
-                            }
-                        }).to_string(),
+                        aggregator: memory_aggregate_closure.into_token_stream().to_string(),
+                        bin_merger: bin_merger.into_token_stream().to_string(),
                         bin_type: quote!(#memory_type).to_string(),
                     })
                 } else {
-                    let aggregate_expr = projection.tumbling_aggregation_syn_expression();
-                    let bin_merger = projection.bin_merger_syn_expression();
-                    let bin_type = projection.bin_type();
+                    let bin_merger_context = ValueBinMergingContext::new();
+                    let bin_type = bin_merger_context
+                        .bin_syn_type(projection)
+                        .into_token_stream()
+                        .to_string();
+                    let bin_merger = bin_merger_context
+                        .compile_closure_with_some_result(projection)
+                        .into_token_stream()
+                        .to_string();
+
+                    let bin_aggregating_context = BinAggregatingContext::new();
+                    let aggregator = bin_aggregating_context
+                        .compile_non_windowed_closure(projection)
+                        .into_token_stream()
+                        .to_string();
+
                     arroyo_datastream::Operator::NonWindowAggregator(NonWindowAggregator {
                         expiration: *expiration,
-                        aggregator: quote!(|key, arg| {#aggregate_expr}).to_string(),
-                        bin_merger: quote!(|arg, current_bin| {Some(#bin_merger)}).to_string(),
-                        bin_type: quote!(#bin_type).to_string(),
+                        aggregator,
+                        bin_merger,
+                        bin_type,
                     })
                 }
             }
@@ -816,7 +857,6 @@ impl PlanNode {
             } => {
                 output_types.extend(projection.output_struct().all_structs());
             }
-
             _ => {}
         }
         output_types
@@ -1165,8 +1205,12 @@ impl PlanGraph {
         }
 
         let strategy = if let Some(watermark_expression) = source_operator.watermark_column {
-            let expression = watermark_expression.to_syn_expression();
-            let null_checked_expression = if watermark_expression.nullable() {
+            let arg_ident = ValuePointerContext.variable_ident();
+            let expression = watermark_expression.generate(&ValuePointerContext);
+            let null_checked_expression = if watermark_expression
+                .expression_type(&ValuePointerContext)
+                .is_optional()
+            {
                 parse_quote!(#expression.unwrap_or_else(|| std::time::SystemTime::now()))
             } else {
                 expression
@@ -1174,7 +1218,7 @@ impl PlanGraph {
 
             arroyo_datastream::WatermarkStrategy::Expression {
                 expression: quote!({
-                   let arg = record.value.clone();
+                   let #arg_ident = record.value.clone();
                    #null_checked_expression
                 })
                 .to_string(),
@@ -1237,7 +1281,7 @@ impl PlanGraph {
         self.graph.add_edge(input_index, key_index, key_edge);
 
         let aggregate_projection = aggregate.aggregating;
-        let aggregate_struct = aggregate_projection.output_struct();
+        let aggregate_struct = aggregate_projection.expression_type(&VecAggregationContext::new());
 
         let aggregate_operator = PlanOperator::WindowAggregate {
             window: aggregate.window,
@@ -1624,7 +1668,7 @@ impl PlanGraph {
         };
         self.graph.add_edge(input_index, key_index, key_edge);
         let aggregate_projection = aggregate.aggregating;
-        let aggregate_struct = aggregate_projection.output_struct();
+        let aggregate_struct = aggregate_projection.expression_type(&VecAggregationContext::new());
         let aggregate_operator = PlanOperator::NonWindowAggregate {
             input_is_update: input_updating,
             expiration: Duration::from_secs(60 * 60 * 24),

@@ -16,3 +16,4 @@ quote = "1.0"
 proc-macro2 = "1"
 serde_json = "1"
 
+runtime-macros-derive = "0.6.0"

@@ -31,7 +31,7 @@ pub trait JoinProcessor<K: Key, T1: Data, T2: Data, Output: Data>: Send + 'stati
         left_timestamp: SystemTime,
         left_value: T1,
         right: Option<(SystemTime, &T2)>,
-        evict_prior: bool,
+        first_left: bool,
     ) -> Option<(SystemTime, Output)>;
     fn right_join(
         &self,
@@ -39,7 +39,7 @@ pub trait JoinProcessor<K: Key, T1: Data, T2: Data, Output: Data>: Send + 'stati
         right_timestamp: SystemTime,
         right_value: T2,
         left: Option<(SystemTime, &T1)>,
-        evict_prior: bool,
+        first_right: bool,
     ) -> Option<(SystemTime, Output)>;
 }
 
@@ -56,25 +56,13 @@ impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(T1, Opti
         left_timestamp: SystemTime,
         left_value: T1,
         right: Option<(SystemTime, &T2)>,
-        evict_prior: bool,
+        _first_left: bool,
     ) -> Option<(SystemTime, UpdatingData<(T1, Option<T2>)>)> {
         match right {
-            Some((right_timestamp, right_value)) => {
-                if evict_prior {
-                    Some((
-                        left_timestamp.max(right_timestamp),
-                        UpdatingData::Update {
-                            old: (left_value.clone(), None),
-                            new: (left_value, Some(right_value.clone())),
-                        },
-                    ))
-                } else {
-                    Some((
-                        left_timestamp,
-                        UpdatingData::Append((left_value, Some(right_value.clone()))),
-                    ))
-                }
-            }
+            Some((right_timestamp, right_value)) => Some((
+                left_timestamp.max(right_timestamp),
+                UpdatingData::Append((left_value, Some(right_value.clone()))),
+            )),
             None => Some((left_timestamp, UpdatingData::Append((left_value, None)))),
         }
     }
@@ -85,13 +73,23 @@ impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(T1, Opti
         right_timestamp: SystemTime,
         right_value: T2,
         left: Option<(SystemTime, &T1)>,
-        _evict_prior: bool,
+        first_right: bool,
     ) -> Option<(SystemTime, UpdatingData<(T1, Option<T2>)>)> {
         left.map(|(left_timestamp, left_value)| {
-            (
-                right_timestamp.max(left_timestamp),
-                UpdatingData::Append((left_value.clone(), Some(right_value))),
-            )
+            if first_right {
+                (
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Update {
+                        old: (left_value.clone(), None),
+                        new: (left_value.clone(), Some(right_value.clone())),
+                    },
+                )
+            } else {
+                (
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Append((left_value.clone(), Some(right_value))),
+                )
+            }
         })
     }
 }
@@ -109,13 +107,23 @@ impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(Option<T
         left_timestamp: SystemTime,
         left_value: T1,
         right: Option<(SystemTime, &T2)>,
-        _evict_prior: bool,
+        first_left: bool,
     ) -> Option<(SystemTime, UpdatingData<(Option<T1>, T2)>)> {
         right.map(|(right_timestamp, right_value)| {
-            (
-                left_timestamp.max(right_timestamp),
-                UpdatingData::Append((Some(left_value), right_value.clone())),
-            )
+            if first_left {
+                (
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Update {
+                        old: (None, right_value.clone()),
+                        new: (Some(left_value.clone()), right_value.clone()),
+                    },
+                )
+            } else {
+                (
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Append((Some(left_value), right_value.clone())),
+                )
+            }
         })
     }
 
@@ -125,25 +133,13 @@ impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(Option<T
         right_timestamp: SystemTime,
         right_value: T2,
         left: Option<(SystemTime, &T1)>,
-        evict_prior: bool,
+        _first_right: bool,
     ) -> Option<(SystemTime, UpdatingData<(Option<T1>, T2)>)> {
         match left {
-            Some((left_timestamp, left_value)) => {
-                if evict_prior {
-                    Some((
-                        left_timestamp.max(right_timestamp),
-                        UpdatingData::Update {
-                            old: (Some(left_value.clone()), right_value.clone()),
-                            new: (None, right_value),
-                        },
-                    ))
-                } else {
-                    Some((
-                        right_timestamp,
-                        UpdatingData::Append((Some(left_value.clone()), right_value)),
-                    ))
-                }
-            }
+            Some((left_timestamp, left_value)) => Some((
+                left_timestamp.max(right_timestamp),
+                UpdatingData::Append((Some(left_value.clone()), right_value)),
+            )),
             None => Some((right_timestamp, UpdatingData::Append((None, right_value)))),
         }
     }
@@ -162,15 +158,15 @@ impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(Option<T
         left_timestamp: SystemTime,
         left_value: T1,
         right: Option<(SystemTime, &T2)>,
-        evict_prior: bool,
+        first_left: bool,
     ) -> Option<(SystemTime, UpdatingData<(Option<T1>, Option<T2>)>)> {
         match right {
             Some((right_timestamp, right_value)) => {
-                if evict_prior {
+                if first_left {
                     Some((
                         left_timestamp.max(right_timestamp),
                         UpdatingData::Update {
-                            old: (Some(left_value.clone()), None),
+                            old: (None, Some(right_value.clone())),
                             new: (Some(left_value), Some(right_value.clone())),
                         },
                     ))
@@ -194,15 +190,15 @@ impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(Option<T
         right_timestamp: SystemTime,
         right_value: T2,
         left: Option<(SystemTime, &T1)>,
-        evict_prior: bool,
+        first_right: bool,
     ) -> Option<(SystemTime, UpdatingData<(Option<T1>, Option<T2>)>)> {
         match left {
             Some((left_timestamp, left_value)) => {
-                if evict_prior {
+                if first_right {
                     Some((
                         left_timestamp.max(right_timestamp),
                         UpdatingData::Update {
-                            old: (None, Some(right_value.clone())),
+                            old: (Some(left_value.clone()), None),
                             new: (Some(left_value.clone()), Some(right_value)),
                         },
                     ))
@@ -363,7 +359,7 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
         let value = record.value.clone();
 
         let mut left_state: KeyTimeMultiMap<K, T1, _> = ctx.state.get_key_time_multi_map('l').await;
-        let evict = left_state
+        let first_left = left_state
             .get_all_values_with_timestamps(&mut key)
             .await
             .is_none();
@@ -378,7 +374,7 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
                         record.timestamp,
                         value.clone(),
                         Some(right),
-                        evict,
+                        first_left,
                     ) {
                         records.push(Record {
                             timestamp,
@@ -387,10 +383,13 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
                         });
                     }
                 }
-            } else if let Some((timestamp, value)) =
-                self.processor
-                    .left_join(key.clone(), record.timestamp, value.clone(), None, evict)
-            {
+            } else if let Some((timestamp, value)) = self.processor.left_join(
+                key.clone(),
+                record.timestamp,
+                value.clone(),
+                None,
+                first_left,
+            ) {
                 records.push(Record {
                     timestamp,
                     key: Some(key.clone()),
@@ -415,7 +414,7 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
         let mut key = record.key.clone().unwrap();
         let value = record.value.clone();
         let mut right_state = ctx.state.get_key_time_multi_map('r').await;
-        let evict = right_state
+        let first_right = right_state
             .get_all_values_with_timestamps(&mut key)
             .await
             .is_none();
@@ -435,7 +434,7 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
                         record.timestamp,
                         value.clone(),
                         Some(left),
-                        evict,
+                        first_right,
                     ) {
                         records.push(Record {
                             timestamp,
@@ -444,10 +443,13 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
                         });
                     }
                 }
-            } else if let Some((timestamp, value)) =
-                self.processor
-                    .right_join(key.clone(), record.timestamp, value.clone(), None, evict)
-            {
+            } else if let Some((timestamp, value)) = self.processor.right_join(
+                key.clone(),
+                record.timestamp,
+                value.clone(),
+                None,
+                first_right,
+            ) {
                 records.push(Record {
                     timestamp,
                     key: Some(key.clone()),

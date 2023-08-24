@@ -35,8 +35,6 @@ arrow-array = { version = "43.0.0" }
 arrow-schema = { version = "43.0.0" }
 parquet = { version = "43.0.0" }
 
-
-
 [profile.release]
 debug = 1
 

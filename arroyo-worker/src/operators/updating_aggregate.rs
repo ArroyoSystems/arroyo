@@ -15,6 +15,7 @@ pub struct UpdatingAggregateOperator<K: Key, T: Data, BinA: Data, OutT: Data> {
     _t: PhantomData<K>,
 }
 
+#[derive(Debug)]
 enum StateOp<T: Data> {
     Set(T),
     Delete,
