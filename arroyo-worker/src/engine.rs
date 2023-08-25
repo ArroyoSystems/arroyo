@@ -28,7 +28,7 @@ use arroyo_types::{
     from_micros, to_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark,
     WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
 };
-use petgraph::graph::DiGraph;
+use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::{labels, IntCounter, IntGauge};
@@ -36,6 +36,7 @@ use rand::Rng;
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
+use tonic::transport::Channel;
 use tonic::Request;
 
 use crate::network_manager::{NetworkManager, Quad, Senders};
@@ -900,7 +901,8 @@ impl Engine {
     }
 
     pub async fn start(mut self, config: StreamConfig) -> RunningEngine {
-        //console_subscriber::init();
+        info!("Starting job {}", self.job_id);
+
         let checkpoint_metadata = if let Some(epoch) = config.restore_epoch {
             info!("Restoring checkpoint {} for job {}", epoch, self.job_id);
             Some(
@@ -914,49 +916,10 @@ impl Engine {
             None
         };
 
-        info!("Starting job {}", self.job_id);
+        let node_indexes: Vec<_> = self.program.graph.node_indices().collect();
 
-        let labels = labels! {
-            "worker_id".to_string() => format!("{}", self.worker_id.0),
-            "job_name".to_string() => self.program.name.clone(),
-            "job_id".to_string() => self.job_id.clone(),
-            "run_id".to_string() => self.run_id.to_string(),
-        };
-        let job_id = self.job_id.clone();
-
-        thread::spawn(move || {
-            #[cfg(not(target_os = "freebsd"))]
-            let _agent = arroyo_server_common::try_profile_start(
-                "node",
-                [("job_id", job_id.as_str())].to_vec(),
-            );
-            // push to metrics gateway
-            loop {
-                let metrics = prometheus::gather();
-                if let Err(e) = prometheus::push_metrics(
-                    "arroyo-worker",
-                    labels.clone(),
-                    PROMETHEUS_PUSH_GATEWAY,
-                    metrics,
-                    None,
-                ) {
-                    debug!(
-                        "Failed to push metrics to {}: {}",
-                        PROMETHEUS_PUSH_GATEWAY, e
-                    );
-                }
-                thread::sleep(METRICS_PUSH_INTERVAL);
-            }
-        });
-
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::broadcast::channel(1);
-
-        let (control_tx, mut control_rx) = channel(128);
-
-        let indices: Vec<_> = self.program.graph.node_indices().collect();
-
+        let (control_tx, control_rx) = channel(128);
         let mut senders = Senders::new();
-
         let worker_id = self.worker_id;
         let job_id = self.job_id.clone();
         let mut controller = if let Some(addr) = self.controller_addr.clone() {
@@ -965,162 +928,17 @@ impl Engine {
             None
         };
 
-        for idx in indices {
-            let (node, control_rx) = self
-                .program
-                .graph
-                .node_weight_mut(idx)
-                .unwrap()
-                .take_subtask(self.job_id.clone());
-
-            let assignment = self
-                .assignments
-                .get(&(node.id.to_string(), node.subtask_idx))
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Could not find assignment for node {}-{}",
-                        node.id, node.subtask_idx
-                    )
-                });
-
-            if assignment.worker_id == self.worker_id.0 {
-                info!(
-                    "[{:?}] Scheduling {}-{}-{} ({}/{})",
-                    self.worker_id,
-                    node.node.node_name(),
-                    node.id,
-                    node.subtask_idx,
-                    node.subtask_idx + 1,
-                    node.parallelism
-                );
-
-                let mut in_qs_map: BTreeMap<(LogicalEdge, usize), Vec<Receiver<QueueItem>>> =
-                    BTreeMap::new();
-
-                for edge in self.program.graph.edge_indices() {
-                    if self.program.graph.edge_endpoints(edge).unwrap().1 == idx {
-                        let weight = self.program.graph.edge_weight_mut(edge).unwrap();
-                        in_qs_map
-                            .entry((weight.edge.clone(), weight.in_logical_idx))
-                            .or_default()
-                            .push(weight.rx.take().unwrap());
-                    }
-                }
-
-                let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, OutQueue>> = BTreeMap::new();
-
-                for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
-                    // is the target of this edge local or remote?
-                    let local = {
-                        let target = self.program.graph.node_weight(edge.target()).unwrap();
-                        self.assignments
-                            .get(&(target.id().to_string(), target.subtask_idx()))
-                            .unwrap()
-                            .worker_id
-                            == self.worker_id.0
-                    };
-
-                    let tx = edge.weight().tx.as_ref().unwrap().clone();
-                    let sender = OutQueue::new(tx, !local);
-                    out_qs_map
-                        .entry(edge.weight().out_logical_idx)
-                        .or_default()
-                        .insert(edge.weight().edge_idx, sender);
-                }
-
-                let task_info = self
-                    .program
-                    .graph
-                    .node_weight(idx)
-                    .unwrap()
-                    .as_queue()
-                    .task_info
-                    .clone();
-                let operator_id = task_info.operator_id.clone();
-                let task_index = task_info.task_index;
-                let join_task = node.node.start(
-                    task_info,
-                    checkpoint_metadata.clone(),
-                    control_rx,
-                    control_tx.clone(),
-                    in_qs_map.into_values().collect(),
-                    out_qs_map
-                        .into_values()
-                        .map(|v| v.into_values().collect())
-                        .collect(),
-                );
-                let send_copy = control_tx.clone();
-                tokio::spawn(async move {
-                    if let Err(error) = join_task.await {
-                        send_copy
-                            .send(ControlResp::TaskFailed {
-                                operator_id,
-                                task_index,
-                                error: error.to_string(),
-                            })
-                            .await
-                            .ok();
-                    };
-                });
-
-                // TODO: make async
-                if let Some(c) = controller.as_mut() {
-                    c.task_started(TaskStartedReq {
-                        worker_id: worker_id.0,
-                        time: to_micros(SystemTime::now()),
-                        job_id: job_id.clone(),
-                        operator_id: node.id.clone(),
-                        operator_subtask: node.subtask_idx as u64,
-                    })
-                    .await
-                    .unwrap();
-                }
-            } else {
-                info!(
-                    "Connecting to remote task {}-{} running on {}",
-                    node.id, node.subtask_idx, assignment.worker_addr
-                );
-
-                for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
-                    let target = self.program.graph.node_weight(edge.target()).unwrap();
-
-                    let quad = Quad {
-                        src_id: edge.weight().in_logical_idx,
-                        src_idx: node.subtask_idx,
-                        dst_id: edge.weight().out_logical_idx,
-                        dst_idx: target.subtask_idx(),
-                    };
-
-                    senders.add(quad, edge.weight().tx.as_ref().unwrap().clone());
-                }
-
-                let mut connects = vec![];
-
-                for edge in self.program.graph.edges_directed(idx, Direction::Incoming) {
-                    let source = self.program.graph.node_weight(edge.source()).unwrap();
-
-                    let quad = Quad {
-                        src_id: edge.weight().in_logical_idx,
-                        src_idx: source.subtask_idx(),
-                        dst_id: edge.weight().out_logical_idx,
-                        dst_idx: node.subtask_idx,
-                    };
-
-                    connects.push((edge.id(), quad));
-                }
-
-                for (id, quad) in connects {
-                    let edge = self.program.graph.edge_weight_mut(id).unwrap();
-
-                    self.network_manager
-                        .connect(
-                            assignment.worker_addr.clone(),
-                            quad,
-                            edge.rx.take().unwrap(),
-                        )
-                        .await;
-                }
-            }
+        for idx in node_indexes {
+            self.schedule_node(
+                &checkpoint_metadata,
+                &control_tx,
+                &mut senders,
+                worker_id,
+                &job_id,
+                &mut controller,
+                idx,
+            )
+            .await;
         }
 
         self.network_manager.start(senders).await;
@@ -1130,6 +948,26 @@ impl Engine {
             n.tx = None;
         }
 
+        let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+        self.spawn_control_thread(shutdown_rx, control_rx, worker_id, job_id, controller);
+        self.spawn_metrics_thread();
+
+        RunningEngine {
+            program: self.program,
+            shutdown_tx,
+            assignments: self.assignments,
+            worker_id,
+        }
+    }
+
+    fn spawn_control_thread(
+        &mut self,
+        mut shutdown_rx: tokio::sync::broadcast::Receiver<bool>,
+        mut control_rx: Receiver<ControlResp>,
+        worker_id: WorkerId,
+        job_id: String,
+        mut controller: Option<ControllerGrpcClient<Channel>>,
+    ) {
         tokio::spawn(async move {
             loop {
                 select! {
@@ -1249,13 +1087,254 @@ impl Engine {
                 }
             }
         });
+    }
 
-        RunningEngine {
-            program: self.program,
-            shutdown_tx,
-            assignments: self.assignments,
-            worker_id,
+    async fn schedule_node(
+        &mut self,
+        checkpoint_metadata: &Option<CheckpointMetadata>,
+        control_tx: &Sender<ControlResp>,
+        senders: &mut Senders,
+        worker_id: WorkerId,
+        job_id: &String,
+        controller: &mut Option<ControllerGrpcClient<Channel>>,
+        idx: NodeIndex,
+    ) {
+        let (node, control_rx) = self
+            .program
+            .graph
+            .node_weight_mut(idx)
+            .unwrap()
+            .take_subtask(self.job_id.clone());
+
+        let assignment = &self
+            .assignments
+            .get(&(node.id.clone().to_string(), node.subtask_idx))
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!(
+                    "Could not find assignment for node {}-{}",
+                    node.id.clone(),
+                    node.subtask_idx
+                )
+            });
+
+        if assignment.worker_id == self.worker_id.0 {
+            self.run_locally(
+                checkpoint_metadata,
+                control_tx,
+                worker_id,
+                job_id,
+                controller,
+                idx,
+                node,
+                control_rx,
+            )
+            .await;
+        } else {
+            self.connect_to_remote_task(
+                senders,
+                idx,
+                node.id.clone(),
+                node.subtask_idx,
+                assignment,
+            )
+            .await;
         }
+    }
+
+    async fn connect_to_remote_task(
+        &mut self,
+        senders: &mut Senders,
+        idx: NodeIndex,
+        node_id: String,
+        node_subtask_idx: usize,
+        assignment: &TaskAssignment,
+    ) {
+        info!(
+            "Connecting to remote task {}-{} running on {}",
+            node_id, node_subtask_idx, assignment.worker_addr
+        );
+
+        for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
+            let target = self.program.graph.node_weight(edge.target()).unwrap();
+
+            let quad = Quad {
+                src_id: edge.weight().in_logical_idx,
+                src_idx: node_subtask_idx,
+                dst_id: edge.weight().out_logical_idx,
+                dst_idx: target.subtask_idx(),
+            };
+
+            senders.add(quad, edge.weight().tx.as_ref().unwrap().clone());
+        }
+
+        let mut connects = vec![];
+
+        for edge in self.program.graph.edges_directed(idx, Direction::Incoming) {
+            let source = self.program.graph.node_weight(edge.source()).unwrap();
+
+            let quad = Quad {
+                src_id: edge.weight().in_logical_idx,
+                src_idx: source.subtask_idx(),
+                dst_id: edge.weight().out_logical_idx,
+                dst_idx: node_subtask_idx,
+            };
+
+            connects.push((edge.id(), quad));
+        }
+
+        for (id, quad) in connects {
+            let edge = self.program.graph.edge_weight_mut(id).unwrap();
+
+            self.network_manager
+                .connect(
+                    assignment.worker_addr.clone(),
+                    quad,
+                    edge.rx.take().unwrap(),
+                )
+                .await;
+        }
+    }
+
+    async fn run_locally(
+        &mut self,
+        checkpoint_metadata: &Option<CheckpointMetadata>,
+        control_tx: &Sender<ControlResp>,
+        worker_id: WorkerId,
+        job_id: &String,
+        controller: &mut Option<ControllerGrpcClient<Channel>>,
+        idx: NodeIndex,
+        node: SubtaskNode,
+        control_rx: Receiver<ControlMessage>,
+    ) {
+        info!(
+            "[{:?}] Scheduling {}-{}-{} ({}/{})",
+            self.worker_id,
+            node.node.node_name(),
+            node.id,
+            node.subtask_idx,
+            node.subtask_idx + 1,
+            node.parallelism
+        );
+
+        let mut in_qs_map: BTreeMap<(LogicalEdge, usize), Vec<Receiver<QueueItem>>> =
+            BTreeMap::new();
+
+        for edge in self.program.graph.edge_indices() {
+            if self.program.graph.edge_endpoints(edge).unwrap().1 == idx {
+                let weight = self.program.graph.edge_weight_mut(edge).unwrap();
+                in_qs_map
+                    .entry((weight.edge.clone(), weight.in_logical_idx))
+                    .or_default()
+                    .push(weight.rx.take().unwrap());
+            }
+        }
+
+        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, OutQueue>> = BTreeMap::new();
+
+        for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
+            // is the target of this edge local or remote?
+            let local = {
+                let target = self.program.graph.node_weight(edge.target()).unwrap();
+                self.assignments
+                    .get(&(target.id().to_string(), target.subtask_idx()))
+                    .unwrap()
+                    .worker_id
+                    == self.worker_id.0
+            };
+
+            let tx = edge.weight().tx.as_ref().unwrap().clone();
+            let sender = OutQueue::new(tx, !local);
+            out_qs_map
+                .entry(edge.weight().out_logical_idx)
+                .or_default()
+                .insert(edge.weight().edge_idx, sender);
+        }
+
+        let task_info = self
+            .program
+            .graph
+            .node_weight(idx)
+            .unwrap()
+            .as_queue()
+            .task_info
+            .clone();
+
+        let operator_id = task_info.operator_id.clone();
+        let task_index = task_info.task_index;
+        let join_task = node.node.start(
+            task_info,
+            checkpoint_metadata.clone(),
+            control_rx,
+            control_tx.clone(),
+            in_qs_map.into_values().collect(),
+            out_qs_map
+                .into_values()
+                .map(|v| v.into_values().collect())
+                .collect(),
+        );
+
+        let send_copy = control_tx.clone();
+        tokio::spawn(async move {
+            if let Err(error) = join_task.await {
+                send_copy
+                    .send(ControlResp::TaskFailed {
+                        operator_id,
+                        task_index,
+                        error: error.to_string(),
+                    })
+                    .await
+                    .ok();
+            };
+        });
+
+        // TODO: make async
+        if let Some(c) = controller.as_mut() {
+            c.task_started(TaskStartedReq {
+                worker_id: worker_id.0,
+                time: to_micros(SystemTime::now()),
+                job_id: job_id.clone(),
+                operator_id: node.id.clone(),
+                operator_subtask: node.subtask_idx as u64,
+            })
+            .await
+            .unwrap();
+        }
+    }
+
+    fn spawn_metrics_thread(&mut self) {
+        let labels = labels! {
+            "worker_id".to_string() => format!("{}", self.worker_id.0),
+            "job_name".to_string() => self.program.name.clone(),
+            "job_id".to_string() => self.job_id.clone(),
+            "run_id".to_string() => self.run_id.to_string(),
+        };
+        let job_id = self.job_id.clone();
+
+        thread::spawn(move || {
+            #[cfg(not(target_os = "freebsd"))]
+            let _agent = arroyo_server_common::try_profile_start(
+                "node",
+                [("job_id", job_id.as_str())].to_vec(),
+            );
+            // push to metrics gateway
+            loop {
+                let metrics = prometheus::gather();
+                if let Err(e) = prometheus::push_metrics(
+                    "arroyo-worker",
+                    labels.clone(),
+                    PROMETHEUS_PUSH_GATEWAY,
+                    metrics,
+                    None,
+                ) {
+                    debug!(
+                        "Failed to push metrics to {}: {}",
+                        PROMETHEUS_PUSH_GATEWAY, e
+                    );
+                }
+                thread::sleep(METRICS_PUSH_INTERVAL);
+            }
+        });
     }
 }
 
