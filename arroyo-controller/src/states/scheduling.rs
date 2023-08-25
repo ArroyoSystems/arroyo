@@ -110,7 +110,7 @@ async fn handle_worker_connect<'a>(
                     rpc_address
                 );
 
-                for i in 0..10 {
+                for i in 0..3 {
                     match Channel::from_shared(rpc_address.clone())
                         .unwrap()
                         .timeout(Duration::from_secs(10))
@@ -258,6 +258,7 @@ impl State for Scheduling {
         let start = Instant::now();
         loop {
             let timeout = STARTUP_TIME
+                .min(ctx.config.ttl.unwrap_or(STARTUP_TIME))
                 .checked_sub(start.elapsed())
                 .unwrap_or(Duration::ZERO);
 

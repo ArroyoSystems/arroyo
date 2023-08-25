@@ -1,7 +1,13 @@
+use std::time::Duration;
+
 use crate::states::StateError;
 use arroyo_rpc::grpc::StopMode;
+use tokio::time::timeout;
+use tracing::{error, info};
 
 use super::{Context, State, Stopped, Transition};
+
+const FINISH_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Copy, Clone, Debug)]
 pub enum StopBehavior {
@@ -27,14 +33,30 @@ impl State for Stopping {
                     return Err(ctx.retryable(self, "failed while stopping job", e, 10));
                 }
 
-                if let Err(e) = ctx
-                    .job_controller
-                    .as_mut()
-                    .unwrap()
-                    .wait_for_finish(ctx.rx)
-                    .await
-                {
-                    return Err(ctx.retryable(self, "failed while waiting for job to stop", e, 10));
+                info!(
+                    msg = "waiting for workers to terminate",
+                    job_id = ctx.config.id
+                );
+                match timeout(FINISH_TIMEOUT, job_controller.wait_for_finish(ctx.rx)).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => {
+                        error!(
+                            msg = "encountered error while waiting for job to stop gracefully; will try force-stopping",
+                            job_id = ctx.config.id,
+                            error = e.to_string(),
+                        );
+                        self.stop_mode = StopBehavior::StopWorkers;
+                        return Self::next(self, ctx).await;
+                    }
+                    Err(_) => {
+                        error!(
+                            msg =
+                                "timed out while waiting for job to stop; will try force-stopping",
+                            job_id = ctx.config.id
+                        );
+                        self.stop_mode = StopBehavior::StopWorkers;
+                        return Self::next(self, ctx).await;
+                    }
                 }
             }
             (_, StopBehavior::StopWorkers) | (None, _) => {
