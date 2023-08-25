@@ -203,7 +203,11 @@ impl ControllerGrpc for ControllerServer {
         &self,
         request: Request<RegisterWorkerReq>,
     ) -> Result<Response<RegisterWorkerResp>, Status> {
-        info!("Worker registered: {:?}", request.get_ref());
+        info!(
+            "Worker registered: {:?} -- {:?}",
+            request.get_ref(),
+            request.remote_addr()
+        );
 
         let req = request.into_inner();
 
