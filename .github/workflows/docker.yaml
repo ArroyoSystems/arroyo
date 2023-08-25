@@ -211,4 +211,3 @@ jobs:
           --set=controller.image.tag=${{ matrix.config.arch }}-sha-${{ steps.short-sha.outputs.sha }} \
           --set=worker.image.repository=ghcr.io/${{ github.repository_owner }}/arroyo-worker \
           --set=worker.image.tag=${{ matrix.config.arch }}-sha-${{ steps.short-sha.outputs.sha }}"
-          
