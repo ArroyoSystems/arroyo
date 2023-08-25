@@ -424,6 +424,12 @@ async fn execute_state<'a>(
         | Err(StateError::RetryableError {
             message,
             source,
+            retries: 1,
+            ..
+        })
+        | Err(StateError::RetryableError {
+            message,
+            source,
             retries: 0,
             ..
         }) => {
@@ -435,7 +441,7 @@ async fn execute_state<'a>(
                 error = format!("{:?}", source)
             );
             log_event(
-                "state_error",
+                "fatal_state_error",
                 json!({
                     "service": "controller",
                     "job_id": ctx.config.id,
