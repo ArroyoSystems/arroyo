@@ -43,6 +43,7 @@ pub struct KubernetesScheduler {
 fn yaml_config<T: DeserializeOwned>(var: &str, default: T) -> T {
     env::var(var)
         .map(|s| {
+            println!("{}", s);
             serde_yaml::from_str(&s)
                 .unwrap_or_else(|e| panic!("Invalid configuration for '{}': {:?}", var, e))
         })
@@ -57,7 +58,7 @@ impl KubernetesScheduler {
             name: format!("{}-worker", string_config(K8S_WORKER_NAME_ENV, "arroyo")),
             image: string_config(
                 K8S_WORKER_IMAGE_ENV,
-                "ghcr.io/arroyosystems/arroyo-worker:amd64",
+                "ghcr.io/arroyosystems/arroyo-worker:latest",
             ),
             labels: yaml_config(K8S_WORKER_LABELS_ENV, BTreeMap::new()),
             annotations: yaml_config(K8S_WORKER_ANNOTATIONS_ENV, BTreeMap::new()),

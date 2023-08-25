@@ -27,10 +27,7 @@ impl State for Stopping {
                     return Err(ctx.retryable(self, "failed while stopping job", e, 10));
                 }
 
-                if let Err(e) = ctx
-                    .job_controller
-                    .as_mut()
-                    .unwrap()
+                if let Err(e) = job_controller
                     .wait_for_finish(ctx.rx)
                     .await
                 {
