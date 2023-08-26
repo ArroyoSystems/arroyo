@@ -539,18 +539,22 @@ fn impl_stream_node_type(
                             }
                         }
                     }
-                    Some(((idx, item), s)) = sel.next() => {
-                        match idx / (in_partitions / #handler_count) {
-                            #(#handle_matchers
-                            )*
-                            _ => unreachable!()
+                    p = sel.next() => {
+                        match p {
+                            Some(((idx, item), s)) => {
+                                match idx / (in_partitions / #handler_count) {
+                                    #(#handle_matchers
+                                    )*
+                                    _ => unreachable!()
+                                }
+                            }
+                            None => {
+                                tracing::info!("[{}] Stream completed", ctx.task_info.operator_name);
+                                break;
+                            }
                         }
                     }
                     #tick_case
-                    else => {
-                        tracing::info!("[{}] Stream completed", ctx.task_info.operator_name);
-                        break;
-                    }
                 }
             }
 

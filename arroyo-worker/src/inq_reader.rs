@@ -62,7 +62,6 @@ impl<St: Stream + Unpin> Stream for InQReader<St> {
                     // because it yielded a Some.
                     // We do not return, but poll `FuturesUnordered`
                     // in the next loop iteration.
-                    tracing::info!("hit this case");
                 }
                 None => return Poll::Ready(None),
             }
