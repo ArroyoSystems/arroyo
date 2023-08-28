@@ -200,7 +200,10 @@ pub(crate) async fn get<C: GenericClient>(
         .into_iter()
         .filter_map(|t| {
             let Some(connector) = connector_for_type(&t.connector) else {
-                warn!("invalid connector {} in saved ConnectionTable {}", t.connector, t.id);
+                warn!(
+                    "invalid connector {} in saved ConnectionTable {}",
+                    t.connector, t.id
+                );
                 return None;
             };
 
@@ -279,9 +282,10 @@ pub(crate) async fn test_schema(req: TestSchemaReq) -> Result<Vec<String>, Statu
     let Some(schema_def) = req
         .schema
         .ok_or_else(|| required_field("schema"))?
-        .definition else {
-            return Ok(vec![]);
-        };
+        .definition
+    else {
+        return Ok(vec![]);
+    };
 
     match schema_def {
         Definition::JsonSchema(schema) => {

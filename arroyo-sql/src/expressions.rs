@@ -1729,7 +1729,10 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
             (2, BuiltinScalarFunction::RegexpMatch) => {
                 let first_argument = Box::new(args.remove(0));
                 let regex_arg = args.remove(0);
-                let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(regex))}) = regex_arg else {
+                let Expression::Literal(LiteralExpression {
+                    literal: ScalarValue::Utf8(Some(regex)),
+                }) = regex_arg
+                else {
                     bail!("regex argument must be a string literal")
                 };
                 let _ = Regex::new(&regex)?;
@@ -1802,7 +1805,10 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
             (3, BuiltinScalarFunction::RegexpReplace) => {
                 let first_argument = Box::new(args.remove(0));
                 let regex_arg = args.remove(0);
-                let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(regex))}) = regex_arg else {
+                let Expression::Literal(LiteralExpression {
+                    literal: ScalarValue::Utf8(Some(regex)),
+                }) = regex_arg
+                else {
                     bail!("regex argument must be a string literal")
                 };
                 let _ = Regex::new(&regex)?;
@@ -2353,7 +2359,7 @@ impl DataStructureFunction {
             }
             DataStructureFunction::NullIf { left, right: _ } => left.return_type().as_nullable(),
             DataStructureFunction::MakeArray(terms) => {
-                let TypeDef::DataType(primitive_type, _ ) = terms[0].return_type() else {
+                let TypeDef::DataType(primitive_type, _) = terms[0].return_type() else {
                     unreachable!("make_array should only be called on a primitive type")
                 };
                 let nullable = terms.iter().any(|term| term.nullable());
@@ -2670,7 +2676,10 @@ pub enum DateTimeFunction {
 }
 
 fn extract_literal_string(expr: Expression) -> Result<String, anyhow::Error> {
-    let Expression::Literal(LiteralExpression{literal: ScalarValue::Utf8(Some(literal_string))}) = expr else {
+    let Expression::Literal(LiteralExpression {
+        literal: ScalarValue::Utf8(Some(literal_string)),
+    }) = expr
+    else {
         bail!("Can only convert a literal into a string")
     };
     Ok(literal_string)

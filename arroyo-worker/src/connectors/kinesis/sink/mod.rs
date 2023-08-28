@@ -101,7 +101,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KinesisSinkFunc<K, T> {
 
     async fn handle_tick(&mut self, _: u64, _ctx: &mut Context<(), ()>) {
         let Some(batch_preparer) = &self.in_progress_batch else {
-            return
+            return;
         };
 
         if !self.flush_config.should_flush(batch_preparer) {
@@ -167,7 +167,12 @@ struct FlushConfig {
 
 impl FlushConfig {
     fn new_from_table(table: &KinesisTable) -> Self {
-        let TableType::Sink { batch_flush_interval_millis, batch_max_buffer_size, records_per_batch } = &table.type_ else {
+        let TableType::Sink {
+            batch_flush_interval_millis,
+            batch_max_buffer_size,
+            records_per_batch,
+        } = &table.type_
+        else {
             panic!("found non-sink kinesis config in sink operator");
         };
         Self {

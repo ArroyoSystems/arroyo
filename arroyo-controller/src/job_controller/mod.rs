@@ -141,7 +141,9 @@ impl RunningJobModel {
                             self.job_id,
                         );
                     } else {
-                        let CheckpointingOrCommittingState::Checkpointing(checkpoint_state)  = checkpoint_state else {
+                        let CheckpointingOrCommittingState::Checkpointing(checkpoint_state) =
+                            checkpoint_state
+                        else {
                             bail!("Received checkpoint finished but not checkpointing");
                         };
                         checkpoint_state.checkpoint_finished(c).await;
@@ -571,7 +573,9 @@ impl JobController {
     }
 
     pub async fn send_commit_messages(&mut self) -> anyhow::Result<()> {
-        let Some(CheckpointingOrCommittingState::Committing(_committing)) = &self.model.checkpoint_state else {
+        let Some(CheckpointingOrCommittingState::Committing(_committing)) =
+            &self.model.checkpoint_state
+        else {
             bail!("should be committing")
         };
         for worker in self.model.workers.values_mut() {

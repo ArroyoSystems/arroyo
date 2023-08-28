@@ -71,7 +71,7 @@ where
             serde_json::from_str(config).expect("Invalid config for FluvioSource");
         let table: FluvioTable =
             serde_json::from_value(config.table).expect("Invalid table config for FluvioSource");
-        let TableType::Source{ offset, .. } = &table.type_ else {
+        let TableType::Source { offset, .. } = &table.type_ else {
             panic!("found non-source Fluvio config in source operator");
         };
 
