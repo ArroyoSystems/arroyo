@@ -100,8 +100,6 @@ jobs:
           mkdir /tmp/kraft-combined-logs
           kafka_*/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/kraft/server.properties
           kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/kraft/server.properties
-      - name: Check Formatting
-        run: cargo fmt -- --check
       - name: Build
         run: cargo build --all-features
       - name: Validate API

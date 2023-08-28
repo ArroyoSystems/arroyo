@@ -15,7 +15,7 @@ serde_json = "1.0"
 arrow = { workspace = true}
 arrow-array = { workspace = true}
 arroyo-types = { path = "../../arroyo-types" }
-arroyo-worker = { path = "../../arroyo-worker" }
+arroyo-worker = { path = "../../arroyo-worker", features = ["kafka-sasl"] }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
