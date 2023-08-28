@@ -1,14 +1,9 @@
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-};
-
 use arrow_schema::DataType;
 use quote::{format_ident, quote};
 use schemars::schema::{Metadata, RootSchema, Schema};
-use syn::{parse_str, Type};
+use syn::parse_str;
 use tracing::warn;
-use typify::{TypeDetails, TypeSpace, TypeSpaceSettings};
+use typify::{Type, TypeDetails, TypeSpace, TypeSpaceSettings};
 
 use crate::types::{StructDef, StructField, TypeDef};
 
@@ -61,9 +56,7 @@ pub fn convert_json_schema(name: &str, schema: &str) -> Result<Vec<StructField>,
             ..
         },
         _,
-    ) = to_schema_type(&type_space, name, s.name(), s.details())
-        .unwrap()
-        .0
+    ) = to_schema_type(&type_space, name, &s).unwrap().0
     {
         Ok(fields)
     } else {
@@ -72,7 +65,7 @@ pub fn convert_json_schema(name: &str, schema: &str) -> Result<Vec<StructField>,
 }
 
 pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
-    fn add_defs(name: &str, fields: &Vec<StructField>, defs: &mut Vec<String>) {
+    fn add_defs(source_name: &str, name: &str, fields: &Vec<StructField>, defs: &mut Vec<String>) {
         let struct_fields: Vec<_> = fields.iter().map(|f| {
             let mut serde_opts = vec![];
             if let Some(opt) = match (&f.data_type, f.original_type.as_ref().map(|s| s.as_str())) {
@@ -110,20 +103,19 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
                 serde_opts.push(quote!(#[serde(rename = #rename)]));
             }
 
-            let name = format_ident!("{}", f.name);
+            let ident = format_ident!("{}", f.name);
             let typ = match &f.data_type {
                 TypeDef::DataType(dt, _) => StructField::data_type_name(dt),
                 TypeDef::StructDef(sd, _) => {
-                    let mut s = DefaultHasher::new();
-                    name.hash(&mut s);
-                    let struct_name = format!("generated_struct_{}", s.finish());
-                    add_defs(&struct_name, &sd.fields, defs);
+                    let name = sd.name.as_ref().unwrap().replace(&format!("{}::", source_name), "");
 
-                    struct_name
+                    add_defs(source_name, &name, &sd.fields, defs);
+
+                    name
                 },
             };
 
-            let typ: Type = parse_str(&typ).unwrap();
+            let typ: syn::Type = parse_str(&typ).unwrap();
 
             let typ = if f.data_type.is_optional() {
                 quote! { Option<#typ> }
@@ -133,7 +125,7 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
 
             quote! {
                 #(#serde_opts) *
-                pub #name: #typ
+                pub #ident: #typ
             }
         }).collect();
 
@@ -151,7 +143,7 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
 
     let mut defs: Vec<String> = vec![];
 
-    add_defs(ROOT_NAME, &fields, &mut defs);
+    add_defs(source_name, ROOT_NAME, &fields, &mut defs);
 
     Ok(format!(
         "mod {} {{\nuse crate::*;\n{}\n}}",
@@ -163,20 +155,14 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
 fn to_schema_type(
     type_space: &TypeSpace,
     source_name: &str,
-    type_name: String,
-    td: TypeDetails,
+    t: &Type,
 ) -> Option<(TypeDef, Option<String>)> {
-    match td {
+    match t.details() {
         TypeDetails::Struct(s) => {
             let mut fields = vec![];
             for info in s.properties_info() {
                 let field_type = type_space.get_type(&info.type_id).unwrap();
-                if let Some((t, original)) = to_schema_type(
-                    type_space,
-                    source_name,
-                    field_type.name(),
-                    field_type.details(),
-                ) {
+                if let Some((t, original)) = to_schema_type(type_space, source_name, &field_type) {
                     fields.push(StructField::with_rename(
                         info.name.to_string(),
                         None,
@@ -189,7 +175,10 @@ fn to_schema_type(
 
             Some((
                 TypeDef::StructDef(
-                    StructDef::for_name(Some(format!("{}::{}", source_name, type_name)), fields),
+                    StructDef::for_name(
+                        Some(format!("{}::{}", source_name, t.ident().to_string())),
+                        fields,
+                    ),
                     false,
                 ),
                 None,
@@ -197,7 +186,7 @@ fn to_schema_type(
         }
         TypeDetails::Option(opt) => {
             let t = type_space.get_type(&opt).unwrap();
-            let (dt, original) = to_schema_type(type_space, source_name, t.name(), t.details())?;
+            let (dt, original) = to_schema_type(type_space, source_name, &t)?;
             Some((dt.to_optional(), original))
         }
         TypeDetails::Builtin(t) => {
@@ -225,12 +214,12 @@ fn to_schema_type(
         TypeDetails::String => Some((TypeDef::DataType(DataType::Utf8, false), None)),
         TypeDetails::Newtype(t) => {
             let t = type_space.get_type(&t.subtype()).unwrap();
-            to_schema_type(type_space, source_name, t.name(), t.details())
+            to_schema_type(type_space, source_name, &t)
         }
         _ => {
             warn!(
                 "Unhandled JSON schema type for field {}, converting to raw json",
-                type_name
+                t.name()
             );
             Some((
                 TypeDef::DataType(DataType::Utf8, false),
@@ -242,111 +231,68 @@ fn to_schema_type(
 
 #[cfg(test)]
 mod test {
+    use crate::json_schema::get_defs;
+
     use super::convert_json_schema;
 
     #[test]
     fn test() {
-        convert_json_schema(
-            "nexmark",
-            r##"
-            {
-                "$schema": "https://json-schema.org/draft/2019-09/schema",
-                "type": "object",
-                "default": {},
-                "title": "Root Schema",
-                "properties": {
-                    "auction": { "$ref": "#/definitions/Auction" },
-                    "bid": { "$ref": "#/definitions/Bid" }
-                },
-                "definitions": {
-                    "Auction": {
-                        "type": "object",
-                        "default": {},
-                        "required": [
-                            "id",
-                            "itemName",
-                            "description",
-                            "initialBid",
-                            "reserve",
-                            "dateTime",
-                            "expires",
-                            "seller",
-                            "category",
-                            "extra"
-                        ],
-                        "properties": {
-                            "id": {
-                                "type": "integer"
-                            },
-                            "itemName": {
-                                "type": "string"
-                            },
-                            "description": {
-                                "type": "string"
-                            },
-                            "initialBid": {
-                                "type": "integer"
-                            },
-                            "reserve": {
-                                "type": "integer"
-                            },
-                            "dateTime": {
-                                "type": "number"
-                            },
-                            "expires": {
-                                "type": "number"
-                            },
-                            "seller": {
-                                "type": "integer"
-                            },
-                            "category": {
-                                "type": "integer"
-                            },
-                            "extra": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "Bid": {
-                        "type": "object",
-                        "default": {},
-                        "required": [
-                            "auction",
-                            "bidder",
-                            "price",
-                            "channel",
-                            "url",
-                            "dateTime",
-                            "extra"
-                        ],
-                        "properties": {
-                            "auction": {
-                                "type": "integer"
-                            },
-                            "bidder": {
-                                "type": "integer"
-                            },
-                            "price": {
-                                "type": "integer"
-                            },
-                            "channel": {
-                                "type": "string"
-                            },
-                            "url": {
-                                "type": "string"
-                            },
-                            "dateTime": {
-                                "type": "number"
-                            },
-                            "extra": {
-                                "type": "string"
-                            }
-                        }
-                    }
+        let json_schema = r##"
+{
+  "type": "object",
+  "title": "ksql.orders",
+  "properties": {
+    "itemid": {
+      "type": "string",
+      "connect.index": 2
+    },
+    "address": {
+      "type": "object",
+      "title": "ksql.address",
+      "connect.index": 4,
+      "properties": {
+        "zipcode": {
+          "type": "integer",
+          "connect.index": 2,
+          "connect.type": "int64"
+        },
+        "city": {
+          "type": "string",
+          "connect.index": 0
+        },
+        "state": {
+          "type": "string",
+          "connect.index": 1
+        },
+        "nested": {
+            "type": "object",
+            "properties": {
+                "a": {
+                    "type": "integer"
                 }
             }
-            "##,
-        )
-        .unwrap();
+        }
+      }
+    },
+    "orderid": {
+      "type": "integer",
+      "connect.index": 1,
+      "connect.type": "int32"
+    },
+    "orderunits": {
+      "type": "number",
+      "connect.index": 3,
+      "connect.type": "float64"
+    },
+    "ordertime": {
+      "type": "integer",
+      "connect.index": 0,
+      "connect.type": "int64"
+    }
+  }
+}            "##;
+
+        let _ = convert_json_schema("nexmark", json_schema).unwrap();
+        let _ = get_defs("nexmark", json_schema).unwrap();
     }
 }
