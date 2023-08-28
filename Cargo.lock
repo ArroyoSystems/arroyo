@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-api"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-compiler-service"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arroyo-rpc",
  "arroyo-server-common",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-connectors"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arroyo-datastream",
@@ -498,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-controller"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arrow-schema",
@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-datastream"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arroyo-macro",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-macro"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-metrics"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arroyo-types",
  "prometheus",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-node"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arroyo-rpc",
@@ -608,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-openapi"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arroyo-api",
  "reqwest",
@@ -622,7 +622,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-rpc"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arroyo-types",
  "bincode 2.0.0-rc.3",
@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-server-common"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arroyo-types",
  "axum",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-sql"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arrow",
@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-sql-macro"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arroyo-connectors",
  "arroyo-datastream",
@@ -704,7 +704,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-sql-testing"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-state"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arrow",
@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-types"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -766,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-worker"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arrow",
@@ -4205,7 +4205,7 @@ dependencies = [
 
 [[package]]
 name = "integ"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arroyo-openapi",
