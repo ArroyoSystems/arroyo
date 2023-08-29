@@ -99,6 +99,7 @@ const checkpointDetailsKey = (pipelineId?: string, jobId?: string, epoch?: numbe
 
 const operatorErrorsKey = (pipelineId?: string, jobId?: string) => {
   return (pageIndex: number, previousPageData: schemas['JobLogMessageCollection']) => {
+    if (!pipelineId || !jobId) return null;
     if (previousPageData && !previousPageData.hasMore) return null;
 
     if (pageIndex === 0) {
