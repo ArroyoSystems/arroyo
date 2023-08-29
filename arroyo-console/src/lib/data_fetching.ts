@@ -254,7 +254,7 @@ const jobMetricsFetcher = () => {
 };
 
 export const useJobMetrics = (pipelineId?: string, jobId?: string) => {
-  const { data, error } = useSWR<schemas['OperatorMetricGroupCollection']>(
+  const { data, isLoading, error } = useSWR<schemas['OperatorMetricGroupCollection']>(
     jobMetricsKey(pipelineId, jobId),
     jobMetricsFetcher(),
     {
@@ -264,6 +264,7 @@ export const useJobMetrics = (pipelineId?: string, jobId?: string) => {
 
   return {
     operatorMetricGroups: data?.data,
+    operatorMetricGroupsLoading: isLoading,
     operatorMetricGroupsError: error,
   };
 };
