@@ -364,3 +364,27 @@ SELECT sum(bid.price) as total_price, bid.auction as auction FROM nexmark
 GROUP BY 2)
 GROUP BY 2;
 "}
+
+full_pipeline_codegen! {"join_matching_columns",
+"create table table_one (
+  a_field BIGINT
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  topic = 'test',
+  format = 'json',
+  type = 'source'
+);
+create table table_two (
+  a_field BIGINT
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  topic = 'test',
+  format = 'json',
+  type = 'source'
+);
+
+SELECT * FROM table_one LEFT OUTER JOIN table_two ON table_one.a_field = table_two.a_field;
+
+"}
