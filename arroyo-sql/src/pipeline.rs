@@ -802,7 +802,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             let field_names = fields
                 .iter()
                 .map(|t| Column {
-                    relation: None,
+                    relation: Some(table_scan.table_name.to_string()),
                     name: t.name.clone(),
                 })
                 .collect();
