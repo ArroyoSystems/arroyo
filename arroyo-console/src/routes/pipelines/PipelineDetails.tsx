@@ -71,7 +71,8 @@ export function PipelineDetails() {
     useOperatorErrors(id, job?.id);
   const [operatorErrors, setOperatorErrors] = useState<JobLogMessage[]>([]);
   const { operatorMetricGroups } = useJobMetrics(id, job?.id);
-  const hasErrors = operatorErrorsPages?.length && operatorErrorsPages[0].data.length > 0;
+
+  const hasErrors = operatorErrorsPages?.length && operatorErrorsPages[0]?.data.length > 0;
 
   if (pipelineError || jobsError) {
     return (
