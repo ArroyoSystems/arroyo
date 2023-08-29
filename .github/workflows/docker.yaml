@@ -49,7 +49,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Login to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v2.2.0
         if:  ${{ github.event_name != 'pull_request' }}
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
@@ -58,7 +58,7 @@ jobs:
         uses: docker/login-action@v2.2.0
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -67,7 +67,7 @@ jobs:
         uses: docker/metadata-action@v4.6.0
         with:
           images: |
-            ghcr.io/${{ github.actor }}/arroyo-${{ matrix.image_type }}
+            ghcr.io/${{ github.repository_owner }}/arroyo-${{ matrix.image_type }}
           tags: |
             type=schedule
             type=ref,event=branch
@@ -110,17 +110,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Login to GHCR
-        uses: docker/login-action@v1
+        uses: docker/login-action@v2.20
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Docker meta
         id: arroyo-docker # you'll use this in the next step
         uses: docker/metadata-action@v3
         with:
           images: |
-            ghcr.io/${{ github.actor }}/arroyo-${{ matrix.image_type }}
+            ghcr.io/${{ github.repository_owner }}/arroyo-${{ matrix.image_type }}
           tags: |
             type=schedule
             type=ref,event=branch
@@ -132,7 +132,7 @@ jobs:
       - name: Create and push Docker manifest
         run: |
           TAG=${{ steps.arroyo-docker.outputs.version }}
-          IMAGE=ghcr.io/${{ github.actor }}/arroyo-${{ matrix.image_type }}
+          IMAGE=ghcr.io/${{ github.repository_owner }}/arroyo-${{ matrix.image_type }}
           docker manifest create   ${IMAGE}:${TAG} ${IMAGE}:arm64-${TAG} ${IMAGE}:amd64-${TAG}
           docker manifest annotate ${IMAGE}:${TAG} ${IMAGE}:arm64-${TAG} --arch arm64
           docker manifest annotate ${IMAGE}:${TAG} ${IMAGE}:amd64-${TAG} --arch amd64
@@ -141,7 +141,7 @@ jobs:
         if: github.ref == 'refs/heads/master'
         run: |
           TAG=${{ steps.arroyo-docker.outputs.version }}
-          IMAGE=ghcr.io/${{ github.actor }}/arroyo-${{ matrix.image_type }}
+          IMAGE=ghcr.io/${{ github.repository_owner }}/arroyo-${{ matrix.image_type }}
           docker manifest create   ${IMAGE}:tip ${IMAGE}:arm64-${TAG} ${IMAGE}:amd64-${TAG}
           docker manifest annotate ${IMAGE}:tip ${IMAGE}:arm64-${TAG} --arch arm64
           docker manifest annotate ${IMAGE}:tip ${IMAGE}:amd64-${TAG} --arch amd64
@@ -203,11 +203,11 @@ jobs:
         run: |
           ct install --charts ./ --config ct.yaml \
           --helm-extra-set-args="\
-          --set=api.image.repository=ghcr.io/${{ github.actor }}/arroyo-services \
+          --set=api.image.repository=ghcr.io/${{ github.repository_owner }}/arroyo-services \
           --set=api.image.tag=${{ matrix.config.arch }}-sha-${{ steps.short-sha.outputs.sha }} \
-          --set=compiler.image.repository=ghcr.io/${{ github.actor }}/arroyo-compiler \
+          --set=compiler.image.repository=ghcr.io/${{ github.repository_owner }}/arroyo-compiler \
           --set=compiler.image.tag=${{ matrix.config.arch }}-sha-${{ steps.short-sha.outputs.sha }} \
-          --set=controller.image.repository=ghcr.io/${{ github.actor }}/arroyo-services \
+          --set=controller.image.repository=ghcr.io/${{ github.repository_owner }}/arroyo-services \
           --set=controller.image.tag=${{ matrix.config.arch }}-sha-${{ steps.short-sha.outputs.sha }} \
-          --set=worker.image.repository=ghcr.io/${{ github.actor }}/arroyo-worker \
+          --set=worker.image.repository=ghcr.io/${{ github.repository_owner }}/arroyo-worker \
           --set=worker.image.tag=${{ matrix.config.arch }}-sha-${{ steps.short-sha.outputs.sha }}"
