@@ -352,7 +352,16 @@ impl State for Scheduling {
         {
             let mut metadata = StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch)
                 .await
-                .unwrap_or_else(|| panic!("epoch {} not found for job {}", epoch, ctx.config.id));
+                .ok_or_else(|| {
+                    fatal(
+                        format!("Failed to restore job; checkpoint {} not found.", epoch),
+                        anyhow!(format!(
+                            "epoch {} not found for job {}",
+                            epoch, ctx.config.id
+                        )),
+                    )
+                })?;
+
             if let Err(e) = StateBackend::prepare_checkpoint_load(&metadata).await {
                 return Err(ctx.retryable(self, "failed to prepare checkpoint for loading", e, 10));
             }

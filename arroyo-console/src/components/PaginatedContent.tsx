@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Flex, IconButton, Stack } from '@chakra-ui/react';
 import { ArrowBackIcon, ArrowForwardIcon } from '@chakra-ui/icons';
 import Loading from './Loading';
@@ -26,14 +26,18 @@ const PaginatedContent: React.FC<PaginatedContentProps> = ({
   setCurrentData,
 }) => {
   const [pageNum, setPageNum] = useState<number>(1);
+  const currentPage = pages?.length ? pages[pageNum - 1] : undefined;
   setMaxPages(Math.max(pageNum, totalPages));
 
-  if (!pages || !pages.length || pages.length != totalPages || loading) {
+  useEffect(() => {
+    if (currentPage) {
+      setCurrentData(currentPage.data);
+    }
+  }, [currentPage]);
+
+  if (!pages || !pages.length || pages.length != totalPages || loading || !currentPage) {
     return <Loading />;
   }
-
-  const currentPage = pages[pageNum - 1];
-  setCurrentData(currentPage.data);
 
   let pageButtons = <></>;
   if (currentPage.hasMore || pages.length > 1) {

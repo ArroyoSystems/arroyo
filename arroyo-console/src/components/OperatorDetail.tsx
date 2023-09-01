@@ -22,7 +22,8 @@ export interface OperatorDetailProps {
 
 const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, operatorId }) => {
   const { pipeline } = usePipeline(pipelineId);
-  const { operatorMetricGroups, operatorMetricGroupsError } = useJobMetrics(pipelineId, jobId);
+  const { operatorMetricGroups, operatorMetricGroupsLoading, operatorMetricGroupsError } =
+    useJobMetrics(pipelineId, jobId);
 
   if (operatorMetricGroupsError) {
     return (
@@ -33,7 +34,7 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, oper
     );
   }
 
-  if (!pipeline || !operatorMetricGroups) {
+  if (!pipeline || !operatorMetricGroups || operatorMetricGroupsLoading) {
     return <Loading size={'lg'} />;
   }
 
@@ -45,16 +46,9 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, oper
   }
 
   const metricGroups = operatorMetricGroup.metricGroups;
+
   const backpressureGroup = metricGroups.find(m => m.name == 'backpressure');
-  const messagesRecievedGroup = metricGroups.find(m => m.name == 'messages_recv');
-  const messagesSentGroup = metricGroups.find(m => m.name == 'messages_sent');
-
-  if (!backpressureGroup || !messagesRecievedGroup || !messagesSentGroup) {
-    return <Loading size={'lg'} />;
-  }
-
   const backpressure = backpressureGroup ? getCurrentMaxMetric(backpressureGroup) : 0;
-
   let backpressureBadge;
   if (backpressure < 0.33) {
     backpressureBadge = <Badge colorScheme={'green'}>LOW</Badge>;
@@ -64,16 +58,37 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, oper
     backpressureBadge = <Badge colorScheme={'red'}>HIGH</Badge>;
   }
 
-  const msgRecv = messagesRecievedGroup.subtasks
-    .map(s => s.metrics[s.metrics.length - 1].value)
-    .reduce((a, c) => a + c, 0);
+  let msgRecv = 0;
+  let eventsReceivedGraph = <></>;
+  const messagesRecievedGroup = metricGroups.find(m => m.name == 'messages_recv');
+  if (messagesRecievedGroup) {
+    msgRecv = messagesRecievedGroup.subtasks
+      .map(s => s.metrics[s.metrics.length - 1].value)
+      .reduce((a, c) => a + c, 0);
+    const msgRecvData = transformMetricGroup(messagesRecievedGroup);
+    eventsReceivedGraph = (
+      <Box className="chart" marginTop="20px" fontSize={14}>
+        Events RX
+        <TimeSeriesGraph data={msgRecvData} timeWindowMs={5 * 60 * 1000} />
+      </Box>
+    );
+  }
 
-  const msgSent = messagesSentGroup.subtasks
-    .map(s => s.metrics[s.metrics.length - 1].value)
-    .reduce((a, c) => a + c, 0);
-
-  const msgSentData = transformMetricGroup(messagesSentGroup);
-  const msgRecvData = transformMetricGroup(messagesRecievedGroup);
+  let msgSent = 0;
+  let eventsSentGraph = <></>;
+  const messagesSentGroup = metricGroups.find(m => m.name == 'messages_sent');
+  if (messagesSentGroup) {
+    msgSent = messagesSentGroup.subtasks
+      .map(s => s.metrics[s.metrics.length - 1].value)
+      .reduce((a, c) => a + c, 0);
+    const msgSentData = transformMetricGroup(messagesSentGroup);
+    eventsSentGraph = (
+      <Box className="chart" marginTop="20px" fontSize={14}>
+        Events TX
+        <TimeSeriesGraph data={msgSentData} timeWindowMs={5 * 60 * 1000} />
+      </Box>
+    );
+  }
 
   return (
     <Box className="operatorDetail" marginTop={10} padding="10px" border="1px solid #333">
@@ -90,15 +105,8 @@ const OperatorDetail: React.FC<OperatorDetailProps> = ({ pipelineId, jobId, oper
         <Code>{Math.round(msgRecv)} eps</Code> rx
         <Code marginLeft="20px">{Math.round(msgSent)} eps</Code> tx
       </Box>
-      <Box className="chart" marginTop="20px" fontSize={14}>
-        Events RX
-        <TimeSeriesGraph data={msgRecvData} timeWindowMs={5 * 60 * 1000} />
-      </Box>
-
-      <Box className="chart" marginTop="20px" fontSize={14}>
-        Events TX
-        <TimeSeriesGraph data={msgSentData} timeWindowMs={5 * 60 * 1000} />
-      </Box>
+      {eventsReceivedGraph}
+      {eventsSentGraph}
     </Box>
   );
 };

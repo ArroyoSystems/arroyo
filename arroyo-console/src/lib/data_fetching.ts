@@ -99,6 +99,7 @@ const checkpointDetailsKey = (pipelineId?: string, jobId?: string, epoch?: numbe
 
 const operatorErrorsKey = (pipelineId?: string, jobId?: string) => {
   return (pageIndex: number, previousPageData: schemas['JobLogMessageCollection']) => {
+    if (!pipelineId || !jobId) return null;
     if (previousPageData && !previousPageData.hasMore) return null;
 
     if (pageIndex === 0) {
@@ -253,7 +254,7 @@ const jobMetricsFetcher = () => {
 };
 
 export const useJobMetrics = (pipelineId?: string, jobId?: string) => {
-  const { data, error } = useSWR<schemas['OperatorMetricGroupCollection']>(
+  const { data, isLoading, error } = useSWR<schemas['OperatorMetricGroupCollection']>(
     jobMetricsKey(pipelineId, jobId),
     jobMetricsFetcher(),
     {
@@ -263,6 +264,7 @@ export const useJobMetrics = (pipelineId?: string, jobId?: string) => {
 
   return {
     operatorMetricGroups: data?.data,
+    operatorMetricGroupsLoading: isLoading,
     operatorMetricGroupsError: error,
   };
 };
