@@ -729,14 +729,6 @@ impl<'a> SqlPipelineBuilder<'a> {
             JoinConstraint::Using => bail!("don't support 'using' in joins"),
         };
         let join_type = join.join_type.try_into()?;
-        // check supported join types
-        match (left_input.has_window(), right_input.has_window()) {
-            (true, false) | (false, true) => {
-                bail!("windowing join mismatch. both sides must either have or not have windows")
-            }
-            _ => {}
-        }
-
         let join_projection_field_names: Vec<_> = join
             .on
             .iter()
