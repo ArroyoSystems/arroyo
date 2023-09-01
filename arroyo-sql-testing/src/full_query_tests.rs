@@ -364,3 +364,32 @@ SELECT sum(bid.price) as total_price, bid.auction as auction FROM nexmark
 GROUP BY 2)
 GROUP BY 2;
 "}
+
+full_pipeline_codegen! { "window_non_windowed_join",
+"
+WITH 
+auction as (
+    SELECT auction.category as category, 
+        auction.datetime as datetime, 
+        auction.expires as expires,
+        auction.id as id 
+    FROM nexmark where auction is not null),
+bid as (
+    SELECT bid.auction as auction,
+        bid.bidder as bidder, 
+        bid.extra as extra,
+        bid.datetime as datetime,
+         bid.price as price
+    FROM nexmark  where bid is not null
+)
+
+SELECT B.auction, B.price, B.bidder, B.dateTime, B.extra
+from bid B
+JOIN (
+  SELECT MAX(B1.price) AS maxprice, tumble(INTERVAL '10' SECOND) as window
+  FROM bid B1
+  GROUP BY 2
+) B1
+ON B.price = B1.maxprice  
+WHERE B.dateTime BETWEEN B1.window.start AND B1.window.end;
+"}
