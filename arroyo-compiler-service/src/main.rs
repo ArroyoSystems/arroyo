@@ -1,20 +1,17 @@
-use std::fs;
-use std::io::ErrorKind;
 use std::process::{exit, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{io, path::PathBuf, str::FromStr, sync::Arc};
 
+use anyhow::bail;
 use arroyo_rpc::grpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
     CompileQueryReq, CompileQueryResp,
 };
 
 use arroyo_server_common::start_admin_server;
-use arroyo_types::{grpc_port, ports, S3_BUCKET_ENV, S3_REGION_ENV};
-use object_store::aws::AmazonS3Builder;
-use object_store::local::LocalFileSystem;
-use object_store::ObjectStore;
+use arroyo_storage::StorageProvider;
+use arroyo_types::{grpc_port, ports, ARTIFACT_URL_ENV};
 use prost::Message;
 use tokio::sync::broadcast;
 use tokio::{process::Command, sync::Mutex};
@@ -37,36 +34,11 @@ pub async fn main() {
     let build_dir = std::env::var("BUILD_DIR").unwrap_or("build_dir".to_string());
     let debug = std::env::var("DEBUG").is_ok();
 
-    let s3_bucket = std::env::var(S3_BUCKET_ENV).ok();
-    let s3_region = std::env::var(S3_REGION_ENV).ok();
-    let output_dir = std::env::var("OUTPUT_DIR").ok();
+    let artifact_url = std::env::var(ARTIFACT_URL_ENV)
+        .unwrap_or_else(|_| panic!("{} must be set", ARTIFACT_URL_ENV));
 
-    let (object_store, base_path): (Arc<Box<dyn ObjectStore>>, _) =
-        match (s3_bucket, s3_region, output_dir) {
-            (Some(s3_bucket), Some(s3_region), _) => (
-                Arc::new(Box::new(
-                    AmazonS3Builder::from_env()
-                        .with_bucket_name(&s3_bucket)
-                        .with_region(&s3_region)
-                        .build()
-                        .unwrap(),
-                )),
-                format!("s3://{}.s3-{}.amazonaws.com", s3_bucket, s3_region),
-            ),
-            (None, _, Some(output_dir)) => {
-                let output_dir =
-                    fs::canonicalize(output_dir).expect("Failed to canonicalize output_dir");
-                (
-                    Arc::new(Box::new(
-                        LocalFileSystem::new_with_prefix(output_dir.clone()).unwrap(),
-                    )),
-                    format!("file://{}", output_dir.to_string_lossy()),
-                )
-            }
-            _ => {
-                panic!("One of {} or OUTPUT_DIR must be set", S3_BUCKET_ENV)
-            }
-        };
+    let storage = StorageProvider::for_url(&artifact_url)
+        .expect("unable to construct storage provider");
 
     let last_used = Arc::new(AtomicU64::new(to_millis(SystemTime::now())));
 
@@ -74,8 +46,7 @@ pub async fn main() {
         build_dir: PathBuf::from_str(&build_dir).unwrap(),
         lock: Arc::new(Mutex::new(())),
         last_used: last_used.clone(),
-        object_store,
-        base_path,
+        storage,
         debug,
     };
 
@@ -85,21 +56,12 @@ pub async fn main() {
             start_service(service).await;
         }
         Some(arg) if arg == "compile" => {
-            let path: object_store::path::Path = args
+            let path = args
                 .get(2)
-                .expect("Usage: ./compiler_service compile <query-req-path>")
-                .to_string()
-                .try_into()
-                .unwrap();
+                .expect("Usage: ./compiler_service compile <query-req-path>");
 
-            let query = service
-                .object_store
-                .get(&path)
-                .await
-                .expect("Failed to read file from object store")
-                .bytes()
-                .await
-                .expect("Failed to read file from object store");
+            let query = service.storage.get(path).await
+                .expect("Failed to read query from storage");
 
             let query = CompileQueryReq::decode(&*query).expect("Failed to decode query request");
 
@@ -160,8 +122,7 @@ pub struct CompileService {
     build_dir: PathBuf,
     lock: Arc<Mutex<()>>,
     last_used: Arc<AtomicU64>,
-    object_store: Arc<Box<dyn ObjectStore>>,
-    base_path: String,
+    storage: StorageProvider,
     debug: bool,
 }
 
@@ -197,7 +158,7 @@ impl CompileService {
         }
     }
 
-    async fn compile(&self, req: CompileQueryReq) -> io::Result<CompileQueryResp> {
+    async fn compile(&self, req: CompileQueryReq) -> anyhow::Result<CompileQueryResp> {
         info!("Starting compilation for {}", req.job_id);
         let start = Instant::now();
         let build_dir = &self.build_dir;
@@ -210,13 +171,7 @@ impl CompileService {
         let result = self.get_output().await?;
 
         if !result.status.success() {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "Failed to compile job: {}",
-                    String::from_utf8_lossy(&result.stderr)
-                ),
-            ));
+            bail!("Failed to compile job: {}", String::from_utf8_lossy(&result.stderr));
         } else if self.debug {
             info!(
                 "cargo build stderr: {}",
@@ -233,13 +188,7 @@ impl CompileService {
                 .expect("wasm-pack not found -- install with `cargo install wasm-pack`");
 
             if !result.status.success() {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!(
-                        "Failed to compile wasm: {}",
-                        String::from_utf8_lossy(&result.stderr)
-                    ),
-                ));
+                bail!("Failed to compile wasm: {}", String::from_utf8_lossy(&result.stderr));
             }
         }
 
@@ -251,26 +200,24 @@ impl CompileService {
         // TODO: replace this with the SHA of the worker code once that's available
         let id = (to_millis(SystemTime::now()) / 1000).to_string();
 
-        let base: object_store::path::Path = format!("{}/artifacts/{}", &req.job_id, id)
-            .try_into()
-            .unwrap();
+        let base = format!("{}/artifacts/{}", &req.job_id, id);
 
         {
             let pipeline = tokio::fs::read(&build_dir.join(self.pipeline_path())).await?;
-            self.object_store
-                .put(&base.child("pipeline"), pipeline.into())
+            self.storage
+                .put(format!("{}/pipeline", base), pipeline)
                 .await?;
         }
 
         {
             let wasm_fns =
                 tokio::fs::read(&build_dir.join("wasm-fns/pkg/wasm_fns_bg.wasm")).await?;
-            self.object_store
-                .put(&base.child("wasm_fns_bg.wasm"), wasm_fns.into())
+            self.storage
+                .put(format!("{}/wasm_fns_bg.wasm", base), wasm_fns)
                 .await?;
         }
 
-        let full_path = format!("{}/{}", self.base_path, base);
+        let full_path = format!("{}/{}", self.storage.canonical_url(), base);
 
         Ok(CompileQueryResp {
             pipeline_path: format!("{}/pipeline", full_path),
@@ -295,10 +242,7 @@ impl CompilerGrpc for CompileService {
 
         self.compile(req).await.map(Response::new).map_err(|e| {
             error!("Failed to compile: {:?}", e);
-            match e.kind() {
-                ErrorKind::InvalidData => Status::unimplemented(e.to_string()),
-                _ => Status::internal(e.to_string()),
-            }
+            Status::internal(e.to_string())
         })
     }
 }

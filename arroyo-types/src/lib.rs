@@ -103,9 +103,14 @@ pub const API_ENDPOINT_ENV: &str = "API_ENDPOINT";
 // be at least 4x the configured scrape interval for your prometheus config
 pub const API_METRICS_RATE_ENV: &str = "API_METRICS_RATE";
 
+// storage configuration
+pub const S3_ENDPOINT_ENV: &str = "S3_ENDPOINT";
 pub const S3_REGION_ENV: &str = "S3_REGION";
 pub const S3_BUCKET_ENV: &str = "S3_BUCKET";
 pub const OUTPUT_DIR_ENV: &str = "OUTPUT_DIR";
+
+// compiler service
+pub const ARTIFACT_URL_ENV: &str = "ARTIFACT_URL";
 
 // kubernetes scheduler configuration
 pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";
