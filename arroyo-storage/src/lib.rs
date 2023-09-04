@@ -5,9 +5,10 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use arroyo_types::{S3_BUCKET_ENV, S3_ENDPOINT_ENV, S3_REGION_ENV};
+use arroyo_types::{S3_ENDPOINT_ENV, S3_REGION_ENV};
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
+use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::path::Path;
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
 use regex::{Captures, Regex};
@@ -120,7 +121,6 @@ pub struct S3Config {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GCSConfig {
-    region: Option<String>,
     bucket: String,
     key: Option<String>,
 }
@@ -144,7 +144,7 @@ impl BackendConfig {
             if let Some(matches) = v.iter().filter_map(|r| r.captures(url)).next() {
                 return match k {
                     Backend::S3 => Self::parse_s3(matches),
-                    Backend::GCS => todo!(),
+                    Backend::GCS => Self::parse_gcs(matches),
                     Backend::Local => Self::parse_local(matches, with_key),
                 };
             }
@@ -155,11 +155,11 @@ impl BackendConfig {
 
     fn parse_s3(matches: Captures) -> Result<Self, StorageError> {
         // fill in env vars
-        let bucket = last([
-            std::env::var(S3_BUCKET_ENV).ok(),
-            matches.name("bucket").map(|m| m.as_str().to_string()),
-        ])
-        .expect("bucket should always be available");
+        let bucket = matches
+            .name("bucket")
+            .expect("bucket should always be available")
+            .as_str()
+            .to_string();
 
         let region = last([
             std::env::var("AWS_DEFAULT_REGION").ok(),
@@ -202,6 +202,18 @@ impl BackendConfig {
         }))
     }
 
+    fn parse_gcs(matches: Captures) -> Result<Self, StorageError> {
+        let bucket = matches
+            .name("bucket")
+            .expect("bucket should always be available")
+            .as_str()
+            .to_string();
+
+        let key = matches.name("key").map(|r| r.as_str().to_string());
+
+        Ok(BackendConfig::GCS(GCSConfig { bucket, key }))
+    }
+
     fn parse_local(matches: Captures, with_key: bool) -> Result<Self, StorageError> {
         let path = matches
             .name("path")
@@ -239,7 +251,7 @@ impl StorageProvider {
 
         match config {
             BackendConfig::S3(config) => Self::construct_s3(config).await,
-            BackendConfig::GCS(_) => todo!(),
+            BackendConfig::GCS(config) => Self::construct_gcs(config),
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }
     }
@@ -249,13 +261,13 @@ impl StorageProvider {
 
         let provider = match config {
             BackendConfig::S3(config) => Self::construct_s3(config).await,
-            BackendConfig::GCS(_) => todo!(),
+            BackendConfig::GCS(config) => Self::construct_gcs(config),
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }?;
 
         let path = match &provider.config {
             BackendConfig::S3(s3) => s3.key.as_ref(),
-            BackendConfig::GCS(_) => todo!(),
+            BackendConfig::GCS(gcs) => gcs.key.as_ref(),
             BackendConfig::Local(local) => local.key.as_ref(),
         }
         .ok_or_else(|| StorageError::NoKeyInUrl)?;
@@ -300,6 +312,20 @@ impl StorageProvider {
         Ok(Self {
             config: BackendConfig::S3(config),
             object_store: Arc::new(builder.build().map_err(|e| Into::<StorageError>::into(e))?),
+            canonical_url,
+        })
+    }
+
+    fn construct_gcs(config: GCSConfig) -> Result<Self, StorageError> {
+        let gcs = GoogleCloudStorageBuilder::from_env()
+            .with_bucket_name(&config.bucket)
+            .build()?;
+
+        let canonical_url = format!("https://{}.storage.googleapis.com", config.bucket);
+
+        Ok(Self {
+            config: BackendConfig::GCS(config),
+            object_store: Arc::new(gcs),
             canonical_url,
         })
     }

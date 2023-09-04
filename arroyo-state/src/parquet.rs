@@ -10,7 +10,7 @@ use arroyo_rpc::{CheckpointCompleted, ControlResp};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{
     from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, CHECKPOINT_URL_ENV,
-    S3_BUCKET_ENV, S3_ENDPOINT_ENV, S3_REGION_ENV,
+    S3_ENDPOINT_ENV, S3_REGION_ENV,
 };
 use bincode::config;
 use bytes::Bytes;
@@ -848,13 +848,8 @@ impl ParquetFlusher {
 }
 
 pub fn get_storage_env_vars() -> HashMap<String, String> {
-    [
-        S3_REGION_ENV,
-        S3_BUCKET_ENV,
-        S3_ENDPOINT_ENV,
-        CHECKPOINT_URL_ENV,
-    ]
-    .iter()
-    .filter_map(|&var| env::var(var).ok().map(|v| (var.to_string(), v)))
-    .collect()
+    [S3_REGION_ENV, S3_ENDPOINT_ENV, CHECKPOINT_URL_ENV]
+        .iter()
+        .filter_map(|&var| env::var(var).ok().map(|v| (var.to_string(), v)))
+        .collect()
 }
