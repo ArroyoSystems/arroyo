@@ -491,9 +491,13 @@ export const useJobOutput = (
   pipelineId?: string,
   jobId?: string
 ) => {
+  if (!pipelineId || !jobId) {
+    return;
+  }
   const url = `${BASE_URL}/v1/pipelines/${pipelineId}/jobs/${jobId}/output`;
   const eventSource = new EventSource(url);
   eventSource.addEventListener('message', handler);
+  return eventSource;
 };
 
 export const useConnectionTableTest = async (
