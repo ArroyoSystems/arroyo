@@ -509,6 +509,7 @@ dependencies = [
  "arroyo-server-common",
  "arroyo-sql",
  "arroyo-state",
+ "arroyo-storage",
  "arroyo-types",
  "async-stream",
  "async-trait",
@@ -521,7 +522,6 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "lazy_static",
- "object_store 0.5.6",
  "petgraph",
  "postgres",
  "postgres-types",
@@ -738,6 +738,7 @@ dependencies = [
  "arrow-schema",
  "arroyo-metrics",
  "arroyo-rpc",
+ "arroyo-storage",
  "arroyo-types",
  "async-stream",
  "async-trait",
@@ -751,8 +752,6 @@ dependencies = [
  "prometheus",
  "prost",
  "rand",
- "rusoto_core",
- "rusoto_s3",
  "test-case",
  "tokio",
  "tracing",
@@ -4926,33 +4925,6 @@ dependencies = [
 
 [[package]]
 name = "object_store"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec9cd6ca25e796a49fa242876d1c4de36a24a6da5258e9f0bc062dbf5e81c53b"
-dependencies = [
- "async-trait",
- "base64 0.21.2",
- "bytes",
- "chrono",
- "futures",
- "itertools 0.10.5",
- "parking_lot 0.12.1",
- "percent-encoding",
- "quick-xml",
- "rand",
- "reqwest",
- "ring",
- "serde",
- "serde_json",
- "snafu",
- "tokio",
- "tracing",
- "url",
- "walkdir",
-]
-
-[[package]]
-name = "object_store"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c776db4f332b571958444982ff641d2531417a326ca368995073b639205d58"
@@ -8711,9 +8683,9 @@ dependencies = [
 
 [[package]]
 name = "xml-rs"
-version = "0.8.15"
+version = "0.8.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a56c84a8ccd4258aed21c92f70c0f6dea75356b6892ae27c24139da456f9336"
+checksum = "47430998a7b5d499ccee752b41567bc3afc57e1327dc855b1a2aa44ce29b5fa1"
 
 [[package]]
 name = "xmlparser"

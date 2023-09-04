@@ -4,6 +4,7 @@ use arroyo_rpc::grpc::{
     HeartbeatNodeReq, RegisterNodeReq, StartWorkerData, StartWorkerHeader, StartWorkerReq,
     StopWorkerReq, StopWorkerStatus, WorkerFinishedReq,
 };
+use arroyo_storage::StorageProvider;
 use arroyo_types::{
     NodeId, WorkerId, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV,
 };
@@ -20,8 +21,6 @@ use tokio::process::Command;
 use tokio::sync::{oneshot, Mutex};
 use tonic::{Request, Status};
 use tracing::{info, warn};
-
-use crate::get_from_object_store;
 
 #[cfg(feature = "k8s")]
 pub mod kubernetes;
@@ -103,10 +102,10 @@ pub struct StartPipelineReq {
 }
 
 async fn get_binaries(req: &StartPipelineReq) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-    let pipeline = get_from_object_store(&req.pipeline_path).await?;
-    let wasm = get_from_object_store(&req.wasm_path).await?;
+    let pipeline = StorageProvider::get_url(&req.pipeline_path).await?;
+    let wasm = StorageProvider::get_url(&req.wasm_path).await?;
 
-    Ok((pipeline, wasm))
+    Ok((pipeline.into(), wasm.into()))
 }
 
 #[async_trait::async_trait]

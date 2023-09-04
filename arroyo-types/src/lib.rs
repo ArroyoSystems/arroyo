@@ -107,7 +107,7 @@ pub const API_METRICS_RATE_ENV: &str = "API_METRICS_RATE";
 pub const S3_ENDPOINT_ENV: &str = "S3_ENDPOINT";
 pub const S3_REGION_ENV: &str = "S3_REGION";
 pub const S3_BUCKET_ENV: &str = "S3_BUCKET";
-pub const OUTPUT_DIR_ENV: &str = "OUTPUT_DIR";
+pub const CHECKPOINT_URL_ENV: &str = "CHECKPOINT_URL";
 
 // compiler service
 pub const ARTIFACT_URL_ENV: &str = "ARTIFACT_URL";

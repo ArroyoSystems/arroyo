@@ -6,7 +6,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-object_store = {version = "0.5.6", features = ["aws", "aws-config", "aws_profile"]}
+arroyo-storage = { path = "../../../../arroyo-storage" }
 regex = "1.7.3"
 tokio = {version = "1.27.0", features = ["fs", "rt", "net"]}
 

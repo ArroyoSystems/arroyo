@@ -37,8 +37,8 @@ pub async fn main() {
     let artifact_url = std::env::var(ARTIFACT_URL_ENV)
         .unwrap_or_else(|_| panic!("{} must be set", ARTIFACT_URL_ENV));
 
-    let storage = StorageProvider::for_url(&artifact_url)
-        .expect("unable to construct storage provider");
+    let storage =
+        StorageProvider::for_url(&artifact_url).expect("unable to construct storage provider");
 
     let last_used = Arc::new(AtomicU64::new(to_millis(SystemTime::now())));
 
@@ -60,7 +60,10 @@ pub async fn main() {
                 .get(2)
                 .expect("Usage: ./compiler_service compile <query-req-path>");
 
-            let query = service.storage.get(path).await
+            let query = service
+                .storage
+                .get(path)
+                .await
                 .expect("Failed to read query from storage");
 
             let query = CompileQueryReq::decode(&*query).expect("Failed to decode query request");
@@ -87,6 +90,10 @@ pub async fn start_service(service: CompileService) {
     let addr = format!("0.0.0.0:{}", grpc).parse().unwrap();
 
     info!("Starting compiler service at {}", addr);
+    info!(
+        "artifacts will be written to {}",
+        service.storage.canonical_url()
+    );
 
     let last_used = service.last_used.clone();
 
@@ -171,7 +178,10 @@ impl CompileService {
         let result = self.get_output().await?;
 
         if !result.status.success() {
-            bail!("Failed to compile job: {}", String::from_utf8_lossy(&result.stderr));
+            bail!(
+                "Failed to compile job: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
         } else if self.debug {
             info!(
                 "cargo build stderr: {}",
@@ -188,7 +198,10 @@ impl CompileService {
                 .expect("wasm-pack not found -- install with `cargo install wasm-pack`");
 
             if !result.status.success() {
-                bail!("Failed to compile wasm: {}", String::from_utf8_lossy(&result.stderr));
+                bail!(
+                    "Failed to compile wasm: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
             }
         }
 

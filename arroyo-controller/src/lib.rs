@@ -2,7 +2,6 @@
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 
-use anyhow::bail;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
@@ -20,10 +19,7 @@ use arroyo_server_common::log_event;
 use arroyo_types::{from_micros, ports, DatabaseConfig, NodeId, WorkerId};
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use lazy_static::lazy_static;
-use object_store::aws::AmazonS3Builder;
-use object_store::ObjectStore;
 use prometheus::{register_gauge, Gauge};
-use regex::Regex;
 use serde_json::json;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
@@ -60,35 +56,6 @@ lazy_static! {
         "number of active pipelines in arroyo-controller"
     )
     .unwrap();
-}
-
-pub async fn get_from_object_store(path: &str) -> anyhow::Result<Vec<u8>> {
-    lazy_static! {
-        static ref PATH_REGEX: Regex = Regex::new(r"file://(?P<path>/.*)").unwrap();
-        static ref S3_REGEX: Regex = Regex::new(
-            r"s3://(?P<bucket>[^/\.]*)\.s3-(?P<region>[^\.]*).amazonaws.com/(?P<path>.*)"
-        )
-        .unwrap();
-    }
-
-    if let Some(m) = PATH_REGEX.captures(path) {
-        return Ok(tokio::fs::read(&m.name("path").unwrap().as_str()).await?);
-    }
-    if let Some(m) = S3_REGEX.captures(path) {
-        let store = AmazonS3Builder::new()
-            .with_bucket_name(m.name("bucket").unwrap().as_str())
-            .with_region(m.name("region").unwrap().as_str())
-            .build()
-            .unwrap();
-        return Ok(store
-            .get(&m.name("path").unwrap().as_str().try_into().unwrap())
-            .await?
-            .bytes()
-            .await?
-            .into());
-    }
-
-    bail!("Unknown protocol for path {}", path);
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]

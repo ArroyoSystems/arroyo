@@ -14,7 +14,7 @@ use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
 use anyhow::anyhow;
-use arroyo_state::{parquet::StorageClient, BackingStore, StateBackend};
+use arroyo_state::{parquet::get_storage_env_vars, BackingStore, StateBackend};
 
 use crate::{
     job_controller::JobController,
@@ -171,7 +171,7 @@ impl Scheduling {
                     name: ctx.config.pipeline_name.clone(),
                     hash: ctx.program.get_hash(),
                     slots: slots_needed,
-                    env_vars: StorageClient::get_storage_environment_variables(),
+                    env_vars: get_storage_env_vars(),
                 })
                 .await
             {
