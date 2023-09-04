@@ -18,6 +18,7 @@ members = [
     "arroyo-storage",
     "arroyo-types",
     "arroyo-worker",
+    "copy-artifacts",
     "integ",
 ]
 
@@ -40,6 +41,11 @@ parquet = { version = "43.0.0" }
 
 [profile.release]
 debug = 1
+
+[profile.release.package.copy-artifacts]
+# optimize for small binary size
+strip = true
+opt-level = "z"
 
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }

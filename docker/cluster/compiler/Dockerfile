@@ -45,6 +45,7 @@ COPY arroyo-console src/arroyo-console
 COPY arroyo-storage src/arroyo-storage
 COPY connector-schemas src/connector-schemas
 
+COPY copy-artifacts src/copy-artifacts
 COPY integ src/integ
 
 COPY Cargo.toml src/Cargo.toml

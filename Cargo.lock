@@ -809,7 +809,7 @@ dependencies = [
  "lazy_static",
  "local-ip-address",
  "md-5 0.10.5",
- "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches)",
+ "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=multipart_gcp)",
  "once_cell",
  "ordered-float 3.7.0",
  "parquet",
@@ -1939,6 +1939,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7bda66e858c683005a53a9a60c69a4aca7eeaa45d124526e389f7aec8e62f38"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "copy-artifacts"
+version = "0.5.0"
+dependencies = [
+ "arroyo-storage",
+ "regex",
+ "tokio",
 ]
 
 [[package]]
@@ -4959,7 +4968,7 @@ dependencies = [
 [[package]]
 name = "object_store"
 version = "0.6.1"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=multipart_gcp#ba7da77b583db84c0e0ea171ce15892918d73fb1"
 dependencies = [
  "async-trait",
  "base64 0.21.2",

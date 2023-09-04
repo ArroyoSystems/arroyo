@@ -7,6 +7,7 @@ require 'toml-rb'
 DOCKERFILES = [
   "docker/cluster/compiler/Dockerfile",
   "docker/cluster/services/Dockerfile",
+  "docker/cluster/worker/Dockerfile",
   "docker/single/Dockerfile"
 ]
 
