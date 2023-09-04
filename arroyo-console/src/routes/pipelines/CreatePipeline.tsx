@@ -74,6 +74,7 @@ export function CreatePipeline() {
   const navigate = useNavigate();
   const [startError, setStartError] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState<number>(0);
+  const [outputSource, setOutputSource] = useState<EventSource | undefined>(undefined);
   const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
   const { connectionTablePages, connectionTablesLoading } = useConnectionTables(50);
   const queryParams = useQuery();
@@ -133,7 +134,7 @@ export function CreatePipeline() {
 
   useEffect(() => {
     if (pipeline && job) {
-      useJobOutput(sseHandler, pipeline.id, job.id);
+      setOutputSource(useJobOutput(sseHandler, pipeline.id, job.id));
     }
   }, [job?.id]);
 
@@ -158,6 +159,7 @@ export function CreatePipeline() {
   };
 
   const preview = async () => {
+    setPipelineId(undefined);
     setOutputs([]);
 
     if (!(await pipelineIsValid())) {
@@ -181,6 +183,14 @@ export function CreatePipeline() {
     // Setting the pipeline id will trigger fetching the job and subscribing to the output
     setPipelineId(newPipeline?.id);
     setTabIndex(1);
+  };
+
+  const stopPreview = async () => {
+    await updatePipeline({ stop: 'immediate' });
+
+    if (outputSource) {
+      outputSource.close();
+    }
   };
 
   const run = async () => {
@@ -291,7 +301,7 @@ export function CreatePipeline() {
     </Stack>
   );
 
-  const previewing = job?.runningDesired && job?.state != 'Failed';
+  const previewing = job?.runningDesired && job?.state != 'Failed' && !job?.finishTime;
 
   let startPreviewButton = <></>;
   let stopPreviewButton = <></>;
@@ -299,7 +309,7 @@ export function CreatePipeline() {
   if (previewing) {
     stopPreviewButton = (
       <Button
-        onClick={() => updatePipeline({ stop: 'immediate' })}
+        onClick={stopPreview}
         size="sm"
         colorScheme="blue"
         title="Stop a preview pipeline"
@@ -470,8 +480,6 @@ export function CreatePipeline() {
     errorMessage = formatError(pipelineGraphError);
   } else if (job?.state == 'Failed') {
     errorMessage = 'Job failed. See "Errors" tab for more details.';
-    // } else if (jobError && jobError instanceof ConnectError) {
-    //   errorMessage = jobError.rawMessage;
   } else {
     errorMessage = '';
   }
@@ -486,6 +494,20 @@ export function CreatePipeline() {
             <Text noOfLines={2} textOverflow={'ellipsis'} wordBreak={'break-all'}>
               {errorMessage}
             </Text>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  let previewCompletedComponent = <></>;
+  if (job?.finishTime && !job?.failureMessage) {
+    previewCompletedComponent = (
+      <div>
+        <Alert status="success">
+          <AlertIcon />
+          <AlertDescription>
+            <Text>Preview completed</Text>
           </AlertDescription>
         </Alert>
       </div>
@@ -520,6 +542,7 @@ export function CreatePipeline() {
         {editorTabs}
         {actionBar}
         {errorComponent}
+        {previewCompletedComponent}
         {previewTabs}
       </Flex>
       {startPipelineModal}
