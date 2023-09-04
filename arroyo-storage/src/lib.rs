@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::{
     collections::HashMap,
@@ -5,10 +6,14 @@ use std::{
 };
 
 use arroyo_types::{S3_BUCKET_ENV, S3_ENDPOINT_ENV, S3_REGION_ENV};
+use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
+use object_store::path::Path;
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
 use regex::{Captures, Regex};
 use thiserror::Error;
+
+mod aws;
 
 #[derive(Clone)]
 pub struct StorageProvider {
@@ -30,6 +35,9 @@ pub enum StorageError {
 
     #[error("object store error: {0:?}")]
     ObjectStore(#[from] object_store::Error),
+
+    #[error("failed to load credentials: {0}")]
+    CredentialsError(String),
 }
 
 // https://s3.us-west-2.amazonaws.com/DOC-EXAMPLE-BUCKET1/puppy.jpg
@@ -39,9 +47,9 @@ const S3_PATH: &str =
 const S3_VIRTUAL: &str =
     r"^https://(?P<bucket>[a-z0-9\-\.]+)\.s3\.(?P<region>[\w\-]+)\.amazonaws\.com(/(?P<key>.+))?$";
 // S3://mybucket/puppy.jpg
-const S3_URL: &str = r"^[sS]3a?://(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
-// unofficial, but convenient -- s3:https://my-endpoint.com:1234/mybucket/puppy.jpg
-const S3_ENDPOINT_URL: &str = r"^[sS]3a?://((?<protocol>https?)://)?(?P<endpoint>[^:/]+):(?<port>\d+)/(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
+const S3_URL: &str = r"^[sS]3[aA]?://(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
+// unofficial, but convenient -- s3::https://my-endpoint.com:1234/mybucket/puppy.jpg
+const S3_ENDPOINT_URL: &str = r"^[sS]3[aA]?::(?<protocol>https?)://(?P<endpoint>[^:/]+):(?<port>\d+)/(?P<bucket>[a-z0-9\-\.]+)(/(?P<key>.+))?$";
 
 // file:///my/path/directory
 const FILE_URI: &str = r"^file://(?P<path>.*)$";
@@ -120,6 +128,7 @@ pub struct GCSConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalConfig {
     path: String,
+    key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,13 +139,13 @@ pub enum BackendConfig {
 }
 
 impl BackendConfig {
-    pub fn parse_url(url: &str) -> Result<Self, StorageError> {
+    pub fn parse_url(url: &str, with_key: bool) -> Result<Self, StorageError> {
         for (k, v) in matchers() {
             if let Some(matches) = v.iter().filter_map(|r| r.captures(url)).next() {
                 return match k {
                     Backend::S3 => Self::parse_s3(matches),
                     Backend::GCS => todo!(),
-                    Backend::Local => Self::parse_local(matches),
+                    Backend::Local => Self::parse_local(matches, with_key),
                 };
             }
         }
@@ -193,19 +202,30 @@ impl BackendConfig {
         }))
     }
 
-    fn parse_local(matches: Captures) -> Result<Self, StorageError> {
+    fn parse_local(matches: Captures, with_key: bool) -> Result<Self, StorageError> {
         let path = matches
             .name("path")
             .expect("path regex must contain a path group")
             .as_str();
 
-        let path = if !path.starts_with("/") {
-            format!("/{}", path)
+        let mut path = if !path.starts_with("/") {
+            PathBuf::from(format!("/{}", path))
         } else {
-            path.to_string()
+            PathBuf::from(path)
         };
 
-        Ok(BackendConfig::Local(LocalConfig { path }))
+        let key = if with_key {
+            let key = path.file_name().map(|k| k.to_str().unwrap().to_string());
+            path.pop();
+            key
+        } else {
+            None
+        };
+
+        Ok(BackendConfig::Local(LocalConfig {
+            path: path.to_str().unwrap().to_string(),
+            key,
+        }))
     }
 }
 
@@ -214,37 +234,55 @@ fn last<I: Sized, const COUNT: usize>(opts: [Option<I>; COUNT]) -> Option<I> {
 }
 
 impl StorageProvider {
-    pub fn for_url(url: &str) -> Result<Self, StorageError> {
-        let config = BackendConfig::parse_url(url)?;
+    pub async fn for_url(url: &str) -> Result<Self, StorageError> {
+        let config: BackendConfig = BackendConfig::parse_url(url, false)?;
 
         match config {
-            BackendConfig::S3(config) => Self::construct_s3(config),
+            BackendConfig::S3(config) => Self::construct_s3(config).await,
             BackendConfig::GCS(_) => todo!(),
-            BackendConfig::Local(config) => Self::construct_local(config),
+            BackendConfig::Local(config) => Self::construct_local(config).await,
         }
     }
 
     pub async fn get_url(url: &str) -> Result<Bytes, StorageError> {
-        let provider = Self::for_url(url)?;
+        let config: BackendConfig = BackendConfig::parse_url(url, true)?;
+
+        let provider = match config {
+            BackendConfig::S3(config) => Self::construct_s3(config).await,
+            BackendConfig::GCS(_) => todo!(),
+            BackendConfig::Local(config) => Self::construct_local(config).await,
+        }?;
 
         let path = match &provider.config {
-            BackendConfig::S3(s3) => s3.key.as_ref().ok_or_else(|| StorageError::NoKeyInUrl)?,
+            BackendConfig::S3(s3) => s3.key.as_ref(),
             BackendConfig::GCS(_) => todo!(),
-            BackendConfig::Local(local) => &local.path,
-        };
+            BackendConfig::Local(local) => local.key.as_ref(),
+        }
+        .ok_or_else(|| StorageError::NoKeyInUrl)?;
 
-        provider.get(path).await
+        let result = provider.get(path).await;
+
+        result
     }
 
-    fn construct_s3(config: S3Config) -> Result<Self, StorageError> {
-        let mut builder = AmazonS3Builder::from_env().with_bucket_name(&config.bucket);
+    async fn construct_s3(mut config: S3Config) -> Result<Self, StorageError> {
+        let credentials = Arc::new(ArroyoCredentialProvider::try_new()?);
 
+        let mut builder = AmazonS3Builder::from_env()
+            .with_bucket_name(&config.bucket)
+            .with_credentials(credentials.clone());
+
+        let default_region = credentials.default_region().await;
+        config.region = config.region.or(default_region);
         if let Some(region) = &config.region {
             builder = builder.with_region(region);
         }
 
         if let Some(endpoint) = &config.endpoint {
-            builder = builder.with_endpoint(endpoint);
+            builder = builder
+                .with_endpoint(endpoint)
+                .with_virtual_hosted_style_request(false)
+                .with_allow_http(true);
         }
 
         let canonical_url = match (&config.region, &config.endpoint) {
@@ -252,10 +290,10 @@ impl StorageProvider {
                 format!("s3::{}/{}", endpoint, config.bucket)
             }
             (Some(region), _) => {
-                format!("s3::https://s3-{}.amazonaws.com/{}", region, config.bucket)
+                format!("https://s3.{}.amazonaws.com/{}", region, config.bucket)
             }
             _ => {
-                format!("s3::https://s3.amazonaws.com/{}", config.bucket)
+                format!("https://s3.amazonaws.com/{}", config.bucket)
             }
         };
 
@@ -266,7 +304,14 @@ impl StorageProvider {
         })
     }
 
-    fn construct_local(config: LocalConfig) -> Result<Self, StorageError> {
+    async fn construct_local(config: LocalConfig) -> Result<Self, StorageError> {
+        tokio::fs::create_dir_all(&config.path).await.map_err(|e| {
+            StorageError::PathError(format!(
+                "failed to create directory {}: {:?}",
+                config.path, e
+            ))
+        })?;
+
         let object_store = Arc::new(
             LocalFileSystem::new_with_prefix(&config.path)
                 .map_err(|e| Into::<StorageError>::into(e))?,
@@ -288,18 +333,20 @@ impl StorageProvider {
             .await
             .map_err(|e| Into::<StorageError>::into(e))?
             .bytes()
-            .await
-            .map_err(|e| Into::<StorageError>::into(e))?;
+            .await?;
 
         Ok(bytes)
     }
 
-    pub async fn put<P: Into<String>>(&self, path: P, bytes: Vec<u8>) -> Result<(), StorageError> {
-        let path = path.into();
-        self.object_store
-            .put(&path.into(), bytes.into())
-            .await
-            .map_err(|e| Into::<StorageError>::into(e))
+    pub async fn put<P: Into<String>>(
+        &self,
+        path: P,
+        bytes: Vec<u8>,
+    ) -> Result<String, StorageError> {
+        let path: Path = path.into().into();
+        self.object_store.put(&path, bytes.into()).await?;
+
+        Ok(format!("{}/{}", self.canonical_url, path))
     }
 
     pub async fn delete<P: Into<String>>(&self, path: P) -> Result<(), StorageError> {
@@ -322,7 +369,11 @@ impl StorageProvider {
 
 #[cfg(test)]
 mod tests {
-    use crate::{matchers, BackendConfig};
+    use std::time::SystemTime;
+
+    use arroyo_types::to_nanos;
+
+    use crate::{matchers, BackendConfig, StorageProvider};
 
     #[test]
     fn test_regex_compilation() {
@@ -332,7 +383,7 @@ mod tests {
     #[test]
     fn test_s3_configs() {
         assert_eq!(
-            BackendConfig::parse_url("s3://mybucket/puppy.jpg").unwrap(),
+            BackendConfig::parse_url("s3://mybucket/puppy.jpg", false).unwrap(),
             BackendConfig::S3(crate::S3Config {
                 endpoint: None,
                 region: None,
@@ -342,8 +393,11 @@ mod tests {
         );
 
         assert_eq!(
-            BackendConfig::parse_url("https://s3.us-west-2.amazonaws.com/my-bucket1/puppy.jpg")
-                .unwrap(),
+            BackendConfig::parse_url(
+                "https://s3.us-west-2.amazonaws.com/my-bucket1/puppy.jpg",
+                false
+            )
+            .unwrap(),
             BackendConfig::S3(crate::S3Config {
                 endpoint: None,
                 region: Some("us-west-2".to_string()),
@@ -353,7 +407,8 @@ mod tests {
         );
 
         assert_eq!(
-            BackendConfig::parse_url("https://s3.us-east-1.amazonaws.com/my-bucket").unwrap(),
+            BackendConfig::parse_url("https://s3.us-east-1.amazonaws.com/my-bucket", false)
+                .unwrap(),
             BackendConfig::S3(crate::S3Config {
                 endpoint: None,
                 region: Some("us-east-1".to_string()),
@@ -364,7 +419,8 @@ mod tests {
 
         assert_eq!(
             BackendConfig::parse_url(
-                "https://my-bucket.s3.us-west-2.amazonaws.com/my/path/test.pdf"
+                "https://my-bucket.s3.us-west-2.amazonaws.com/my/path/test.pdf",
+                false
             )
             .unwrap(),
             BackendConfig::S3(crate::S3Config {
@@ -377,20 +433,10 @@ mod tests {
 
         assert_eq!(
             BackendConfig::parse_url(
-                "s3://https://my-custom-endpoint.com:1234/my-bucket/path/test.pdf"
+                "s3::https://my-custom-endpoint.com:1234/my-bucket/path/test.pdf",
+                false
             )
             .unwrap(),
-            BackendConfig::S3(crate::S3Config {
-                endpoint: Some("https://my-custom-endpoint.com:1234".to_string()),
-                region: None,
-                bucket: "my-bucket".to_string(),
-                key: Some("path/test.pdf".to_string()),
-            })
-        );
-
-        assert_eq!(
-            BackendConfig::parse_url("s3a://my-custom-endpoint.com:1234/my-bucket/path/test.pdf")
-                .unwrap(),
             BackendConfig::S3(crate::S3Config {
                 endpoint: Some("https://my-custom-endpoint.com:1234".to_string()),
                 region: None,
@@ -401,26 +447,66 @@ mod tests {
     }
 
     #[test]
-    fn test_local() {
+    fn test_local_configs() {
         assert_eq!(
-            BackendConfig::parse_url("file:///my/path/directory").unwrap(),
+            BackendConfig::parse_url("file:///my/path/directory", false).unwrap(),
             BackendConfig::Local(crate::LocalConfig {
                 path: "/my/path/directory".to_string(),
+                key: None,
             })
         );
 
         assert_eq!(
-            BackendConfig::parse_url("file:/my/path/directory").unwrap(),
+            BackendConfig::parse_url("file:/my/path/directory", false).unwrap(),
             BackendConfig::Local(crate::LocalConfig {
                 path: "/my/path/directory".to_string(),
+                key: None,
             })
         );
 
         assert_eq!(
-            BackendConfig::parse_url("/my/path/directory").unwrap(),
+            BackendConfig::parse_url("/my/path/directory", false).unwrap(),
             BackendConfig::Local(crate::LocalConfig {
                 path: "/my/path/directory".to_string(),
+                key: None,
             })
+        );
+
+        assert_eq!(
+            BackendConfig::parse_url("/my/path/directory/my-file.pdf", true).unwrap(),
+            BackendConfig::Local(crate::LocalConfig {
+                path: "/my/path/directory".to_string(),
+                key: Some("my-file.pdf".to_string()),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn test_local_fs() {
+        let storage = StorageProvider::for_url("file:///tmp/arroyo-testing/storage-tests")
+            .await
+            .unwrap();
+
+        let now = to_nanos(SystemTime::now());
+        let data = now.to_le_bytes().to_vec();
+        let key = format!("my-test/{}", now);
+
+        let full_url = storage.put(&key, data.clone()).await;
+        assert!(full_url.is_ok());
+
+        assert_eq!(storage.get(&key).await.unwrap(), data.clone());
+
+        assert_eq!(
+            StorageProvider::get_url(&full_url.unwrap()).await.unwrap(),
+            data.clone()
+        );
+
+        storage.delete(&key).await.unwrap();
+
+        assert!(
+            !tokio::fs::try_exists(format!("/tmp/arroyo-testing/storage-tests/{}", key))
+                .await
+                .unwrap()
         );
     }
 }

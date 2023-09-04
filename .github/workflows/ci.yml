@@ -114,7 +114,7 @@ jobs:
       - name: Integ
         run: |
           mkdir /tmp/arroyo-integ
-          RUST_LOG=info DISABLE_TELEMETRY=true OUTPUT_DIR=/tmp/arroyo-integ DEBUG=true target/debug/integ
+          RUST_LOG=info DISABLE_TELEMETRY=true OUTPUT_DIR=file:///tmp/arroyo-integ DEBUG=true target/debug/integ
   build-console:
     runs-on: ubuntu-latest
     steps:

@@ -30,16 +30,18 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::warn;
 use tracing::{debug, info};
 
-fn get_storage_provider() -> anyhow::Result<StorageProvider> {
+async fn get_storage_provider() -> anyhow::Result<StorageProvider> {
     // TODO: this should be encoded in the config so that the controller doesn't need
     // to be synchronized with the workers
     let storage_url =
         env::var(CHECKPOINT_URL_ENV).unwrap_or_else(|_| "file:///tmp/arroyo".to_string());
 
-    StorageProvider::for_url(&storage_url).context(format!(
-        "failed to construct checkpoint backend for URL {}",
-        storage_url
-    ))
+    StorageProvider::for_url(&storage_url)
+        .await
+        .context(format!(
+            "failed to construct checkpoint backend for URL {}",
+            storage_url
+        ))
 }
 
 pub struct ParquetBackend {
@@ -86,7 +88,7 @@ impl BackingStore for ParquetBackend {
 
     // TODO: should this be a Result, rather than an option?
     async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Option<CheckpointMetadata> {
-        let storage_client = get_storage_provider().unwrap();
+        let storage_client = get_storage_provider().await.unwrap();
         let data = storage_client
             .get(&metadata_path(&base_path(job_id, epoch)))
             .await
@@ -100,7 +102,7 @@ impl BackingStore for ParquetBackend {
         operator_id: &str,
         epoch: u32,
     ) -> Option<OperatorCheckpointMetadata> {
-        let storage_client = get_storage_provider().unwrap();
+        let storage_client = get_storage_provider().await.unwrap();
         let data = storage_client
             .get(&metadata_path(&operator_path(job_id, epoch, operator_id)))
             .await
@@ -108,23 +110,8 @@ impl BackingStore for ParquetBackend {
         Some(OperatorCheckpointMetadata::decode(&data[..]).unwrap())
     }
 
-    async fn initialize_checkpoint(_job_id: &str, _epoch: u32, _operators: &[&str]) -> Result<()> {
-        // let storage_client = get_storage_provider().unwrap();
-        // let path = base_path(job_id, epoch);
-
-        // storage_client.initialize(&path).await?;
-
-        // for operator in operators {
-        //     storage_client
-        //         .initialize(&operator_path(job_id, epoch, operator))
-        //         .await?;
-        // }
-
-        Ok(())
-    }
-
     async fn complete_operator_checkpoint(metadata: OperatorCheckpointMetadata) {
-        let storage_client = get_storage_provider().unwrap();
+        let storage_client = get_storage_provider().await.unwrap();
         let path = metadata_path(&operator_path(
             &metadata.job_id,
             metadata.epoch,
@@ -139,7 +126,7 @@ impl BackingStore for ParquetBackend {
 
     async fn complete_checkpoint(metadata: CheckpointMetadata) {
         debug!("writing checkpoint {:?}", metadata);
-        let storage_client = get_storage_provider().unwrap();
+        let storage_client = get_storage_provider().await.unwrap();
         let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
         // TODO: propagate error
         storage_client
@@ -153,7 +140,7 @@ impl BackingStore for ParquetBackend {
         tables: Vec<TableDescriptor>,
         tx: Sender<ControlResp>,
     ) -> Self {
-        let storage = get_storage_provider().unwrap();
+        let storage = get_storage_provider().await.unwrap();
         Self {
             epoch: 1,
             min_epoch: 1,
@@ -222,7 +209,7 @@ impl BackingStore for ParquetBackend {
 
         let writer_current_files = current_files.clone();
 
-        let storage = get_storage_provider().unwrap();
+        let storage = get_storage_provider().await.unwrap();
 
         Self {
             epoch: metadata.epoch + 1,
@@ -265,7 +252,7 @@ impl BackingStore for ParquetBackend {
             })
             .collect();
 
-        let storage_client = Mutex::new(get_storage_provider()?);
+        let storage_client = Mutex::new(get_storage_provider().await?);
 
         // wait for all of the futures to complete
         while let Some(result) = futures.next().await {
@@ -425,7 +412,7 @@ impl ParquetBackend {
                 .collect();
 
         let mut deleted_paths = HashSet::new();
-        let storage_client = get_storage_provider()?;
+        let storage_client = get_storage_provider().await?;
 
         for epoch_to_remove in old_min_epoch..new_min_epoch {
             let Some(metadata) =

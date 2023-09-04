@@ -109,7 +109,8 @@ s3:
   region: ""
   bucket: ""
 
-outputDir: ""
+artifactUrl: ""
+checkpointUrl: ""
 
 serviceAccount:
   # Specifies whether a service account should be created

@@ -37,8 +37,9 @@ pub async fn main() {
     let artifact_url = std::env::var(ARTIFACT_URL_ENV)
         .unwrap_or_else(|_| panic!("{} must be set", ARTIFACT_URL_ENV));
 
-    let storage =
-        StorageProvider::for_url(&artifact_url).expect("unable to construct storage provider");
+    let storage = StorageProvider::for_url(&artifact_url)
+        .await
+        .expect("unable to construct storage provider");
 
     let last_used = Arc::new(AtomicU64::new(to_millis(SystemTime::now())));
 
@@ -229,6 +230,8 @@ impl CompileService {
                 .put(format!("{}/wasm_fns_bg.wasm", base), wasm_fns)
                 .await?;
         }
+
+        info!("Uploaded binaries to {}", base);
 
         let full_path = format!("{}/{}", self.storage.canonical_url(), base);
 
