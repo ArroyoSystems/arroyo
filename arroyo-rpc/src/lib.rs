@@ -54,6 +54,11 @@ pub struct CheckpointEvent {
 pub enum ControlResp {
     CheckpointEvent(CheckpointEvent),
     CheckpointCompleted(CheckpointCompleted),
+    TaskStarted {
+        operator_id: String,
+        task_index: usize,
+        start_time: SystemTime,
+    },
     TaskFinished {
         operator_id: String,
         task_index: usize,
