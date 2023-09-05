@@ -130,7 +130,7 @@ Generic storage env vars
 {{- if .Values.s3.bucket }}
 - name: S3_BUCKET
   value: {{ .Values.s3.bucket }}
-{{ -end }}
+{{- end }}
 {{- if .Values.s3.region }}
 - name: S3_REGION
   value: {{ .Values.s3.region }}

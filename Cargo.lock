@@ -809,7 +809,7 @@ dependencies = [
  "lazy_static",
  "local-ip-address",
  "md-5 0.10.5",
- "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=multipart_gcp)",
+ "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches)",
  "once_cell",
  "ordered-float 3.7.0",
  "parquet",
@@ -4968,7 +4968,7 @@ dependencies = [
 [[package]]
 name = "object_store"
 version = "0.6.1"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=multipart_gcp#ba7da77b583db84c0e0ea171ce15892918d73fb1"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
 dependencies = [
  "async-trait",
  "base64 0.21.2",
