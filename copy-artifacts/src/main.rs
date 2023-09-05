@@ -1,7 +1,7 @@
+use arroyo_storage::StorageProvider;
 use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
-use arroyo_storage::StorageProvider;
 
 fn main() {
     let args: Vec<_> = env::args().collect();
@@ -16,22 +16,26 @@ fn main() {
     // TODO: stream the data instead of materializing it all in memory
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
-        .build().unwrap();
+        .build()
+        .unwrap();
     rt.block_on(async {
-        let futures: Vec<_> = srcs.iter().map(|src| {
-            let src = src.clone();
-            let name = src.split("/").last().unwrap();
-            let dst = PathBuf::from_str(&dst).unwrap()
-                .join(name);
-            tokio::spawn(async move {
-                let data: Vec<u8> = StorageProvider::get_url(&src).await
-                    .expect(&format!("Failed to download {}", src))
-                    .into();
+        let futures: Vec<_> = srcs
+            .iter()
+            .map(|src| {
+                let src = src.clone();
+                let name = src.split("/").last().unwrap();
+                let dst = PathBuf::from_str(&dst).unwrap().join(name);
+                tokio::spawn(async move {
+                    let data: Vec<u8> = StorageProvider::get_url(&src)
+                        .await
+                        .expect(&format!("Failed to download {}", src))
+                        .into();
 
-                tokio::fs::write(&dst, data).await.unwrap();
-                println!("Downloaded {}", src);
+                    tokio::fs::write(&dst, data).await.unwrap();
+                    println!("Downloaded {}", src);
+                })
             })
-        }).collect();
+            .collect();
 
         for f in futures {
             f.await.unwrap();
