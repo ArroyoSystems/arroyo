@@ -76,7 +76,7 @@ impl Connector for FileSystemConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
         let is_local = match &table.write_target {
-            Destination::FolderUri { path } => path.starts_with("file://"),
+            Destination::FolderUri { path } => path.starts_with("file:/"),
             Destination::S3Bucket { .. } => false,
             Destination::LocalFilesystem { .. } => true,
         };

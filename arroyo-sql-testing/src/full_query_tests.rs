@@ -1,7 +1,90 @@
 #![allow(warnings)]
-use arroyo_sql_macro::full_pipeline_codegen;
+use std::{fmt::Debug, sync::Arc};
 
-full_pipeline_codegen! {"select_star", "SELECT * FROM nexmark"}
+use arroyo_rpc::ControlResp;
+use arroyo_sql_macro::{correctness_run_codegen, full_pipeline_codegen};
+use arroyo_worker::{
+    engine::{Engine, StreamConfig},
+    LocalRunner, LogicalEdge, LogicalNode,
+};
+use petgraph::Graph;
+use tokio::fs::read_to_string;
+
+pub(crate) struct CompiledIntegrationTestProgram {
+    graph: Graph<LogicalNode, LogicalEdge>,
+    name: String,
+    output_location: String,
+    golden_output_location: String,
+}
+
+correctness_run_codegen! {"select_star",
+"CREATE TABLE cars (
+  timestamp TIMESTAMP,
+  driver_id BIGINT,
+  event_type TEXT,
+  location TEXT
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/cars.json',
+  format = 'json',
+  type = 'source'
+);
+
+CREATE TABLE cars_output (
+  timestamp TIMESTAMP,
+  driver_id BIGINT,
+  event_type TEXT,
+  location TEXT
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'json',
+  type = 'sink'
+);
+INSERT INTO cars_output SELECT * FROM cars"}
+
+async fn run_pipeline_and_assert_outputs(
+    graph: Graph<LogicalNode, LogicalEdge>,
+    name: String,
+    output_location: String,
+    golden_output_location: String,
+) {
+    let program = arroyo_worker::engine::Program::local_from_logical(name, &graph);
+    let (running_engine, mut control_rx) = Engine::for_local(program, "test".to_string())
+        .start(StreamConfig {
+            restore_epoch: None,
+        })
+        .await;
+    while let Some(control_resp) = control_rx.recv().await {}
+
+    // get the lines of output and golden output
+    let mut output_lines: Vec<_> = read_to_string(output_location)
+        .await
+        .unwrap()
+        .lines()
+        .map(|x| x.to_string())
+        .collect();
+    let mut golden_output_lines: Vec<_> = read_to_string(golden_output_location.clone())
+        .await
+        .expect(&golden_output_location)
+        .lines()
+        .map(|x| x.to_string())
+        .collect();
+    if output_lines.len() != golden_output_lines.len() {
+        panic!("output and golden output have different number of lines");
+    }
+    output_lines
+        .into_iter()
+        .zip(golden_output_lines.into_iter())
+        .enumerate()
+        .for_each(|(i, (output_line, golden_output_line))| {
+            assert_eq!(
+                output_line, golden_output_line,
+                "line {} of output and golden output differ",
+                i
+            )
+        });
+}
 
 full_pipeline_codegen! {"query_5_join",
 "WITH bids as (SELECT bid.auction as auction, bid.datetime as datetime
@@ -150,7 +233,7 @@ full_pipeline_codegen! {"create_parquet_s3_source",
 ) WITH (
   connector ='filesystem',
   path = 'https://s3.us-west-2.amazonaws.com/demo/s3-uri',
-  format = 'parquet',
+  format = 'json',
   rollover_seconds = '5'
 );
 

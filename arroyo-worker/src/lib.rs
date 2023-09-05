@@ -190,15 +190,28 @@ impl LocalRunner {
 
     pub async fn run(self) {
         let name = format!("{}-0", self.program.name);
+        let mut running_nodes = self.program.total_nodes();
         let engine = Engine::for_local(self.program, name);
-        engine
+        let (_running_engine, mut control_rx) = engine
             .start(StreamConfig {
                 restore_epoch: None,
             })
             .await;
 
         loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            while let Some(control_message) = control_rx.recv().await {
+                println!("received {:?}", control_message);
+                if let ControlResp::TaskFinished {
+                    operator_id: _,
+                    task_index: _,
+                } = control_message
+                {
+                    running_nodes -= 1;
+                    if running_nodes == 0 {
+                        return;
+                    }
+                }
+            }
         }
     }
 }

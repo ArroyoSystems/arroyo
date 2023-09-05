@@ -677,6 +677,23 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn total_nodes(&self) -> usize {
+        self.graph.node_count()
+    }
+    pub fn local_from_logical(name: String, logical: &DiGraph<LogicalNode, LogicalEdge>) -> Self {
+        let assignments = logical
+            .node_weights()
+            .flat_map(|weight| {
+                (0..weight.initial_parallelism).map(|index| TaskAssignment {
+                    operator_id: weight.id.clone(),
+                    operator_subtask: index as u64,
+                    worker_id: 0,
+                    worker_addr: "".into(),
+                })
+            })
+            .collect();
+        Self::from_logical(name, logical, &assignments)
+    }
     pub fn from_logical(
         name: String,
         logical: &DiGraph<LogicalNode, LogicalEdge>,

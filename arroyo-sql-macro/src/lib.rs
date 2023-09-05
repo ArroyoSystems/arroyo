@@ -118,10 +118,16 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
 
 fn full_pipeline_codegen_internal(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     let pipeline_case: PipelineCase = syn::parse2(input).unwrap();
+    get_pipeline_module(pipeline_case.query.value(), pipeline_case.test_name.value()).into()
+}
 
-    let test_name = &pipeline_case.test_name.value();
-    let query_string = &pipeline_case.query;
+struct PipelineCase {
+    test_name: LitStr,
+    query: LitStr,
+}
 
+fn get_pipeline_module(query_string: String, mod_name: String) -> TokenStream {
+    let mod_ident: syn::Ident = parse_str(&mod_name).unwrap();
     let mut schema_provider = ArroyoSchemaProvider::new();
 
     // Add a Nexmark source named "nexmark";
@@ -131,8 +137,8 @@ fn full_pipeline_codegen_internal(input: proc_macro2::TokenStream) -> proc_macro
             "nexmark",
             EmptyConfig {},
             NexmarkTable {
-                event_rate: 10.0,
-                runtime: None,
+                event_rate: 1000.0,
+                runtime: Some(0.1),
             },
             None,
         )
@@ -140,11 +146,15 @@ fn full_pipeline_codegen_internal(input: proc_macro2::TokenStream) -> proc_macro
 
     schema_provider.add_connector_table(nexmark);
 
-    let (program, _) =
-        parse_and_get_program_sync(query_string.value(), schema_provider, SqlConfig::default())
-            .unwrap();
-
-    let mod_name: syn::Ident = parse_str(test_name).unwrap();
+    // TODO: test with higher parallelism
+    let (program, _) = parse_and_get_program_sync(
+        query_string,
+        schema_provider,
+        SqlConfig {
+            default_parallelism: 1,
+        },
+    )
+    .unwrap();
 
     let function = program.make_graph_function();
     let other_defs: Vec<proc_macro2::TokenStream> = program
@@ -152,32 +162,29 @@ fn full_pipeline_codegen_internal(input: proc_macro2::TokenStream) -> proc_macro
         .iter()
         .map(|t| parse_str(t).unwrap())
         .collect();
-    quote!(mod #mod_name {
-        use petgraph::graph::DiGraph;
-        use arroyo_worker::operators::*;
-        use arroyo_worker::connectors;
-        use arroyo_worker::operators::sinks::*;
-        use arroyo_worker::operators::sinks;
-        use arroyo_worker::operators::joins::*;
-        use arroyo_worker::operators::windows::*;
-        use arroyo_worker::engine::{Program, SubtaskNode};
-        use arroyo_worker::{LogicalEdge, LogicalNode};
-        use arroyo_sql::types;
-        use types::*;
-        use chrono;
-        use std::time::SystemTime;
-        use std::str::FromStr;
-        use serde::{Deserialize, Serialize};
-        #function
+    quote!(mod #mod_ident {
+            use petgraph::graph::DiGraph;
+            use arroyo_worker::operators::*;
+            use arroyo_worker::connectors;
+            use arroyo_worker::operators::sinks::*;
+            use arroyo_worker::operators::sinks;
+            use arroyo_worker::operators::joins::*;
+            use arroyo_worker::operators::windows::*;
+            use arroyo_worker::engine::{Program, SubtaskNode};
+            use arroyo_worker::{LogicalEdge, LogicalNode};
+            use arroyo_sql::types;
+            use types::*;
+            use chrono;
+            use std::time::SystemTime;
+            use std::str::FromStr;
+            use serde::{Deserialize, Serialize};
 
-        #(#other_defs)*
-    })
+            #function
+
+            #(#other_defs)*
+        }
+    )
     .into()
-}
-
-struct PipelineCase {
-    test_name: LitStr,
-    query: LitStr,
 }
 
 impl Parse for PipelineCase {
@@ -187,6 +194,72 @@ impl Parse for PipelineCase {
         let query = input.parse()?;
         Ok(Self { test_name, query })
     }
+}
+
+struct CorrectnessTestCase {
+    test_name: LitStr,
+    query: LitStr,
+}
+
+impl Parse for CorrectnessTestCase {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let test_name = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let query = input.parse()?;
+        Ok(Self { test_name, query })
+    }
+}
+
+#[proc_macro]
+pub fn correctness_run_codegen(input: TokenStream) -> TokenStream {
+    let correctness_case: CorrectnessTestCase =
+        syn::parse_macro_input!(input as CorrectnessTestCase);
+    let query_string = correctness_case.query.value();
+    let test_name = correctness_case.test_name.value();
+    // replace $input_file with the current directory and then inputs/query_name.json
+    let physical_input_dir = format!(
+        "{}/arroyo-sql-testing/inputs/",
+        std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string(),
+    );
+    let query_string = query_string.replace("$input_dir", &physical_input_dir);
+    // replace $output_file with the current directory and then outputs/query_name.json
+    let physical_output = format!(
+        "{}/arroyo-sql-testing/outputs/{}.json",
+        std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string(),
+        test_name
+    );
+    let query_string = query_string.replace("$output_path", &physical_output);
+    let golden_output_location = format!(
+        "{}/arroyo-sql-testing/golden_outputs/{}.json",
+        std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string(),
+        test_name
+    );
+    let module_ident: syn::Ident = parse_str(&test_name).unwrap();
+    let test_ident: syn::Ident = parse_str(&format!("{}_test", test_name)).unwrap();
+    let module: proc_macro2::TokenStream =
+        get_pipeline_module(query_string, test_name.clone()).into();
+
+    quote!(
+        #[tokio::test]
+        async fn #test_ident() {
+            let graph = #module_ident::make_graph();
+            let name = #test_name.to_string();
+            let output_location = #physical_output.to_string();
+            let golden_output_location = #golden_output_location.to_string();
+            run_pipeline_and_assert_outputs(graph, name, output_location, golden_output_location).await;
+        }
+        #module
+    )
+    .into()
 }
 
 #[cfg(test)]

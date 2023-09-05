@@ -1137,6 +1137,25 @@ impl Program {
             .collect()
     }
 
+    pub fn sink_value_types(&self) -> Vec<String> {
+        let sink_node_indexes = self
+            .graph
+            .externals(Direction::Outgoing)
+            .collect::<Vec<NodeIndex>>();
+        sink_node_indexes
+            .into_iter()
+            .map(|node| {
+                self.graph
+                    .edges_directed(node, Direction::Incoming)
+                    .next()
+                    .unwrap()
+                    .weight()
+                    .value
+                    .clone()
+            })
+            .collect()
+    }
+
     pub fn get_hash(&self) -> String {
         let mut hasher = DefaultHasher::new();
         let bs = bincode::encode_to_vec(self, bincode::config::standard()).unwrap();
