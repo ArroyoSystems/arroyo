@@ -47,7 +47,6 @@ aws-config = { version = "0.51", default-features = false, features = ["rt-tokio
 uuid = {version = "1.4.1", features = ["v4"]}
 rusoto_core = "0.48.0"
 rusoto_s3 = "0.48.0"
-object_store = {version = "0.6.1", features = ["aws"]}
 
 tonic = { workspace = true }
 prost = "0.11"
@@ -67,6 +66,7 @@ typify = "0.0.13"
 regress = "0.6.0"
 tokio-tungstenite = { version = "0.19", features = ["native-tls"] }
 fluvio = {version = "0.19", features = ["openssl"]}
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches', features = ["aws"] }
 
 [dev-dependencies]
 test-case = "3"

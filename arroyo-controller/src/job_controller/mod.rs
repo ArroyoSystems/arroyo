@@ -508,6 +508,9 @@ impl JobController {
                         job_id = self.config.id,
                         error = format!("{:?}", e)
                     );
+
+                    // wait a bit before trying again
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 Err(e) => {
                     error!(
@@ -515,6 +518,9 @@ impl JobController {
                         job_id = self.config.id,
                         error = format!("{:?}", e)
                     );
+
+                    // wait a bit before trying again
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
         }
@@ -628,7 +634,7 @@ impl JobController {
     }
 
     fn start_compaction(&self, new_min: u32) -> JoinHandle<anyhow::Result<u32>> {
-        let min_epoch = self.model.min_epoch;
+        let min_epoch = self.model.min_epoch.max(1);
         let job_id = self.config.id.clone();
         let pool = self.pool.clone();
 

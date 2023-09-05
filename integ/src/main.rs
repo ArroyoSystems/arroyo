@@ -132,7 +132,7 @@ pub async fn main() {
         format!("target/{}/arroyo-controller", profile),
         &[],
         vec![
-            ("OUTPUT_DIR".to_string(), output_dir.clone()),
+            ("CHECKPOINT_URL".to_string(), output_dir.clone()),
             (
                 "REMOTE_COMPILER_ENDPOINT".to_string(),
                 "http://localhost:9000".to_string(),
@@ -143,7 +143,7 @@ pub async fn main() {
     run_service(
         format!("target/{}/arroyo-compiler-service", profile),
         &["start"],
-        vec![("OUTPUT_DIR".to_string(), output_dir.clone())],
+        vec![("ARTIFACT_URL".to_string(), output_dir.clone())],
     )
     .expect("Failed to run compiler service");
 

@@ -134,7 +134,7 @@ arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arr
 arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
 arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
 arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
-object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches' }
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'multipart_gcp' }
 "#;
 
         // NOTE: These must be kept in sync with the Cargo configs in docker/build_base and build_dir/Cargo.toml

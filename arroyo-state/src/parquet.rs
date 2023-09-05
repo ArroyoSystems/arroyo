@@ -1,5 +1,5 @@
 use crate::{hash_key, BackingStore, BINCODE_CONFIG};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use arrow_array::RecordBatch;
 use arroyo_rpc::grpc::backend_data::BackendData;
 use arroyo_rpc::grpc::{
@@ -7,9 +7,10 @@ use arroyo_rpc::grpc::{
     SubtaskCheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType,
 };
 use arroyo_rpc::{CheckpointCompleted, ControlResp};
+use arroyo_storage::StorageProvider;
 use arroyo_types::{
-    from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, OUTPUT_DIR_ENV, S3_BUCKET_ENV,
-    S3_REGION_ENV,
+    from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, CHECKPOINT_URL_ENV,
+    S3_ENDPOINT_ENV, S3_REGION_ENV,
 };
 use bincode::config;
 use bytes::Bytes;
@@ -20,23 +21,28 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::ZstdLevel;
 use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use prost::Message;
-use rusoto_core::{ByteStream, Region, RusotoError};
-use rusoto_s3::{
-    DeleteObjectRequest, GetObjectError, GetObjectRequest, PutObjectRequest, S3Client, S3,
-};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
-use std::io::ErrorKind;
 use std::ops::RangeInclusive;
-use std::path::Path;
-use std::str::FromStr;
-use std::time::{Duration, SystemTime};
-use tokio::fs::{remove_file, DirBuilder};
-use tokio::io::AsyncReadExt;
+use std::time::SystemTime;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex};
 use tracing::warn;
 use tracing::{debug, info};
+
+async fn get_storage_provider() -> anyhow::Result<StorageProvider> {
+    // TODO: this should be encoded in the config so that the controller doesn't need
+    // to be synchronized with the workers
+    let storage_url =
+        env::var(CHECKPOINT_URL_ENV).unwrap_or_else(|_| "file:///tmp/arroyo".to_string());
+
+    StorageProvider::for_url(&storage_url)
+        .await
+        .context(format!(
+            "failed to construct checkpoint backend for URL {}",
+            storage_url
+        ))
+}
 
 pub struct ParquetBackend {
     epoch: u32,
@@ -46,7 +52,7 @@ pub struct ParquetBackend {
     writer: ParquetWriter,
     task_info: TaskInfo,
     tables: HashMap<char, TableDescriptor>,
-    storage_client: StorageClient,
+    storage: StorageProvider,
 }
 
 fn base_path(job_id: &str, epoch: u32) -> String {
@@ -82,10 +88,11 @@ impl BackingStore for ParquetBackend {
 
     // TODO: should this be a Result, rather than an option?
     async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Option<CheckpointMetadata> {
-        let storage_client = StorageClient::new();
+        let storage_client = get_storage_provider().await.unwrap();
         let data = storage_client
-            .get_bytes(&metadata_path(&base_path(job_id, epoch)))
-            .await?;
+            .get(&metadata_path(&base_path(job_id, epoch)))
+            .await
+            .ok()?;
         let metadata = CheckpointMetadata::decode(&data[..]).unwrap();
         Some(metadata)
     }
@@ -95,30 +102,16 @@ impl BackingStore for ParquetBackend {
         operator_id: &str,
         epoch: u32,
     ) -> Option<OperatorCheckpointMetadata> {
-        let storage_client = StorageClient::new();
+        let storage_client = get_storage_provider().await.unwrap();
         let data = storage_client
-            .get_bytes(&metadata_path(&operator_path(job_id, epoch, operator_id)))
-            .await?;
+            .get(&metadata_path(&operator_path(job_id, epoch, operator_id)))
+            .await
+            .ok()?;
         Some(OperatorCheckpointMetadata::decode(&data[..]).unwrap())
     }
 
-    async fn initialize_checkpoint(job_id: &str, epoch: u32, operators: &[&str]) -> Result<()> {
-        let storage_client = StorageClient::new();
-        let path = base_path(job_id, epoch);
-
-        storage_client.initialize(&path).await?;
-
-        for operator in operators {
-            storage_client
-                .initialize(&operator_path(job_id, epoch, operator))
-                .await?;
-        }
-
-        Ok(())
-    }
-
     async fn complete_operator_checkpoint(metadata: OperatorCheckpointMetadata) {
-        let storage_client = StorageClient::new();
+        let storage_client = get_storage_provider().await.unwrap();
         let path = metadata_path(&operator_path(
             &metadata.job_id,
             metadata.epoch,
@@ -126,18 +119,18 @@ impl BackingStore for ParquetBackend {
         ));
         // TODO: propagate error
         storage_client
-            .write(&path, metadata.encode_to_vec())
+            .put(&path, metadata.encode_to_vec())
             .await
             .unwrap();
     }
 
     async fn complete_checkpoint(metadata: CheckpointMetadata) {
         debug!("writing checkpoint {:?}", metadata);
-        let storage_client = StorageClient::new();
+        let storage_client = get_storage_provider().await.unwrap();
         let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
         // TODO: propagate error
         storage_client
-            .write(&path, metadata.encode_to_vec())
+            .put(&path, metadata.encode_to_vec())
             .await
             .unwrap();
     }
@@ -147,6 +140,7 @@ impl BackingStore for ParquetBackend {
         tables: Vec<TableDescriptor>,
         tx: Sender<ControlResp>,
     ) -> Self {
+        let storage = get_storage_provider().await.unwrap();
         Self {
             epoch: 1,
             min_epoch: 1,
@@ -155,7 +149,7 @@ impl BackingStore for ParquetBackend {
                 task_info.clone(),
                 tx,
                 tables.clone(),
-                StorageClient::new(),
+                storage.clone(),
                 HashMap::new(),
             ),
             task_info: task_info.clone(),
@@ -163,7 +157,7 @@ impl BackingStore for ParquetBackend {
                 .into_iter()
                 .map(|table| (table.name.clone().chars().next().unwrap(), table))
                 .collect(),
-            storage_client: StorageClient::new(),
+            storage,
         }
     }
 
@@ -215,6 +209,8 @@ impl BackingStore for ParquetBackend {
 
         let writer_current_files = current_files.clone();
 
+        let storage = get_storage_provider().await.unwrap();
+
         Self {
             epoch: metadata.epoch + 1,
             min_epoch: metadata.min_epoch,
@@ -223,12 +219,12 @@ impl BackingStore for ParquetBackend {
                 task_info.clone(),
                 control_tx,
                 tables.values().cloned().collect(),
-                StorageClient::new(),
+                storage.clone(),
                 writer_current_files,
             ),
             task_info: task_info.clone(),
             tables,
-            storage_client: StorageClient::new(),
+            storage,
         }
     }
 
@@ -256,7 +252,7 @@ impl BackingStore for ParquetBackend {
             })
             .collect();
 
-        let storage_client = StorageClient::new();
+        let storage_client = Mutex::new(get_storage_provider().await?);
 
         // wait for all of the futures to complete
         while let Some(result) = futures.next().await {
@@ -269,7 +265,7 @@ impl BackingStore for ParquetBackend {
                     &operator_id,
                 ));
                 debug!("deleting {}", path);
-                storage_client.remove(path).await?;
+                storage_client.lock().await.delete(path).await?;
             }
             debug!(
                 message = "Finished compacting operator",
@@ -280,8 +276,10 @@ impl BackingStore for ParquetBackend {
         }
 
         for epoch_to_remove in old_min_epoch..min_epoch {
-            StorageClient::new()
-                .remove(metadata_path(&base_path(&metadata.job_id, epoch_to_remove)))
+            storage_client
+                .lock()
+                .await
+                .delete(metadata_path(&base_path(&metadata.job_id, epoch_to_remove)))
                 .await?;
         }
         metadata.min_epoch = min_epoch;
@@ -312,15 +310,12 @@ impl BackingStore for ParquetBackend {
                     return vec![];
                 };
                 for file in files.values().flatten() {
-                    let bytes = self
-                        .storage_client
-                        .get_bytes(&file.file)
-                        .await
-                        .unwrap_or_else(|| {
-                            panic!("unable to find file {} in checkpoint", file.file)
-                        });
+                    let bytes = self.storage.get(&file.file).await.unwrap_or_else(|_| {
+                        panic!("unable to find file {} in checkpoint", file.file)
+                    });
                     result.append(
-                        &mut self.triples_from_parquet_bytes(bytes, &self.task_info.key_range),
+                        &mut self
+                            .triples_from_parquet_bytes(bytes.into(), &self.task_info.key_range),
                     );
                 }
             }
@@ -360,11 +355,12 @@ impl BackingStore for ParquetBackend {
         let mut state_map = HashMap::new();
         for file in files.values().flatten() {
             let bytes = self
-                .storage_client
-                .get_bytes(&file.file)
+                .storage
+                .get(&file.file)
                 .await
-                .unwrap_or_else(|| panic!("unable to find file {} in checkpoint", file.file));
-            for (_timestamp, key, value) in self.triples_from_parquet_bytes(bytes, &(0..=u64::MAX))
+                .unwrap_or_else(|_| panic!("unable to find file {} in checkpoint", file.file));
+            for (_timestamp, key, value) in
+                self.triples_from_parquet_bytes(bytes.into(), &(0..=u64::MAX))
             {
                 state_map.insert(key, value);
             }
@@ -379,12 +375,12 @@ impl BackingStore for ParquetBackend {
         let mut state_map = HashMap::new();
         for file in files.values().flatten() {
             let bytes = self
-                .storage_client
-                .get_bytes(&file.file)
+                .storage
+                .get(&file.file)
                 .await
-                .unwrap_or_else(|| panic!("unable to find file {} in checkpoint", file.file));
+                .unwrap_or_else(|_| panic!("unable to find file {} in checkpoint", file.file));
             for (_timestamp, key, value) in
-                self.triples_from_parquet_bytes(bytes, &self.task_info.key_range)
+                self.triples_from_parquet_bytes(bytes.into(), &self.task_info.key_range)
             {
                 state_map.insert(key, value);
             }
@@ -416,7 +412,7 @@ impl ParquetBackend {
                 .collect();
 
         let mut deleted_paths = HashSet::new();
-        let storage_client = StorageClient::new();
+        let storage_client = get_storage_provider().await?;
 
         for epoch_to_remove in old_min_epoch..new_min_epoch {
             let Some(metadata) =
@@ -432,7 +428,7 @@ impl ParquetBackend {
                 let file = parquet_store.file.clone();
                 if !paths_to_keep.contains(&file) && !deleted_paths.contains(&file) {
                     deleted_paths.insert(file.clone());
-                    storage_client.remove(file).await?;
+                    storage_client.delete(file).await?;
                 }
             }
         }
@@ -503,7 +499,7 @@ impl ParquetWriter {
         task_info: TaskInfo,
         control_tx: Sender<ControlResp>,
         tables: Vec<TableDescriptor>,
-        storage_client: StorageClient,
+        storage: StorageProvider,
         current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(1024 * 1024);
@@ -511,7 +507,7 @@ impl ParquetWriter {
 
         (ParquetFlusher {
             queue: rx,
-            storage_client,
+            storage,
             control_tx,
             finish_tx: Some(finish_tx),
             task_info,
@@ -696,177 +692,13 @@ impl Default for RecordBatchBuilder {
 
 struct ParquetFlusher {
     queue: Receiver<ParquetQueueItem>,
-    storage_client: StorageClient,
+    storage: StorageProvider,
     control_tx: Sender<ControlResp>,
     finish_tx: Option<oneshot::Sender<()>>,
     task_info: TaskInfo,
     table_descriptors: HashMap<char, TableDescriptor>,
     builders: HashMap<char, RecordBatchBuilder>,
     current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>,
-}
-
-#[derive(Clone)]
-pub enum StorageClient {
-    LocalDirectory(String),
-    S3 {
-        client: S3Client,
-        region: String,
-        bucket: String,
-    },
-}
-
-// TODO: Better way to configure this.
-impl StorageClient {
-    pub fn new() -> Self {
-        let bucket = env::var(S3_BUCKET_ENV).ok();
-        let region = env::var(S3_REGION_ENV).ok();
-        let output_dir = env::var(OUTPUT_DIR_ENV).ok();
-
-        match (bucket, region, output_dir) {
-            (Some(bucket), Some(region), _) => {
-                let client = S3Client::new(Region::from_str(&region).unwrap());
-                Self::S3 {
-                    client,
-                    region,
-                    bucket,
-                }
-            }
-            (_, _, Some(output_dir)) => Self::LocalDirectory(output_dir),
-            _ => Self::LocalDirectory("/tmp/arroyo".to_string()),
-        }
-    }
-    pub fn get_storage_environment_variables() -> HashMap<String, String> {
-        [S3_REGION_ENV, S3_BUCKET_ENV, OUTPUT_DIR_ENV]
-            .iter()
-            .filter_map(|&var| env::var(var).ok().map(|v| (var.to_string(), v)))
-            .collect()
-    }
-
-    async fn initialize(&self, key: &str) -> Result<()> {
-        match self {
-            StorageClient::LocalDirectory(directory) => {
-                DirBuilder::new()
-                    // when jobs are running in a container but the controller is outside, this
-                    // allows the controller to modify the checkpoint files
-                    .mode(0o6777)
-                    .recursive(true)
-                    .create(&Path::new(directory).join(key))
-                    .await?;
-            }
-            StorageClient::S3 { .. } => {
-                // no initialization needed for S3
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn write(&self, key: &str, parquet_bytes: Vec<u8>) -> Result<()> {
-        match self {
-            StorageClient::LocalDirectory(directory) => {
-                let file_path = Path::new(directory).join(Path::new(&key));
-                DirBuilder::new()
-                    .recursive(true)
-                    .create(file_path.parent().unwrap())
-                    .await?;
-                tokio::fs::write(&file_path, &parquet_bytes).await?;
-            }
-            StorageClient::S3 {
-                client,
-                region: _,
-                bucket,
-            } => {
-                let request = PutObjectRequest {
-                    bucket: bucket.into(),
-                    key: key.to_string(),
-                    body: Some(parquet_bytes.into()),
-                    ..Default::default()
-                };
-                client.put_object(request).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn remove(&self, key: String) -> Result<()> {
-        match self {
-            StorageClient::LocalDirectory(directory) => {
-                let file_path = Path::new(directory).join(Path::new(&key));
-                if let Err(e) = remove_file(&file_path).await {
-                    if e.kind() != ErrorKind::NotFound {
-                        return Err(e.into());
-                    }
-                }
-            }
-            StorageClient::S3 {
-                client,
-                region: _,
-                bucket,
-            } => {
-                for i in (0..5).rev() {
-                    let req = DeleteObjectRequest {
-                        bucket: bucket.into(),
-                        key: key.clone(),
-                        ..Default::default()
-                    };
-
-                    match (client.delete_object(req).await, i) {
-                        (Ok(_), _) => return Ok(()),
-                        (Err(e), 0) => return Err(e.into()),
-                        (Err(e), _) => {
-                            warn!("failed to delete object, retrying {}", e);
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn get_bytes(&self, key: &str) -> Option<Vec<u8>> {
-        match self {
-            StorageClient::LocalDirectory(local_directory) => {
-                let file_path = Path::new(local_directory).join(key);
-                match tokio::fs::read(file_path).await {
-                    Ok(bytes) => Some(bytes),
-                    Err(e) => match e.kind() {
-                        ErrorKind::NotFound => None,
-                        _ => panic!("An unexpected error occurred: {}", e),
-                    },
-                }
-            }
-            StorageClient::S3 {
-                client,
-                region: _,
-                bucket,
-            } => {
-                let request = GetObjectRequest {
-                    bucket: bucket.into(),
-                    key: key.to_string(),
-                    ..Default::default()
-                };
-                let response = match client.get_object(request).await {
-                    Ok(response) => response,
-                    Err(RusotoError::Service(GetObjectError::NoSuchKey(_message))) => {
-                        warn!("could not find state for {:?}, skipping", key);
-                        return None;
-                    }
-                    Err(err) => panic!("errored on {:?}", err),
-                };
-
-                let data: ByteStream = response.body.unwrap();
-                let mut buffer = Vec::new();
-                data.into_async_read()
-                    .read_to_end(&mut buffer)
-                    .await
-                    .unwrap();
-                Some(buffer)
-            }
-        }
-    }
 }
 
 impl ParquetFlusher {
@@ -894,7 +726,7 @@ impl ParquetFlusher {
         writer.flush().unwrap();
         let parquet_bytes = writer.into_inner().unwrap();
         let bytes = parquet_bytes.len();
-        self.storage_client.write(key, parquet_bytes).await?;
+        self.storage.put(key, parquet_bytes).await?;
         Ok(bytes)
     }
 
@@ -1013,4 +845,11 @@ impl ParquetFlusher {
         }
         Ok(true)
     }
+}
+
+pub fn get_storage_env_vars() -> HashMap<String, String> {
+    [S3_REGION_ENV, S3_ENDPOINT_ENV, CHECKPOINT_URL_ENV]
+        .iter()
+        .filter_map(|&var| env::var(var).ok().map(|v| (var.to_string(), v)))
+        .collect()
 }

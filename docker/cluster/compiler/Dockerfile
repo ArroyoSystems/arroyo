@@ -42,8 +42,10 @@ COPY arroyo-sql-macro src/arroyo-sql-macro
 COPY arroyo-sql-testing src/arroyo-sql-testing
 COPY arroyo-controller src/arroyo-controller
 COPY arroyo-console src/arroyo-console
+COPY arroyo-storage src/arroyo-storage
 COPY connector-schemas src/connector-schemas
 
+COPY copy-artifacts src/copy-artifacts
 COPY integ src/integ
 
 COPY Cargo.toml src/Cargo.toml

@@ -15,10 +15,14 @@ members = [
     "arroyo-sql-macro",
     "arroyo-sql-testing",
     "arroyo-state",
+    "arroyo-storage",
     "arroyo-types",
     "arroyo-worker",
+    "copy-artifacts",
     "integ",
 ]
+
+resolver = "2"
 
 exclude = [
     "build_dir",
@@ -38,6 +42,11 @@ parquet = { version = "43.0.0" }
 [profile.release]
 debug = 1
 
+[profile.release.package.copy-artifacts]
+# optimize for small binary size
+strip = true
+opt-level = "z"
+
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
 parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
@@ -45,4 +54,3 @@ arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arr
 arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
 arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
 arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
-object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches' }

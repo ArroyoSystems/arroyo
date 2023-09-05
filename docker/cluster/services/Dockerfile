@@ -36,9 +36,12 @@ COPY arroyo-sql-macro arroyo-sql-macro
 COPY arroyo-sql-testing arroyo-sql-testing
 COPY arroyo-controller arroyo-controller
 COPY arroyo-console arroyo-console
-COPY arroyo-openapi arroyo-openapi
+COPY arroyo-openapi arroyo-openap
+COPY arroyo-storage arroyo-storage
 COPY docker/refinery.toml refinery.toml
 COPY connector-schemas connector-schemas
+
+COPY copy-artifacts copy-artifacts
 COPY integ integ
 
 # set git hash

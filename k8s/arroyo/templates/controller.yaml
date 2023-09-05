@@ -47,6 +47,11 @@ spec:
 
         env:
         {{- include "arroyo.storageEnvVars" . | nindent 8 }}
+        {{ if .Values.checkpointUrl }}
+        - name: CHECKPOINT_URL
+          value: {{ .Values.checkpointUrl }}
+        {{- end }}
+
         {{- include "arroyo.databaseEnvVars" . | nindent 8 }}
         - name: CONTROLLER_ADDR
           value: "http://{{ include "arroyo.fullname" . }}-controller:9190"
