@@ -20,7 +20,6 @@ export function CodeEditor({
 
   return (
     <Editor
-      height="50vh"
       defaultLanguage={language || 'sql'}
       onChange={onChange}
       theme="vs-dark"

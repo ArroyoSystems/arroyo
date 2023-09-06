@@ -2,6 +2,7 @@ import {
   Alert,
   AlertDescription,
   AlertIcon,
+  Badge,
   Box,
   Button,
   Flex,
@@ -22,7 +23,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Catalog } from './Catalog';
 import { PipelineGraphViewer } from './PipelineGraph';
-import { PipelineOutputs } from './PipelineOutputs';
 import { CodeEditor } from './SqlEditor';
 import { SqlOptions } from '../../lib/types';
 import {
@@ -44,6 +44,9 @@ import StartPipelineModal from '../../components/StartPipelineModal';
 import { formatError } from '../../lib/util';
 import { WarningIcon } from '@chakra-ui/icons';
 import PaginatedContent from '../../components/PaginatedContent';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { MdDragHandle } from 'react-icons/md';
+import { PipelineOutputs } from './PipelineOutputs';
 
 function useQuery() {
   const { search } = useLocation();
@@ -147,6 +150,7 @@ export function CreatePipeline() {
     // Setting this state triggers the uswSWR calls
     setQueryInputToCheck(queryInput);
     setUdfsInputToCheck(udfsInput);
+    setOutputs([]);
   };
 
   const pipelineIsValid = async () => {
@@ -159,8 +163,8 @@ export function CreatePipeline() {
   };
 
   const preview = async () => {
+    setQueryInputToCheck('');
     setPipelineId(undefined);
-    setOutputs([]);
 
     if (!(await pipelineIsValid())) {
       return;
@@ -310,7 +314,7 @@ export function CreatePipeline() {
     stopPreviewButton = (
       <Button
         onClick={stopPreview}
-        size="sm"
+        size="md"
         colorScheme="blue"
         title="Stop a preview pipeline"
         borderRadius={2}
@@ -322,7 +326,7 @@ export function CreatePipeline() {
     startPreviewButton = (
       <Button
         onClick={preview}
-        size="sm"
+        size="md"
         colorScheme="blue"
         title="Run a preview pipeline"
         borderRadius={2}
@@ -334,7 +338,7 @@ export function CreatePipeline() {
 
   const checkButton = (
     <Button
-      size="sm"
+      size="md"
       colorScheme="blue"
       onClick={() => {
         check();
@@ -348,17 +352,16 @@ export function CreatePipeline() {
   );
 
   const startPipelineButton = (
-    <Button size="sm" colorScheme="green" onClick={run} borderRadius={2}>
+    <Button size="md" colorScheme="green" onClick={run} borderRadius={2}>
       Start Pipeline
     </Button>
   );
 
-  const actionBar = (
-    <HStack spacing={4} p={2} backgroundColor="gray.500">
+  const buttonGroup = (
+    <HStack spacing={4} p={4}>
       {checkButton}
       {startPreviewButton}
       {stopPreviewButton}
-      <Spacer />
       {startPipelineButton}
     </HStack>
   );
@@ -411,12 +414,17 @@ export function CreatePipeline() {
     );
   } else {
     if (previewing) {
-      previewResultsTabContent = <Text>Launching preview pipeline...</Text>;
+      previewResultsTabContent = (
+        <Flex>
+          <Text marginRight={'2'}>Job status:</Text>
+          <Badge>{job?.state}</Badge>
+        </Flex>
+      );
     }
   }
 
   const previewResultsTab = (
-    <TabPanel overflowX="auto" height="100%" position="relative">
+    <TabPanel overflowX="auto" flex={1} position="relative">
       {previewResultsTabContent}
     </TabPanel>
   );
@@ -449,7 +457,7 @@ export function CreatePipeline() {
   );
 
   const previewTabsContent = (
-    <TabPanels height="calc(100% - 40px)" width={'100%'}>
+    <TabPanels display={'flex'} flexDirection={'column'} flex={1}>
       {previewPipelineTab}
       {previewResultsTab}
       {errorsTab}
@@ -457,22 +465,22 @@ export function CreatePipeline() {
   );
 
   const editorTabs = (
-    <Box padding={5} pl={0} backgroundColor="#1e1e1e">
-      <Tabs>
+    <Flex direction={'column'} padding={5} pl={0} backgroundColor="#1e1e1e" height="100%">
+      <Tabs display={'flex'} flexDirection={'column'} flex={1}>
         <TabList>
           <Tab>query.sql</Tab>
           <Tab>udfs.rs</Tab>
         </TabList>
-        <TabPanels>
-          <TabPanel>
+        <TabPanels flex={1}>
+          <TabPanel height={'100%'}>
             <CodeEditor query={queryInput} setQuery={updateQuery} />
           </TabPanel>
-          <TabPanel>
+          <TabPanel height={'100%'}>
             <CodeEditor query={udfsInput} setQuery={updateUdf} language="rust" />
           </TabPanel>
         </TabPanels>
       </Tabs>
-    </Box>
+    </Flex>
   );
 
   let errorMessage;
@@ -514,36 +522,59 @@ export function CreatePipeline() {
     );
   }
 
-  const previewTabs = (
-    <Tabs index={tabIndex} onChange={i => setTabIndex(i)} height="100%">
-      {
-        <TabList>
-          <Tab>Pipeline</Tab>
-          <Tab>
-            <HStack>
-              <Text>Results</Text>
-              {previewing ? <Spinner size="xs" speed="0.9s" /> : null}
-            </HStack>
-          </Tab>
-          <Tab>
-            <Text>Errors</Text>
-            {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}
-          </Tab>
-        </TabList>
-      }
+  const tabs = (
+    <Tabs
+      display={'flex'}
+      flexDirection={'column'}
+      index={tabIndex}
+      onChange={i => setTabIndex(i)}
+      flex={1}
+    >
+      <TabList>
+        <Flex width={'100%'} justifyContent={'space-between'}>
+          <Flex>
+            <Tab>Pipeline</Tab>
+            <Tab>
+              <HStack>
+                <Text>Results</Text>
+                {previewing ? <Spinner size="xs" speed="0.9s" /> : null}
+              </HStack>
+            </Tab>
+            <Tab>
+              <Text>Errors</Text>
+              {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}
+            </Tab>
+          </Flex>
+          {buttonGroup}
+        </Flex>
+      </TabList>
       {previewTabsContent}
     </Tabs>
+  );
+
+  const panelResizer = (
+    <PanelResizeHandle>
+      <Flex justifyContent="center">
+        <MdDragHandle color={'grey'} />
+      </Flex>
+    </PanelResizeHandle>
   );
 
   return (
     <Flex height={'100vh'}>
       <Flex>{catalog}</Flex>
       <Flex direction={'column'} flex={1} minWidth={0}>
-        {editorTabs}
-        {actionBar}
-        {errorComponent}
-        {previewCompletedComponent}
-        {previewTabs}
+        <PanelGroup autoSaveId={'create-pipeline-panels'} direction="vertical">
+          <Panel minSize={20}>{editorTabs}</Panel>
+          {panelResizer}
+          <Panel minSize={20}>
+            <Flex direction={'column'} height={'100%'}>
+              {errorComponent}
+              {previewCompletedComponent}
+              {tabs}
+            </Flex>
+          </Panel>
+        </PanelGroup>
       </Flex>
       {startPipelineModal}
     </Flex>
