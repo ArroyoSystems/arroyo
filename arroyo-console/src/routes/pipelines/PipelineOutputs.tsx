@@ -17,8 +17,8 @@ export function PipelineOutputs({ outputs }: { outputs: Array<{ id: number; data
         });
       }
 
-      Object.values(parsed).forEach(v => {
-        cols.push(<Td>{JSON.stringify(v, null, 2)}</Td>);
+      Object.values(parsed).forEach((v, i) => {
+        cols.push(<Td key={i}>{JSON.stringify(v, null, 2)}</Td>);
       });
 
       return (
