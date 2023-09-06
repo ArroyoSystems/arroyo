@@ -488,6 +488,7 @@ dependencies = [
  "futures",
  "rdkafka",
  "regress",
+ "reqwest",
  "schemars",
  "serde",
  "serde_json",
@@ -708,6 +709,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-sql-testing"
+version = "0.5.0"
+dependencies = [
+ "arrow",
+ "arrow-array",
+ "arrow-schema",
+ "arroyo-sql",
+ "arroyo-sql-macro",
+ "arroyo-types",
+ "arroyo-worker",
+ "bincode 2.0.0-rc.3",
+ "bincode_derive",
+ "chrono",
+ "hex",
+ "petgraph",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.26",
+]
+
+[[package]]
 name = "arroyo-state"
 version = "0.5.0"
 dependencies = [
@@ -781,12 +804,10 @@ dependencies = [
  "bytes",
  "chrono",
  "eventsource-client",
- "flume",
  "fluvio",
  "futures",
  "governor",
  "hex",
- "hyper",
  "lazy_static",
  "local-ip-address",
  "md-5 0.10.5",
@@ -2978,18 +2999,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flume"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55ac459de2512911e4b674ce33cf20befaba382d05b62b008afc1c8b57cbf181"
-dependencies = [
- "futures-core",
- "futures-sink",
- "nanorand",
- "spin 0.9.8",
-]
-
-[[package]]
 name = "fluvio"
 version = "0.19.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3450,10 +3459,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be4136b2a15dd319360be1c07d9933517ccf0be8f16bf62a3bee4f0d618df427"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "wasi",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -4245,7 +4252,7 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 dependencies = [
- "spin 0.5.2",
+ "spin",
 ]
 
 [[package]]
@@ -4687,15 +4694,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ffa00dec017b5b1a8b7cf5e2c008bfda1aa7e0697ac1508b491fdf2622fb4d8"
 dependencies = [
  "rand",
-]
-
-[[package]]
-name = "nanorand"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
-dependencies = [
- "getrandom",
 ]
 
 [[package]]
@@ -6088,7 +6086,7 @@ dependencies = [
  "cc",
  "libc",
  "once_cell",
- "spin 0.5.2",
+ "spin",
  "untrusted",
  "web-sys",
  "winapi",
@@ -6911,15 +6909,6 @@ name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
-
-[[package]]
-name = "spin"
-version = "0.9.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-dependencies = [
- "lock_api",
-]
 
 [[package]]
 name = "spki"
