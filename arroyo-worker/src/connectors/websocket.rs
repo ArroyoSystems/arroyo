@@ -69,7 +69,7 @@ where
     }
 
     fn tables(&self) -> Vec<TableDescriptor> {
-        vec![arroyo_state::global_table("e", "sse source state")]
+        vec![arroyo_state::global_table("e", "websocket source state")]
     }
 
     async fn on_start(&mut self, ctx: &mut Context<(), T>) {

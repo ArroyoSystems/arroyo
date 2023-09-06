@@ -7,4 +7,5 @@ pub mod kinesis;
 pub mod nexmark;
 pub mod sse;
 pub mod two_phase_committer;
+pub mod webhook;
 pub mod websocket;
