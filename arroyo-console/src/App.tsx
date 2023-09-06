@@ -18,6 +18,7 @@ import { FiHome, FiGitBranch, FiLink } from 'react-icons/fi';
 import { CloudSidebar, UserProfile } from './lib/CloudComponents';
 import { usePing } from './lib/data_fetching';
 import ApiUnavailable from './routes/not_found/ApiUnavailable';
+import Loading from './components/Loading';
 
 function logout() {
   // TODO: also send a request to the server to delete the session
@@ -94,13 +95,17 @@ function Sidebar() {
 }
 
 function App() {
-  const { ping, pingError } = usePing();
+  const { ping, pingLoading, pingError } = usePing();
 
   let content = (
     <GridItem className="main" area={'main'}>
       {<Outlet />}
     </GridItem>
   );
+
+  if (pingLoading) {
+    return <Loading />;
+  }
 
   if (!ping || pingError) {
     content = <ApiUnavailable />;

@@ -44,6 +44,9 @@ import StartPipelineModal from '../../components/StartPipelineModal';
 import { formatError } from '../../lib/util';
 import { WarningIcon } from '@chakra-ui/icons';
 import PaginatedContent from '../../components/PaginatedContent';
+import CreatePipelineStepper from '../../components/CreatePipelineStepper';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { MdDragHandle } from 'react-icons/md';
 
 function useQuery() {
   const { search } = useLocation();
@@ -143,7 +146,14 @@ export function CreatePipeline() {
     return <Loading />;
   }
 
+  const clearPreview = () => {
+    setPipelineId(undefined);
+    setOutputs([]);
+  };
+
   const check = () => {
+    clearPreview();
+
     // Setting this state triggers the uswSWR calls
     setQueryInputToCheck(queryInput);
     setUdfsInputToCheck(udfsInput);
@@ -159,8 +169,7 @@ export function CreatePipeline() {
   };
 
   const preview = async () => {
-    setPipelineId(undefined);
-    setOutputs([]);
+    clearPreview();
 
     if (!(await pipelineIsValid())) {
       return;
@@ -310,7 +319,7 @@ export function CreatePipeline() {
     stopPreviewButton = (
       <Button
         onClick={stopPreview}
-        size="sm"
+        size="md"
         colorScheme="blue"
         title="Stop a preview pipeline"
         borderRadius={2}
@@ -322,7 +331,7 @@ export function CreatePipeline() {
     startPreviewButton = (
       <Button
         onClick={preview}
-        size="sm"
+        size="md"
         colorScheme="blue"
         title="Run a preview pipeline"
         borderRadius={2}
@@ -334,7 +343,7 @@ export function CreatePipeline() {
 
   const checkButton = (
     <Button
-      size="sm"
+      size="md"
       colorScheme="blue"
       onClick={() => {
         check();
@@ -348,17 +357,16 @@ export function CreatePipeline() {
   );
 
   const startPipelineButton = (
-    <Button size="sm" colorScheme="green" onClick={run} borderRadius={2}>
+    <Button size="md" colorScheme="green" onClick={run} borderRadius={2}>
       Start Pipeline
     </Button>
   );
 
-  const actionBar = (
-    <HStack spacing={4} p={2} backgroundColor="gray.500">
+  const buttonGroup = (
+    <HStack spacing={4} p={4}>
       {checkButton}
       {startPreviewButton}
       {stopPreviewButton}
-      <Spacer />
       {startPipelineButton}
     </HStack>
   );
@@ -449,7 +457,7 @@ export function CreatePipeline() {
   );
 
   const previewTabsContent = (
-    <TabPanels height="calc(100% - 40px)" width={'100%'}>
+    <TabPanels height={'100%'} width={'100%'}>
       {previewPipelineTab}
       {previewResultsTab}
       {errorsTab}
@@ -457,22 +465,22 @@ export function CreatePipeline() {
   );
 
   const editorTabs = (
-    <Box padding={5} pl={0} backgroundColor="#1e1e1e">
-      <Tabs>
+    <Flex direction={'column'} padding={5} pl={0} backgroundColor="#1e1e1e" height="100%">
+      <Tabs display={'flex'} flexDirection={'column'} flex={1}>
         <TabList>
           <Tab>query.sql</Tab>
           <Tab>udfs.rs</Tab>
         </TabList>
-        <TabPanels>
-          <TabPanel>
+        <TabPanels flex={1}>
+          <TabPanel height={'100%'}>
             <CodeEditor query={queryInput} setQuery={updateQuery} />
           </TabPanel>
-          <TabPanel>
+          <TabPanel height={'100%'}>
             <CodeEditor query={udfsInput} setQuery={updateUdf} language="rust" />
           </TabPanel>
         </TabPanels>
       </Tabs>
-    </Box>
+    </Flex>
   );
 
   let errorMessage;
@@ -500,50 +508,64 @@ export function CreatePipeline() {
     );
   }
 
-  let previewCompletedComponent = <></>;
-  if (job?.finishTime && !job?.failureMessage) {
-    previewCompletedComponent = (
-      <div>
-        <Alert status="success">
-          <AlertIcon />
-          <AlertDescription>
-            <Text>Preview completed</Text>
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
-
-  const previewTabs = (
-    <Tabs index={tabIndex} onChange={i => setTabIndex(i)} height="100%">
+  const tabs = (
+    <Tabs index={tabIndex} onChange={i => setTabIndex(i)} height="100%" flex={1}>
       {
         <TabList>
-          <Tab>Pipeline</Tab>
-          <Tab>
-            <HStack>
-              <Text>Results</Text>
-              {previewing ? <Spinner size="xs" speed="0.9s" /> : null}
-            </HStack>
-          </Tab>
-          <Tab>
-            <Text>Errors</Text>
-            {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}
-          </Tab>
+          <Flex width={'100%'} justifyContent={'space-between'}>
+            <Flex>
+              <Tab>Pipeline</Tab>
+              <Tab>
+                <HStack>
+                  <Text>Results</Text>
+                  {previewing ? <Spinner size="xs" speed="0.9s" /> : null}
+                </HStack>
+              </Tab>
+              <Tab>
+                <Text>Errors</Text>
+                {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}
+              </Tab>
+            </Flex>
+            {buttonGroup}
+          </Flex>
         </TabList>
       }
       {previewTabsContent}
     </Tabs>
   );
 
+  const createPipelineStepper = (
+    <CreatePipelineStepper
+      pipelineGraph={pipelineGraph}
+      pipelineGraphError={pipelineGraphError}
+      job={job}
+      modalOpen={isOpen}
+    />
+  );
+
+  const panelResizer = (
+    <PanelResizeHandle>
+      <Flex justifyContent="center">
+        <MdDragHandle color={'grey'} />
+      </Flex>
+    </PanelResizeHandle>
+  );
+
   return (
     <Flex height={'100vh'}>
       <Flex>{catalog}</Flex>
       <Flex direction={'column'} flex={1} minWidth={0}>
-        {editorTabs}
-        {actionBar}
-        {errorComponent}
-        {previewCompletedComponent}
-        {previewTabs}
+        {createPipelineStepper}
+        <PanelGroup autoSaveId={'create-pipeline-panels'} direction="vertical">
+          <Panel minSize={20}>{editorTabs}</Panel>
+          {panelResizer}
+          <Panel minSize={20}>
+            <Flex direction={'column'} height={'100%'}>
+              {errorComponent}
+              <Flex flex={1}>{tabs}</Flex>
+            </Flex>
+          </Panel>
+        </PanelGroup>
       </Flex>
       {startPipelineModal}
     </Flex>

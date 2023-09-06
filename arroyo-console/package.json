@@ -44,6 +44,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-icons": "^4.9.0",
+    "react-resizable-panels": "^0.0.55",
     "react-router-dom": "^6.13.0",
     "react-test-renderer": "^18.2.0",
     "reactflow": "^11.7.2",
