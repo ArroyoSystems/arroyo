@@ -118,7 +118,7 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
 
 fn full_pipeline_codegen_internal(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     let pipeline_case: PipelineCase = syn::parse2(input).unwrap();
-    get_pipeline_module(pipeline_case.query.value(), pipeline_case.test_name.value()).into()
+    get_pipeline_module(pipeline_case.query.value(), pipeline_case.test_name.value())
 }
 
 struct PipelineCase {
@@ -126,7 +126,7 @@ struct PipelineCase {
     query: LitStr,
 }
 
-fn get_pipeline_module(query_string: String, mod_name: String) -> TokenStream {
+fn get_pipeline_module(query_string: String, mod_name: String) -> proc_macro2::TokenStream {
     let mod_ident: syn::Ident = parse_str(&mod_name).unwrap();
     let mut schema_provider = ArroyoSchemaProvider::new();
 
@@ -184,7 +184,6 @@ fn get_pipeline_module(query_string: String, mod_name: String) -> TokenStream {
             #(#other_defs)*
         }
     )
-    .into()
 }
 
 impl Parse for PipelineCase {

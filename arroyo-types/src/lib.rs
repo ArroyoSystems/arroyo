@@ -246,7 +246,9 @@ pub fn to_nanos(time: SystemTime) -> u128 {
 }
 
 pub fn from_nanos(ts: u128) -> SystemTime {
-    UNIX_EPOCH + Duration::from_nanos(ts as u64)
+    UNIX_EPOCH
+        + Duration::from_secs((ts / 1_000_000_000) as u64)
+        + Duration::from_nanos((ts % 1_000_000_000) as u64)
 }
 
 pub fn string_to_map(s: &str) -> Option<HashMap<String, String>> {
