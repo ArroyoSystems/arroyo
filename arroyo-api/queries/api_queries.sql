@@ -266,11 +266,6 @@ DELETE FROM pipelines WHERE pipelines.id = (
 SELECT jlm.pub_id, jlm.job_id, jlm.operator_id, jlm.task_index, jlm.created_at, jlm.log_level, jlm.message, jlm.details
 FROM job_log_messages jlm
 JOIN public.job_configs ON job_configs.id = jlm.job_id
-INNER JOIN (
-    SELECT operator_id, task_index, MAX(created_at) AS max_created_at
-    FROM job_log_messages
-    GROUP BY operator_id, task_index, job_id
-) jlm_max ON jlm.operator_id = jlm_max.operator_id AND jlm.task_index = jlm_max.task_index AND jlm.created_at = jlm_max.max_created_at
 WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_id
   AND jlm.log_level = 'error'
   AND (jlm.created_at < (
