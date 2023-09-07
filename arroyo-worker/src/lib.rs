@@ -342,6 +342,8 @@ impl WorkerServer {
     ) -> Result<()> {
         let mut controller = ControllerGrpcClient::connect(self.controller_addr.clone()).await?;
         tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(5));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 select! {
                         msg = control_rx.recv() => {
@@ -429,7 +431,7 @@ impl WorkerServer {
                                 exit(1);
                             }
                         }
-                        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                        _ = tick.tick() => {
                                 let result = controller.heartbeat(Request::new(HeartbeatReq {
                                     job_id: job_id.clone(),
                                     time: to_micros(SystemTime::now()),
