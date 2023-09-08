@@ -23,7 +23,8 @@ use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
 use rand::Rng;
-use serde::{Deserialize, Deserializer};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt::{Debug, Display, Formatter};
 use std::process::exit;
 use std::str::FromStr;
@@ -54,9 +55,16 @@ lazy_static! {
         format!("http://localhost:{}", ports::CONTROLLER_GRPC);
 }
 
-pub trait SchemaData: Data {
+pub trait SchemaData: Data + Serialize + DeserializeOwned {
     fn name() -> &'static str;
     fn schema() -> arrow::datatypes::Schema;
+
+    /// Returns the raw string representation of this data, if available for the type
+    ///
+    /// Implementations should return None if the relevant field is Optional and has
+    /// a None value, and should panic if they do not support raw strings (which
+    /// indicates a miscompilation).
+    fn to_raw_string(&self) -> Option<Vec<u8>>;
 }
 
 impl<T: SchemaData> SchemaData for Debezium<T> {
@@ -82,6 +90,10 @@ impl<T: SchemaData> SchemaData for Debezium<T> {
         ];
 
         arrow::datatypes::Schema::new(fields)
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        unimplemented!("debezium data cannot be written as a raw string");
     }
 }
 

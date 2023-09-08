@@ -90,8 +90,8 @@ async fn get_and_validate_connector<E: GenericClient>(
 
     let schema: Option<ConnectionSchema> = req
         .schema
-        .as_ref()
-        .map(|t| t.clone().try_into())
+        .clone()
+        .map(|t| t.validate())
         .transpose()
         .map_err(|e| bad_request(format!("Invalid schema: {}", e)))?;
 

@@ -21,7 +21,7 @@ use crate::{engine::Context, formats::DataSerializer, SchemaData};
 use super::{KinesisTable, TableType};
 
 #[derive(StreamNode)]
-pub struct KinesisSinkFunc<K: Key + Serialize, T: SchemaData + Serialize> {
+pub struct KinesisSinkFunc<K: Key + Serialize, T: SchemaData> {
     client: Option<KinesisClient>,
     in_progress_batch: Option<BatchRecordPreparer>,
     flush_config: FlushConfig,
@@ -31,7 +31,7 @@ pub struct KinesisSinkFunc<K: Key + Serialize, T: SchemaData + Serialize> {
 }
 
 #[process_fn(in_k = K, in_t = T, tick_ms=10)]
-impl<K: Key + Serialize, T: SchemaData + Serialize> KinesisSinkFunc<K, T> {
+impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
     pub fn from_config(config: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config).expect("Invalid config for KafkaSink");
@@ -77,7 +77,10 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KinesisSinkFunc<K, T> {
             .as_ref()
             .map(|k| serde_json::to_string(k).unwrap())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let v = self.serializer.to_vec(&record.value);
+
+        let Some(v) = self.serializer.to_vec(&record.value) else {
+            return;
+        };
 
         let mut batch_preparer = match self.in_progress_batch.take() {
             None => BatchRecordPreparer::new(

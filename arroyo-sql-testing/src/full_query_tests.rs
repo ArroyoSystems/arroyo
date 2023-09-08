@@ -348,7 +348,7 @@ full_pipeline_codegen! {"row_number",
 "
   SELECT ROW_NUMBER()  OVER (
       PARTITION BY window
-      ORDER BY price DESC) as row_number, auction, price 
+      ORDER BY price DESC) as row_number, auction, price
   FROM (
     SELECT bid.auction as auction,
            hop(INTERVAL '2' second, INTERVAL '9' second ) as window,
@@ -387,4 +387,20 @@ create table table_two (
 
 SELECT * FROM table_one LEFT OUTER JOIN table_two ON table_one.a_field = table_two.a_field;
 
+"}
+
+full_pipeline_codegen! {"raw_string_test",
+"CREATE TABLE raw_sink (
+  output TEXT
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'sink',
+  topic = 'outputs',
+  format = 'raw_string'
+);
+
+INSERT INTO raw_sink
+SELECT bid.channel
+FROM nexmark;
 "}
