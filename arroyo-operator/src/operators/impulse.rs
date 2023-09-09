@@ -1,21 +1,19 @@
-use std::fmt::Debug;
-use std::marker::PhantomData;
-
-use crate::engine::{Context, StreamNode};
+use crate::operator::{ArrowContext, ArrowOperator};
 use crate::SourceFinishType;
-use arroyo_macro::source_fn;
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow_array::{ArrayRef, RecordBatch, Time64NanosecondArray, UInt64Array};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
-use arroyo_types::*;
-use bincode::{Decode, Encode};
+use arroyo_types::{to_nanos, ArrowRecord};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tracing::{debug, info};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/impulse/table.json");
 
-#[derive(Encode, Decode, Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ImpulseSourceState {
     counter: usize,
     start_time: SystemTime,
@@ -27,91 +25,37 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-#[derive(StreamNode, Debug)]
-pub struct ImpulseSourceFunc<K: Data, T: Data> {
+pub struct ImpulseSource {
     interval: Option<Duration>,
     spec: ImpulseSpec,
     limit: usize,
     state: ImpulseSourceState,
-    _t: PhantomData<(K, T)>,
 }
 
-#[source_fn(out_t = ImpulseEvent)]
-impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
-    /* This method is mainly useful for testing,
-      so you can always ensure it starts at the beginning of an interval.
-    */
-    pub fn new_aligned(
-        interval: Duration,
-        spec: ImpulseSpec,
-        alignment_duration: Duration,
-        limit: usize,
-        start_time: SystemTime,
-    ) -> Self {
-        let start_millis = to_millis(start_time);
-        let truncated_start_millis =
-            start_millis - (start_millis % alignment_duration.as_millis() as u64);
-        let start_time = from_millis(truncated_start_millis);
-        Self::new(Some(interval), spec, limit, start_time)
-    }
-
-    pub fn new(
-        interval: Option<Duration>,
-        spec: ImpulseSpec,
-        limit: usize,
-        start_time: SystemTime,
-    ) -> Self {
-        Self {
-            interval,
-            spec,
-            limit,
-            state: ImpulseSourceState {
-                counter: 0,
-                start_time,
-            },
-            _t: PhantomData,
-        }
-    }
-
+impl ImpulseSource {
     pub fn from_config(config: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config).expect("Invalid config for ImpulseSource");
         let table: ImpulseTable =
             serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
 
-        Self::new(
-            table
+        ImpulseSource {
+            interval: table
                 .event_time_interval
                 .map(|i| Duration::from_micros(i as u64)),
-            ImpulseSpec::EventsPerSecond(table.event_rate as f32),
-            table
+            spec: ImpulseSpec::EventsPerSecond(table.event_rate as f32),
+            limit: table
                 .message_count
                 .map(|n| n as usize)
                 .unwrap_or(usize::MAX),
-            SystemTime::now(),
-        )
-    }
-
-    fn name(&self) -> String {
-        "impulse-source".to_string()
-    }
-
-    fn tables(&self) -> Vec<TableDescriptor> {
-        vec![arroyo_state::global_table("i", "impulse source state")]
-    }
-
-    async fn on_start(&mut self, ctx: &mut Context<(), ImpulseEvent>) {
-        let s = ctx
-            .state
-            .get_global_keyed_state::<usize, ImpulseSourceState>('i')
-            .await;
-
-        if let Some(state) = s.get(&ctx.task_info.task_index) {
-            self.state = *state;
+            state: ImpulseSourceState {
+                counter: 0,
+                start_time: SystemTime::now(),
+            },
         }
     }
 
-    async fn run(&mut self, ctx: &mut Context<(), ImpulseEvent>) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         let delay = match self.spec {
             ImpulseSpec::Delay(d) => d,
             ImpulseSpec::EventsPerSecond(eps) => {
@@ -125,32 +69,41 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
 
         let start_time = SystemTime::now() - delay * self.state.counter as u32;
 
+        // let schema = Arc::new(Schema::new(vec![
+        //     Field::new("time", DataType::Time64(TimeUnit::Nanosecond), false),
+        //     Field::new("counter", DataType::UInt64, false),
+        //     Field::new("subtask_index", DataType::UInt64, false),
+        // ]));
+
         while self.state.counter < self.limit {
             let timestamp = self
                 .interval
                 .map(|d| self.state.start_time + d * self.state.counter as u32)
                 .unwrap_or_else(SystemTime::now);
-            ctx.collect(Record {
-                timestamp,
-                key: None,
-                value: ImpulseEvent {
-                    counter: self.state.counter as u64,
-                    subtask_index: ctx.task_info.task_index as u64,
-                },
-            })
-            .await;
+
+            let columns: Vec<ArrayRef> = vec![
+                Arc::new(Time64NanosecondArray::from(
+                    vec![to_nanos(timestamp) as i64],
+                )),
+                Arc::new(UInt64Array::from(vec![self.state.counter as u64])),
+                Arc::new(UInt64Array::from(vec![ctx.task_info.task_index as u64])),
+            ];
+
+            let record = ArrowRecord { columns, count: 1 };
+
+            ctx.collect(record).await;
 
             self.state.counter += 1;
 
             match ctx.control_rx.try_recv() {
                 Ok(ControlMessage::Checkpoint(c)) => {
                     // checkpoint our state
-                    debug!("starting checkpointing {}", ctx.task_info.task_index);
-                    ctx.state
-                        .get_global_keyed_state('i')
-                        .await
-                        .insert(ctx.task_info.task_index, self.state)
-                        .await;
+                    // debug!("starting checkpointing {}", ctx.task_info.task_index);
+                    // ctx.state
+                    //     .get_global_keyed_state('i')
+                    //     .await
+                    //     .insert(ctx.task_info.task_index, self.state)
+                    //     .await;
                     if self.checkpoint(c, ctx).await {
                         return SourceFinishType::Immediate;
                     }
@@ -184,5 +137,33 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
         }
 
         SourceFinishType::Final
+    }
+}
+
+#[async_trait::async_trait]
+impl ArrowOperator for ImpulseSource {
+    fn name(&self) -> String {
+        "impulse-source".to_string()
+    }
+
+    fn tables(&self) -> Vec<TableDescriptor> {
+        vec![arroyo_state::global_table("i", "impulse source state")]
+    }
+
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        // let s = ctx
+        //     .state
+        //     .get_global_keyed_state::<usize, ImpulseSourceState>('i')
+        //     .await;
+        //
+        // if let Some(state) = s.get(&ctx.task_info.task_index) {
+        //     self.state = *state;
+        // }
+
+        self.run(ctx).await;
+    }
+
+    async fn process_batch(&mut self, _: ArrowRecord, _: &mut ArrowContext) {
+        unreachable!("process batch should not be called on source");
     }
 }

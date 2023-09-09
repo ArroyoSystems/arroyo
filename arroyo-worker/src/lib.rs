@@ -43,7 +43,6 @@ pub mod engine;
 pub mod formats;
 mod inq_reader;
 mod network_manager;
-mod operator;
 pub mod operators;
 mod process_fn;
 

@@ -303,6 +303,16 @@ pub struct ArrowRecord {
     pub count: usize,
 }
 
+impl ArrowRecord {
+    pub fn new(columns: Vec<Arc<dyn Array>>) -> ArrowRecord {
+        let count = columns
+            .first()
+            .expect("must have at least one column")
+            .len();
+        ArrowRecord { columns, count }
+    }
+}
+
 // #[derive(Debug, Clone)]
 // pub struct ArrowRecord {
 //     pub timestamp_col: u16,

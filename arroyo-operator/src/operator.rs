@@ -5,6 +5,8 @@ use std::{
     time::SystemTime,
 };
 
+use crate::inq_reader::InQReader;
+use crate::{CheckpointCounter, ControlOutcome, WatermarkHolder};
 use arrow::datatypes::Schema;
 use arrow_array::iterator::ArrayIter;
 use arrow_array::{downcast_primitive_array, Array, ArrayAccessor, ArrayRef, RecordBatch};
@@ -29,15 +31,15 @@ use rand::{random, Rng};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, Instrument};
 
-use crate::engine::{server_for_hash, QUEUE_SIZE};
-use crate::{
-    engine::{CheckpointCounter, WatermarkHolder},
-    inq_reader::InQReader,
-    ControlOutcome, TIMER_TABLE,
-};
+pub fn server_for_hash(x: u64, n: usize) -> usize {
+    let range_size = u64::MAX / (n as u64);
+    (n - 1).min((x / range_size) as usize)
+}
+
+pub static TIMER_TABLE: char = '[';
 
 #[derive(Debug, Clone)]
-struct ArroyoSchema {
+pub struct ArroyoSchema {
     pub schema: Arc<Schema>,
     pub timestamp_col: usize,
     pub key_field: Option<usize>,
@@ -277,13 +279,13 @@ impl ArrowCollector {
         if self.out_qs.len() == 1 {
             let idx = out_idx(keys, self.out_qs[0].len());
 
-            self.tx_queue_rem_gauges[0][idx]
-                .iter()
-                .for_each(|g| g.set(self.out_qs[0][idx].tx.capacity() as i64));
-
-            self.tx_queue_size_gauges[0][idx]
-                .iter()
-                .for_each(|g| g.set(QUEUE_SIZE as i64));
+            // self.tx_queue_rem_gauges[0][idx]
+            //     .iter()
+            //     .for_each(|g| g.set(self.out_qs[0][idx].tx.capacity() as i64));
+            //
+            // self.tx_queue_size_gauges[0][idx]
+            //     .iter()
+            //     .for_each(|g| g.set(QUEUE_SIZE as i64));
 
             self.out_qs[0][idx]
                 .send(ArrowMessage::Record(record))
@@ -462,7 +464,7 @@ pub trait ArrowOperator: Send + 'static {
         closed: &mut HashSet<usize>,
         in_partitions: usize,
         ctx: &mut ArrowContext,
-    ) -> crate::ControlOutcome {
+    ) -> ControlOutcome {
         match message {
             ArrowMessage::Record(record) => {
                 unreachable!();
@@ -498,7 +500,7 @@ pub trait ArrowOperator: Send + 'static {
                         ctx.task_info.task_index
                     );
                     if self.checkpoint(t, ctx).await {
-                        return crate::ControlOutcome::Stop;
+                        return ControlOutcome::Stop;
                     }
                 }
             }
@@ -531,11 +533,11 @@ pub trait ArrowOperator: Send + 'static {
                 closed.insert(idx);
                 if closed.len() == in_partitions {
                     ctx.broadcast(ArrowMessage::EndOfData).await;
-                    return crate::ControlOutcome::Finish;
+                    return ControlOutcome::Finish;
                 }
             }
         }
-        crate::ControlOutcome::Continue
+        ControlOutcome::Continue
     }
 
     async fn checkpoint(
@@ -598,7 +600,9 @@ pub trait ArrowOperator: Send + 'static {
     }
 
     fn name(&self) -> String;
-    fn tables(&self) -> Vec<TableDescriptor>;
+    fn tables(&self) -> Vec<TableDescriptor> {
+        vec![]
+    }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {}
 

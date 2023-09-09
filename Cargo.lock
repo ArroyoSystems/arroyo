@@ -201,7 +201,8 @@ checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
 [[package]]
 name = "arrow"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2feeebd77b34b0bc88f224e06d01c27da4733997cc4789a4e056196656cdc59a"
 dependencies = [
  "ahash 0.8.3",
  "arrow-arith",
@@ -222,7 +223,8 @@ dependencies = [
 [[package]]
 name = "arrow-arith"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7173f5dc49c0ecb5135f52565af33afd3fdc9a12d13bd6f9973e8b96305e4b2e"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -236,7 +238,8 @@ dependencies = [
 [[package]]
 name = "arrow-array"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63d7ea725f7d1f8bb2cffc53ef538557e95fc802e217d5be25122d402e22f3d0"
 dependencies = [
  "ahash 0.8.3",
  "arrow-buffer",
@@ -252,7 +255,8 @@ dependencies = [
 [[package]]
 name = "arrow-buffer"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdbe439e077f484e5000b9e1d47b5e4c0d15f2b311a8f5bcc682553d5d67a722"
 dependencies = [
  "half",
  "num",
@@ -261,7 +265,8 @@ dependencies = [
 [[package]]
 name = "arrow-cast"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93913cc14875770aa1eef5e310765e855effa352c094cb1c7c00607d0f37b4e1"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -278,7 +283,8 @@ dependencies = [
 [[package]]
 name = "arrow-csv"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef55b67c55ed877e6fe7b923121c19dae5e31ca70249ea2779a17b58fb0fbd9a"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -296,7 +302,8 @@ dependencies = [
 [[package]]
 name = "arrow-data"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4f4f4a3c54614126a71ab91f6631c9743eb4643d6e9318b74191da9dc6e028b"
 dependencies = [
  "arrow-buffer",
  "arrow-schema",
@@ -307,7 +314,8 @@ dependencies = [
 [[package]]
 name = "arrow-ipc"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d41a3659f984a524ef1c2981d43747b24d8eec78e2425267fcd0ef34ce71cd18"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -320,7 +328,8 @@ dependencies = [
 [[package]]
 name = "arrow-json"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10b95faa95a378f56ef32d84cc0104ea998c39ef7cd1faaa6b4cebf8ea92846d"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -339,7 +348,8 @@ dependencies = [
 [[package]]
 name = "arrow-ord"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c68549a4284d9f8b39586afb8d5ff8158b8f0286353a4844deb1d11cf1ba1f26"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -353,7 +363,8 @@ dependencies = [
 [[package]]
 name = "arrow-row"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a75a4a757afc301ce010adadff54d79d66140c4282ed3de565f6ccb716a5cf3"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -367,7 +378,8 @@ dependencies = [
 [[package]]
 name = "arrow-schema"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bebcb57eef570b15afbcf2d07d813eb476fde9f6dd69c81004d6476c197e87e"
 dependencies = [
  "serde",
 ]
@@ -375,7 +387,8 @@ dependencies = [
 [[package]]
 name = "arrow-select"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6e2943fa433a48921e914417173816af64eef61c0a3d448280e6c40a62df221"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -387,7 +400,8 @@ dependencies = [
 [[package]]
 name = "arrow-string"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbc92ed638851774f6d7af1ad900b92bc1486746497511868b4298fcbcfa35af"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -620,6 +634,34 @@ dependencies = [
  "serde_with",
  "url",
  "utoipa",
+]
+
+[[package]]
+name = "arroyo-operator"
+version = "0.5.0"
+dependencies = [
+ "ahash 0.8.3",
+ "arrow",
+ "arrow-array",
+ "arrow-json",
+ "arroyo-metrics",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-stream",
+ "async-trait",
+ "datafusion-common",
+ "datafusion-physical-expr",
+ "futures",
+ "parquet",
+ "prometheus",
+ "rand",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "typify",
 ]
 
 [[package]]
@@ -5195,7 +5237,7 @@ dependencies = [
 [[package]]
 name = "parquet"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1fc09ac1ae38e4ad3ddf707ea26911c4a10f7080"
+source = "git+https://github.com/ArroyoSystems/arrow-rs.git?branch=use_public_arrow#675131b1f01a180485a82d298383848558043983"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",

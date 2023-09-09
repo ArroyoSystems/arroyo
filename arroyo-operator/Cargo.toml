@@ -1,0 +1,34 @@
+[package]
+name = "arroyo-operator"
+version = "0.5.0"
+edition = "2021"
+
+[dependencies]
+arroyo-types = { path = "../arroyo-types" }
+arroyo-state = { path = "../arroyo-state" }
+arroyo-rpc = { path = "../arroyo-rpc" }
+arroyo-metrics =  { path = "../arroyo-metrics" }
+
+datafusion-physical-expr = "28.0"
+datafusion-common = "28.0"
+ahash = "0.8.3"
+
+prometheus = {version = "0.13", features = ["process"] }
+futures = "0.3"
+tokio = { version = "1", features = ["full", "tracing"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+async-trait = "0.1.68"
+async-stream = "0.3.4"
+
+arrow = { workspace = true }
+parquet = { workspace = true, features = ["async"]}
+arrow-array = { workspace = true}
+arrow-json = { workspace = true }
+
+tracing = "0.1"
+
+rand = "0.8"
+
+serde = "1.0"
+serde_json = "1.0"
+typify = "0.0.13"
