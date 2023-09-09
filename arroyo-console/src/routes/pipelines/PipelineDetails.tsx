@@ -192,18 +192,14 @@ export function PipelineDetails() {
   );
 
   const queryTab = (
-    <TabPanel w={'100%'}>
-      <Box>
-        <CodeEditor query={pipeline.query} readOnly={true} />
-      </Box>
+    <TabPanel flex={1}>
+      <CodeEditor query={pipeline.query} readOnly={true} />
     </TabPanel>
   );
 
   const udfsTab = (
-    <TabPanel w={'100%'}>
-      <Box>
-        <CodeEditor query={pipeline.udfs[0]?.definition || ''} language="rust" readOnly={true} />
-      </Box>
+    <TabPanel flex={1}>
+      <CodeEditor query={pipeline.udfs[0]?.definition || ''} language="rust" readOnly={true} />
     </TabPanel>
   );
 
@@ -230,7 +226,7 @@ export function PipelineDetails() {
         <Tab>Errors {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}</Tab>
       </TabList>
       <Flex minH={0} flex={1}>
-        <TabPanels>
+        <TabPanels display={'flex'} flexDirection={'column'}>
           {operatorsTab}
           {outputsTab}
           {checkpointsTab}
