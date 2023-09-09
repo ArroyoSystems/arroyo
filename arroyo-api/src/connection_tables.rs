@@ -54,7 +54,7 @@ async fn get_and_validate_connector<E: GenericClient>(
         .ok_or_else(|| anyhow!("Unknown connector '{}'", req.connector,))
         .map_err(log_and_map)?;
 
-    let (connection_profile_id, config) = if let Some(connection_profile_id) =
+    let (connection_profile_id, profile_config) = if let Some(connection_profile_id) =
         &req.connection_profile_id
     {
         let connection_profile = api_queries::get_connection_profile_by_pub_id()
@@ -101,7 +101,7 @@ async fn get_and_validate_connector<E: GenericClient>(
         None
     };
 
-    Ok((connector, connection_profile_id, config, schema))
+    Ok((connector, connection_profile_id, profile_config, schema))
 }
 
 /// Delete a Connection Table
@@ -154,13 +154,13 @@ pub(crate) async fn test_connection_table(
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    let (connector, _, config, schema) =
+    let (connector, _, profile, schema) =
         get_and_validate_connector(&req, &auth_data, &client).await?;
 
     let (tx, rx) = channel(8);
 
     connector
-        .test(&req.name, &config, &req.config, schema.as_ref(), tx)
+        .test(&req.name, &profile, &req.config, schema.as_ref(), tx)
         .map_err(|e| bad_request(format!("Failed to parse config or schema: {:?}", e)))?;
 
     Ok(Sse::new(ReceiverStream::new(rx)))
@@ -169,15 +169,33 @@ pub(crate) async fn test_connection_table(
 fn get_connection_profile(
     c: &DbConnectionTable,
     connector: &dyn ErasedConnector,
-) -> Option<ConnectionProfile> {
-    let config = c.connection_config.clone().unwrap_or(json!({}));
-    Some(ConnectionProfile {
-        id: c.pub_id.clone(),
-        name: c.connection_name.as_ref()?.clone(),
-        connector: c.connection_type.as_ref()?.clone(),
-        description: connector.config_description(&config).ok()?,
-        config,
-    })
+) -> anyhow::Result<Option<ConnectionProfile>> {
+    if let Some(id) = &c.profile_id {
+        let config = c
+            .profile_config
+            .as_ref()
+            .ok_or_else(|| anyhow!("connection name not found"))?
+            .clone();
+        Ok(Some(ConnectionProfile {
+            id: id.clone(),
+            name: c
+                .profile_name
+                .as_ref()
+                .ok_or_else(|| anyhow!("connection name not found"))?
+                .clone(),
+            connector: c
+                .profile_type
+                .as_ref()
+                .ok_or_else(|| anyhow!("connection type not found"))?
+                .clone(),
+            description: connector
+                .config_description(&config)
+                .map_err(|e| anyhow!("invalid config for connector {}: {:?}", id, e))?,
+            config,
+        }))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(crate) async fn get_all_connection_tables<C: GenericClient>(
@@ -228,11 +246,11 @@ pub async fn create_connection_table(
         .await
         .map_err(log_and_map)?;
 
-    let (connector, connection_id, config, schema) =
+    let (connector, connection_id, profile, schema) =
         get_and_validate_connector(&req, &auth_data, &transaction).await?;
 
     let table_type: String = connector
-        .table_type(&config, &req.config)
+        .table_type(&profile, &req.config)
         .unwrap()
         .to_string();
 
@@ -285,7 +303,7 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
             ));
         };
 
-        let connection = get_connection_profile(&self, &*connector);
+        let profile = get_connection_profile(&self, &*connector).map_err(|e| e.to_string())?;
 
         let schema = self.schema.map(|schema| serde_json::from_value(schema));
         let schema = match schema {
@@ -300,7 +318,7 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
         };
 
         let schema = match connector.get_schema(
-            &connection
+            &profile
                 .as_ref()
                 .map(|t| t.config.clone())
                 .unwrap_or(json!({})),
@@ -327,7 +345,7 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
             pub_id: self.pub_id,
             name: self.name,
             created_at: to_micros(self.created_at),
-            connection_profile: None,
+            connection_profile: profile,
             connector: self.connector,
             table_type: connection_type,
             config: self.config,

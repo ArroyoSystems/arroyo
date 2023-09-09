@@ -44,12 +44,12 @@ VALUES (:pub_id, :organization_id, :created_by, :name, :kafka_schema_registry, :
 
 
 ------- connection tables -------------
---! create_connection_table(connection_id?, schema?)
+--! create_connection_table(profile_id?, schema?)
 INSERT INTO connection_tables
 (pub_id, organization_id, created_by, name, table_type, connector, connection_id, config, schema)
-VALUES (:pub_id, :organization_id, :created_by, :name, :table_type, :connector, :connection_id, :config, :schema);
+VALUES (:pub_id, :organization_id, :created_by, :name, :table_type, :connector, :profile_id, :config, :schema);
 
---: DbConnectionTable (connection_id?, connection_name?, connection_type?, connection_config?, schema?)
+--: DbConnectionTable (profile_id?, profile_name?, profile_type?, profile_config?, schema?)
 
 --! get_connection_tables: DbConnectionTable
 SELECT connection_tables.id as id,
@@ -60,10 +60,10 @@ SELECT connection_tables.id as id,
     connection_tables.table_type as table_type,
     connection_tables.config as config,
     connection_tables.schema as schema,
-    connection_tables.connection_id as connection_id,
-    connection_profiles.name as connection_name,
-    connection_profiles.type as connection_type,
-    connection_profiles.config as connection_config,
+    connection_profiles.pub_id as profile_id,
+    connection_profiles.name as profile_name,
+    connection_profiles.type as profile_type,
+    connection_profiles.config as profile_config,
     (SELECT count(*) as pipeline_count
         FROM connection_table_pipelines
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
@@ -87,10 +87,10 @@ SELECT connection_tables.id as id,
     connection_tables.table_type as table_type,
     connection_tables.config as config,
     connection_tables.schema as schema,
-    connection_tables.connection_id as connection_id,
-    connection_profiles.name as connection_name,
-    connection_profiles.type as connection_type,
-    connection_profiles.config as connection_config,
+    connection_profiles.pub_id as profile_id,
+    connection_profiles.name as profile_name,
+    connection_profiles.type as profile_type,
+    connection_profiles.config as profile_config,
     (SELECT count(*) as pipeline_count
         FROM connection_table_pipelines
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
@@ -109,10 +109,10 @@ SELECT connection_tables.id as id,
     connection_tables.table_type as table_type,
     connection_tables.config as config,
     connection_tables.schema as schema,
-    connection_tables.connection_id as connection_id,
-    connection_profiles.name as connection_name,
-    connection_profiles.type as connection_type,
-    connection_profiles.config as connection_config,
+    connection_profiles.pub_id as profile_id,
+    connection_profiles.name as profile_name,
+    connection_profiles.type as profile_type,
+    connection_profiles.config as profile_config,
     (SELECT count(*) as pipeline_count
         FROM connection_table_pipelines
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
