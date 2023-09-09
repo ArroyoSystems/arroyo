@@ -1,5 +1,5 @@
 use arrow::datatypes::SchemaRef;
-use arrow_array::RecordBatch;
+use arrow_array::{Array, RecordBatch};
 use bincode::{config, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::{Range, RangeInclusive};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
@@ -294,6 +295,28 @@ pub struct Record<K: Key, T: Data> {
     pub timestamp: SystemTime,
     pub key: Option<K>,
     pub value: T,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrowRecord {
+    pub columns: Vec<Arc<dyn Array>>,
+    pub count: usize,
+}
+
+// #[derive(Debug, Clone)]
+// pub struct ArrowRecord {
+//     pub timestamp_col: u16,
+//     pub key_col: Option<u16>,
+//     pub data: ArrowData,
+// }
+
+#[derive(Debug, Clone)]
+pub enum ArrowMessage {
+    Record(ArrowRecord),
+    Barrier(CheckpointBarrier),
+    Watermark(Watermark),
+    Stop,
+    EndOfData,
 }
 
 pub struct UserError {

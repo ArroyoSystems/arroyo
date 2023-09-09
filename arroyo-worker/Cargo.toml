@@ -14,6 +14,9 @@ arroyo-state = { path = "../arroyo-state" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
+datafusion-physical-expr = "28.0"
+datafusion-common = "28.0"
+ahash = "0.8.3"
 
 rand = "0.8"
 bincode = "2.0.0-rc.3"

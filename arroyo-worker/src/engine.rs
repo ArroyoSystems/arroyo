@@ -44,7 +44,7 @@ use crate::TIMER_TABLE;
 use crate::{LogicalEdge, LogicalNode, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
 
-const QUEUE_SIZE: usize = 4 * 1024;
+pub const QUEUE_SIZE: usize = 4 * 1024;
 
 #[derive(Debug)]
 pub enum QueueItem {
@@ -75,7 +75,7 @@ fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
     start..=end
 }
 
-fn server_for_hash(x: u64, n: usize) -> usize {
+pub fn server_for_hash(x: u64, n: usize) -> usize {
     let range_size = u64::MAX / (n as u64);
     (n - 1).min((x / range_size) as usize)
 }

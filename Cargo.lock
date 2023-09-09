@@ -785,6 +785,7 @@ dependencies = [
 name = "arroyo-worker"
 version = "0.5.0"
 dependencies = [
+ "ahash 0.8.3",
  "anyhow",
  "arrow",
  "arrow-array",
@@ -801,6 +802,8 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "bytes",
  "chrono",
+ "datafusion-common",
+ "datafusion-physical-expr",
  "eventsource-client",
  "fluvio",
  "futures",
