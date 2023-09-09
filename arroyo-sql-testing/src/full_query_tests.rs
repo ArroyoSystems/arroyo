@@ -404,3 +404,19 @@ INSERT INTO raw_sink
 SELECT bid.channel
 FROM nexmark;
 "}
+
+full_pipeline_codegen! {"raw_string_test_not_null",
+"CREATE TABLE raw_sink (
+  output TEXT NOT NULL
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'sink',
+  topic = 'outputs',
+  format = 'raw_string'
+);
+
+INSERT INTO raw_sink
+SELECT 'test'
+FROM nexmark;
+"}

@@ -254,7 +254,7 @@ impl StructDef {
                     }
                 } else {
                     quote! {
-                        self.#field.as_bytes().to_vec()
+                        Some(self.#field.as_bytes().to_vec())
                     }
                 }
             } else {
