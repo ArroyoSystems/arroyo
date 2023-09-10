@@ -1,10 +1,15 @@
-use crate::operator::{ArrowContext, ArrowOperator, ArroyoSchema};
+use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor, ArroyoSchema};
 use arrow_array::RecordBatch;
 use arroyo_types::ArrowRecord;
 use async_trait::async_trait;
+use serde_json::Value;
 
-pub struct ConsoleSink {
-    input_schema: ArroyoSchema,
+pub struct ConsoleSink {}
+
+impl ArrowOperatorConstructor for ConsoleSink {
+    fn from_config(_config: Value) -> Box<dyn ArrowOperator> {
+        Box::new(Self {})
+    }
 }
 
 #[async_trait]
@@ -13,8 +18,8 @@ impl ArrowOperator for ConsoleSink {
         "ConsoleSink".to_string()
     }
 
-    async fn process_batch(&mut self, batch: ArrowRecord, _ctx: &mut ArrowContext) {
-        let batch = RecordBatch::try_new(self.input_schema.schema.clone(), batch.columns).unwrap();
+    async fn process_batch(&mut self, batch: ArrowRecord, ctx: &mut ArrowContext) {
+        let batch = RecordBatch::try_new(ctx.in_schemas[0].schema.clone(), batch.columns).unwrap();
 
         let out = std::io::stdout();
         let buf = std::io::BufWriter::new(out);

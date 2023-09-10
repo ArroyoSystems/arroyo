@@ -9,8 +9,11 @@ arroyo-state = { path = "../arroyo-state" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
 
+datafusion-proto = "28.0.0"
+datafusion-expr = "28.0.0"
 datafusion-physical-expr = "28.0"
 datafusion-common = "28.0"
+datafusion-execution = "28.0"
 ahash = "0.8.3"
 
 prometheus = {version = "0.13", features = ["process"] }
@@ -24,7 +27,7 @@ arrow = { workspace = true }
 parquet = { workspace = true, features = ["async"]}
 arrow-array = { workspace = true}
 arrow-json = { workspace = true }
-
+prost = "0.11"
 tracing = "0.1"
 
 rand = "0.8"

@@ -1,3 +1,3 @@
-mod console;
-mod impulse;
-mod projection;
+pub mod console;
+pub mod impulse;
+pub mod projection;

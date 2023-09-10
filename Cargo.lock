@@ -651,10 +651,14 @@ dependencies = [
  "async-stream",
  "async-trait",
  "datafusion-common",
+ "datafusion-execution",
+ "datafusion-expr",
  "datafusion-physical-expr",
+ "datafusion-proto",
  "futures",
  "parquet",
  "prometheus",
+ "prost",
  "rand",
  "serde",
  "serde_json",
@@ -749,28 +753,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arroyo-sql-testing"
-version = "0.5.0"
-dependencies = [
- "arrow",
- "arrow-array",
- "arrow-schema",
- "arroyo-sql",
- "arroyo-sql-macro",
- "arroyo-types",
- "arroyo-worker",
- "bincode 2.0.0-rc.3",
- "bincode_derive",
- "chrono",
- "hex",
- "petgraph",
- "quote",
- "serde",
- "serde_json",
- "syn 2.0.26",
-]
-
-[[package]]
 name = "arroyo-state"
 version = "0.5.0"
 dependencies = [
@@ -833,6 +815,7 @@ dependencies = [
  "arrow-array",
  "arroyo-macro",
  "arroyo-metrics",
+ "arroyo-operator",
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-state",
@@ -2570,6 +2553,21 @@ dependencies = [
  "sha2 0.10.7",
  "unicode-segmentation",
  "uuid",
+]
+
+[[package]]
+name = "datafusion-proto"
+version = "28.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60b7088150bc98c46e7b3a7168b96ea020c0eff682af08a6d1f3b8415ce1d7a7"
+dependencies = [
+ "arrow",
+ "chrono",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "object_store 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "prost",
 ]
 
 [[package]]

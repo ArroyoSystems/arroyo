@@ -17,6 +17,8 @@ use bincode::{config, Decode, Encode};
 use tracing::{debug, error, info, warn};
 
 pub use arroyo_macro::StreamNode;
+use arroyo_operator::construct_operator;
+use arroyo_operator::operator::{ArrowOperator, ArroyoSchema};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{
     CheckpointMetadata, HeartbeatReq, TableDeleteBehavior, TableDescriptor, TableType,
@@ -25,8 +27,8 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{
-    from_micros, to_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark,
-    WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+    from_micros, to_micros, ArrowMessage, CheckpointBarrier, Data, Key, Message, Record, TaskInfo,
+    Watermark, WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -565,18 +567,14 @@ pub struct SubtaskNode {
     pub id: String,
     pub subtask_idx: usize,
     pub parallelism: usize,
-    pub node: Box<dyn StreamNode>,
+    pub in_schemas: Vec<ArroyoSchema>,
+    pub out_schema: ArroyoSchema,
+    pub node: Box<dyn ArrowOperator>,
 }
 
 impl Debug for SubtaskNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}-{}-{}",
-            self.node.node_name(),
-            self.id,
-            self.subtask_idx
-        )
+        write!(f, "{}-{}-{}", self.node.name(), self.id, self.subtask_idx)
     }
 }
 
@@ -606,8 +604,8 @@ struct PhysicalGraphEdge {
     in_logical_idx: usize,
     out_logical_idx: usize,
     edge: LogicalEdge,
-    tx: Option<Sender<QueueItem>>,
-    rx: Option<Receiver<QueueItem>>,
+    tx: Option<Sender<ArrowMessage>>,
+    rx: Option<Receiver<ArrowMessage>>,
 }
 
 impl Debug for PhysicalGraphEdge {
@@ -629,7 +627,7 @@ impl SubtaskOrQueueNode {
                 let n = SubtaskOrQueueNode::QueueNode(QueueNode {
                     task_info: TaskInfo {
                         job_id,
-                        operator_name: sn.node.node_name(),
+                        operator_name: sn.node.name(),
                         operator_id: sn.id.clone(),
                         task_index: sn.subtask_idx,
                         parallelism: sn.parallelism,
@@ -702,10 +700,14 @@ impl Program {
                 &node.initial_parallelism
             });
             for i in 0..parallelism {
-                physical.add_node(SubtaskOrQueueNode::SubtaskNode((*node.create_fn)(
-                    i,
+                physical.add_node(SubtaskOrQueueNode::SubtaskNode(SubtaskNode {
+                    id: node.id.clone(),
+                    subtask_idx: i,
                     parallelism,
-                )));
+                    in_schemas: node.in_schemas.clone(),
+                    out_schema: node.out_schema.clone(),
+                    node: construct_operator(&node.operator, node.config.clone()),
+                }));
             }
         }
 
@@ -1165,7 +1167,8 @@ impl Engine {
                 dst_idx: target.subtask_idx(),
             };
 
-            senders.add(quad, edge.weight().tx.as_ref().unwrap().clone());
+            todo!("networking");
+            //senders.add(quad, edge.weight().tx.as_ref().unwrap().clone());
         }
 
         let mut connects = vec![];
@@ -1186,13 +1189,14 @@ impl Engine {
         for (id, quad) in connects {
             let edge = self.program.graph.edge_weight_mut(id).unwrap();
 
-            self.network_manager
-                .connect(
-                    assignment.worker_addr.clone(),
-                    quad,
-                    edge.rx.take().unwrap(),
-                )
-                .await;
+            todo!("networking");
+            // self.network_manager
+            //     .connect(
+            //         assignment.worker_addr.clone(),
+            //         quad,
+            //         edge.rx.take().unwrap(),
+            //     )
+            //     .await;
         }
     }
 
@@ -1210,14 +1214,14 @@ impl Engine {
         info!(
             "[{:?}] Scheduling {}-{}-{} ({}/{})",
             self.worker_id,
-            node.node.node_name(),
+            node.node.name(),
             node.id,
             node.subtask_idx,
             node.subtask_idx + 1,
             node.parallelism
         );
 
-        let mut in_qs_map: BTreeMap<(LogicalEdge, usize), Vec<Receiver<QueueItem>>> =
+        let mut in_qs_map: BTreeMap<(LogicalEdge, usize), Vec<Receiver<ArrowMessage>>> =
             BTreeMap::new();
 
         for edge in self.program.graph.edge_indices() {
@@ -1230,7 +1234,8 @@ impl Engine {
             }
         }
 
-        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, OutQueue>> = BTreeMap::new();
+        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, Sender<ArrowMessage>>> =
+            BTreeMap::new();
 
         for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
             // is the target of this edge local or remote?
@@ -1244,11 +1249,10 @@ impl Engine {
             };
 
             let tx = edge.weight().tx.as_ref().unwrap().clone();
-            let sender = OutQueue::new(tx, !local);
             out_qs_map
                 .entry(edge.weight().out_logical_idx)
                 .or_default()
-                .insert(edge.weight().edge_idx, sender);
+                .insert(edge.weight().edge_idx, tx);
         }
 
         let task_info = self
@@ -1267,6 +1271,8 @@ impl Engine {
             checkpoint_metadata.clone(),
             control_rx,
             control_tx.clone(),
+            node.in_schemas,
+            node.out_schema,
             in_qs_map.into_values().collect(),
             out_qs_map
                 .into_values()

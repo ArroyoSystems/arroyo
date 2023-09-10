@@ -5,7 +5,7 @@ extern crate core;
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
-use arrow::datatypes::Field;
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -23,7 +23,8 @@ use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
 use rand::Rng;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::env;
 use std::fmt::{Debug, Display, Formatter};
 use std::process::exit;
 use std::str::FromStr;
@@ -36,7 +37,9 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::info;
 
+use arroyo_operator::operator::ArroyoSchema;
 pub use ordered_float::OrderedFloat;
+use serde_json::{json, Value};
 
 pub mod connectors;
 pub mod engine;
@@ -121,7 +124,7 @@ pub enum ControlOutcome {
     Finish,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LogicalEdge {
     Forward,
     Shuffle,
@@ -138,11 +141,14 @@ impl Display for LogicalEdge {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LogicalNode {
     pub id: String,
     pub description: String,
-    pub create_fn: Box<fn(usize, usize) -> SubtaskNode>,
+    pub operator: String,
+    pub in_schemas: Vec<ArroyoSchema>,
+    pub out_schema: ArroyoSchema,
+    pub config: Value,
     pub initial_parallelism: usize,
 }
 
@@ -451,4 +457,15 @@ impl WorkerGrpc for WorkerServer {
 
         Ok(Response::new(JobFinishedResp {}))
     }
+}
+
+#[tokio::main]
+pub async fn main() {
+    let mut program = DiGraph::new();
+
+    let program = env::var("PROGRAM").unwrap();
+    let logical = serde_json::from_str(&program).expect("invalid program");
+    let program = Program::from_logical("test".to_string(), &logical, &vec![]);
+    LocalRunner::new(program).run().await;
+    //WorkerServer::new("job", "blah", logical).start().unwrap();
 }

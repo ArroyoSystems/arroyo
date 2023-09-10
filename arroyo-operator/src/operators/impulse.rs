@@ -1,4 +1,4 @@
-use crate::operator::{ArrowContext, ArrowOperator};
+use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor};
 use crate::SourceFinishType;
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow_array::{ArrayRef, RecordBatch, Time64NanosecondArray, UInt64Array};
@@ -6,6 +6,7 @@ use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::{to_nanos, ArrowRecord};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tracing::{debug, info};
@@ -33,28 +34,6 @@ pub struct ImpulseSource {
 }
 
 impl ImpulseSource {
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for ImpulseSource");
-        let table: ImpulseTable =
-            serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
-
-        ImpulseSource {
-            interval: table
-                .event_time_interval
-                .map(|i| Duration::from_micros(i as u64)),
-            spec: ImpulseSpec::EventsPerSecond(table.event_rate as f32),
-            limit: table
-                .message_count
-                .map(|n| n as usize)
-                .unwrap_or(usize::MAX),
-            state: ImpulseSourceState {
-                counter: 0,
-                start_time: SystemTime::now(),
-            },
-        }
-    }
-
     async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         let delay = match self.spec {
             ImpulseSpec::Delay(d) => d,
@@ -137,6 +116,30 @@ impl ImpulseSource {
         }
 
         SourceFinishType::Final
+    }
+}
+
+impl ArrowOperatorConstructor for ImpulseSource {
+    fn from_config(config: Value) -> Box<dyn ArrowOperator> {
+        let config: OperatorConfig =
+            serde_json::from_value(config).expect("Invalid config for ImpulseSource");
+        let table: ImpulseTable =
+            serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
+
+        Box::new(ImpulseSource {
+            interval: table
+                .event_time_interval
+                .map(|i| Duration::from_micros(i as u64)),
+            spec: ImpulseSpec::EventsPerSecond(table.event_rate as f32),
+            limit: table
+                .message_count
+                .map(|n| n as usize)
+                .unwrap_or(usize::MAX),
+            state: ImpulseSourceState {
+                counter: 0,
+                start_time: SystemTime::now(),
+            },
+        })
     }
 }
 

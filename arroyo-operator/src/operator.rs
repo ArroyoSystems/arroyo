@@ -7,7 +7,7 @@ use std::{
 
 use crate::inq_reader::InQReader;
 use crate::{CheckpointCounter, ControlOutcome, WatermarkHolder};
-use arrow::datatypes::Schema;
+use arrow::datatypes::{Schema, SchemaRef};
 use arrow_array::iterator::ArrayIter;
 use arrow_array::{downcast_primitive_array, Array, ArrayAccessor, ArrayRef, RecordBatch};
 use arroyo_metrics::{counter_for_task, gauge_for_task};
@@ -28,6 +28,8 @@ use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use prometheus::{labels, IntCounter, IntGauge};
 use rand::{random, Rng};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, Instrument};
 
@@ -38,7 +40,7 @@ pub fn server_for_hash(x: u64, n: usize) -> usize {
 
 pub static TIMER_TABLE: char = '[';
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArroyoSchema {
     pub schema: Arc<Schema>,
     pub timestamp_col: usize,
@@ -51,7 +53,8 @@ pub struct ArrowContext<S: BackingStore = StateBackend> {
     pub control_tx: Sender<ControlResp>,
     pub watermarks: WatermarkHolder,
     pub state: StateStore<S>,
-    pub in_schema: ArroyoSchema,
+    pub in_schemas: Vec<ArroyoSchema>,
+    pub out_schema: ArroyoSchema,
     pub collector: ArrowCollector,
     pub counters: HashMap<&'static str, IntCounter>,
 }
@@ -63,7 +66,7 @@ impl ArrowContext {
         control_rx: Receiver<ControlMessage>,
         control_tx: Sender<ControlResp>,
         input_partitions: usize,
-        in_schema: ArroyoSchema,
+        in_schemas: Vec<ArroyoSchema>,
         out_schema: ArroyoSchema,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
         mut tables: Vec<TableDescriptor>,
@@ -196,13 +199,14 @@ impl ArrowContext {
             ]),
             collector: ArrowCollector {
                 out_qs,
-                out_schema,
+                out_schema: out_schema.clone(),
                 sent_messages: counters.remove(MESSAGES_SENT),
                 sent_bytes: counters.remove(BYTES_SENT),
                 tx_queue_rem_gauges,
                 tx_queue_size_gauges,
             },
-            in_schema,
+            in_schemas,
+            out_schema,
             state,
             counters,
         }
@@ -322,15 +326,19 @@ impl ArrowCollector {
     }
 }
 
+pub trait ArrowOperatorConstructor: ArrowOperator {
+    fn from_config(config: Value) -> Box<dyn ArrowOperator>;
+}
+
 #[async_trait::async_trait]
 pub trait ArrowOperator: Send + 'static {
     fn start(
         mut self: Box<Self>,
         task_info: TaskInfo,
         restore_from: Option<CheckpointMetadata>,
-        control_rx: Receiver<arroyo_rpc::ControlMessage>,
-        control_tx: Sender<arroyo_rpc::ControlResp>,
-        in_schema: ArroyoSchema,
+        control_rx: Receiver<ControlMessage>,
+        control_tx: Sender<ControlResp>,
+        in_schemas: Vec<ArroyoSchema>,
         out_schema: ArroyoSchema,
         in_qs: Vec<Vec<Receiver<ArrowMessage>>>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
@@ -354,7 +362,7 @@ pub trait ArrowOperator: Send + 'static {
                 control_rx,
                 control_tx,
                 in_qs.len(),
-                in_schema,
+                in_schemas,
                 out_schema,
                 out_qs,
                 tables,

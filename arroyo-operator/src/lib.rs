@@ -1,4 +1,9 @@
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
+use crate::operators::console::ConsoleSink;
+use crate::operators::impulse::ImpulseSource;
+use crate::operators::projection::ProjectionOperator;
 use arroyo_types::{CheckpointBarrier, Watermark};
+use serde_json::Value;
 use std::time::SystemTime;
 
 mod inq_reader;
@@ -116,5 +121,16 @@ impl CheckpointCounter {
         };
 
         self.counter.is_none()
+    }
+}
+
+pub fn construct_operator(operator: &str, config: Value) -> Box<dyn ArrowOperator> {
+    match operator {
+        "ImpulseSource" => ImpulseSource::from_config(config),
+        "Projection" => ProjectionOperator::from_config(config),
+        "ConsoleSink" => ConsoleSink::from_config(config),
+        _ => {
+            panic!("unknown operator {}", operator);
+        }
     }
 }
