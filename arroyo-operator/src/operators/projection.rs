@@ -48,24 +48,23 @@ impl FunctionRegistry for Registry {
 }
 
 impl ArrowOperatorConstructor for ProjectionOperator {
-    fn from_config(config: Value) -> Box<dyn ArrowOperator> {
-        let mut config: ProjectionOperatorConfig = serde_json::from_value(config).unwrap();
-        let mut buf: Bytes = config.exprs.into();
-
-        let node = ProjectionExecNode::decode(&mut buf).unwrap();
+    fn from_config(config: Vec<u8>) -> Box<dyn ArrowOperator> {
+        let mut buf = config.as_slice();
+        let proto_config: arroyo_rpc::grpc::api::ProjectionOperator =
+            arroyo_rpc::grpc::api::ProjectionOperator::decode(&mut buf).unwrap();
 
         let registry = Registry {};
-
         let schema = Schema::empty();
 
-        let exprs = node
-            .expr
-            .iter()
-            .map(|expr| parse_physical_expr(expr, &registry, &schema).unwrap())
+        let exprs: Vec<_> = proto_config
+            .expressions
+            .into_iter()
+            .map(|expr| PhysicalExprNode::decode(&mut expr.as_slice()).unwrap())
+            .map(|expr| parse_physical_expr(&expr, &registry, &schema).unwrap())
             .collect();
 
         Box::new(Self {
-            name: config.name,
+            name: proto_config.name,
             exprs,
         })
     }
@@ -78,8 +77,11 @@ impl ArrowOperator for ProjectionOperator {
     }
 
     async fn process_batch(&mut self, batch: ArrowRecord, ctx: &mut ArrowContext) {
-        let record_batch =
-            RecordBatch::try_new(ctx.out_schema.schema.clone(), batch.columns).unwrap();
+        let record_batch = RecordBatch::try_new(
+            ctx.out_schema.as_ref().unwrap().schema.clone(),
+            batch.columns,
+        )
+        .unwrap();
 
         let arrays = self
             .exprs

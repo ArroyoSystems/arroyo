@@ -1,9 +1,21 @@
-use arrow_schema::DataType;
+use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_connectors::{
     nexmark::{NexmarkConnector, NexmarkTable},
     Connector, EmptyConfig,
 };
+use arroyo_datastream::logical::ArrowSchema;
+use arroyo_rpc::grpc::api::{
+    ArrowEdge, ArrowNode, ArrowProgram, ConnectorOp, EdgeType, ProjectionOperator,
+};
+use datafusion::physical_expr::udf::create_physical_expr;
+use datafusion_expr::BuiltinScalarFunction;
+use datafusion_physical_expr::expressions::Column;
+use datafusion_physical_expr::ScalarFunctionExpr;
+use prost::Message;
+use serde_json::json;
+use std::sync::Arc;
 
+use crate::expressions::ColumnExpression;
 use crate::{parse_and_get_program, types::TypeDef, ArroyoSchemaProvider, SqlConfig};
 
 #[tokio::test]
@@ -216,4 +228,90 @@ async fn test_udf() {
     parse_and_get_program(sql, schema_provider, SqlConfig::default())
         .await
         .unwrap();
+}
+
+#[test]
+fn create_program() {
+    let mut nodes = vec![];
+    let mut edges = vec![];
+
+    nodes.push(ArrowNode {
+        node_index: 1,
+        node_id: "source".to_string(),
+        parallelism: 1,
+        description: "source node".to_string(),
+        operator_name: "ImpulseSource".to_string(),
+        operator_config: (ConnectorOp {
+            operator: "ImpulseSource".to_string(),
+            config: serde_json::to_string(&json!({
+                "connection": {},
+                "table": {
+                    "event_rate": 2.0,
+                }
+            }))
+            .unwrap(),
+            description: "impulse<2.0>".to_string(),
+        })
+        .encode_to_vec(),
+    });
+
+    // nodes.push(ArrowNode {
+    //     node_index: 2,
+    //     node_id: "project".to_string(),
+    //     parallelism: 1,
+    //     description: "projection_node".to_string(),
+    //     operator_name: "Projection".to_string(),
+    //     operator_config: (ProjectionOperator {
+    //         name: "project".to_string(),
+    //         expressions: vec![
+    //             Column::new("time2", 0),
+    //             create_physical_expr()
+    //         ],
+    //     })
+    // })
+
+    nodes.push(ArrowNode {
+        node_index: 3,
+        node_id: "sink".to_string(),
+        parallelism: 1,
+        description: "sink node".to_string(),
+        operator_name: "ConsoleSink".to_string(),
+        operator_config: (ConnectorOp {
+            operator: "ConsoleSink".to_string(),
+            config: serde_json::to_string(&json!({
+                "connection": {},
+                "table": {}
+            }))
+            .unwrap(),
+            description: "consolesink".to_string(),
+        })
+        .encode_to_vec(),
+    });
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new(
+            "time",
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        ),
+        Field::new("counter", DataType::UInt64, false),
+        Field::new("subtask_index", DataType::UInt64, false),
+    ]));
+
+    let arroyo_schema = arroyo_rpc::grpc::api::ArroyoSchema {
+        arrow_schema: serde_json::to_string(&schema).unwrap(),
+        timestamp_col: 0,
+        key_col: None,
+    };
+
+    edges.push(ArrowEdge {
+        source: 1,
+        target: 3,
+        schema: Some(arroyo_schema),
+        edge_type: EdgeType::Forward as i32,
+    });
+
+    let program = ArrowProgram { nodes, edges };
+
+    std::fs::write("/tmp/program.pb", &program.encode_to_vec()).unwrap();
 }

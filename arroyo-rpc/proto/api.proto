@@ -281,6 +281,43 @@ enum EdgeType {
   RIGHT_JOIN = 4;
 }
 
+// Arrow
+
+message ArrowProgram {
+  repeated ArrowNode nodes = 1;
+  repeated ArrowEdge edges = 2;
+}
+
+message ArroyoSchema {
+  // json-encoded
+  string arrow_schema = 1;
+  uint32 timestamp_col = 2;
+  optional uint32 key_col = 3;
+}
+
+message ArrowNode {
+  int32 node_index = 1;
+  string node_id = 2;
+  uint32 parallelism = 3;
+  string description = 4;
+  string operator_name = 5;
+  bytes operator_config = 6;
+}
+
+message ArrowEdge {
+  int32 source = 1;
+  int32 target = 2;
+  ArroyoSchema schema = 4;
+  EdgeType edge_type = 5;
+}
+
+message ProjectionOperator {
+  string name = 1;
+  repeated bytes expressions = 2;
+}
+
+
+
 // job status
 
 message JobStatus {
@@ -355,3 +392,4 @@ message OperatorCheckpointDetail {
   bool has_state = 4;
   map<uint32, TaskCheckpointDetail> tasks = 5;
 }
+

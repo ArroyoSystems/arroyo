@@ -1,10 +1,14 @@
 use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor};
 use crate::SourceFinishType;
+use arrow::datatypes::DataType::Time64;
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
-use arrow_array::{ArrayRef, RecordBatch, Time64NanosecondArray, UInt64Array};
+use arrow_array::{
+    ArrayRef, RecordBatch, Time64NanosecondArray, TimestampNanosecondArray, UInt64Array,
+};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::{to_nanos, ArrowRecord};
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -61,9 +65,9 @@ impl ImpulseSource {
                 .unwrap_or_else(SystemTime::now);
 
             let columns: Vec<ArrayRef> = vec![
-                Arc::new(Time64NanosecondArray::from(
-                    vec![to_nanos(timestamp) as i64],
-                )),
+                Arc::new(TimestampNanosecondArray::from(vec![
+                    to_nanos(timestamp) as i64
+                ])),
                 Arc::new(UInt64Array::from(vec![self.state.counter as u64])),
                 Arc::new(UInt64Array::from(vec![ctx.task_info.task_index as u64])),
             ];
@@ -120,9 +124,12 @@ impl ImpulseSource {
 }
 
 impl ArrowOperatorConstructor for ImpulseSource {
-    fn from_config(config: Value) -> Box<dyn ArrowOperator> {
+    fn from_config(config: Vec<u8>) -> Box<dyn ArrowOperator> {
+        let mut buf = config.as_slice();
+        let op = arroyo_rpc::grpc::api::ConnectorOp::decode(&mut buf).unwrap();
+
         let config: OperatorConfig =
-            serde_json::from_value(config).expect("Invalid config for ImpulseSource");
+            serde_json::from_str(&op.config).expect("Invalid config for ImpulseSource");
         let table: ImpulseTable =
             serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
 

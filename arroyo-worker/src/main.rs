@@ -6,6 +6,7 @@ extern crate core;
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arroyo_datastream::logical;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -22,10 +23,12 @@ use engine::RunningEngine;
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
+use prost::Message;
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::env;
 use std::fmt::{Debug, Display, Formatter};
+use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -37,9 +40,8 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 use tracing::info;
 
-use arroyo_operator::operator::ArroyoSchema;
-pub use ordered_float::OrderedFloat;
-use serde_json::{json, Value};
+use arroyo_datastream::logical::LogicalGraph;
+use arroyo_rpc::grpc::api::ArrowProgram;
 
 pub mod connectors;
 pub mod engine;
@@ -124,46 +126,6 @@ pub enum ControlOutcome {
     Finish,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum LogicalEdge {
-    Forward,
-    Shuffle,
-    ShuffleJoin(usize),
-}
-
-impl Display for LogicalEdge {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LogicalEdge::Forward => write!(f, "→"),
-            LogicalEdge::Shuffle => write!(f, "⤨"),
-            LogicalEdge::ShuffleJoin(order) => write!(f, "{}⤨", order),
-        }
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct LogicalNode {
-    pub id: String,
-    pub description: String,
-    pub operator: String,
-    pub in_schemas: Vec<ArroyoSchema>,
-    pub out_schema: ArroyoSchema,
-    pub config: Value,
-    pub initial_parallelism: usize,
-}
-
-impl Display for LogicalNode {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.description)
-    }
-}
-
-impl Debug for LogicalNode {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.id)
-    }
-}
-
 struct EngineState {
     sources: Vec<Sender<ControlMessage>>,
     sinks: Vec<Sender<ControlMessage>>,
@@ -201,17 +163,13 @@ pub struct WorkerServer {
     name: &'static str,
     hash: &'static str,
     controller_addr: String,
-    logical: DiGraph<LogicalNode, LogicalEdge>,
+    logical: LogicalGraph,
     state: Arc<Mutex<Option<EngineState>>>,
     network: Arc<Mutex<Option<NetworkManager>>>,
 }
 
 impl WorkerServer {
-    pub fn new(
-        name: &'static str,
-        hash: &'static str,
-        logical: DiGraph<LogicalNode, LogicalEdge>,
-    ) -> Self {
+    pub fn new(name: &'static str, hash: &'static str, logical: LogicalGraph) -> Self {
         let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
             .unwrap_or_else(|_| LOCAL_CONTROLLER_ADDR.clone());
 
@@ -461,10 +419,11 @@ impl WorkerGrpc for WorkerServer {
 
 #[tokio::main]
 pub async fn main() {
-    let mut program = DiGraph::new();
+    let path = PathBuf::from(env::var("PROGRAM_FILE").unwrap());
+    let buf = std::fs::read(&path).expect(&format!("could not open file: {:?}", &path));
 
-    let program = env::var("PROGRAM").unwrap();
-    let logical = serde_json::from_str(&program).expect("invalid program");
+    let proto = ArrowProgram::decode(&mut buf.as_slice()).unwrap();
+    let logical = logical::from_proto(proto);
     let program = Program::from_logical("test".to_string(), &logical, &vec![]);
     LocalRunner::new(program).run().await;
     //WorkerServer::new("job", "blah", logical).start().unwrap();

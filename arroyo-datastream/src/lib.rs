@@ -34,6 +34,8 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
+pub mod logical;
+
 pub fn parse_type(s: &str) -> Type {
     let s = s
         .replace("arroyo_bench::", "")

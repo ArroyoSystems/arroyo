@@ -10,6 +10,7 @@ use crate::{CheckpointCounter, ControlOutcome, WatermarkHolder};
 use arrow::datatypes::{Schema, SchemaRef};
 use arrow_array::iterator::ArrayIter;
 use arrow_array::{downcast_primitive_array, Array, ArrayAccessor, ArrayRef, RecordBatch};
+use arroyo_datastream::logical::ArrowSchema;
 use arroyo_metrics::{counter_for_task, gauge_for_task};
 use arroyo_rpc::{
     grpc::{
@@ -40,21 +41,14 @@ pub fn server_for_hash(x: u64, n: usize) -> usize {
 
 pub static TIMER_TABLE: char = '[';
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArroyoSchema {
-    pub schema: Arc<Schema>,
-    pub timestamp_col: usize,
-    pub key_field: Option<usize>,
-}
-
 pub struct ArrowContext<S: BackingStore = StateBackend> {
     pub task_info: TaskInfo,
     pub control_rx: Receiver<ControlMessage>,
     pub control_tx: Sender<ControlResp>,
     pub watermarks: WatermarkHolder,
     pub state: StateStore<S>,
-    pub in_schemas: Vec<ArroyoSchema>,
-    pub out_schema: ArroyoSchema,
+    pub in_schemas: Vec<ArrowSchema>,
+    pub out_schema: Option<ArrowSchema>,
     pub collector: ArrowCollector,
     pub counters: HashMap<&'static str, IntCounter>,
 }
@@ -66,8 +60,8 @@ impl ArrowContext {
         control_rx: Receiver<ControlMessage>,
         control_tx: Sender<ControlResp>,
         input_partitions: usize,
-        in_schemas: Vec<ArroyoSchema>,
-        out_schema: ArroyoSchema,
+        in_schemas: Vec<ArrowSchema>,
+        out_schema: Option<ArrowSchema>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
         mut tables: Vec<TableDescriptor>,
     ) -> ArrowContext {
@@ -250,7 +244,7 @@ impl ArrowContext {
 
 pub struct ArrowCollector {
     out_qs: Vec<Vec<Sender<ArrowMessage>>>,
-    out_schema: ArroyoSchema,
+    out_schema: Option<ArrowSchema>,
     sent_bytes: Option<IntCounter>,
     sent_messages: Option<IntCounter>,
     tx_queue_rem_gauges: Vec<Vec<Option<IntGauge>>>,
@@ -327,7 +321,7 @@ impl ArrowCollector {
 }
 
 pub trait ArrowOperatorConstructor: ArrowOperator {
-    fn from_config(config: Value) -> Box<dyn ArrowOperator>;
+    fn from_config(config: Vec<u8>) -> Box<dyn ArrowOperator>;
 }
 
 #[async_trait::async_trait]
@@ -338,19 +332,19 @@ pub trait ArrowOperator: Send + 'static {
         restore_from: Option<CheckpointMetadata>,
         control_rx: Receiver<ControlMessage>,
         control_tx: Sender<ControlResp>,
-        in_schemas: Vec<ArroyoSchema>,
-        out_schema: ArroyoSchema,
+        in_schemas: Vec<ArrowSchema>,
+        out_schema: Option<ArrowSchema>,
         in_qs: Vec<Vec<Receiver<ArrowMessage>>>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
     ) -> tokio::task::JoinHandle<()> {
-        if in_qs.len() != 1 {
-            panic!(
-                "Wrong number of logical inputs for node {} (expected {}, found {})",
-                task_info.operator_name,
-                1,
-                in_qs.len()
-            );
-        }
+        // if in_qs.len() != 1 {
+        //     panic!(
+        //         "Wrong number of logical inputs for node {} (expected {}, found {})",
+        //         task_info.operator_name,
+        //         1,
+        //         in_qs.len()
+        //     );
+        // }
 
         let mut in_qs: Vec<_> = in_qs.into_iter().flatten().collect();
         let tables = self.tables();

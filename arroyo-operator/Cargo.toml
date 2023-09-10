@@ -8,6 +8,7 @@ arroyo-types = { path = "../arroyo-types" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
+arroyo-datastream =  { path = "../arroyo-datastream" }
 
 datafusion-proto = "28.0.0"
 datafusion-expr = "28.0.0"

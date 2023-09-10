@@ -16,9 +16,10 @@ use bincode::{config, Decode, Encode};
 
 use tracing::{debug, error, info, warn};
 
+use arroyo_datastream::logical::{ArrowSchema, LogicalEdgeType, LogicalGraph};
 pub use arroyo_macro::StreamNode;
 use arroyo_operator::construct_operator;
-use arroyo_operator::operator::{ArrowOperator, ArroyoSchema};
+use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{
     CheckpointMetadata, HeartbeatReq, TableDeleteBehavior, TableDescriptor, TableType,
@@ -43,7 +44,7 @@ use tonic::Request;
 
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::TIMER_TABLE;
-use crate::{LogicalEdge, LogicalNode, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
+use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
@@ -567,8 +568,8 @@ pub struct SubtaskNode {
     pub id: String,
     pub subtask_idx: usize,
     pub parallelism: usize,
-    pub in_schemas: Vec<ArroyoSchema>,
-    pub out_schema: ArroyoSchema,
+    pub in_schemas: Vec<ArrowSchema>,
+    pub out_schema: Option<ArrowSchema>,
     pub node: Box<dyn ArrowOperator>,
 }
 
@@ -603,7 +604,7 @@ struct PhysicalGraphEdge {
     edge_idx: usize,
     in_logical_idx: usize,
     out_logical_idx: usize,
-    edge: LogicalEdge,
+    edge: LogicalEdgeType,
     tx: Option<Sender<ArrowMessage>>,
     rx: Option<Receiver<ArrowMessage>>,
 }
@@ -683,7 +684,7 @@ pub struct Program {
 impl Program {
     pub fn from_logical(
         name: String,
-        logical: &DiGraph<LogicalNode, LogicalEdge>,
+        logical: &LogicalGraph,
         assignments: &Vec<TaskAssignment>,
     ) -> Program {
         let mut physical = DiGraph::new();
@@ -694,6 +695,16 @@ impl Program {
         }
 
         for idx in logical.node_indices() {
+            let in_schemas: Vec<_> = logical
+                .edges_directed(idx, Direction::Incoming)
+                .map(|edge| edge.weight().schema.clone())
+                .collect();
+
+            let out_schema = logical
+                .edges_directed(idx, Direction::Outgoing)
+                .map(|edge| edge.weight().schema.clone())
+                .next();
+
             let node = logical.node_weight(idx).unwrap();
             let parallelism = *parallelism_map.get(&node.id).unwrap_or_else(|| {
                 warn!("no assignments for operator {}", node.id);
@@ -704,9 +715,9 @@ impl Program {
                     id: node.id.clone(),
                     subtask_idx: i,
                     parallelism,
-                    in_schemas: node.in_schemas.clone(),
-                    out_schema: node.out_schema.clone(),
-                    node: construct_operator(&node.operator, node.config.clone()),
+                    in_schemas: in_schemas.clone(),
+                    out_schema: out_schema.clone(),
+                    node: construct_operator(&node.operator_name, node.operator_config.clone()),
                 }));
             }
         }
@@ -728,8 +739,8 @@ impl Program {
                 .collect();
             assert_ne!(from_nodes.len(), 0, "failed to find to nodes");
 
-            match edge {
-                LogicalEdge::Forward => {
+            match edge.edge_type {
+                LogicalEdgeType::Forward => {
                     if from_nodes.len() != to_nodes.len() && !from_nodes.is_empty() {
                         panic!("cannot create a forward connection between nodes of different parallelism");
                     }
@@ -739,14 +750,16 @@ impl Program {
                             edge_idx: 0,
                             in_logical_idx: logical_in_node_idx.index(),
                             out_logical_idx: logical_out_node_idx.index(),
-                            edge: edge.clone(),
+                            edge: edge.edge_type,
                             tx: Some(tx),
                             rx: Some(rx),
                         };
                         physical.add_edge(*f, *t, edge);
                     }
                 }
-                LogicalEdge::Shuffle | LogicalEdge::ShuffleJoin(_) => {
+                LogicalEdgeType::Shuffle
+                | LogicalEdgeType::LeftJoin
+                | LogicalEdgeType::RightJoin => {
                     for f in &from_nodes {
                         for (idx, t) in to_nodes.iter().enumerate() {
                             let (tx, rx) = channel(QUEUE_SIZE);
@@ -754,7 +767,7 @@ impl Program {
                                 edge_idx: idx,
                                 in_logical_idx: logical_in_node_idx.index(),
                                 out_logical_idx: logical_out_node_idx.index(),
-                                edge: edge.clone(),
+                                edge: edge.edge_type,
                                 tx: Some(tx),
                                 rx: Some(rx),
                             };
@@ -1221,7 +1234,7 @@ impl Engine {
             node.parallelism
         );
 
-        let mut in_qs_map: BTreeMap<(LogicalEdge, usize), Vec<Receiver<ArrowMessage>>> =
+        let mut in_qs_map: BTreeMap<(LogicalEdgeType, usize), Vec<Receiver<ArrowMessage>>> =
             BTreeMap::new();
 
         for edge in self.program.graph.edge_indices() {

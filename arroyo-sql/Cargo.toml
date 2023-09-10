@@ -12,6 +12,7 @@ arroyo-connectors = { path = "../arroyo-connectors" }
 
 datafusion = "28.0"
 datafusion-expr = "28.0"
+datafusion-physical-expr = "28.0"
 datafusion-common = "28.0"
 arrow-schema = {workspace = true }
 serde = {version = "1", features = ["derive"]}
@@ -28,6 +29,7 @@ anyhow = {version = "1.0.70", features = ["backtrace"]}
 proc-macro2 = "1"
 syn = {version = "2", features = ["full", "parsing"]}
 tracing = "0.1.37"
+prost = "0.11"
 
 typify = "0.0.13"
 schemars = "0.8"

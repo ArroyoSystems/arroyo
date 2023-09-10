@@ -15,6 +15,7 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
 arroyo-operator =  { path = "../arroyo-operator" }
+arroyo-datastream =  { path = "../arroyo-datastream" }
 
 
 datafusion-physical-expr = "28.0"
@@ -73,6 +74,7 @@ regress = "0.6.0"
 tokio-tungstenite = { version = "0.19", features = ["native-tls"] }
 fluvio = {version = "0.19", features = ["openssl"]}
 object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches', features = ["aws"] }
+
 
 [dev-dependencies]
 test-case = "3"

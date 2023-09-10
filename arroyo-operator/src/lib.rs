@@ -124,7 +124,7 @@ impl CheckpointCounter {
     }
 }
 
-pub fn construct_operator(operator: &str, config: Value) -> Box<dyn ArrowOperator> {
+pub fn construct_operator(operator: &str, config: Vec<u8>) -> Box<dyn ArrowOperator> {
     match operator {
         "ImpulseSource" => ImpulseSource::from_config(config),
         "Projection" => ProjectionOperator::from_config(config),

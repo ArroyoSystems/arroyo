@@ -1,13 +1,12 @@
-use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor, ArroyoSchema};
+use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor};
 use arrow_array::RecordBatch;
 use arroyo_types::ArrowRecord;
 use async_trait::async_trait;
-use serde_json::Value;
 
 pub struct ConsoleSink {}
 
 impl ArrowOperatorConstructor for ConsoleSink {
-    fn from_config(_config: Value) -> Box<dyn ArrowOperator> {
+    fn from_config(_config: Vec<u8>) -> Box<dyn ArrowOperator> {
         Box::new(Self {})
     }
 }
