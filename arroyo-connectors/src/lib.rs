@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use arroyo_rpc::primitive_to_sql;
 use arroyo_rpc::types::{
     ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType,
@@ -12,7 +12,11 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sse::SSEConnector;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::time::Duration;
+use reqwest::{Client, Request};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tokio::sync::mpsc::Sender;
+use arroyo_types::string_to_map;
 use websocket::WebsocketConnector;
 
 use self::kafka::KafkaConnector;
@@ -28,20 +32,21 @@ pub mod single_file;
 pub mod sse;
 pub mod webhook;
 pub mod websocket;
-
+pub mod polling_http;
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
-    m.insert("kafka", Box::new(KafkaConnector {}));
-    m.insert("sse", Box::new(SSEConnector {}));
-    m.insert("nexmark", Box::new(NexmarkConnector {}));
-    m.insert("impulse", Box::new(ImpulseConnector {}));
     m.insert("blackhole", Box::new(BlackholeConnector {}));
-    m.insert("websocket", Box::new(WebsocketConnector {}));
-    m.insert("fluvio", Box::new(FluvioConnector {}));
     m.insert("filesystem", Box::new(filesystem::FileSystemConnector {}));
+    m.insert("fluvio", Box::new(FluvioConnector {}));
+    m.insert("impulse", Box::new(ImpulseConnector {}));
+    m.insert("kafka", Box::new(KafkaConnector {}));
     m.insert("kinesis", Box::new(kinesis::KinesisConnector {}));
-    m.insert("webhook", Box::new(webhook::WebhookConnector {}));
+    m.insert("nexmark", Box::new(NexmarkConnector {}));
+    m.insert("polling_http", Box::new(polling_http::PollingHTTPConnector {}));
     m.insert("single_file", Box::new(single_file::SingleFileConnector {}));
+    m.insert("sse", Box::new(SSEConnector {}));
+    m.insert("webhook", Box::new(webhook::WebhookConnector {}));
+    m.insert("websocket", Box::new(WebsocketConnector {}));
 
     m
 }
@@ -298,4 +303,32 @@ pub(crate) fn nullable_field(name: &str, field_type: SourceFieldType) -> SourceF
         field_type,
         nullable: true,
     }
+}
+
+fn construct_http_client(endpoint: &str, headers: Option<&String>) -> anyhow::Result<Client> {
+    if let Err(e) = reqwest::Url::parse(&endpoint) {
+        bail!("invalid endpoint '{}': {:?}", endpoint, e)
+    };
+
+    let headers: anyhow::Result<HeaderMap> =
+        string_to_map(headers.as_ref().map(|t| t.as_str()).unwrap_or(""))
+            .expect("Invalid header map")
+            .into_iter()
+            .map(|(k, v)| {
+                Ok((
+                    TryInto::<HeaderName>::try_into(&k)
+                        .map_err(|_| anyhow!("invalid header name {}", k))?,
+                    TryInto::<HeaderValue>::try_into(&v)
+                        .map_err(|_| anyhow!("invalid header value {}", v))?,
+                ))
+            })
+            .collect();
+
+    let client = reqwest::ClientBuilder::new()
+        .default_headers(headers?)
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| anyhow!("could not construct HTTP client: {:?}", e))?;
+
+    Ok(client)
 }
