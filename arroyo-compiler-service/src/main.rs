@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{io, path::PathBuf, str::FromStr, sync::Arc};
 
-use anyhow::bail;
 use arroyo_rpc::grpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
     CompileQueryReq, CompileQueryResp,
@@ -179,10 +178,10 @@ impl CompileService {
         let result = self.get_output().await?;
 
         if !result.status.success() {
-            bail!(
+            Err(Status::unimplemented(format!(
                 "Failed to compile job: {}",
                 String::from_utf8_lossy(&result.stderr)
-            );
+            )))?;
         } else if self.debug {
             info!(
                 "cargo build stderr: {}",
@@ -199,10 +198,10 @@ impl CompileService {
                 .expect("wasm-pack not found -- install with `cargo install wasm-pack`");
 
             if !result.status.success() {
-                bail!(
+                Err(Status::unimplemented(format!(
                     "Failed to compile wasm: {}",
                     String::from_utf8_lossy(&result.stderr)
-                );
+                )))?;
             }
         }
 
@@ -258,7 +257,8 @@ impl CompilerGrpc for CompileService {
 
         self.compile(req).await.map(Response::new).map_err(|e| {
             error!("Failed to compile: {:?}", e);
-            Status::internal(e.to_string())
+            e.downcast::<Status>()
+                .unwrap_or_else(|e| Status::internal(e.to_string()))
         })
     }
 }

@@ -626,6 +626,7 @@ dependencies = [
 name = "arroyo-rpc"
 version = "0.5.0"
 dependencies = [
+ "anyhow",
  "arroyo-types",
  "bincode 2.0.0-rc.3",
  "nanoid",

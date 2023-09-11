@@ -241,6 +241,26 @@ impl StructDef {
         let schema_data_impl = if self.name.is_none() {
             // generate a SchemaData impl but only for generated types
             let name = self.struct_name();
+
+            let to_raw_string = if self.fields.len() == 1
+                && matches!(
+                    self.fields[0].data_type,
+                    TypeDef::DataType(DataType::Utf8, _)
+                ) {
+                let field = &self.fields[0].field_ident();
+                if self.fields[0].nullable() {
+                    quote! {
+                        self.#field.as_ref().map(|v| v.as_bytes().to_vec())
+                    }
+                } else {
+                    quote! {
+                        Some(self.#field.as_bytes().to_vec())
+                    }
+                }
+            } else {
+                quote! { unimplemented!("to_raw_string is not implemented for this type") }
+            };
+
             Some(quote! {
                 impl arroyo_worker::SchemaData for #struct_type {
                     fn name() -> &'static str {
@@ -250,6 +270,10 @@ impl StructDef {
                     fn schema() -> arrow::datatypes::Schema {
                         let fields: Vec<arrow::datatypes::Field> = vec![#(#schema_initializations,)*];
                         arrow::datatypes::Schema::new(fields)
+                    }
+
+                    fn to_raw_string(&self) -> Option<Vec<u8>> {
+                        #to_raw_string
                     }
                 }
             })

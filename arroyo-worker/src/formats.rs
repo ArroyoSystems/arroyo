@@ -3,7 +3,7 @@ use std::{collections::HashMap, marker::PhantomData};
 use arrow::datatypes::{Field, Fields};
 use arroyo_rpc::types::{Format, JsonFormat};
 use arroyo_types::UserError;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use crate::SchemaData;
@@ -72,7 +72,7 @@ pub fn deserialize_slice<T: DeserializeOwned>(format: &Format, msg: &[u8]) -> Re
     })
 }
 
-pub struct DataSerializer<T: SchemaData + Serialize> {
+pub struct DataSerializer<T: SchemaData> {
     kafka_schema: Value,
     #[allow(unused)]
     json_schema: Value,
@@ -80,7 +80,7 @@ pub struct DataSerializer<T: SchemaData + Serialize> {
     _t: PhantomData<T>,
 }
 
-impl<T: SchemaData + Serialize> DataSerializer<T> {
+impl<T: SchemaData> DataSerializer<T> {
     pub fn new(format: Format) -> Self {
         Self {
             kafka_schema: arrow_to_kafka_json(T::name(), T::schema().fields()),
@@ -90,7 +90,7 @@ impl<T: SchemaData + Serialize> DataSerializer<T> {
         }
     }
 
-    pub fn to_vec(&self, record: &T) -> Vec<u8> {
+    pub fn to_vec(&self, record: &T) -> Option<Vec<u8>> {
         match &self.format {
             Format::Json(json) => {
                 let v = if json.include_schema {
@@ -108,11 +108,11 @@ impl<T: SchemaData + Serialize> DataSerializer<T> {
                     todo!("Serializing to confluent schema registry is not yet supported");
                 }
 
-                v
+                Some(v)
             }
             Format::Avro(_) => todo!(),
             Format::Parquet(_) => todo!(),
-            Format::RawString(_) => todo!(),
+            Format::RawString(_) => record.to_raw_string(),
         }
     }
 }

@@ -502,7 +502,7 @@ export const useJobOutput = (
 };
 
 export const useConnectionTableTest = async (
-  handler: (event: any) => void,
+  handler: (event: TestSourceMessage) => void,
   req: ConnectionTablePost
 ) => {
   const url = `${BASE_URL}/v1/connection_tables/test`;
@@ -516,7 +516,18 @@ export const useConnectionTableTest = async (
   });
 
   if (!response.ok || !response.body) {
-    console.log('Error subscribing to test output');
+    const text = await response.text();
+    let message;
+    try {
+      message = (JSON.parse(text) as { error: string }).error;
+    } catch {
+      message = text;
+    }
+    handler({
+      done: true,
+      error: true,
+      message,
+    });
     return;
   }
 
@@ -538,7 +549,12 @@ export const useConnectionTableTest = async (
     for (const line of lines) {
       const value = line.substring('data:'.length);
       if (value) {
-        handler(value);
+        try {
+          const parsed = JSON.parse(value) as TestSourceMessage;
+          handler(parsed);
+        } catch {
+          console.log('Failed to parse event');
+        }
       }
     }
   }

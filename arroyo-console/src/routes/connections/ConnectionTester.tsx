@@ -62,14 +62,9 @@ export function ConnectionTester({
     return name && /^[_a-zA-Z][a-zA-Z0-9_]*$/.test(name);
   };
 
-  const sseHandler = (event: any) => {
-    try {
-      const parsed = JSON.parse(event) as TestSourceMessage;
-      messages.push(parsed);
-      setMessages(messages);
-    } catch {
-      console.log('Failed to parse event');
-    }
+  const sseHandler = (event: TestSourceMessage) => {
+    messages.push(event);
+    setMessages(messages);
   };
 
   const createRequest: ConnectionTablePost = {

@@ -1,5 +1,6 @@
 use crate::grpc as grpc_proto;
 use crate::grpc::api as api_proto;
+use anyhow::bail;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -561,6 +562,40 @@ pub struct ConnectionSchema {
     pub struct_name: Option<String>,
     pub fields: Vec<SourceField>,
     pub definition: Option<SchemaDefinition>,
+}
+
+impl ConnectionSchema {
+    pub fn try_new(
+        format: Option<Format>,
+        struct_name: Option<String>,
+        fields: Vec<SourceField>,
+        definition: Option<SchemaDefinition>,
+    ) -> anyhow::Result<Self> {
+        let s = ConnectionSchema {
+            format,
+            struct_name,
+            fields,
+            definition,
+        };
+
+        s.validate()
+    }
+
+    pub fn validate(self) -> anyhow::Result<Self> {
+        match &self.format {
+            Some(Format::RawString(_)) => {
+                if self.fields.len() != 1
+                    || self.fields.get(0).unwrap().field_type.r#type
+                        != FieldType::Primitive(PrimitiveType::String)
+                {
+                    bail!("raw_string format requires a schema with a single field of type TEXT");
+                }
+            }
+            _ => {}
+        }
+
+        Ok(self)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, IntoParams)]
