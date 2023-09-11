@@ -7,7 +7,6 @@ use crate::{
     expressions::{
         AggregateResultExtraction, AggregationExpression, Aggregator, Column, Expression,
     },
-    schemas::window_type_def,
     types::{data_type_as_syn_type, StructDef, StructField, TypeDef},
 };
 use anyhow::Result;

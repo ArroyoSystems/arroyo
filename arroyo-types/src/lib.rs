@@ -577,7 +577,7 @@ impl TaskInfo {
     }
 
     pub fn metric_label_map(&self) -> HashMap<String, String> {
-        let mut labels: HashMap<String, String> = HashMap::new();
+        let mut labels = HashMap::new();
         labels.insert("operator_id".to_string(), self.operator_id.clone());
         labels.insert("subtask_idx".to_string(), format!("{}", self.task_index));
         labels.insert("operator_name".to_string(), self.operator_name.clone());

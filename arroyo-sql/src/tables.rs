@@ -17,7 +17,6 @@ use datafusion_common::{config::ConfigOptions, DFField, DFSchema};
 use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
 };
-use tracing::info;
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::expressions::CastExpression;

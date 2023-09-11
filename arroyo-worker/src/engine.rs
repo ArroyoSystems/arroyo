@@ -936,8 +936,6 @@ impl Engine {
             n.tx = None;
         }
 
-        //let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
-        //self.spawn_control_thread(shutdown_rx, control_rx, worker_id, job_id, controller);
         self.spawn_metrics_thread();
 
         (

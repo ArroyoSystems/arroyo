@@ -1,6 +1,7 @@
 #![allow(warnings)]
 use arroyo_sql_macro::full_pipeline_codegen;
-use std::{alloc::System, fmt::Debug, sync::Arc, time::SystemTime};
+
+full_pipeline_codegen! {"select_star", "SELECT * FROM nexmark"}
 
 full_pipeline_codegen! {"query_5_join",
 "WITH bids as (SELECT bid.auction as auction, bid.datetime as datetime
@@ -32,8 +33,7 @@ full_pipeline_codegen! {"query_5_join",
     ) AS MaxBids
     ON
        AuctionBids.num = MaxBids.maxn
-       and AuctionBids.window = MaxBids.window;
-"}
+       and AuctionBids.window = MaxBids.window;"}
 
 full_pipeline_codegen! {"watermark_test",
 "CREATE TABLE person (
@@ -150,7 +150,7 @@ full_pipeline_codegen! {"create_parquet_s3_source",
 ) WITH (
   connector ='filesystem',
   path = 'https://s3.us-west-2.amazonaws.com/demo/s3-uri',
-  format = 'json',
+  format = 'parquet',
   rollover_seconds = '5'
 );
 

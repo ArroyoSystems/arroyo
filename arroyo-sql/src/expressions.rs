@@ -249,7 +249,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::RustUdf(udf) => udf.generate(input_context),
             Expression::WrapType(wrap_type) => wrap_type.generate(input_context),
             Expression::Case(case) => case.generate(input_context),
-            Expression::WindowUDF(window_type) => {
+            Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
         }
@@ -292,7 +292,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::RustUdf(t) => t.expression_type(input_context),
             Expression::WrapType(t) => t.expression_type(input_context),
             Expression::Case(case_statement) => case_statement.expression_type(input_context),
-            Expression::WindowUDF(window_type) => {
+            Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
         }

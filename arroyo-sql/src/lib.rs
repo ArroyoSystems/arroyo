@@ -309,11 +309,6 @@ pub async fn parse_and_get_program(
         .map_err(|_| anyhow!("Something went wrong"))?
 }
 
-pub enum DefaultOutput {
-    WebSink,
-    ControllerSink,
-}
-
 pub fn parse_and_get_program_sync(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,

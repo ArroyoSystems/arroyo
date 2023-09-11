@@ -14,9 +14,7 @@ use datafusion_expr::{
     BinaryExpr, BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp,
 };
 
-use quote::{format_ident, quote};
-use syn::{parse_quote, Type};
-use tracing::info;
+use quote::quote;
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext, VecAggregationContext};
 use crate::expressions::{AggregateResultExtraction, ExpressionContext};
@@ -273,51 +271,6 @@ impl JoinType {
             JoinType::Left | JoinType::Full => true,
         }
     }
-
-    pub fn merge_syn_expression(
-        &self,
-        left_struct: &StructDef,
-        right_struct: &StructDef,
-    ) -> syn::Expr {
-        let mut assignments: Vec<_> = vec![];
-
-        left_struct.fields.iter().for_each(|field| {
-            let field_name = format_ident!("{}", field.field_name());
-            if self.left_nullable() {
-                if field.data_type.is_optional() {
-                    assignments.push(
-                        quote!(#field_name : left.map(|inner| inner.#field_name.clone()).flatten()),
-                    );
-                } else {
-                    assignments
-                        .push(quote!(#field_name : left.map(|inner| inner.#field_name.clone())));
-                }
-            } else {
-                assignments.push(quote!(#field_name : left.#field_name.clone()));
-            }
-        });
-        right_struct.fields.iter().for_each(|field| {
-                let field_name = format_ident!("{}",field.field_name());
-                if self.right_nullable() {
-                    if field.data_type.is_optional() {
-                        assignments.push(quote!(#field_name : right.map(|inner| inner.#field_name.clone()).flatten()));
-                    } else {
-                        assignments.push(quote!(#field_name : right.map(|inner| inner.#field_name.clone())));
-                    }
-                } else {
-                    assignments.push(quote!(#field_name : right.#field_name.clone()));
-                }
-            });
-
-        let return_struct = self.output_struct(left_struct, right_struct);
-        let return_type = return_struct.get_type();
-        parse_quote!(
-                #return_type {
-                    #(#assignments)
-                    ,*
-                }
-        )
-    }
 }
 
 impl SqlOperator {
@@ -394,7 +347,7 @@ impl SqlOperator {
                 | WindowType::Session { .. } => Some(aggregator.window.clone()),
                 WindowType::Instant => input.get_window(),
             },
-            SqlOperator::JoinOperator(left, right, _) => left.get_window(),
+            SqlOperator::JoinOperator(left, _, _) => left.get_window(),
             SqlOperator::Window(_, sql_window_operator) => {
                 Some(sql_window_operator.window_type.clone())
             }
@@ -930,8 +883,6 @@ impl<'a> SqlPipelineBuilder<'a> {
                 anyhow!("window function must be partitioned by a window as the first argument")
             })?;
 
-            let input_has_window = input.has_window();
-
             let field_names = w
                 .partition_by
                 .iter()
@@ -1096,130 +1047,6 @@ impl MethodCompiler {
             name: name.to_string(),
             expression: quote!(#updating_expression).to_string(),
         }
-    }
-
-    pub fn join_merge_operator(
-        name: impl ToString,
-        join_type: JoinType,
-        merge_struct_name: Type,
-        merge_expr: syn::Expr,
-    ) -> Result<Operator> {
-        let expression = match join_type {
-            JoinType::Inner => {
-                quote!({
-                    let mut value = Vec::with_capacity(record.value.0.len() * record.value.1.len());
-                    for left in &record.value.0 {
-                        for right in &record.value.1 {
-                            value.push(#merge_expr);
-                        }
-                    }
-                    arroyo_types::Record {
-                    timestamp: record.timestamp,
-                    key: None,
-                    value
-            }}).to_string()}
-            JoinType::Left => {
-                quote!({
-                    let record = record.clone();
-                    let lefts = record.value.0;
-                    let rights = record.value.1;
-                    let value = if rights.len() == 0 {
-                        let mut value = Vec::with_capacity(lefts.len());
-                        for left in lefts.clone() {
-                            let arg = #merge_struct_name{left, right: None};
-                            value.push(#merge_expr);
-                        }
-                        value
-                    } else {
-                        let mut value = Vec::with_capacity(lefts.len() * rights.len());
-                        for left in lefts.clone() {
-                            for right in rights.clone() {
-                                let arg = #merge_struct_name{left: left.clone(), right: Some(right)};
-                                value.push(#merge_expr);
-                            }
-                        }
-                        value
-                    };
-
-                    arroyo_types::Record {
-                        timestamp: record.timestamp,
-                        key: None,
-                        value
-                    }
-                }).to_string()},
-            JoinType::Right => {quote!(
-                {
-                    let record = record.clone();
-                    let lefts = record.value.0;
-                    let rights = record.value.1;
-                    let value = if lefts.len() == 0 {
-                        let mut value = Vec::with_capacity(rights.len());
-                        for right in rights.clone() {
-                            let arg = #merge_struct_name{left: None, right};
-                            value.push(#merge_expr);
-                        }
-                        value
-                    } else {
-                        let mut value = Vec::with_capacity(lefts.len() * rights.len());
-                        for left in lefts.clone() {
-                            for right in rights.clone() {
-                                let arg = #merge_struct_name{left: Some(left.clone()), right};
-                                value.push(#merge_expr);
-                            }
-                        }
-                        value
-                    };
-
-                    arroyo_types::Record {
-                    timestamp: record.timestamp,
-                    key: None,
-                    value
-            }}).to_string()},
-            JoinType::Full => {
-                quote!({
-                    let record = record.clone();
-                    let lefts = record.value.0;
-                    let rights = record.value.1;
-                    let value = if lefts.len() == 0 {
-                        let mut value = Vec::with_capacity(rights.len());
-                        for right in rights.clone() {
-                            let arg = #merge_struct_name{left: None, right:Some(right)};
-                            value.push(#merge_expr);
-                        }
-                        value
-                    } else if rights.len() == 0 {
-                        let mut value = Vec::with_capacity(rights.len());
-                        for left in lefts.clone() {
-                            let arg = #merge_struct_name{left: Some(left), right: None};
-                            value.push(#merge_expr);
-                        }
-                        value
-                    } else {
-                        let mut value = Vec::with_capacity(lefts.len() * rights.len());
-                        for left in lefts.clone() {
-                            for right in rights.clone() {
-                                let arg = #merge_struct_name{left: Some(left.clone()),right: Some(right)};
-                                value.push(#merge_expr);
-                            }
-                        }
-                        value
-                    };
-
-                    arroyo_types::Record {
-                    timestamp: record.timestamp,
-                    key: None,
-                    value
-            }
-        })
-        .to_string()
-    },
-        };
-
-        Ok(Operator::ExpressionOperator {
-            name: name.to_string(),
-            expression,
-            return_type: arroyo_datastream::ExpressionReturnType::Record,
-        })
     }
 
     fn updating_key_operator(name: impl ToString, key_closure: syn::ExprClosure) -> Operator {

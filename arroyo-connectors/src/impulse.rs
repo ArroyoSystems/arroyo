@@ -113,11 +113,7 @@ impl Connector for ImpulseConnector {
         // validate the schema
         if let Some(s) = s {
             if s.fields != impulse_schema().fields {
-                bail!(
-                    "invalid schema for impulse source. expected {:?}, got {:?}",
-                    impulse_schema().fields,
-                    s.fields
-                );
+                bail!("invalid schema for impulse source");
             }
         }
 

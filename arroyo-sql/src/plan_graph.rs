@@ -21,7 +21,7 @@ use crate::{
         MemoryAddingContext, MemoryAggregatingContext, MemoryRemovingContext,
         ValueBinMergingContext, ValuePointerContext, VecAggregationContext,
     },
-    expressions::{Expression, SortExpression},
+    expressions::SortExpression,
     external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource},
     operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
@@ -1491,7 +1491,6 @@ impl PlanGraph {
         window_operator: crate::pipeline::SqlWindowOperator,
     ) -> NodeIndex {
         let input_type = input.return_type();
-        let input_window = input.get_window();
         let window_type = if input.has_window() {
             WindowType::Instant
         } else {
