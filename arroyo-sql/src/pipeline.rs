@@ -10,7 +10,9 @@ use arrow_schema::DataType;
 use arroyo_datastream::{Operator, WindowType};
 use datafusion_common::{DFField, ScalarValue};
 use datafusion_expr::expr::ScalarUDF;
-use datafusion_expr::{BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp};
+use datafusion_expr::{
+    BinaryExpr, BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp,
+};
 
 use quote::{format_ident, quote};
 use syn::{parse_quote, Type};
@@ -170,7 +172,7 @@ pub struct SqlWindowOperator {
     pub partition: Projection,
     pub order_by: Vec<SortExpression>,
     pub field_name: String,
-    pub window: WindowType,
+    pub window_type: WindowType,
 }
 
 #[derive(Debug, Clone)]
@@ -280,24 +282,27 @@ impl JoinType {
         let mut assignments: Vec<_> = vec![];
 
         left_struct.fields.iter().for_each(|field| {
-                let field_name = format_ident!("{}",field.field_name());
-                if self.left_nullable() {
-                    if field.data_type.is_optional() {
-                        assignments.push(quote!(#field_name : left.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
-                    } else {
-                        assignments.push(quote!(#field_name : left.as_ref().map(|inner| inner.#field_name.clone())));
-                    }
+            let field_name = format_ident!("{}", field.field_name());
+            if self.left_nullable() {
+                if field.data_type.is_optional() {
+                    assignments.push(
+                        quote!(#field_name : left.map(|inner| inner.#field_name.clone()).flatten()),
+                    );
                 } else {
-                    assignments.push(quote!(#field_name : left.#field_name.clone()));
+                    assignments
+                        .push(quote!(#field_name : left.map(|inner| inner.#field_name.clone())));
                 }
-            });
+            } else {
+                assignments.push(quote!(#field_name : left.#field_name.clone()));
+            }
+        });
         right_struct.fields.iter().for_each(|field| {
                 let field_name = format_ident!("{}",field.field_name());
                 if self.right_nullable() {
                     if field.data_type.is_optional() {
-                        assignments.push(quote!(#field_name : right.as_ref().map(|inner| inner.#field_name.clone()).flatten()));
+                        assignments.push(quote!(#field_name : right.map(|inner| inner.#field_name.clone()).flatten()));
                     } else {
-                        assignments.push(quote!(#field_name : right.as_ref().map(|inner| inner.#field_name.clone())));
+                        assignments.push(quote!(#field_name : right.map(|inner| inner.#field_name.clone())));
                     }
                 } else {
                     assignments.push(quote!(#field_name : right.#field_name.clone()));
@@ -371,12 +376,31 @@ impl SqlOperator {
                     || (!right.has_window() && join_operator.join_type.right_nullable())
             }
             SqlOperator::Window(input, sql_window_operator) => {
-                input.is_updating()
-                    || (!input.has_window() && sql_window_operator.window == WindowType::Instant)
+                input.is_updating() // TODO: figure out when this second case is supposed to be triggered.
+                    || (!input.has_window() && sql_window_operator.window_type == WindowType::Instant)
             }
             SqlOperator::RecordTransform(input, _) => input.is_updating(),
             SqlOperator::Sink(_, _, input) => input.is_updating(),
             SqlOperator::NamedTable(_, table_operator) => table_operator.is_updating(),
+        }
+    }
+
+    pub(crate) fn get_window(&self) -> Option<WindowType> {
+        match self {
+            SqlOperator::Source(_) => None,
+            SqlOperator::Aggregator(input, aggregator) => match &aggregator.window {
+                WindowType::Tumbling { .. }
+                | WindowType::Sliding { .. }
+                | WindowType::Session { .. } => Some(aggregator.window.clone()),
+                WindowType::Instant => input.get_window(),
+            },
+            SqlOperator::JoinOperator(left, right, _) => left.get_window(),
+            SqlOperator::Window(_, sql_window_operator) => {
+                Some(sql_window_operator.window_type.clone())
+            }
+            SqlOperator::RecordTransform(input, _) => input.get_window(),
+            SqlOperator::Sink(_, _, input) => input.get_window(),
+            SqlOperator::NamedTable(_, input) => input.get_window(),
         }
     }
 }
@@ -736,9 +760,48 @@ impl<'a> SqlPipelineBuilder<'a> {
             }
             _ => {}
         }
+        let mut join_pairs = join.on.clone();
+        if let Some(Expr::BinaryExpr(BinaryExpr { left, op, right })) = &join.filter {
+            if *op != datafusion_expr::Operator::Eq {
+                bail!("only equality joins are supported");
+            }
+            // check which side each column comes from. Assumes there's at least one field
+            let left_relation = join
+                .schema
+                .fields()
+                .first()
+                .unwrap()
+                .qualifier()
+                .as_ref()
+                .unwrap()
+                .to_string();
+            let right_relation = join
+                .schema
+                .fields()
+                .last()
+                .unwrap()
+                .qualifier()
+                .as_ref()
+                .unwrap()
+                .to_string();
+            let left_table = Column::convert_expr(left)?.relation.unwrap();
+            let right_table = Column::convert_expr(right)?.relation.unwrap();
+            let pair = if right_table == right_relation && left_table == left_relation {
+                (left.as_ref().clone(), right.as_ref().clone())
+            } else if left_table == right_relation && right_table == left_relation {
+                ((right.as_ref()).clone(), left.as_ref().clone())
+            } else {
+                bail!("join filter must contain at least one column from each side of the join");
+            };
+            join_pairs.push(pair);
+        } else if join.filter.is_some() {
+            bail!(
+                "only equality joins are supported, not filter {:?}",
+                join.filter
+            );
+        }
 
-        let join_projection_field_names: Vec<_> = join
-            .on
+        let join_projection_field_names: Vec<_> = join_pairs
             .iter()
             .map(|(left, _right)| Column::convert_expr(left))
             .collect::<Result<Vec<_>>>()?;
@@ -759,7 +822,7 @@ impl<'a> SqlPipelineBuilder<'a> {
 
         let right_key = Projection::new(join_projection_field_names, right_computations);
 
-        let join_operator = SqlOperator::JoinOperator(
+        Ok(SqlOperator::JoinOperator(
             Box::new(left_input),
             Box::new(right_input),
             JoinOperator {
@@ -767,16 +830,6 @@ impl<'a> SqlPipelineBuilder<'a> {
                 right_key,
                 join_type,
             },
-        );
-        let Some(join_filter) = &join.filter else {
-            return Ok(join_operator);
-        };
-        let join_filter = self
-            .ctx(&join_operator.return_type())
-            .compile_expr(join_filter)?;
-        Ok(SqlOperator::RecordTransform(
-            Box::new(join_operator),
-            RecordTransform::Filter(join_filter),
         ))
     }
 
@@ -869,11 +922,20 @@ impl<'a> SqlPipelineBuilder<'a> {
                     }
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let first_term = w.partition_by.first().ok_or_else(|| {
+                anyhow!("window function must have at least one partition expression")
+            })?;
+            let first_expression = ctx.compile_expr(first_term)?;
+            let window_type = first_expression.get_window_type(&input)?.ok_or_else(|| {
+                anyhow!("window function must be partitioned by a window as the first argument")
+            })?;
+
+            let input_has_window = input.has_window();
 
             let field_names = w
                 .partition_by
                 .iter()
-                .filter(|expr| !Self::is_window(expr))
+                .skip(1)
                 .enumerate()
                 .map(|(i, _t)| Column {
                     relation: None,
@@ -883,19 +945,18 @@ impl<'a> SqlPipelineBuilder<'a> {
 
             let field_computations = w
                 .partition_by
-                .iter()
-                .filter(|expr| !Self::is_window(expr))
-                .map(|expression| ctx.compile_expr(expression))
+                .iter().skip(1)
+                .map(|expression| {let expr = ctx.compile_expr(expression)?;
+                if expr.get_window_type(&input)?.is_some() {
+                    bail!("window functions can only be partitioned by a window as the first argument");
+                } else {
+                    Ok(expr)
+                }
+            })
                 .collect::<Result<Vec<_>>>()?;
 
-            let partition = Projection::new(field_names, field_computations).without_window();
-            info!("partition: {:?}", partition);
+            let partition = Projection::new(field_names, field_computations);
             let field_name = window.schema.field_names().last().cloned().unwrap();
-            let window = self.window(&w.partition_by)?;
-
-            if !input.has_window() && window == WindowType::Instant {
-                bail!("window functions have to be partitioned by a time window")
-            }
 
             return Ok(SqlOperator::Window(
                 Box::new(input),
@@ -904,7 +965,7 @@ impl<'a> SqlPipelineBuilder<'a> {
                     partition,
                     order_by,
                     field_name,
-                    window,
+                    window_type,
                 },
             ));
         }

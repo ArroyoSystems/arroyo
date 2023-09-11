@@ -13,14 +13,15 @@ use arroyo_datastream::{
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str};
+use tracing::info;
 
 use crate::{
     code_gen::{
-        BinAggregatingContext, CodeGenerator, CombiningContext, JoinPairContext,
+        BinAggregatingContext, CodeGenerator, CombiningContext, JoinListsContext, JoinPairContext,
         MemoryAddingContext, MemoryAggregatingContext, MemoryRemovingContext,
         ValueBinMergingContext, ValuePointerContext, VecAggregationContext,
     },
-    expressions::SortExpression,
+    expressions::{Expression, SortExpression},
     external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource},
     operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
@@ -437,17 +438,10 @@ impl PlanNode {
                 join_type: join_type.clone().into(),
             },
             PlanOperator::JoinListMerge(join_type, struct_pair) => {
-                let merge_struct =
-                    join_type.join_struct_type(&struct_pair.left, &struct_pair.right);
-                let merge_expr =
-                    join_type.merge_syn_expression(&struct_pair.left, &struct_pair.right);
-                MethodCompiler::join_merge_operator(
-                    "join_merge",
-                    join_type.clone(),
-                    merge_struct.get_type(),
-                    merge_expr,
-                )
-                .unwrap()
+                let context =
+                    JoinListsContext::new(struct_pair.left.clone(), struct_pair.right.clone());
+                let record_expression = context.compile_list_merge_record_expression(join_type);
+                MethodCompiler::record_expression_operator("join_list_merge", record_expression)
             }
             PlanOperator::JoinPairMerge(join_type, struct_pair) => {
                 let context =
@@ -1497,6 +1491,12 @@ impl PlanGraph {
         window_operator: crate::pipeline::SqlWindowOperator,
     ) -> NodeIndex {
         let input_type = input.return_type();
+        let input_window = input.get_window();
+        let window_type = if input.has_window() {
+            WindowType::Instant
+        } else {
+            window_operator.window_type
+        };
         let input_index = self.add_sql_operator(*input);
         let mut result_type = input_type.clone();
         result_type.fields.push(StructField::new(
@@ -1505,6 +1505,7 @@ impl PlanGraph {
             TypeDef::DataType(DataType::UInt64, false),
         ));
         let partition_struct = window_operator.partition.output_struct();
+        info!("window partition struct is {:?}", partition_struct);
 
         let partition_key_node = PlanOperator::RecordTransform(RecordTransform::KeyProjection(
             window_operator.partition,
@@ -1526,7 +1527,7 @@ impl PlanGraph {
         let window_function_node = PlanOperator::WindowFunction(WindowFunctionOperator {
             window_function: window_operator.window_fn,
             order_by: window_operator.order_by,
-            window_type: window_operator.window,
+            window_type,
             result_struct: result_type.clone(),
             field_name: window_operator.field_name,
         });

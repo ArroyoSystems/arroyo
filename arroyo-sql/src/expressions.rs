@@ -1,13 +1,17 @@
 use crate::{
-    code_gen::{CodeGenerator, JoinPairContext, ValuePointerContext, VecOfPointersContext},
+    code_gen::{
+        CodeGenerator, JoinListsContext, JoinPairContext, ValuePointerContext, VecOfPointersContext,
+    },
     operators::TwoPhaseAggregation,
-    pipeline::{JoinType, SortDirection},
-    types::{StructDef, StructField, TypeDef},
+    pipeline::{JoinType, SortDirection, SqlOperator},
+    schemas::window_type_def,
+    types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
 use anyhow::{anyhow, bail, Ok, Result};
 use arrow::datatypes::DataType;
 use arrow_schema::{Field, TimeUnit};
+use arroyo_datastream::WindowType;
 use arroyo_types::{DatePart, DateTruncPrecision};
 use datafusion_common::ScalarValue;
 use datafusion_expr::{
@@ -19,7 +23,7 @@ use datafusion_expr::{
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use regex::Regex;
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 use syn::{parse_quote, parse_str, Ident, Path};
 
 #[derive(Debug, Clone)]
@@ -44,6 +48,7 @@ pub enum Expression {
     RustUdf(RustUdfExpression),
     WrapType(WrapTypeExpression),
     Case(CaseExpression),
+    WindowUDF(WindowType),
 }
 
 pub struct JoinedPairedStruct {
@@ -126,6 +131,104 @@ impl CodeGenerator<JoinPairContext, StructDef, syn::Expr> for JoinType {
     }
 }
 
+impl CodeGenerator<JoinListsContext, StructDef, syn::Expr> for JoinType {
+    fn generate(&self, input_context: &JoinListsContext) -> syn::Expr {
+        let pair_context = JoinPairContext {
+            left_struct: input_context.left_struct.clone(),
+            right_struct: input_context.right_struct.clone(),
+        };
+        let pair_expression = self.generate(&pair_context);
+        let left_list_ident = input_context.left_list_ident();
+        let right_list_ident = input_context.right_list_ident();
+        let left_ident = pair_context.left_ident();
+        let right_ident = pair_context.right_ident();
+        let right_type = input_context.right_struct.get_type();
+        let left_type = input_context.left_struct.get_type();
+        match self {
+            JoinType::Inner => {
+                parse_quote!( {
+                    let mut result = vec![];
+                    for #left_ident in #left_list_ident {
+                        for #right_ident in #right_list_ident {
+                            result.push(#pair_expression)
+                        }
+                    }
+                    result
+                })
+            }
+            JoinType::Left => {
+                parse_quote!( {
+                    let mut result = vec![];
+                    for #left_ident in #left_list_ident {
+                        let mut found = false;
+                        for #right_ident in #right_list_ident {
+                            let #right_ident =:Option<#right_type> = Some(#right_ident);
+                            result.push(#pair_expression);
+                            found = true;
+                        }
+                        if !found {
+                            let #right_ident : Option<#right_type> = None;
+                            result.push(#pair_expression);
+                        }
+                    }
+                    result
+                })
+            }
+            JoinType::Right => {
+                parse_quote!( {
+                    let mut result = vec![];
+                    for #right_ident in #right_list_ident {
+                        let mut found = false;
+                        for #left_ident in #left_list_ident {
+                            result.push(#pair_expression);
+                            found = true;
+                        }
+                        if !found {
+                            let #left_ident : Option<#left_type> = None;
+                            result.push(#pair_expression);
+                        }
+                    }
+                    result
+                })
+            }
+            JoinType::Full => {
+                parse_quote!(
+                    {
+                        let mut result = vec![];
+                        let left_empty = #left_list_ident.is_empty();
+                        let right_empty = #right_list_ident.is_empty();
+                        println!("left:{:?}, right:{:?}, left_empty: {}, right_empty: {}", #left_list_ident, #right_list_ident, left_empty, right_empty);
+                        for #left_ident in #left_list_ident {
+                            let #left_ident :Option<&#left_type> = Some(#left_ident);
+                            for #right_ident in #right_list_ident {
+                                let #right_ident :Option<&#right_type> = Some(#right_ident);
+                                result.push(#pair_expression);
+                            }
+                            if right_empty {
+                                println!("right is empty");
+                                let #right_ident : Option<#right_type> = None;
+                                result.push(#pair_expression);
+                            }
+                        }
+                        if left_empty {
+                            let #left_ident : Option<#left_type> = None;
+                            for #right_ident in #right_list_ident {
+                                let #right_ident :Option<&#right_type> = Some(#right_ident);
+                                result.push(#pair_expression);
+                            }
+                        }
+                        result
+                    }
+                )
+            }
+        }
+    }
+
+    fn expression_type(&self, input_context: &JoinListsContext) -> StructDef {
+        self.join_struct_type(&input_context.left_struct, &input_context.right_struct)
+    }
+}
+
 impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         match self {
@@ -146,6 +249,9 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::RustUdf(udf) => udf.generate(input_context),
             Expression::WrapType(wrap_type) => wrap_type.generate(input_context),
             Expression::Case(case) => case.generate(input_context),
+            Expression::WindowUDF(window_type) => {
+                unreachable!("window functions shouldn't be computed off of a value pointer")
+            }
         }
     }
 
@@ -186,43 +292,14 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::RustUdf(t) => t.expression_type(input_context),
             Expression::WrapType(t) => t.expression_type(input_context),
             Expression::Case(case_statement) => case_statement.expression_type(input_context),
+            Expression::WindowUDF(window_type) => {
+                unreachable!("window functions shouldn't be computed off of a value pointer")
+            }
         }
     }
 }
 
 impl Expression {
-    pub fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
-        match self {
-            Expression::Column(column_expression) => column_expression.generate(input_context),
-            Expression::UnaryBoolean(unary_boolean_expression) => {
-                unary_boolean_expression.generate(input_context)
-            }
-            Expression::Literal(literal_expression) => literal_expression.generate(input_context),
-            Expression::BinaryComparison(comparison_expression) => {
-                comparison_expression.generate(input_context)
-            }
-            Expression::BinaryMath(math_expression) => math_expression.generate(input_context),
-            Expression::StructField(struct_field_expression) => {
-                struct_field_expression.generate(input_context)
-            }
-            Expression::Aggregation(_aggregation_expression) => {
-                unreachable!("aggregates shouldn't actually be expressions!")
-            }
-            Expression::Cast(cast_expression) => cast_expression.generate(input_context),
-            Expression::Numeric(numeric_expression) => numeric_expression.generate(input_context),
-            Expression::String(string_function) => string_function.generate(input_context),
-            Expression::Hash(hash_expression) => hash_expression.generate(input_context),
-            Expression::DataStructure(data_structure_expression) => {
-                data_structure_expression.generate(input_context)
-            }
-            Expression::Json(json_function) => json_function.generate(input_context),
-            Expression::RustUdf(t) => t.generate(input_context),
-            Expression::WrapType(t) => t.generate(input_context),
-            Expression::Case(case_expression) => case_expression.generate(input_context),
-            Expression::Date(datetime_expr) => datetime_expr.generate(input_context),
-        }
-    }
-
     pub(crate) fn has_max_value(&self, field: &StructField) -> Option<u64> {
         match self {
             Expression::BinaryComparison(BinaryComparisonExpression { left, op, right }) => {
@@ -287,6 +364,64 @@ impl Expression {
                 }
             }
             _ => None,
+        }
+    }
+
+    pub(crate) fn get_window_type(&self, input: &SqlOperator) -> Result<Option<WindowType>> {
+        match self {
+            Expression::Column(column) => {
+                if let Some(window_type) = input.get_window() {
+                    let column_field = input
+                        .return_type()
+                        .get_field(column.column_field.alias.clone(), &column.column_field.name)?;
+                    if column_field.data_type == window_type_def() {
+                        return Ok(Some(window_type.clone()));
+                    }
+                }
+                Ok(None)
+            }
+            Expression::WindowUDF(window_type) => {
+                if let Some(input_window_type) = input.get_window() {
+                    if input_window_type != *window_type {
+                        bail!(
+                            "window type mismatch: {:?} != {:?}",
+                            input_window_type,
+                            window_type
+                        );
+                    }
+                }
+                Ok(Some(window_type.clone()))
+            }
+            Expression::UnaryBoolean(_)
+            | Expression::Literal(_)
+            | Expression::BinaryComparison(_)
+            | Expression::BinaryMath(_)
+            | Expression::StructField(_)
+            | Expression::Aggregation(_)
+            | Expression::Cast(_)
+            | Expression::Numeric(_)
+            | Expression::Date(_)
+            | Expression::String(_)
+            | Expression::Hash(_)
+            | Expression::DataStructure(_)
+            | Expression::Json(_)
+            | Expression::RustUdf(_)
+            | Expression::WrapType(_)
+            | Expression::Case(_) => Ok(None),
+        }
+    }
+    fn get_duration(expression: &Expr) -> Result<Duration> {
+        match expression {
+            Expr::Literal(ScalarValue::IntervalDayTime(Some(val))) => {
+                Ok(Duration::from_millis(*val as u64))
+            }
+            Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(val))) => {
+                Ok(interval_month_day_nanos_to_duration(*val))
+            }
+            _ => bail!(
+                "unsupported Duration expression, expect duration literal, not {}",
+                expression
+            ),
         }
     }
 }
@@ -653,6 +788,28 @@ impl<'a> ExpressionContext<'a> {
                         json_string,
                         path,
                     }))
+                }
+                "hop" => {
+                    if args.len() != 2 {
+                        bail!("wrong number of arguments for hop(), expected two");
+                    }
+                    let slide = Expression::get_duration(&args[0])?;
+                    let width = Expression::get_duration(&args[1])?;
+                    Ok(Expression::WindowUDF(WindowType::Sliding { width, slide }))
+                }
+                "tumble" => {
+                    if args.len() != 1 {
+                        bail!("wrong number of arguments for tumble(), expect one");
+                    }
+                    let width = Expression::get_duration(&args[0])?;
+                    Ok(Expression::WindowUDF(WindowType::Tumbling { width }))
+                }
+                "session" => {
+                    if args.len() != 1 {
+                        bail!("wrong number of arguments for session(), expected one");
+                    }
+                    let gap = Expression::get_duration(&args[0])?;
+                    Ok(Expression::WindowUDF(WindowType::Session { gap }))
                 }
                 udf => {
                     // get udf from context
