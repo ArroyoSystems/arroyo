@@ -8,9 +8,11 @@ use arroyo_rpc::grpc::api::{
     ArrowEdge, ArrowNode, ArrowProgram, ConnectorOp, EdgeType, ProjectionOperator,
 };
 use datafusion::physical_expr::udf::create_physical_expr;
-use datafusion_expr::BuiltinScalarFunction;
-use datafusion_physical_expr::expressions::Column;
-use datafusion_physical_expr::ScalarFunctionExpr;
+use datafusion_common::ScalarValue;
+use datafusion_expr::Operator;
+use datafusion_physical_expr::expressions::{BinaryExpr, Column, Literal};
+use datafusion_physical_expr::PhysicalExpr;
+use datafusion_proto::protobuf::PhysicalExprNode;
 use prost::Message;
 use serde_json::json;
 use std::sync::Arc;
@@ -255,20 +257,33 @@ fn create_program() {
         .encode_to_vec(),
     });
 
-    // nodes.push(ArrowNode {
-    //     node_index: 2,
-    //     node_id: "project".to_string(),
-    //     parallelism: 1,
-    //     description: "projection_node".to_string(),
-    //     operator_name: "Projection".to_string(),
-    //     operator_config: (ProjectionOperator {
-    //         name: "project".to_string(),
-    //         expressions: vec![
-    //             Column::new("time2", 0),
-    //             create_physical_expr()
-    //         ],
-    //     })
-    // })
+    let exprs: Vec<Arc<dyn PhysicalExpr>> = vec![
+        Arc::new(Column::new("time2", 0)),
+        Arc::new(BinaryExpr::new(
+            Arc::new(Column::new("l", 1)),
+            Operator::Multiply,
+            Arc::new(Literal::new(ScalarValue::UInt64(Some(10)))),
+        )),
+    ];
+
+    let expressions: Vec<_> = exprs
+        .into_iter()
+        .map(|expr| TryInto::<PhysicalExprNode>::try_into(expr).unwrap())
+        .map(|p| p.encode_to_vec())
+        .collect();
+
+    nodes.push(ArrowNode {
+        node_index: 2,
+        node_id: "project".to_string(),
+        parallelism: 1,
+        description: "projection_node".to_string(),
+        operator_name: "Projection".to_string(),
+        operator_config: (ProjectionOperator {
+            name: "project".to_string(),
+            expressions,
+        })
+        .encode_to_vec(),
+    });
 
     nodes.push(ArrowNode {
         node_index: 3,
@@ -306,6 +321,28 @@ fn create_program() {
 
     edges.push(ArrowEdge {
         source: 1,
+        target: 2,
+        schema: Some(arroyo_schema),
+        edge_type: EdgeType::Forward as i32,
+    });
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new(
+            "time2",
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        ),
+        Field::new("value", DataType::UInt64, false),
+    ]));
+
+    let arroyo_schema = arroyo_rpc::grpc::api::ArroyoSchema {
+        arrow_schema: serde_json::to_string(&schema).unwrap(),
+        timestamp_col: 0,
+        key_col: None,
+    };
+
+    edges.push(ArrowEdge {
+        source: 2,
         target: 3,
         schema: Some(arroyo_schema),
         edge_type: EdgeType::Forward as i32,

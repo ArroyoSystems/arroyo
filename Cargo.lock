@@ -729,6 +729,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "datafusion-physical-expr",
+ "datafusion-proto",
  "petgraph",
  "proc-macro2",
  "prost",

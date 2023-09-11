@@ -77,11 +77,8 @@ impl ArrowOperator for ProjectionOperator {
     }
 
     async fn process_batch(&mut self, batch: ArrowRecord, ctx: &mut ArrowContext) {
-        let record_batch = RecordBatch::try_new(
-            ctx.out_schema.as_ref().unwrap().schema.clone(),
-            batch.columns,
-        )
-        .unwrap();
+        let record_batch =
+            RecordBatch::try_new(ctx.in_schemas[0].schema.clone(), batch.columns).unwrap();
 
         let arrays = self
             .exprs
