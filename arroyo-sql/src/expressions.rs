@@ -197,7 +197,6 @@ impl CodeGenerator<JoinListsContext, StructDef, syn::Expr> for JoinType {
                         let mut result = vec![];
                         let left_empty = #left_list_ident.is_empty();
                         let right_empty = #right_list_ident.is_empty();
-                        println!("left:{:?}, right:{:?}, left_empty: {}, right_empty: {}", #left_list_ident, #right_list_ident, left_empty, right_empty);
                         for #left_ident in #left_list_ident {
                             let #left_ident :Option<&#left_type> = Some(#left_ident);
                             for #right_ident in #right_list_ident {

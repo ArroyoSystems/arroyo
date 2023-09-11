@@ -13,7 +13,6 @@ use arroyo_datastream::{
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str};
-use tracing::info;
 
 use crate::{
     code_gen::{
@@ -1504,7 +1503,6 @@ impl PlanGraph {
             TypeDef::DataType(DataType::UInt64, false),
         ));
         let partition_struct = window_operator.partition.output_struct();
-        info!("window partition struct is {:?}", partition_struct);
 
         let partition_key_node = PlanOperator::RecordTransform(RecordTransform::KeyProjection(
             window_operator.partition,
