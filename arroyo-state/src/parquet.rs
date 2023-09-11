@@ -824,7 +824,7 @@ impl ParquetFlusher {
                 subtask_index: self.task_info.task_index as u32,
                 start_time: to_micros(cp.time),
                 finish_time: to_micros(SystemTime::now()),
-                has_state: bytes > 0,
+                has_state: !backend_data.is_empty(),
                 tables: self.table_descriptors.values().cloned().collect(),
                 watermark: cp.watermark.map(to_micros),
                 backend_data,
