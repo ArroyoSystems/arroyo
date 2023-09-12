@@ -498,6 +498,9 @@ export const useJobOutput = (
   }
   const url = `${BASE_URL}/v1/pipelines/${pipelineId}/jobs/${jobId}/output`;
   const eventSource = new EventSource(url);
+  eventSource.onerror = () => {
+    eventSource.close();
+  };
   eventSource.addEventListener('message', handler);
   return eventSource;
 };

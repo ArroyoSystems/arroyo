@@ -137,6 +137,9 @@ export function CreatePipeline() {
 
   useEffect(() => {
     if (pipeline && job) {
+      if (outputSource) {
+        outputSource.close();
+      }
       setOutputSource(useJobOutput(sseHandler, pipeline.id, job.id));
     }
   }, [job?.id]);
