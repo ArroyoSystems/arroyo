@@ -4,14 +4,12 @@ use anyhow::{anyhow};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
-use futures::StreamExt;
 use reqwest::{Client, Request};
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
 use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use crate::{pull_opt, Connection, EmptyConfig, pull_option_to_i64, construct_http_client};
 
@@ -32,10 +30,10 @@ impl PollingHTTPConnector {
                 Some(Method::Post) => reqwest::Method::POST,
                 Some(Method::Put) => reqwest::Method::PUT,
                 Some(Method::Patch) => reqwest::Method::PATCH,
-            });
+            }, &config.endpoint);
 
         if let Some(body) = &config.body {
-            req = req.body(body);
+            req = req.body(body.clone());
         }
 
         let req = req.build()
@@ -110,7 +108,24 @@ impl Connector for PollingHTTPConnector {
         _: Option<&ConnectionSchema>,
         tx: Sender<Result<Event, Infallible>>,
     ) {
+        tokio::task::spawn(async move {
+            let message = match Self::test_int(&table, tx.clone()).await {
+                Ok(_) => TestSourceMessage {
+                    error: false,
+                    done: true,
+                    message: "Successfully validated source".to_string(),
+                },
+                Err(err) => TestSourceMessage {
+                    error: true,
+                    done: true,
+                    message: format!("{:?}", err),
+                },
+            };
 
+            tx.send(Ok(Event::default().json_data(message).unwrap()))
+                .await
+                .unwrap();
+        });
     }
 
     fn from_options(
@@ -191,7 +206,7 @@ impl Connector for PollingHTTPConnector {
             name: name.to_string(),
             connection_type: ConnectionType::Source,
             schema,
-            operator: "connectors::http::PollingHTTPSource".to_string(),
+            operator: "connectors::polling_http::PollingHttpSourceFunc".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

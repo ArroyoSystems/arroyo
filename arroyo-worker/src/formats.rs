@@ -46,7 +46,7 @@ fn deserialize_slice_json<T: DeserializeOwned>(
     }
 }
 
-pub fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> {
+fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> {
     let json = json! {
         { "value": String::from_utf8_lossy(msg) }
     };

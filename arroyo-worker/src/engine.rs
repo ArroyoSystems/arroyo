@@ -21,10 +21,7 @@ use arroyo_rpc::grpc::{
     TaskAssignment,
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_types::{
-    from_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark, WorkerId,
-    BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
-};
+use arroyo_types::{from_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark, WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT, UserError};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
@@ -501,7 +498,20 @@ impl<K: Key, T: Data> Context<K, T> {
             .await
             .unwrap();
     }
+
+    pub async fn report_user_error(&mut self, error: UserError) {
+        self.control_tx
+            .send(ControlResp::Error {
+                operator_id: self.task_info.operator_id.clone(),
+                task_index: self.task_info.task_index,
+                message: error.name,
+                details: error.details,
+            })
+            .await
+            .unwrap();
+    }
 }
+
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {

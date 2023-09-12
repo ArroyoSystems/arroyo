@@ -13,7 +13,7 @@ use sse::SSEConnector;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
-use reqwest::{Client, Request};
+use reqwest::{Client};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tokio::sync::mpsc::Sender;
 use arroyo_types::string_to_map;

@@ -1,10 +1,10 @@
-use std::{convert::Infallible, time::Duration};
+use std::{convert::Infallible};
 
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow};
 use arroyo_rpc::OperatorConfig;
-use arroyo_types::string_to_map;
+
 use axum::response::sse::Event;
-use reqwest::{header::HeaderMap, header::HeaderName, header::HeaderValue, Client, Request};
+use reqwest::{Client, Request};
 use serde_json::json;
 use tokio::sync::mpsc::Sender;
 use typify::import_types;

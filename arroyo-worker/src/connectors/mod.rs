@@ -9,3 +9,4 @@ pub mod sse;
 pub mod two_phase_committer;
 pub mod webhook;
 pub mod websocket;
+pub mod polling_http;

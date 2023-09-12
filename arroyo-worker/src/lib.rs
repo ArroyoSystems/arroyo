@@ -1,12 +1,11 @@
 #![allow(clippy::new_without_default)]
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
-extern crate core;
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use anyhow::Result;
-use arrow::datatypes::Field;
+use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -17,10 +16,7 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_server_common::start_admin_server;
-use arroyo_types::{
-    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, Data, Debezium, NodeId, WorkerId,
-    JOB_ID_ENV, RUN_ID_ENV,
-};
+use arroyo_types::{from_millis, grpc_port, ports, CheckpointBarrier, Data, Debezium, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV, RawJson, to_micros};
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
@@ -98,6 +94,36 @@ impl<T: SchemaData> SchemaData for Debezium<T> {
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {
         unimplemented!("debezium data cannot be written as a raw string");
+    }
+}
+
+impl SchemaData for RawJson {
+    fn name() -> &'static str {
+        "raw_json"
+    }
+
+    fn schema() -> Schema {
+        Schema::new(vec![
+            Field::new("value", DataType::Utf8, false),
+        ])
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        Some(self.value.as_bytes().to_vec())
+    }
+}
+
+impl SchemaData for () {
+    fn name() -> &'static str {
+        "empty"
+    }
+
+    fn schema() -> Schema {
+        Schema::empty()
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        None
     }
 }
 
