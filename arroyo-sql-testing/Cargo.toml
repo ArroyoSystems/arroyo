@@ -3,6 +3,9 @@ name = "arroyo-sql-testing"
 version = "0.5.0"
 edition = "2021"
 
+[features]
+integration-tests = []
+
 
 [dependencies]
 syn = "2.0"

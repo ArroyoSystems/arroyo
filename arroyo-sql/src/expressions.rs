@@ -204,7 +204,6 @@ impl CodeGenerator<JoinListsContext, StructDef, syn::Expr> for JoinType {
                                 result.push(#pair_expression);
                             }
                             if right_empty {
-                                println!("right is empty");
                                 let #right_ident : Option<#right_type> = None;
                                 result.push(#pair_expression);
                             }

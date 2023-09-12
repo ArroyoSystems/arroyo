@@ -27,6 +27,7 @@ use petgraph::graph::DiGraph;
 use rand::Rng;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
 use std::process::exit;
 use std::str::FromStr;
@@ -38,7 +39,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 pub use ordered_float::OrderedFloat;
 
@@ -190,7 +191,7 @@ impl LocalRunner {
 
     pub async fn run(self) {
         let name = format!("{}-0", self.program.name);
-        let mut running_nodes = self.program.total_nodes();
+        let total_nodes = self.program.total_nodes();
         let engine = Engine::for_local(self.program, name);
         let (_running_engine, mut control_rx) = engine
             .start(StreamConfig {
@@ -198,16 +199,18 @@ impl LocalRunner {
             })
             .await;
 
+        let mut finished_nodes = HashSet::new();
+
         loop {
             while let Some(control_message) = control_rx.recv().await {
-                println!("received {:?}", control_message);
+                debug!("received {:?}", control_message);
                 if let ControlResp::TaskFinished {
-                    operator_id: _,
-                    task_index: _,
+                    operator_id,
+                    task_index,
                 } = control_message
                 {
-                    running_nodes -= 1;
-                    if running_nodes == 0 {
+                    finished_nodes.insert((operator_id, task_index));
+                    if finished_nodes.len() == total_nodes {
                         return;
                     }
                 }
@@ -346,106 +349,106 @@ impl WorkerServer {
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 select! {
-                        msg = control_rx.recv() => {
-                            let err = match msg {
-                                Some(ControlResp::CheckpointEvent(c)) => {
-                                    controller.task_checkpoint_event(Request::new(
-                                        TaskCheckpointEventReq {
-                                            worker_id: worker_id.0,
-                                            time: to_micros(c.time),
-                                            job_id: job_id.clone(),
-                                            operator_id: c.operator_id,
-                                            subtask_index: c.subtask_index,
-                                            epoch: c.checkpoint_epoch,
-                                            event_type: c.event_type as i32,
-                                        }
-                                    )).await.err()
-                                }
-                                Some(ControlResp::CheckpointCompleted(c)) => {
-                                    controller.task_checkpoint_completed(Request::new(
-                                        TaskCheckpointCompletedReq {
-                                            worker_id: worker_id.0,
-                                            time: c.subtask_metadata.finish_time,
-                                            job_id: job_id.clone(),
-                                            operator_id: c.operator_id,
-                                            epoch: c.checkpoint_epoch,
-                                            needs_commit: false,
-                                            metadata: Some(c.subtask_metadata),
-                                        }
-                                    )).await.err()
-                                }
-                                Some(ControlResp::TaskFinished { operator_id, task_index }) => {
-                                    info!(message = "Task finished", operator_id, task_index);
-                                    controller.task_finished(Request::new(
-                                        TaskFinishedReq {
-                                            worker_id: worker_id.0,
-                                            job_id: job_id.clone(),
-                                            time: to_micros(SystemTime::now()),
-                                            operator_id: operator_id.to_string(),
-                                            operator_subtask: task_index as u64,
-                                        }
-                                    )).await.err()
-                                }
-                                Some(ControlResp::TaskFailed { operator_id, task_index, error }) => {
-                                    controller.task_failed(Request::new(
-                                        TaskFailedReq {
-                                            worker_id: worker_id.0,
-                                            job_id: job_id.clone(),
-                                            time: to_micros(SystemTime::now()),
-                                            operator_id: operator_id.to_string(),
-                                            operator_subtask: task_index as u64,
-                                            error,
-                                        }
-                                    )).await.err()
-                                }
-                                Some(ControlResp::Error { operator_id, task_index, message, details}) => {
-                                    controller.worker_error(Request::new(
-                                        WorkerErrorReq {
-                                            job_id: job_id.clone(),
-                                            operator_id,
-                                            task_index: task_index as u32,
-                                            message,
-                                            details
-                                        }
-                                    )).await.err()
-                                }
-                                Some(ControlResp::TaskStarted {operator_id, task_index, start_time}) => {
-                                    controller.task_started(Request::new(
-                                        TaskStartedReq {
-                                            worker_id: worker_id.0,
-                                            job_id: job_id.clone(),
-                                            time: to_micros(start_time),
-                                            operator_id: operator_id.to_string(),
-                                            operator_subtask: task_index as u64,
-                                        }
-                                    )).await.err()
-                                }
-                                None => {
-                                    // TODO: remove the control queue from the select at this point
-                                    tokio::time::sleep(Duration::from_millis(50)).await;
-                                    None
-                                }
-                            };
-                            if let Some(err) = err {
-                                error!("encountered control message failure {}", err);
-                                exit(1);
+                    msg = control_rx.recv() => {
+                        let err = match msg {
+                            Some(ControlResp::CheckpointEvent(c)) => {
+                                controller.task_checkpoint_event(Request::new(
+                                    TaskCheckpointEventReq {
+                                        worker_id: worker_id.0,
+                                        time: to_micros(c.time),
+                                        job_id: job_id.clone(),
+                                        operator_id: c.operator_id,
+                                        subtask_index: c.subtask_index,
+                                        epoch: c.checkpoint_epoch,
+                                        event_type: c.event_type as i32,
+                                    }
+                                )).await.err()
                             }
+                            Some(ControlResp::CheckpointCompleted(c)) => {
+                                controller.task_checkpoint_completed(Request::new(
+                                    TaskCheckpointCompletedReq {
+                                        worker_id: worker_id.0,
+                                        time: c.subtask_metadata.finish_time,
+                                        job_id: job_id.clone(),
+                                        operator_id: c.operator_id,
+                                        epoch: c.checkpoint_epoch,
+                                        needs_commit: false,
+                                        metadata: Some(c.subtask_metadata),
+                                    }
+                                )).await.err()
+                            }
+                            Some(ControlResp::TaskFinished { operator_id, task_index }) => {
+                                info!(message = "Task finished", operator_id, task_index);
+                                controller.task_finished(Request::new(
+                                    TaskFinishedReq {
+                                        worker_id: worker_id.0,
+                                        job_id: job_id.clone(),
+                                        time: to_micros(SystemTime::now()),
+                                        operator_id: operator_id.to_string(),
+                                        operator_subtask: task_index as u64,
+                                    }
+                                )).await.err()
+                            }
+                            Some(ControlResp::TaskFailed { operator_id, task_index, error }) => {
+                                controller.task_failed(Request::new(
+                                    TaskFailedReq {
+                                        worker_id: worker_id.0,
+                                        job_id: job_id.clone(),
+                                        time: to_micros(SystemTime::now()),
+                                        operator_id: operator_id.to_string(),
+                                        operator_subtask: task_index as u64,
+                                        error,
+                                    }
+                                )).await.err()
+                            }
+                            Some(ControlResp::Error { operator_id, task_index, message, details}) => {
+                                controller.worker_error(Request::new(
+                                    WorkerErrorReq {
+                                        job_id: job_id.clone(),
+                                        operator_id,
+                                        task_index: task_index as u32,
+                                        message,
+                                        details
+                                    }
+                                )).await.err()
+                            }
+                            Some(ControlResp::TaskStarted {operator_id, task_index, start_time}) => {
+                                controller.task_started(Request::new(
+                                    TaskStartedReq {
+                                        worker_id: worker_id.0,
+                                        job_id: job_id.clone(),
+                                        time: to_micros(start_time),
+                                        operator_id: operator_id.to_string(),
+                                        operator_subtask: task_index as u64,
+                                    }
+                                )).await.err()
+                            }
+                            None => {
+                                // TODO: remove the control queue from the select at this point
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                                None
+                            }
+                        };
+                        if let Some(err) = err {
+                            error!("encountered control message failure {}", err);
+                            exit(1);
                         }
-                        _ = tick.tick() => {
-                                let result = controller.heartbeat(Request::new(HeartbeatReq {
-                                    job_id: job_id.clone(),
-                                    time: to_micros(SystemTime::now()),
-                                    worker_id: worker_id.0,
-                                })).await;
-                                if let Err(err) = result {
-                                    error!("heartbeat failed {:?}", err);
-                                    exit(1);
-                                }
+                    }
+                    _ = tick.tick() => {
+                        let result = controller.heartbeat(Request::new(HeartbeatReq {
+                            job_id: job_id.clone(),
+                            time: to_micros(SystemTime::now()),
+                            worker_id: worker_id.0,
+                        })).await;
+                        if let Err(err) = result {
+                            error!("heartbeat failed {:?}", err);
+                            exit(1);
                         }
-                        _ = shutdown_rx.recv() => {
-                            info!("shutting down");
-                            break;
-                        }
+                    }
+                    _ = shutdown_rx.recv() => {
+                        info!("shutting down");
+                        break;
+                    }
                 }
             }
         });
