@@ -118,7 +118,11 @@ pub fn full_pipeline_codegen(input: TokenStream) -> TokenStream {
 
 fn full_pipeline_codegen_internal(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     let pipeline_case: PipelineCase = syn::parse2(input).unwrap();
-    get_pipeline_module(pipeline_case.query.value(), pipeline_case.test_name.value())
+    get_pipeline_module(
+        pipeline_case.query.value(),
+        pipeline_case.test_name.value(),
+        None,
+    )
 }
 
 struct PipelineCase {
@@ -126,7 +130,11 @@ struct PipelineCase {
     query: LitStr,
 }
 
-fn get_pipeline_module(query_string: String, mod_name: String) -> proc_macro2::TokenStream {
+fn get_pipeline_module(
+    query_string: String,
+    mod_name: String,
+    udfs: Option<String>,
+) -> proc_macro2::TokenStream {
     let mod_ident: syn::Ident = parse_str(&mod_name).unwrap();
     let mut schema_provider = ArroyoSchemaProvider::new();
 
@@ -145,6 +153,10 @@ fn get_pipeline_module(query_string: String, mod_name: String) -> proc_macro2::T
         .unwrap();
 
     schema_provider.add_connector_table(nexmark);
+
+    if let Some(udfs) = udfs {
+        schema_provider.add_rust_udf(udfs.as_str()).unwrap();
+    }
 
     // TODO: test with higher parallelism
     let (program, _) = parse_and_get_program_sync(
@@ -198,6 +210,7 @@ impl Parse for PipelineCase {
 struct CorrectnessTestCase {
     test_name: LitStr,
     query: LitStr,
+    udfs: Option<LitStr>,
 }
 
 impl Parse for CorrectnessTestCase {
@@ -205,7 +218,16 @@ impl Parse for CorrectnessTestCase {
         let test_name = input.parse()?;
         input.parse::<Token![,]>()?;
         let query = input.parse()?;
-        Ok(Self { test_name, query })
+        let udfs = if input.parse::<Token![,]>().is_ok() {
+            input.parse()?
+        } else {
+            None
+        };
+        Ok(Self {
+            test_name,
+            query,
+            udfs,
+        })
     }
 }
 
@@ -244,8 +266,12 @@ pub fn correctness_run_codegen(input: TokenStream) -> TokenStream {
     );
     let module_ident: syn::Ident = parse_str(&test_name).unwrap();
     let test_ident: syn::Ident = parse_str(&format!("{}_test", test_name)).unwrap();
-    let module: proc_macro2::TokenStream =
-        get_pipeline_module(query_string, test_name.clone()).into();
+    let module: proc_macro2::TokenStream = get_pipeline_module(
+        query_string,
+        test_name.clone(),
+        correctness_case.udfs.map(|udfs| udfs.value()),
+    )
+    .into();
 
     quote!(
         #[tokio::test]
