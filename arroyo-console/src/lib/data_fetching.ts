@@ -344,7 +344,8 @@ const pipelineGraphFetcher = () => {
 export const usePipelineGraph = (query?: string, udfsInput?: string) => {
   const { data, error } = useSWR<schemas['PipelineGraph']>(
     pipelineGraphKey(query, udfsInput),
-    pipelineGraphFetcher()
+    pipelineGraphFetcher(),
+    { revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false }
   );
 
   return {
