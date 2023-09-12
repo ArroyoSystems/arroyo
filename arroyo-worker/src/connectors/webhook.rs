@@ -114,7 +114,12 @@ where
             .await
             .expect("websink semaphore closed");
 
-        let body: bytes::Bytes = self.serializer.to_vec(&record.value).into();
+        let Some(body) = self.serializer.to_vec(&record.value) else {
+            return;
+        };
+
+        let body: bytes::Bytes = body.into();
+
         let client = self.client.clone();
         let control_tx = ctx.control_tx.clone();
         let error_lock = self.last_reported_error_at.clone();
