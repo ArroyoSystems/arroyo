@@ -1,29 +1,29 @@
-use std::{
-    marker::PhantomData,
-    time::Duration,
-};
+use bincode::{Decode, Encode};
+use bytes::Bytes;
 use std::borrow::Cow;
 use std::str::FromStr;
 use std::time::SystemTime;
-use bincode::{Decode, Encode};
-use bytes::Bytes;
+use std::{marker::PhantomData, time::Duration};
 
-use arroyo_macro::{source_fn};
-use arroyo_rpc::{ControlMessage};
+use arroyo_macro::source_fn;
+use arroyo_rpc::ControlMessage;
 use arroyo_rpc::{grpc::TableDescriptor, OperatorConfig};
-use arroyo_types::{string_to_map, Record, Message, Watermark, UserError};
+use arroyo_types::{string_to_map, Message, Record, UserError, Watermark};
 
 use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 
-use tracing::{debug, info, warn};
-use typify::import_types;
 use arroyo_rpc::grpc::StopMode;
 use arroyo_rpc::types::Format;
 use arroyo_state::tables::GlobalKeyedState;
+use tracing::{debug, info, warn};
+use typify::import_types;
 
-use crate::{engine::{Context, StreamNode}, formats, SchemaData, SourceFinishType};
+use crate::{
+    engine::{Context, StreamNode},
+    formats, SchemaData, SourceFinishType,
+};
 
 import_types!(schema = "../connector-schemas/polling_http/table.json");
 
@@ -44,7 +44,7 @@ where
     polling_interval: Duration,
     emit_behavior: EmitBehavior,
 
-    _t: PhantomData<(K, T)>
+    _t: PhantomData<(K, T)>,
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -78,15 +78,15 @@ where
             .collect();
 
         Self {
-            state: PollingHttpSourceState {
-                last_message: None,
-            },
+            state: PollingHttpSourceState { last_message: None },
             client: reqwest::ClientBuilder::new()
                 .default_headers(headers)
                 .timeout(Duration::from_secs(5))
                 .build()
                 .expect("could not construct http client"),
-            format: config.format.expect("polling http source must have a format configured"),
+            format: config
+                .format
+                .expect("polling http source must have a format configured"),
             endpoint: url::Url::from_str(&table.endpoint).expect("invalid endpoint"),
             method: match table.method {
                 None | Some(Method::Get) => reqwest::Method::GET,
@@ -95,10 +95,12 @@ where
                 Some(Method::Patch) => reqwest::Method::PATCH,
             },
             body: table.body.map(|b| b.into()),
-            polling_interval: table.poll_interval_ms.map(|d| Duration::from_millis(d as u64))
+            polling_interval: table
+                .poll_interval_ms
+                .map(|d| Duration::from_millis(d as u64))
                 .unwrap_or(DEFAULT_POLLING_INTERVAL),
             emit_behavior: table.emit_behavior.unwrap_or(EmitBehavior::All),
-            _t: PhantomData
+            _t: PhantomData,
         }
     }
 
@@ -156,31 +158,53 @@ where
     }
 
     async fn request(&mut self) -> Result<T, UserError> {
-        let mut request = self.client.request(self.method.clone(), self.endpoint.clone());
+        let mut request = self
+            .client
+            .request(self.method.clone(), self.endpoint.clone());
 
         if let Some(body) = self.body.clone() {
             request = request.body(body);
         }
 
-        let resp = self.client.execute(request.build().expect("building request failed"))
+        let resp = self
+            .client
+            .execute(request.build().expect("building request failed"))
             .await
-            .map_err(|e| UserError::new("request failed", format!("failed to execute HTTP request: {}", e)))?;
+            .map_err(|e| {
+                UserError::new(
+                    "request failed",
+                    format!("failed to execute HTTP request: {}", e),
+                )
+            })?;
 
         if resp.status().is_success() {
-            let bytes = resp.bytes().await
-                .map_err(|e| UserError::new("request failed",
-                format!("failed while reading body: {}", e)))?;
+            let bytes = resp.bytes().await.map_err(|e| {
+                UserError::new(
+                    "request failed",
+                    format!("failed while reading body: {}", e),
+                )
+            })?;
 
             Ok(formats::deserialize_slice(&self.format, &bytes)?)
         } else {
             let status = resp.status();
             let bytes = resp.bytes().await;
-            let error_body = bytes.as_ref().map(|b| String::from_utf8_lossy(b))
+            let error_body = bytes
+                .as_ref()
+                .map(|b| String::from_utf8_lossy(b))
                 .unwrap_or_else(|_| Cow::from("<no body>"));
 
-            warn!("HTTP request to {} failed with {}: {}", self.endpoint, status.as_u16(), error_body);
+            warn!(
+                "HTTP request to {} failed with {}: {}",
+                self.endpoint,
+                status.as_u16(),
+                error_body
+            );
 
-            Err(UserError::new("server responded with error", "http server responded with {}"))
+            Err(UserError::new(
+                "server responded with error",
+                "http server responded with {}",
+            ))
         }
     }
 

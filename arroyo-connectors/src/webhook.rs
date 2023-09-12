@@ -1,6 +1,6 @@
-use std::{convert::Infallible};
+use std::convert::Infallible;
 
-use anyhow::{anyhow};
+use anyhow::anyhow;
 use arroyo_rpc::OperatorConfig;
 
 use axum::response::sse::Event;
@@ -12,7 +12,7 @@ use typify::import_types;
 use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, Connection, EmptyConfig, construct_http_client};
+use crate::{construct_http_client, pull_opt, Connection, EmptyConfig};
 
 use super::Connector;
 
@@ -44,8 +44,8 @@ impl WebhookConnector {
         config: &WebhookTable,
         tx: Sender<Result<Event, Infallible>>,
     ) -> anyhow::Result<()> {
-        let client = construct_http_client(&config.endpoint,
-           config.headers.as_ref().map(|t| &t.0))?;
+        let client =
+            construct_http_client(&config.endpoint, config.headers.as_ref().map(|t| &t.0))?;
         let req = Self::construct_test_request(&client, config)?;
 
         tx.send(Ok(Event::default()
@@ -178,10 +178,8 @@ impl Connector for WebhookConnector {
             .map_err(|e| anyhow!("invalid value for 'headers' config: {:?}", e))?;
 
         let table = WebhookTable { endpoint, headers };
-        let client = construct_http_client(&table.endpoint,
-                                           table.headers.as_ref().map(|t| &t.0))?;
+        let client = construct_http_client(&table.endpoint, table.headers.as_ref().map(|t| &t.0))?;
         let _ = Self::construct_test_request(&client, &table)?;
-
 
         self.from_config(None, name, EmptyConfig {}, table, schema)
     }

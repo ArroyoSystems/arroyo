@@ -21,7 +21,10 @@ use arroyo_rpc::grpc::{
     TaskAssignment,
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_types::{from_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark, WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT, UserError};
+use arroyo_types::{
+    from_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, UserError, Watermark,
+    WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
@@ -511,7 +514,6 @@ impl<K: Key, T: Data> Context<K, T> {
             .unwrap();
     }
 }
-
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {

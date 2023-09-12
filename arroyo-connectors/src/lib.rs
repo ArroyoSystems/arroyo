@@ -3,20 +3,20 @@ use arroyo_rpc::primitive_to_sql;
 use arroyo_rpc::types::{
     ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType,
 };
+use arroyo_types::string_to_map;
 use axum::response::sse::Event;
 use blackhole::BlackholeConnector;
 use fluvio::FluvioConnector;
 use impulse::ImpulseConnector;
 use nexmark::NexmarkConnector;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::Client;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sse::SSEConnector;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
-use reqwest::{Client};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tokio::sync::mpsc::Sender;
-use arroyo_types::string_to_map;
 use websocket::WebsocketConnector;
 
 use self::kafka::KafkaConnector;
@@ -28,11 +28,11 @@ pub mod impulse;
 pub mod kafka;
 pub mod kinesis;
 pub mod nexmark;
+pub mod polling_http;
 pub mod single_file;
 pub mod sse;
 pub mod webhook;
 pub mod websocket;
-pub mod polling_http;
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
     m.insert("blackhole", Box::new(BlackholeConnector {}));
@@ -42,7 +42,10 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("kafka", Box::new(KafkaConnector {}));
     m.insert("kinesis", Box::new(kinesis::KinesisConnector {}));
     m.insert("nexmark", Box::new(NexmarkConnector {}));
-    m.insert("polling_http", Box::new(polling_http::PollingHTTPConnector {}));
+    m.insert(
+        "polling_http",
+        Box::new(polling_http::PollingHTTPConnector {}),
+    );
     m.insert("single_file", Box::new(single_file::SingleFileConnector {}));
     m.insert("sse", Box::new(SSEConnector {}));
     m.insert("webhook", Box::new(webhook::WebhookConnector {}));

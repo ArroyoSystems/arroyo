@@ -16,7 +16,10 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_server_common::start_admin_server;
-use arroyo_types::{from_millis, grpc_port, ports, CheckpointBarrier, Data, Debezium, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV, RawJson, to_micros};
+use arroyo_types::{
+    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, Data, Debezium, NodeId, RawJson,
+    WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+};
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
@@ -103,9 +106,7 @@ impl SchemaData for RawJson {
     }
 
     fn schema() -> Schema {
-        Schema::new(vec![
-            Field::new("value", DataType::Utf8, false),
-        ])
+        Schema::new(vec![Field::new("value", DataType::Utf8, false)])
     }
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {

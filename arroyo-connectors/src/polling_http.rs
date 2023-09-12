@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use anyhow::{anyhow};
+use anyhow::anyhow;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
@@ -11,32 +11,38 @@ use typify::import_types;
 use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, Connection, EmptyConfig, pull_option_to_i64, construct_http_client};
+use crate::{construct_http_client, pull_opt, pull_option_to_i64, Connection, EmptyConfig};
 
 use super::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/polling_http/table.json");
 
 import_types!(schema = "../connector-schemas/polling_http/table.json");
-const ICON: &str = include_str!("../resources/sse.svg");
+const ICON: &str = include_str!("../resources/http.svg");
 
 pub struct PollingHTTPConnector {}
 
 impl PollingHTTPConnector {
-    fn construct_test_request(client: &Client, config: &PollingHttpTable) -> anyhow::Result<Request> {
-        let mut req = client
-            .request(match config.method {
+    fn construct_test_request(
+        client: &Client,
+        config: &PollingHttpTable,
+    ) -> anyhow::Result<Request> {
+        let mut req = client.request(
+            match config.method {
                 None | Some(Method::Get) => reqwest::Method::GET,
                 Some(Method::Post) => reqwest::Method::POST,
                 Some(Method::Put) => reqwest::Method::PUT,
                 Some(Method::Patch) => reqwest::Method::PATCH,
-            }, &config.endpoint);
+            },
+            &config.endpoint,
+        );
 
         if let Some(body) = &config.body {
             req = req.body(body.clone());
         }
 
-        let req = req.build()
+        let req = req
+            .build()
             .map_err(|e| anyhow!("invalid request: {}", e.to_string()))?;
 
         Ok(req)
@@ -46,8 +52,8 @@ impl PollingHTTPConnector {
         config: &PollingHttpTable,
         tx: Sender<Result<Event, Infallible>>,
     ) -> anyhow::Result<()> {
-        let client = construct_http_client(&config.endpoint,
-                                           config.headers.as_ref().map(|t| &t.0))?;
+        let client =
+            construct_http_client(&config.endpoint, config.headers.as_ref().map(|t| &t.0))?;
         let req = Self::construct_test_request(&client, config)?;
 
         tx.send(Ok(Event::default()
@@ -67,7 +73,6 @@ impl PollingHTTPConnector {
 
         Ok(())
     }
-
 }
 
 impl Connector for PollingHTTPConnector {
@@ -136,7 +141,8 @@ impl Connector for PollingHTTPConnector {
     ) -> anyhow::Result<crate::Connection> {
         let endpoint = pull_opt("endpoint", opts)?;
         let headers = opts.remove("headers");
-        let method: Option<Method> = opts.remove("method")
+        let method: Option<Method> = opts
+            .remove("method")
             .map(|s| s.try_into())
             .transpose()
             .map_err(|_| anyhow!("invalid value for 'method'"))?;
@@ -144,7 +150,8 @@ impl Connector for PollingHTTPConnector {
         let body = opts.remove("body");
 
         let interval = pull_option_to_i64("poll_interval_ms", opts)?;
-        let emit_behavior: Option<EmitBehavior> = opts.remove("emit_behavior")
+        let emit_behavior: Option<EmitBehavior> = opts
+            .remove("emit_behavior")
             .map(|s| s.try_into())
             .transpose()
             .map_err(|_| anyhow!("invalid value for 'emit_behavior'"))?;
