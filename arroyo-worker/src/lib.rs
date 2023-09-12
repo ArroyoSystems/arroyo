@@ -5,37 +5,41 @@ extern crate core;
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
+use anyhow::Result;
 use arrow::datatypes::Field;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
-    CheckpointReq, CheckpointResp, JobFinishedReq, JobFinishedResp, RegisterWorkerReq,
-    StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp, WorkerResources,
+    CheckpointReq, CheckpointResp, HeartbeatReq, JobFinishedReq, JobFinishedResp,
+    RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp,
+    TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq,
+    TaskStartedReq, WorkerErrorReq, WorkerResources,
 };
-use arroyo_rpc::ControlMessage;
+use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    from_millis, grpc_port, ports, CheckpointBarrier, Data, Debezium, NodeId, WorkerId, JOB_ID_ENV,
-    RUN_ID_ENV,
+    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, Data, Debezium, NodeId, WorkerId,
+    JOB_ID_ENV, RUN_ID_ENV,
 };
-use engine::RunningEngine;
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
 use rand::Rng;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
+use tokio::select;
 use tokio::sync::broadcast;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
-use tracing::info;
+use tracing::{debug, error, info};
 
 pub use ordered_float::OrderedFloat;
 
@@ -173,7 +177,7 @@ impl Debug for LogicalNode {
 struct EngineState {
     sources: Vec<Sender<ControlMessage>>,
     sinks: Vec<Sender<ControlMessage>>,
-    running_engine: RunningEngine,
+    shutdown_tx: broadcast::Sender<bool>,
 }
 
 pub struct LocalRunner {
@@ -187,15 +191,30 @@ impl LocalRunner {
 
     pub async fn run(self) {
         let name = format!("{}-0", self.program.name);
+        let total_nodes = self.program.total_nodes();
         let engine = Engine::for_local(self.program, name);
-        engine
+        let (_running_engine, mut control_rx) = engine
             .start(StreamConfig {
                 restore_epoch: None,
             })
             .await;
 
+        let mut finished_nodes = HashSet::new();
+
         loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            while let Some(control_message) = control_rx.recv().await {
+                debug!("received {:?}", control_message);
+                if let ControlResp::TaskFinished {
+                    operator_id,
+                    task_index,
+                } = control_message
+                {
+                    finished_nodes.insert((operator_id, task_index));
+                    if finished_nodes.len() == total_nodes {
+                        return;
+                    }
+                }
+            }
         }
     }
 }
@@ -316,6 +335,125 @@ impl WorkerServer {
     pub async fn start(self) -> Result<(), Box<dyn std::error::Error>> {
         self.start_async().await
     }
+
+    async fn spawn_control_thread(
+        &self,
+        mut shutdown_rx: tokio::sync::broadcast::Receiver<bool>,
+        mut control_rx: Receiver<ControlResp>,
+        worker_id: WorkerId,
+        job_id: String,
+    ) -> Result<()> {
+        let mut controller = ControllerGrpcClient::connect(self.controller_addr.clone()).await?;
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(5));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                select! {
+                    msg = control_rx.recv() => {
+                        let err = match msg {
+                            Some(ControlResp::CheckpointEvent(c)) => {
+                                controller.task_checkpoint_event(Request::new(
+                                    TaskCheckpointEventReq {
+                                        worker_id: worker_id.0,
+                                        time: to_micros(c.time),
+                                        job_id: job_id.clone(),
+                                        operator_id: c.operator_id,
+                                        subtask_index: c.subtask_index,
+                                        epoch: c.checkpoint_epoch,
+                                        event_type: c.event_type as i32,
+                                    }
+                                )).await.err()
+                            }
+                            Some(ControlResp::CheckpointCompleted(c)) => {
+                                controller.task_checkpoint_completed(Request::new(
+                                    TaskCheckpointCompletedReq {
+                                        worker_id: worker_id.0,
+                                        time: c.subtask_metadata.finish_time,
+                                        job_id: job_id.clone(),
+                                        operator_id: c.operator_id,
+                                        epoch: c.checkpoint_epoch,
+                                        needs_commit: false,
+                                        metadata: Some(c.subtask_metadata),
+                                    }
+                                )).await.err()
+                            }
+                            Some(ControlResp::TaskFinished { operator_id, task_index }) => {
+                                info!(message = "Task finished", operator_id, task_index);
+                                controller.task_finished(Request::new(
+                                    TaskFinishedReq {
+                                        worker_id: worker_id.0,
+                                        job_id: job_id.clone(),
+                                        time: to_micros(SystemTime::now()),
+                                        operator_id: operator_id.to_string(),
+                                        operator_subtask: task_index as u64,
+                                    }
+                                )).await.err()
+                            }
+                            Some(ControlResp::TaskFailed { operator_id, task_index, error }) => {
+                                controller.task_failed(Request::new(
+                                    TaskFailedReq {
+                                        worker_id: worker_id.0,
+                                        job_id: job_id.clone(),
+                                        time: to_micros(SystemTime::now()),
+                                        operator_id: operator_id.to_string(),
+                                        operator_subtask: task_index as u64,
+                                        error,
+                                    }
+                                )).await.err()
+                            }
+                            Some(ControlResp::Error { operator_id, task_index, message, details}) => {
+                                controller.worker_error(Request::new(
+                                    WorkerErrorReq {
+                                        job_id: job_id.clone(),
+                                        operator_id,
+                                        task_index: task_index as u32,
+                                        message,
+                                        details
+                                    }
+                                )).await.err()
+                            }
+                            Some(ControlResp::TaskStarted {operator_id, task_index, start_time}) => {
+                                controller.task_started(Request::new(
+                                    TaskStartedReq {
+                                        worker_id: worker_id.0,
+                                        job_id: job_id.clone(),
+                                        time: to_micros(start_time),
+                                        operator_id: operator_id.to_string(),
+                                        operator_subtask: task_index as u64,
+                                    }
+                                )).await.err()
+                            }
+                            None => {
+                                // TODO: remove the control queue from the select at this point
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                                None
+                            }
+                        };
+                        if let Some(err) = err {
+                            error!("encountered control message failure {}", err);
+                            exit(1);
+                        }
+                    }
+                    _ = tick.tick() => {
+                        let result = controller.heartbeat(Request::new(HeartbeatReq {
+                            job_id: job_id.clone(),
+                            time: to_micros(SystemTime::now()),
+                            worker_id: worker_id.0,
+                        })).await;
+                        if let Err(err) = result {
+                            error!("heartbeat failed {:?}", err);
+                            exit(1);
+                        }
+                    }
+                    _ = shutdown_rx.recv() => {
+                        info!("shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+        Ok(())
+    }
 }
 
 #[tonic::async_trait]
@@ -338,7 +476,7 @@ impl WorkerGrpc for WorkerServer {
 
         let program = Program::from_logical(self.name.to_string(), &self.logical, &req.tasks);
 
-        let engine = {
+        let (engine, control_rx) = {
             let network = { self.network.lock().unwrap().take().unwrap() };
 
             let engine = Engine::new(
@@ -346,7 +484,6 @@ impl WorkerGrpc for WorkerServer {
                 self.id,
                 self.job_id.clone(),
                 self.run_id.clone(),
-                self.controller_addr.clone(),
                 network,
                 req.tasks,
             );
@@ -356,6 +493,10 @@ impl WorkerGrpc for WorkerServer {
                 })
                 .await
         };
+        let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+        self.spawn_control_thread(shutdown_rx, control_rx, self.id, self.job_id.clone())
+            .await
+            .unwrap();
 
         let sources = engine.source_controls();
         let sinks = engine.sink_controls();
@@ -364,7 +505,7 @@ impl WorkerGrpc for WorkerServer {
         *state = Some(EngineState {
             sources,
             sinks,
-            running_engine: engine,
+            shutdown_tx,
         });
 
         info!("[{:?}] Started execution", self.id);
@@ -453,7 +594,7 @@ impl WorkerGrpc for WorkerServer {
     ) -> Result<Response<JobFinishedResp>, Status> {
         let mut state = self.state.lock().unwrap();
         if let Some(engine) = state.as_mut() {
-            engine.running_engine.stop();
+            engine.shutdown_tx.send(true).unwrap();
         }
 
         tokio::task::spawn(async {

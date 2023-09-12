@@ -5,39 +5,33 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::RangeInclusive;
 
 use std::any::Any;
-use std::process::exit;
 use std::{mem, thread};
 
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use arroyo_metrics::{counter_for_task, gauge_for_task};
 use arroyo_state::tables::TimeKeyMap;
 use bincode::{config, Decode, Encode};
 
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 pub use arroyo_macro::StreamNode;
-use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{
-    CheckpointMetadata, HeartbeatReq, TableDeleteBehavior, TableDescriptor, TableType,
-    TableWriteBehavior, TaskAssignment, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
-    TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerErrorReq,
+    CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
+    TaskAssignment,
 };
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{
-    from_micros, to_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark,
-    WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+    from_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark, WorkerId,
+    BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::{labels, IntCounter, IntGauge};
 use rand::Rng;
-use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
-use tonic::transport::Channel;
-use tonic::Request;
 
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::TIMER_TABLE;
@@ -683,6 +677,23 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn total_nodes(&self) -> usize {
+        self.graph.node_count()
+    }
+    pub fn local_from_logical(name: String, logical: &DiGraph<LogicalNode, LogicalEdge>) -> Self {
+        let assignments = logical
+            .node_weights()
+            .flat_map(|weight| {
+                (0..weight.initial_parallelism).map(|index| TaskAssignment {
+                    operator_id: weight.id.clone(),
+                    operator_subtask: index as u64,
+                    worker_id: 0,
+                    worker_addr: "".into(),
+                })
+            })
+            .collect();
+        Self::from_logical(name, logical, &assignments)
+    }
     pub fn from_logical(
         name: String,
         logical: &DiGraph<LogicalNode, LogicalEdge>,
@@ -775,7 +786,6 @@ pub struct Engine {
     worker_id: WorkerId,
     run_id: String,
     job_id: String,
-    controller_addr: Option<String>,
     network_manager: NetworkManager,
     assignments: HashMap<(String, usize), TaskAssignment>,
 }
@@ -788,7 +798,6 @@ pub struct RunningEngine {
     program: Program,
     assignments: HashMap<(String, usize), TaskAssignment>,
     worker_id: WorkerId,
-    shutdown_tx: tokio::sync::broadcast::Sender<bool>,
 }
 
 impl RunningEngine {
@@ -839,10 +848,6 @@ impl RunningEngine {
             })
             .collect()
     }
-
-    pub fn stop(&mut self) {
-        self.shutdown_tx.send(true).unwrap();
-    }
 }
 
 impl Engine {
@@ -851,7 +856,6 @@ impl Engine {
         worker_id: WorkerId,
         job_id: String,
         run_id: String,
-        controller_addr: String,
         network_manager: NetworkManager,
         assignments: Vec<TaskAssignment>,
     ) -> Self {
@@ -865,7 +869,6 @@ impl Engine {
             worker_id,
             job_id,
             run_id,
-            controller_addr: Some(controller_addr),
             network_manager,
             assignments,
         }
@@ -894,13 +897,12 @@ impl Engine {
             worker_id,
             job_id,
             run_id: "0".to_string(),
-            controller_addr: None,
             network_manager: NetworkManager::new(0),
             assignments,
         }
     }
 
-    pub async fn start(mut self, config: StreamConfig) -> RunningEngine {
+    pub async fn start(mut self, config: StreamConfig) -> (RunningEngine, Receiver<ControlResp>) {
         info!("Starting job {}", self.job_id);
 
         let checkpoint_metadata = if let Some(epoch) = config.restore_epoch {
@@ -921,24 +923,10 @@ impl Engine {
         let (control_tx, control_rx) = channel(128);
         let mut senders = Senders::new();
         let worker_id = self.worker_id;
-        let job_id = self.job_id.clone();
-        let mut controller = if let Some(addr) = self.controller_addr.clone() {
-            Some(ControllerGrpcClient::connect(addr).await.unwrap())
-        } else {
-            None
-        };
 
         for idx in node_indexes {
-            self.schedule_node(
-                &checkpoint_metadata,
-                &control_tx,
-                &mut senders,
-                worker_id,
-                &job_id,
-                &mut controller,
-                idx,
-            )
-            .await;
+            self.schedule_node(&checkpoint_metadata, &control_tx, &mut senders, idx)
+                .await;
         }
 
         self.network_manager.start(senders).await;
@@ -948,145 +936,16 @@ impl Engine {
             n.tx = None;
         }
 
-        let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
-        self.spawn_control_thread(shutdown_rx, control_rx, worker_id, job_id, controller);
         self.spawn_metrics_thread();
 
-        RunningEngine {
-            program: self.program,
-            shutdown_tx,
-            assignments: self.assignments,
-            worker_id,
-        }
-    }
-
-    fn spawn_control_thread(
-        &mut self,
-        mut shutdown_rx: tokio::sync::broadcast::Receiver<bool>,
-        mut control_rx: Receiver<ControlResp>,
-        worker_id: WorkerId,
-        job_id: String,
-        mut controller: Option<ControllerGrpcClient<Channel>>,
-    ) {
-        tokio::spawn(async move {
-            loop {
-                select! {
-                    msg = control_rx.recv() => {
-                        let err = match msg {
-                            Some(ControlResp::CheckpointEvent(c)) => {
-                                if let Some(controller) = controller.as_mut() {
-                                    controller.task_checkpoint_event(Request::new(
-                                        TaskCheckpointEventReq {
-                                            worker_id: worker_id.0,
-                                            time: to_micros(c.time),
-                                            job_id: job_id.clone(),
-                                            operator_id: c.operator_id,
-                                            subtask_index: c.subtask_index,
-                                            epoch: c.checkpoint_epoch,
-                                            event_type: c.event_type as i32,
-                                        }
-                                    )).await.err()
-                                } else {
-                                    warn!("no controller");
-                                    None
-                                }
-                            }
-                            Some(ControlResp::CheckpointCompleted(c)) => {
-                                if let Some(controller) = controller.as_mut() {
-                                    controller.task_checkpoint_completed(Request::new(
-                                        TaskCheckpointCompletedReq {
-                                            worker_id: worker_id.0,
-                                            time: c.subtask_metadata.finish_time,
-                                            job_id: job_id.clone(),
-                                            operator_id: c.operator_id,
-                                            epoch: c.checkpoint_epoch,
-                                            needs_commit: false,
-                                            metadata: Some(c.subtask_metadata),
-                                        }
-                                    )).await.err()
-                                } else {
-                                    None
-                                }
-                            }
-                            Some(ControlResp::TaskFinished { operator_id, task_index }) => {
-                                info!(message = "Task finished", operator_id, task_index);
-                                if let Some(controller) = controller.as_mut() {
-                                    controller.task_finished(Request::new(
-                                        TaskFinishedReq {
-                                            worker_id: worker_id.0,
-                                            job_id: job_id.clone(),
-                                            time: to_micros(SystemTime::now()),
-                                            operator_id: operator_id.to_string(),
-                                            operator_subtask: task_index as u64,
-                                        }
-                                    )).await.err()
-                                } else {
-                                    None
-                                }
-                            }
-                            Some(ControlResp::TaskFailed { operator_id, task_index, error }) => {
-                                info!(message = "Task failed", operator_id, task_index, error);
-                                if let Some(controller) = controller.as_mut() {
-                                    controller.task_failed(Request::new(
-                                        TaskFailedReq {
-                                            worker_id: worker_id.0,
-                                            job_id: job_id.clone(),
-                                            time: to_micros(SystemTime::now()),
-                                            operator_id: operator_id.to_string(),
-                                            operator_subtask: task_index as u64,
-                                            error,
-                                        }
-                                    )).await.err()
-                                } else {
-                                    None
-                                }
-                            }
-                            Some(ControlResp::Error { operator_id, task_index, message, details}) => {
-                                if let Some(controller) = controller.as_mut() {
-                                    controller.worker_error(Request::new(
-                                        WorkerErrorReq {
-                                            job_id: job_id.clone(),
-                                            operator_id,
-                                            task_index: task_index as u32,
-                                            message,
-                                            details
-                                        }
-                                    )).await.err()
-                                } else {
-                                    None
-                                }
-                            }
-                            None => {
-                                // TODO: remove the control queue from the select at this point
-                                tokio::time::sleep(Duration::from_millis(50)).await;
-                                None
-                            }
-                        };
-                        if let Some(err) = err {
-                            error!("encountered control message failure {}", err);
-                            exit(1);
-                        }
-                    }
-                    _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                        if let Some(controller) = controller.as_mut() {
-                            let result = controller.heartbeat(Request::new(HeartbeatReq {
-                                job_id: job_id.clone(),
-                                time: to_micros(SystemTime::now()),
-                                worker_id: worker_id.0,
-                            })).await;
-                            if let Err(err) = result {
-                                error!("heartbeat failed {:?}", err);
-                                exit(1);
-                            }
-                        }
-                    }
-                    _ = shutdown_rx.recv() => {
-                        info!("shutting down");
-                        break;
-                    }
-                }
-            }
-        });
+        (
+            RunningEngine {
+                program: self.program,
+                assignments: self.assignments,
+                worker_id,
+            },
+            control_rx,
+        )
     }
 
     async fn schedule_node(
@@ -1094,9 +953,6 @@ impl Engine {
         checkpoint_metadata: &Option<CheckpointMetadata>,
         control_tx: &Sender<ControlResp>,
         senders: &mut Senders,
-        worker_id: WorkerId,
-        job_id: &String,
-        controller: &mut Option<ControllerGrpcClient<Channel>>,
         idx: NodeIndex,
     ) {
         let (node, control_rx) = self
@@ -1119,17 +975,8 @@ impl Engine {
             });
 
         if assignment.worker_id == self.worker_id.0 {
-            self.run_locally(
-                checkpoint_metadata,
-                control_tx,
-                worker_id,
-                job_id,
-                controller,
-                idx,
-                node,
-                control_rx,
-            )
-            .await;
+            self.run_locally(checkpoint_metadata, control_tx, idx, node, control_rx)
+                .await;
         } else {
             self.connect_to_remote_task(
                 senders,
@@ -1200,9 +1047,6 @@ impl Engine {
         &mut self,
         checkpoint_metadata: &Option<CheckpointMetadata>,
         control_tx: &Sender<ControlResp>,
-        worker_id: WorkerId,
-        job_id: &String,
-        controller: &mut Option<ControllerGrpcClient<Channel>>,
         idx: NodeIndex,
         node: SubtaskNode,
         control_rx: Receiver<ControlMessage>,
@@ -1276,6 +1120,14 @@ impl Engine {
 
         let send_copy = control_tx.clone();
         tokio::spawn(async move {
+            send_copy
+                .send(ControlResp::TaskStarted {
+                    operator_id: operator_id.clone(),
+                    task_index,
+                    start_time: SystemTime::now(),
+                })
+                .await
+                .unwrap();
             if let Err(error) = join_task.await {
                 send_copy
                     .send(ControlResp::TaskFailed {
@@ -1287,19 +1139,6 @@ impl Engine {
                     .ok();
             };
         });
-
-        // TODO: make async
-        if let Some(c) = controller.as_mut() {
-            c.task_started(TaskStartedReq {
-                worker_id: worker_id.0,
-                time: to_micros(SystemTime::now()),
-                job_id: job_id.clone(),
-                operator_id: node.id.clone(),
-                operator_subtask: node.subtask_idx as u64,
-            })
-            .await
-            .unwrap();
-        }
     }
 
     fn spawn_metrics_thread(&mut self) {
@@ -1340,6 +1179,8 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]

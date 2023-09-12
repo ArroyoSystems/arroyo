@@ -30,10 +30,7 @@ pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
 }
 
 impl<K: Key, D: Data + Sync, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
-    pub fn new(mut final_dir: String, table_properties: FileSystemTable) -> Self {
-        if !final_dir.starts_with('/') {
-            final_dir = format!("/{}", final_dir);
-        }
+    pub fn new(final_dir: String, table_properties: FileSystemTable) -> Self {
         // TODO: explore configuration options here
         let tmp_dir = format!("{}/__in_progress", final_dir);
         // make sure final_dir and tmp_dir exists

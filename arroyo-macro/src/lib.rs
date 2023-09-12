@@ -448,11 +448,11 @@ fn impl_stream_node_type(
                             // do nothing
                         }
                         crate::ControlOutcome::Stop => {
-                            ctx.broadcast(arroyo_types::Message::Stop).await;
+                            final_message = Some(arroyo_types::Message::Stop);
                             break;
                         }
                         crate::ControlOutcome::Finish => {
-                            ctx.broadcast(arroyo_types::Message::EndOfData).await;
+                            final_message = Some(arroyo_types::Message::EndOfData);
                             break;
                         }
                     }
@@ -477,15 +477,16 @@ fn impl_stream_node_type(
     let handle_body = if handler_count == 0 {
         // sources
         quote! {
+            let mut final_message = None;
             match self.run(&mut ctx).await {
                 crate::SourceFinishType::Graceful => {
-                    ctx.broadcast(arroyo_types::Message::Stop).await;
+                    final_message = Some(arroyo_types::Message::Stop);
                 }
                 crate::SourceFinishType::Immediate => {
                     // do nothing, allow shutdown to proceed
                 }
                 crate::SourceFinishType::Final => {
-                    ctx.broadcast(arroyo_types::Message::EndOfData).await;
+                    final_message = Some(arroyo_types::Message::EndOfData);
                 }
             }
         }
@@ -525,7 +526,7 @@ fn impl_stream_node_type(
             }
 
             let mut blocked = vec![];
-
+            let mut final_message = None;
             #tick_setup
 
             loop {
@@ -606,6 +607,9 @@ fn impl_stream_node_type(
                 #handle_body
 
                 Self::on_close(&mut (*self), &mut ctx).await;
+                if let Some(final_message) = final_message {
+                    ctx.broadcast(final_message).await;
+                }
                 tracing::info!("Task finished {}-{}", ctx.task_info.operator_name, ctx.task_info.task_index);
 
                 ctx.control_tx
@@ -682,14 +686,12 @@ fn impl_stream_node_type(
                     Message::Stop => {
                         closed.insert(idx);
                         if closed.len() == in_partitions {
-                            ctx.broadcast(arroyo_types::Message::Stop).await;
                             return crate::ControlOutcome::Stop;
                         }
                     }
                     Message::EndOfData => {
                         closed.insert(idx);
                         if closed.len() == in_partitions {
-                            ctx.broadcast(arroyo_types::Message::EndOfData).await;
                             return crate::ControlOutcome::Finish;
                         }
                     }

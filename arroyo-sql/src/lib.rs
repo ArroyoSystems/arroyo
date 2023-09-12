@@ -36,7 +36,7 @@ use plan_graph::{get_program, PlanGraph};
 use schemas::window_arrow_struct;
 use tables::{schema_defs, ConnectorTable, Insert, Table};
 
-use crate::code_gen::ValuePointerContext;
+use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::types::{StructDef, StructField, TypeDef};
 use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, JsonFormat};
 use quote::ToTokens;

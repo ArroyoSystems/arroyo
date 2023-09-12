@@ -24,6 +24,7 @@ pub mod impulse;
 pub mod kafka;
 pub mod kinesis;
 pub mod nexmark;
+pub mod single_file;
 pub mod sse;
 pub mod webhook;
 pub mod websocket;
@@ -40,6 +41,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     m.insert("filesystem", Box::new(filesystem::FileSystemConnector {}));
     m.insert("kinesis", Box::new(kinesis::KinesisConnector {}));
     m.insert("webhook", Box::new(webhook::WebhookConnector {}));
+    m.insert("single_file", Box::new(single_file::SingleFileConnector {}));
 
     m
 }

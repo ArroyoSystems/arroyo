@@ -292,7 +292,7 @@ impl<
                 let value = (self.aggregator)(
                     key,
                     Window {
-                        start: bin_start,
+                        start: bin_end - self.width,
                         end: bin_end,
                     },
                     in_memory,
