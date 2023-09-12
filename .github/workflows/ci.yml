@@ -110,7 +110,7 @@ jobs:
           cd arroyo-openapi
           lint-openapi --errors-only api-spec.json
       - name: Test
-        run: cargo nextest run
+        run: cargo nextest run --all-features
       - name: Integ
         run: |
           mkdir /tmp/arroyo-integ
