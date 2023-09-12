@@ -16,6 +16,23 @@
       "pattern": "([a-zA-Z0-9-]+: ?.+,)*([a-zA-Z0-9-]+: ?.+)",
       "examples": ["Authentication: digest 1234,Content-Type: application/json"]
     },
+    "method": {
+      "title": "Method",
+      "type": "string",
+      "description": "HTTP method to use for the request",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH"
+      ],
+      "examples": ["GET"]
+    },
+    "body": {
+      "title": "Body",
+      "type": "string",
+      "description": "An optional body to send along with the request"
+    },
     "poll_interval_ms": {
       "title": "Polling Interval (ms)",
       "type": "integer",

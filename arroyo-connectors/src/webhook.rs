@@ -12,7 +12,7 @@ use typify::import_types;
 use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_opt, Connection, EmptyConfig};
+use crate::{pull_opt, Connection, EmptyConfig, construct_http_client};
 
 use super::Connector;
 
@@ -24,31 +24,7 @@ const ICON: &str = include_str!("../resources/webhook.svg");
 pub struct WebhookConnector {}
 
 impl WebhookConnector {
-    fn construct_test_request(config: &WebhookTable) -> anyhow::Result<(Client, Request)> {
-        if let Err(e) = reqwest::Url::parse(&config.endpoint) {
-            bail!("invalid endpoint '{}': {:?}", config.endpoint, e)
-        };
-
-        let headers: anyhow::Result<HeaderMap> =
-            string_to_map(config.headers.as_ref().map(|t| t.0.as_str()).unwrap_or(""))
-                .expect("Invalid header map")
-                .into_iter()
-                .map(|(k, v)| {
-                    Ok((
-                        TryInto::<HeaderName>::try_into(&k)
-                            .map_err(|_| anyhow!("invalid header name {}", k))?,
-                        TryInto::<HeaderValue>::try_into(&v)
-                            .map_err(|_| anyhow!("invalid header value {}", v))?,
-                    ))
-                })
-                .collect();
-
-        let client = reqwest::ClientBuilder::new()
-            .default_headers(headers?)
-            .timeout(Duration::from_secs(5))
-            .build()
-            .map_err(|e| anyhow!("could not construct HTTP client: {:?}", e))?;
-
+    fn construct_test_request(client: &Client, config: &WebhookTable) -> anyhow::Result<Request> {
         let req = client
             .post(&config.endpoint)
             // TODO: use the schema to construct a correctly-formatted message
@@ -61,14 +37,16 @@ impl WebhookConnector {
             .build()
             .map_err(|e| anyhow!("invalid URL for websink: {}", e.to_string()))?;
 
-        Ok((client, req))
+        Ok(req)
     }
 
     async fn test_int(
         config: &WebhookTable,
         tx: Sender<Result<Event, Infallible>>,
     ) -> anyhow::Result<()> {
-        let (client, req) = Self::construct_test_request(config)?;
+        let client = construct_http_client(&config.endpoint,
+           config.headers.as_ref().map(|t| &t.0))?;
+        let req = Self::construct_test_request(&client, config)?;
 
         tx.send(Ok(Event::default()
             .json_data(TestSourceMessage {
@@ -200,7 +178,10 @@ impl Connector for WebhookConnector {
             .map_err(|e| anyhow!("invalid value for 'headers' config: {:?}", e))?;
 
         let table = WebhookTable { endpoint, headers };
-        let _ = Self::construct_test_request(&table)?;
+        let client = construct_http_client(&table.endpoint,
+                                           table.headers.as_ref().map(|t| &t.0))?;
+        let _ = Self::construct_test_request(&client, &table)?;
+
 
         self.from_config(None, name, EmptyConfig {}, table, schema)
     }

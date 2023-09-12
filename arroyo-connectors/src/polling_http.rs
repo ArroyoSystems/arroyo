@@ -5,13 +5,15 @@ use arroyo_rpc::OperatorConfig;
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
 use futures::StreamExt;
+use reqwest::{Client, Request};
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType};
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
-use crate::{pull_opt, Connection, EmptyConfig, pull_option_to_i64};
+use crate::{pull_opt, Connection, EmptyConfig, pull_option_to_i64, construct_http_client};
 
 use super::Connector;
 
@@ -21,6 +23,54 @@ import_types!(schema = "../connector-schemas/polling_http/table.json");
 const ICON: &str = include_str!("../resources/sse.svg");
 
 pub struct PollingHTTPConnector {}
+
+impl PollingHTTPConnector {
+    fn construct_test_request(client: &Client, config: &PollingHttpTable) -> anyhow::Result<Request> {
+        let mut req = client
+            .request(match config.method {
+                None | Some(Method::Get) => reqwest::Method::GET,
+                Some(Method::Post) => reqwest::Method::POST,
+                Some(Method::Put) => reqwest::Method::PUT,
+                Some(Method::Patch) => reqwest::Method::PATCH,
+            });
+
+        if let Some(body) = &config.body {
+            req = req.body(body);
+        }
+
+        let req = req.build()
+            .map_err(|e| anyhow!("invalid request: {}", e.to_string()))?;
+
+        Ok(req)
+    }
+
+    async fn test_int(
+        config: &PollingHttpTable,
+        tx: Sender<Result<Event, Infallible>>,
+    ) -> anyhow::Result<()> {
+        let client = construct_http_client(&config.endpoint,
+                                           config.headers.as_ref().map(|t| &t.0))?;
+        let req = Self::construct_test_request(&client, config)?;
+
+        tx.send(Ok(Event::default()
+            .json_data(TestSourceMessage {
+                error: false,
+                done: false,
+                message: "Requesting data".to_string(),
+            })
+            .unwrap()))
+            .await
+            .unwrap();
+
+        client
+            .execute(req)
+            .await
+            .map_err(|e| anyhow!("HTTP request failed: {}", e))?;
+
+        Ok(())
+    }
+
+}
 
 impl Connector for PollingHTTPConnector {
     type ProfileT = EmptyConfig;
@@ -60,7 +110,7 @@ impl Connector for PollingHTTPConnector {
         _: Option<&ConnectionSchema>,
         tx: Sender<Result<Event, Infallible>>,
     ) {
-        
+
     }
 
     fn from_options(
@@ -71,12 +121,18 @@ impl Connector for PollingHTTPConnector {
     ) -> anyhow::Result<crate::Connection> {
         let endpoint = pull_opt("endpoint", opts)?;
         let headers = opts.remove("headers");
+        let method: Option<Method> = opts.remove("method")
+            .map(|s| s.try_into())
+            .transpose()
+            .map_err(|_| anyhow!("invalid value for 'method'"))?;
+
+        let body = opts.remove("body");
+
         let interval = pull_option_to_i64("poll_interval_ms", opts)?;
         let emit_behavior: Option<EmitBehavior> = opts.remove("emit_behavior")
             .map(|s| s.try_into())
             .transpose()
             .map_err(|_| anyhow!("invalid value for 'emit_behavior'"))?;
-
 
         self.from_config(
             None,
@@ -85,6 +141,8 @@ impl Connector for PollingHTTPConnector {
             PollingHttpTable {
                 endpoint,
                 headers: headers.map(Headers),
+                method,
+                body,
                 poll_interval_ms: interval,
                 emit_behavior,
             },
