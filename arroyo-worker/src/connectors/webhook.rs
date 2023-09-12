@@ -7,9 +7,7 @@ use std::{
 use arroyo_macro::process_fn;
 use arroyo_rpc::ControlResp;
 use arroyo_rpc::{grpc::TableDescriptor, OperatorConfig};
-use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::{string_to_map, CheckpointBarrier, Key, Record};
-use bincode::{Decode, Encode};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Semaphore};
@@ -27,9 +25,6 @@ import_types!(schema = "../connector-schemas/webhook/table.json");
 
 const MAX_INFLIGHT: u32 = 50;
 
-#[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
-pub struct WebhookSinkState {}
-
 #[derive(StreamNode)]
 pub struct WebhookSinkFunc<K, T>
 where
@@ -37,7 +32,6 @@ where
     T: Serialize + SchemaData,
 {
     url: Arc<String>,
-    state: WebhookSinkState,
     semaphore: Arc<Semaphore>,
     client: reqwest::Client,
     serializer: DataSerializer<T>,
@@ -72,7 +66,6 @@ where
 
         Self {
             url: Arc::new(table.endpoint),
-            state: WebhookSinkState::default(),
             client: reqwest::ClientBuilder::new()
                 .default_headers(headers)
                 .timeout(Duration::from_secs(5))
@@ -95,15 +88,6 @@ where
 
     fn tables(&self) -> Vec<TableDescriptor> {
         vec![arroyo_state::global_table("s", "webhook sink state")]
-    }
-
-    async fn on_start(&mut self, ctx: &mut Context<(), ()>) {
-        let s: GlobalKeyedState<(), WebhookSinkState, _> =
-            ctx.state.get_global_keyed_state('s').await;
-
-        if let Some(state) = s.get(&()) {
-            self.state = state.clone();
-        }
     }
 
     async fn process_element(&mut self, record: &Record<K, T>, ctx: &mut Context<(), ()>) {
