@@ -16,7 +16,7 @@ use arroyo_rpc::{
 };
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::{from_nanos, Data, Record, UserError};
-use aws_config::load_from_env;
+use aws_config::{from_env, load_from_env};
 use aws_sdk_kinesis::{
     client::fluent_builders::GetShardIterator,
     model::{Shard, ShardIteratorType},
@@ -373,16 +373,11 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
     }
 
     async fn init_client(&mut self) {
-        let config = match self.aws_region {
-            Some(ref region) => {
-                aws_config::from_env()
-                    .region(Region::new(region.to_string()))
-                    .load()
-                    .await
-            }
-            None => load_from_env().await,
-        };
-        self.kinesis_client = Some(KinesisClient::new(&config));
+        let mut loader = from_env();
+        if let Some(region) = &self.aws_region {
+            loader = loader.region(Region::new(region.clone()));
+        }
+        self.kinesis_client = Some(KinesisClient::new(&loader.load().await));
     }
 
     /// Runs the Kinesis source, handling incoming records and control messages.

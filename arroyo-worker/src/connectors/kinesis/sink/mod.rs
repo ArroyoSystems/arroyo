@@ -59,11 +59,11 @@ impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
     }
 
     async fn on_start(&mut self, _ctx: &mut Context<(), ()>) {
-        let config = match &self.aws_region {
-            Some(region) => from_env().region(Region::new(region.clone())).load().await,
-            None => load_from_env().await,
-        };
-        self.client = Some(KinesisClient::new(&config));
+        let mut loader = from_env();
+        if let Some(region) = &self.aws_region {
+            loader = loader.region(Region::new(region.clone()));
+        }
+        self.client = Some(KinesisClient::new(&loader.load().await));
     }
 
     async fn handle_checkpoint(&mut self, _: &CheckpointBarrier, _: &mut Context<(), ()>) {
