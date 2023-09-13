@@ -19,7 +19,7 @@ spec:
         {{- if .Values.prometheus.setAnnotations }}
         prometheus.io/scrape: "true"
         prometheus.io/path: /metrics
-        prometheus.io/port: "8002"
+        prometheus.io/port: "8001"
         {{- end }}
       {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -53,8 +53,6 @@ spec:
         - containerPort: 8000
           name: http
         - containerPort: 8001
-          name: grpc
-        - containerPort: 8002
           name: admin
         livenessProbe:
           httpGet:
@@ -94,7 +92,7 @@ spec:
       protocol: TCP
       port: {{ .Values.api.service.httpPort }}
       targetPort: 8000
-    - name: grpc
+    - name: admin
       protocol: TCP
       port: {{ .Values.api.service.grpcPort }}
       targetPort: 8001

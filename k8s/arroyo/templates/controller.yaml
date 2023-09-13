@@ -77,7 +77,7 @@ spec:
           value: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
         - name: K8S_WORKER_IMAGE_PULL_POLICY
           value: "{{ .Values.worker.image.pullPolicy }}"
-        # TODO: imagee pull secret
+        # TODO: image pull secret
         {{- if .Values.serviceAccount.name }}
         - name: K8S_WORKER_SERVICE_ACCOUNT_NAME
           value: "{{ template "arroyo.serviceAccountName" . }}"
@@ -93,6 +93,10 @@ spec:
         {{- if .Values.volumeMounts }}
         - name: K8S_WORKER_VOLUME_MOUNTS
           value: {{ .Values.volumeMounts | toYaml | quote }}
+        {{- end }}
+        {{- if .Values.existingConfigMap }}
+        - name: K8S_WORKER_CONFIG_MAP
+          value: {{ .Values.existingConfigMap }}
         {{- end }}
 
         {{- include "arroyo.existingConfigMap" . | nindent 8 }}
