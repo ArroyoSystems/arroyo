@@ -1,5 +1,6 @@
 use bincode::{Decode, Encode};
 use bytes::Bytes;
+use futures::StreamExt;
 use std::borrow::Cow;
 use std::str::FromStr;
 use std::time::SystemTime;
@@ -28,6 +29,7 @@ use crate::{
 import_types!(schema = "../connector-schemas/polling_http/table.json");
 
 const DEFAULT_POLLING_INTERVAL: Duration = Duration::from_secs(1);
+const MAX_BODY_SIZE: usize = 5 * 1024 * 1024; // 5M ought to be enough for anybody
 
 #[derive(StreamNode)]
 pub struct PollingHttpSourceFunc<K, T>
@@ -178,14 +180,37 @@ where
             })?;
 
         if resp.status().is_success() {
-            let bytes = resp.bytes().await.map_err(|e| {
-                UserError::new(
-                    "request failed",
-                    format!("failed while reading body: {}", e),
-                )
-            })?;
+            let content_len = resp.content_length().unwrap_or(0);
+            if content_len > MAX_BODY_SIZE as u64 {
+                return Err(UserError::new(
+                    "error reading from http endpoint",
+                    format!(
+                        "content length sent by server exceeds maximum limit ({} > {})",
+                        content_len, MAX_BODY_SIZE
+                    ),
+                ));
+            }
 
-            Ok(formats::deserialize_slice(&self.format, &bytes)?)
+            let mut buf = Vec::with_capacity(content_len as usize);
+
+            let mut bytes_stream = resp.bytes_stream();
+            while let Some(chunk) = bytes_stream.next().await {
+                buf.extend_from_slice(&chunk.map_err(|e| {
+                    UserError::new(
+                        "request failed",
+                        format!("failed while reading body: {}", e),
+                    )
+                })?);
+
+                if buf.len() > MAX_BODY_SIZE {
+                    return Err(UserError::new(
+                        "error reading from http endpoint",
+                        format!("response body exceeds max length {}", MAX_BODY_SIZE),
+                    ));
+                }
+            }
+
+            Ok(formats::deserialize_slice(&self.format, &buf)?)
         } else {
             let status = resp.status();
             let bytes = resp.bytes().await;
@@ -203,7 +228,7 @@ where
 
             Err(UserError::new(
                 "server responded with error",
-                "http server responded with {}",
+                format!("http server responded with {}", status.as_u16()),
             ))
         }
     }
