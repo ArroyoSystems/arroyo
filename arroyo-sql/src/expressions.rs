@@ -16,7 +16,7 @@ use arroyo_types::{DatePart, DateTruncPrecision};
 use datafusion_common::ScalarValue;
 use datafusion_expr::{
     aggregate_function,
-    expr::{AggregateFunction, ScalarFunction, ScalarUDF, Sort},
+    expr::{AggregateFunction, AggregateUDF, Alias, ScalarFunction, ScalarUDF, Sort},
     type_coercion::aggregates::{avg_return_type, sum_return_type},
     BinaryExpr, BuiltinScalarFunction, Expr, TryCast,
 };
@@ -1357,6 +1357,80 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StructFieldExpre
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum AggregateComputation {
+    Builtin {
+        column: Column,
+        computation: AggregationExpression,
+    },
+    UDAF {
+        column: Column,
+        computation: RustUdafExpression,
+    },
+}
+impl AggregateComputation {
+    pub fn allows_two_phase(&self) -> bool {
+        match self {
+            AggregateComputation::Builtin { computation, .. } => computation.allows_two_phase(),
+            AggregateComputation::UDAF { .. } => false,
+        }
+    }
+    pub fn try_from_expression(
+        ctx: &mut ExpressionContext,
+        column: &datafusion_common::Column,
+        expr: &Expr,
+    ) -> Result<Self> {
+        match expr {
+            Expr::Alias(Alias { expr, .. }) => Self::try_from_expression(ctx, column, expr),
+            Expr::AggregateFunction(aggregate_function) => {
+                let computation =
+                    AggregationExpression::try_from_aggregate_function(ctx, aggregate_function)?;
+                Ok(Self::Builtin {
+                    column: Column::convert(column),
+                    computation,
+                })
+            }
+            Expr::AggregateUDF(aggregate_udf) => {
+                let computation = RustUdafExpression::try_from_aggregate_udf(ctx, aggregate_udf)?;
+                Ok(Self::UDAF {
+                    column: Column::convert(column),
+                    computation,
+                })
+            }
+            _ => bail!("can't convert expression {:?} to aggregate", expr),
+        }
+    }
+
+    pub(crate) fn column(&self) -> Column {
+        match self {
+            AggregateComputation::Builtin { column, .. }
+            | AggregateComputation::UDAF { column, .. } => column.clone(),
+        }
+    }
+}
+
+impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for AggregateComputation {
+    fn generate(&self, input_context: &VecOfPointersContext) -> syn::Expr {
+        match self {
+            AggregateComputation::Builtin { computation, .. } => {
+                computation.generate(input_context)
+            }
+            AggregateComputation::UDAF { computation, .. } => computation.generate(input_context),
+        }
+    }
+
+    fn expression_type(&self, input_context: &VecOfPointersContext) -> TypeDef {
+        match self {
+            AggregateComputation::Builtin { computation, .. } => {
+                computation.expression_type(input_context)
+            }
+            AggregateComputation::UDAF { computation, .. } => {
+                computation.expression_type(input_context)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum Aggregator {
     Count,
@@ -1452,28 +1526,29 @@ impl AggregationExpression {
         }
     }
 
-    pub fn try_from_expression(ctx: &mut ExpressionContext, expr: &Expr) -> Result<Self> {
-        match expr {
-            Expr::AggregateFunction(datafusion_expr::expr::AggregateFunction {
-                fun,
-                args,
-                distinct,
-                filter: None,
-                order_by: None,
-            }) => {
-                if args.len() != 1 {
-                    bail!("unexpected arg length");
-                }
-                let producing_expression = Box::new(ctx.compile_expr(&args[0])?);
-                let aggregator = Aggregator::from_datafusion(fun.clone(), *distinct)?;
-                Ok(AggregationExpression {
-                    producing_expression,
-                    aggregator,
-                })
-            }
-            Expr::Alias(alias) => Self::try_from_expression(ctx, &alias.expr),
-            _ => bail!("expected aggregate function, not {}", expr),
+    pub fn try_from_aggregate_function(
+        ctx: &mut ExpressionContext,
+        aggregate_function: &datafusion_expr::expr::AggregateFunction,
+    ) -> Result<Self> {
+        if aggregate_function.filter.is_some() {
+            bail!("Not supporting aggregate filters right now");
         }
+        if aggregate_function.order_by.is_some() {
+            bail!("Not supporting aggregate sorts right now");
+        }
+        let fun = &aggregate_function.fun;
+        let distinct = aggregate_function.distinct;
+        let args = &aggregate_function.args;
+
+        if args.len() != 1 {
+            bail!("unexpected arg length");
+        }
+        let producing_expression = Box::new(ctx.compile_expr(&args[0])?);
+        let aggregator = Aggregator::from_datafusion(fun.clone(), distinct)?;
+        Ok(AggregationExpression {
+            producing_expression,
+            aggregator,
+        })
     }
 }
 
@@ -1498,7 +1573,7 @@ impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for AggregationExpr
             Some(quote!(.unwrap()))
         };
 
-        match self.aggregator {
+        match &self.aggregator {
             Aggregator::Count => {
                 if producing_expression_is_optional {
                     parse_quote!({
@@ -3234,7 +3309,7 @@ pub struct RustUdfExpression {
     ret_type: TypeDef,
 }
 
-impl RustUdfExpression {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for RustUdfExpression {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let name = format_ident!("{}", &self.name);
 
@@ -3283,6 +3358,131 @@ impl RustUdfExpression {
                         !t.is_optional() && e.expression_type(input_context).is_optional()
                     }),
         )
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
+pub struct RustUdafExpression {
+    name: String,
+    args: Vec<(TypeDef, Expression)>,
+    ret_type: TypeDef,
+}
+impl RustUdafExpression {
+    fn try_from_aggregate_udf(
+        ctx: &mut ExpressionContext<'_>,
+        aggregate_udf: &AggregateUDF,
+    ) -> Result<Self> {
+        let udf_name = &aggregate_udf.fun.name;
+        let udf = ctx
+            .schema_provider
+            .udf_defs
+            .get(udf_name)
+            .ok_or_else(|| anyhow!("no UDAF with name '{}'", udf_name))?;
+        let inputs: Result<Vec<Expression>> = aggregate_udf
+            .args
+            .iter()
+            .map(|e| (ctx.compile_expr(e)))
+            .collect();
+        let inputs = inputs?;
+
+        if inputs.len() != udf.args.len() {
+            bail!(
+                "wrong number of arguments for udf {} (found {}, expected {})",
+                udf_name,
+                aggregate_udf.args.len(),
+                udf.args.len()
+            );
+        }
+        if aggregate_udf.order_by.is_some() {
+            bail!("Not supporting UDAF sorts right now, as datafusion doesn't");
+        }
+
+        Ok(RustUdafExpression {
+            name: udf_name.to_string(),
+            args: udf.args.clone().into_iter().zip(inputs).collect(),
+            ret_type: udf.ret.clone(),
+        })
+    }
+}
+impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for RustUdafExpression {
+    fn generate(&self, input_context: &VecOfPointersContext) -> syn::Expr {
+        let name = format_ident!("{}", &self.name);
+
+        // early exit means there are terms that won't be included in the aggregate
+        // if they have null values, because the UDAF expects non-null values
+        let need_early_exit = self.args.iter().any(|(function_arg, incoming_expression)| {
+            !function_arg.is_optional()
+                && incoming_expression
+                    .expression_type(&ValuePointerContext)
+                    .is_optional()
+        });
+
+        let (arg_initialization, term_expressions): (Vec<syn::Stmt>, Vec<syn::Expr>) = self
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, (def, expr))| {
+                let sub_expr = expr.generate(&ValuePointerContext);
+                let term_expr = match (
+                    def.is_optional(),
+                    expr.expression_type(&ValuePointerContext).is_optional(),
+                ) {
+                    (true, true) | (false, false) => parse_quote!(#sub_expr),
+                    (true, false) => parse_quote!(Some(#sub_expr)),
+                    (false, true) => parse_quote!((#sub_expr)?),
+                };
+                let arg_ident = format_ident!("arg_vec_{}", i);
+                let arg_init = parse_quote!(let mut #arg_ident = Vec::new(););
+                (arg_init, term_expr)
+            })
+            .unzip();
+        let single_value_ident = ValuePointerContext.variable_ident();
+
+        let mut vec_init: Vec<syn::Stmt> = Vec::new();
+        let mut vec_push: Vec<syn::Stmt> = Vec::new();
+        let mut vec_names: Vec<Ident> = Vec::new();
+        for i in 0..self.args.len() {
+            let arg_ident = format_ident!("arg_vec_{}", i);
+            vec_init.push(parse_quote!(let mut #arg_ident = Vec::new();));
+            let index: syn::Index = parse_str(&i.to_string()).unwrap();
+            vec_push.push(parse_quote!(#arg_ident.push(#single_value_ident.#index);));
+            vec_names.push(arg_ident);
+        }
+
+        let trailing_comma: Option<TokenStream> = if self.args.len() == 1 {
+            Some(quote!(,))
+        } else {
+            None
+        };
+
+        let tuple_expr: syn::Expr = parse_quote!((#(#term_expressions),*#trailing_comma));
+
+        let (map_func, tuple_expr): (syn::Ident, syn::Expr) = if need_early_exit {
+            (parse_quote!(filter_map), parse_quote!(Some(#tuple_expr)))
+        } else {
+            (parse_quote!(map), tuple_expr)
+        };
+
+        let ret: syn::Expr = parse_quote!(udfs::#name(#(#vec_names),*));
+
+        let vec_arg = input_context.variable_ident();
+        let tokens = quote!( {
+            #(#arg_initialization)*
+            #vec_arg.iter().#map_func(|#single_value_ident| {
+               #tuple_expr
+            }).for_each ( |#single_value_ident| {
+                #(#vec_push)*
+            }
+            );
+            #ret
+        }
+        );
+        let token_string = tokens.to_string();
+        parse_str(&token_string).expect(&token_string)
+    }
+
+    fn expression_type(&self, _input_context: &VecOfPointersContext) -> TypeDef {
+        self.ret_type.clone()
     }
 }
 

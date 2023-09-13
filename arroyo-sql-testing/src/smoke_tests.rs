@@ -413,3 +413,93 @@ INNER JOIN (
 ) pickups
 ON dropoffs.window = pickups.window)
 "}
+
+correctness_run_codegen! {"aggregates",
+"CREATE TABLE impulse_source (
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'impulse',
+  event_rate = '1000000',
+  message_count = '100'
+);
+CREATE TABLE aggregates (
+  min BIGINT,
+  max BIGINT,
+  sum BIGINT,
+  count BIGINT,
+  avg DOUBLE
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'debezium_json',
+  type = 'sink'
+);
+INSERT INTO aggregates SELECT min(counter), max(counter), sum(counter), count(*), avg(counter)  FROM impulse_source"}
+
+// test double negative UDF
+correctness_run_codegen! {"double_negative_udf",
+"CREATE TABLE impulse_source (
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'impulse',
+  event_rate = '1000000',
+  message_count = '100'
+);
+CREATE TABLE double_negative_udf (
+  counter bigint
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'json',
+  type = 'sink'
+);
+INSERT INTO double_negative_udf
+SELECT double_negative(counter) FROM impulse_source",
+"fn double_negative(x: u64) -> i64 {
+  -2 * (x as i64)
+}"}
+
+// test UDAF
+correctness_run_codegen! {"udaf",
+"CREATE TABLE impulse_source (
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'impulse',
+  event_rate = '1000000',
+  message_count = '100'
+);
+CREATE TABLE udaf (
+  median bigint,
+  none_value double,
+  max_product bigint
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'json',
+  type = 'sink'
+);
+INSERT INTO udaf SELECT median, none_value, max_product FROM (
+  SELECT  tumble(interval '1' month) as window, my_median(counter) as median, none_udf(counter) as none_value,
+  max_product(counter, subtask_index) as max_product
+FROM impulse_source
+GROUP BY 1)",
+"fn my_median(args: Vec<u64>) -> f64 {
+  let mut args = args;
+  args.sort();
+  let mid = args.len() / 2;
+  if args.len() % 2 == 0 {
+      (args[mid] + args[mid - 1]) as f64 / 2.0
+  } else {
+      args[mid] as f64
+  }
+}
+fn none_udf(args: Vec<u64>) -> Option<f64> {
+  None
+}
+fn max_product(first_arg: Vec<u64>, second_arg: Vec<u64>) -> u64 {
+  let pairs = first_arg.iter().zip(second_arg.iter());
+  pairs.map(|(x, y)| x * y).max().unwrap()
+}"}
