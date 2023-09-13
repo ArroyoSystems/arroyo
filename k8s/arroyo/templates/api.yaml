@@ -94,5 +94,5 @@ spec:
       targetPort: 8000
     - name: admin
       protocol: TCP
-      port: {{ .Values.api.service.grpcPort }}
+      port: {{ .Values.api.service.adminPort }}
       targetPort: 8001

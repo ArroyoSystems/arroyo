@@ -18,8 +18,8 @@ api:
     tag: "0.5.0"
   service:
     type: ClusterIP
-    apiPort: 80
-    grpcPort: 8001
+    httpPort: 80
+    adminPort: 8001
 
 
 controller:
@@ -34,7 +34,7 @@ controller:
     tag: "0.5.0"
   service:
     grpcPort: 9190
-    httpPort: 9191
+    adminPort: 9191
 
 compiler:
   replicas: 1
@@ -49,7 +49,7 @@ compiler:
     tag: "0.5.0"
   service:
     grpcPort: 9000
-    httpPort: 9001
+    adminPort: 9001
 
 worker:
   resources:
@@ -118,7 +118,6 @@ prometheus:
 
 s3:
   region: ""
-  bucket: ""
 
 artifactUrl: ""
 checkpointUrl: ""
