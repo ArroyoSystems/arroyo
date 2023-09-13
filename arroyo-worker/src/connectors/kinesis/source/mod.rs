@@ -22,7 +22,7 @@ use aws_sdk_kinesis::{
     model::{Shard, ShardIteratorType},
     output::GetRecordsOutput,
     types::SdkError,
-    Client as KinesisClient,
+    Client as KinesisClient, Region,
 };
 use bincode::{Decode, Encode};
 use futures::stream::StreamExt;
@@ -50,6 +50,7 @@ pub struct KinesisSourceFunc<K: Data, T: Data + DeserializeOwned> {
     stream_name: String,
     format: Format,
     kinesis_client: Option<KinesisClient>,
+    aws_region: Option<String>,
     shards: HashMap<String, ShardState>,
     config: KinesisSourceConfig,
     _phantom: PhantomData<(K, T)>,
@@ -184,6 +185,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         Self {
             stream_name: table.stream_name,
             kinesis_client: None,
+            aws_region: table.aws_region,
             config: kinesis_config,
             shards: HashMap::new(),
             format: config.format.unwrap(),
@@ -370,6 +372,19 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         )))
     }
 
+    async fn init_client(&mut self) {
+        let config = match self.aws_region {
+            Some(ref region) => {
+                aws_config::from_env()
+                    .region(Region::new(region.to_string()))
+                    .load()
+                    .await
+            }
+            None => load_from_env().await,
+        };
+        self.kinesis_client = Some(KinesisClient::new(&config));
+    }
+
     /// Runs the Kinesis source, handling incoming records and control messages.
     ///
     /// This method initializes the Kinesis client, initializes the shards, and enters a loop to handle incoming
@@ -378,8 +393,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
     /// * An interval that periodically polls for new shards, initializing their futures.
     /// * Polling off of the control queue, to perform checkpointing and stop the operator.
     async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
-        let config = load_from_env().await;
-        self.kinesis_client = Some(KinesisClient::new(&config));
+        self.init_client().await;
         let starting_futures = self
             .init_shards(ctx)
             .await
