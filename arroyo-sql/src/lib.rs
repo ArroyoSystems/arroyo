@@ -38,7 +38,6 @@ use pipeline::{SqlOperator, SqlPipelineBuilder};
 use plan_graph::{get_program, PlanGraph};
 use schemas::window_arrow_struct;
 use tables::{schema_defs, ConnectorTable, Insert, Table};
-use tracing::info;
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::types::{StructDef, StructField, TypeDef};
@@ -205,12 +204,10 @@ impl ArroyoSchemaProvider {
             let mut args: Vec<TypeDef> = vec![];
             let mut vec_arguments = 0;
             for (i, arg) in function.sig.inputs.iter().enumerate() {
-                info!("arg {}: {:?}", i, quote::quote!(#arg).to_string());
                 match arg {
                     FnArg::Receiver(_) => bail!("self types are not allowed in UDFs"),
                     FnArg::Typed(t) => {
                         if let Some(vec_type) = Self::vec_inner_type(&*t.ty) {
-                            info!("arg {} is a vector", i);
                             vec_arguments += 1;
                             args.push((&vec_type).try_into().map_err(|_| {
                                 anyhow!(

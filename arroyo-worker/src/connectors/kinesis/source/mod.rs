@@ -16,7 +16,7 @@ use arroyo_rpc::{
 };
 use arroyo_state::tables::GlobalKeyedState;
 use arroyo_types::{from_nanos, Data, Record, UserError};
-use aws_config::{from_env, load_from_env};
+use aws_config::from_env;
 use aws_sdk_kinesis::{
     client::fluent_builders::GetShardIterator,
     model::{Shard, ShardIteratorType},
