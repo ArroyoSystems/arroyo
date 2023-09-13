@@ -156,6 +156,6 @@ Mount a config map with custom configuration
 {{- if .Values.existingConfigMap  -}}
 envFrom:
 - configMapRef:
-  name: {{ .Values.existingConfigMap }}
+    name: {{ .Values.existingConfigMap }}
 {{- end -}}
 {{- end -}}
