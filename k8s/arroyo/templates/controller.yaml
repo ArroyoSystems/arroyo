@@ -6,7 +6,6 @@ metadata:
     {{- include "arroyo.labels" . | nindent 4 }}
     app: {{ include "arroyo.fullname" . }}-controller
 spec:
-spec:
   replicas: 1
   selector:
     matchLabels:
@@ -104,10 +103,12 @@ spec:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         readinessProbe:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         {{- if .Values.compiler.resources }}
         resources: {{- toYaml .Values.compiler.resources | nindent 10 }}
         {{- end }}
@@ -137,11 +138,12 @@ spec:
   selector:
     app: {{ include "arroyo.fullname" . }}-controller
   ports:
-    - name: grpc
-      protocol: TCP
-      port: 9190
-      targetPort: 9190
     - name: http
       protocol: TCP
-      port: 9191
+      port: {{ .Values.controller.service.httpPort }}
       targetPort: 9191
+    - name: grpc
+      protocol: TCP
+      port: {{ .Values.controller.service.grpcPort }}
+      targetPort: 9190
+

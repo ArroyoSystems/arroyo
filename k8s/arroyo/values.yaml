@@ -16,6 +16,11 @@ api:
     repository: ghcr.io/arroyosystems/arroyo-services
     pullPolicy: IfNotPresent
     tag: "0.5.0"
+  service:
+    type: ClusterIP
+    apiPort: 80
+    grpcPort: 8001
+
 
 controller:
   resources:
@@ -27,6 +32,9 @@ controller:
     repository: ghcr.io/arroyosystems/arroyo-services
     pullPolicy: IfNotPresent
     tag: "0.5.0"
+  service:
+    grpcPort: 9190
+    httpPort: 9191
 
 compiler:
   replicas: 1
@@ -39,6 +47,9 @@ compiler:
     repository: ghcr.io/arroyosystems/arroyo-compiler
     pullPolicy: IfNotPresent
     tag: "0.5.0"
+  service:
+    grpcPort: 9000
+    httpPort: 9001
 
 worker:
   resources:
@@ -139,9 +150,7 @@ securityContext: {}
   # runAsNonRoot: true
   # runAsUser: 1000
 
-service:
-  type: ClusterIP
-  port: 80
+
 
 apiResources: {}
 controllerResources: {}
