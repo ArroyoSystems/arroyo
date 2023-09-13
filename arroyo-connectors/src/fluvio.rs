@@ -10,7 +10,7 @@ use crate::{pull_opt, Connection, ConnectionType, Connector, EmptyConfig};
 
 pub struct FluvioConnector {}
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/kafka/table.json");
+const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/fluvio/table.json");
 const ICON: &str = include_str!("../resources/fluvio.svg");
 
 import_types!(schema = "../connector-schemas/fluvio/table.json");

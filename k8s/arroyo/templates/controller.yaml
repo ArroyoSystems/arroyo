@@ -6,7 +6,6 @@ metadata:
     {{- include "arroyo.labels" . | nindent 4 }}
     app: {{ include "arroyo.fullname" . }}-controller
 spec:
-spec:
   replicas: 1
   selector:
     matchLabels:
@@ -79,7 +78,7 @@ spec:
         - name: K8S_WORKER_IMAGE_PULL_POLICY
           value: "{{ .Values.worker.image.pullPolicy }}"
         # TODO: image pull secret
-        {{- if .Values.serviceAccount.create }}
+        {{- if .Values.serviceAccount.name }}
         - name: K8S_WORKER_SERVICE_ACCOUNT_NAME
           value: "{{ template "arroyo.serviceAccountName" . }}"
         {{- end }}
@@ -95,6 +94,13 @@ spec:
         - name: K8S_WORKER_VOLUME_MOUNTS
           value: {{ .Values.volumeMounts | toYaml | quote }}
         {{- end }}
+        {{- if .Values.existingConfigMap }}
+        - name: K8S_WORKER_CONFIG_MAP
+          value: {{ .Values.existingConfigMap }}
+        {{- end }}
+
+        {{- include "arroyo.existingConfigMap" . | nindent 8 }}
+
         ports:
         - containerPort: 9190
           name: grpc
@@ -104,10 +110,12 @@ spec:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         readinessProbe:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         {{- if .Values.compiler.resources }}
         resources: {{- toYaml .Values.compiler.resources | nindent 10 }}
         {{- end }}
@@ -139,9 +147,9 @@ spec:
   ports:
     - name: grpc
       protocol: TCP
-      port: 9190
+      port: {{ .Values.controller.service.grpcPort }}
       targetPort: 9190
     - name: http
       protocol: TCP
-      port: 9191
+      port: {{ .Values.controller.service.adminPort }}
       targetPort: 9191

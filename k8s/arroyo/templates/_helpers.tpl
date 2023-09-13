@@ -127,15 +127,11 @@ Database environment variables
 Generic storage env vars
 */}}
 {{- define "arroyo.storageEnvVars" -}}
-{{- if .Values.s3.bucket }}
-- name: S3_BUCKET
-  value: {{ .Values.s3.bucket }}
-{{- end }}
-{{- if .Values.s3.region }}
+{{- if .Values.s3.region -}}
 - name: S3_REGION
   value: {{ .Values.s3.region }}
-{{- end }}
-{{- end }}
+{{- end -}}
+{{- end -}}
 
 {{- define "tplvalues.render" -}}
     {{- if typeIs "string" .value }}
@@ -143,4 +139,16 @@ Generic storage env vars
     {{- else }}
         {{- tpl (.value | toYaml) .context }}
     {{- end }}
+{{- end -}}
+
+
+{{/*
+Mount a config map with custom configuration
+*/}}
+{{- define "arroyo.existingConfigMap" -}}
+{{- if .Values.existingConfigMap  -}}
+envFrom:
+- configMapRef:
+    name: {{ .Values.existingConfigMap }}
+{{- end -}}
 {{- end -}}

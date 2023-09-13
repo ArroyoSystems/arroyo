@@ -3,10 +3,11 @@ use anyhow::bail;
 use arroyo_rpc::grpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_types::{
     string_config, u32_config, WorkerId, ADMIN_PORT_ENV, CONTROLLER_ADDR_ENV, GRPC_PORT_ENV,
-    JOB_ID_ENV, K8S_NAMESPACE_ENV, K8S_WORKER_ANNOTATIONS_ENV, K8S_WORKER_IMAGE_ENV,
-    K8S_WORKER_IMAGE_PULL_POLICY_ENV, K8S_WORKER_LABELS_ENV, K8S_WORKER_NAME_ENV,
-    K8S_WORKER_RESOURCES_ENV, K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV, K8S_WORKER_SLOTS_ENV,
-    K8S_WORKER_VOLUMES_ENV, K8S_WORKER_VOLUME_MOUNTS_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV,
+    JOB_ID_ENV, K8S_NAMESPACE_ENV, K8S_WORKER_ANNOTATIONS_ENV, K8S_WORKER_CONFIG_MAP_ENV,
+    K8S_WORKER_IMAGE_ENV, K8S_WORKER_IMAGE_PULL_POLICY_ENV, K8S_WORKER_LABELS_ENV,
+    K8S_WORKER_NAME_ENV, K8S_WORKER_RESOURCES_ENV, K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV,
+    K8S_WORKER_SLOTS_ENV, K8S_WORKER_VOLUMES_ENV, K8S_WORKER_VOLUME_MOUNTS_ENV, NODE_ID_ENV,
+    RUN_ID_ENV, TASK_SLOTS_ENV,
 };
 use async_trait::async_trait;
 use k8s_openapi::api::apps::v1::ReplicaSet;
@@ -26,7 +27,7 @@ const RUN_ID_LABEL: &'static str = "run_id";
 const JOB_NAME_LABEL: &'static str = "job_name";
 
 pub struct KubernetesScheduler {
-    client: Client,
+    client: Option<Client>,
     namespace: String,
     name: String,
     labels: BTreeMap<String, String>,
@@ -38,6 +39,7 @@ pub struct KubernetesScheduler {
     slots_per_pod: u32,
     volumes: Vec<Volume>,
     volume_mounts: Vec<VolumeMount>,
+    config_map: Option<String>,
 }
 
 fn yaml_config<T: DeserializeOwned>(var: &str, default: T) -> T {
@@ -51,8 +53,12 @@ fn yaml_config<T: DeserializeOwned>(var: &str, default: T) -> T {
 
 impl KubernetesScheduler {
     pub async fn from_env() -> Self {
+        Self::new(Some(Client::try_default().await.unwrap()))
+    }
+
+    pub fn new(client: Option<Client>) -> Self {
         Self {
-            client: Client::try_default().await.unwrap(),
+            client,
             namespace: string_config(K8S_NAMESPACE_ENV, "default"),
             name: format!("{}-worker", string_config(K8S_WORKER_NAME_ENV, "arroyo")),
             image: string_config(
@@ -83,15 +89,11 @@ impl KubernetesScheduler {
             slots_per_pod: u32_config(K8S_WORKER_SLOTS_ENV, 4),
             volumes: yaml_config(K8S_WORKER_VOLUMES_ENV, vec![]),
             volume_mounts: yaml_config(K8S_WORKER_VOLUME_MOUNTS_ENV, vec![]),
+            config_map: env::var(K8S_WORKER_CONFIG_MAP_ENV).ok(),
         }
     }
-}
 
-#[async_trait]
-impl Scheduler for KubernetesScheduler {
-    async fn start_workers(&self, req: StartPipelineReq) -> Result<(), SchedulerError> {
-        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.clone());
-
+    fn make_replicaset(&self, req: StartPipelineReq) -> ReplicaSet {
         let replicas = (req.slots as f32 / self.slots_per_pod as f32).ceil() as usize;
 
         let mut labels = json!({
@@ -161,7 +163,7 @@ impl Scheduler for KubernetesScheduler {
             }));
         }
 
-        let rs: ReplicaSet = serde_json::from_value(json!({
+        serde_json::from_value(json!({
             "apiVersion": "apps/v1",
             "kind": "ReplicaSet",
             "metadata": {
@@ -202,15 +204,30 @@ impl Scheduler for KubernetesScheduler {
                                     }
                                 ],
                                 "env": env,
-                                "volumeMounts": self.volume_mounts
+                                "volumeMounts": self.volume_mounts,
+                                "envFrom": self.config_map.as_ref().map(|name| {
+                                  json!([
+                                    {"configMapRef": {
+                                         "name": name
+                                    }}
+                                  ])
+                                }).unwrap_or_else(|| json!([]))
                             }
                         ],
                         "serviceAccountName": self.service_account_name,
                     }
                 }
             }
-        }))
-        .unwrap();
+        })).unwrap()
+    }
+}
+
+#[async_trait]
+impl Scheduler for KubernetesScheduler {
+    async fn start_workers(&self, req: StartPipelineReq) -> Result<(), SchedulerError> {
+        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
+
+        let rs = self.make_replicaset(req);
 
         api.create(&Default::default(), &rs)
             .await
@@ -238,7 +255,7 @@ impl Scheduler for KubernetesScheduler {
         run_id: Option<i64>,
         force: bool,
     ) -> anyhow::Result<()> {
-        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.clone());
+        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
         let mut labels = format!("{}={}", JOB_ID_LABEL, job_id);
         if let Some(run_id) = run_id {
@@ -279,7 +296,7 @@ impl Scheduler for KubernetesScheduler {
         run_id: Option<i64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
         // get the pods associated with the replica set for the given job_id and run_id
-        let api: Api<Pod> = Api::default_namespaced(self.client.clone());
+        let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
         // label selector for job_id and optional run_id
 
@@ -298,5 +315,29 @@ impl Scheduler for KubernetesScheduler {
                 Ok(WorkerId(1))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::schedulers::kubernetes::KubernetesScheduler;
+    use crate::schedulers::StartPipelineReq;
+
+    #[test]
+    fn test_resource_creation() {
+        let req = StartPipelineReq {
+            name: "test_pipeline".to_string(),
+            pipeline_path: "file:///pipeline".to_string(),
+            wasm_path: "file:///wasm".to_string(),
+            job_id: "job123".to_string(),
+            hash: "12123123h".to_string(),
+            run_id: 1,
+            slots: 8,
+            env_vars: Default::default(),
+        };
+
+        KubernetesScheduler::new(None)
+            // test that we don't panic when creating the replicaset
+            .make_replicaset(req);
     }
 }
