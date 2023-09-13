@@ -5,6 +5,7 @@ pub mod impulse;
 pub mod kafka;
 pub mod kinesis;
 pub mod nexmark;
+pub mod polling_http;
 pub mod sse;
 pub mod two_phase_committer;
 pub mod webhook;
