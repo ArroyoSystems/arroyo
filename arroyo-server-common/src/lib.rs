@@ -3,7 +3,7 @@ use arroyo_types::{admin_port, telemetry_enabled, POSTHOG_KEY};
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::routing::{get, get_service};
+use axum::routing::get;
 use axum::Router;
 use hyper::Body;
 use lazy_static::lazy_static;
@@ -25,7 +25,6 @@ use tonic::transport::Server;
 use tower::layer::util::Stack;
 use tower::{Layer, Service};
 use tower_http::classify::{GrpcCode, GrpcErrorsAsFailures, SharedClassifier};
-use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultOnFailure, TraceLayer};
 
 use tracing::metadata::LevelFilter;
@@ -183,10 +182,6 @@ pub fn start_admin_server(service: &str, default_port: u16, mut shutdown: Receiv
 
     info!("Starting {} admin server on 0.0.0.0:{}", service, port);
 
-    let serve_dir = ServeDir::new("arroyo-console/dist")
-        .not_found_service(ServeFile::new("arroyo-console/dist/index.html"));
-    let serve_dir = get_service(serve_dir);
-
     let state = Arc::new(AdminState {
         name: format!("arroyo-{}", service),
     });
@@ -195,8 +190,6 @@ pub fn start_admin_server(service: &str, default_port: u16, mut shutdown: Receiv
         .route("/name", get(root))
         .route("/metrics", get(metrics))
         .route("/details", get(details))
-        .nest_service("/", serve_dir.clone())
-        .fallback_service(serve_dir)
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port).parse().unwrap();
