@@ -503,3 +503,28 @@ fn max_product(first_arg: Vec<u64>, second_arg: Vec<u64>) -> u64 {
   let pairs = first_arg.iter().zip(second_arg.iter());
   pairs.map(|(x, y)| x * y).max().unwrap()
 }"}
+
+// filter updating aggregates
+correctness_run_codegen! {"filter_updating_aggregates",
+"CREATE TABLE impulse_source (
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'impulse',
+  event_rate = '1000000',
+  message_count = '100'
+);
+CREATE TABLE filter_updating_aggregates (
+  subtasks BIGINT
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'debezium_json',
+  type = 'sink'
+);
+
+INSERT INTO filter_updating_aggregates
+SELECT * FROM (
+  SELECT count(distinct subtask_index) as subtasks FROM impulse_source
+)
+WHERE subtasks >= 1"}

@@ -1686,7 +1686,18 @@ impl PlanGraph {
         self.graph
             .add_edge(key_index, aggregate_index, aggregate_edge);
 
-        aggregate_index
+        // unkey the operator
+        let unkey_operator = PlanOperator::Unkey;
+        let unkey_index = self.insert_operator(
+            unkey_operator,
+            PlanType::Updating(Box::new(PlanType::Unkeyed(aggregate_struct))),
+        );
+        let unkey_edge = PlanEdge {
+            edge_type: EdgeType::Forward,
+        };
+        self.graph
+            .add_edge(aggregate_index, unkey_index, unkey_edge);
+        unkey_index
     }
 }
 
