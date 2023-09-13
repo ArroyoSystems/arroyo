@@ -6,7 +6,7 @@ Once the release is fully deployed, you can navigate to the web ui by running
 
   $ open "http://$(kubectl get service/{{ .Release.Name }}-api -o jsonpath='{.spec.clusterIP}')"
 
-(note this might take a few minutes so if you are also deploying Postgres)
+(note this might take a few minutes if you are also deploying Postgres)
 
 If that doesn't work (for example on MacOS or a remote Kubernetes cluster), you can also try
 
