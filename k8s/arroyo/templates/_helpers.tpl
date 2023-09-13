@@ -127,16 +127,9 @@ Database environment variables
 Generic storage env vars
 */}}
 {{- define "arroyo.storageEnvVars" -}}
-{{- if .Values.outputDir -}}
-- name: OUTPUT_DIR
-  value: {{ .Values.outputDir }}
-{{- else if .Values.s3.bucket -}}
-- name: S3_BUCKET
-  value: {{ .Values.s3.bucket }}
 {{- if .Values.s3.region -}}
 - name: S3_REGION
   value: {{ .Values.s3.region }}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 

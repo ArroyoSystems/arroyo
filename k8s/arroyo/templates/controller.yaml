@@ -145,12 +145,11 @@ spec:
   selector:
     app: {{ include "arroyo.fullname" . }}-controller
   ports:
-    - name: http
-      protocol: TCP
-      port: {{ .Values.controller.service.httpPort }}
-      targetPort: 9191
     - name: grpc
       protocol: TCP
       port: {{ .Values.controller.service.grpcPort }}
       targetPort: 9190
-
+    - name: http
+      protocol: TCP
+      port: {{ .Values.controller.service.adminPort }}
+      targetPort: 9191

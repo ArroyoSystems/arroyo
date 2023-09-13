@@ -93,5 +93,5 @@ spec:
       targetPort: 9000
     - name: http
       protocol: TCP
-      port: {{ .Values.compiler.service.httpPort }}
+      port: {{ .Values.compiler.service.adminPort }}
       targetPort: 9001
