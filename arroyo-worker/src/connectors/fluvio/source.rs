@@ -241,6 +241,9 @@ where
                         Some(ControlMessage::Commit{..}) => {
                             return Err(UserError::new("Fluvio source does not support committing", ""));
                         }
+                        Some(ControlMessage::LoadCompacted {compacted}) => {
+                            ctx.load_compacted(compacted).await;
+                        }
                         None => {
 
                         }

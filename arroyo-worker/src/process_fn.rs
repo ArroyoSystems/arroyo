@@ -23,11 +23,13 @@ impl ProcessFnUtils {
         state.evict_all_before_watermark(watermark)
     }
 
-    pub async fn send_event<OutK: Key, OutT: Data>(
+    pub async fn send_checkpoint_event<OutK: Key, OutT: Data>(
         barrier: arroyo_types::CheckpointBarrier,
         ctx: &mut Context<OutK, OutT>,
         event_type: TaskCheckpointEventType,
     ) {
+        // These messages are received by the engine control thread,
+        // which then sends a TaskCheckpointEventReq to the controller.
         ctx.control_tx
             .send(arroyo_rpc::ControlResp::CheckpointEvent(
                 arroyo_rpc::CheckpointEvent {

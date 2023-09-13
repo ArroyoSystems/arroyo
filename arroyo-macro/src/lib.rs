@@ -537,6 +537,9 @@ fn impl_stream_node_type(
                             arroyo_rpc::ControlMessage::Stop { mode: _ } => tracing::warn!("shouldn't receive stop"),
                             arroyo_rpc::ControlMessage::Commit { epoch } => {
                                 self.handle_commit(epoch, &mut ctx).await;
+                            },
+                            arroyo_rpc::ControlMessage::LoadCompacted { compacted } => {
+                                ctx.load_compacted(compacted).await;
                             }
                         }
                     }
@@ -715,16 +718,16 @@ fn impl_stream_node_type(
             checkpoint_barrier: arroyo_types::CheckpointBarrier,
             ctx: &mut crate::engine::Context<#out_k, #out_t>) -> bool {
 
-            crate::process_fn::ProcessFnUtils::send_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::StartedCheckpointing).await;
+            crate::process_fn::ProcessFnUtils::send_checkpoint_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::StartedCheckpointing).await;
 
             self.handle_checkpoint(&checkpoint_barrier, ctx).await;
 
-            crate::process_fn::ProcessFnUtils::send_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::FinishedOperatorSetup).await;
+            crate::process_fn::ProcessFnUtils::send_checkpoint_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::FinishedOperatorSetup).await;
 
             let watermark = ctx.watermarks.last_present_watermark();
             ctx.state.checkpoint(checkpoint_barrier, watermark).await;
 
-            crate::process_fn::ProcessFnUtils::send_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::FinishedSync).await;
+            crate::process_fn::ProcessFnUtils::send_checkpoint_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::FinishedSync).await;
 
             ctx.broadcast(arroyo_types::Message::Barrier(checkpoint_barrier)).await;
 

@@ -56,6 +56,16 @@ lazy_static! {
         "number of active pipelines in arroyo-controller"
     )
     .unwrap();
+    pub static ref COMPACTION_TUPLES_IN: Gauge = register_gauge!(
+        "arroyo_controller_compaction_tuples_in",
+        "Number of tuples being considered for compaction"
+    )
+    .unwrap();
+    static ref COMPACTION_TUPLES_OUT: Gauge = register_gauge!(
+        "arroyo_controller_compaction_tuples_in",
+        "Number of tuples being considered for compaction"
+    )
+    .unwrap();
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]
