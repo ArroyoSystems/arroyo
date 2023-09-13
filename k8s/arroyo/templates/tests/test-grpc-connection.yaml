@@ -10,7 +10,7 @@ spec:
   containers:
     - name: grpcurl
       image: fullstorydev/grpcurl:v1.8.7-alpine
-      args: ['-plaintext', '{{ include "arroyo.fullname" . }}-api:{{ .Values.compiler.service.grpcPort }}','list']
+      args: ['-plaintext', '{{ include "arroyo.fullname" . }}-compiler:{{ .Values.compiler.service.grpcPort }}','list']
   restartPolicy: Never
 ---
 apiVersion: v1
@@ -25,5 +25,5 @@ spec:
   containers:
     - name: grpcurl
       image: fullstorydev/grpcurl:v1.8.7-alpine
-      args: ['-plaintext', '{{ include "arroyo.fullname" . }}-api:{{ .Values.controller.service.grpcPort }}','list']
+      args: ['-plaintext', '{{ include "arroyo.fullname" . }}-controller:{{ .Values.controller.service.grpcPort }}','list']
   restartPolicy: Never
