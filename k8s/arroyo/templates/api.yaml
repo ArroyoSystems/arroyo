@@ -91,9 +91,9 @@ spec:
   ports:
     - name: http
       protocol: TCP
-      port: {{ .Values.service.apiPort }}
+      port: {{ .Values.api.service.httpPort }}
       targetPort: 8000
     - name: grpc
       protocol: TCP
-      port: {{ .Values.service.grpcPort }}
+      port: {{ .Values.api.service.grpcPort }}
       targetPort: 8001

@@ -88,9 +88,9 @@ spec:
   ports:
     - name: grpc
       protocol: TCP
-      port: 9000
+      port: {{ .Values.compiler.service.grpcPort }}
       targetPort: 9000
     - name: http
       protocol: TCP
-      port: 9001
+      port: {{ .Values.compiler.service.httpPort }}
       targetPort: 9001
