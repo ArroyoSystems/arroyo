@@ -144,3 +144,15 @@ Generic storage env vars
         {{- tpl (.value | toYaml) .context }}
     {{- end }}
 {{- end -}}
+
+
+{{/*
+Mount a config map with custom configuration
+*/}}
+{{- define "arroyo.existingConfigMap" -}}
+{{- if .Values.existingConfigMap  -}}
+envFrom:
+- configMapRef:
+  name: {{ .Values.existingConfigMap }}
+{{- end -}}
+{{- end -}}

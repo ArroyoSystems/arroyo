@@ -48,6 +48,7 @@ spec:
           value: "{{ include "arroyo.prometheusEndpoint" .}}"
         - name: API_METRICS_RATE
           value: "{{ .Values.prometheus.queryRate }}"
+        {{- include "arroyo.existingConfigMap" . | nindent 8 }}
         ports:
         - containerPort: 8000
           name: http

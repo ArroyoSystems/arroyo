@@ -43,6 +43,7 @@ spec:
           - name: ARTIFACT_URL
             value: {{ .Values.artifactUrl }}
           {{- end }}
+        {{- include "arroyo.existingConfigMap" . | nindent 8 }}
         ports:
         - containerPort: 9000
           name: grpc

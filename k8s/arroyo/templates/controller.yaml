@@ -78,8 +78,8 @@ spec:
           value: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
         - name: K8S_WORKER_IMAGE_PULL_POLICY
           value: "{{ .Values.worker.image.pullPolicy }}"
-        # TODO: image pull secret
-        {{- if .Values.serviceAccount.create }}
+        # TODO: imagee pull secret
+        {{- if .Values.serviceAccount.name }}
         - name: K8S_WORKER_SERVICE_ACCOUNT_NAME
           value: "{{ template "arroyo.serviceAccountName" . }}"
         {{- end }}
@@ -95,6 +95,9 @@ spec:
         - name: K8S_WORKER_VOLUME_MOUNTS
           value: {{ .Values.volumeMounts | toYaml | quote }}
         {{- end }}
+
+        {{- include "arroyo.existingConfigMap" . | nindent 8 }}
+
         ports:
         - containerPort: 9190
           name: grpc
