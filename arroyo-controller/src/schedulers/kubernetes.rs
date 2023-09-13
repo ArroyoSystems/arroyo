@@ -10,6 +10,7 @@ use arroyo_types::{
     RUN_ID_ENV, TASK_SLOTS_ENV,
 };
 use async_trait::async_trait;
+use futures::TryFutureExt;
 use k8s_openapi::api::apps::v1::ReplicaSet;
 use k8s_openapi::api::core::v1::{Pod, ResourceRequirements, Volume, VolumeMount};
 use kube::api::{DeleteParams, ListParams};
@@ -27,7 +28,7 @@ const RUN_ID_LABEL: &'static str = "run_id";
 const JOB_NAME_LABEL: &'static str = "job_name";
 
 pub struct KubernetesScheduler {
-    client: Client,
+    client: Option<Client>,
     namespace: String,
     name: String,
     labels: BTreeMap<String, String>,
@@ -53,8 +54,12 @@ fn yaml_config<T: DeserializeOwned>(var: &str, default: T) -> T {
 
 impl KubernetesScheduler {
     pub async fn from_env() -> Self {
+        Self::new(Some(Client::try_default().await.unwrap()))
+    }
+
+    pub fn new(client: Option<Client>) -> Self {
         Self {
-            client: Client::try_default().await.unwrap(),
+            client,
             namespace: string_config(K8S_NAMESPACE_ENV, "default"),
             name: format!("{}-worker", string_config(K8S_WORKER_NAME_ENV, "arroyo")),
             image: string_config(
@@ -251,7 +256,7 @@ impl Scheduler for KubernetesScheduler {
         run_id: Option<i64>,
         force: bool,
     ) -> anyhow::Result<()> {
-        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.clone());
+        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
         let mut labels = format!("{}={}", JOB_ID_LABEL, job_id);
         if let Some(run_id) = run_id {
@@ -292,7 +297,7 @@ impl Scheduler for KubernetesScheduler {
         run_id: Option<i64>,
     ) -> anyhow::Result<Vec<WorkerId>> {
         // get the pods associated with the replica set for the given job_id and run_id
-        let api: Api<Pod> = Api::default_namespaced(self.client.clone());
+        let api: Api<Pod> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
         // label selector for job_id and optional run_id
 
@@ -319,8 +324,8 @@ mod test {
     use crate::schedulers::kubernetes::KubernetesScheduler;
     use crate::schedulers::StartPipelineReq;
 
-    #[tokio::test]
-    async fn test_resource_creation() {
+    #[test]
+    fn test_resource_creation() {
         let req = StartPipelineReq {
             name: "test_pipeline".to_string(),
             pipeline_path: "file:///pipeline".to_string(),
@@ -332,8 +337,7 @@ mod test {
             env_vars: Default::default(),
         };
 
-        KubernetesScheduler::from_env()
-            .await
+        KubernetesScheduler::new(None)
             // test that we don't panic when creating the replicaset
             .make_replicaset(req);
     }
