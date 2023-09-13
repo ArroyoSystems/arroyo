@@ -368,7 +368,7 @@ impl CheckpointState {
             .values()
             .fold(0, |size, s| size + s.metadata.as_ref().unwrap().bytes);
 
-        StateBackend::complete_operator_checkpoint(OperatorCheckpointMetadata {
+        StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
             job_id: self.job_id.to_string(),
             operator_id: operator_id.clone(),
             epoch: self.epoch,

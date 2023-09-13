@@ -220,7 +220,7 @@ async fn test_kafka() {
 
     reader.assert_next_message_checkpoint(1).await;
 
-    StateBackend::complete_operator_checkpoint(OperatorCheckpointMetadata {
+    StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
         job_id: task_info.job_id.clone(),
         operator_id: task_info.operator_id.clone(),
         epoch: 1,

@@ -739,6 +739,7 @@ dependencies = [
  "bytes",
  "ctor",
  "futures",
+ "lazy_static",
  "once_cell",
  "parquet",
  "prometheus",
@@ -746,6 +747,7 @@ dependencies = [
  "rand",
  "test-case",
  "tokio",
+ "tonic",
  "tracing",
 ]
 

@@ -112,6 +112,9 @@ where
             ControlMessage::Commit { epoch: _ } => {
                 unreachable!("sources shouldn't receive commit messages");
             }
+            ControlMessage::LoadCompacted { compacted } => {
+                ctx.load_compacted(compacted).await;
+            }
         }
         None
     }

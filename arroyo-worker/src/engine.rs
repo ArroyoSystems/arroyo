@@ -1,10 +1,8 @@
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
-use std::collections::{BTreeMap, HashMap};
-use std::ops::RangeInclusive;
-
 use std::any::Any;
+use std::collections::{BTreeMap, HashMap};
 use std::{mem, thread};
 
 use std::time::SystemTime;
@@ -19,10 +17,10 @@ use arroyo_rpc::grpc::{
     CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
     TaskAssignment,
 };
-use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_types::{
-    from_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, UserError, Watermark,
-    WorkerId, BYTES_SENT, MESSAGES_SENT,
+    from_micros, range_for_server, server_for_hash, CheckpointBarrier, Data, Key, Message, Record,
+    TaskInfo, UserError, Watermark, WorkerId, BYTES_SENT, MESSAGES_SENT,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -57,21 +55,6 @@ impl<K: Key, T: Data> From<QueueItem> for Message<K, T> {
             }
         }
     }
-}
-fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
-    let range_size = u64::MAX / (n as u64);
-    let start = range_size * (i as u64);
-    let end = if i + 1 == n {
-        u64::MAX
-    } else {
-        start + range_size - 1
-    };
-    start..=end
-}
-
-fn server_for_hash(x: u64, n: usize) -> usize {
-    let range_size = u64::MAX / (n as u64);
-    (n - 1).min((x / range_size) as usize)
 }
 
 pub trait StreamNode: Send {
@@ -437,6 +420,10 @@ impl<K: Key, T: Data> Context<K, T> {
             .await
             .unwrap();
     }
+
+    pub async fn load_compacted(&mut self, compaction: CompactionResult) {
+        self.state.load_compacted(compaction).await;
+    }
 }
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
@@ -784,6 +771,43 @@ impl RunningEngine {
             })
             .collect()
     }
+
+    pub fn operator_controls(&self) -> HashMap<String, Vec<Sender<ControlMessage>>> {
+        let mut controls = HashMap::new();
+
+        self.program
+            .graph
+            .node_indices()
+            .filter(|idx| {
+                let w = self.program.graph.node_weight(*idx).unwrap();
+                self.assignments
+                    .get(&(w.id().to_string(), w.subtask_idx()))
+                    .unwrap()
+                    .worker_id
+                    == self.worker_id.0
+            })
+            .for_each(|idx| {
+                let w = self.program.graph.node_weight(idx).unwrap();
+                let assignment = self
+                    .assignments
+                    .get(&(w.id().to_string(), w.subtask_idx()))
+                    .unwrap();
+                let tx = self
+                    .program
+                    .graph
+                    .node_weight(idx)
+                    .unwrap()
+                    .as_queue()
+                    .tx
+                    .clone();
+                controls
+                    .entry(assignment.operator_id.clone())
+                    .or_insert(vec![])
+                    .push(tx);
+            });
+
+        controls
+    }
 }
 
 impl Engine {
@@ -1118,39 +1142,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-
-    #[test]
-    fn test_range_for_server() {
-        let n = 6;
-
-        for i in 0..(n - 1) {
-            let range1 = range_for_server(i, n);
-            let range2 = range_for_server(i + 1, n);
-
-            assert_eq!(*range1.end() + 1, *range2.start(), "Ranges not adjacent");
-        }
-
-        let last_range = range_for_server(n - 1, n);
-        assert_eq!(
-            *last_range.end(),
-            u64::MAX,
-            "Last range does not contain u64::MAX"
-        );
-    }
-
-    #[test]
-    fn test_server_for_hash() {
-        let n = 2;
-        let x = u64::MAX;
-
-        let server_index = server_for_hash(x, n);
-        let server_range = range_for_server(server_index, n);
-
-        assert!(
-            server_range.contains(&x),
-            "u64::MAX is not in the correct range"
-        );
-    }
 
     #[test]
     fn test_watermark_holder() {
