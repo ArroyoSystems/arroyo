@@ -178,8 +178,7 @@ pub mod ports {
     pub const NODE_ADMIN: u16 = 9291;
 
     pub const API_HTTP: u16 = 8000;
-    pub const API_GRPC: u16 = 8001;
-    pub const API_ADMIN: u16 = 8002;
+    pub const API_ADMIN: u16 = 8001;
 
     pub const COMPILER_GRPC: u16 = 9000;
     pub const COMPILER_ADMIN: u16 = 9001;

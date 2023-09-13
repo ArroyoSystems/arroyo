@@ -103,6 +103,6 @@ RUN cd pipeline && cargo build --release && cargo build --release
 RUN cd pipeline/wasm-fns && wasm-pack build
 COPY docker/single/supervisord.conf /opt/arroyo/src/docker/single/supervisord.conf
 COPY docker/single/entrypoint.sh /entrypoint.sh
-EXPOSE 8000 8001 9000 9190 9191
+EXPOSE 8000 9000 9190 9191
 RUN mkdir -p /tmp/arroyo/build
 ENTRYPOINT ["/entrypoint.sh"]

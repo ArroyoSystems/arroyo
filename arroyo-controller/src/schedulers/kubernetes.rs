@@ -10,7 +10,6 @@ use arroyo_types::{
     RUN_ID_ENV, TASK_SLOTS_ENV,
 };
 use async_trait::async_trait;
-use futures::TryFutureExt;
 use k8s_openapi::api::apps::v1::ReplicaSet;
 use k8s_openapi::api::core::v1::{Pod, ResourceRequirements, Volume, VolumeMount};
 use kube::api::{DeleteParams, ListParams};
@@ -226,7 +225,7 @@ impl KubernetesScheduler {
 #[async_trait]
 impl Scheduler for KubernetesScheduler {
     async fn start_workers(&self, req: StartPipelineReq) -> Result<(), SchedulerError> {
-        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.clone());
+        let api: Api<ReplicaSet> = Api::default_namespaced(self.client.as_ref().unwrap().clone());
 
         let rs = self.make_replicaset(req);
 
