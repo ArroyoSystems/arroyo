@@ -61,10 +61,10 @@ impl<K: Data, T: DeserializeOwned + Data> FileSourceFunc<K, T> {
 
         let mut i = 0;
 
-        'lines: while let Some(s) = lines.next_line().await.unwrap() {
-            while i < self.lines_read {
+        while let Some(s) = lines.next_line().await.unwrap() {
+            if i < self.lines_read {
                 i += 1;
-                continue 'lines;
+                continue;
             }
             let value = serde_json::from_str(&s).unwrap();
             ctx.collector
