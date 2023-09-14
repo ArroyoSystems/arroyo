@@ -20,9 +20,9 @@ jobs:
           - linux/arm64
         image_type:
           - worker
-          - services
-          - compiler
-          - single
+#          - services
+#          - compiler
+#          - single
         include:
           - platform: linux/amd64
             mold_arch: x86_64
@@ -103,9 +103,9 @@ jobs:
       matrix:
         image_type:
           - worker
-          - services
-          - compiler
-          - single
+#          - services
+#          - compiler
+#          - single
     runs-on: ubuntu-latest
     steps:
       - name: Login to GHCR
@@ -119,7 +119,7 @@ jobs:
         uses: docker/metadata-action@v3
         with:
           images: |
-            ghcr.io/${{ github.repository_owner }}/arroyo-${{ matrix.image_type }}
+            ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
           tags: |
             type=schedule
             type=ref,event=branch
@@ -131,7 +131,7 @@ jobs:
       - name: Create and push Docker manifest
         run: |
           TAG=${{ steps.arroyo-docker.outputs.version }}
-          IMAGE=ghcr.io/${{ github.repository_owner }}/arroyo-${{ matrix.image_type }}
+          IMAGE=ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
           docker manifest create   ${IMAGE}:${TAG} ${IMAGE}:arm64-${TAG} ${IMAGE}:amd64-${TAG}
           docker manifest annotate ${IMAGE}:${TAG} ${IMAGE}:arm64-${TAG} --arch arm64
           docker manifest annotate ${IMAGE}:${TAG} ${IMAGE}:amd64-${TAG} --arch amd64
@@ -140,7 +140,7 @@ jobs:
         if: github.ref == 'refs/heads/master'
         run: |
           TAG=${{ steps.arroyo-docker.outputs.version }}
-          IMAGE=ghcr.io/${{ github.repository_owner }}/arroyo-${{ matrix.image_type }}
+          IMAGE=ghcr.io/arroyosystems/arroyo-${{ matrix.image_type }}
           docker manifest create   ${IMAGE}:tip ${IMAGE}:arm64-${TAG} ${IMAGE}:amd64-${TAG}
           docker manifest annotate ${IMAGE}:tip ${IMAGE}:arm64-${TAG} --arch arm64
           docker manifest annotate ${IMAGE}:tip ${IMAGE}:amd64-${TAG} --arch amd64
