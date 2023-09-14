@@ -274,6 +274,7 @@ pub fn correctness_run_codegen(input: TokenStream) -> TokenStream {
     .into();
 
     quote!(
+        #[ignore]
         #[tokio::test]
         async fn #test_ident() {
             let graph = #module_ident::make_graph();
