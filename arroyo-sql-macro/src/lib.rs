@@ -145,8 +145,8 @@ fn get_pipeline_module(
             "nexmark",
             EmptyConfig {},
             NexmarkTable {
-                event_rate: 1000.0,
-                runtime: Some(0.1),
+                event_rate: 200000.0,
+                runtime: Some(0.5),
             },
             None,
         )
@@ -163,7 +163,7 @@ fn get_pipeline_module(
         query_string,
         schema_provider,
         SqlConfig {
-            default_parallelism: 1,
+            default_parallelism: 16,
         },
     )
     .unwrap();

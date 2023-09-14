@@ -1,0 +1,29 @@
+[package]
+name = "arroyo-bench"
+version = "0.6.0"
+edition = "2021"
+
+[features]
+integration-tests = []
+
+
+[dependencies]
+syn = "2.0"
+quote = "1.0"
+chrono = "0.4"
+hex = "0.4"
+petgraph = "0.6"
+bincode = "=2.0.0-rc.3"
+bincode_derive = "=2.0.0-rc.3"
+serde = "1.0"
+serde_json = "1.0"
+arroyo-types = { path = "../arroyo-types" }
+arroyo-sql = { path = "../arroyo-sql" }
+arroyo-rpc = { path = "../arroyo-rpc" }
+arroyo-worker = { path = "../arroyo-worker" }
+arroyo-sql-macro = { path = "../arroyo-sql-macro" }
+tokio = { version = "1.16", features = ["full"] }
+
+arrow = {workspace = true }
+arrow-array = {workspace = true }
+arrow-schema = {workspace = true }

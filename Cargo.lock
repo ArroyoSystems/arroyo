@@ -449,6 +449,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-bench"
+version = "0.6.0"
+dependencies = [
+ "arrow",
+ "arrow-array",
+ "arrow-schema",
+ "arroyo-rpc",
+ "arroyo-sql",
+ "arroyo-sql-macro",
+ "arroyo-types",
+ "arroyo-worker",
+ "bincode 2.0.0-rc.3",
+ "bincode_derive",
+ "chrono",
+ "hex",
+ "petgraph",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.33",
+ "tokio",
+]
+
+[[package]]
 name = "arroyo-compiler-service"
 version = "0.6.0"
 dependencies = [
