@@ -46,6 +46,7 @@ pub mod connectors;
 pub mod engine;
 pub mod formats;
 mod inq_reader;
+mod metrics;
 mod network_manager;
 pub mod operators;
 mod process_fn;

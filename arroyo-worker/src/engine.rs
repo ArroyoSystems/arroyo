@@ -9,7 +9,6 @@ use std::{mem, thread};
 
 use std::time::SystemTime;
 
-use arroyo_metrics::{counter_for_task, gauge_for_task};
 use arroyo_state::tables::TimeKeyMap;
 use bincode::{config, Decode, Encode};
 
@@ -23,16 +22,17 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_types::{
     from_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, UserError, Watermark,
-    WorkerId, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+    WorkerId, BYTES_SENT, MESSAGES_SENT,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
-use prometheus::{labels, IntCounter, IntGauge};
+use prometheus::{labels, IntCounter};
 use rand::Rng;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
 
+use crate::metrics::{register_counters, register_queue_gauges, QueueGauges};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::TIMER_TABLE;
 use crate::{LogicalEdge, LogicalNode, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
@@ -193,8 +193,8 @@ pub struct Collector<K: Key, T: Data> {
     _ts: PhantomData<(K, T)>,
     sent_bytes: Option<IntCounter>,
     sent_messages: Option<IntCounter>,
-    tx_queue_rem_gauges: Vec<Vec<Option<IntGauge>>>,
-    tx_queue_size_gauges: Vec<Vec<Option<IntGauge>>>,
+    tx_queue_rem_gauges: QueueGauges,
+    tx_queue_size_gauges: QueueGauges,
 }
 
 impl<K: Key, T: Data> Collector<K, T> {
@@ -304,85 +304,9 @@ impl<K: Key, T: Data> Context<K, T> {
             )
         };
 
-        let mut counters = HashMap::new();
-
-        if let Some(c) = counter_for_task(
-            &task_info,
-            MESSAGES_RECV,
-            "Count of messages received by this subtask",
-            HashMap::new(),
-        ) {
-            counters.insert(MESSAGES_RECV, c);
-        }
-
-        if let Some(c) = counter_for_task(
-            &task_info,
-            MESSAGES_SENT,
-            "Count of messages sent by this subtask",
-            HashMap::new(),
-        ) {
-            counters.insert(MESSAGES_SENT, c);
-        }
-
-        if let Some(c) = counter_for_task(
-            &task_info,
-            BYTES_RECV,
-            "Count of bytes received by this subtask",
-            HashMap::new(),
-        ) {
-            counters.insert(BYTES_RECV, c);
-        }
-
-        if let Some(c) = counter_for_task(
-            &task_info,
-            BYTES_SENT,
-            "Count of bytes sent by this subtask",
-            HashMap::new(),
-        ) {
-            counters.insert(BYTES_SENT, c);
-        }
-
-        let tx_queue_size_gauges = out_qs
-            .iter()
-            .enumerate()
-            .map(|(i, qs)| {
-                qs.iter()
-                    .enumerate()
-                    .map(|(j, _)| {
-                        gauge_for_task(
-                            &task_info,
-                            "arroyo_worker_tx_queue_size",
-                            "Size of a tx queue",
-                            labels! {
-                                "next_node".to_string() => format!("{}", i),
-                                "next_node_idx".to_string() => format!("{}", j)
-                            },
-                        )
-                    })
-                    .collect()
-            })
-            .collect();
-
-        let tx_queue_rem_gauges = out_qs
-            .iter()
-            .enumerate()
-            .map(|(i, qs)| {
-                qs.iter()
-                    .enumerate()
-                    .map(|(j, _)| {
-                        gauge_for_task(
-                            &task_info,
-                            "arroyo_worker_tx_queue_rem",
-                            "Remaining space in a tx queue",
-                            labels! {
-                                "next_node".to_string() => format!("{}", i),
-                                "next_node_idx".to_string() => format!("{}", j)
-                            },
-                        )
-                    })
-                    .collect()
-            })
-            .collect();
+        let mut counters = register_counters(&task_info);
+        let (tx_queue_size_gauges, tx_queue_rem_gauges) =
+            register_queue_gauges(&task_info, &out_qs);
 
         Context {
             task_info,
