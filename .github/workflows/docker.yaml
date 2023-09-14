@@ -20,9 +20,9 @@ jobs:
           - linux/arm64
         image_type:
           - worker
-#          - services
-#          - compiler
-#          - single
+          - services
+          - compiler
+          - single
         include:
           - platform: linux/amd64
             mold_arch: x86_64
@@ -103,9 +103,9 @@ jobs:
       matrix:
         image_type:
           - worker
-#          - services
-#          - compiler
-#          - single
+          - services
+          - compiler
+          - single
     runs-on: ubuntu-latest
     steps:
       - name: Login to GHCR
