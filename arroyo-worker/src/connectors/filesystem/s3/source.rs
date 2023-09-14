@@ -43,11 +43,11 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
     }
 
     pub fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
-        vec![arroyo_state::global_table('a', "s3_source")]
+        vec![arroyo_state::global_table('a', "s3")]
     }
 
     fn name(&self) -> String {
-        "S3Source".to_string()
+        "S3".to_string()
     }
 
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
