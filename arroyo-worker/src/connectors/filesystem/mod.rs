@@ -32,6 +32,7 @@ pub mod json;
 pub mod local;
 pub mod parquet;
 pub mod single_file;
+pub mod s3;
 
 use self::{
     json::{JsonLocalWriter, JsonWriter, PassThrough},
