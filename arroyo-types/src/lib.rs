@@ -581,7 +581,6 @@ impl TaskInfo {
         labels.insert("operator_id".to_string(), self.operator_id.clone());
         labels.insert("subtask_idx".to_string(), format!("{}", self.task_index));
         labels.insert("operator_name".to_string(), self.operator_name.clone());
-        labels.insert("job_name".to_string(), self.job_id.clone());
         labels
     }
 }
