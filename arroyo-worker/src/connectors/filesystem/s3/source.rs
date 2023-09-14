@@ -27,7 +27,7 @@ pub struct S3SourceFunc<K: Data, T: DeserializeOwned + Data> {
 
 #[source_fn(out_t = T)]
 impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
-    pub fn fom_config(config_str: &str) -> Self {
+    pub fn from_config(config_str: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config_str).expect("Invalid config for S3SourceFunc");
         let table: S3Table =
