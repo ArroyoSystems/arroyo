@@ -141,7 +141,7 @@ async fn test_no_updating_window_functions() {
         .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "window functions have to be partitioned by a time window"
+        "window function must be partitioned by a window as the first argument"
     );
 }
 

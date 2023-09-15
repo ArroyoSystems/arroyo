@@ -29,14 +29,17 @@ use datafusion::sql::{planner::ContextProvider, TableReference};
 use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
-use datafusion_expr::{LogicalPlan, Volatility, WindowUDF};
+use datafusion_expr::{
+    AccumulatorFactoryFunction, LogicalPlan, ReturnTypeFunction, Signature, StateTypeFunction,
+    Volatility, WindowUDF,
+};
 use expressions::{Expression, ExpressionContext};
 use pipeline::{SqlOperator, SqlPipelineBuilder};
 use plan_graph::{get_program, PlanGraph};
 use schemas::window_arrow_struct;
 use tables::{schema_defs, ConnectorTable, Insert, Table};
 
-use crate::code_gen::ValuePointerContext;
+use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::types::{StructDef, StructField, TypeDef};
 use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, JsonFormat};
 use quote::ToTokens;
@@ -61,6 +64,7 @@ pub struct ArroyoSchemaProvider {
     pub source_defs: HashMap<String, String>,
     tables: HashMap<String, Table>,
     pub functions: HashMap<String, Arc<ScalarUDF>>,
+    pub aggregate_functions: HashMap<String, Arc<AggregateUDF>>,
     pub connections: HashMap<String, Connection>,
     pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
@@ -145,6 +149,7 @@ impl ArroyoSchemaProvider {
         Self {
             tables,
             functions,
+            aggregate_functions: HashMap::new(),
             source_defs: HashMap::new(),
             connections: HashMap::new(),
             udf_defs: HashMap::new(),
@@ -171,6 +176,23 @@ impl ArroyoSchemaProvider {
         self.tables.get(table_name)
     }
 
+    fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
+        if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
+            if let Some(segment) = path.segments.last() {
+                if segment.ident == "Vec" {
+                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                        if args.args.len() == 1 {
+                            if let syn::GenericArgument::Type(inner_ty) = &args.args[0] {
+                                return Some(inner_ty.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub fn add_rust_udf(&mut self, body: &str) -> Result<()> {
         let file = syn::parse_file(body)?;
 
@@ -180,13 +202,24 @@ impl ArroyoSchemaProvider {
             };
 
             let mut args: Vec<TypeDef> = vec![];
+            let mut vec_arguments = 0;
             for (i, arg) in function.sig.inputs.iter().enumerate() {
                 match arg {
                     FnArg::Receiver(_) => bail!("self types are not allowed in UDFs"),
                     FnArg::Typed(t) => {
-                        args.push((&*t.ty).try_into().map_err(|_| {
-                            anyhow!("Could not convert arg {} into a SQL data type", i)
-                        })?);
+                        if let Some(vec_type) = Self::vec_inner_type(&*t.ty) {
+                            vec_arguments += 1;
+                            args.push((&vec_type).try_into().map_err(|_| {
+                                anyhow!(
+                                    "Could not convert inner vector arg {} into a SQL data type",
+                                    i
+                                )
+                            })?);
+                        } else {
+                            args.push((&*t.ty).try_into().map_err(|_| {
+                                anyhow!("Could not convert arg {} into a SQL data type", i)
+                            })?);
+                        }
                     }
                 }
             }
@@ -197,28 +230,48 @@ impl ArroyoSchemaProvider {
                     .try_into()
                     .map_err(|_| anyhow!("Could not convert return type into a SQL data type"))?,
             };
+            if vec_arguments > 0 && vec_arguments != args.len() {
+                bail!("all arguments must be vectors or none");
+            }
+            if vec_arguments > 0 {
+                let return_type = Arc::new(ret.as_datatype().unwrap().clone());
+                let name = function.sig.ident.to_string();
+                let signature = Signature::exact(
+                    args.iter()
+                        .map(|t| t.as_datatype().unwrap().clone())
+                        .collect(),
+                    Volatility::Volatile,
+                );
+                let return_type: ReturnTypeFunction = Arc::new(move |_| Ok(return_type.clone()));
+                let accumulator: AccumulatorFactoryFunction = Arc::new(|_| unreachable!());
+                let state_type: StateTypeFunction = Arc::new(|_| unreachable!());
+                let udaf =
+                    AggregateUDF::new(&name, &signature, &return_type, &accumulator, &state_type);
+                self.aggregate_functions
+                    .insert(function.sig.ident.to_string(), Arc::new(udaf));
+            } else {
+                let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
 
-            let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
-
-            if self
-                .functions
-                .insert(
-                    function.sig.ident.to_string(),
-                    Arc::new(create_udf(
-                        &function.sig.ident.to_string(),
-                        args.iter()
-                            .map(|t| t.as_datatype().unwrap().clone())
-                            .collect(),
-                        Arc::new(ret.as_datatype().unwrap().clone()),
-                        Volatility::Volatile,
-                        make_scalar_function(fn_impl),
-                    )),
-                )
-                .is_some()
-            {
-                bail!("Could not register UDF '{}', as there is already a built-in function with that name",
-                    function.sig.ident.to_string());
-            };
+                if self
+                    .functions
+                    .insert(
+                        function.sig.ident.to_string(),
+                        Arc::new(create_udf(
+                            &function.sig.ident.to_string(),
+                            args.iter()
+                                .map(|t| t.as_datatype().unwrap().clone())
+                                .collect(),
+                            Arc::new(ret.as_datatype().unwrap().clone()),
+                            Volatility::Volatile,
+                            make_scalar_function(fn_impl),
+                        )),
+                    )
+                    .is_some()
+                {
+                    bail!("Could not register UDF '{}', as there is already a built-in function with that name",
+                        function.sig.ident.to_string());
+                };
+            }
 
             function.vis = Visibility::Public(Default::default());
 
@@ -263,8 +316,8 @@ impl ContextProvider for ArroyoSchemaProvider {
         self.functions.get(name).cloned()
     }
 
-    fn get_aggregate_meta(&self, _name: &str) -> Option<Arc<AggregateUDF>> {
-        None
+    fn get_aggregate_meta(&self, name: &str) -> Option<Arc<AggregateUDF>> {
+        self.aggregate_functions.get(name).cloned()
     }
 
     fn get_variable_type(&self, _variable_names: &[String]) -> Option<DataType> {

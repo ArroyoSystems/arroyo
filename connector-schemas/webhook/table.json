@@ -1,0 +1,28 @@
+{
+    "type": "object",
+    "title": "WebhookTable",
+    "properties": {
+        "endpoint": {
+            "title": "Endpoint",
+            "type": "string",
+            "description": "The endpoint that should receive the webhook",
+            "examples": [
+                "https://yourdomain.com/api/v1/webhooks"
+            ],
+            "format": "uri"
+        },
+        "headers": {
+            "title": "Headers",
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Optional, comma separated list of headers to send with the webhook",
+            "pattern": "([a-zA-Z0-9-]+: ?.+,)*([a-zA-Z0-9-]+: ?.+)",
+            "examples": [
+                "Authentication: Basic my-auth-secret,Content-Type: application/json"
+            ]
+        }
+    },
+    "required": [
+        "endpoint"
+    ]
+}

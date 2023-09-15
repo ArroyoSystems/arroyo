@@ -136,8 +136,11 @@ export function CreatePipeline() {
   };
 
   useEffect(() => {
-    if (pipeline && job) {
-      setOutputSource(useJobOutput(sseHandler, pipeline.id, job.id));
+    if (pipelineId && job) {
+      if (outputSource) {
+        outputSource.close();
+      }
+      setOutputSource(useJobOutput(sseHandler, pipelineId, job.id));
     }
   }, [job?.id]);
 
@@ -251,7 +254,7 @@ export function CreatePipeline() {
           {name.toUpperCase()}S
         </Text>
         <Stack spacing={4}>
-          {sources.length == 0 ? (
+          {tables.length == 0 ? (
             <Box overflowY="auto" overflowX="hidden">
               <Text>
                 No {name}s have been created. Create one <Link to="/connections/new">here</Link>.

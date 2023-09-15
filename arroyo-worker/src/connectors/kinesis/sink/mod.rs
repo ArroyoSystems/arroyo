@@ -7,10 +7,10 @@ use anyhow::Result;
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::{CheckpointBarrier, Key, Record};
-use aws_config::load_from_env;
+use aws_config::from_env;
 use aws_sdk_kinesis::{
     client::fluent_builders::PutRecords, model::PutRecordsRequestEntry, types::Blob,
-    Client as KinesisClient,
+    Client as KinesisClient, Region,
 };
 use serde::Serialize;
 use tracing::warn;
@@ -21,8 +21,9 @@ use crate::{engine::Context, formats::DataSerializer, SchemaData};
 use super::{KinesisTable, TableType};
 
 #[derive(StreamNode)]
-pub struct KinesisSinkFunc<K: Key + Serialize, T: SchemaData + Serialize> {
+pub struct KinesisSinkFunc<K: Key + Serialize, T: SchemaData> {
     client: Option<KinesisClient>,
+    aws_region: Option<String>,
     in_progress_batch: Option<BatchRecordPreparer>,
     flush_config: FlushConfig,
     serializer: DataSerializer<T>,
@@ -31,7 +32,7 @@ pub struct KinesisSinkFunc<K: Key + Serialize, T: SchemaData + Serialize> {
 }
 
 #[process_fn(in_k = K, in_t = T, tick_ms=10)]
-impl<K: Key + Serialize, T: SchemaData + Serialize> KinesisSinkFunc<K, T> {
+impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
     pub fn from_config(config: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config).expect("Invalid config for KafkaSink");
@@ -41,6 +42,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KinesisSinkFunc<K, T> {
         Self {
             client: None,
             in_progress_batch: None,
+            aws_region: table.aws_region,
             name: table.stream_name,
             serializer: DataSerializer::new(
                 config
@@ -57,9 +59,11 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KinesisSinkFunc<K, T> {
     }
 
     async fn on_start(&mut self, _ctx: &mut Context<(), ()>) {
-        let config = load_from_env().await;
-        let client = KinesisClient::new(&config);
-        self.client = Some(client);
+        let mut loader = from_env();
+        if let Some(region) = &self.aws_region {
+            loader = loader.region(Region::new(region.clone()));
+        }
+        self.client = Some(KinesisClient::new(&loader.load().await));
     }
 
     async fn handle_checkpoint(&mut self, _: &CheckpointBarrier, _: &mut Context<(), ()>) {
@@ -77,7 +81,10 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KinesisSinkFunc<K, T> {
             .as_ref()
             .map(|k| serde_json::to_string(k).unwrap())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let v = self.serializer.to_vec(&record.value);
+
+        let Some(v) = self.serializer.to_vec(&record.value) else {
+            return;
+        };
 
         let mut batch_preparer = match self.in_progress_batch.take() {
             None => BatchRecordPreparer::new(

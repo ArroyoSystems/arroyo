@@ -1,25 +1,29 @@
 use crate::{
-    code_gen::{CodeGenerator, JoinPairContext, ValuePointerContext, VecOfPointersContext},
+    code_gen::{
+        CodeGenerator, JoinListsContext, JoinPairContext, ValuePointerContext, VecOfPointersContext,
+    },
     operators::TwoPhaseAggregation,
-    pipeline::{JoinType, SortDirection},
-    types::{StructDef, StructField, TypeDef},
+    pipeline::{JoinType, SortDirection, SqlOperator},
+    schemas::window_type_def,
+    types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
 use anyhow::{anyhow, bail, Ok, Result};
 use arrow::datatypes::DataType;
 use arrow_schema::{Field, TimeUnit};
+use arroyo_datastream::WindowType;
 use arroyo_types::{DatePart, DateTruncPrecision};
 use datafusion_common::ScalarValue;
 use datafusion_expr::{
     aggregate_function,
-    expr::{AggregateFunction, ScalarFunction, ScalarUDF, Sort},
+    expr::{AggregateUDF, Alias, ScalarFunction, ScalarUDF, Sort},
     type_coercion::aggregates::{avg_return_type, sum_return_type},
     BinaryExpr, BuiltinScalarFunction, Expr, TryCast,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use regex::Regex;
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 use syn::{parse_quote, parse_str, Ident, Path};
 
 #[derive(Debug, Clone)]
@@ -44,6 +48,7 @@ pub enum Expression {
     RustUdf(RustUdfExpression),
     WrapType(WrapTypeExpression),
     Case(CaseExpression),
+    WindowUDF(WindowType),
 }
 
 pub struct JoinedPairedStruct {
@@ -126,6 +131,102 @@ impl CodeGenerator<JoinPairContext, StructDef, syn::Expr> for JoinType {
     }
 }
 
+impl CodeGenerator<JoinListsContext, StructDef, syn::Expr> for JoinType {
+    fn generate(&self, input_context: &JoinListsContext) -> syn::Expr {
+        let pair_context = JoinPairContext {
+            left_struct: input_context.left_struct.clone(),
+            right_struct: input_context.right_struct.clone(),
+        };
+        let pair_expression = self.generate(&pair_context);
+        let left_list_ident = input_context.left_list_ident();
+        let right_list_ident = input_context.right_list_ident();
+        let left_ident = pair_context.left_ident();
+        let right_ident = pair_context.right_ident();
+        let right_type = input_context.right_struct.get_type();
+        let left_type = input_context.left_struct.get_type();
+        match self {
+            JoinType::Inner => {
+                parse_quote!( {
+                    let mut result = vec![];
+                    for #left_ident in #left_list_ident {
+                        for #right_ident in #right_list_ident {
+                            result.push(#pair_expression)
+                        }
+                    }
+                    result
+                })
+            }
+            JoinType::Left => {
+                parse_quote!( {
+                    let mut result = vec![];
+                    for #left_ident in #left_list_ident {
+                        let mut found = false;
+                        for #right_ident in #right_list_ident {
+                            let #right_ident =:Option<#right_type> = Some(#right_ident);
+                            result.push(#pair_expression);
+                            found = true;
+                        }
+                        if !found {
+                            let #right_ident : Option<#right_type> = None;
+                            result.push(#pair_expression);
+                        }
+                    }
+                    result
+                })
+            }
+            JoinType::Right => {
+                parse_quote!( {
+                    let mut result = vec![];
+                    for #right_ident in #right_list_ident {
+                        let mut found = false;
+                        for #left_ident in #left_list_ident {
+                            result.push(#pair_expression);
+                            found = true;
+                        }
+                        if !found {
+                            let #left_ident : Option<#left_type> = None;
+                            result.push(#pair_expression);
+                        }
+                    }
+                    result
+                })
+            }
+            JoinType::Full => {
+                parse_quote!(
+                    {
+                        let mut result = vec![];
+                        let left_empty = #left_list_ident.is_empty();
+                        let right_empty = #right_list_ident.is_empty();
+                        for #left_ident in #left_list_ident {
+                            let #left_ident :Option<&#left_type> = Some(#left_ident);
+                            for #right_ident in #right_list_ident {
+                                let #right_ident :Option<&#right_type> = Some(#right_ident);
+                                result.push(#pair_expression);
+                            }
+                            if right_empty {
+                                let #right_ident : Option<#right_type> = None;
+                                result.push(#pair_expression);
+                            }
+                        }
+                        if left_empty {
+                            let #left_ident : Option<#left_type> = None;
+                            for #right_ident in #right_list_ident {
+                                let #right_ident :Option<&#right_type> = Some(#right_ident);
+                                result.push(#pair_expression);
+                            }
+                        }
+                        result
+                    }
+                )
+            }
+        }
+    }
+
+    fn expression_type(&self, input_context: &JoinListsContext) -> StructDef {
+        self.join_struct_type(&input_context.left_struct, &input_context.right_struct)
+    }
+}
+
 impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         match self {
@@ -146,6 +247,9 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::RustUdf(udf) => udf.generate(input_context),
             Expression::WrapType(wrap_type) => wrap_type.generate(input_context),
             Expression::Case(case) => case.generate(input_context),
+            Expression::WindowUDF(_window_type) => {
+                unreachable!("window functions shouldn't be computed off of a value pointer")
+            }
         }
     }
 
@@ -186,43 +290,14 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::RustUdf(t) => t.expression_type(input_context),
             Expression::WrapType(t) => t.expression_type(input_context),
             Expression::Case(case_statement) => case_statement.expression_type(input_context),
+            Expression::WindowUDF(_window_type) => {
+                unreachable!("window functions shouldn't be computed off of a value pointer")
+            }
         }
     }
 }
 
 impl Expression {
-    pub fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
-        match self {
-            Expression::Column(column_expression) => column_expression.generate(input_context),
-            Expression::UnaryBoolean(unary_boolean_expression) => {
-                unary_boolean_expression.generate(input_context)
-            }
-            Expression::Literal(literal_expression) => literal_expression.generate(input_context),
-            Expression::BinaryComparison(comparison_expression) => {
-                comparison_expression.generate(input_context)
-            }
-            Expression::BinaryMath(math_expression) => math_expression.generate(input_context),
-            Expression::StructField(struct_field_expression) => {
-                struct_field_expression.generate(input_context)
-            }
-            Expression::Aggregation(_aggregation_expression) => {
-                unreachable!("aggregates shouldn't actually be expressions!")
-            }
-            Expression::Cast(cast_expression) => cast_expression.generate(input_context),
-            Expression::Numeric(numeric_expression) => numeric_expression.generate(input_context),
-            Expression::String(string_function) => string_function.generate(input_context),
-            Expression::Hash(hash_expression) => hash_expression.generate(input_context),
-            Expression::DataStructure(data_structure_expression) => {
-                data_structure_expression.generate(input_context)
-            }
-            Expression::Json(json_function) => json_function.generate(input_context),
-            Expression::RustUdf(t) => t.generate(input_context),
-            Expression::WrapType(t) => t.generate(input_context),
-            Expression::Case(case_expression) => case_expression.generate(input_context),
-            Expression::Date(datetime_expr) => datetime_expr.generate(input_context),
-        }
-    }
-
     pub(crate) fn has_max_value(&self, field: &StructField) -> Option<u64> {
         match self {
             Expression::BinaryComparison(BinaryComparisonExpression { left, op, right }) => {
@@ -287,6 +362,64 @@ impl Expression {
                 }
             }
             _ => None,
+        }
+    }
+
+    pub(crate) fn get_window_type(&self, input: &SqlOperator) -> Result<Option<WindowType>> {
+        match self {
+            Expression::Column(column) => {
+                if let Some(window_type) = input.get_window() {
+                    let column_field = input
+                        .return_type()
+                        .get_field(column.column_field.alias.clone(), &column.column_field.name)?;
+                    if column_field.data_type == window_type_def() {
+                        return Ok(Some(window_type.clone()));
+                    }
+                }
+                Ok(None)
+            }
+            Expression::WindowUDF(window_type) => {
+                if let Some(input_window_type) = input.get_window() {
+                    if input_window_type != *window_type {
+                        bail!(
+                            "window type mismatch: {:?} != {:?}",
+                            input_window_type,
+                            window_type
+                        );
+                    }
+                }
+                Ok(Some(window_type.clone()))
+            }
+            Expression::UnaryBoolean(_)
+            | Expression::Literal(_)
+            | Expression::BinaryComparison(_)
+            | Expression::BinaryMath(_)
+            | Expression::StructField(_)
+            | Expression::Aggregation(_)
+            | Expression::Cast(_)
+            | Expression::Numeric(_)
+            | Expression::Date(_)
+            | Expression::String(_)
+            | Expression::Hash(_)
+            | Expression::DataStructure(_)
+            | Expression::Json(_)
+            | Expression::RustUdf(_)
+            | Expression::WrapType(_)
+            | Expression::Case(_) => Ok(None),
+        }
+    }
+    fn get_duration(expression: &Expr) -> Result<Duration> {
+        match expression {
+            Expr::Literal(ScalarValue::IntervalDayTime(Some(val))) => {
+                Ok(Duration::from_millis(*val as u64))
+            }
+            Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(val))) => {
+                Ok(interval_month_day_nanos_to_duration(*val))
+            }
+            _ => bail!(
+                "unsupported Duration expression, expect duration literal, not {}",
+                expression
+            ),
         }
     }
 }
@@ -654,6 +787,28 @@ impl<'a> ExpressionContext<'a> {
                         path,
                     }))
                 }
+                "hop" => {
+                    if args.len() != 2 {
+                        bail!("wrong number of arguments for hop(), expected two");
+                    }
+                    let slide = Expression::get_duration(&args[0])?;
+                    let width = Expression::get_duration(&args[1])?;
+                    Ok(Expression::WindowUDF(WindowType::Sliding { width, slide }))
+                }
+                "tumble" => {
+                    if args.len() != 1 {
+                        bail!("wrong number of arguments for tumble(), expect one");
+                    }
+                    let width = Expression::get_duration(&args[0])?;
+                    Ok(Expression::WindowUDF(WindowType::Tumbling { width }))
+                }
+                "session" => {
+                    if args.len() != 1 {
+                        bail!("wrong number of arguments for session(), expected one");
+                    }
+                    let gap = Expression::get_duration(&args[0])?;
+                    Ok(Expression::WindowUDF(WindowType::Session { gap }))
+                }
                 udf => {
                     // get udf from context
                     let def = self
@@ -685,32 +840,6 @@ impl<'a> ExpressionContext<'a> {
             expression => {
                 bail!("expression {:?} not yet implemented", expression)
             }
-        }
-    }
-
-    pub fn as_two_phase_aggregation(&mut self, expr: &Expr) -> Result<TwoPhaseAggregation> {
-        if !self.input_struct.fields.is_empty() {
-            bail!("expected single field input");
-        }
-        match expr {
-            Expr::AggregateFunction(AggregateFunction {
-                fun,
-                args,
-                distinct: false,
-                filter: None,
-                order_by: None,
-            }) => {
-                if args.len() != 1 {
-                    bail!("unexpected arg length");
-                }
-                let incoming_expression = self.compile_expr(&args[0])?;
-                let aggregator = Aggregator::from_datafusion(fun.clone(), false)?;
-                Ok(TwoPhaseAggregation {
-                    incoming_expression,
-                    aggregator,
-                })
-            }
-            _ => bail!("expected aggregate expression"),
         }
     }
 }
@@ -1202,6 +1331,80 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StructFieldExpre
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum AggregateComputation {
+    Builtin {
+        column: Column,
+        computation: AggregationExpression,
+    },
+    UDAF {
+        column: Column,
+        computation: RustUdafExpression,
+    },
+}
+impl AggregateComputation {
+    pub fn allows_two_phase(&self) -> bool {
+        match self {
+            AggregateComputation::Builtin { computation, .. } => computation.allows_two_phase(),
+            AggregateComputation::UDAF { .. } => false,
+        }
+    }
+    pub fn try_from_expression(
+        ctx: &mut ExpressionContext,
+        column: &datafusion_common::Column,
+        expr: &Expr,
+    ) -> Result<Self> {
+        match expr {
+            Expr::Alias(Alias { expr, .. }) => Self::try_from_expression(ctx, column, expr),
+            Expr::AggregateFunction(aggregate_function) => {
+                let computation =
+                    AggregationExpression::try_from_aggregate_function(ctx, aggregate_function)?;
+                Ok(Self::Builtin {
+                    column: Column::convert(column),
+                    computation,
+                })
+            }
+            Expr::AggregateUDF(aggregate_udf) => {
+                let computation = RustUdafExpression::try_from_aggregate_udf(ctx, aggregate_udf)?;
+                Ok(Self::UDAF {
+                    column: Column::convert(column),
+                    computation,
+                })
+            }
+            _ => bail!("can't convert expression {:?} to aggregate", expr),
+        }
+    }
+
+    pub(crate) fn column(&self) -> Column {
+        match self {
+            AggregateComputation::Builtin { column, .. }
+            | AggregateComputation::UDAF { column, .. } => column.clone(),
+        }
+    }
+}
+
+impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for AggregateComputation {
+    fn generate(&self, input_context: &VecOfPointersContext) -> syn::Expr {
+        match self {
+            AggregateComputation::Builtin { computation, .. } => {
+                computation.generate(input_context)
+            }
+            AggregateComputation::UDAF { computation, .. } => computation.generate(input_context),
+        }
+    }
+
+    fn expression_type(&self, input_context: &VecOfPointersContext) -> TypeDef {
+        match self {
+            AggregateComputation::Builtin { computation, .. } => {
+                computation.expression_type(input_context)
+            }
+            AggregateComputation::UDAF { computation, .. } => {
+                computation.expression_type(input_context)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub enum Aggregator {
     Count,
@@ -1297,28 +1500,29 @@ impl AggregationExpression {
         }
     }
 
-    pub fn try_from_expression(ctx: &mut ExpressionContext, expr: &Expr) -> Result<Self> {
-        match expr {
-            Expr::AggregateFunction(datafusion_expr::expr::AggregateFunction {
-                fun,
-                args,
-                distinct,
-                filter: None,
-                order_by: None,
-            }) => {
-                if args.len() != 1 {
-                    bail!("unexpected arg length");
-                }
-                let producing_expression = Box::new(ctx.compile_expr(&args[0])?);
-                let aggregator = Aggregator::from_datafusion(fun.clone(), *distinct)?;
-                Ok(AggregationExpression {
-                    producing_expression,
-                    aggregator,
-                })
-            }
-            Expr::Alias(alias) => Self::try_from_expression(ctx, &alias.expr),
-            _ => bail!("expected aggregate function, not {}", expr),
+    pub fn try_from_aggregate_function(
+        ctx: &mut ExpressionContext,
+        aggregate_function: &datafusion_expr::expr::AggregateFunction,
+    ) -> Result<Self> {
+        if aggregate_function.filter.is_some() {
+            bail!("Not supporting aggregate filters right now");
         }
+        if aggregate_function.order_by.is_some() {
+            bail!("Not supporting aggregate sorts right now");
+        }
+        let fun = &aggregate_function.fun;
+        let distinct = aggregate_function.distinct;
+        let args = &aggregate_function.args;
+
+        if args.len() != 1 {
+            bail!("unexpected arg length");
+        }
+        let producing_expression = Box::new(ctx.compile_expr(&args[0])?);
+        let aggregator = Aggregator::from_datafusion(fun.clone(), distinct)?;
+        Ok(AggregationExpression {
+            producing_expression,
+            aggregator,
+        })
     }
 }
 
@@ -1343,7 +1547,7 @@ impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for AggregationExpr
             Some(quote!(.unwrap()))
         };
 
-        match self.aggregator {
+        match &self.aggregator {
             Aggregator::Count => {
                 if producing_expression_is_optional {
                     parse_quote!({
@@ -3079,7 +3283,7 @@ pub struct RustUdfExpression {
     ret_type: TypeDef,
 }
 
-impl RustUdfExpression {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for RustUdfExpression {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let name = format_ident!("{}", &self.name);
 
@@ -3128,6 +3332,131 @@ impl RustUdfExpression {
                         !t.is_optional() && e.expression_type(input_context).is_optional()
                     }),
         )
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
+pub struct RustUdafExpression {
+    name: String,
+    args: Vec<(TypeDef, Expression)>,
+    ret_type: TypeDef,
+}
+impl RustUdafExpression {
+    fn try_from_aggregate_udf(
+        ctx: &mut ExpressionContext<'_>,
+        aggregate_udf: &AggregateUDF,
+    ) -> Result<Self> {
+        let udf_name = &aggregate_udf.fun.name;
+        let udf = ctx
+            .schema_provider
+            .udf_defs
+            .get(udf_name)
+            .ok_or_else(|| anyhow!("no UDAF with name '{}'", udf_name))?;
+        let inputs: Result<Vec<Expression>> = aggregate_udf
+            .args
+            .iter()
+            .map(|e| (ctx.compile_expr(e)))
+            .collect();
+        let inputs = inputs?;
+
+        if inputs.len() != udf.args.len() {
+            bail!(
+                "wrong number of arguments for udf {} (found {}, expected {})",
+                udf_name,
+                aggregate_udf.args.len(),
+                udf.args.len()
+            );
+        }
+        if aggregate_udf.order_by.is_some() {
+            bail!("Not supporting UDAF sorts right now, as datafusion doesn't");
+        }
+
+        Ok(RustUdafExpression {
+            name: udf_name.to_string(),
+            args: udf.args.clone().into_iter().zip(inputs).collect(),
+            ret_type: udf.ret.clone(),
+        })
+    }
+}
+impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for RustUdafExpression {
+    fn generate(&self, input_context: &VecOfPointersContext) -> syn::Expr {
+        let name = format_ident!("{}", &self.name);
+
+        // early exit means there are terms that won't be included in the aggregate
+        // if they have null values, because the UDAF expects non-null values
+        let need_early_exit = self.args.iter().any(|(function_arg, incoming_expression)| {
+            !function_arg.is_optional()
+                && incoming_expression
+                    .expression_type(&ValuePointerContext)
+                    .is_optional()
+        });
+
+        let (arg_initialization, term_expressions): (Vec<syn::Stmt>, Vec<syn::Expr>) = self
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, (def, expr))| {
+                let sub_expr = expr.generate(&ValuePointerContext);
+                let term_expr = match (
+                    def.is_optional(),
+                    expr.expression_type(&ValuePointerContext).is_optional(),
+                ) {
+                    (true, true) | (false, false) => parse_quote!(#sub_expr),
+                    (true, false) => parse_quote!(Some(#sub_expr)),
+                    (false, true) => parse_quote!((#sub_expr)?),
+                };
+                let arg_ident = format_ident!("arg_vec_{}", i);
+                let arg_init = parse_quote!(let mut #arg_ident = Vec::new(););
+                (arg_init, term_expr)
+            })
+            .unzip();
+        let single_value_ident = ValuePointerContext.variable_ident();
+
+        let mut vec_init: Vec<syn::Stmt> = Vec::new();
+        let mut vec_push: Vec<syn::Stmt> = Vec::new();
+        let mut vec_names: Vec<Ident> = Vec::new();
+        for i in 0..self.args.len() {
+            let arg_ident = format_ident!("arg_vec_{}", i);
+            vec_init.push(parse_quote!(let mut #arg_ident = Vec::new();));
+            let index: syn::Index = parse_str(&i.to_string()).unwrap();
+            vec_push.push(parse_quote!(#arg_ident.push(#single_value_ident.#index);));
+            vec_names.push(arg_ident);
+        }
+
+        let trailing_comma: Option<TokenStream> = if self.args.len() == 1 {
+            Some(quote!(,))
+        } else {
+            None
+        };
+
+        let tuple_expr: syn::Expr = parse_quote!((#(#term_expressions),*#trailing_comma));
+
+        let (map_func, tuple_expr): (syn::Ident, syn::Expr) = if need_early_exit {
+            (parse_quote!(filter_map), parse_quote!(Some(#tuple_expr)))
+        } else {
+            (parse_quote!(map), tuple_expr)
+        };
+
+        let ret: syn::Expr = parse_quote!(udfs::#name(#(#vec_names),*));
+
+        let vec_arg = input_context.variable_ident();
+        let tokens = quote!( {
+            #(#arg_initialization)*
+            #vec_arg.iter().#map_func(|#single_value_ident| {
+               #tuple_expr
+            }).for_each ( |#single_value_ident| {
+                #(#vec_push)*
+            }
+            );
+            #ret
+        }
+        );
+        let token_string = tokens.to_string();
+        parse_str(&token_string).expect(&token_string)
+    }
+
+    fn expression_type(&self, _input_context: &VecOfPointersContext) -> TypeDef {
+        self.ret_type.clone()
     }
 }
 

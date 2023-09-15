@@ -29,7 +29,7 @@ use super::{client_configs, KafkaConfig, KafkaTable, SinkCommitMode, TableType};
 mod test;
 
 #[derive(StreamNode)]
-pub struct KafkaSinkFunc<K: Key + Serialize, T: SchemaData + Serialize> {
+pub struct KafkaSinkFunc<K: Key + Serialize, T: SchemaData> {
     topic: String,
     bootstrap_servers: String,
     consistency_mode: ConsistencyMode,
@@ -60,7 +60,7 @@ impl From<SinkCommitMode> for ConsistencyMode {
     }
 }
 
-impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
+impl<K: Key + Serialize, T: SchemaData> KafkaSinkFunc<K, T> {
     pub fn new(
         servers: &str,
         topic: &str,
@@ -246,7 +246,9 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
             .map(|k| serde_json::to_string(k).unwrap());
         let v = self.serializer.to_vec(&record.value);
 
-        self.publish(k, v).await;
+        if let Some(v) = v {
+            self.publish(k, v).await;
+        }
     }
 
     async fn handle_commit(&mut self, epoch: u32, ctx: &mut crate::engine::Context<(), ()>) {

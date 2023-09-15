@@ -138,6 +138,10 @@ impl SchemaData for TestOutStruct {
             false,
         )])
     }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        unimplemented!()
+    }
 }
 
 struct KafkaSinkWithWrites {

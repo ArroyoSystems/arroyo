@@ -13,9 +13,12 @@ use arrow::{
     datatypes::{Field, IntervalDayTimeType},
 };
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
-use arroyo_rpc::types::{
-    FieldType, Format, JsonFormat, PrimitiveType, SourceField, SourceFieldType, StructType,
-    TimestampFormat,
+use arroyo_rpc::{
+    primitive_to_sql,
+    types::{
+        FieldType, Format, JsonFormat, PrimitiveType, SourceField, SourceFieldType, StructType,
+        TimestampFormat,
+    },
 };
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
@@ -241,6 +244,26 @@ impl StructDef {
         let schema_data_impl = if self.name.is_none() {
             // generate a SchemaData impl but only for generated types
             let name = self.struct_name();
+
+            let to_raw_string = if self.fields.len() == 1
+                && matches!(
+                    self.fields[0].data_type,
+                    TypeDef::DataType(DataType::Utf8, _)
+                ) {
+                let field = &self.fields[0].field_ident();
+                if self.fields[0].nullable() {
+                    quote! {
+                        self.#field.as_ref().map(|v| v.as_bytes().to_vec())
+                    }
+                } else {
+                    quote! {
+                        Some(self.#field.as_bytes().to_vec())
+                    }
+                }
+            } else {
+                quote! { unimplemented!("to_raw_string is not implemented for this type") }
+            };
+
             Some(quote! {
                 impl arroyo_worker::SchemaData for #struct_type {
                     fn name() -> &'static str {
@@ -250,6 +273,10 @@ impl StructDef {
                     fn schema() -> arrow::datatypes::Schema {
                         let fields: Vec<arrow::datatypes::Field> = vec![#(#schema_initializations,)*];
                         arrow::datatypes::Schema::new(fields)
+                    }
+
+                    fn to_raw_string(&self) -> Option<Vec<u8>> {
+                        #to_raw_string
                     }
                 }
             })
@@ -1216,16 +1243,16 @@ impl TryFrom<StructField> for SourceField {
     fn try_from(f: StructField) -> Result<Self, Self::Error> {
         let field_name = f.name();
         let nullable = f.nullable();
-        let field_type = match f.data_type {
+        let (field_type, sql_name) = match f.data_type {
             TypeDef::StructDef(StructDef { name, fields, .. }, _) => {
                 let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
 
                 let st = StructType {
-                    name,
+                    name: name.clone(),
                     fields: fields?,
                 };
 
-                FieldType::Struct(st)
+                (FieldType::Struct(st), name)
             }
             TypeDef::DataType(dt, _) => {
                 let pt = match dt {
@@ -1244,7 +1271,10 @@ impl TryFrom<StructField> for SourceField {
                     dt => Err(format!("Unsupported data type {:?}", dt)),
                 }?;
 
-                FieldType::Primitive(pt)
+                (
+                    FieldType::Primitive(pt.clone()),
+                    Some(primitive_to_sql(pt).to_string()),
+                )
             }
         };
 
@@ -1252,7 +1282,7 @@ impl TryFrom<StructField> for SourceField {
             field_name,
             field_type: SourceFieldType {
                 r#type: field_type,
-                sql_name: None,
+                sql_name,
             },
             nullable,
         })

@@ -11,74 +11,6 @@ pub trait CodeGenerator<Context, OutputValue, OutputType: ToTokens> {
     fn expression_type(&self, input_context: &Context) -> OutputValue;
 }
 
-impl Typed for () {
-    fn syn_type(&self) -> syn::Type {
-        parse_quote!(())
-    }
-}
-
-pub trait Typed {
-    fn syn_type(&self) -> syn::Type;
-}
-
-pub struct JoinPairContext {
-    pub left_struct: StructDef,
-    pub right_struct: StructDef,
-}
-
-impl JoinPairContext {
-    pub fn new(left_struct: StructDef, right_struct: StructDef) -> Self {
-        JoinPairContext {
-            left_struct,
-            right_struct,
-        }
-    }
-
-    pub fn left_ident(&self) -> syn::Ident {
-        parse_quote!(left)
-    }
-
-    pub fn right_ident(&self) -> syn::Ident {
-        parse_quote!(right)
-    }
-
-    pub(crate) fn compile_pair_merge_record_expression<
-        CG: CodeGenerator<Self, StructDef, syn::Expr>,
-    >(
-        &self,
-        code_generator: &CG,
-    ) -> syn::Expr {
-        let merge_expr = code_generator.generate(self);
-        let left_ident = self.left_ident();
-        let right_ident = self.right_ident();
-        parse_quote!({
-            let #left_ident = &record.value.0;
-            let #right_ident = &record.value.1;
-            arroyo_types::Record {
-                timestamp: record.timestamp.clone(),
-                key: None,
-                value: #merge_expr
-            }
-        })
-    }
-
-    pub fn compile_updating_pair_merge_value_expression<
-        CG: CodeGenerator<Self, StructDef, syn::Expr>,
-    >(
-        &self,
-        code_generator: &CG,
-    ) -> syn::Expr {
-        let merge_expr = code_generator.generate(self);
-        let left_ident = self.left_ident();
-        let right_ident = self.right_ident();
-        parse_quote!({
-            let #left_ident = &arg.0;
-            let #right_ident = &arg.1;
-            Some(#merge_expr)
-        })
-    }
-}
-
 pub struct ValuePointerContext;
 
 impl ValuePointerContext {
@@ -239,6 +171,107 @@ impl ValuePointerContext {
         )
     }
 }
+
+pub struct JoinPairContext {
+    pub left_struct: StructDef,
+    pub right_struct: StructDef,
+}
+
+impl JoinPairContext {
+    pub fn new(left_struct: StructDef, right_struct: StructDef) -> Self {
+        JoinPairContext {
+            left_struct,
+            right_struct,
+        }
+    }
+
+    pub fn left_ident(&self) -> syn::Ident {
+        parse_quote!(left)
+    }
+
+    pub fn right_ident(&self) -> syn::Ident {
+        parse_quote!(right)
+    }
+
+    pub(crate) fn compile_pair_merge_record_expression<
+        CG: CodeGenerator<Self, StructDef, syn::Expr>,
+    >(
+        &self,
+        code_generator: &CG,
+    ) -> syn::Expr {
+        let merge_expr = code_generator.generate(self);
+        let left_ident = self.left_ident();
+        let right_ident = self.right_ident();
+        parse_quote!({
+            let #left_ident = &record.value.0;
+            let #right_ident = &record.value.1;
+            arroyo_types::Record {
+                timestamp: record.timestamp.clone(),
+                key: None,
+                value: #merge_expr
+            }
+        })
+    }
+
+    pub fn compile_updating_pair_merge_value_expression<
+        CG: CodeGenerator<Self, StructDef, syn::Expr>,
+    >(
+        &self,
+        code_generator: &CG,
+    ) -> syn::Expr {
+        let merge_expr = code_generator.generate(self);
+        let left_ident = self.left_ident();
+        let right_ident = self.right_ident();
+        parse_quote!({
+            let #left_ident = &arg.0;
+            let #right_ident = &arg.1;
+            Some(#merge_expr)
+        })
+    }
+}
+
+pub struct JoinListsContext {
+    pub left_struct: StructDef,
+    pub right_struct: StructDef,
+}
+
+impl JoinListsContext {
+    pub fn new(left_struct: StructDef, right_struct: StructDef) -> Self {
+        JoinListsContext {
+            left_struct,
+            right_struct,
+        }
+    }
+
+    pub fn left_list_ident(&self) -> syn::Ident {
+        parse_quote!(lefts)
+    }
+
+    pub fn right_list_ident(&self) -> syn::Ident {
+        parse_quote!(rights)
+    }
+
+    pub(crate) fn compile_list_merge_record_expression<
+        CG: CodeGenerator<Self, StructDef, syn::Expr>,
+    >(
+        &self,
+        code_generator: &CG,
+    ) -> syn::Expr {
+        let merge_expr = code_generator.generate(self);
+        let left_ident = self.left_list_ident();
+        let right_ident = self.right_list_ident();
+        parse_quote!({
+            let #left_ident = &record.value.0;
+            let #right_ident = &record.value.1;
+            arroyo_types::Record {
+                timestamp: record.timestamp.clone(),
+                key: None,
+                value: #merge_expr
+            }
+        })
+    }
+}
+
 pub struct VecAggregationContext {
     pub values_context: VecOfPointersContext,
 }

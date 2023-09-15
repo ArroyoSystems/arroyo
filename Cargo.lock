@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-api"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-compiler-service"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arroyo-rpc",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-connectors"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arroyo-datastream",
@@ -502,6 +502,7 @@ dependencies = [
  "futures",
  "rdkafka",
  "regress",
+ "reqwest",
  "schemars",
  "serde",
  "serde_json",
@@ -514,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-controller"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arrow-schema",
@@ -564,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-datastream"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arrow-schema",
@@ -588,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-macro"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -597,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-metrics"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arroyo-types",
  "prometheus",
@@ -605,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-node"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arroyo-rpc",
@@ -626,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-openapi"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arroyo-api",
  "reqwest",
@@ -673,8 +674,9 @@ dependencies = [
 
 [[package]]
 name = "arroyo-rpc"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
+ "anyhow",
  "arroyo-types",
  "bincode 2.0.0-rc.3",
  "nanoid",
@@ -689,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-server-common"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arroyo-types",
  "axum",
@@ -715,7 +717,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-sql"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -746,7 +748,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-sql-macro"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arroyo-connectors",
  "arroyo-datastream",
@@ -760,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-state"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -789,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-storage"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arroyo-types",
  "async-trait",
@@ -803,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-types"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -813,7 +815,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-worker"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "ahash 0.8.3",
  "anyhow",
@@ -856,6 +858,7 @@ dependencies = [
  "rdkafka-sys",
  "regex",
  "regress",
+ "reqwest",
  "rusoto_core",
  "rusoto_s3",
  "serde",
@@ -1978,7 +1981,7 @@ dependencies = [
 
 [[package]]
 name = "copy-artifacts"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arroyo-storage",
  "regex",
@@ -3842,7 +3845,7 @@ dependencies = [
  "rustls-native-certs",
  "tokio",
  "tokio-rustls 0.22.0",
- "webpki 0.21.4",
+ "webpki",
 ]
 
 [[package]]
@@ -3854,7 +3857,7 @@ dependencies = [
  "futures-util",
  "http",
  "hyper",
- "rustls 0.21.5",
+ "rustls 0.21.7",
  "tokio",
  "tokio-rustls 0.24.1",
 ]
@@ -3970,7 +3973,7 @@ dependencies = [
 
 [[package]]
 name = "integ"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arroyo-openapi",
@@ -6066,9 +6069,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.18"
+version = "0.11.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cde824a14b7c14f85caff81225f411faacc04a2013f41670f41443742b1c1c55"
+checksum = "3e9ad3fe7488d7e34558a2033d45a0c90b72d97b4f80705666fea71472e2e6a1"
 dependencies = [
  "base64 0.21.4",
  "bytes",
@@ -6089,7 +6092,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls 0.21.5",
+ "rustls 0.21.7",
  "rustls-pemfile",
  "serde",
  "serde_json",
@@ -6366,14 +6369,14 @@ dependencies = [
  "log",
  "ring",
  "sct 0.6.1",
- "webpki 0.21.4",
+ "webpki",
 ]
 
 [[package]]
 name = "rustls"
-version = "0.21.5"
+version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79ea77c539259495ce8ca47f53e66ae0330a8819f67e23ac96ca02f50e7b7d36"
+checksum = "cd8d6c9f025a446bc4d18ad9632e69aec8f287aa84499ee335599fabd20c3fd8"
 dependencies = [
  "log",
  "ring",
@@ -6404,9 +6407,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.101.1"
+version = "0.101.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15f36a6828982f422756984e47912a7a51dcbc2a197aa791158f8ca61cd8204e"
+checksum = "45a27e3b59326c16e23d30aeb7a36a24cc0d29e71d68ff611cdfb4a01d013bed"
 dependencies = [
  "ring",
  "untrusted",
@@ -7462,7 +7465,7 @@ checksum = "bc6844de72e57df1980054b38be3a9f4702aba4858be64dd700181a8a6d0e1b6"
 dependencies = [
  "rustls 0.19.1",
  "tokio",
- "webpki 0.21.4",
+ "webpki",
 ]
 
 [[package]]
@@ -7471,7 +7474,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls 0.21.5",
+ "rustls 0.21.7",
  "tokio",
 ]
 
@@ -8173,9 +8176,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-streams"
-version = "0.2.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bbae3363c08332cadccd13b67db371814cd214c2524020932f0804b8cf7c078"
+checksum = "b4609d447824375f43e1ffbc051b50ad8f4b3ae8219680c94452ea05eb240ac7"
 dependencies = [
  "futures-util",
  "js-sys",
@@ -8489,23 +8492,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "webpki"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f095d78192e208183081cc07bc5515ef55216397af48b873e5edcd72637fa1bd"
-dependencies = [
- "ring",
- "untrusted",
-]
-
-[[package]]
 name = "webpki-roots"
-version = "0.22.6"
+version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6c71e40d7d2c34a5106301fb632274ca37242cd0c9d3e64dbece371a40a2d87"
-dependencies = [
- "webpki 0.22.0",
-]
+checksum = "14247bb57be4f377dfb94c72830b8ce8fc6beac03cf4bf7b9732eadd414123fc"
 
 [[package]]
 name = "which"
@@ -8701,11 +8691,12 @@ dependencies = [
 
 [[package]]
 name = "winreg"
-version = "0.10.1"
+version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
+checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
- "winapi",
+ "cfg-if",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

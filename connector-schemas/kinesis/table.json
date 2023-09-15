@@ -7,6 +7,11 @@
             "type": "string",
             "description": "The Kinesis stream name for this table"
         },
+        "aws_region": {
+            "title": "AWS Region",
+            "type": "string",
+            "description": "The AWS region for this table"
+        },
         "type": {
             "type": "object",
             "title": "Table Type",

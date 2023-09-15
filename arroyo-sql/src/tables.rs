@@ -172,12 +172,7 @@ impl ConnectorTable {
             })
             .collect();
 
-        let schema = ConnectionSchema {
-            format,
-            struct_name: None,
-            fields: schema_fields?,
-            definition: None,
-        };
+        let schema = ConnectionSchema::try_new(format, None, schema_fields?, None)?;
 
         let connection = connector.from_options(name, options, Some(&schema))?;
 

@@ -101,7 +101,7 @@ pub struct WasmUDF {
     pub def: WasmDef,
 }
 
-#[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
 pub enum WindowType {
     Tumbling { width: Duration },
     Sliding { width: Duration, slide: Duration },

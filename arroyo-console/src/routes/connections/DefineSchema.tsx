@@ -133,7 +133,17 @@ const RawStringEditor = ({
       schema: {
         ...state.schema,
         definition: { raw_schema: 'value' },
-        fields: [],
+        fields: [
+          {
+            fieldName: 'value',
+            fieldType: {
+              type: {
+                primitive: 'string',
+              },
+            },
+            nullable: true,
+          },
+        ],
         format: { raw_string: {} },
       },
     });

@@ -16,7 +16,7 @@ use syn::{parse_quote, parse_str};
 
 use crate::{
     code_gen::{
-        BinAggregatingContext, CodeGenerator, CombiningContext, JoinPairContext,
+        BinAggregatingContext, CodeGenerator, CombiningContext, JoinListsContext, JoinPairContext,
         MemoryAddingContext, MemoryAggregatingContext, MemoryRemovingContext,
         ValueBinMergingContext, ValuePointerContext, VecAggregationContext,
     },
@@ -437,17 +437,10 @@ impl PlanNode {
                 join_type: join_type.clone().into(),
             },
             PlanOperator::JoinListMerge(join_type, struct_pair) => {
-                let merge_struct =
-                    join_type.join_struct_type(&struct_pair.left, &struct_pair.right);
-                let merge_expr =
-                    join_type.merge_syn_expression(&struct_pair.left, &struct_pair.right);
-                MethodCompiler::join_merge_operator(
-                    "join_merge",
-                    join_type.clone(),
-                    merge_struct.get_type(),
-                    merge_expr,
-                )
-                .unwrap()
+                let context =
+                    JoinListsContext::new(struct_pair.left.clone(), struct_pair.right.clone());
+                let record_expression = context.compile_list_merge_record_expression(join_type);
+                MethodCompiler::record_expression_operator("join_list_merge", record_expression)
             }
             PlanOperator::JoinPairMerge(join_type, struct_pair) => {
                 let context =
@@ -1497,6 +1490,11 @@ impl PlanGraph {
         window_operator: crate::pipeline::SqlWindowOperator,
     ) -> NodeIndex {
         let input_type = input.return_type();
+        let window_type = if input.has_window() {
+            WindowType::Instant
+        } else {
+            window_operator.window_type
+        };
         let input_index = self.add_sql_operator(*input);
         let mut result_type = input_type.clone();
         result_type.fields.push(StructField::new(
@@ -1526,7 +1524,7 @@ impl PlanGraph {
         let window_function_node = PlanOperator::WindowFunction(WindowFunctionOperator {
             window_function: window_operator.window_fn,
             order_by: window_operator.order_by,
-            window_type: window_operator.window,
+            window_type,
             result_struct: result_type.clone(),
             field_name: window_operator.field_name,
         });
@@ -1688,7 +1686,18 @@ impl PlanGraph {
         self.graph
             .add_edge(key_index, aggregate_index, aggregate_edge);
 
-        aggregate_index
+        // unkey the operator
+        let unkey_operator = PlanOperator::Unkey;
+        let unkey_index = self.insert_operator(
+            unkey_operator,
+            PlanType::Updating(Box::new(PlanType::Unkeyed(aggregate_struct))),
+        );
+        let unkey_edge = PlanEdge {
+            edge_type: EdgeType::Forward,
+        };
+        self.graph
+            .add_edge(aggregate_index, unkey_index, unkey_edge);
+        unkey_index
     }
 }
 
