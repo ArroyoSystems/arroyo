@@ -69,14 +69,7 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
 
         let client = aws_sdk_s3::Client::new(&config);
 
-        // let mut sort_criteria = HashMap::new();
-
-        // // sorting by creation date ensures that we always read in the same
-        // // order when restarting from a checkpoint, even if new files have
-        // // been added.
-        // sort_criteria.insert("key", "CreationDate");
-        // list_req.sort = Some(sort_criteria);
-
+        // TODO: sort by creation date
         let list_res = client
             .list_objects_v2()
             .bucket(self.bucket.clone())
@@ -120,10 +113,9 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                     }
                     // use json! to correctly handle escaping
                     let value = serde_json::from_value(serde_json::json!({
-                        "value": format!("{}", s)
+                        "value": format!("{}", String::from_utf8_lossy(s.as_bytes()))
                     }))
                     .unwrap();
-                    // let val = serde_json::from_value(serde_json::json!(format!("\"{}\"", s))).unwrap();
                     ctx.collector
                         .collect(Record::<(), T>::from_value(SystemTime::now(), value).unwrap())
                         .await;
