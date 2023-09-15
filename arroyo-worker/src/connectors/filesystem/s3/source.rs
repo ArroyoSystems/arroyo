@@ -118,7 +118,12 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                         i += 1;
                         continue;
                     }
-                    let value = serde_json::from_str(&format!("\"{}\"", s)).unwrap();
+                    // use json! to correctly handle escaping
+                    let value = serde_json::from_value(serde_json::json!({
+                        "value": format!("{}", s)
+                    }))
+                    .unwrap();
+                    // let val = serde_json::from_value(serde_json::json!(format!("\"{}\"", s))).unwrap();
                     ctx.collector
                         .collect(Record::<(), T>::from_value(SystemTime::now(), value).unwrap())
                         .await;
