@@ -118,7 +118,7 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                 .unwrap();
             let body = get_res.body;
 
-            // fixme: not the most optimal thing, as this will if-branch on every line
+            // fixme: not the most optimal thing, as this will if-branch on every next_line() call
             let mut reader = if self.compression == "zstd" {
                 let r = ZstdDecoder::new(BufReader::new(body.into_async_read()));
                 Reader::Zstd(BufReader::new(r).lines())
