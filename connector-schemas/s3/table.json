@@ -23,7 +23,8 @@
       "description": "Compression format of the files in S3",
       "enum": [
         "none",
-        "zstd"
+        "zstd",
+        "gzip"
       ]
     }
   },

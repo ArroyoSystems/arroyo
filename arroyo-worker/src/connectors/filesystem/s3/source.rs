@@ -1,10 +1,10 @@
 use std::marker::PhantomData;
 use std::time::SystemTime;
 
-use async_compression::tokio::bufread::ZstdDecoder;
+use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
 use aws_sdk_s3::Region;
 use serde::de::DeserializeOwned;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, BufReader, Lines};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines};
 use tracing::info;
 
 use arroyo_macro::{source_fn, StreamNode};
@@ -14,20 +14,6 @@ use arroyo_types::{Data, Record};
 use crate::{engine::Context, SourceFinishType};
 
 use super::S3Table;
-
-enum Reader<T> {
-    Zstd(Lines<BufReader<ZstdDecoder<BufReader<T>>>>),
-    Uncompressed(Lines<BufReader<T>>),
-}
-
-impl<T: AsyncRead + Unpin> Reader<T> {
-    async fn next_line(&mut self) -> tokio::io::Result<Option<String>> {
-        match self {
-            Reader::Zstd(lines) => lines.next_line().await,
-            Reader::Uncompressed(lines) => lines.next_line().await,
-        }
-    }
-}
 
 #[derive(StreamNode)]
 pub struct S3SourceFunc<K: Data, T: DeserializeOwned + Data> {
@@ -118,32 +104,34 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                 .unwrap();
             let body = get_res.body;
 
-            // fixme: not the most optimal thing, as this will if-branch on every next_line() call
-            let mut reader = if self.compression == "zstd" {
+            if self.compression == "zstd" {
                 let r = ZstdDecoder::new(BufReader::new(body.into_async_read()));
-                Reader::Zstd(BufReader::new(r).lines())
-            } else {
-                Reader::Uncompressed(BufReader::new(body.into_async_read()).lines())
-            };
-
-            let mut lines_read = 0;
-            while let Ok(Some(s)) = reader.next_line().await {
-                // if we're restoring from checkpoint, skip until we find the line we were on
-                if lines_read < prev_lines_read {
-                    lines_read += 1;
-                    continue;
+                match self
+                    .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
+                    .await
+                {
+                    Some(finish_type) => return finish_type,
+                    None => {}
                 }
-                // json! will correctly handle escaping
-                let value = serde_json::from_value(serde_json::json!({
-                    "value": s
-                }))
-                .unwrap();
-                ctx.collector
-                    .collect(Record::<(), T>::from_value(SystemTime::now(), value).unwrap())
-                    .await;
-                self.total_lines_read += 1;
-                lines_read += 1;
-                match self.check_control_message(ctx, &obj_key, lines_read).await {
+            } else if self.compression == "gzip" {
+                let r = GzipDecoder::new(BufReader::new(body.into_async_read()));
+                match self
+                    .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
+                    .await
+                {
+                    Some(finish_type) => return finish_type,
+                    None => {}
+                }
+            } else {
+                match self
+                    .read_file(
+                        ctx,
+                        BufReader::new(body.into_async_read()).lines(),
+                        &obj_key,
+                        prev_lines_read,
+                    )
+                    .await
+                {
                     Some(finish_type) => return finish_type,
                     None => {}
                 }
@@ -151,6 +139,38 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
         }
         info!("S3 source finished");
         SourceFinishType::Final
+    }
+
+    async fn read_file<R: AsyncBufRead + Unpin>(
+        &mut self,
+        ctx: &mut Context<(), T>,
+        mut reader: Lines<R>,
+        obj_key: &str,
+        prev_lines_read: usize,
+    ) -> Option<SourceFinishType> {
+        let mut lines_read = 0;
+        while let Ok(Some(s)) = reader.next_line().await {
+            // if we're restoring from checkpoint, skip until we find the line we were on
+            if lines_read < prev_lines_read {
+                lines_read += 1;
+                continue;
+            }
+            // json! will correctly handle escaping
+            let value = serde_json::from_value(serde_json::json!({
+                "value": s
+            }))
+            .unwrap();
+            ctx.collector
+                .collect(Record::<(), T>::from_value(SystemTime::now(), value).unwrap())
+                .await;
+            self.total_lines_read += 1;
+            lines_read += 1;
+            match self.check_control_message(ctx, &obj_key, lines_read).await {
+                None => {}
+                finish_type => return finish_type,
+            }
+        }
+        None
     }
 
     async fn check_control_message(
