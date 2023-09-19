@@ -1,7 +1,7 @@
 //use crate::parquet::ParquetBackend;
 use crate::{BackingStore, StateBackend};
 use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor, TableType};
-use arroyo_types::{from_micros, Data, Key, TaskInfo, ArroyoRecordBatch};
+use arroyo_types::{from_micros, Data, Key, TaskInfo};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 use arrow::row::{OwnedRow, RowConverter, SortField};

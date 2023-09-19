@@ -5,6 +5,8 @@ use std::{
     time::SystemTime,
 };
 use std::collections::BTreeSet;
+use std::fmt::Debug;
+use std::time::Duration;
 
 use crate::inq_reader::InQReader;
 use crate::{CheckpointCounter, ControlOutcome, WatermarkHolder};
@@ -12,6 +14,7 @@ use arrow::datatypes::{Schema, SchemaRef};
 use arrow::row::{OwnedRow, Row, RowConverter};
 use arrow_array::iterator::ArrayIter;
 use arrow_array::{downcast_primitive_array, Array, ArrayAccessor, ArrayRef, RecordBatch};
+use bincode::{Decode, Encode};
 use arroyo_datastream::logical::ArrowSchema;
 use arroyo_metrics::{counter_for_task, gauge_for_task};
 use arroyo_rpc::{
@@ -22,10 +25,7 @@ use arroyo_rpc::{
     ControlMessage, ControlResp,
 };
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
-use arroyo_types::{
-    from_micros, ArrowMessage, ArroyoRecordBatch, CheckpointBarrier, TaskInfo, Watermark, BYTES_RECV,
-    BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
-};
+use arroyo_types::{from_micros, ArrowMessage, CheckpointBarrier, TaskInfo, Watermark, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT, Key, Data, ArroyoRecordBatch, Window, to_millis, from_millis};
 use datafusion_physical_expr::hash_utils;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
@@ -36,12 +36,134 @@ use serde_json::Value;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, Instrument};
 
+pub trait TimerT: Data + PartialEq + Eq + 'static {}
+impl<T: Data + PartialEq + Eq + 'static> TimerT for T {}
+
 pub fn server_for_hash(x: u64, n: usize) -> usize {
     let range_size = u64::MAX / (n as u64);
     (n - 1).min((x / range_size) as usize)
 }
 
 pub static TIMER_TABLE: char = '[';
+
+pub trait TimeWindowAssigner: Send + 'static {
+    fn windows(&self, ts: SystemTime) -> Vec<Window>;
+
+    fn next(&self, window: Window) -> Window;
+
+    fn safe_retention_duration(&self) -> Option<Duration>;
+}
+
+pub trait WindowAssigner: Send + 'static {}
+
+#[derive(Clone, Copy)]
+pub struct TumblingWindowAssigner {
+    pub size: Duration,
+}
+
+impl TimeWindowAssigner for TumblingWindowAssigner {
+    fn windows(&self, ts: SystemTime) -> Vec<Window> {
+        let key = to_millis(ts) / (self.size.as_millis() as u64);
+        vec![Window {
+            start: from_millis(key * self.size.as_millis() as u64),
+            end: from_millis((key + 1) * (self.size.as_millis() as u64)),
+        }]
+    }
+
+    fn next(&self, window: Window) -> Window {
+        Window {
+            start: window.end,
+            end: window.end + self.size,
+        }
+    }
+
+    fn safe_retention_duration(&self) -> Option<Duration> {
+        Some(self.size)
+    }
+}
+#[derive(Clone, Copy)]
+pub struct InstantWindowAssigner {}
+
+impl TimeWindowAssigner for InstantWindowAssigner {
+    fn windows(&self, ts: SystemTime) -> Vec<Window> {
+        vec![Window {
+            start: ts,
+            end: ts + Duration::from_nanos(1),
+        }]
+    }
+
+    fn next(&self, window: Window) -> Window {
+        Window {
+            start: window.start + Duration::from_micros(1),
+            end: window.end + Duration::from_micros(1),
+        }
+    }
+
+    fn safe_retention_duration(&self) -> Option<Duration> {
+        Some(Duration::ZERO)
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct SlidingWindowAssigner {
+    pub size: Duration,
+    pub slide: Duration,
+}
+//  012345678
+//  --x------
+// [--x]
+//  [-x-]
+//   [x--]
+//    [---]
+
+impl SlidingWindowAssigner {
+    fn start(&self, ts: SystemTime) -> SystemTime {
+        let ts_millis = to_millis(ts);
+        let earliest_window_start = ts_millis - self.size.as_millis() as u64;
+
+        let remainder = earliest_window_start % (self.slide.as_millis() as u64);
+
+        from_millis(earliest_window_start - remainder + self.slide.as_millis() as u64)
+    }
+}
+
+impl TimeWindowAssigner for SlidingWindowAssigner {
+    fn windows(&self, ts: SystemTime) -> Vec<Window> {
+        let mut windows =
+            Vec::with_capacity(self.size.as_millis() as usize / self.slide.as_millis() as usize);
+
+        let mut start = self.start(ts);
+
+        while start <= ts {
+            windows.push(Window {
+                start,
+                end: start + self.size,
+            });
+            start += self.slide;
+        }
+
+        windows
+    }
+
+    fn next(&self, window: Window) -> Window {
+        let start_time = window.start + self.slide;
+        Window {
+            start: start_time,
+            end: start_time + self.size,
+        }
+    }
+
+    fn safe_retention_duration(&self) -> Option<Duration> {
+        Some(self.size)
+    }
+}
+
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
+pub struct ArrowTimerValue {
+    pub time: SystemTime,
+    pub key: Vec<u8>,
+    pub data: Vec<u8>,
+}
 
 pub struct ArrowContext<S: BackingStore = StateBackend> {
     pub task_info: TaskInfo,
@@ -60,19 +182,19 @@ pub struct ArrowRowMap<'a> {
     row_converter: RowConverter,
 }
 
-impl ArrowRowMap {
-    pub fn insert(&mut self, batch: &ArroyoRecordBatch) {
-        let rows = self.row_converter.convert_columns(&batch.columns).unwrap();
-
-        for row in &rows {
-
-        }
-    }
-
-    pub fn get(&mut self, key: &[u8]) -> ArroyoRecordBatch {
-
-    }
-}
+// impl ArrowRowMap {
+//     pub fn insert(&mut self, batch: &ArroyoRecordBatch) {
+//         let rows = self.row_converter.convert_columns(&batch.columns).unwrap();
+//
+//         for row in &rows {
+//
+//         }
+//     }
+//
+//     pub fn get(&mut self, key: &[u8]) -> ArroyoRecordBatch {
+//
+//     }
+// }
 
 impl ArrowContext {
     pub async fn new(
@@ -345,6 +467,37 @@ pub trait ArrowOperatorConstructor<C: prost::Message>: ArrowOperator {
     fn from_config(config: C) -> Box<dyn ArrowOperator>;
 }
 
+async fn handle_watermark_int<T: ArrowOperator + ?Sized>(
+    operator: &mut T,
+    watermark: Watermark,
+    ctx: &mut ArrowContext,
+) {
+    tracing::trace!(
+            "handling watermark {:?} for {}-{}",
+            watermark,
+            ctx.task_info.operator_name,
+            ctx.task_info.task_index
+        );
+
+    let last_watermark = ctx.last_present_watermark();
+
+    if let Watermark::EventTime(t) = watermark {
+        let finished: Vec<(Vec<u8>, ArrowTimerValue)> = {
+            let mut state = ctx
+                .state
+                .get_time_key_map(TIMER_TABLE, last_watermark)
+                .await;
+            state.evict_all_before_watermark(t)
+        };
+
+        for (k, tv) in finished {
+            operator.handle_timer(k, tv.data, ctx).await;
+        }
+    }
+    operator.handle_watermark(watermark, ctx).await;
+}
+
+
 #[async_trait::async_trait]
 pub trait ArrowOperator: Send + 'static {
     fn start(
@@ -507,9 +660,9 @@ pub trait ArrowOperator: Send + 'static {
                                 checkpoint_epoch: t.epoch,
                                 operator_id: ctx.task_info.operator_id.clone(),
                                 subtask_index: ctx.task_info.task_index as u32,
-                                time: std::time::SystemTime::now(),
+                                time: SystemTime::now(),
                                 event_type:
-                                    arroyo_rpc::grpc::TaskCheckpointEventType::StartedAlignment,
+                                    TaskCheckpointEventType::StartedAlignment,
                             },
                         ))
                         .await
@@ -542,7 +695,7 @@ pub trait ArrowOperator: Send + 'static {
                     if let Watermark::EventTime(t) = watermark {
                         ctx.state.handle_watermark(t);
                     }
-                    self.handle_watermark_int(watermark, ctx).await;
+                    handle_watermark_int(self, watermark, ctx).await;
                 }
             }
             ArrowMessage::Stop => {
@@ -595,34 +748,8 @@ pub trait ArrowOperator: Send + 'static {
         checkpoint_barrier.then_stop
     }
 
-    async fn handle_watermark_int(
-        &mut self,
-        watermark: arroyo_types::Watermark,
-        ctx: &mut ArrowContext,
-    ) {
-        tracing::trace!(
-            "handling watermark {:?} for {}-{}",
-            watermark,
-            ctx.task_info.operator_name,
-            ctx.task_info.task_index
-        );
-        if let arroyo_types::Watermark::EventTime(t) = watermark {
-            let mut state = ctx
-                .state
-                .get_time_key_map(TIMER_TABLE, ctx.last_present_watermark())
-                .await;
-            let finished = state.evict_all_before_watermark(t);
-
-            for (k, tv) in finished {
-                self.handle_timer(k, tv.data, ctx).await;
-            }
-
-            // TODO: handle timers
-        }
-        self.handle_watermark(watermark, ctx).await;
-    }
-
     fn name(&self) -> String;
+
     fn tables(&self) -> Vec<TableDescriptor> {
         vec![]
     }
@@ -631,11 +758,11 @@ pub trait ArrowOperator: Send + 'static {
 
     async fn process_batch(&mut self, batch: ArroyoRecordBatch, ctx: &mut ArrowContext);
 
-    async fn handle_timer(&mut self, batch: ArroyoRecordBatch, ctx: &mut ArrowContext) {}
+    async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut ArrowContext) {}
 
     async fn handle_watermark(
         &mut self,
-        watermark: arroyo_types::Watermark,
+        watermark: Watermark,
         ctx: &mut ArrowContext,
     ) {
         ctx.broadcast(ArrowMessage::Watermark(watermark)).await;

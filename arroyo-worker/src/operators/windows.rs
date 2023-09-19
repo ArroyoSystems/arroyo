@@ -6,7 +6,7 @@ use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWri
 use arroyo_state::tables::{KeyTimeMultiMap, KeyedState};
 use arroyo_types::*;
 use std::time::Duration;
-use arroyo_operator::operators::{InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner};
+use arroyo_operator::operator::{InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner};
 
 
 // Enforce a maximum session size to prevent unbounded state growth until we are able to

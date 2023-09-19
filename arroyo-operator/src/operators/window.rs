@@ -1,12 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
+use async_trait::async_trait;
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use arroyo_rpc::grpc::{api, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
-use arroyo_rpc::grpc::api::{Window, window, WindowExpressionOperator};
-use arroyo_types::ArroyoRecordBatch;
-use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor};
-use crate::operators::{exprs_from_proto, InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner, WindowAssigner};
+use arroyo_rpc::grpc::api::{window, WindowExpressionOperator};
+use arroyo_types::{ArroyoRecordBatch, Window};
+use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor, InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner};
+use crate::operators::{exprs_from_proto};
 
 pub enum WindowOperation {
     Aggregate,
@@ -94,6 +95,7 @@ impl ArrowOperatorConstructor<WindowExpressionOperator> for KeyedWindowFunc {
     }
 }
 
+#[async_trait]
 impl ArrowOperator for KeyedWindowFunc {
 
     fn name(&self) -> String {
@@ -111,17 +113,17 @@ impl ArrowOperator for KeyedWindowFunc {
         }]
     }
 
-    async fn handle_timer(&mut self, mut key: K, window: Window, ctx: &mut Context<K, OutT>) {
-        self.operation.operate(&mut key, window, 'w', ctx).await;
+    async fn handle_timer(&mut self, mut key: Vec<u8>, data: Vec<u8>, ctx: &mut ArrowContext) {
+        // self.operation.operate(&mut key, window, 'w', ctx).await;
 
-        // clear everything before our start time (we're guaranteed that timers execute in order,
-        // so with fixed-width windows there won't be any earlier data)
-        let next = self.assigner.next(window);
-        let mut state: KeyTimeMultiMap<K, T, _> = ctx.state.get_key_time_multi_map('w').await;
-
-        state
-            .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
-            .await;
+        // // clear everything before our start time (we're guaranteed that timers execute in order,
+        // // so with fixed-width windows there won't be any earlier data)
+        // let next = self.assigner.next(window);
+        // let mut state: KeyTimeMultiMap<K, T, _> = ctx.state.get_key_time_multi_map('w').await;
+        //
+        // state
+        //     .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
+        //     .await;
     }
 
     async fn process_batch(&mut self, batch: ArroyoRecordBatch, ctx: &mut ArrowContext) {

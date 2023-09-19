@@ -8,7 +8,8 @@ use std::time::SystemTime;
 
 mod inq_reader;
 pub mod operator;
-pub mod operators;
+mod operators;
+
 
 pub enum ControlOutcome {
     Continue,
@@ -125,10 +126,11 @@ impl CheckpointCounter {
 }
 
 pub fn construct_operator(operator: &str, config: Vec<u8>) -> Box<dyn ArrowOperator> {
+    let mut buf = config.as_slice();
     match operator {
-        "ImpulseSource" => ImpulseSource::from_config(config),
-        "Projection" => ProjectionOperator::from_config(config),
-        "ConsoleSink" => ConsoleSink::from_config(config),
+        "ImpulseSource" => ImpulseSource::from_config(prost::Message::decode(&mut buf).unwrap()),
+        "Projection" => ProjectionOperator::from_config(prost::Message::decode(&mut buf).unwrap()),
+        "ConsoleSink" => ConsoleSink::from_config(prost::Message::decode(&mut buf).unwrap()),
         _ => {
             panic!("unknown operator {}", operator);
         }

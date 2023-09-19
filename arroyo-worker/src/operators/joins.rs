@@ -2,22 +2,19 @@ use std::time::SystemTime;
 use std::{marker::PhantomData, time::Duration};
 
 use arroyo_macro::{co_process_fn, StreamNode};
+use arroyo_operator::operator::{InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner};
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_types::*;
 
 use crate::engine::Context;
-
-use super::{
-    InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner,
-};
 
 #[derive(StreamNode)]
 pub struct WindowedHashJoin<
     K: Key,
     T1: Data,
     T2: Data,
-    W1: TimeWindowAssigner<K, T1>,
-    W2: TimeWindowAssigner<K, T2>,
+    W1: TimeWindowAssigner,
+    W2: TimeWindowAssigner,
 > {
     assigner1: W1,
     assigner2: W2,
@@ -25,7 +22,7 @@ pub struct WindowedHashJoin<
 }
 
 #[co_process_fn(in_k1=K, in_t1=T1, in_k2=K, in_t2=T2, out_k=K, out_t=(Vec<T1>, Vec<T2>), timer_t=Window)]
-impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAssigner<K, T2>>
+impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner, W2: TimeWindowAssigner>
     WindowedHashJoin<K, T1, T2, W1, W2>
 {
     pub fn tumbling_window(
@@ -91,9 +88,9 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
         ]
     }
 
-    async fn store<T: Data, W: TimeWindowAssigner<K, T>>(
+    async fn store<T: Data, W: TimeWindowAssigner>(
         record: &Record<K, T>,
-        assigner: W,
+        assigner: &mut W,
         table: char,
         ctx: &mut Context<K, (Vec<T1>, Vec<T2>)>,
     ) {
@@ -168,7 +165,7 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
         record: &Record<K, T1>,
         ctx: &mut Context<K, (Vec<T1>, Vec<T2>)>,
     ) {
-        Self::store(record, self.assigner1, 'l', ctx).await;
+        Self::store(record, &mut self.assigner1, 'l', ctx).await;
     }
 
     async fn process_right(
@@ -176,6 +173,6 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
         record: &Record<K, T2>,
         ctx: &mut Context<K, (Vec<T1>, Vec<T2>)>,
     ) {
-        Self::store(record, self.assigner2, 'r', ctx).await;
+        Self::store(record, &mut self.assigner2, 'r', ctx).await;
     }
 }
