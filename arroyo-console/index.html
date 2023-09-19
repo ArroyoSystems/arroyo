@@ -5,11 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arroyo Console</title>
     <script>
-      window.__API_ENDPOINT = "%VITE_API_ENDPOINT%";
-      if (window.__API_ENDPOINT === "" || window.__API_ENDPOINT === "{{" + "API_ENDPOINT}}") {
-        window.__API_ENDPOINT = window.location.protocol + "//" + window.location.host.split(":")[0] + ":8001";
-      }
-
       const clusterId = "%VITE_CLUSTER_ID%";
       const disableTelemetry = ("%VITE_DISABLE_TELEMETRY%" == "true");
 

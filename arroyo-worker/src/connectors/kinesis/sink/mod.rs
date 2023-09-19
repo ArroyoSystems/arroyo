@@ -7,10 +7,10 @@ use anyhow::Result;
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::{CheckpointBarrier, Key, Record};
-use aws_config::load_from_env;
+use aws_config::from_env;
 use aws_sdk_kinesis::{
     client::fluent_builders::PutRecords, model::PutRecordsRequestEntry, types::Blob,
-    Client as KinesisClient,
+    Client as KinesisClient, Region,
 };
 use serde::Serialize;
 use tracing::warn;
@@ -23,6 +23,7 @@ use super::{KinesisTable, TableType};
 #[derive(StreamNode)]
 pub struct KinesisSinkFunc<K: Key + Serialize, T: SchemaData> {
     client: Option<KinesisClient>,
+    aws_region: Option<String>,
     in_progress_batch: Option<BatchRecordPreparer>,
     flush_config: FlushConfig,
     serializer: DataSerializer<T>,
@@ -41,6 +42,7 @@ impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
         Self {
             client: None,
             in_progress_batch: None,
+            aws_region: table.aws_region,
             name: table.stream_name,
             serializer: DataSerializer::new(
                 config
@@ -57,9 +59,11 @@ impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
     }
 
     async fn on_start(&mut self, _ctx: &mut Context<(), ()>) {
-        let config = load_from_env().await;
-        let client = KinesisClient::new(&config);
-        self.client = Some(client);
+        let mut loader = from_env();
+        if let Some(region) = &self.aws_region {
+            loader = loader.region(Region::new(region.clone()));
+        }
+        self.client = Some(KinesisClient::new(&loader.load().await));
     }
 
     async fn handle_checkpoint(&mut self, _: &CheckpointBarrier, _: &mut Context<(), ()>) {

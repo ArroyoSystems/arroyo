@@ -5,11 +5,11 @@ use crate::{
         ValuePointerContext, VecAggregationContext,
     },
     expressions::{
-        AggregateResultExtraction, AggregationExpression, Aggregator, Column, Expression,
+        AggregateComputation, AggregateResultExtraction, Aggregator, Column, Expression,
     },
     types::{data_type_as_syn_type, StructDef, StructField, TypeDef},
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use arrow_schema::DataType;
 use arroyo_rpc::types::Format;
 use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
@@ -80,7 +80,7 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for Projection {
 
 #[derive(Debug, Clone)]
 pub struct AggregateProjection {
-    pub aggregates: Vec<(Column, AggregationExpression)>,
+    pub aggregates: Vec<AggregateComputation>,
     pub group_bys: Vec<(StructField, AggregateResultExtraction)>,
 }
 
@@ -88,7 +88,7 @@ impl AggregateProjection {
     pub(crate) fn supports_two_phase(&self) -> bool {
         self.aggregates
             .iter()
-            .all(|(_, computation)| computation.allows_two_phase())
+            .all(|computation| computation.allows_two_phase())
     }
 }
 
@@ -97,12 +97,12 @@ impl CodeGenerator<VecAggregationContext, StructDef, syn::Expr> for AggregatePro
         let mut assignments: Vec<_> = self
             .aggregates
             .iter()
-            .map(|(column, field_computation)| {
-                let data_type = field_computation.expression_type(&input_context.values_context);
-                let expr = field_computation.generate(&input_context.values_context);
+            .map(|computation| {
+                let data_type = computation.expression_type(&input_context.values_context);
+                let expr = computation.generate(&input_context.values_context);
+                let column = computation.column();
                 let field_ident =
-                    StructField::new(column.name.clone(), column.relation.clone(), data_type)
-                        .field_ident();
+                    StructField::new(column.name, column.relation, data_type).field_ident();
                 parse_quote!(#field_ident: #expr)
             })
             .collect();
@@ -129,9 +129,10 @@ impl CodeGenerator<VecAggregationContext, StructDef, syn::Expr> for AggregatePro
         let mut fields: Vec<StructField> = self
             .aggregates
             .iter()
-            .map(|(column, computation)| {
+            .map(|computation| {
                 let field_type = computation.expression_type(&input_context.values_context);
-                StructField::new(column.name.clone(), column.relation.clone(), field_type)
+                let column = computation.column();
+                StructField::new(column.name, column.relation, field_type)
             })
             .collect();
         fields.extend(
@@ -156,7 +157,15 @@ impl TryFrom<AggregateProjection> for TwoPhaseAggregateProjection {
         let aggregates = aggregate_projection
             .aggregates
             .into_iter()
-            .map(|(c, expr)| Ok((c, expr.try_into()?)))
+            .map(|computation| match computation {
+                AggregateComputation::Builtin {
+                    column,
+                    computation,
+                } => Ok((column, computation.try_into()?)),
+                AggregateComputation::UDAF { .. } => {
+                    bail!("UDAFs not supported in two phase aggregation")
+                }
+            })
             .collect::<Result<Vec<(Column, TwoPhaseAggregation)>>>()?;
 
         Ok(Self {

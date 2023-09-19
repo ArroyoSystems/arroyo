@@ -123,6 +123,7 @@ pub const K8S_WORKER_RESOURCES_ENV: &str = "K8S_WORKER_RESOURCES";
 pub const K8S_WORKER_SLOTS_ENV: &str = "K8S_WORKER_SLOTS";
 pub const K8S_WORKER_VOLUMES_ENV: &str = "K8S_WORKER_VOLUMES";
 pub const K8S_WORKER_VOLUME_MOUNTS_ENV: &str = "K8S_WORKER_VOLUME_MOUNTS";
+pub const K8S_WORKER_CONFIG_MAP_ENV: &str = "K8S_WORKER_CONFIG_MAP";
 
 // telemetry configuration
 pub const DISABLE_TELEMETRY_ENV: &str = "DISABLE_TELEMETRY";
@@ -177,8 +178,7 @@ pub mod ports {
     pub const NODE_ADMIN: u16 = 9291;
 
     pub const API_HTTP: u16 = 8000;
-    pub const API_GRPC: u16 = 8001;
-    pub const API_ADMIN: u16 = 8002;
+    pub const API_ADMIN: u16 = 8001;
 
     pub const COMPILER_GRPC: u16 = 9000;
     pub const COMPILER_ADMIN: u16 = 9001;
@@ -581,7 +581,6 @@ impl TaskInfo {
         labels.insert("operator_id".to_string(), self.operator_id.clone());
         labels.insert("subtask_idx".to_string(), format!("{}", self.task_index));
         labels.insert("operator_name".to_string(), self.operator_name.clone());
-        labels.insert("job_name".to_string(), self.job_id.clone());
         labels
     }
 }

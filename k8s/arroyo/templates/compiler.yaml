@@ -43,6 +43,7 @@ spec:
           - name: ARTIFACT_URL
             value: {{ .Values.artifactUrl }}
           {{- end }}
+        {{- include "arroyo.existingConfigMap" . | nindent 8 }}
         ports:
         - containerPort: 9000
           name: grpc
@@ -52,10 +53,12 @@ spec:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         readinessProbe:
           httpGet:
             path: /status
             port: admin
+          initialDelaySeconds: 5
         {{- if .Values.compiler.resources }}
         resources: {{- toYaml .Values.compiler.resources | nindent 10 }}
         {{- end }}
@@ -86,9 +89,9 @@ spec:
   ports:
     - name: grpc
       protocol: TCP
-      port: 9000
+      port: {{ .Values.compiler.service.grpcPort }}
       targetPort: 9000
     - name: http
       protocol: TCP
-      port: 9001
+      port: {{ .Values.compiler.service.adminPort }}
       targetPort: 9001

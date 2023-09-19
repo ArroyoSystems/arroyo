@@ -17,12 +17,12 @@ use datafusion_expr::{
 use quote::quote;
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext, VecAggregationContext};
-use crate::expressions::{AggregateResultExtraction, ExpressionContext};
+use crate::expressions::{AggregateComputation, AggregateResultExtraction, ExpressionContext};
 use crate::external::{ProcessingMode, SqlSink, SqlSource};
 use crate::schemas::window_type_def;
 use crate::tables::{Insert, Table};
 use crate::{
-    expressions::{AggregationExpression, Column, ColumnExpression, Expression, SortExpression},
+    expressions::{Column, ColumnExpression, Expression, SortExpression},
     operators::{AggregateProjection, Projection},
     types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
@@ -558,10 +558,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             .skip(aggregate.group_expr.len()) // the group bys always come first
             .zip(aggregate.aggr_expr.iter())
             .map(|(field, expr)| {
-                Ok((
-                    Column::convert(&field.qualified_column()),
-                    AggregationExpression::try_from_expression(&mut ctx, expr)?,
-                ))
+                AggregateComputation::try_from_expression(&mut ctx, &field.qualified_column(), expr)
             })
             .collect::<Result<Vec<_>>>()?;
 

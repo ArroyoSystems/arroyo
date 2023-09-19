@@ -15,7 +15,12 @@ api:
   image:
     repository: ghcr.io/arroyosystems/arroyo-services
     pullPolicy: IfNotPresent
-    tag: "0.5.0"
+    tag: "0.6.0"
+  service:
+    type: ClusterIP
+    httpPort: 80
+    adminPort: 8001
+
 
 controller:
   resources:
@@ -26,7 +31,10 @@ controller:
   image:
     repository: ghcr.io/arroyosystems/arroyo-services
     pullPolicy: IfNotPresent
-    tag: "0.5.0"
+    tag: "0.6.0"
+  service:
+    grpcPort: 9190
+    adminPort: 9191
 
 compiler:
   replicas: 1
@@ -38,7 +46,10 @@ compiler:
   image:
     repository: ghcr.io/arroyosystems/arroyo-compiler
     pullPolicy: IfNotPresent
-    tag: "0.5.0"
+    tag: "0.6.0"
+  service:
+    grpcPort: 9000
+    adminPort: 9001
 
 worker:
   resources:
@@ -50,7 +61,7 @@ worker:
   image:
     repository: ghcr.io/arroyosystems/arroyo-worker
     pullPolicy: IfNotPresent
-    tag: "0.5.0"
+    tag: "0.6.0"
 
 postgresql:
   # set to true to deploy a postgres instance in-cluster
@@ -107,7 +118,6 @@ prometheus:
 
 s3:
   region: ""
-  bucket: ""
 
 artifactUrl: ""
 checkpointUrl: ""
@@ -139,9 +149,7 @@ securityContext: {}
   # runAsNonRoot: true
   # runAsUser: 1000
 
-service:
-  type: ClusterIP
-  port: 80
+
 
 apiResources: {}
 controllerResources: {}
@@ -155,3 +163,6 @@ affinity: {}
 
 volumes: []
 volumeMounts: []
+
+existingConfigMap: ""
+  
