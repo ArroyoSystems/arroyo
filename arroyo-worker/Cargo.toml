@@ -25,7 +25,7 @@ prometheus = {version = "0.13", features = ["process"] }
 futures = "0.3"
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-async-compression = { version = "0.4.3", features = ["tokio", "zstd"] }
+async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 async-trait = "0.1.68"
 async-stream = "0.3.4"
 stacker = "0.1"
