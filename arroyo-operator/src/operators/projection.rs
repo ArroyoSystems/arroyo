@@ -1,7 +1,7 @@
 use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor};
 use arrow::datatypes::{Schema, SchemaRef};
 use arrow_array::RecordBatch;
-use arroyo_types::ArrowRecord;
+use arroyo_types::ArroyoRecordBatch;
 use async_trait::async_trait;
 use datafusion_common::DataFusionError;
 use datafusion_execution::FunctionRegistry;
@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
+use arroyo_rpc::grpc::api;
+use crate::operators::exprs_from_proto;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProjectionOperatorConfig {
@@ -27,44 +29,12 @@ pub struct ProjectionOperator {
     exprs: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-pub struct Registry {}
 
-impl FunctionRegistry for Registry {
-    fn udfs(&self) -> HashSet<String> {
-        HashSet::new()
-    }
-
-    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
-        todo!()
-    }
-
-    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
-        todo!()
-    }
-
-    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
-        todo!()
-    }
-}
-
-impl ArrowOperatorConstructor for ProjectionOperator {
-    fn from_config(config: Vec<u8>) -> Box<dyn ArrowOperator> {
-        let mut buf = config.as_slice();
-        let proto_config: arroyo_rpc::grpc::api::ProjectionOperator =
-            arroyo_rpc::grpc::api::ProjectionOperator::decode(&mut buf).unwrap();
-
-        let registry = Registry {};
-        let schema = Schema::empty();
-
-        let exprs: Vec<_> = proto_config
-            .expressions
-            .into_iter()
-            .map(|expr| PhysicalExprNode::decode(&mut expr.as_slice()).unwrap())
-            .map(|expr| parse_physical_expr(&expr, &registry, &schema).unwrap())
-            .collect();
-
+impl ArrowOperatorConstructor<api::ProjectionOperator> for ProjectionOperator {
+    fn from_config(config: api::ProjectionOperator) -> Box<dyn ArrowOperator> {
+        let exprs = exprs_from_proto(config.expressions);
         Box::new(Self {
-            name: proto_config.name,
+            name: config.name,
             exprs,
         })
     }
@@ -76,7 +46,7 @@ impl ArrowOperator for ProjectionOperator {
         self.name.clone()
     }
 
-    async fn process_batch(&mut self, batch: ArrowRecord, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: ArroyoRecordBatch, ctx: &mut ArrowContext) {
         let record_batch =
             RecordBatch::try_new(ctx.in_schemas[0].schema.clone(), batch.columns).unwrap();
 
@@ -88,7 +58,7 @@ impl ArrowOperator for ProjectionOperator {
             .collect::<datafusion_common::Result<Vec<_>>>()
             .unwrap();
 
-        let record = ArrowRecord::new(arrays);
+        let record = ArroyoRecordBatch::new(arrays);
 
         ctx.collector.collect(record).await;
     }

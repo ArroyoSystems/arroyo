@@ -311,6 +311,12 @@ message ArrowEdge {
   EdgeType edge_type = 5;
 }
 
+message WindowExpressionOperator {
+  Window window = 1;
+  repeated bytes expressions = 2;
+  bool flatten = 3;
+}
+
 message ProjectionOperator {
   string name = 1;
   repeated bytes expressions = 2;

@@ -8,7 +8,7 @@ use std::time::SystemTime;
 
 mod inq_reader;
 pub mod operator;
-mod operators;
+pub mod operators;
 
 pub enum ControlOutcome {
     Continue,

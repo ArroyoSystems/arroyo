@@ -4,10 +4,12 @@ use std::{
     sync::Arc,
     time::SystemTime,
 };
+use std::collections::BTreeSet;
 
 use crate::inq_reader::InQReader;
 use crate::{CheckpointCounter, ControlOutcome, WatermarkHolder};
 use arrow::datatypes::{Schema, SchemaRef};
+use arrow::row::{OwnedRow, Row, RowConverter};
 use arrow_array::iterator::ArrayIter;
 use arrow_array::{downcast_primitive_array, Array, ArrayAccessor, ArrayRef, RecordBatch};
 use arroyo_datastream::logical::ArrowSchema;
@@ -21,7 +23,7 @@ use arroyo_rpc::{
 };
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
 use arroyo_types::{
-    from_micros, ArrowMessage, ArrowRecord, CheckpointBarrier, TaskInfo, Watermark, BYTES_RECV,
+    from_micros, ArrowMessage, ArroyoRecordBatch, CheckpointBarrier, TaskInfo, Watermark, BYTES_RECV,
     BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
 };
 use datafusion_physical_expr::hash_utils;
@@ -51,6 +53,25 @@ pub struct ArrowContext<S: BackingStore = StateBackend> {
     pub out_schema: Option<ArrowSchema>,
     pub collector: ArrowCollector,
     pub counters: HashMap<&'static str, IntCounter>,
+}
+
+pub struct ArrowRowMap<'a> {
+    map: BTreeSet<Row<'a>>,
+    row_converter: RowConverter,
+}
+
+impl ArrowRowMap {
+    pub fn insert(&mut self, batch: &ArroyoRecordBatch) {
+        let rows = self.row_converter.convert_columns(&batch.columns).unwrap();
+
+        for row in &rows {
+
+        }
+    }
+
+    pub fn get(&mut self, key: &[u8]) -> ArroyoRecordBatch {
+
+    }
 }
 
 impl ArrowContext {
@@ -206,7 +227,7 @@ impl ArrowContext {
         }
     }
 
-    pub async fn collect(&mut self, record: ArrowRecord) {
+    pub async fn collect(&mut self, record: ArroyoRecordBatch) {
         self.collector.collect(record).await;
     }
 
@@ -252,7 +273,7 @@ pub struct ArrowCollector {
 }
 
 impl ArrowCollector {
-    pub async fn collect(&mut self, record: ArrowRecord) {
+    pub async fn collect(&mut self, record: ArroyoRecordBatch) {
         assert_eq!(record.count, 1);
 
         fn out_idx(keys: Option<ArrayRef>, qs: usize) -> usize {
@@ -320,8 +341,8 @@ impl ArrowCollector {
     }
 }
 
-pub trait ArrowOperatorConstructor: ArrowOperator {
-    fn from_config(config: Vec<u8>) -> Box<dyn ArrowOperator>;
+pub trait ArrowOperatorConstructor<C: prost::Message>: ArrowOperator {
+    fn from_config(config: C) -> Box<dyn ArrowOperator>;
 }
 
 #[async_trait::async_trait]
@@ -586,7 +607,7 @@ pub trait ArrowOperator: Send + 'static {
             ctx.task_info.task_index
         );
         if let arroyo_types::Watermark::EventTime(t) = watermark {
-            /*let mut state = ctx
+            let mut state = ctx
                 .state
                 .get_time_key_map(TIMER_TABLE, ctx.last_present_watermark())
                 .await;
@@ -594,7 +615,7 @@ pub trait ArrowOperator: Send + 'static {
 
             for (k, tv) in finished {
                 self.handle_timer(k, tv.data, ctx).await;
-            }*/
+            }
 
             // TODO: handle timers
         }
@@ -608,9 +629,9 @@ pub trait ArrowOperator: Send + 'static {
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {}
 
-    async fn process_batch(&mut self, batch: ArrowRecord, ctx: &mut ArrowContext);
+    async fn process_batch(&mut self, batch: ArroyoRecordBatch, ctx: &mut ArrowContext);
 
-    //async fn handle_timer(&mut self, k: ArrowData, tv: (), ctx: &mut ArrowContext) {}
+    async fn handle_timer(&mut self, batch: ArroyoRecordBatch, ctx: &mut ArrowContext) {}
 
     async fn handle_watermark(
         &mut self,

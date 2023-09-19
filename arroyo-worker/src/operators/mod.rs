@@ -33,11 +33,9 @@ pub mod windows;
 #[cfg(test)]
 mod test {
     use crate::operators::WasmOperator;
-    use crate::{engine::Context, operators::TimeWindowAssigner};
+    use crate::{engine::Context};
     use arroyo_types::{from_millis, to_millis, Message, Record};
     use std::time::{Duration, SystemTime};
-
-    use super::SlidingWindowAssigner;
 
     #[tokio::test]
     #[ignore]
@@ -77,21 +75,6 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_sliding_window_assignment() {
-        let assigner = SlidingWindowAssigner {
-            size: Duration::from_secs(5),
-            slide: Duration::from_secs(5),
-        };
-        let start_millis = to_millis(SystemTime::now());
-        let truncated_start_millis =
-            start_millis - (start_millis % Duration::from_secs(10).as_millis() as u64);
-        let start = from_millis(truncated_start_millis);
-        assert_eq!(
-            1,
-            <SlidingWindowAssigner as TimeWindowAssigner<(), ()>>::windows(&assigner, start).len()
-        );
-    }
 }
 
 #[derive(Encode, Decode, Copy, Clone, Debug, PartialEq)]
@@ -232,117 +215,6 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
     }
 }
 
-pub trait TimeWindowAssigner<K: Key, T: Data>: Copy + Clone + Send + 'static {
-    fn windows(&self, ts: SystemTime) -> Vec<Window>;
-
-    fn next(&self, window: Window) -> Window;
-
-    fn safe_retention_duration(&self) -> Option<Duration>;
-}
-
-pub trait WindowAssigner<K: Key, T: Data>: Clone + Send {}
-
-#[derive(Clone, Copy)]
-pub struct TumblingWindowAssigner {
-    size: Duration,
-}
-
-impl<K: Key, T: Data> TimeWindowAssigner<K, T> for TumblingWindowAssigner {
-    fn windows(&self, ts: SystemTime) -> Vec<Window> {
-        let key = to_millis(ts) / (self.size.as_millis() as u64);
-        vec![Window {
-            start: from_millis(key * self.size.as_millis() as u64),
-            end: from_millis((key + 1) * (self.size.as_millis() as u64)),
-        }]
-    }
-
-    fn next(&self, window: Window) -> Window {
-        Window {
-            start: window.end,
-            end: window.end + self.size,
-        }
-    }
-
-    fn safe_retention_duration(&self) -> Option<Duration> {
-        Some(self.size)
-    }
-}
-#[derive(Clone, Copy)]
-pub struct InstantWindowAssigner {}
-
-impl<K: Key, T: Data> TimeWindowAssigner<K, T> for InstantWindowAssigner {
-    fn windows(&self, ts: SystemTime) -> Vec<Window> {
-        vec![Window {
-            start: ts,
-            end: ts + Duration::from_nanos(1),
-        }]
-    }
-
-    fn next(&self, window: Window) -> Window {
-        Window {
-            start: window.start + Duration::from_micros(1),
-            end: window.end + Duration::from_micros(1),
-        }
-    }
-
-    fn safe_retention_duration(&self) -> Option<Duration> {
-        Some(Duration::ZERO)
-    }
-}
-
-#[derive(Copy, Clone)]
-pub struct SlidingWindowAssigner {
-    size: Duration,
-    slide: Duration,
-}
-//  012345678
-//  --x------
-// [--x]
-//  [-x-]
-//   [x--]
-//    [---]
-
-impl SlidingWindowAssigner {
-    fn start(&self, ts: SystemTime) -> SystemTime {
-        let ts_millis = to_millis(ts);
-        let earliest_window_start = ts_millis - self.size.as_millis() as u64;
-
-        let remainder = earliest_window_start % (self.slide.as_millis() as u64);
-
-        from_millis(earliest_window_start - remainder + self.slide.as_millis() as u64)
-    }
-}
-
-impl<K: Key, T: Data> TimeWindowAssigner<K, T> for SlidingWindowAssigner {
-    fn windows(&self, ts: SystemTime) -> Vec<Window> {
-        let mut windows =
-            Vec::with_capacity(self.size.as_millis() as usize / self.slide.as_millis() as usize);
-
-        let mut start = self.start(ts);
-
-        while start <= ts {
-            windows.push(Window {
-                start,
-                end: start + self.size,
-            });
-            start += self.slide;
-        }
-
-        windows
-    }
-
-    fn next(&self, window: Window) -> Window {
-        let start_time = window.start + self.slide;
-        Window {
-            start: start_time,
-            end: start_time + self.size,
-        }
-    }
-
-    fn safe_retention_duration(&self) -> Option<Duration> {
-        Some(self.size)
-    }
-}
 
 struct WasmOperatorEnv<K: Key, T: Data> {
     //ctx: Arc<Mutex<Option<Context<K, T>>>>,

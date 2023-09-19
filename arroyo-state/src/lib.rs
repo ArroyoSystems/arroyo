@@ -20,6 +20,7 @@ use tokio::sync::mpsc::Sender;
 
 pub mod parquet;
 pub mod tables;
+pub mod arrow;
 
 pub const BINCODE_CONFIG: Configuration = bincode::config::standard();
 

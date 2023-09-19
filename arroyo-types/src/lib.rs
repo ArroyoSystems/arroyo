@@ -300,18 +300,18 @@ pub struct Record<K: Key, T: Data> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ArrowRecord {
+pub struct ArroyoRecordBatch {
     pub columns: Vec<Arc<dyn Array>>,
     pub count: usize,
 }
 
-impl ArrowRecord {
-    pub fn new(columns: Vec<Arc<dyn Array>>) -> ArrowRecord {
+impl ArroyoRecordBatch {
+    pub fn new(columns: Vec<Arc<dyn Array>>) -> ArroyoRecordBatch {
         let count = columns
             .first()
             .expect("must have at least one column")
             .len();
-        ArrowRecord { columns, count }
+        ArroyoRecordBatch { columns, count }
     }
 }
 
@@ -324,7 +324,7 @@ impl ArrowRecord {
 
 #[derive(Debug, Clone)]
 pub enum ArrowMessage {
-    Record(ArrowRecord),
+    Record(ArroyoRecordBatch),
     Barrier(CheckpointBarrier),
     Watermark(Watermark),
     Stop,

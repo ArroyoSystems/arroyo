@@ -6,10 +6,8 @@ use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWri
 use arroyo_state::tables::{KeyTimeMultiMap, KeyedState};
 use arroyo_types::*;
 use std::time::Duration;
+use arroyo_operator::operators::{InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner};
 
-use super::{
-    InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner,
-};
 
 // Enforce a maximum session size to prevent unbounded state growth until we are able to
 // delete from parquet state.
@@ -101,14 +99,14 @@ impl<K: Key, T: Data, OutT: Data> WindowOperation<K, T, OutT> {
 }
 
 #[derive(StreamNode)]
-pub struct KeyedWindowFunc<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> {
+pub struct KeyedWindowFunc<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner> {
     assigner: W,
     operation: WindowOperation<K, T, OutT>,
     _phantom: PhantomData<(K, T, OutT)>,
 }
 
 #[process_fn(in_k = K, in_t = T, out_k = K, out_t = OutT, timer_t = Window)]
-impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K, T, OutT, W> {
+impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner> KeyedWindowFunc<K, T, OutT, W> {
     pub fn tumbling_window(
         size: Duration,
         operation: WindowOperation<K, T, OutT>,

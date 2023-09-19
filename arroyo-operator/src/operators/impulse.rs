@@ -1,16 +1,13 @@
 use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor};
 use crate::SourceFinishType;
-use arrow::datatypes::DataType::Time64;
-use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow_array::{
-    ArrayRef, RecordBatch, Time64NanosecondArray, TimestampNanosecondArray, UInt64Array,
+    ArrayRef, TimestampNanosecondArray, UInt64Array,
 };
-use arroyo_rpc::grpc::{StopMode, TableDescriptor};
+use arroyo_rpc::grpc::{api, StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
-use arroyo_types::{to_nanos, ArrowRecord};
-use prost::Message;
+use arroyo_types::{to_nanos, ArroyoRecordBatch};
+use bincode::{Encode, Decode};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tracing::{debug, info};
@@ -18,7 +15,7 @@ use typify::import_types;
 
 import_types!(schema = "../connector-schemas/impulse/table.json");
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Encode, Decode)]
 pub struct ImpulseSourceState {
     counter: usize,
     start_time: SystemTime,
@@ -72,7 +69,7 @@ impl ImpulseSource {
                 Arc::new(UInt64Array::from(vec![ctx.task_info.task_index as u64])),
             ];
 
-            let record = ArrowRecord { columns, count: 1 };
+            let record = ArroyoRecordBatch { columns, count: 1 };
 
             ctx.collect(record).await;
 
@@ -81,12 +78,12 @@ impl ImpulseSource {
             match ctx.control_rx.try_recv() {
                 Ok(ControlMessage::Checkpoint(c)) => {
                     // checkpoint our state
-                    // debug!("starting checkpointing {}", ctx.task_info.task_index);
-                    // ctx.state
-                    //     .get_global_keyed_state('i')
-                    //     .await
-                    //     .insert(ctx.task_info.task_index, self.state)
-                    //     .await;
+                    debug!("starting checkpointing {}", ctx.task_info.task_index);
+                    ctx.state
+                        .get_global_keyed_state('i')
+                        .await
+                        .insert(ctx.task_info.task_index, self.state)
+                        .await;
                     if self.checkpoint(c, ctx).await {
                         return SourceFinishType::Immediate;
                     }
@@ -123,13 +120,10 @@ impl ImpulseSource {
     }
 }
 
-impl ArrowOperatorConstructor for ImpulseSource {
-    fn from_config(config: Vec<u8>) -> Box<dyn ArrowOperator> {
-        let mut buf = config.as_slice();
-        let op = arroyo_rpc::grpc::api::ConnectorOp::decode(&mut buf).unwrap();
-
+impl ArrowOperatorConstructor<api::ConnectorOp> for ImpulseSource {
+    fn from_config(config: api::ConnectorOp) -> Box<dyn ArrowOperator> {
         let config: OperatorConfig =
-            serde_json::from_str(&op.config).expect("Invalid config for ImpulseSource");
+            serde_json::from_str(&config.config).expect("Invalid config for ImpulseSource");
         let table: ImpulseTable =
             serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
 
@@ -161,19 +155,19 @@ impl ArrowOperator for ImpulseSource {
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {
-        // let s = ctx
-        //     .state
-        //     .get_global_keyed_state::<usize, ImpulseSourceState>('i')
-        //     .await;
-        //
-        // if let Some(state) = s.get(&ctx.task_info.task_index) {
-        //     self.state = *state;
-        // }
+        let s = ctx
+            .state
+            .get_global_keyed_state::<usize, ImpulseSourceState>('i')
+            .await;
+
+        if let Some(state) = s.get(&ctx.task_info.task_index) {
+            self.state = *state;
+        }
 
         self.run(ctx).await;
     }
 
-    async fn process_batch(&mut self, _: ArrowRecord, _: &mut ArrowContext) {
+    async fn process_batch(&mut self, _: ArroyoRecordBatch, _: &mut ArrowContext) {
         unreachable!("process batch should not be called on source");
     }
 }

@@ -1,12 +1,13 @@
 use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor};
 use arrow_array::RecordBatch;
-use arroyo_types::ArrowRecord;
+use arroyo_types::ArroyoRecordBatch;
 use async_trait::async_trait;
+use arroyo_rpc::grpc::api;
 
 pub struct ConsoleSink {}
 
-impl ArrowOperatorConstructor for ConsoleSink {
-    fn from_config(_config: Vec<u8>) -> Box<dyn ArrowOperator> {
+impl ArrowOperatorConstructor<api::ConnectorOp> for ConsoleSink {
+    fn from_config(_c: api::ConnectorOp) -> Box<dyn ArrowOperator> {
         Box::new(Self {})
     }
 }
@@ -17,7 +18,7 @@ impl ArrowOperator for ConsoleSink {
         "ConsoleSink".to_string()
     }
 
-    async fn process_batch(&mut self, batch: ArrowRecord, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: ArroyoRecordBatch, ctx: &mut ArrowContext) {
         let batch = RecordBatch::try_new(ctx.in_schemas[0].schema.clone(), batch.columns).unwrap();
 
         let out = std::io::stdout();
