@@ -265,7 +265,7 @@ impl BackingStore for ParquetBackend {
                     &operator_id,
                 ));
                 debug!("deleting {}", path);
-                storage_client.lock().await.delete(path).await?;
+                storage_client.lock().await.delete_if_present(path).await?;
             }
             debug!(
                 message = "Finished compacting operator",
@@ -279,7 +279,7 @@ impl BackingStore for ParquetBackend {
             storage_client
                 .lock()
                 .await
-                .delete(metadata_path(&base_path(&metadata.job_id, epoch_to_remove)))
+                .delete_if_present(metadata_path(&base_path(&metadata.job_id, epoch_to_remove)))
                 .await?;
         }
         metadata.min_epoch = min_epoch;
@@ -428,7 +428,7 @@ impl ParquetBackend {
                 let file = parquet_store.file.clone();
                 if !paths_to_keep.contains(&file) && !deleted_paths.contains(&file) {
                     deleted_paths.insert(file.clone());
-                    storage_client.delete(file).await?;
+                    storage_client.delete_if_present(file).await?;
                 }
             }
         }
