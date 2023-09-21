@@ -9,7 +9,7 @@ use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
 };
-use arroyo_state::tables::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{Data, Message, Record, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};

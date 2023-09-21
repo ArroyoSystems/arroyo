@@ -6,7 +6,7 @@ use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_rpc::types::Format;
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
-use arroyo_state::tables::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
 use governor::{Quota, RateLimiter};

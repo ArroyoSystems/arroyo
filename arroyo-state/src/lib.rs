@@ -15,10 +15,11 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ops::RangeInclusive;
 use std::time::{Duration, SystemTime};
-use tables::{
-    GlobalKeyedState, GlobalKeyedStateCache, KeyTimeMultiMap, KeyTimeMultiMapCache, KeyedState,
-    KeyedStateCache, TimeKeyMap, TimeKeyMapCache,
-};
+use tables::global_keyed_map::{GlobalKeyedState, GlobalKeyedStateCache};
+use tables::key_time_multi_map::{KeyTimeMultiMap, KeyTimeMultiMapCache};
+use tables::keyed_map::{KeyedState, KeyedStateCache};
+use tables::time_key_map::{TimeKeyMap, TimeKeyMapCache};
+use tables::{global_keyed_map, key_time_multi_map, keyed_map, time_key_map};
 use tokio::sync::mpsc::Sender;
 
 mod metrics;
@@ -235,7 +236,7 @@ impl<S: BackingStore> StateStore<S> {
                     .await;
                     Box::new(cache)
                 }
-                None => Box::<tables::TimeKeyMapCache<K, V>>::default(),
+                None => Box::<time_key_map::TimeKeyMapCache<K, V>>::default(),
             };
             e.insert(cache);
         }
@@ -270,7 +271,7 @@ impl<S: BackingStore> StateStore<S> {
                     .await;
                     Box::new(cache)
                 }
-                None => Box::<tables::KeyTimeMultiMapCache<K, V>>::default(),
+                None => Box::<key_time_multi_map::KeyTimeMultiMapCache<K, V>>::default(),
             };
             e.insert(cache);
         }
@@ -299,7 +300,7 @@ impl<S: BackingStore> StateStore<S> {
                         GlobalKeyedStateCache::<K, V>::from_checkpoint(&self.backend, table).await;
                     Box::new(cache)
                 }
-                None => Box::<tables::GlobalKeyedStateCache<K, V>>::default(),
+                None => Box::<global_keyed_map::GlobalKeyedStateCache<K, V>>::default(),
             };
             e.insert(cache);
         }
@@ -324,7 +325,7 @@ impl<S: BackingStore> StateStore<S> {
                         KeyedStateCache::<K, V>::from_checkpoint(&self.backend, table).await;
                     Box::new(cache)
                 }
-                None => Box::<tables::KeyedStateCache<K, V>>::default(),
+                None => Box::<keyed_map::KeyedStateCache<K, V>>::default(),
             };
             e.insert(cache);
         }
@@ -366,7 +367,9 @@ mod test {
     use tokio::sync::mpsc::channel;
 
     use crate::parquet::ParquetBackend;
-    use crate::tables::{KeyTimeMultiMap, KeyedState, TimeKeyMap};
+    use crate::tables::key_time_multi_map::KeyTimeMultiMap;
+    use crate::tables::keyed_map::KeyedState;
+    use crate::tables::time_key_map::TimeKeyMap;
     use crate::{global_table, timestamp_table, BackingStore, StateStore};
     use arroyo_types::{to_micros, CheckpointBarrier, TaskInfo};
 

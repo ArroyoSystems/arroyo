@@ -14,7 +14,7 @@ use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
 };
-use arroyo_state::tables::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{from_nanos, Data, Record, UserError};
 use aws_config::from_env;
 use aws_sdk_kinesis::{

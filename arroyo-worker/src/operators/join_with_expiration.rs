@@ -5,7 +5,7 @@ use std::{
 
 use arroyo_macro::{co_process_fn, StreamNode};
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
-use arroyo_state::tables::KeyTimeMultiMap;
+use arroyo_state::tables::key_time_multi_map::KeyTimeMultiMap;
 use arroyo_types::*;
 
 use crate::engine::Context;
