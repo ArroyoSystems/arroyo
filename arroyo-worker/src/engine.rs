@@ -7,7 +7,7 @@ use std::{mem, thread};
 
 use std::time::SystemTime;
 
-use arroyo_state::tables::TimeKeyMap;
+use arroyo_state::tables::time_key_map::TimeKeyMap;
 use bincode::{config, Decode, Encode};
 
 use tracing::{debug, info, warn};
