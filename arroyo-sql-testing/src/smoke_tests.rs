@@ -1,18 +1,163 @@
 #![allow(warnings)]
-use std::{alloc::System, fmt::Debug, sync::Arc, time::SystemTime};
+use std::collections::HashMap;
+use std::{fmt::Debug, time::SystemTime};
+use tokio::sync::mpsc::Receiver;
 
-use arroyo_rpc::ControlResp;
-use arroyo_sql_macro::{correctness_run_codegen, full_pipeline_codegen};
+use arroyo_controller::job_controller::checkpoint_state::CheckpointState;
+use arroyo_rpc::grpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
+use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_sql_macro::correctness_run_codegen;
+use arroyo_types::{to_micros, CheckpointBarrier};
+use arroyo_worker::engine::{Program, RunningEngine};
 use arroyo_worker::{
     engine::{Engine, StreamConfig},
-    LocalRunner, LogicalEdge, LogicalNode,
+    LogicalEdge, LogicalNode,
 };
 use petgraph::Graph;
+use test_log::test;
 use tokio::fs::read_to_string;
+use tokio::sync::mpsc::error::TryRecvError;
+use tracing::info;
+
+struct SmokeTestContext<'a> {
+    job_id: String,
+    engine: &'a RunningEngine,
+    control_rx: &'a mut Receiver<ControlResp>,
+    tasks_per_operator: HashMap<String, usize>,
+}
+
+async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
+    let checkpoint_id = epoch as i64;
+    let mut checkpoint_state = CheckpointState::new(
+        ctx.job_id.clone(),
+        checkpoint_id,
+        epoch,
+        0,
+        ctx.tasks_per_operator.clone(),
+    );
+
+    // trigger a checkpoint, pass the messages to the CheckpointState
+
+    let barrier = CheckpointBarrier {
+        epoch,
+        min_epoch: 0,
+        timestamp: SystemTime::now(),
+        then_stop: false,
+    };
+
+    for source in ctx.engine.source_controls() {
+        source
+            .send(ControlMessage::Checkpoint(barrier))
+            .await
+            .unwrap();
+    }
+
+    while !checkpoint_state.done() {
+        let c: ControlResp = ctx.control_rx.recv().await.unwrap();
+
+        match c {
+            ControlResp::CheckpointEvent(c) => {
+                let req = TaskCheckpointEventReq {
+                    worker_id: 1,
+                    time: to_micros(c.time),
+                    job_id: ctx.job_id.clone(),
+                    operator_id: c.operator_id,
+                    subtask_index: c.subtask_index,
+                    epoch: c.checkpoint_epoch,
+                    event_type: c.event_type as i32,
+                };
+                checkpoint_state.checkpoint_event(req).unwrap();
+            }
+            ControlResp::CheckpointCompleted(c) => {
+                let req = TaskCheckpointCompletedReq {
+                    worker_id: 1,
+                    time: c.subtask_metadata.finish_time,
+                    job_id: ctx.job_id.clone(),
+                    operator_id: c.operator_id,
+                    epoch: c.checkpoint_epoch,
+                    needs_commit: false,
+                    metadata: Some(c.subtask_metadata),
+                };
+                checkpoint_state.checkpoint_finished(req).await.unwrap();
+            }
+            _ => {}
+        }
+    }
+
+    checkpoint_state.save_state().await.unwrap();
+
+    info!("Smoke test checkpoint completed");
+}
+
+async fn advance(engine: &RunningEngine) {
+    // let the engine run for a bit, process 100 records
+    for source in engine.source_controls() {
+        for _ in 0..100 {
+            let _ = source.send(ControlMessage::NoOp).await;
+        }
+    }
+}
+
+async fn run_until_finished(engine: &RunningEngine, control_rx: &mut Receiver<ControlResp>) {
+    while control_rx.try_recv().is_ok()
+        || control_rx
+            .try_recv()
+            .is_err_and(|e| e == TryRecvError::Empty)
+    {
+        advance(engine).await;
+    }
+}
+
+async fn test_checkpoints(
+    job_id: String,
+    running_engine: &RunningEngine,
+    mut control_rx: &mut Receiver<ControlResp>,
+    tasks_per_operator: HashMap<String, usize>,
+    graph: Graph<LogicalNode, LogicalEdge>,
+) {
+    info!("Smoke test checkpointing enabled");
+
+    let ctx = &mut SmokeTestContext {
+        job_id: job_id.clone(),
+        engine: running_engine,
+        control_rx: &mut control_rx,
+        tasks_per_operator,
+    };
+
+    // trigger a couple checkpoints
+    checkpoint(ctx, 1).await;
+    advance(running_engine).await;
+    checkpoint(ctx, 2).await;
+    advance(running_engine).await;
+
+    // shut down the engine
+    for source in running_engine.source_controls() {
+        source
+            .send(ControlMessage::Stop {
+                mode: StopMode::Graceful,
+            })
+            .await
+            .unwrap();
+    }
+    run_until_finished(running_engine, &mut control_rx).await;
+
+    // create a new engine, restore from the last checkpoint
+    let program = Program::local_from_logical(job_id.clone(), &graph);
+    let engine = Engine::for_local(program, job_id.clone());
+    let (running_engine, mut control_rx) = engine
+        .start(StreamConfig {
+            restore_epoch: Some(2),
+        })
+        .await;
+
+    info!("Restored engine, running until finished");
+    run_until_finished(&running_engine, &mut control_rx).await;
+}
 
 async fn run_pipeline_and_assert_outputs(
     graph: Graph<LogicalNode, LogicalEdge>,
-    name: String,
+    job_id: String,
+    checkpoints: bool,
     output_location: String,
     golden_output_location: String,
 ) {
@@ -21,14 +166,27 @@ async fn run_pipeline_and_assert_outputs(
         std::fs::remove_file(&output_location).unwrap();
     }
 
-    let program = arroyo_worker::engine::Program::local_from_logical(name.clone(), &graph);
-    let (running_engine, mut control_rx) = Engine::for_local(program, name.clone())
+    let program = Program::local_from_logical(job_id.clone(), &graph);
+    let tasks_per_operator = program.tasks_per_operator();
+    let engine = Engine::for_local(program, job_id.clone());
+    let (running_engine, mut control_rx) = engine
         .start(StreamConfig {
             restore_epoch: None,
         })
         .await;
-    // wait for the engine to finish
-    while let Some(control_resp) = control_rx.recv().await {}
+
+    if checkpoints {
+        test_checkpoints(
+            job_id,
+            &running_engine,
+            &mut control_rx,
+            tasks_per_operator,
+            graph,
+        )
+        .await;
+    }
+
+    run_until_finished(&running_engine, &mut control_rx).await;
 
     check_output_files(output_location, golden_output_location).await;
 }
@@ -72,7 +230,7 @@ async fn check_output_files(output_location: String, golden_output_location: Str
         });
 }
 
-correctness_run_codegen! {"select_star",
+correctness_run_codegen! {"select_star", true,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -98,7 +256,7 @@ CREATE TABLE cars_output (
 );
 INSERT INTO cars_output SELECT * FROM cars"}
 
-correctness_run_codegen! {"hourly_by_event_type",
+correctness_run_codegen! {"hourly_by_event_type", true,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -129,7 +287,7 @@ FROM cars
 GROUP BY 1,2);
 "}
 
-correctness_run_codegen! {"month_loose_watermark",
+correctness_run_codegen! {"month_loose_watermark", true,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -141,7 +299,7 @@ correctness_run_codegen! {"month_loose_watermark",
   path = '$input_dir/cars.json',
   format = 'json',
   type = 'source',
-  event_time_field = 'timestamp', 
+  event_time_field = 'timestamp',
   watermark_field = 'watermark'
 );
 CREATE TABLE group_by_aggregate (
@@ -161,7 +319,7 @@ FROM cars
 GROUP BY 1);
 "}
 
-correctness_run_codegen! {"tight_watermark",
+correctness_run_codegen! {"tight_watermark", true,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -172,7 +330,7 @@ correctness_run_codegen! {"tight_watermark",
   path = '$input_dir/cars.json',
   format = 'json',
   type = 'source',
-  event_time_field = 'timestamp', 
+  event_time_field = 'timestamp',
   watermark_field = 'timestamp'
 );
 CREATE TABLE group_by_aggregate (
@@ -192,7 +350,7 @@ FROM cars
 GROUP BY 1);
 "}
 
-correctness_run_codegen! {"suspicious_drivers",
+correctness_run_codegen! {"suspicious_drivers", true,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -203,7 +361,7 @@ correctness_run_codegen! {"suspicious_drivers",
   path = '$input_dir/sorted_cars.json',
   format = 'json',
   type = 'source',
-  event_time_field = 'timestamp', 
+  event_time_field = 'timestamp',
   watermark_field = 'timestamp'
 );
 CREATE TABLE suspicious_drivers (
@@ -224,7 +382,7 @@ GROUP BY 1
 ) WHERE pickups < dropoffs
 "}
 
-correctness_run_codegen! {"most_active_driver_last_hour_unaligned",
+correctness_run_codegen! {"most_active_driver_last_hour_unaligned", true,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -245,7 +403,7 @@ CREATE TABLE most_active_driver (
   row_number BIGINT
 ) WITH (
   connector = 'single_file',
-  path = '$output_path', 
+  path = '$output_path',
   format = 'json',
   type = 'sink'
 );
@@ -263,7 +421,7 @@ SELECT * FROM (
          GROUP BY 1,2)) ) where row_number = 1
 "}
 
-correctness_run_codegen! {"most_active_driver_last_hour",
+correctness_run_codegen! {"most_active_driver_last_hour", true,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -284,7 +442,7 @@ CREATE TABLE most_active_driver (
   row_number BIGINT
 ) WITH (
   connector = 'single_file',
-  path = '$output_path', 
+  path = '$output_path',
   format = 'json',
   type = 'sink'
 );
@@ -299,10 +457,10 @@ SELECT * FROM (
   hop(INTERVAL '1' minute, INTERVAL '1' hour ) as window,
          count(*) as count
          FROM cars
-         GROUP BY 1,2)) ) where row_number = 1 
+         GROUP BY 1,2)) ) where row_number = 1
 "}
 
-correctness_run_codegen! {"outer_join",
+correctness_run_codegen! {"outer_join", true,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -326,7 +484,7 @@ CREATE TABLE driver_status (
   type = 'sink'
 );
 INSERT INTO driver_status
-SELECT distinct COALESCE(pickups.driver_id, dropoffs.driver_id) as 
+SELECT distinct COALESCE(pickups.driver_id, dropoffs.driver_id) as
 driver_id, pickups.driver_id is not null as has_pickup,
 dropoffs.driver_id is not null as has_dropoff
 FROM
@@ -336,7 +494,7 @@ FULL OUTER JOIN
 ON pickups.driver_id = dropoffs.driver_id
 "}
 
-correctness_run_codegen! {"windowed_outer_join",
+correctness_run_codegen! {"windowed_outer_join", false,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -375,7 +533,7 @@ FULL OUTER JOIN (
 ON dropoffs.window = pickups.window)
 "}
 
-correctness_run_codegen! {"windowed_inner_join",
+correctness_run_codegen! {"windowed_inner_join", true,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -414,7 +572,7 @@ INNER JOIN (
 ON dropoffs.window = pickups.window)
 "}
 
-correctness_run_codegen! {"aggregates",
+correctness_run_codegen! {"aggregates", false,
 "CREATE TABLE impulse_source (
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null
@@ -438,7 +596,7 @@ CREATE TABLE aggregates (
 INSERT INTO aggregates SELECT min(counter), max(counter), sum(counter), count(*), avg(counter)  FROM impulse_source"}
 
 // test double negative UDF
-correctness_run_codegen! {"double_negative_udf",
+correctness_run_codegen! {"double_negative_udf", false,
 "CREATE TABLE impulse_source (
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null
@@ -462,7 +620,7 @@ SELECT double_negative(counter) FROM impulse_source",
 }"}
 
 // test UDAF
-correctness_run_codegen! {"udaf",
+correctness_run_codegen! {"udaf", false,
 "CREATE TABLE impulse_source (
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null
@@ -505,7 +663,7 @@ fn max_product(first_arg: Vec<u64>, second_arg: Vec<u64>) -> u64 {
 }"}
 
 // filter updating aggregates
-correctness_run_codegen! {"filter_updating_aggregates",
+correctness_run_codegen! {"filter_updating_aggregates", false,
 "CREATE TABLE impulse_source (
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null

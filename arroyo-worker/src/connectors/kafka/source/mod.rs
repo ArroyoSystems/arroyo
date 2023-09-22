@@ -283,6 +283,7 @@ where
                         Some(ControlMessage::LoadCompacted {compacted}) => {
                             ctx.load_compacted(compacted).await;
                         }
+                        Some(ControlMessage::NoOp) => {}
                         None => {
 
                         }

@@ -703,6 +703,7 @@ dependencies = [
  "arrow",
  "arrow-array",
  "arrow-schema",
+ "arroyo-controller",
  "arroyo-rpc",
  "arroyo-sql",
  "arroyo-sql-macro",
@@ -717,7 +718,10 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.33",
+ "test-log",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -7226,6 +7230,17 @@ dependencies = [
  "quote",
  "syn 1.0.109",
  "test-case-core",
+]
+
+[[package]]
+name = "test-log"
+version = "0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9601d162c1d77e62c1ea0bc8116cd1caf143ce3af947536c3c9052a1677fe0c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

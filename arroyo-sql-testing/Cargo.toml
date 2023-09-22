@@ -18,6 +18,7 @@ bincode_derive = "=2.0.0-rc.3"
 serde = "1.0"
 serde_json = "1.0"
 arroyo-types = { path = "../arroyo-types" }
+arroyo-controller = { path = "../arroyo-controller" }
 arroyo-sql = { path = "../arroyo-sql" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-worker = { path = "../arroyo-worker" }
@@ -27,3 +28,6 @@ tokio = { version = "1.16", features = ["full"] }
 arrow = {workspace = true }
 arrow-array = {workspace = true }
 arrow-schema = {workspace = true }
+tracing = "0.1.37"
+test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
+tracing-subscriber = {version = "0.3.17"}
