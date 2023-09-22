@@ -4,7 +4,7 @@ use crate::{states::StateError, JobMessage};
 
 use super::{
     stopping::{StopBehavior, Stopping},
-    Context, State, Stopped, Transition,
+    JobContext, State, Stopped, Transition,
 };
 
 #[derive(Debug)]
@@ -16,7 +16,7 @@ impl State for CheckpointStopping {
         "CheckpointStopping"
     }
 
-    async fn next(mut self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+    async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         let job_controller = ctx.job_controller.as_mut().unwrap();
 
         let mut final_checkpoint_started = false;

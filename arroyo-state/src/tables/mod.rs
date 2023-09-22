@@ -1,6 +1,5 @@
-use crate::{BackingStore, DataOperation};
+use crate::DataOperation;
 use arroyo_rpc::grpc::TableType;
-use arroyo_types::{Data, Key};
 use std::collections::HashMap;
 use std::time::SystemTime;
 

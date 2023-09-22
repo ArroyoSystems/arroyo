@@ -33,6 +33,7 @@ pub enum ControlMessage {
     Stop { mode: StopMode },
     Commit { epoch: u32 },
     LoadCompacted { compacted: CompactionResult },
+    NoOp,
 }
 
 #[derive(Debug, Clone)]

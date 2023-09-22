@@ -1,6 +1,6 @@
 use crate::{states::stop_if_desired_non_running, JobMessage};
 
-use super::{scheduling::Scheduling, Context, State, StateError, Transition};
+use super::{scheduling::Scheduling, JobContext, State, StateError, Transition};
 
 #[derive(Debug)]
 pub struct Rescaling {}
@@ -11,7 +11,7 @@ impl State for Rescaling {
         "Rescaling"
     }
 
-    async fn next(mut self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+    async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         let job_controller = ctx.job_controller.as_mut().unwrap();
 
         if let Err(e) = job_controller.checkpoint(true).await {

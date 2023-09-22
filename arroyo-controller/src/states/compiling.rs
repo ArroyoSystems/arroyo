@@ -4,7 +4,7 @@ use tracing::info;
 use crate::states::{fatal, stop_if_desired_non_running, StateError};
 use crate::{compiler::ProgramCompiler, JobMessage};
 
-use super::{scheduling::Scheduling, Context, State, Transition};
+use super::{scheduling::Scheduling, JobContext, State, Transition};
 
 #[derive(Debug)]
 pub struct Compiling;
@@ -15,7 +15,7 @@ impl State for Compiling {
         "Compiling"
     }
 
-    async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+    async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         if ctx.status.pipeline_path.is_some() {
             info!(
                 message = "Pipeline already compiled",

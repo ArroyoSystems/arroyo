@@ -77,7 +77,7 @@ impl State for Created {
         "Created"
     }
 
-    async fn next(self: Box<Self>, _: &mut Context) -> Result<Transition, StateError> {
+    async fn next(self: Box<Self>, _: &mut JobContext) -> Result<Transition, StateError> {
         Ok(Transition::next(*self, Compiling))
     }
 }
@@ -90,7 +90,7 @@ impl State for Failed {
         "Failed"
     }
 
-    async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+    async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         if let Err(e) = ctx
             .scheduler
             .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
@@ -120,7 +120,7 @@ impl State for Finished {
         "Finished"
     }
 
-    async fn next(self: Box<Self>, _: &mut Context) -> Result<Transition, StateError> {
+    async fn next(self: Box<Self>, _: &mut JobContext) -> Result<Transition, StateError> {
         Ok(Transition::Stop)
     }
 
@@ -138,7 +138,7 @@ impl State for Stopped {
         "Stopped"
     }
 
-    async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+    async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         if let Err(e) = ctx
             .scheduler
             .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
@@ -212,7 +212,7 @@ impl TransitionTo<Scheduling> for Rescaling {
 
 impl TransitionTo<Compiling> for Recovering {}
 
-fn done_transition(ctx: &mut Context) {
+fn done_transition(ctx: &mut JobContext) {
     ctx.status.finish_time = Some(OffsetDateTime::now_utc());
     ctx.job_controller = None;
 }
@@ -316,7 +316,7 @@ macro_rules! stop_if_desired_non_running {
 pub(crate) use stop_if_desired_non_running;
 pub(crate) use stop_if_desired_running;
 
-pub struct Context<'a> {
+pub struct JobContext<'a> {
     config: JobConfig,
     status: &'a mut JobStatus,
     program: &'a mut Program,
@@ -328,7 +328,7 @@ pub struct Context<'a> {
     last_transitioned_at: Instant,
 }
 
-impl<'a> Context<'a> {
+impl<'a> JobContext<'a> {
     pub fn handle(&mut self, msg: JobMessage) -> Result<(), StateError> {
         warn!("unhandled job message {:?}", msg);
         Ok(())
@@ -358,10 +358,10 @@ pub trait State: Sync + Send + 'static + Debug {
         false
     }
 
-    async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError>;
+    async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError>;
 }
 
-type TransitionFn = Box<dyn Fn(&mut Context) + Send>;
+type TransitionFn = Box<dyn Fn(&mut JobContext) + Send>;
 
 pub trait TransitionTo<S: State> {
     fn update_status(&self) -> TransitionFn {
@@ -388,8 +388,8 @@ impl Transition {
 
 async fn execute_state<'a>(
     state: Box<dyn State>,
-    mut ctx: Context<'a>,
-) -> (Option<Box<dyn State>>, Context<'a>) {
+    mut ctx: JobContext<'a>,
+) -> (Option<Box<dyn State>>, JobContext<'a>) {
     let state_name = state.name();
 
     let next: Option<Box<dyn State>> = match state.next(&mut ctx).await {
@@ -523,7 +523,7 @@ pub async fn run_to_completion(
             .unwrap()
     };
 
-    let mut ctx = Context {
+    let mut ctx = JobContext {
         config: config.read().unwrap().clone(),
         status: &mut status,
         program: &mut program,

@@ -452,6 +452,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
                         Some(ControlMessage::LoadCompacted { compacted }) => {
                             ctx.load_compacted(compacted).await;
                         },
+                        Some(ControlMessage::NoOp ) => {}
                         None => {
 
                         }
