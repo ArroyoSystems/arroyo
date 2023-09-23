@@ -19,7 +19,6 @@ use arroyo_datastream::logical::{ArrowSchema, LogicalEdge, LogicalEdgeType, Logi
 pub use arroyo_macro::StreamNode;
 use arroyo_operator::construct_operator;
 use arroyo_operator::operator::{ArrowOperator};
-use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{
     CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
     TaskAssignment,

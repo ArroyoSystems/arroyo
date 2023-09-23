@@ -1,7 +1,6 @@
 use std::hash::Hash;
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
     time::SystemTime,
 };
 use std::collections::BTreeSet;
@@ -10,11 +9,10 @@ use std::time::Duration;
 
 use crate::inq_reader::InQReader;
 use crate::{CheckpointCounter, ControlOutcome, WatermarkHolder};
-use arrow::datatypes::{Schema, SchemaRef};
-use arrow::row::{OwnedRow, Row, RowConverter};
-use arrow_array::iterator::ArrayIter;
-use arrow_array::{downcast_primitive_array, Array, ArrayAccessor, ArrayRef, RecordBatch};
+use arrow::row::{Row, RowConverter};
+use arrow_array::{Array, ArrayRef};
 use bincode::{Decode, Encode};
+use datafusion_common::ScalarValue;
 use arroyo_datastream::logical::ArrowSchema;
 use arroyo_metrics::{counter_for_task, gauge_for_task};
 use arroyo_rpc::{
@@ -24,17 +22,15 @@ use arroyo_rpc::{
     },
     ControlMessage, ControlResp,
 };
-use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
+use arroyo_state::{BackingStore, StateBackend, StateStore};
 use arroyo_types::{from_micros, ArrowMessage, CheckpointBarrier, TaskInfo, Watermark, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT, Key, Data, ArroyoRecordBatch, Window, to_millis, from_millis};
 use datafusion_physical_expr::hash_utils;
-use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use prometheus::{labels, IntCounter, IntGauge};
-use rand::{random, Rng};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use rand::{random};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{error, Instrument};
+use tracing::{debug, error, Instrument, warn};
+use arroyo_state::tables::TimeKeyMap;
 
 pub trait TimerT: Data + PartialEq + Eq + 'static {}
 impl<T: Data + PartialEq + Eq + 'static> TimerT for T {}
@@ -383,6 +379,46 @@ impl ArrowContext {
     pub fn last_present_watermark(&self) -> Option<SystemTime> {
         self.watermarks.last_present_watermark()
     }
+
+    pub async fn schedule_timer<D: TimerT>(
+        &mut self,
+        key: &mut ScalarValue,
+        event_time: SystemTime,
+        data: D,
+    ) {
+        if let Some(watermark) = self.last_present_watermark() {
+            assert!(watermark < event_time, "Timer scheduled for past");
+        };
+
+        let mut timer_state: TimeKeyMap<ScalarValue, ArrowTimerValue, _> =
+            self.state.get_time_key_map(TIMER_TABLE, None).await;
+        let value = ArrowTimerValue {
+            time: event_time,
+            key: key.clone(),
+            data,
+        };
+
+        debug!(
+            "[{}] scheduling timer for [{}, {:?}]",
+            self.task_info.task_index,
+            hash_key(key),
+            event_time
+        );
+
+        timer_state.insert(event_time, key., value);
+    }
+
+    pub async fn cancel_timer<D: Data + PartialEq + Eq>(
+        &mut self,
+        key: &mut K,
+        event_time: SystemTime,
+    ) -> Option<D> {
+        let mut timer_state: TimeKeyMap<K, TimerValue<K, D>, _> =
+            self.state.get_time_key_map(TIMER_TABLE, None).await;
+
+        timer_state.remove(event_time, key).map(|v| v.data)
+    }
+
 }
 
 pub struct ArrowCollector {
@@ -642,7 +678,7 @@ pub trait ArrowOperator: Send + 'static {
         ctx: &mut ArrowContext,
     ) -> ControlOutcome {
         match message {
-            ArrowMessage::Record(record) => {
+            ArrowMessage::Record(_) => {
                 unreachable!();
             }
             ArrowMessage::Barrier(t) => {
@@ -754,10 +790,12 @@ pub trait ArrowOperator: Send + 'static {
         vec![]
     }
 
+    #[allow(unused_variables)]
     async fn on_start(&mut self, ctx: &mut ArrowContext) {}
 
     async fn process_batch(&mut self, batch: ArroyoRecordBatch, ctx: &mut ArrowContext);
 
+    #[allow(unused_variables)]
     async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut ArrowContext) {}
 
     async fn handle_watermark(
@@ -768,11 +806,14 @@ pub trait ArrowOperator: Send + 'static {
         ctx.broadcast(ArrowMessage::Watermark(watermark)).await;
     }
 
+    #[allow(unused_variables)]
     async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {}
 
+    #[allow(unused_variables)]
     async fn handle_commit(&mut self, epoch: u32, ctx: &mut ArrowContext) {
-        tracing::warn!("default haindling of commit with epoch {:?}", epoch);
+        warn!("default handling of commit with epoch {:?}", epoch);
     }
 
+    #[allow(unused_variables)]
     async fn on_close(&mut self, ctx: &mut ArrowContext) {}
 }

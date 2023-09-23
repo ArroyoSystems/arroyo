@@ -3,7 +3,6 @@ use crate::operators::console::ConsoleSink;
 use crate::operators::impulse::ImpulseSource;
 use crate::operators::projection::ProjectionOperator;
 use arroyo_types::{CheckpointBarrier, Watermark};
-use serde_json::Value;
 use std::time::SystemTime;
 
 mod inq_reader;

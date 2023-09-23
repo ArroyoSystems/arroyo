@@ -1,11 +1,16 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
+use arrow::row::{RowConverter, SortField};
+use arrow_array::{Array, ArrayAccessor, StructArray, TimestampNanosecondArray};
+use arrow_array::cast::AsArray;
+use arrow_array::iterator::ArrayIter;
 use async_trait::async_trait;
+use datafusion_common::ScalarValue;
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use arroyo_rpc::grpc::{api, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_rpc::grpc::api::{window, WindowExpressionOperator};
-use arroyo_types::{ArroyoRecordBatch, Window};
+use arroyo_types::{ArroyoRecordBatch, from_nanos, Window};
 use crate::operator::{ArrowContext, ArrowOperator, ArrowOperatorConstructor, InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner};
 use crate::operators::{exprs_from_proto};
 
@@ -127,30 +132,37 @@ impl ArrowOperator for KeyedWindowFunc {
     }
 
     async fn process_batch(&mut self, batch: ArroyoRecordBatch, ctx: &mut ArrowContext) {
-        //
-        // let windows = self.assigner.windows(record.timestamp);
-        // let watermark = ctx
-        //     .last_present_watermark()
-        //     .unwrap_or(SystemTime::UNIX_EPOCH);
-        // let mut has_window = false;
-        // let mut key = record.key.clone().unwrap();
-        // for w in windows {
-        //     if w.end > watermark {
-        //         has_window = true;
-        //
-        //         ctx.schedule_timer(&mut key, w.end, w).await;
-        //     }
-        // }
-        //
-        // if has_window {
-        //     let key = record.key.as_ref().unwrap().clone();
-        //     let value = record.value.clone();
-        //     ctx.state
-        //         .get_key_time_multi_map('w')
-        //         .await
-        //         .insert(record.timestamp, key, value)
-        //         .await;
-        // }
+        let timestamp_col = ctx.in_schemas[0].timestamp_col;
+        let key_col = ctx.in_schemas[0].key_col.unwrap();
+
+        let timestamps: &TimestampNanosecondArray = batch.columns[timestamp_col].as_any().downcast_ref().unwrap();
+
+        for (i, timestamp) in timestamps.iter().enumerate() {
+            let windows = self.assigner.windows(from_nanos(timestamp.unwrap() as u128));
+            let watermark = ctx
+                .last_present_watermark()
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            let mut has_window = false;
+            let mut key = ScalarValue::try_from_array(&batch.columns[key_col], i).unwrap();
+            for w in windows {
+                if w.end > watermark {
+                    has_window = true;
+
+                    ctx.schedule_timer(&mut key, w.end, w).await;
+                }
+            }
+
+            if has_window {
+                let key = record.key.as_ref().unwrap().clone();
+                let value = record.value.clone();
+                ctx.state
+                    .get_key_time_multi_map('w')
+                    .await
+                    .insert(record.timestamp, key, value)
+                    .await;
+            }
+        }
+
 
         todo!()
     }
