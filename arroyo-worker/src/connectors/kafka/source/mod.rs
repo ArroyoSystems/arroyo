@@ -135,10 +135,14 @@ where
             .set("enable.auto.commit", "false")
             .set(
                 "group.id",
-                format!(
-                    "arroyo-{}-{}-consumer",
-                    ctx.task_info.job_id, ctx.task_info.operator_id
-                ),
+                if !&self.group_id.is_empty() {
+                    format!(
+                        "arroyo-{}-{}-consumer",
+                        ctx.task_info.job_id, ctx.task_info.operator_id
+                    )
+                } else {
+                    &self.group_id
+                },
             )
             .create()?;
 
