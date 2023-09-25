@@ -153,6 +153,7 @@ impl Connector for KafkaConnector {
         let connection = KafkaConfig {
             authentication: auth,
             bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", opts)?),
+            group_id: opts.remove("group_id")
         };
 
         let typ = pull_opt("type", opts)?;
