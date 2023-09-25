@@ -24,6 +24,7 @@ struct TestData {
 pub struct KafkaTopicTester {
     topic: String,
     server: String,
+    group: String
 }
 
 impl KafkaTopicTester {
@@ -63,6 +64,7 @@ impl KafkaTopicTester {
         let mut kafka: KafkaSourceFunc<(), TestData> = KafkaSourceFunc::new(
             &self.server,
             &self.topic,
+            &self.group,
             crate::connectors::kafka::SourceOffset::Earliest,
             Format::Json(JsonFormat::default()),
             100,
@@ -192,6 +194,7 @@ async fn test_kafka() {
     let mut kafka_topic_tester = KafkaTopicTester {
         topic: "arroyo-source".to_string(),
         server: "0.0.0.0:9092".to_string(),
+        group: "test-consumer-group".to_string(),
     };
 
     let mut task_info = arroyo_types::get_test_task_info();

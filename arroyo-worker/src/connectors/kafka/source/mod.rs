@@ -33,6 +33,7 @@ where
 {
     topic: String,
     bootstrap_servers: String,
+    group_id: String,
     offset_mode: super::SourceOffset,
     format: Format,
     client_configs: HashMap<String, String>,
@@ -59,6 +60,7 @@ where
     pub fn new(
         servers: &str,
         topic: &str,
+        group: &str,
         offset_mode: super::SourceOffset,
         format: Format,
         messages_per_second: u32,
@@ -67,6 +69,7 @@ where
         Self {
             topic: topic.to_string(),
             bootstrap_servers: servers.to_string(),
+            group_id: group.to_string(),
             offset_mode,
             format,
             client_configs: client_configs
@@ -96,6 +99,7 @@ where
         Self {
             topic: table.topic,
             bootstrap_servers: connection.bootstrap_servers.to_string(),
+            group_id: connection.group_id.to_string(),
             offset_mode: *offset,
             format: config.format.expect("Format must be set for Kafka source"),
             client_configs,

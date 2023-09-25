@@ -49,6 +49,11 @@
                     "additionalProperties": false
                 }
             ]
+        },
+        "groupId": {
+            "type": "string",
+            "title": "Group Id",
+            "description": "Custom Group ID (Consumer Group) to use"
         }
     },
     "required": [
