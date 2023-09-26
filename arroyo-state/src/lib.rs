@@ -609,7 +609,7 @@ mod test {
         // insert a key/value
 
         let mut ks: KeyedState<usize, i32, _> = ss.get_key_state('t').await;
-        let t1 = SystemTime::now();
+        let t1 = SystemTime::UNIX_EPOCH;
         ks.insert(t1, 1, 1).await;
         assert_eq!(Some(&1), ks.get(&mut 1));
 
