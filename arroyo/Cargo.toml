@@ -1,0 +1,28 @@
+[package]
+name = "arroyo"
+version = "0.6.0"
+edition = "2021"
+
+authors = ["Arroyo Systems <support@arroyo.systems>"]
+
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/ArroyoSystems/arroyo"
+homepage = "https://arroyo.dev"
+description = """
+Arroyo is a distributed stream processor that lets users ask complex questions of high-volume real-time data by writing SQL.
+
+This CLI can be used to run Arroyo clusters in Docker
+"""
+
+categories = ["database-implementations", "web-programming"]
+
+keywords = ["streaming", "data", "sql", "event-processing"]
+
+
+[dependencies]
+anyhow = "1.0.75"
+bollard = "0"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1.32.0", features = ["full"] }
+tokio-stream = "0.1.14"
