@@ -707,6 +707,7 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-sql",
  "arroyo-sql-macro",
+ "arroyo-state",
  "arroyo-types",
  "arroyo-worker",
  "bincode 2.0.0-rc.3",
