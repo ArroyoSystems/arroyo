@@ -665,7 +665,7 @@ impl StructField {
         match parse_str(&self.field_name()) {
             Ok(ident) => ident,
             Err(_) => {
-                format_ident!("r#{}", self.field_name())
+                format_ident!("r#_{}", self.field_name())
             }
         }
     }
