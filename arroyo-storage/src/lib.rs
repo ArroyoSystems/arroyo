@@ -367,10 +367,10 @@ impl StorageProvider {
     pub async fn put<P: Into<String>>(
         &self,
         path: P,
-        bytes: Vec<u8>,
+        bytes: Bytes,
     ) -> Result<String, StorageError> {
         let path: Path = path.into().into();
-        self.object_store.put(&path, bytes.into()).await?;
+        self.object_store.put(&path, bytes).await?;
 
         Ok(format!("{}/{}", self.canonical_url, path))
     }
@@ -519,7 +519,7 @@ mod tests {
         let data = now.to_le_bytes().to_vec();
         let key = format!("my-test/{}", now);
 
-        let full_url = storage.put(&key, data.clone()).await;
+        let full_url = storage.put(&key, data.clone().into()).await;
         assert!(full_url.is_ok());
 
         assert_eq!(storage.get(&key).await.unwrap(), data.clone());

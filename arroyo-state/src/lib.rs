@@ -1,14 +1,15 @@
 use crate::tables::DataTuple;
 use anyhow::Result;
 use arroyo_rpc::grpc::{
-    CheckpointMetadata, OperatorCheckpointMetadata, TableDeleteBehavior, TableDescriptor,
-    TableType, TableWriteBehavior,
+    BackendData, CheckpointMetadata, OperatorCheckpointMetadata, TableDeleteBehavior,
+    TableDescriptor, TableType, TableWriteBehavior,
 };
 use arroyo_rpc::{CompactionResult, ControlResp};
 use arroyo_types::{CheckpointBarrier, Data, Key, TaskInfo};
 use async_trait::async_trait;
 use bincode::config::Configuration;
 use bincode::{Decode, Encode};
+use bytes::Bytes;
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -22,6 +23,7 @@ use tables::time_key_map::{TimeKeyMap, TimeKeyMapCache};
 use tables::{global_keyed_map, key_time_multi_map, keyed_map, time_key_map};
 use tokio::sync::mpsc::Sender;
 
+pub mod judy;
 mod metrics;
 pub mod parquet;
 pub mod tables;
@@ -151,6 +153,12 @@ pub trait BackingStore {
     async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
 
     async fn load_compacted(&mut self, compaction: CompactionResult);
+
+    async fn files_for_table(
+        &mut self,
+        table: char,
+        watermark: Option<SystemTime>,
+    ) -> Vec<(BackendData, Bytes)>;
 }
 
 pub struct StateStore<S: BackingStore> {

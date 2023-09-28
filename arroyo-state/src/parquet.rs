@@ -26,7 +26,7 @@ use prost::Message;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::ops::RangeInclusive;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc::{self, channel, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
@@ -129,7 +129,7 @@ impl BackingStore for ParquetBackend {
         ));
         // TODO: propagate error
         storage_client
-            .put(&path, metadata.encode_to_vec())
+            .put(&path, metadata.encode_to_vec().into())
             .await
             .unwrap();
     }
@@ -140,7 +140,7 @@ impl BackingStore for ParquetBackend {
         let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
         // TODO: propagate error
         storage_client
-            .put(&path, metadata.encode_to_vec())
+            .put(&path, metadata.encode_to_vec().into())
             .await
             .unwrap();
     }
@@ -412,6 +412,60 @@ impl BackingStore for ParquetBackend {
 
     async fn load_compacted(&mut self, compaction: CompactionResult) {
         self.writer.load_compacted_data(compaction).await;
+    }
+
+    async fn files_for_table(
+        &mut self,
+        table: char,
+        watermark: Option<SystemTime>,
+    ) -> Vec<(grpc::BackendData, Bytes)> {
+        let table_descriptor = self.tables.get(&table).unwrap();
+        let Some(files) = self.current_files.get(&table) else {
+            return vec![];
+        };
+        let mut result = vec![];
+        let files_to_search = if table_descriptor.table_type() == TableType::Global {
+            files.values().last().unwrap().clone()
+        } else {
+            files
+                .values()
+                .flatten()
+                .filter(|metadata| {
+                    if table_descriptor.delete_behavior()
+                        == TableDeleteBehavior::NoReadsBeforeWatermark
+                    {
+                        if let Some(watermark) = watermark {
+                            if from_micros(metadata.max_timestamp_micros)
+                                < watermark
+                                    - Duration::from_micros(table_descriptor.retention_micros)
+                            {
+                                return false;
+                            }
+                        }
+                    }
+                    if metadata.max_routing_key < *self.task_info.key_range.start()
+                        || *self.task_info.key_range.end() < metadata.min_routing_key
+                    {
+                        return false;
+                    }
+                    true
+                })
+                .map(|val| val.clone())
+                .collect()
+        };
+        for file in files_to_search {
+            result.push((
+                grpc::BackendData {
+                    backend_data: Some(grpc::backend_data::BackendData::ParquetStore(file.clone())),
+                },
+                self.storage
+                    .get(file.file.clone())
+                    .await
+                    .unwrap_or_else(|_| panic!("unable to find file {} in checkpoint", file.file))
+                    .into(),
+            ));
+        }
+        result
     }
 }
 
@@ -859,7 +913,7 @@ impl ParquetCompactFileWriter {
         writer.flush().unwrap();
         let parquet_bytes = writer.into_inner().unwrap();
         let bytes = parquet_bytes.len();
-        storage.put(key, parquet_bytes).await?;
+        storage.put(key, parquet_bytes.into()).await?;
         Ok(bytes)
     }
 
@@ -1156,7 +1210,7 @@ impl ParquetFlusher {
         writer.flush().unwrap();
         let parquet_bytes = writer.into_inner().unwrap();
         let bytes = parquet_bytes.len();
-        self.storage.put(key, parquet_bytes).await?;
+        self.storage.put(key, parquet_bytes.into()).await?;
         Ok(bytes)
     }
 

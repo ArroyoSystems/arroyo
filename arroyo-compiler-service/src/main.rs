@@ -218,7 +218,7 @@ impl CompileService {
         {
             let pipeline = tokio::fs::read(&build_dir.join(self.pipeline_path())).await?;
             self.storage
-                .put(format!("{}/pipeline", base), pipeline)
+                .put(format!("{}/pipeline", base), pipeline.into())
                 .await?;
         }
 
@@ -226,7 +226,7 @@ impl CompileService {
             let wasm_fns =
                 tokio::fs::read(&build_dir.join("wasm-fns/pkg/wasm_fns_bg.wasm")).await?;
             self.storage
-                .put(format!("{}/wasm_fns_bg.wasm", base), wasm_fns)
+                .put(format!("{}/wasm_fns_bg.wasm", base), wasm_fns.into())
                 .await?;
         }
 

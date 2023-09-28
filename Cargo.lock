@@ -750,10 +750,12 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-storage",
  "arroyo-types",
+ "async-recursion",
  "async-stream",
  "async-trait",
  "backoff",
  "bincode 2.0.0-rc.3",
+ "byteorder",
  "bytes",
  "ctor",
  "futures",
@@ -978,6 +980,17 @@ dependencies = [
  "rustix 0.37.23",
  "signal-hook",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "async-recursion"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd55a5ba1179988837d24ab4c7cc8ed6efdeff578ede0416b4225a5fca35bd0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.33",
 ]
 
 [[package]]
