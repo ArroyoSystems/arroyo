@@ -14,7 +14,7 @@ use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
 };
-use arroyo_state::tables::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{from_nanos, Data, Record, UserError};
 use aws_config::from_env;
 use aws_sdk_kinesis::{
@@ -449,6 +449,9 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
                         Some(ControlMessage::Commit { epoch: _ }) => {
                             unreachable!("sources shouldn't receive commit messages");
                         }
+                        Some(ControlMessage::LoadCompacted { compacted }) => {
+                            ctx.load_compacted(compacted).await;
+                        },
                         None => {
 
                         }

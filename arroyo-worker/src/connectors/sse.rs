@@ -4,7 +4,7 @@ use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::types::Format;
 use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
-use arroyo_state::tables::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{string_to_map, Data, Message, Record, Watermark};
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
@@ -128,6 +128,9 @@ where
             }
             ControlMessage::Commit { epoch: _ } => {
                 unreachable!("sources shouldn't receive commit messages");
+            }
+            ControlMessage::LoadCompacted { compacted } => {
+                ctx.load_compacted(compacted).await;
             }
         }
         None

@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
-use arroyo_state::tables::KeyedState;
+use arroyo_state::tables::keyed_map::KeyedState;
 use arroyo_types::*;
 use std::time::Duration;
 

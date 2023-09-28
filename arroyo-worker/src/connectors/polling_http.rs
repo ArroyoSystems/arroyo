@@ -17,7 +17,7 @@ use tokio::time::MissedTickBehavior;
 
 use arroyo_rpc::grpc::StopMode;
 use arroyo_rpc::types::Format;
-use arroyo_state::tables::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use tracing::{debug, info, warn};
 use typify::import_types;
 
@@ -154,6 +154,9 @@ where
             }
             ControlMessage::Commit { epoch: _ } => {
                 unreachable!("sources shouldn't receive commit messages");
+            }
+            ControlMessage::LoadCompacted { compacted } => {
+                ctx.load_compacted(compacted).await;
             }
         }
         None

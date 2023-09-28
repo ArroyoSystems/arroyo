@@ -3,7 +3,7 @@ pub mod types;
 
 use std::{fs, time::SystemTime};
 
-use crate::grpc::SubtaskCheckpointMetadata;
+use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use crate::types::{Format, PrimitiveType};
 use arroyo_types::CheckpointBarrier;
 use grpc::{StopMode, TaskCheckpointEventType};
@@ -32,6 +32,24 @@ pub enum ControlMessage {
     Checkpoint(CheckpointBarrier),
     Stop { mode: StopMode },
     Commit { epoch: u32 },
+    LoadCompacted { compacted: CompactionResult },
+}
+
+#[derive(Debug, Clone)]
+pub struct CompactionResult {
+    pub operator_id: String,
+    pub backend_data_to_drop: Vec<grpc::BackendData>,
+    pub backend_data_to_load: Vec<grpc::BackendData>,
+}
+
+impl From<LoadCompactedDataReq> for CompactionResult {
+    fn from(req: LoadCompactedDataReq) -> Self {
+        Self {
+            operator_id: req.operator_id,
+            backend_data_to_drop: req.backend_data_to_drop,
+            backend_data_to_load: req.backend_data_to_load,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
