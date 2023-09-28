@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::unreachable;
 
-use anyhow::Result;
 use anyhow::{anyhow, bail};
+use anyhow::{Ok, Result};
 use arrow_schema::DataType;
 use arroyo_datastream::{Operator, WindowType};
 use datafusion_common::{DFField, ScalarValue};
@@ -35,6 +35,7 @@ pub enum SqlOperator {
     JoinOperator(Box<SqlOperator>, Box<SqlOperator>, JoinOperator),
     Window(Box<SqlOperator>, SqlWindowOperator),
     RecordTransform(Box<SqlOperator>, RecordTransform),
+    Union(Vec<SqlOperator>),
     Sink(String, SqlSink, Box<SqlOperator>),
     NamedTable(String, Box<SqlOperator>),
 }
@@ -297,6 +298,7 @@ impl SqlOperator {
             }
             SqlOperator::Sink(_, sql_sink, _) => sql_sink.struct_def.clone(),
             SqlOperator::NamedTable(_table_name, table) => table.return_type(),
+            SqlOperator::Union(inputs) => inputs[0].return_type(),
         }
     }
 
@@ -311,6 +313,7 @@ impl SqlOperator {
             SqlOperator::RecordTransform(input, _) => input.has_window(),
             SqlOperator::Sink(_, _, input) => input.has_window(),
             SqlOperator::NamedTable(_, input) => input.has_window(),
+            SqlOperator::Union(inputs) => inputs[0].has_window(),
         }
     }
 
@@ -335,6 +338,7 @@ impl SqlOperator {
             SqlOperator::RecordTransform(input, _) => input.is_updating(),
             SqlOperator::Sink(_, _, input) => input.is_updating(),
             SqlOperator::NamedTable(_, table_operator) => table_operator.is_updating(),
+            SqlOperator::Union(inputs) => inputs[0].is_updating(),
         }
     }
 
@@ -354,6 +358,7 @@ impl SqlOperator {
             SqlOperator::RecordTransform(input, _) => input.get_window(),
             SqlOperator::Sink(_, _, input) => input.get_window(),
             SqlOperator::NamedTable(_, input) => input.get_window(),
+            SqlOperator::Union(inputs) => inputs[0].get_window(),
         }
     }
 }
@@ -390,7 +395,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             LogicalPlan::Join(join) => self.insert_join(join),
             LogicalPlan::CrossJoin(_) => bail!("cross joins are not currently supported"),
             LogicalPlan::Repartition(_) => bail!("repartitions are not currently supported"),
-            LogicalPlan::Union(_) => bail!("unions are not currently supported"),
+            LogicalPlan::Union(union) => self.insert_union(union),
             LogicalPlan::TableScan(table_scan) => self.insert_table_scan(table_scan),
             LogicalPlan::EmptyRelation(_) => bail!("empty relations not currently supported"),
             LogicalPlan::Subquery(subquery) => self.insert_sql_plan(&subquery.subquery),
@@ -1002,6 +1007,28 @@ impl<'a> SqlPipelineBuilder<'a> {
             }
         }
         Ok(())
+    }
+
+    fn insert_union(&mut self, union: &datafusion_expr::Union) -> Result<SqlOperator> {
+        let inputs = union
+            .inputs
+            .iter()
+            .map(|input| self.insert_sql_plan(input))
+            .collect::<Result<Vec<_>>>()?;
+        // check that all inputs have the same schema, updating behavior and windowing behavior
+        let first_input = &inputs[0];
+        for input in &inputs[1..] {
+            if input.return_type() != first_input.return_type() {
+                bail!("union inputs must have the same schema");
+            }
+            if input.is_updating() != first_input.is_updating() {
+                bail!("union inputs must have the same updating behavior");
+            }
+            if input.get_window() != first_input.get_window() {
+                bail!("union inputs must have the same windowing behavior");
+            }
+        }
+        Ok(SqlOperator::Union(inputs))
     }
 }
 

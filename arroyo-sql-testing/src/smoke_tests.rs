@@ -726,3 +726,25 @@ SELECT * FROM (
   SELECT count(distinct subtask_index) as subtasks FROM impulse_source
 )
 WHERE subtasks >= 1"}
+
+correctness_run_codegen! {"union", false,
+"CREATE TABLE impulse_source (
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'impulse',
+  event_rate = '1000000',
+  message_count = '100'
+);
+CREATE TABLE union_output (
+  counter bigint
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'json',
+  type = 'sink'
+);
+INSERT INTO union_output
+SELECT counter FROM (SELECT counter * 2 as counter FROM impulse_source)
+UNION ALL (SELECT 2 * counter + 1 as counter FROM impulse_source)"
+}
