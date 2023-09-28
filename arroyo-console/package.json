@@ -13,9 +13,10 @@
   },
   "dependencies": {
     "@babel/core": "^7.22.5",
+    "@chakra-ui/anatomy": "^2.2.1",
     "@chakra-ui/icons": "^2.0.19",
     "@chakra-ui/pro-theme": "^0.0.57",
-    "@chakra-ui/react": "^2.7.0",
+    "@chakra-ui/react": "^2.8.0",
     "@chakra-ui/stepper": "^2.2.0",
     "@chakra-ui/styled-system": "^2.9.1",
     "@emotion/react": "^11.11.1",
@@ -29,6 +30,7 @@
     "@types/d3": "^7.4.0",
     "@types/dagre": "^0.7.48",
     "@types/json-schema": "^7.0.12",
+    "@types/react-syntax-highlighter": "^15.5.7",
     "ajv": "^8.12.0",
     "ajv-formats": "^2.1.1",
     "d3": "^7.8.5",
@@ -46,6 +48,7 @@
     "react-icons": "^4.9.0",
     "react-resizable-panels": "^0.0.55",
     "react-router-dom": "^6.13.0",
+    "react-syntax-highlighter": "^15.5.0",
     "react-test-renderer": "^18.2.0",
     "reactflow": "^11.7.2",
     "swr": "^2.2.1"

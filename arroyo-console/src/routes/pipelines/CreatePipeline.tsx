@@ -8,6 +8,14 @@ import {
   Flex,
   HStack,
   Icon,
+  IconButton,
+  Popover,
+  PopoverArrow,
+  PopoverBody,
+  PopoverCloseButton,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTrigger,
   Spacer,
   Spinner,
   Stack,
@@ -19,24 +27,24 @@ import {
   Text,
   useDisclosure,
 } from '@chakra-ui/react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Catalog } from './Catalog';
 import { PipelineGraphViewer } from './PipelineGraph';
 import { CodeEditor } from './SqlEditor';
 import { SqlOptions } from '../../lib/types';
 import {
+  ConnectionTable,
+  JobLogMessage,
   OutputData,
   post,
   useConnectionTables,
-  useJobOutput,
   useJobMetrics,
+  useJobOutput,
   useOperatorErrors,
   usePipeline,
   usePipelineGraph,
   usePipelineJobs,
-  ConnectionTable,
-  JobLogMessage,
 } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';
@@ -47,6 +55,11 @@ import PaginatedContent from '../../components/PaginatedContent';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { MdDragHandle } from 'react-icons/md';
 import { PipelineOutputs } from './PipelineOutputs';
+import ExampleQueries from '../../components/ExampleQueries';
+import { HiOutlineBookOpen } from 'react-icons/hi';
+import { TourContext, TourSteps } from '../../tour';
+import CreatePipelineTourModal from '../../components/CreatePipelineTourModal';
+import TourCompleteModal from '../../components/TourCompleteModal';
 
 function useQuery() {
   const { search } = useLocation();
@@ -85,6 +98,19 @@ export function CreatePipeline() {
     queryParams.get('from') ?? undefined
   );
   const hasErrors = operatorErrorsPages?.length && operatorErrorsPages[0].data.length > 0;
+  const { tourActive, tourStep, setTourStep, disableTour } = useContext(TourContext);
+
+  const {
+    isOpen: exampleQueriesIsOpen,
+    onOpen: openExampleQueries,
+    onClose: onExampleQueriesClose,
+  } = useDisclosure();
+
+  useEffect(() => {
+    if (tourActive) {
+      setTourStep(TourSteps.CreatePipelineModal);
+    }
+  }, []);
 
   let connectionTables: ConnectionTable[] = [];
   let catalogTruncated = false;
@@ -166,6 +192,7 @@ export function CreatePipeline() {
   };
 
   const preview = async () => {
+    setTourStep(undefined);
     setQueryInputToCheck('');
     setPipelineId(undefined);
 
@@ -303,7 +330,10 @@ export function CreatePipeline() {
       <Spacer />
       <Box p={4} borderTop={'1px solid'} borderColor={'gray.500'}>
         Write SQL to create a streaming pipeline. See the{' '}
-        <Link to={'http://doc.arroyo.dev/sql'}>SQL docs</Link> for details on Arroyo SQL.
+        <Link to={'http://doc.arroyo.dev/sql'} target="_blank">
+          SQL docs
+        </Link>{' '}
+        for details on Arroyo SQL.
       </Box>
     </Stack>
   );
@@ -363,7 +393,22 @@ export function CreatePipeline() {
   const buttonGroup = (
     <HStack spacing={4} p={4}>
       {checkButton}
-      {startPreviewButton}
+      <Popover
+        isOpen={tourStep == TourSteps.Preview}
+        placement={'top'}
+        closeOnBlur={false}
+        variant={'tour'}
+      >
+        <PopoverTrigger>{startPreviewButton}</PopoverTrigger>
+        <PopoverContent>
+          <PopoverArrow />
+          <PopoverCloseButton onClick={disableTour} />
+          <PopoverHeader>Nice!</PopoverHeader>
+          <PopoverBody>
+            Finally, run a preview pipeline to see the results of your query.
+          </PopoverBody>
+        </PopoverContent>
+      </Popover>
       {stopPreviewButton}
       {startPipelineButton}
     </HStack>
@@ -401,6 +446,7 @@ export function CreatePipeline() {
   let previewResultsTabContent = <Text>Preview your SQL to see outputs.</Text>;
 
   if (outputs.length) {
+    setTourStep(TourSteps.TourCompleted);
     previewResultsTabContent = (
       <Box
         style={{
@@ -467,12 +513,54 @@ export function CreatePipeline() {
     </TabPanels>
   );
 
+  const exampleQueries = (
+    <ExampleQueries
+      isOpen={exampleQueriesIsOpen}
+      onClose={onExampleQueriesClose}
+      setQuery={s => {
+        updateQuery(s);
+        onExampleQueriesClose();
+      }}
+    />
+  );
+
+  const exampleQueriesButton = (
+    <Popover
+      isOpen={tourStep == TourSteps.ExampleQueriesButton}
+      placement={'bottom-start'}
+      closeOnBlur={false}
+      variant={'tour'}
+    >
+      <PopoverTrigger>
+        <IconButton
+          icon={<HiOutlineBookOpen />}
+          aria-label="Example queries"
+          onClick={() => {
+            openExampleQueries();
+            setTourStep(TourSteps.ExampleQuery);
+          }}
+        />
+      </PopoverTrigger>
+      <PopoverContent>
+        <PopoverArrow />
+        <PopoverCloseButton onClick={disableTour} />
+        <PopoverHeader>Example Queries</PopoverHeader>
+        <PopoverBody>Open for some example queries</PopoverBody>
+      </PopoverContent>
+    </Popover>
+  );
+
   const editorTabs = (
-    <Flex direction={'column'} padding={5} pl={0} backgroundColor="#1e1e1e" height="100%">
+    <Flex direction={'column'} backgroundColor="#1e1e1e" height="100%">
       <Tabs display={'flex'} flexDirection={'column'} flex={1}>
         <TabList>
-          <Tab>query.sql</Tab>
-          <Tab>udfs.rs</Tab>
+          <Flex justifyContent={'space-between'} width={'100%'}>
+            <Flex>
+              <Tab>query.sql</Tab>
+              <Tab>udfs.rs</Tab>
+            </Flex>
+            <HStack p={4}>{exampleQueriesButton}</HStack>
+          </Flex>
         </TabList>
         <TabPanels flex={1}>
           <TabPanel height={'100%'}>
@@ -579,6 +667,9 @@ export function CreatePipeline() {
           </Panel>
         </PanelGroup>
       </Flex>
+      <CreatePipelineTourModal />
+      <TourCompleteModal />
+      {exampleQueries}
       {startPipelineModal}
     </Flex>
   );
