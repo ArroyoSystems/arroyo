@@ -21,8 +21,10 @@ keywords = ["streaming", "data", "sql", "event-processing"]
 
 
 [dependencies]
-anyhow = "1.0.75"
+anyhow = {version = "1.0.75", features = ["backtrace"]}
 bollard = "0"
 clap = { version = "4", features = ["derive"] }
+open = "5.0.0"
+reqwest = "0.11.20"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-stream = "0.1.14"
