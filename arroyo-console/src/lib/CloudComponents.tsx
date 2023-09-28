@@ -1,7 +1,7 @@
 import { ChakraProvider } from '@chakra-ui/react';
-import { Router } from '../main';
 import * as ReactDOM from 'react-dom/client';
 import React from 'react';
+import { Router } from '../router';
 
 export function UserProfile() {
   return <></>;

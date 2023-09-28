@@ -14,11 +14,13 @@ import {
 } from '@chakra-ui/react';
 
 import { Link, Outlet, useLinkClickHandler, useMatch } from 'react-router-dom';
-import { FiHome, FiGitBranch, FiLink } from 'react-icons/fi';
+import { FiGitBranch, FiHome, FiLink } from 'react-icons/fi';
 import { CloudSidebar, UserProfile } from './lib/CloudComponents';
 import { usePing } from './lib/data_fetching';
 import ApiUnavailable from './routes/not_found/ApiUnavailable';
 import Loading from './components/Loading';
+import React from 'react';
+import { getTourContextValue, TourContext } from './tour';
 
 function logout() {
   // TODO: also send a request to the server to delete the session
@@ -96,6 +98,7 @@ function Sidebar() {
 
 function App() {
   const { ping, pingLoading, pingError } = usePing();
+  const tourContextValue = getTourContextValue();
 
   let content = (
     <GridItem className="main" area={'main'}>
@@ -112,10 +115,12 @@ function App() {
   }
 
   return (
-    <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px minmax(0, 1fr)'} h="100vh">
-      <Sidebar />
-      {content}
-    </Grid>
+    <TourContext.Provider value={tourContextValue}>
+      <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px minmax(0, 1fr)'} h="100vh">
+        <Sidebar />
+        {content}
+      </Grid>
+    </TourContext.Provider>
   );
 }
 

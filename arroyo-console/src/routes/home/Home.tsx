@@ -4,6 +4,13 @@ import {
   Container,
   Heading,
   HStack,
+  Popover,
+  PopoverArrow,
+  PopoverBody,
+  PopoverCloseButton,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTrigger,
   SimpleGrid,
   Stack,
   Text,
@@ -13,6 +20,9 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useJobs } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
+import React, { useContext, useEffect } from 'react';
+import WelcomeModal from '../../components/WelcomeModal';
+import { TourContext, TourSteps } from '../../tour';
 
 interface Props {
   label: string;
@@ -47,6 +57,14 @@ export function Home() {
   const { jobs, jobsLoading } = useJobs();
   const navigate = useNavigate();
 
+  const { tourActive, tourStep, setTourStep, disableTour } = useContext(TourContext);
+
+  useEffect(() => {
+    if (tourActive) {
+      setTourStep(TourSteps.WelcomeModal);
+    }
+  }, []);
+
   let runningJobs = 0;
   let allJobs = 0;
   let failedJobs = 0;
@@ -63,28 +81,74 @@ export function Home() {
     failedJobs = jobs.filter(j => j.state == 'Failed').length;
   }
 
+  const createPipelineButton = (
+    <Popover
+      isOpen={tourStep == TourSteps.CreatePipelineButton}
+      closeOnBlur={false}
+      variant={'tour'}
+    >
+      <PopoverTrigger>
+        <Button
+          variant="primary"
+          onClick={() => {
+            navigate('/pipelines/new');
+            setTourStep(TourSteps.CreatePipelineModal);
+            console.log('clicked');
+          }}
+        >
+          Create Pipeline
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent overflow={'unset'}>
+        <PopoverArrow />
+        <PopoverCloseButton onClick={disableTour} />
+        <PopoverHeader>Create Pipeline</PopoverHeader>
+        <PopoverBody>Click here to start creating a pipeline.</PopoverBody>
+      </PopoverContent>
+    </Popover>
+  );
+
   return (
     <Container py="8" flex="1">
-      <Stack spacing={{ base: '8', lg: '6' }}>
+      <WelcomeModal />
+      <Stack
+        spacing={{
+          base: '8',
+          lg: '6',
+        }}
+      >
         <Stack
           spacing="4"
-          direction={{ base: 'column', lg: 'row' }}
+          direction={{
+            base: 'column',
+            lg: 'row',
+          }}
           justify="space-between"
-          align={{ base: 'start', lg: 'center' }}
+          align={{
+            base: 'start',
+            lg: 'center',
+          }}
         >
           <Stack spacing="1">
             <Heading size="sm" fontWeight="medium">
               Dashboard
             </Heading>
           </Stack>
-          <HStack spacing="3">
-            <Button variant="primary" onClick={() => navigate('/pipelines/new')}>
-              Create Pipeline
-            </Button>
-          </HStack>
+          <HStack spacing="3">{createPipelineButton}</HStack>
         </Stack>
-        <Stack spacing={{ base: '5', lg: '6' }}>
-          <SimpleGrid columns={{ base: 1, md: 3 }} gap="6">
+        <Stack
+          spacing={{
+            base: '5',
+            lg: '6',
+          }}
+        >
+          <SimpleGrid
+            columns={{
+              base: 1,
+              md: 3,
+            }}
+            gap="6"
+          >
             <Stat label="Running Jobs" value={runningJobs?.toString()} />
             <Stat label="All Jobs" value={allJobs?.toString()} />
             <Stat
