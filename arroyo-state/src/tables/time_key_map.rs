@@ -221,6 +221,12 @@ impl<K: Key, V: Data> TimeKeyMapCache<K, V> {
                         .or_default()
                         .remove(&tuple.key);
                 }
+                DataOperation::DeleteValue => {
+                    panic!("Not supported")
+                }
+                DataOperation::DeleteTimeRange(..) => {
+                    panic!("Not supported")
+                }
             }
         }
 
