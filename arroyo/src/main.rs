@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 use std::process::exit;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_stream::StreamExt;
 
@@ -42,16 +42,17 @@ enum Commands {
 pub async fn main() {
     let cli = Cli::parse();
 
-    match &cli.command {
-        Commands::Start { tag, daemon } => {
-            start(tag.clone(), *daemon).await.unwrap();
-        }
-        Commands::Stop {} => {
-            stop().await.unwrap();
-        }
-    }
+    let result = match &cli.command {
+        Commands::Start { tag, daemon } => start(tag.clone(), *daemon).await,
+        Commands::Stop {} => stop().await,
+    };
 
-    exit(0);
+    if let Err(e) = result {
+        eprintln!("\n-------------------------------\n{:?}", e);
+        exit(1);
+    } else {
+        exit(0);
+    }
 }
 
 async fn get_docker() -> anyhow::Result<Docker> {
@@ -63,7 +64,7 @@ async fn create_image(docker: &Docker, image: &str) -> Result<String> {
     docker
         .create_image(
             Some(CreateImageOptions {
-                from_image: image.clone(),
+                from_image: image,
                 ..Default::default()
             }),
             None,
@@ -113,7 +114,7 @@ async fn create_container(docker: &Docker, image: &str) -> Result<bool> {
     );
 
     let config = container::Config {
-        image: Some(image.clone()),
+        image: Some(image),
         exposed_ports: Some(ports),
         host_config: Some(HostConfig {
             port_bindings: Some(port_map),
@@ -159,11 +160,13 @@ async fn create_container(docker: &Docker, image: &str) -> Result<bool> {
     Ok(true)
 }
 
-async fn tail_logs(docker: &Docker) -> Result<()> {
+async fn read_logs(docker: &Docker, start_time: SystemTime, tail: bool) -> Result<()> {
+    println!("Reading logs");
     let opts: LogsOptions<String> = LogsOptions {
-        follow: true,
+        follow: tail,
         stdout: true,
         stderr: true,
+        since: start_time.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64,
         ..Default::default()
     };
 
@@ -172,10 +175,10 @@ async fn tail_logs(docker: &Docker) -> Result<()> {
     while let Some(log) = tail.next().await {
         match log.context("Failed while tailing logs")? {
             LogOutput::StdErr { message } => {
-                eprint!("{}", String::from_utf8_lossy(&message));
+                eprint!("> {}", String::from_utf8_lossy(&message));
             }
             LogOutput::StdOut { message } => {
-                print!("{}", String::from_utf8_lossy(&message));
+                print!("> {}", String::from_utf8_lossy(&message));
             }
             LogOutput::StdIn { .. } => {}
             LogOutput::Console { .. } => {}
@@ -185,7 +188,32 @@ async fn tail_logs(docker: &Docker) -> Result<()> {
     Ok(())
 }
 
+pub struct ContainerStatus {
+    state: ContainerStateStatusEnum,
+    api_available: bool,
+}
+
+async fn get_status(docker: &Docker) -> anyhow::Result<ContainerStatus> {
+    let state = docker
+        .inspect_container(CONTAINER_NAME, None)
+        .await
+        .context("Failed talking to the docker daemon while inspecting")?
+        .state
+        .unwrap()
+        .status
+        .unwrap();
+
+    let api_available = reqwest::get("http://localhost:8000").await.is_ok();
+
+    Ok(ContainerStatus {
+        state,
+        api_available,
+    })
+}
+
 pub async fn start(tag: Option<String>, damon: bool) -> Result<()> {
+    let start_time = SystemTime::now();
+
     let docker = get_docker().await?;
 
     let tag = tag.as_ref().map(|t| t.as_str()).unwrap_or("latest");
@@ -205,13 +233,22 @@ pub async fn start(tag: Option<String>, damon: bool) -> Result<()> {
     println!("Started container. Waiting for API to come up...");
 
     // wait for port
+    tokio::time::sleep(Duration::from_secs(5)).await;
     loop {
-        match reqwest::get("http://localhost:8000").await {
-            Ok(_) => {
-                break;
+        let status = get_status(&docker).await?;
+        match status.state {
+            ContainerStateStatusEnum::CREATED | ContainerStateStatusEnum::RUNNING => {}
+            _ => {
+                eprintln!("\nDocker container failed... see logs for details:");
+                read_logs(&docker, start_time, false).await?;
+                bail!("shutting down...");
             }
-            Err(_) => {}
         }
+
+        if status.api_available {
+            break;
+        }
+
         print!(".");
         io::stdout().flush().unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -251,7 +288,7 @@ pub async fn start(tag: Option<String>, damon: bool) -> Result<()> {
         });
     }
 
-    tail_logs(&docker).await?;
+    read_logs(&docker, start_time, true).await?;
 
     println!("Container exited");
 
