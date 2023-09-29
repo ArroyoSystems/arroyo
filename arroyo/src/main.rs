@@ -194,7 +194,7 @@ pub async fn start(tag: Option<String>, damon: bool) -> Result<()> {
     let image_id = create_image(&docker, &image).await?;
     println!("Pulled image {}", image_id);
 
-    if !create_container(&docker, &image).await? {
+    if !create_container(&docker, &image_id).await? {
         return Ok(());
     }
 
