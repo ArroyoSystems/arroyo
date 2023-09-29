@@ -40,6 +40,7 @@ COPY arroyo-openapi arroyo-openap
 COPY arroyo-storage arroyo-storage
 COPY docker/refinery.toml refinery.toml
 COPY connector-schemas connector-schemas
+COPY arroyo arroyo
 
 COPY copy-artifacts copy-artifacts
 COPY integ integ

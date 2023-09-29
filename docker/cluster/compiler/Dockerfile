@@ -44,6 +44,7 @@ COPY arroyo-controller src/arroyo-controller
 COPY arroyo-console src/arroyo-console
 COPY arroyo-storage src/arroyo-storage
 COPY connector-schemas src/connector-schemas
+COPY arroyo src/arroyo
 
 COPY copy-artifacts src/copy-artifacts
 COPY integ src/integ
