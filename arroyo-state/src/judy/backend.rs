@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use prost::Message;
+use std::any::Any;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::io::Cursor;
@@ -31,6 +32,9 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::{oneshot, Mutex};
 use tracing::{debug, info};
 use tracing::{error, warn};
+
+use super::tables::key_time_multimap::JudyKeyTimeMultiMap;
+use super::tables::KeyTimeMultiMap;
 
 async fn get_storage_provider() -> anyhow::Result<StorageProvider> {
     // TODO: this should be encoded in the config so that the controller doesn't need
@@ -56,10 +60,11 @@ pub struct JudyBackend {
     writer: JudyCheckpointWriter,
     task_info: TaskInfo,
     tables: HashMap<char, TableDescriptor>,
+    caches: HashMap<char, Box<dyn Any + Send + Sync>>,
     storage: StorageProvider,
 }
 
-struct BytesOrFutureBytes {
+pub struct BytesOrFutureBytes {
     bytes: Option<Bytes>,
     future_bytes: Option<oneshot::Receiver<Bytes>>,
 }
@@ -78,7 +83,7 @@ impl BytesOrFutureBytes {
         }
     }
 
-    async fn bytes(&mut self) -> Bytes {
+    pub async fn bytes(&mut self) -> Bytes {
         if self.bytes.is_some() {
             self.bytes.as_ref().unwrap().clone()
         } else {
@@ -191,6 +196,7 @@ impl BackingStore for JudyBackend {
                 storage.clone(),
                 HashMap::new(),
             ),
+            caches: HashMap::new(),
             task_info: task_info.clone(),
             tables: tables
                 .into_iter()
@@ -283,6 +289,7 @@ impl BackingStore for JudyBackend {
                 writer_current_files,
             ),
             task_info: task_info.clone(),
+            caches: HashMap::new(),
             tables,
             storage,
         }
@@ -473,282 +480,6 @@ impl BackingStore for JudyBackend {
 }
 
 impl JudyBackend {
-    fn name() -> &'static str {
-        "Judy"
-    }
-
-    fn task_info(&self) -> &TaskInfo {
-        &self.task_info
-    }
-
-    async fn load_latest_checkpoint_metadata(_job_id: &str) -> Option<CheckpointMetadata> {
-        todo!()
-    }
-
-    // TODO: should this be a Result, rather than an option?
-    async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Option<CheckpointMetadata> {
-        let storage_client = get_storage_provider().await.unwrap();
-        let data = storage_client
-            .get(&metadata_path(&base_path(job_id, epoch)))
-            .await
-            .ok()?;
-        let metadata = CheckpointMetadata::decode(&data[..]).unwrap();
-        Some(metadata)
-    }
-
-    async fn load_operator_metadata(
-        job_id: &str,
-        operator_id: &str,
-        epoch: u32,
-    ) -> Option<OperatorCheckpointMetadata> {
-        let storage_client = get_storage_provider().await.unwrap();
-        let data = storage_client
-            .get(&metadata_path(&operator_path(job_id, epoch, operator_id)))
-            .await
-            .ok()?;
-        Some(OperatorCheckpointMetadata::decode(&data[..]).unwrap())
-    }
-
-    async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata) {
-        let storage_client = get_storage_provider().await.unwrap();
-        let path = metadata_path(&operator_path(
-            &metadata.job_id,
-            metadata.epoch,
-            &metadata.operator_id,
-        ));
-        // TODO: propagate error
-        storage_client
-            .put(&path, metadata.encode_to_vec().into())
-            .await
-            .unwrap();
-    }
-
-    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) {
-        debug!("writing checkpoint {:?}", metadata);
-        let storage_client = get_storage_provider().await.unwrap();
-        let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
-        // TODO: propagate error
-        storage_client
-            .put(&path, metadata.encode_to_vec().into())
-            .await
-            .unwrap();
-    }
-
-    async fn new(
-        task_info: &TaskInfo,
-        tables: Vec<TableDescriptor>,
-        tx: Sender<ControlResp>,
-    ) -> Self {
-        let storage = get_storage_provider().await.unwrap();
-        Self {
-            epoch: 1,
-            min_epoch: 1,
-            current_files: HashMap::new(),
-            judy_file_data: HashMap::new(),
-            writer: JudyCheckpointWriter::new(
-                task_info.clone(),
-                tx,
-                tables.clone(),
-                storage.clone(),
-                HashMap::new(),
-            ),
-            task_info: task_info.clone(),
-            tables: tables
-                .into_iter()
-                .map(|table| (table.name.clone().chars().next().unwrap(), table))
-                .collect(),
-            storage,
-        }
-    }
-
-    async fn from_checkpoint(
-        task_info: &TaskInfo,
-        metadata: CheckpointMetadata,
-        tables: Vec<TableDescriptor>,
-        control_tx: Sender<ControlResp>,
-    ) -> Self {
-        let operator_metadata =
-            Self::load_operator_metadata(&task_info.job_id, &task_info.operator_id, metadata.epoch)
-                .await
-                .unwrap_or_else(|| {
-                    panic!(
-                        "missing metadata for operator {}, epoch {}",
-                        task_info.operator_id, metadata.epoch
-                    )
-                });
-        let mut current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> = HashMap::new();
-        let mut judy_file_data: HashMap<
-            char,
-            BTreeMap<u32, BTreeMap<u64, (ParquetStoreData, BytesOrFutureBytes)>>,
-        > = HashMap::new();
-        let storage = get_storage_provider().await.unwrap();
-        let tables: HashMap<char, TableDescriptor> = tables
-            .into_iter()
-            .map(|table| (table.name.clone().chars().next().unwrap(), table))
-            .collect();
-        for backend_data in operator_metadata.backend_data {
-            let Some(backend_data::BackendData::ParquetStore(Judy_data)) =
-                backend_data.backend_data
-            else {
-                panic!("expect Judy data")
-            };
-            let table_descriptor = tables
-                .get(&Judy_data.table.chars().next().unwrap())
-                .unwrap();
-            if table_descriptor.table_type() != TableType::Global {
-                // check if the file has data in the task's key range.
-                if Judy_data.max_routing_key < *task_info.key_range.start()
-                    || *task_info.key_range.end() < Judy_data.min_routing_key
-                {
-                    continue;
-                }
-            }
-
-            let files = current_files
-                .entry(Judy_data.table.chars().next().unwrap())
-                .or_default()
-                .entry(Judy_data.epoch)
-                .or_default();
-            files.push(Judy_data.clone());
-            // create a oneshot channel to pass the data through
-            let (tx, rx) = oneshot::channel();
-            let path = Judy_data.file.clone();
-            let storage_clone = storage.clone();
-            tokio::spawn(async move {
-                let bytes = storage_clone.get(&path).await.unwrap();
-                tx.send(bytes).unwrap();
-            });
-            judy_file_data
-                .entry(Judy_data.table.chars().next().unwrap())
-                .or_default()
-                .entry(Judy_data.epoch)
-                .or_default()
-                .insert(
-                    Judy_data.min_routing_key,
-                    (Judy_data.clone(), BytesOrFutureBytes::from_oneshot(rx)),
-                );
-        }
-
-        let writer_current_files = current_files.clone();
-
-        Self {
-            epoch: metadata.epoch + 1,
-            min_epoch: metadata.min_epoch,
-            current_files,
-            judy_file_data,
-            writer: JudyCheckpointWriter::new(
-                task_info.clone(),
-                control_tx,
-                tables.values().cloned().collect(),
-                storage.clone(),
-                writer_current_files,
-            ),
-            task_info: task_info.clone(),
-            tables,
-            storage,
-        }
-    }
-
-    async fn prepare_checkpoint_load(_metadata: &CheckpointMetadata) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    async fn cleanup_checkpoint(
-        mut metadata: CheckpointMetadata,
-        old_min_epoch: u32,
-        min_epoch: u32,
-    ) -> Result<()> {
-        info!(
-            message = "Cleaning checkpoint",
-            min_epoch,
-            job_id = metadata.job_id
-        );
-
-        let mut futures: FuturesUnordered<_> = metadata
-            .operator_ids
-            .iter()
-            .map(|operator_id| {
-                Self::cleanup_operator(
-                    metadata.job_id.clone(),
-                    operator_id.clone(),
-                    old_min_epoch,
-                    min_epoch,
-                )
-            })
-            .collect();
-
-        let storage_client = Mutex::new(get_storage_provider().await?);
-
-        // wait for all of the futures to complete
-        while let Some(result) = futures.next().await {
-            let operator_id = result?;
-
-            for epoch_to_remove in old_min_epoch..min_epoch {
-                let path = metadata_path(&operator_path(
-                    &metadata.job_id,
-                    epoch_to_remove,
-                    &operator_id,
-                ));
-                storage_client.lock().await.delete_if_present(path).await?;
-            }
-            debug!(
-                message = "Finished cleaning operator",
-                job_id = metadata.job_id,
-                operator_id,
-                min_epoch
-            );
-        }
-
-        for epoch_to_remove in old_min_epoch..min_epoch {
-            storage_client
-                .lock()
-                .await
-                .delete_if_present(metadata_path(&base_path(&metadata.job_id, epoch_to_remove)))
-                .await?;
-        }
-        metadata.min_epoch = min_epoch;
-        Self::write_checkpoint_metadata(metadata).await;
-        Ok(())
-    }
-
-    async fn checkpoint(
-        &mut self,
-        barrier: CheckpointBarrier,
-        watermark: Option<SystemTime>,
-    ) -> u32 {
-        assert_eq!(barrier.epoch, self.epoch);
-        self.writer
-            .checkpoint(self.epoch, barrier.timestamp, watermark, barrier.then_stop)
-            .await;
-        self.epoch += 1;
-        self.min_epoch = barrier.min_epoch;
-        self.epoch - 1
-    }
-
-    async fn get_data_triples<K: Key, V: Data>(&self, table: char) -> Vec<(SystemTime, K, V)> {
-        let mut result = vec![];
-        match self.tables.get(&table).unwrap().table_type() {
-            TableType::Global => todo!(),
-            TableType::TimeKeyMap | TableType::KeyTimeMultiMap => {
-                let Some(files) = self.current_files.get(&table) else {
-                    return vec![];
-                };
-                for file in files.values().flatten() {
-                    let bytes = self.storage.get(&file.file).await.unwrap_or_else(|_| {
-                        panic!("unable to find file {} in checkpoint", file.file)
-                    });
-                    result.append(
-                        &mut self
-                            .triples_from_judy_bytes(bytes.into(), &self.task_info.key_range)
-                            .await
-                            .unwrap(),
-                    );
-                }
-            }
-        }
-        result
-    }
-
     async fn write_data_triple<K: Key, V: Data>(
         &mut self,
         table: char,
@@ -932,53 +663,38 @@ impl JudyBackend {
         }
         min_time
     }
+
+    async fn get_key_time_multi_map<K: Key + Sync, V: Data + Sync>(
+        &mut self,
+        table: char,
+        current_watermark: Option<SystemTime>,
+    ) -> &mut JudyKeyTimeMultiMap<K, V> {
+        if !self.caches.contains_key(&table) {
+            let files = self.judy_file_data.get_mut(&table);
+            let new_cache: JudyKeyTimeMultiMap<K, V> = match files {
+                None => JudyKeyTimeMultiMap::new(),
+                Some(files) => {
+                    JudyKeyTimeMultiMap::from_files(
+                        self.tables.get(&table).unwrap().clone(),
+                        &self.task_info,
+                        current_watermark,
+                        files,
+                    )
+                    .await
+                }
+            };
+            self.caches.insert(table, Box::new(new_cache));
+        }
+        return self
+            .caches
+            .get_mut(&table)
+            .unwrap()
+            .downcast_mut::<JudyKeyTimeMultiMap<K, V>>()
+            .unwrap();
+    }
 }
 
 impl JudyBackend {
-    async fn compact_operator(
-        job_id: String,
-        operator: String,
-        old_min_epoch: u32,
-        new_min_epoch: u32,
-    ) -> anyhow::Result<String> {
-        let paths_to_keep: HashSet<String> =
-            Self::load_operator_metadata(&job_id, &operator, new_min_epoch)
-                .await
-                .expect("expect new_min_epoch metadata to still be present")
-                .backend_data
-                .iter()
-                .map(|backend_data| {
-                    let Some(BackendData::ParquetStore(Judy_store)) = &backend_data.backend_data
-                    else {
-                        unreachable!("expect Judy backends")
-                    };
-                    Judy_store.file.clone()
-                })
-                .collect();
-
-        let mut deleted_paths = HashSet::new();
-        let storage_client = get_storage_provider().await?;
-
-        for epoch_to_remove in old_min_epoch..new_min_epoch {
-            let Some(metadata) =
-                Self::load_operator_metadata(&job_id, &operator, epoch_to_remove).await
-            else {
-                continue;
-            };
-            for backend_data in metadata.backend_data {
-                let Some(BackendData::ParquetStore(Judy_store)) = &backend_data.backend_data else {
-                    unreachable!("expect Judy backends")
-                };
-                let file = Judy_store.file.clone();
-                if !paths_to_keep.contains(&file) && !deleted_paths.contains(&file) {
-                    deleted_paths.insert(file.clone());
-                    storage_client.delete_if_present(file).await?;
-                }
-            }
-        }
-        Ok(operator)
-    }
-
     async fn triples_from_judy_bytes<K: Key, V: Data>(
         &self,
         bytes: Bytes,

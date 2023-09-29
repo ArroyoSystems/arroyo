@@ -16,10 +16,10 @@ use tokio::task::JoinHandle;
 use super::backend::JudyBackend;
 use super::{BytesWithOffset, JudyNode, JudyWriter};
 pub mod global_keyed_map;
-mod key_time_multimap;
-mod keyed_map;
+pub mod key_time_multimap;
+pub mod keyed_map;
 mod reader;
-mod time_key_map;
+pub mod time_key_map;
 
 pub struct TimeKeyMap<'a, K: Key, V: Data, S: BackingStore> {
     table: char,

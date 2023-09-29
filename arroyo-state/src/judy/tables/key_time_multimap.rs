@@ -1,14 +1,18 @@
+use crate::judy::backend::BytesOrFutureBytes;
 use crate::judy::tables::JudyBackend;
 use crate::judy::InMemoryJudyNode;
 use crate::{BackingStore, StateBackend};
 use anyhow::bail;
 use anyhow::Result;
-use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor};
+use arroyo_rpc::grpc::{
+    CheckpointMetadata, ParquetStoreData, TableDeleteBehavior, TableDescriptor,
+};
 use arroyo_types::{from_micros, Data, Key, TaskInfo};
+use bytes::Bytes;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use super::reader::JudyReader;
 
@@ -27,7 +31,7 @@ pub struct JudyKeyTimeMultiMap<K: Key, V: Data> {
 enum EpochData<K: Key, V: Data> {
     InMemory(InMemoryJudyNode<K, InMemoryJudyNode<SystemTime, Vec<V>>>),
     Frozen(Arc<InMemoryJudyNode<K, InMemoryJudyNode<SystemTime, Vec<V>>>>),
-    KeyPartitionedBytes(JudyReader<K, JudyReader<SystemTime, Vec<V>>>),
+    BytesReader(Vec<JudyReader<K, JudyReader<SystemTime, Vec<V>>>>),
 }
 
 impl<K: Key, V: Data> Default for EpochData<K, V> {
@@ -71,13 +75,13 @@ impl<K: Key, V: Data> EpochData<K, V> {
                         .collect()
                 })
                 .unwrap_or_default(),
-            EpochData::KeyPartitionedBytes(data) => data
-                .get_bytes(key)
-                .unwrap()
-                .map(|bytes| {
-                    let mut key_reader: JudyReader<SystemTime, Vec<V>> =
+            EpochData::BytesReader(readers) => readers
+                .iter_mut()
+                .filter_map(|reader| reader.get_bytes(key).unwrap())
+                .flat_map(|bytes| {
+                    let mut reader: JudyReader<SystemTime, Vec<V>> =
                         JudyReader::new(bytes).unwrap();
-                    key_reader
+                    reader
                         .as_vec()
                         .unwrap()
                         .into_iter()
@@ -86,9 +90,8 @@ impl<K: Key, V: Data> EpochData<K, V> {
                                 .into_iter()
                                 .map(move |value| (time, Cow::Owned(value)))
                         })
-                        .collect()
                 })
-                .unwrap_or_default(),
+                .collect(),
         }
     }
 
@@ -101,7 +104,7 @@ impl<K: Key, V: Data> EpochData<K, V> {
                 Ok(())
             }
             EpochData::Frozen(_) => bail!("Cannot insert into frozen epoch data"),
-            EpochData::KeyPartitionedBytes(_) => bail!("Cannot insert into byte data"),
+            EpochData::BytesReader(_) => bail!("Cannot insert into byte data"),
         }
     }
     pub async fn get_time_range(
@@ -117,7 +120,8 @@ impl<K: Key, V: Data> EpochData<K, V> {
                     submap
                         .as_vec()
                         .into_iter()
-                        .flat_map(|(time, values)| {
+                        .filter(|(time, _values)| start <= *time && *time < end)
+                        .flat_map(|(_time, values)| {
                             values.iter().map(move |value| (Cow::Borrowed(value)))
                         })
                         .collect()
@@ -129,35 +133,83 @@ impl<K: Key, V: Data> EpochData<K, V> {
                     submap
                         .as_vec()
                         .into_iter()
+                        .filter(|(time, _values)| start <= *time && *time < end)
                         .flat_map(|(time, values)| {
                             values.iter().map(move |value| (Cow::Borrowed(value)))
                         })
                         .collect()
                 })
                 .unwrap_or_default(),
-            EpochData::KeyPartitionedBytes(data) => data
-                .get_bytes(key)
-                .unwrap()
-                .map(|bytes| {
+            EpochData::BytesReader(data) => data
+                .iter_mut()
+                .filter_map(|reader| reader.get_bytes(key).unwrap())
+                .flat_map(|bytes| {
                     let mut key_reader: JudyReader<SystemTime, Vec<V>> =
                         JudyReader::new(bytes).unwrap();
                     key_reader
                         .as_vec()
                         .unwrap()
                         .into_iter()
-                        .flat_map(|(time, values)| {
-                            values
-                                .into_iter()
-                                .map(move |value| (Cow::Owned(value)))
+                        .filter(|(time, _values)| start <= *time && *time < end)
+                        .flat_map(|(_time, values)| {
+                            values.into_iter().map(move |value| (Cow::Owned(value)))
                         })
-                        .collect()
                 })
-                .unwrap_or_default(),
+                .collect(),
         }
     }
 }
 
 impl<K: Key, V: Data> JudyKeyTimeMultiMap<K, V> {
+    pub fn new() -> Self {
+        Self {
+            table_descriptor: TableDescriptor::default(),
+            current_epoch: 1,
+            data_by_epoch: BTreeMap::new(),
+        }
+    }
+    pub async fn from_files(
+        table_descriptor: TableDescriptor,
+        task_info: &TaskInfo,
+        current_watermark: Option<SystemTime>,
+        files: &mut BTreeMap<u32, BTreeMap<u64, (ParquetStoreData, BytesOrFutureBytes)>>,
+    ) -> Self {
+        let mut data_by_epoch = BTreeMap::new();
+        for (epoch, files) in files {
+            let mut readers = Vec::new();
+            for (_hash_key, (metadata, bytes_or_future_bytes)) in files {
+                // check hash range, watermark
+                if table_descriptor.delete_behavior() == TableDeleteBehavior::NoReadsBeforeWatermark
+                {
+                    if let Some(current_watermark) = current_watermark {
+                        if from_micros(
+                            metadata.max_timestamp_micros + table_descriptor.retention_micros,
+                        ) < current_watermark
+                        {
+                            continue;
+                        }
+                    }
+                }
+                if metadata.min_routing_key > *task_info.key_range.end() {
+                    continue;
+                }
+                if metadata.max_routing_key < *task_info.key_range.start() {
+                    continue;
+                }
+                readers.push(JudyReader::new(bytes_or_future_bytes.bytes().await).unwrap());
+            }
+            if !readers.is_empty() {
+                data_by_epoch.insert(*epoch, EpochData::BytesReader(readers));
+            }
+        }
+
+        Self {
+            table_descriptor,
+            current_epoch: 0,
+            data_by_epoch,
+        }
+    }
+
     fn get_all_values_with_timestamps(&mut self, key: &mut K) -> Vec<(SystemTime, Cow<V>)> {
         self.data_by_epoch
             .values_mut()
