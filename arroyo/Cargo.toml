@@ -6,7 +6,7 @@ edition = "2021"
 authors = ["Arroyo Systems <support@arroyo.systems>"]
 
 license = "MIT OR Apache-2.0"
-readme = "README.md"
+readme = "../README.md"
 repository = "https://github.com/ArroyoSystems/arroyo"
 homepage = "https://arroyo.dev"
 description = """
