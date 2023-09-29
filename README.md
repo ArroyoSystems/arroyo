@@ -79,6 +79,13 @@ You can get started with a single node Arroyo cluster by running the following d
 $ docker run -p 8000:8000 ghcr.io/arroyosystems/arroyo-single:latest
 ```
 
+or if you have Cargo installed, you can use the `arroyo` cli:
+
+```
+$ cargo install arroyo
+$ arroyo start
+```
+
 Then, load the Web UI at http://localhost:8000.
 
 For a more in-depth guide, see the [getting started guide](https://doc.arroyo.dev/getting-started).
