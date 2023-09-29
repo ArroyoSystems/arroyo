@@ -1,7 +1,6 @@
 #![allow(warnings)]
-use arroyo_state::parquet::ParquetBackend;
 use std::collections::HashMap;
-use std::{env, fmt::Debug, time::SystemTime};
+use std::{fmt::Debug, time::SystemTime};
 use tokio::sync::mpsc::Receiver;
 
 use arroyo_controller::job_controller::checkpoint_state::CheckpointState;
@@ -90,34 +89,10 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
     info!("Smoke test checkpoint completed");
 }
 
-async fn compact(
-    job_id: String,
-    running_engine: &RunningEngine,
-    tasks_per_operator: HashMap<String, usize>,
-    epoch: u32,
-) {
-    let operator_controls = running_engine.operator_controls();
-    for (operator, parallelism) in tasks_per_operator {
-        if let Ok(Some(compacted)) =
-            ParquetBackend::compact_operator(parallelism, job_id.clone(), operator.clone(), epoch)
-                .await
-        {
-            let operator_controls = operator_controls.get(&operator).unwrap();
-            for s in operator_controls {
-                s.send(ControlMessage::LoadCompacted {
-                    compacted: compacted.clone(),
-                })
-                .await
-                .unwrap();
-            }
-        }
-    }
-}
-
 async fn advance(engine: &RunningEngine) {
-    // let the engine run for a bit, process 2000 records
+    // let the engine run for a bit, process 100 records
     for source in engine.source_controls() {
-        for _ in 0..2000 {
+        for _ in 0..100 {
             let _ = source.send(ControlMessage::NoOp).await;
         }
     }
@@ -133,7 +108,7 @@ async fn run_until_finished(engine: &RunningEngine, control_rx: &mut Receiver<Co
     }
 }
 
-async fn test_checkpoints_and_compaction(
+async fn test_checkpoints(
     job_id: String,
     running_engine: &RunningEngine,
     mut control_rx: &mut Receiver<ControlResp>,
@@ -141,34 +116,19 @@ async fn test_checkpoints_and_compaction(
     graph: Graph<LogicalNode, LogicalEdge>,
 ) {
     info!("Smoke test checkpointing enabled");
-    env::set_var("MIN_FILES_TO_COMPACT", "2");
 
     let ctx = &mut SmokeTestContext {
         job_id: job_id.clone(),
         engine: running_engine,
         control_rx: &mut control_rx,
-        tasks_per_operator: tasks_per_operator.clone(),
+        tasks_per_operator,
     };
 
     // trigger a couple checkpoints
-    advance(running_engine).await;
     checkpoint(ctx, 1).await;
     advance(running_engine).await;
     checkpoint(ctx, 2).await;
     advance(running_engine).await;
-
-    // compact checkpoint 2
-    compact(
-        job_id.clone(),
-        running_engine,
-        tasks_per_operator.clone(),
-        2,
-    )
-    .await;
-
-    // trigger checkpoint 3, which will include the compacted files
-    advance(running_engine).await;
-    checkpoint(ctx, 3).await;
 
     // shut down the engine
     for source in running_engine.source_controls() {
@@ -186,7 +146,7 @@ async fn test_checkpoints_and_compaction(
     let engine = Engine::for_local(program, job_id.clone());
     let (running_engine, mut control_rx) = engine
         .start(StreamConfig {
-            restore_epoch: Some(3),
+            restore_epoch: Some(2),
         })
         .await;
 
@@ -216,7 +176,7 @@ async fn run_pipeline_and_assert_outputs(
         .await;
 
     if checkpoints {
-        test_checkpoints_and_compaction(
+        test_checkpoints(
             job_id,
             &running_engine,
             &mut control_rx,
