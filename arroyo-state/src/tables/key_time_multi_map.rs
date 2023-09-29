@@ -44,6 +44,25 @@ impl<'a, K: Key, V: Data, S: BackingStore> KeyTimeMultiMap<'a, K, V, S> {
             .set(self.cache.values.len() as f64);
     }
 
+    pub async fn delete_key(&mut self, mut key: K) {
+        self.backing_store
+            .delete_data_tuple(
+                self.table,
+                TableType::KeyTimeMultiMap,
+                SystemTime::now(),
+                &mut key,
+            )
+            .await;
+        self.cache.remove_key(&key);
+    }
+
+    pub async fn delete_value(&mut self, timestamp: SystemTime, mut key: K, mut value: V) {
+        self.backing_store
+            .delete_data_value(self.table, timestamp, &mut key, &mut value)
+            .await;
+        self.cache.remove_value(&timestamp, &mut key, &mut value);
+    }
+
     pub async fn get_time_range(
         &mut self,
         key: &mut K,
@@ -61,16 +80,24 @@ impl<'a, K: Key, V: Data, S: BackingStore> KeyTimeMultiMap<'a, K, V, S> {
 
     pub async fn clear_time_range(&mut self, key: &mut K, start: SystemTime, end: SystemTime) {
         if let Some(key_map) = self.cache.values.get_mut(key) {
-            let times_to_remove = key_map.range(start..end);
-            let times: Vec<_> = times_to_remove.map(|(time, _values)| *time).collect();
-            for time in times {
-                key_map.remove(&time);
-            }
+            key_map.retain(|time, _values| !(start..end).contains(time));
         };
+        self.backing_store
+            .delete_time_range(self.table, key, start..end)
+            .await;
     }
 
-    pub fn expire_entries_before(&mut self, expiration_time: SystemTime) {
-        self.cache.expire_entries_before(expiration_time);
+    pub async fn expire_entries_before(&mut self, expiration_time: SystemTime) {
+        let keys = self.cache.expire_entries_before(expiration_time);
+        for mut key in keys {
+            self.backing_store
+                .delete_time_range(
+                    self.table,
+                    &mut key,
+                    SystemTime::UNIX_EPOCH..expiration_time,
+                )
+                .await;
+        }
     }
 
     pub async fn get_all_values_with_timestamps(
@@ -124,10 +151,30 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
                         .push(tuple.value.unwrap());
                 }
                 DataOperation::DeleteKey => {
-                    values
-                        .entry(tuple.key)
-                        .or_default()
-                        .remove(&tuple.timestamp);
+                    values.remove(&tuple.key);
+                }
+                DataOperation::DeleteValue => {
+                    values.entry(tuple.key).and_modify(|map| {
+                        map.entry(tuple.timestamp).and_modify(|values| {
+                            // delete first value that matches tuple.value
+                            let position = values
+                                .iter()
+                                .position(|value| value == &tuple.value.clone().unwrap());
+                            if let Some(position) = position {
+                                values.remove(position);
+                            }
+                        });
+                    });
+                }
+                DataOperation::DeleteTimeRange(start, end) => {
+                    if let Some(key_map) = values.get_mut(&tuple.key) {
+                        key_map.retain(|time, _values| {
+                            !(from_micros(start)..from_micros(end)).contains(time)
+                        });
+                        if key_map.is_empty() {
+                            values.remove(&tuple.key);
+                        }
+                    }
                 }
             }
         }
@@ -158,12 +205,13 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
         }
     }
 
-    fn expire_entries_before(&mut self, time: SystemTime) {
-        let times_to_remove = self.expirations.range(..time);
-        let keys_to_remove: HashSet<_> = times_to_remove
+    fn expire_entries_before(&mut self, time: SystemTime) -> HashSet<K> {
+        let keys_to_remove: HashSet<_> = self
+            .expirations
+            .range(..time)
             .flat_map(|(_time, keys)| keys.clone())
             .collect();
-        for key in keys_to_remove {
+        for key in keys_to_remove.clone() {
             let key_data = self.values.get_mut(&key).unwrap();
             if *key_data.last_key_value().unwrap().0 <= time {
                 self.values.remove(&key);
@@ -177,6 +225,7 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
                 *key_data = retained_data;
             }
         }
+        keys_to_remove
     }
 
     // Insert a new value for a key at a given timestamp.
@@ -204,6 +253,21 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
             } else {
                 current_entries.entry(timestamp).or_default().push(value);
             }
+        }
+    }
+
+    fn remove_key(&mut self, key: &K) {
+        self.values.remove(key);
+        self.expirations.values_mut().for_each(|keys| {
+            keys.remove(key);
+        });
+    }
+
+    fn remove_value(&mut self, timestamp: &SystemTime, key: &K, value: &V) {
+        if let Some(key_map) = self.values.get_mut(key) {
+            key_map.entry(*timestamp).and_modify(|values| {
+                values.retain(|stored_value| stored_value != value);
+            });
         }
     }
 }

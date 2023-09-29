@@ -25,7 +25,7 @@ use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use prost::Message;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
-use std::ops::RangeInclusive;
+use std::ops::{Range, RangeInclusive};
 use std::time::SystemTime;
 use tokio::sync::mpsc::{self, channel, Receiver, Sender};
 use tokio::sync::oneshot;
@@ -346,13 +346,8 @@ impl BackingStore for ParquetBackend {
         key: &mut K,
         value: &mut V,
     ) {
-        let (key_hash, key_bytes, value_bytes) = {
-            (
-                hash_key(key),
-                bincode::encode_to_vec(&*key, config::standard()).unwrap(),
-                bincode::encode_to_vec(&*value, config::standard()).unwrap(),
-            )
-        };
+        let (key_hash, key_bytes, value_bytes) = Self::get_hash_and_bytes(key, value);
+
         self.writer
             .write(
                 table,
@@ -386,6 +381,52 @@ impl BackingStore for ParquetBackend {
                 key_bytes,
                 vec![],
                 DataOperation::DeleteKey,
+            )
+            .await;
+    }
+
+    async fn delete_data_value<K: Key, V: Data>(
+        &mut self,
+        table: char,
+        timestamp: SystemTime,
+        key: &mut K,
+        value: &mut V,
+    ) {
+        let (key_hash, key_bytes, value_bytes) = Self::get_hash_and_bytes(key, value);
+
+        self.writer
+            .write(
+                table,
+                key_hash,
+                timestamp,
+                key_bytes,
+                value_bytes,
+                DataOperation::DeleteValue,
+            )
+            .await;
+    }
+
+    async fn delete_time_range<K: Key>(
+        &mut self,
+        table: char,
+        key: &mut K,
+        range: Range<SystemTime>,
+    ) {
+        let (key_hash, key_bytes) = {
+            (
+                hash_key(key),
+                bincode::encode_to_vec(&*key, config::standard()).unwrap(),
+            )
+        };
+
+        self.writer
+            .write(
+                table,
+                key_hash,
+                SystemTime::now(),
+                key_bytes,
+                vec![],
+                DataOperation::DeleteTimeRange(to_micros(range.start), to_micros(range.end)),
             )
             .await;
     }
@@ -442,10 +483,27 @@ impl ParquetBackend {
                     DataOperation::DeleteKey => {
                         state_map.remove(&tuple.key);
                     }
+                    DataOperation::DeleteValue => {
+                        panic!("Not supported")
+                    }
+                    DataOperation::DeleteTimeRange(..) => {
+                        panic!("Not supported")
+                    }
                 }
             }
         }
         state_map.into_iter().collect()
+    }
+
+    pub fn get_hash_and_bytes<K: Key, V: Data>(
+        key: &mut K,
+        value: &mut V,
+    ) -> (u64, Vec<u8>, Vec<u8>) {
+        (
+            hash_key(key),
+            bincode::encode_to_vec(&*key, config::standard()).unwrap(),
+            bincode::encode_to_vec(&*value, config::standard()).unwrap(),
+        )
     }
 
     async fn compact_table_partition(
@@ -476,13 +534,14 @@ impl ParquetBackend {
         let tuples_out = compactor.compact_tuples(tuples_in);
 
         info!(
-            "Compaction summary for operator {}, table {}, task {}: {} tuples in, {} tuples out, {} tuples compacted",
-            task.operator_id,
-            table_char,
-            task.task_index,
-            tuples_length,
-            tuples_out.len(),
-            tuples_length - tuples_out.len()
+            message = "Compaction summary for operator",
+            operator_id = task.operator_id,
+            table_char = table_char.to_string(),
+            table_type = table_descriptor.table_type().as_str_name(),
+            task_index = task.task_index,
+            tuples_in = tuples_length,
+            tuples_out = tuples_out.len(),
+            compacted = tuples_length - tuples_out.len()
         );
 
         let mut parquet_writer =
@@ -713,7 +772,7 @@ impl ParquetBackend {
             let operation_array = batch
                 .column(4)
                 .as_any()
-                .downcast_ref::<arrow_array::UInt8Array>()
+                .downcast_ref::<arrow_array::BinaryArray>()
                 .unwrap();
             for index in 0..num_rows {
                 if !range.contains(&key_hash_array.value(index)) {
@@ -734,7 +793,10 @@ impl ParquetBackend {
                     Err(_) => None,
                 };
 
-                let operation = operation_array.value(index).into();
+                let operation: DataOperation =
+                    bincode::decode_from_slice(operation_array.value(index), BINCODE_CONFIG)
+                        .unwrap()
+                        .0;
 
                 result.push(DataTuple {
                     timestamp,
@@ -786,7 +848,7 @@ impl ParquetBackend {
             let operation_array = batch
                 .column(4)
                 .as_any()
-                .downcast_ref::<arrow_array::UInt8Array>()
+                .downcast_ref::<arrow_array::BinaryArray>()
                 .unwrap();
             for index in 0..num_rows {
                 let key_hash = key_hash_array.value(index);
@@ -798,7 +860,10 @@ impl ParquetBackend {
 
                 let key = key_array.value(index).to_owned();
                 let value = value_array.value(index).to_owned();
-                let operation = operation_array.value(index).into();
+                let operation: DataOperation =
+                    bincode::decode_from_slice(operation_array.value(index), BINCODE_CONFIG)
+                        .unwrap()
+                        .0;
 
                 result.push(BlindDataTuple {
                     key_hash,
@@ -1012,7 +1077,7 @@ struct RecordBatchBuilder {
     key_bytes: arrow_array::builder::BinaryBuilder,
     data_bytes: arrow_array::builder::BinaryBuilder,
     parquet_stats: ParquetStats,
-    operation_array: arrow_array::builder::PrimitiveBuilder<arrow_array::types::UInt8Type>,
+    operation_array: arrow_array::builder::BinaryBuilder,
 }
 
 struct ParquetStats {
@@ -1049,7 +1114,8 @@ impl RecordBatchBuilder {
         self.key_bytes.append_value(key);
         self.data_bytes.append_value(data);
 
-        self.operation_array.append_value(operation as u8);
+        self.operation_array
+            .append_value(bincode::encode_to_vec(operation, config::standard()).unwrap());
         self.parquet_stats.max_timestamp = self.parquet_stats.max_timestamp.max(timestamp);
     }
 
@@ -1095,7 +1161,7 @@ impl RecordBatchBuilder {
                 arrow::datatypes::DataType::Binary,
                 false,
             ),
-            arrow::datatypes::Field::new("operation", arrow::datatypes::DataType::UInt8, false),
+            arrow::datatypes::Field::new("operation", arrow::datatypes::DataType::Binary, false),
         ]))
     }
 }
@@ -1110,9 +1176,7 @@ impl Default for RecordBatchBuilder {
             >::with_capacity(1024),
             key_bytes: arrow_array::builder::BinaryBuilder::default(),
             data_bytes: arrow_array::builder::BinaryBuilder::default(),
-            operation_array: arrow_array::builder::PrimitiveBuilder::<
-                arrow_array::types::UInt8Type,
-            >::with_capacity(1024),
+            operation_array: arrow_array::builder::BinaryBuilder::default(),
             parquet_stats: ParquetStats::default(),
         }
     }
