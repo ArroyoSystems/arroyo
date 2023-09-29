@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 use crate::connectors::kafka::source;
 use crate::engine::{Context, OutQueue, QueueItem};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
-use arroyo_rpc::types::{Format, JsonFormat};
+use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
 use arroyo_types::{to_micros, CheckpointBarrier, Message, TaskInfo};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};

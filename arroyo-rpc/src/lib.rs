@@ -1,10 +1,12 @@
 pub mod public_ids;
 pub mod types;
+pub mod formats;
 
 use std::{fs, time::SystemTime};
 
 use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
-use crate::types::{Format, PrimitiveType};
+use crate::types::PrimitiveType;
+use crate::formats::Format;
 use arroyo_types::CheckpointBarrier;
 use grpc::{StopMode, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};

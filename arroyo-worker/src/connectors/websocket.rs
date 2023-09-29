@@ -4,7 +4,7 @@ use std::{
 };
 
 use arroyo_macro::source_fn;
-use arroyo_rpc::types::Format;
+use arroyo_rpc::formats::Format;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,

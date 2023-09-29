@@ -3,7 +3,7 @@ use crate::formats;
 use crate::SourceFinishType;
 use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::TableDescriptor;
-use arroyo_rpc::types::Format;
+use arroyo_rpc::formats::Format;
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;

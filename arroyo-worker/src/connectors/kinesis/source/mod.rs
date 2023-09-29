@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
 use arroyo_macro::{source_fn, StreamNode};
-use arroyo_rpc::types::Format;
+use arroyo_rpc::formats::Format;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,

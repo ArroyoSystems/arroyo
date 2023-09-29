@@ -16,7 +16,7 @@ use tokio::select;
 use tokio::time::MissedTickBehavior;
 
 use arroyo_rpc::grpc::StopMode;
-use arroyo_rpc::types::Format;
+use arroyo_rpc::formats::Format;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use tracing::{debug, info, warn};
 use typify::import_types;

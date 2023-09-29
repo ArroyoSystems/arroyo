@@ -1,10 +1,14 @@
 use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd)]
+#[derive(
+Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum TimestampFormat {
     #[default]
+    #[serde(rename = "rfc3339")]
     RFC3339,
     UnixMillis,
 }
@@ -21,7 +25,10 @@ impl TryFrom<&str> for TimestampFormat {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd)]
+#[derive(
+Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct JsonFormat {
     #[serde(default)]
     pub confluent_schema_registry: bool,
@@ -79,16 +86,20 @@ impl JsonFormat {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct RawStringFormat {}
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct AvroFormat {}
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ParquetFormat {}
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum Format {
     Json(JsonFormat),
     Avro(AvroFormat),

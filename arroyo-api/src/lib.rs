@@ -5,19 +5,19 @@ use tracing::warn;
 use utoipa::OpenApi;
 
 use arroyo_rpc::types::{
-    AvroFormat, Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType,
+    Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType,
     ConfluentSchema, ConnectionProfile, ConnectionProfileCollection, ConnectionProfilePost,
     ConnectionSchema, ConnectionTable, ConnectionTableCollection, ConnectionTablePost,
-    ConnectionType, Connector, ConnectorCollection, FieldType, Format, Job, JobCollection,
-    JobLogLevel, JobLogMessage, JobLogMessageCollection, JsonFormat, Metric, MetricGroup,
+    ConnectionType, Connector, ConnectorCollection, FieldType, Job, JobCollection,
+    JobLogLevel, JobLogMessage, JobLogMessageCollection, Metric, MetricGroup,
     MetricNames, OperatorCheckpointGroup, OperatorCheckpointGroupCollection, OperatorMetricGroup,
-    OutputData, PaginationQueryParams, ParquetFormat, Pipeline, PipelineCollection, PipelineEdge,
-    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, PrimitiveType, RawStringFormat,
+    OutputData, PaginationQueryParams, Pipeline, PipelineCollection, PipelineEdge,
+    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, PrimitiveType,
     SchemaDefinition, SourceField, SourceFieldType, StopType as StopTypeRest, StructType,
-    SubtaskCheckpointGroup, SubtaskMetrics, TestSourceMessage, TimestampFormat, Udf, UdfLanguage,
+    SubtaskCheckpointGroup, SubtaskMetrics, TestSourceMessage, Udf, UdfLanguage,
     ValidatePipelinePost,
 };
-
+use arroyo_rpc::formats::*;
 use crate::connection_profiles::{
     __path_create_connection_profile, __path_get_connection_profiles,
 };

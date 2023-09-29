@@ -4,7 +4,7 @@ use crate::SchemaData;
 use anyhow::Result;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
-use arroyo_rpc::types::Format;
+use arroyo_rpc::formats::Format;
 use arroyo_rpc::{CheckpointEvent, ControlMessage, OperatorConfig};
 use arroyo_types::*;
 use std::collections::HashMap;
