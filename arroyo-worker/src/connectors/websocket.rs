@@ -115,7 +115,6 @@ where
             ControlMessage::LoadCompacted { compacted } => {
                 ctx.load_compacted(compacted).await;
             }
-            ControlMessage::NoOp => {}
         }
         None
     }

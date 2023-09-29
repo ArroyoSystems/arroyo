@@ -418,7 +418,10 @@ fn impl_stream_node_type(
                         *datum.downcast().expect(&format!("failed to downcast data in {}", self.name()))
                     }
                     crate::engine::QueueItem::Bytes(bs) => {
-                        crate::metrics::TaskCounters::BytesReceived.for_task(&ctx.task_info).inc_by(bs.len() as u64);
+                        ctx.counters
+                            .get("arroyo_worker_bytes_recv")
+                            .expect("bytes received")
+                            .inc_by(bs.len() as u64);
 
                         bincode::decode_from_slice(&bs, config::standard())
                             .expect(#deserialize_error)
@@ -430,7 +433,10 @@ fn impl_stream_node_type(
                 tracing::debug!("[{}] Received message {}-{}, {:?} [{:?}]", ctx.task_info.operator_name, #i, local_idx, message, stacker::remaining_stack());
 
                 if let arroyo_types::Message::Record(record) = &message {
-                    crate::metrics::TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
+                    ctx.counters
+                        .get("arroyo_worker_messages_recv")
+                        .expect("msg received")
+                        .inc();
 
                     Self::#handle_fn(&mut (*self), record, &mut ctx)
                       .instrument(tracing::trace_span!("handle_fn",
@@ -535,7 +541,6 @@ fn impl_stream_node_type(
                             arroyo_rpc::ControlMessage::LoadCompacted { compacted } => {
                                 ctx.load_compacted(compacted).await;
                             }
-                            arroyo_rpc::ControlMessage::NoOp => {}
                         }
                     }
                     p = sel.next() => {

@@ -109,9 +109,15 @@ pub trait BackingStore {
 
     fn task_info(&self) -> &TaskInfo;
 
+    // prepares a checkpoint to be written
+    #[allow(unused_variables)]
+    async fn initialize_checkpoint(job_id: &str, epoch: u32, operators: &[&str]) -> Result<()> {
+        Ok(())
+    }
+
     async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata);
 
-    async fn write_checkpoint_metadata(metadata: CheckpointMetadata);
+    async fn complete_checkpoint(metadata: CheckpointMetadata);
 
     async fn cleanup_checkpoint(
         metadata: CheckpointMetadata,
@@ -488,7 +494,7 @@ mod test {
             operator_ids: vec![operator_id.to_string()],
         };
 
-        ParquetBackend::write_checkpoint_metadata(checkpoint_metadata.clone()).await;
+        ParquetBackend::complete_checkpoint(checkpoint_metadata.clone()).await;
 
         checkpoint_metadata
     }

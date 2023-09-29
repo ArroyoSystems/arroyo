@@ -21,17 +21,11 @@ use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
-use crate::job_controller::checkpoint_state::CheckpointState;
-use crate::job_controller::comitting_state::CommittingState;
-use crate::types::public::CheckpointState as DbCheckpointState;
 use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
 
-use self::checkpointer::CheckpointingOrCommittingState;
+use self::checkpointer::{CheckpointState, CheckpointingOrCommittingState, CommittingState};
 
-pub mod checkpoint_state;
 mod checkpointer;
-mod comitting_state;
-mod subtask_state;
 
 const CHECKPOINTS_TO_KEEP: u32 = 4;
 const COMPACT_EVERY: u32 = 2;
@@ -155,7 +149,7 @@ impl RunningJobModel {
                         else {
                             bail!("Received checkpoint finished but not checkpointing");
                         };
-                        checkpoint_state.checkpoint_finished(c).await?;
+                        checkpoint_state.checkpoint_finished(c).await;
                         checkpoint_state.update_db(pool).await?;
                     }
                 } else {
@@ -334,7 +328,6 @@ impl RunningJobModel {
             let state = self.checkpoint_state.take().unwrap();
             match state {
                 CheckpointingOrCommittingState::Checkpointing(checkpointing) => {
-                    checkpointing.save_state().await?;
                     let committing_state = checkpointing.committing_state();
                     let duration = checkpointing
                         .start_time
@@ -343,9 +336,7 @@ impl RunningJobModel {
                         .as_secs_f32();
                     // shortcut if committing is unnecessary
                     if committing_state.done() {
-                        checkpointing
-                            .update_checkpoint_in_db(pool, DbCheckpointState::ready)
-                            .await?;
+                        checkpointing.finish(pool).await?;
                         self.last_checkpoint = Instant::now();
                         self.checkpoint_state = None;
                         self.compact_state().await?;
@@ -357,9 +348,7 @@ impl RunningJobModel {
                             duration
                         );
                     } else {
-                        checkpointing
-                            .update_checkpoint_in_db(pool, DbCheckpointState::committing)
-                            .await?;
+                        checkpointing.pre_commit_finish(pool).await?;
                         self.checkpoint_state =
                             Some(CheckpointingOrCommittingState::Committing(committing_state));
                         info!(

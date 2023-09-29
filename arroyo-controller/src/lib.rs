@@ -38,7 +38,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 pub mod compiler;
-pub mod job_controller;
+mod job_controller;
 pub mod schedulers;
 mod states;
 

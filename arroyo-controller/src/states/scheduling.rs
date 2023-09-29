@@ -27,7 +27,7 @@ use crate::{
     states::{fatal, StateError},
 };
 
-use super::{running::Running, JobContext, State, Transition};
+use super::{running::Running, Context, State, Transition};
 
 const STARTUP_TIME: Duration = Duration::from_secs(10 * 60);
 
@@ -79,7 +79,7 @@ async fn handle_worker_connect<'a>(
     workers: &mut HashMap<WorkerId, WorkerStatus>,
     worker_connects: Arc<Mutex<HashMap<WorkerId, WorkerGrpcClient<Channel>>>>,
     handles: &mut Vec<JoinHandle<()>>,
-    ctx: &mut JobContext<'a>,
+    ctx: &mut Context<'a>,
 ) -> Result<(), StateError> {
     match msg {
         JobMessage::WorkerConnect {
@@ -156,7 +156,7 @@ enum Either<A, B> {
 impl Scheduling {
     async fn start_workers<'a>(
         self: Box<Self>,
-        ctx: &mut JobContext<'a>,
+        ctx: &mut Context<'a>,
         slots_needed: usize,
     ) -> Result<Either<Transition, Box<Self>>, StateError> {
         let start = Instant::now();
@@ -229,7 +229,7 @@ impl State for Scheduling {
         "Scheduling"
     }
 
-    async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+    async fn next(mut self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
         // clear out any existing workers for this job
         if let Err(e) = ctx.scheduler.stop_workers(&ctx.config.id, None, true).await {
             warn!(
@@ -398,7 +398,7 @@ impl State for Scheduling {
                 }
                 committing_state = Some((id, commit_subtasks));
             }
-            StateBackend::write_checkpoint_metadata(metadata).await;
+            StateBackend::complete_checkpoint(metadata).await;
         }
 
         let assignments = compute_assignments(workers.values().collect(), ctx.program);
