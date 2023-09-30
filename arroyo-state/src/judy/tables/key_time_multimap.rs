@@ -1,6 +1,6 @@
 use crate::judy::backend::{BytesOrFutureBytes, Checkpointing, JudyMessage, JudyQueueItem};
 use crate::judy::tables::JudyBackend;
-use crate::judy::InMemoryJudyNode;
+use crate::judy::{self, InMemoryJudyNode, JudyNode, JudyWriter};
 use crate::{hash_key, BackingStore, StateBackend};
 use anyhow::bail;
 use anyhow::Result;
@@ -8,6 +8,7 @@ use arroyo_rpc::grpc::{
     CheckpointMetadata, ParquetStoreData, TableDeleteBehavior, TableDescriptor,
 };
 use arroyo_types::{from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo};
+use bincode::config;
 use bytes::Bytes;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -15,6 +16,7 @@ use std::default;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::oneshot;
+use tracing::info;
 
 use super::reader::JudyReader;
 
@@ -27,11 +29,11 @@ pub struct JudyKeyTimeMultiMap<K: Key, V: Data> {
 enum EpochData<K: Key, V: Data> {
     InMemory {
         stats: FileStats,
-        tree: InMemoryJudyNode<K, InMemoryJudyNode<SystemTime, Vec<V>>>,
+        tree: HashMap<K, BTreeMap<SystemTime, Vec<V>>>,
     },
     Frozen {
         stats: FileStats,
-        tree: Arc<InMemoryJudyNode<K, InMemoryJudyNode<SystemTime, Vec<V>>>>,
+        tree: Arc<HashMap<K, BTreeMap<SystemTime, Vec<V>>>>,
     },
     BytesReader(Vec<(FileStats, JudyReader<K, JudyReader<SystemTime, Vec<V>>>)>),
 }
@@ -83,10 +85,11 @@ impl<K: Key, V: Data> EpochData<K, V> {
                 .get(key)
                 .map(|submap| {
                     submap
-                        .as_vec()
-                        .into_iter()
+                        .iter()
                         .flat_map(|(time, values)| {
-                            values.iter().map(move |value| (time, Cow::Borrowed(value)))
+                            values
+                                .iter()
+                                .map(move |value| (*time, Cow::Borrowed(value)))
                         })
                         .collect()
                 })
@@ -95,10 +98,11 @@ impl<K: Key, V: Data> EpochData<K, V> {
                 .get(key)
                 .map(|submap| {
                     submap
-                        .as_vec()
-                        .into_iter()
+                        .iter()
                         .flat_map(|(time, values)| {
-                            values.iter().map(move |value| (time, Cow::Borrowed(value)))
+                            values
+                                .iter()
+                                .map(move |value| (*time, Cow::Borrowed(value)))
                         })
                         .collect()
                 })
@@ -131,8 +135,10 @@ impl<K: Key, V: Data> EpochData<K, V> {
                 let key_hash = hash_key(&key);
                 stats.max_routing_key = stats.max_routing_key.max(key_hash);
                 stats.min_routing_key = stats.min_routing_key.min(key_hash);
-                tree.get_mut_or_insert(&key, || InMemoryJudyNode::default())
-                    .get_mut_or_insert(&timestamp, || vec![])
+                tree.entry(key)
+                    .or_default()
+                    .entry(timestamp)
+                    .or_default()
                     .push(value);
                 Ok(())
             }
@@ -154,9 +160,7 @@ impl<K: Key, V: Data> EpochData<K, V> {
                 tree.get(key)
                     .map(|submap| {
                         submap
-                            .as_vec()
-                            .into_iter()
-                            .filter(|(time, _values)| start <= *time && *time < end)
+                            .range(start..end)
                             .flat_map(|(_time, values)| {
                                 values.iter().map(move |value| (Cow::Borrowed(value)))
                             })
@@ -171,10 +175,8 @@ impl<K: Key, V: Data> EpochData<K, V> {
                 tree.get(key)
                     .map(|submap| {
                         submap
-                            .as_vec()
-                            .into_iter()
-                            .filter(|(time, _values)| start <= *time && *time < end)
-                            .flat_map(|(time, values)| {
+                            .range(start..end)
+                            .flat_map(|(_time, values)| {
                                 values.iter().map(move |value| (Cow::Borrowed(value)))
                             })
                             .collect()
@@ -205,12 +207,7 @@ impl<K: Key, V: Data> EpochData<K, V> {
         }
     }
 
-    fn as_frozen(
-        self,
-    ) -> (
-        FileStats,
-        Arc<InMemoryJudyNode<K, InMemoryJudyNode<SystemTime, Vec<V>>>>,
-    ) {
+    fn as_frozen(self) -> (FileStats, Arc<HashMap<K, BTreeMap<SystemTime, Vec<V>>>>) {
         match self {
             EpochData::InMemory { stats, tree } => (stats, Arc::new(tree)),
             EpochData::Frozen { .. } => unreachable!("shouldn't be freezing already frozen data"),
@@ -307,7 +304,7 @@ impl<K: Key, V: Data> JudyKeyTimeMultiMap<K, V> {
                 };
                 let mut new_epoch_data = EpochData::InMemory {
                     stats: initial_stats,
-                    tree: InMemoryJudyNode::default(),
+                    tree: HashMap::new(),
                 };
                 new_epoch_data.insert(timestamp, key, value).unwrap();
                 self.data_by_epoch
@@ -342,9 +339,38 @@ impl<K: Key, V: Data> Checkpointing for JudyKeyTimeMultiMap<K, V> {
 
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
-            let bytes = frozen_epoch.to_judy_bytes().await.unwrap();
-            // TODO: calculate bytes
-            tx.send(JudyMessage::new(table_char, bytes, metadata))
+            let start_time = SystemTime::now();
+            let mut byte_map = BTreeMap::new();
+            for (key, key_map) in frozen_epoch.iter() {
+                let mut key_writer = JudyWriter::new();
+                for (time, values) in key_map.iter() {
+                    key_writer
+                        .insert(
+                            &bincode::encode_to_vec(time, config::standard()).unwrap(),
+                            &bincode::encode_to_vec(values, config::standard()).unwrap(),
+                        )
+                        .await
+                        .unwrap();
+                }
+                let mut writer = Vec::new();
+                key_writer.serialize(&mut writer).await.unwrap();
+                byte_map.insert(
+                    bincode::encode_to_vec(key, config::standard()).unwrap(),
+                    writer,
+                );
+            }
+            let mut judy_writer = JudyWriter::new();
+            for (key_bytes, value_bytes) in byte_map {
+                judy_writer.insert(&key_bytes, &value_bytes).await.unwrap();
+            }
+            let mut final_bytes = Vec::new();
+            judy_writer.serialize(&mut final_bytes).await.unwrap();
+            info!(
+                "checkpointed {} bytes in {:?}",
+                final_bytes.len(),
+                start_time.elapsed()
+            );
+            tx.send(JudyMessage::new(table_char, final_bytes.into(), metadata))
                 .unwrap();
         });
         return vec![JudyQueueItem::OneShot(rx)];

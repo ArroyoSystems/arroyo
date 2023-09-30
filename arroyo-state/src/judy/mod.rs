@@ -168,7 +168,10 @@ impl JudyNode {
         let serialization_stats = self.serialization_stats();
         let offset_contribution = if self.is_root {
             if self.offset_contribution.unwrap_or_default() > 0 {
-                bail!("Root node should have 0 as offset contribution");
+                bail!(
+                    "Root node should have 0 as offset contribution, not {}",
+                    self.offset_contribution.unwrap_or_default()
+                );
             }
             Some(serialization_stats.total_size as u32)
         } else {

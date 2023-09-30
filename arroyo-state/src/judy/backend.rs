@@ -964,9 +964,11 @@ impl JudyFlusher {
     }
 
     async fn upload_judy_bytes(&self, key: &str, judy_bytes: Bytes) -> Result<usize> {
-        warn!("uploading judy bytes to {}", key);
+        let bytes = judy_bytes.len();
+        warn!("uploading {} judy bytes to {}", bytes, key);
         let bytes = judy_bytes.len();
         self.storage.put(key, judy_bytes).await?;
+        warn!("uploaded {} judy bytes to {}", bytes, key);
         Ok(bytes)
     }
 
@@ -1019,6 +1021,10 @@ impl JudyFlusher {
                 }
             }
         }
+        let has_futures = !futures.is_empty();
+        if has_futures {
+            info!("draining {} futures", futures.len());
+        }
         // drain futures
         while let Some(result) = futures.next().await {
             let JudyMessage {
@@ -1027,6 +1033,9 @@ impl JudyFlusher {
                 metadata,
             } = result?;
             judy_files.entry(table).or_default().push((metadata, bytes));
+        }
+        if has_futures {
+            info!("drained futures");
         }
 
         let mut backend_data = vec![];
