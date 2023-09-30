@@ -436,3 +436,9 @@ full_pipeline_codegen! {"polling_http_source",
 SELECT value
 FROM polling_source;
 "}
+
+full_pipeline_codegen! {"aliases",
+"
+SELECT 'a' as \"1\"
+from nexmark;
+"}
