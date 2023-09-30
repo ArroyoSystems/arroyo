@@ -99,6 +99,7 @@ impl Connector for SSEConnector {
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: Some(format),
+            framing: schema.framing.clone(),
         };
 
         Ok(Connection {

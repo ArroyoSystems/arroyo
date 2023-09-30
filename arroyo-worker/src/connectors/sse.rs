@@ -1,8 +1,8 @@
 use crate::engine::Context;
 use crate::{formats, SourceFinishType};
 use arroyo_macro::{source_fn, StreamNode};
-use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::formats::Format;
+use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{string_to_map, Data, Message, Record, Watermark};

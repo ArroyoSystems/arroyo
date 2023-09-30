@@ -14,11 +14,9 @@ use arrow::{
 };
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
 use arroyo_rpc::{
-    primitive_to_sql,
     formats::{Format, JsonFormat, TimestampFormat},
-    types::{
-        FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
-    },
+    primitive_to_sql,
+    types::{FieldType, PrimitiveType, SourceField, SourceFieldType, StructType},
 };
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 

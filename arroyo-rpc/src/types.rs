@@ -1,10 +1,10 @@
+use crate::formats::{Format, Framing};
 use crate::grpc as grpc_proto;
 use crate::grpc::api as api_proto;
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use utoipa::{IntoParams, ToSchema};
-use crate::formats::Format;
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -368,7 +368,6 @@ impl TryFrom<String> for ConnectionType {
     }
 }
 
-
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PrimitiveType {
@@ -430,6 +429,7 @@ pub enum SchemaDefinition {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSchema {
     pub format: Option<Format>,
+    pub framing: Option<Framing>,
     pub struct_name: Option<String>,
     pub fields: Vec<SourceField>,
     pub definition: Option<SchemaDefinition>,
@@ -438,12 +438,14 @@ pub struct ConnectionSchema {
 impl ConnectionSchema {
     pub fn try_new(
         format: Option<Format>,
+        framing: Option<Framing>,
         struct_name: Option<String>,
         fields: Vec<SourceField>,
         definition: Option<SchemaDefinition>,
     ) -> anyhow::Result<Self> {
         let s = ConnectionSchema {
             format,
+            framing,
             struct_name,
             fields,
             definition,

@@ -1,9 +1,10 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::str::FromStr;
 use utoipa::ToSchema;
 
 #[derive(
-Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum TimestampFormat {
@@ -26,7 +27,7 @@ impl TryFrom<&str> for TimestampFormat {
 }
 
 #[derive(
-Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
 )]
 #[serde(rename_all = "camelCase")]
 pub struct JsonFormat {
@@ -130,4 +131,59 @@ impl Format {
             Format::Json(_) | Format::Avro(_) | Format::Parquet(_) | Format::RawString(_) => false,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Framing {
+    pub method: FramingMethod,
+}
+
+impl Framing {
+    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Option<Self>, String> {
+        let Some(method) = opts.remove("framing.method") else {
+            return Ok(None);
+        };
+
+        let method = match method.as_str() {
+            "newline" => FramingMethod::Newline(NewlineDelimitedFraming::from_opts(opts)?),
+            "length_delimited" => {
+                todo!()
+            }
+            f => return Err(format!("Unknown framing method '{}'", f)),
+        };
+
+        Ok(Some(Framing { method }))
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewlineDelimitedFraming {
+    pub max_line_length: Option<u64>,
+}
+
+impl NewlineDelimitedFraming {
+    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
+        let max_line_length = opts
+            .remove("framing.newline.max_length")
+            .map(|t| u64::from_str(&t))
+            .transpose()
+            .map_err(|_| {
+                format!("invalid value for framing.newline.max_length; must be an unsigned integer")
+            })?;
+
+        Ok(NewlineDelimitedFraming { max_line_length })
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LengthDelimitedFraming {}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum FramingMethod {
+    Newline(NewlineDelimitedFraming),
+    LengthDelimited(LengthDelimitedFraming),
 }

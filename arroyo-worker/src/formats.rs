@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use std::{collections::HashMap, marker::PhantomData};
 
 use arrow::datatypes::{Field, Fields};
-use arroyo_rpc::formats::{Format, JsonFormat};
+use arroyo_rpc::formats::{Format, Framing, FramingMethod, JsonFormat};
 use arroyo_types::UserError;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -53,6 +54,66 @@ fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> 
     Ok(serde_json::from_value(json).unwrap())
 }
 
+pub struct FramingIterator<'a> {
+    framing: Option<Arc<Framing>>,
+    buf: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> FramingIterator<'a> {
+    pub fn new(framing: Option<Arc<Framing>>, buf: &'a [u8]) -> Self {
+        Self {
+            framing,
+            buf,
+            offset: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for FramingIterator<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset >= self.buf.len() {
+            return None;
+        }
+
+        match &self.framing {
+            Some(framing) => {
+                match &framing.method {
+                    FramingMethod::Newline(newline) => {
+                        let end = memchr::memchr('\n' as u8, &self.buf[self.offset..])
+                            .map(|i| self.offset + i)
+                            .unwrap_or(self.buf.len());
+
+                        let prev = self.offset;
+                        self.offset = end + 1;
+
+                        // enforce max len if set
+                        let length =
+                            (end - prev).min(newline.max_line_length.unwrap_or(u64::MAX) as usize);
+
+                        Some(&self.buf[prev..(prev + length)])
+                    }
+                    FramingMethod::LengthDelimited(_) => {
+                        todo!()
+                    }
+                }
+            }
+            None => {
+                self.offset = self.buf.len();
+                Some(self.buf)
+            }
+        }
+    }
+}
+
+pub struct DataDeserializer<T: SchemaData> {
+    format: Arc<Format>,
+    framing: Option<Arc<Framing>>,
+    _t: PhantomData<T>,
+}
+
 pub fn deserialize_slice<T: DeserializeOwned>(format: &Format, msg: &[u8]) -> Result<T, UserError> {
     match format {
         Format::Json(json) => deserialize_slice_json(json, msg),
@@ -70,6 +131,43 @@ pub fn deserialize_slice<T: DeserializeOwned>(format: &Format, msg: &[u8]) -> Re
             ),
         )
     })
+}
+
+impl<T: SchemaData> DataDeserializer<T> {
+    pub fn new(format: Format, framing: Option<Framing>) -> Self {
+        Self {
+            format: Arc::new(format),
+            framing: framing.map(|f| Arc::new(f)),
+            _t: PhantomData,
+        }
+    }
+    pub fn deserialize_slice<'a>(
+        &self,
+        msg: &'a [u8],
+    ) -> impl Iterator<Item = Result<T, UserError>> + 'a {
+        let format = self.format.clone();
+        FramingIterator::new(self.framing.clone(), msg)
+            .map(move |t| Self::deserialize_single(format.clone(), t))
+    }
+
+    fn deserialize_single(format: Arc<Format>, msg: &[u8]) -> Result<T, UserError> {
+        match &*format {
+            Format::Json(json) => deserialize_slice_json(json, msg),
+            Format::Avro(_) => todo!(),
+            Format::Parquet(_) => todo!(),
+            Format::RawString(_) => deserialize_raw_string(msg),
+        }
+        .map_err(|e| {
+            UserError::new(
+                "Deserialization failed",
+                format!(
+                    "Failed to deserialize: '{}': {}",
+                    String::from_utf8_lossy(&msg),
+                    e
+                ),
+            )
+        })
+    }
 }
 
 pub struct DataSerializer<T: SchemaData> {
@@ -435,4 +533,81 @@ fn arrow_to_kafka_json(name: &str, fields: &Fields) -> Value {
         "fields": fields,
         "optional": false,
     }}
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::formats::FramingIterator;
+    use arroyo_rpc::formats::{Framing, FramingMethod, NewlineDelimitedFraming};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_line_framing() {
+        let framing = Some(Arc::new(Framing {
+            method: FramingMethod::Newline(NewlineDelimitedFraming {
+                max_line_length: None,
+            }),
+        }));
+
+        let result: Vec<_> = FramingIterator::new(framing.clone(), "one block".as_bytes())
+            .map(|t| String::from_utf8(t.to_vec()).unwrap())
+            .collect();
+
+        assert_eq!(vec!["one block".to_string()], result);
+
+        let result: Vec<_> = FramingIterator::new(
+            framing.clone(),
+            "one block\ntwo block\nthree block".as_bytes(),
+        )
+        .map(|t| String::from_utf8(t.to_vec()).unwrap())
+        .collect();
+
+        assert_eq!(
+            vec![
+                "one block".to_string(),
+                "two block".to_string(),
+                "three block".to_string()
+            ],
+            result
+        );
+
+        let result: Vec<_> = FramingIterator::new(
+            framing.clone(),
+            "one block\ntwo block\nthree block\n".as_bytes(),
+        )
+        .map(|t| String::from_utf8(t.to_vec()).unwrap())
+        .collect();
+
+        assert_eq!(
+            vec![
+                "one block".to_string(),
+                "two block".to_string(),
+                "three block".to_string()
+            ],
+            result
+        );
+    }
+
+    #[test]
+    fn test_max_line_length() {
+        let framing = Some(Arc::new(Framing {
+            method: FramingMethod::Newline(NewlineDelimitedFraming {
+                max_line_length: Some(5),
+            }),
+        }));
+
+        let result: Vec<_> =
+            FramingIterator::new(framing, "one block\ntwo block\nwhole".as_bytes())
+                .map(|t| String::from_utf8(t.to_vec()).unwrap())
+                .collect();
+
+        assert_eq!(
+            vec![
+                "one b".to_string(),
+                "two b".to_string(),
+                "whole".to_string()
+            ],
+            result
+        );
+    }
 }

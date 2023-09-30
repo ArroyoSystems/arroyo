@@ -41,12 +41,12 @@ use tables::{schema_defs, ConnectorTable, Insert, Table};
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::types::{StructDef, StructField, TypeDef};
+use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::types::{ConnectionSchema, ConnectionType};
 use quote::ToTokens;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
-use arroyo_rpc::formats::{Format, JsonFormat};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
@@ -581,6 +581,7 @@ pub fn get_test_expression(
     let struct_def = test_struct_def();
     let schema = ConnectionSchema {
         format: Some(Format::Json(JsonFormat::default())),
+        framing: None,
         struct_name: struct_def.name.clone(),
         fields: struct_def
             .fields

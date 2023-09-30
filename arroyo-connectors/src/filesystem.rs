@@ -3,10 +3,10 @@ use axum::response::sse::Event;
 use std::convert::Infallible;
 use typify::import_types;
 
+use arroyo_rpc::formats::Format;
 use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
-use arroyo_rpc::formats::Format;
 
 use crate::{pull_option_to_i64, Connection, EmptyConfig};
 
@@ -116,6 +116,7 @@ impl Connector for FileSystemConnector {
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: Some(format),
+            framing: schema.framing.clone(),
         };
 
         Ok(Connection {
