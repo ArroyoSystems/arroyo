@@ -88,12 +88,10 @@ impl<K: Key, T: SchemaData + Serialize> FileSink<K, T> {
     ) {
         self.file.as_mut().unwrap().flush().await.unwrap();
         let mut state = ctx.state.get_global_keyed_state('f').await;
-        state
-            .insert(
-                self.output_path.clone(),
-                self.file.as_ref().unwrap().metadata().await.unwrap().len(),
-            )
-            .await;
+        state.insert(
+            self.output_path.clone(),
+            self.file.as_ref().unwrap().metadata().await.unwrap().len(),
+        );
     }
 
     async fn on_close(&mut self, _ctx: &mut Context<(), ()>) {

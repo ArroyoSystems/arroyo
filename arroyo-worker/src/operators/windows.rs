@@ -1,10 +1,14 @@
+use std::borrow::Cow;
 use std::{marker::PhantomData, time::SystemTime};
 
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
-use arroyo_state::tables::key_time_multi_map::KeyTimeMultiMap;
 use arroyo_state::tables::keyed_map::KeyedState;
+use arroyo_state::{
+    judy::tables::key_time_multimap::JudyKeyTimeMultiMap,
+    tables::key_time_multi_map::KeyTimeMultiMap,
+};
 use arroyo_types::*;
 use std::time::Duration;
 
@@ -70,7 +74,8 @@ impl<K: Key, T: Data, OutT: Data> WindowOperation<K, T, OutT> {
         match self {
             WindowOperation::Aggregate(aggregator) => {
                 let value = {
-                    let vs: Vec<&T> = state.get_time_range(key, window.start, window.end).await;
+                    let vs: Vec<Cow<T>> = state.get_time_range(key, window.start, window.end);
+                    let vs: Vec<&T> = vs.iter().map(|v| v.as_ref()).collect();
                     (aggregator)(key, window, vs)
                 };
 
@@ -84,7 +89,8 @@ impl<K: Key, T: Data, OutT: Data> WindowOperation<K, T, OutT> {
             }
             WindowOperation::Flatten(flatten) => {
                 let values = {
-                    let vs: Vec<&T> = state.get_time_range(key, window.start, window.end).await;
+                    let vs: Vec<Cow<T>> = state.get_time_range(key, window.start, window.end);
+                    let vs: Vec<&T> = vs.iter().map(|v| v.as_ref()).collect();
                     (flatten)(&key, window, vs)
                 };
 
@@ -178,8 +184,7 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
             ctx.state
                 .get_key_time_multi_map('w')
                 .await
-                .insert(record.timestamp, key, value)
-                .await;
+                .insert(record.timestamp, key, value);
         }
     }
 
@@ -189,11 +194,11 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
         // clear everything before our start time (we're guaranteed that timers execute in order,
         // so with fixed-width windows there won't be any earlier data)
         let next = self.assigner.next(window);
-        let mut state: KeyTimeMultiMap<K, T, _> = ctx.state.get_key_time_multi_map('w').await;
+        let mut state: &mut JudyKeyTimeMultiMap<K, T> = ctx.state.get_key_time_multi_map('w').await;
 
-        state
-            .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
-            .await;
+        // TODO
+        //state
+        //  .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start);
     }
 }
 
@@ -384,8 +389,7 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
         ctx.state
             .get_key_time_multi_map('w')
             .await
-            .insert(timestamp, key, value)
-            .await;
+            .insert(timestamp, key, value);
     }
 
     async fn handle_timer(&mut self, mut key: K, window: Window, ctx: &mut Context<K, OutT>) {
@@ -419,11 +423,11 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
 
         // clear this window and everything before it -- we're guaranteed that windows are executed in order and are
         // non-overlapping so we will never need to reprocess this data
-        let mut state: KeyTimeMultiMap<K, T, _> = ctx.state.get_key_time_multi_map('w').await;
-
-        state
-            .clear_time_range(&mut key, window.start, window.end)
-            .await;
+        // TODO: deletions
+        //let mut state: KeyTimeMultiMap<K, T, _> = ctx.state.get_key_time_multi_map('w').await;
+        //state
+        //   .clear_time_range(&mut key, window.start, window.end)
+        //  .await;
     }
 }
 

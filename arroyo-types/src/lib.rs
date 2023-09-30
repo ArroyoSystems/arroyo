@@ -264,11 +264,14 @@ pub fn string_to_map(s: &str) -> Option<HashMap<String, String>> {
         .collect()
 }
 
-pub trait Key: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + 'static {}
-impl<T: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + 'static> Key for T {}
+pub trait Key:
+    Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + Sync + 'static
+{
+}
+impl<T: Debug + Clone + Encode + Decode + Hash + PartialEq + Eq + Send + Sync + 'static> Key for T {}
 
-pub trait Data: Debug + Clone + Encode + Decode + Send + PartialEq + 'static {}
-impl<T: Debug + Clone + Encode + Decode + Send + PartialEq + 'static> Data for T {}
+pub trait Data: Debug + Clone + Encode + Decode + Send + Sync + PartialEq + 'static {}
+impl<T: Debug + Clone + Encode + Decode + Send + Sync + PartialEq + 'static> Data for T {}
 
 #[derive(Debug, Copy, Clone, Encode, Decode, PartialEq, Eq)]
 pub enum Watermark {

@@ -145,12 +145,14 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
             match ctx.control_rx.try_recv() {
                 Ok(ControlMessage::Checkpoint(c)) => {
                     // checkpoint our state
-                    debug!("starting checkpointing {}", ctx.task_info.task_index);
+                    info!(
+                        "starting checkpointing {} with state {:?}",
+                        ctx.task_info.task_index, self.state
+                    );
                     ctx.state
                         .get_global_keyed_state('i')
                         .await
-                        .insert(ctx.task_info.task_index, self.state)
-                        .await;
+                        .insert(ctx.task_info.task_index, self.state);
                     if self.checkpoint(c, ctx).await {
                         return SourceFinishType::Immediate;
                     }

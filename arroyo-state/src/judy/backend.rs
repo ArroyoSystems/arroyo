@@ -1,3 +1,4 @@
+use super::tables::global_keyed_map::GlobalKeyedState;
 use crate::judy::{self, BytesWithOffset, InMemoryJudyNode, JudyNode, JudyWriter};
 use crate::tables::DataTuple;
 use crate::{hash_key, BackingStore, BINCODE_CONFIG};
@@ -11,7 +12,7 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::{grpc, CheckpointCompleted, CompactionResult, ControlResp};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{
-    from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, CHECKPOINT_URL_ENV,
+    from_micros, to_micros, CheckpointBarrier, Data, Key, TaskInfo, Watermark, CHECKPOINT_URL_ENV,
     S3_ENDPOINT_ENV, S3_REGION_ENV,
 };
 use async_trait::async_trait;
@@ -54,13 +55,13 @@ pub struct JudyBackend {
     epoch: u32,
     min_epoch: u32,
     // ordered by table, then epoch.
-    current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>,
+    last_watermark: Option<SystemTime>,
     judy_file_data:
         HashMap<char, BTreeMap<u32, BTreeMap<u64, (ParquetStoreData, BytesOrFutureBytes)>>>,
     writer: JudyCheckpointWriter,
     task_info: TaskInfo,
     tables: HashMap<char, TableDescriptor>,
-    caches: HashMap<char, Box<dyn Any + Send + Sync>>,
+    caches: HashMap<char, Box<dyn Checkpointing + Send + Sync>>,
     storage: StorageProvider,
 }
 
@@ -187,7 +188,7 @@ impl BackingStore for JudyBackend {
         Self {
             epoch: 1,
             min_epoch: 1,
-            current_files: HashMap::new(),
+            last_watermark: None,
             judy_file_data: HashMap::new(),
             writer: JudyCheckpointWriter::new(
                 task_info.clone(),
@@ -237,9 +238,13 @@ impl BackingStore for JudyBackend {
             else {
                 panic!("expect Judy data")
             };
-            let table_descriptor = tables
-                .get(&Judy_data.table.chars().next().unwrap())
-                .unwrap();
+            let table_descriptor =
+                tables
+                    .get(&Judy_data.table.chars().next().unwrap())
+                    .expect(&format!(
+                        "missing table descriptor for table {}",
+                        Judy_data.table
+                    ));
             if table_descriptor.table_type() != TableType::Global {
                 // check if the file has data in the task's key range.
                 if Judy_data.max_routing_key < *task_info.key_range.start()
@@ -279,7 +284,7 @@ impl BackingStore for JudyBackend {
         Self {
             epoch: metadata.epoch + 1,
             min_epoch: metadata.min_epoch,
-            current_files,
+            last_watermark: operator_metadata.max_watermark.map(|w| from_micros(w)),
             judy_file_data,
             writer: JudyCheckpointWriter::new(
                 task_info.clone(),
@@ -363,6 +368,8 @@ impl BackingStore for JudyBackend {
         watermark: Option<SystemTime>,
     ) -> u32 {
         assert_eq!(barrier.epoch, self.epoch);
+
+        self.checkpoint_tables(&barrier, watermark).await;
         self.writer
             .checkpoint(self.epoch, barrier.timestamp, watermark, barrier.then_stop)
             .await;
@@ -372,7 +379,8 @@ impl BackingStore for JudyBackend {
     }
 
     async fn get_data_tuples<K: Key, V: Data>(&self, table: char) -> Vec<DataTuple<K, V>> {
-        unimplemented!()
+        warn!("{:?}", self.task_info);
+        vec![]
     }
 
     async fn write_data_tuple<K: Key, V: Data>(
@@ -477,6 +485,68 @@ impl BackingStore for JudyBackend {
         }
         result
     }
+
+    async fn get_global_keyed_state<K: Key, V: Data>(
+        &mut self,
+        table: char,
+    ) -> &mut GlobalKeyedState<K, V> {
+        if !self.caches.contains_key(&table) {
+            let table_descriptor = self.tables.get(&table).unwrap().clone();
+            let files: Vec<_> = self
+                .judy_file_data
+                .get_mut(&table)
+                .map(|files_by_epoch| {
+                    files_by_epoch
+                        .values_mut()
+                        .flatten()
+                        .map(|(hash, pair)| pair)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut cache: GlobalKeyedState<K, V> =
+                GlobalKeyedState::from_files(table_descriptor, self.epoch, files).await;
+            self.caches.insert(table, Box::new(cache));
+        }
+        let result: &mut GlobalKeyedState<K, V> = self
+            .caches
+            .get_mut(&table)
+            .unwrap()
+            .as_any()
+            .downcast_mut()
+            .unwrap();
+        result
+    }
+
+    async fn get_key_time_multi_map<K: Key + Sync, V: Data + Sync>(
+        &mut self,
+        table: char,
+    ) -> &mut JudyKeyTimeMultiMap<K, V> {
+        if !self.caches.contains_key(&table) {
+            let files = self.judy_file_data.get_mut(&table);
+            let table_descriptor = self.tables.get(&table).unwrap().clone();
+            let new_cache: JudyKeyTimeMultiMap<K, V> = match files {
+                None => JudyKeyTimeMultiMap::new(table_descriptor),
+                Some(files) => {
+                    JudyKeyTimeMultiMap::from_files(
+                        table_descriptor,
+                        self.epoch,
+                        &self.task_info,
+                        self.last_watermark,
+                        files,
+                    )
+                    .await
+                }
+            };
+            self.caches.insert(table, Box::new(new_cache));
+        }
+        return self
+            .caches
+            .get_mut(&table)
+            .unwrap()
+            .as_any()
+            .downcast_mut::<JudyKeyTimeMultiMap<K, V>>()
+            .unwrap();
+    }
 }
 
 impl JudyBackend {
@@ -503,50 +573,6 @@ impl JudyBackend {
     async fn write_key_value<K: Key, V: Data>(&mut self, table: char, key: &mut K, value: &mut V) {
         self.write_data_triple(table, TableType::Global, SystemTime::UNIX_EPOCH, key, value)
             .await
-    }
-
-    async fn get_global_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)> {
-        let Some(files) = self.current_files.get(&table) else {
-            return vec![];
-        };
-        let mut state_map = HashMap::new();
-        for file in files.values().flatten() {
-            let bytes = self
-                .storage
-                .get(&file.file)
-                .await
-                .unwrap_or_else(|_| panic!("unable to find file {} in checkpoint", file.file));
-            for (_timestamp, key, value) in self
-                .triples_from_judy_bytes(bytes.into(), &(0..=u64::MAX))
-                .await
-                .unwrap()
-            {
-                state_map.insert(key, value);
-            }
-        }
-        state_map.into_iter().collect()
-    }
-
-    async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)> {
-        let Some(files) = self.current_files.get(&table) else {
-            return vec![];
-        };
-        let mut state_map = HashMap::new();
-        for file in files.values().flatten() {
-            let bytes = self
-                .storage
-                .get(&file.file)
-                .await
-                .unwrap_or_else(|_| panic!("unable to find file {} in checkpoint", file.file));
-            for (_timestamp, key, value) in self
-                .triples_from_judy_bytes(bytes.into(), &self.task_info.key_range)
-                .await
-                .unwrap()
-            {
-                state_map.insert(key, value);
-            }
-        }
-        state_map.into_iter().collect()
     }
 
     pub async fn get_last_value_for_key<K: Key, V: Data>(
@@ -664,34 +690,33 @@ impl JudyBackend {
         min_time
     }
 
-    async fn get_key_time_multi_map<K: Key + Sync, V: Data + Sync>(
+    async fn checkpoint_tables(
         &mut self,
-        table: char,
-        current_watermark: Option<SystemTime>,
-    ) -> &mut JudyKeyTimeMultiMap<K, V> {
-        if !self.caches.contains_key(&table) {
-            let files = self.judy_file_data.get_mut(&table);
-            let new_cache: JudyKeyTimeMultiMap<K, V> = match files {
-                None => JudyKeyTimeMultiMap::new(),
-                Some(files) => {
-                    JudyKeyTimeMultiMap::from_files(
-                        self.tables.get(&table).unwrap().clone(),
-                        &self.task_info,
-                        current_watermark,
-                        files,
-                    )
-                    .await
-                }
-            };
-            self.caches.insert(table, Box::new(new_cache));
+        barrier: &CheckpointBarrier,
+        watermark: Option<SystemTime>,
+    ) {
+        let mut futs = FuturesUnordered::new();
+        for table in self.caches.values_mut() {
+            futs.push(table.checkpoint(barrier, watermark));
         }
-        return self
-            .caches
-            .get_mut(&table)
-            .unwrap()
-            .downcast_mut::<JudyKeyTimeMultiMap<K, V>>()
-            .unwrap();
+
+        while let Some(items) = futs.next().await {
+            for item in items {
+                self.writer.sender.send(item).await.unwrap();
+            }
+        }
     }
+}
+
+#[async_trait]
+pub(crate) trait Checkpointing {
+    async fn checkpoint(
+        &mut self,
+        barrier: &CheckpointBarrier,
+        watermark: Option<SystemTime>,
+    ) -> Vec<JudyQueueItem>;
+
+    fn as_any(&mut self) -> &mut dyn Any;
 }
 
 impl JudyBackend {
@@ -826,16 +851,7 @@ impl JudyCheckpointWriter {
         key: Vec<u8>,
         data: Vec<u8>,
     ) {
-        self.sender
-            .send(JudyQueueItem::Write(JudyWrite {
-                table,
-                key_hash,
-                timestamp,
-                key,
-                data,
-            }))
-            .await
-            .unwrap();
+        todo!()
     }
 
     async fn checkpoint(
@@ -864,41 +880,34 @@ impl JudyCheckpointWriter {
 }
 
 #[derive(Debug)]
-enum JudyQueueItem {
-    Write(JudyWrite),
+pub(crate) enum JudyQueueItem {
+    Message(JudyMessage),
     Checkpoint(JudyCheckpoint),
     OneShot(oneshot::Receiver<JudyMessage>),
 }
 #[derive(Debug)]
-struct JudyMessage {
+pub(crate) struct JudyMessage {
     table: char,
     bytes: Bytes,
     metadata: ParquetStoreData,
 }
 
-#[derive(Debug)]
-struct JudyWrite {
-    table: char,
-    key_hash: u64,
-    timestamp: SystemTime,
-    key: Vec<u8>,
-    data: Vec<u8>,
+impl JudyMessage {
+    pub(crate) fn new(table: char, bytes: Bytes, metadata: ParquetStoreData) -> Self {
+        Self {
+            table,
+            bytes,
+            metadata,
+        }
+    }
 }
 
 #[derive(Debug)]
-struct JudyCheckpoint {
+pub(crate) struct JudyCheckpoint {
     epoch: u32,
     time: SystemTime,
     watermark: Option<SystemTime>,
     then_stop: bool,
-}
-struct RecordBatchBuilder {
-    key_hash_builder: arrow_array::builder::PrimitiveBuilder<arrow_array::types::UInt64Type>,
-    start_time_array:
-        arrow_array::builder::PrimitiveBuilder<arrow_array::types::TimestampMicrosecondType>,
-    key_bytes: arrow_array::builder::BinaryBuilder,
-    data_bytes: arrow_array::builder::BinaryBuilder,
-    judy_stats: JudyStats,
 }
 
 struct JudyStats {
@@ -913,78 +922,6 @@ impl Default for JudyStats {
             max_timestamp: SystemTime::UNIX_EPOCH,
             min_routing_key: u64::MAX,
             max_routing_key: u64::MIN,
-        }
-    }
-}
-
-impl RecordBatchBuilder {
-    fn insert(&mut self, key_hash: u64, timestamp: SystemTime, key: Vec<u8>, data: Vec<u8>) {
-        self.judy_stats.min_routing_key = self.judy_stats.min_routing_key.min(key_hash);
-        self.judy_stats.max_routing_key = self.judy_stats.max_routing_key.max(key_hash);
-
-        self.key_hash_builder.append_value(key_hash);
-        self.start_time_array
-            .append_value(to_micros(timestamp) as i64);
-        self.key_bytes.append_value(key);
-        self.data_bytes.append_value(data);
-        self.judy_stats.max_timestamp = self.judy_stats.max_timestamp.max(timestamp);
-    }
-
-    fn flush(mut self) -> Option<(arrow_array::RecordBatch, JudyStats)> {
-        let key_hash_array: arrow_array::PrimitiveArray<arrow_array::types::UInt64Type> =
-            self.key_hash_builder.finish();
-        if key_hash_array.is_empty() {
-            return None;
-        }
-        let start_time_array: arrow_array::PrimitiveArray<
-            arrow_array::types::TimestampMicrosecondType,
-        > = self.start_time_array.finish();
-        let key_array: arrow_array::BinaryArray = self.key_bytes.finish();
-        let data_array: arrow_array::BinaryArray = self.data_bytes.finish();
-        Some((
-            arrow_array::RecordBatch::try_new(
-                self.schema(),
-                vec![
-                    std::sync::Arc::new(key_hash_array),
-                    std::sync::Arc::new(start_time_array),
-                    std::sync::Arc::new(key_array),
-                    std::sync::Arc::new(data_array),
-                ],
-            )
-            .unwrap(),
-            self.judy_stats,
-        ))
-    }
-
-    fn schema(&self) -> std::sync::Arc<arrow_schema::Schema> {
-        std::sync::Arc::new(arrow::datatypes::Schema::new(vec![
-            arrow::datatypes::Field::new("key_hash", arrow::datatypes::DataType::UInt64, false),
-            arrow::datatypes::Field::new(
-                "start_time",
-                arrow::datatypes::DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
-                false,
-            ),
-            arrow::datatypes::Field::new("key_bytes", arrow::datatypes::DataType::Binary, false),
-            arrow::datatypes::Field::new(
-                "aggregate_bytes",
-                arrow::datatypes::DataType::Binary,
-                false,
-            ),
-        ]))
-    }
-}
-impl Default for RecordBatchBuilder {
-    fn default() -> Self {
-        Self {
-            key_hash_builder: arrow_array::builder::PrimitiveBuilder::<
-                arrow_array::types::UInt64Type,
-            >::with_capacity(1024),
-            start_time_array: arrow_array::builder::PrimitiveBuilder::<
-                arrow_array::types::TimestampMicrosecondType,
-            >::with_capacity(1024),
-            key_bytes: arrow_array::builder::BinaryBuilder::default(),
-            data_bytes: arrow_array::builder::BinaryBuilder::default(),
-            judy_stats: JudyStats::default(),
         }
     }
 }
@@ -1027,6 +964,7 @@ impl JudyFlusher {
     }
 
     async fn upload_judy_bytes(&self, key: &str, judy_bytes: Bytes) -> Result<usize> {
+        warn!("uploading judy bytes to {}", key);
         let bytes = judy_bytes.len();
         self.storage.put(key, judy_bytes).await?;
         Ok(bytes)
@@ -1060,10 +998,9 @@ impl JudyFlusher {
             tokio::select! {
                 op = self.queue.recv() => {
                     match op {
-                        Some(JudyQueueItem::Write( JudyWrite{table, key_hash, timestamp, key, data})) => {
-                            self.builders.entry(table).or_default().insert(key_hash, timestamp, key, data);
-                            //self.builders.entry(table).or_default().insert(key_hash, timestamp, key, data);
-                        },
+                        Some(JudyQueueItem::Message(message)) => {
+                            judy_files.entry(message.table).or_default().push((message.metadata, message.bytes));
+                        }
                         Some(JudyQueueItem::OneShot(receiver)) => {
                             futures.push(receiver);
                         },
@@ -1127,6 +1064,10 @@ impl JudyFlusher {
                         table_checkpoint_path(&self.task_info, table, cp.epoch),
                         index
                     );
+                    let metadata = ParquetStoreData {
+                        file: s3_key.clone(),
+                        ..metadata
+                    };
                     bytes += self.upload_judy_bytes(&s3_key, judy_bytes).await?;
                     self.current_files
                         .entry(table)

@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use bincode::config::Configuration;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
+use judy::tables::key_time_multimap::JudyKeyTimeMultiMap;
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -31,7 +32,7 @@ pub mod tables;
 pub const BINCODE_CONFIG: Configuration = bincode::config::standard();
 pub const FULL_KEY_RANGE: RangeInclusive<u64> = 0..=u64::MAX;
 
-pub type StateBackend = parquet::ParquetBackend;
+pub type StateBackend = judy::backend::JudyBackend;
 
 pub fn global_table(name: impl Into<String>, description: impl Into<String>) -> TableDescriptor {
     TableDescriptor {
@@ -159,6 +160,16 @@ pub trait BackingStore {
         table: char,
         watermark: Option<SystemTime>,
     ) -> Vec<(BackendData, Bytes)>;
+
+    async fn get_global_keyed_state<K: Key, V: Data>(
+        &mut self,
+        table: char,
+    ) -> &mut crate::judy::tables::global_keyed_map::GlobalKeyedState<K, V>;
+
+    async fn get_key_time_multi_map<K: Key + Sync, V: Data + Sync>(
+        &mut self,
+        table: char,
+    ) -> &mut crate::judy::tables::key_time_multimap::JudyKeyTimeMultiMap<K, V>;
 }
 
 pub struct StateStore<S: BackingStore> {
@@ -255,68 +266,18 @@ impl<S: BackingStore> StateStore<S> {
         TimeKeyMap::new(table, &mut self.backend, cache)
     }
 
-    pub async fn get_key_time_multi_map<K: Key, V: Data>(
+    pub async fn get_key_time_multi_map<K: Key + Sync, V: Data + Sync>(
         &mut self,
         table: char,
-    ) -> KeyTimeMultiMap<K, V, S> {
-        // this is done because populating it is async, so can't use or_insert().
-        if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
-            let cache: Box<dyn Any + Send> = match &self.restore_from {
-                Some(restore_from) => {
-                    let cache = KeyTimeMultiMapCache::<K, V>::from_checkpoint(
-                        &self.backend,
-                        &self.task_info,
-                        table,
-                        self.table_descriptors.get(&table).unwrap(),
-                        restore_from,
-                    )
-                    .await;
-                    Box::new(cache)
-                }
-                None => Box::<key_time_multi_map::KeyTimeMultiMapCache<K, V>>::default(),
-            };
-            e.insert(cache);
-        }
-
-        let cache = self.caches.get_mut(&table).unwrap();
-        let cache: &mut KeyTimeMultiMapCache<K, V> = cache.downcast_mut().unwrap_or_else(|| {
-            panic!(
-                "Failed to get table {} with key {} and value {}",
-                table,
-                std::any::type_name::<K>(),
-                std::any::type_name::<V>()
-            )
-        });
-        KeyTimeMultiMap::new(table, &mut self.backend, cache)
+    ) -> &mut JudyKeyTimeMultiMap<K, V> {
+        self.backend.get_key_time_multi_map(table).await
     }
 
     pub async fn get_global_keyed_state<K: Key, V: Data>(
         &mut self,
         table: char,
-    ) -> GlobalKeyedState<K, V, S> {
-        // this is done because populating it is async, so can't use or_insert().
-        if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
-            let cache: Box<dyn Any + Send> = match &self.restore_from {
-                Some(_restore_from) => {
-                    let cache =
-                        GlobalKeyedStateCache::<K, V>::from_checkpoint(&self.backend, table).await;
-                    Box::new(cache)
-                }
-                None => Box::<global_keyed_map::GlobalKeyedStateCache<K, V>>::default(),
-            };
-            e.insert(cache);
-        }
-
-        let cache = self.caches.get_mut(&table).unwrap();
-        let cache: &mut GlobalKeyedStateCache<K, V> = cache.downcast_mut().unwrap_or_else(|| {
-            panic!(
-                "Failed to get table {} with key {} and value {}",
-                table,
-                std::any::type_name::<K>(),
-                std::any::type_name::<V>()
-            )
-        });
-        GlobalKeyedState::new(table, &mut self.backend, cache)
+    ) -> &mut crate::judy::tables::global_keyed_map::GlobalKeyedState<K, V> {
+        self.backend.get_global_keyed_state(table).await
     }
 
     pub async fn get_key_state<K: Key, V: Data>(&mut self, table: char) -> KeyedState<K, V, S> {
@@ -359,6 +320,7 @@ mod test {
         CheckpointMetadata, OperatorCheckpointMetadata, TableDeleteBehavior, TableDescriptor,
         TableWriteBehavior,
     };
+    use std::borrow::Cow;
     use std::env;
     use test_case::test_case;
     use tokio::sync::mpsc::Receiver;
@@ -368,6 +330,7 @@ mod test {
     use std::time::{Duration, SystemTime};
     use tokio::sync::mpsc::channel;
 
+    use crate::judy::tables::key_time_multimap::JudyKeyTimeMultiMap;
     use crate::parquet::ParquetBackend;
     use crate::tables::key_time_multi_map::KeyTimeMultiMap;
     use crate::tables::keyed_map::KeyedState;
@@ -508,19 +471,19 @@ mod test {
 
         let mut gs = ss.get_global_keyed_state::<String, i64>('g').await;
 
-        gs.insert("k1".into(), 1).await;
+        gs.insert("k1".into(), 1);
 
         assert_eq!(*gs.get(&"k1".into()).unwrap(), 1);
 
         let mut gs = ss.get_global_keyed_state::<String, i64>('g').await;
         assert_eq!(*gs.get(&"k1".into()).unwrap(), 1);
 
-        gs.insert("k2".into(), 2).await;
+        gs.insert("k2".into(), 2);
 
         let mut entries = gs.get_all();
         entries.sort();
 
-        assert_eq!(entries, vec![&1i64, &2]);
+        assert_eq!(entries, vec![Cow::Borrowed(&1i64), Cow::Borrowed(&2)]);
     }
 
     #[test_case(parquet_for_test().await; "parquet store")]
@@ -529,7 +492,7 @@ mod test {
         let (mut ss, mut rx) = p;
         let job_id = ss.task_info.job_id.clone();
         let operator_id = ss.task_info.operator_id.clone();
-        let mut ks: KeyTimeMultiMap<String, i32, _> = ss.get_key_time_multi_map('t').await;
+        let mut ks: &mut JudyKeyTimeMultiMap<String, i32> = ss.get_key_time_multi_map('t').await;
 
         let k1 = "k1";
         let t1 = SystemTime::now();
@@ -538,20 +501,24 @@ mod test {
         let t4 = t1 + Duration::from_secs(3);
         let _t5 = t1 + Duration::from_secs(4);
 
-        ks.insert(t1, k1.into(), 1).await;
-        ks.insert(t1, k1.into(), 2).await;
-        ks.insert(t2, k1.into(), 3).await;
-        ks.insert(t3, k1.into(), 4).await;
-        ks.insert(t4, k1.into(), 5).await;
+        ks.insert(t1, k1.into(), 1);
+        ks.insert(t1, k1.into(), 2);
+        ks.insert(t2, k1.into(), 3);
+        ks.insert(t3, k1.into(), 4);
+        ks.insert(t4, k1.into(), 5);
 
         assert_eq!(
-            ks.get_time_range(&mut k1.into(), t1, t1 + Duration::from_nanos(1))
-                .await,
-            vec![&1, &2]
+            ks.get_time_range(&mut k1.into(), t1, t1 + Duration::from_nanos(1)),
+            vec![Cow::Borrowed(&1), Cow::Borrowed(&2)]
         );
         assert_eq!(
-            ks.get_time_range(&mut k1.into(), t1, t4).await,
-            vec![&1, &2, &3, &4]
+            ks.get_time_range(&mut k1.into(), t1, t4),
+            vec![
+                Cow::Borrowed(&1),
+                Cow::Borrowed(&2),
+                Cow::Borrowed(&3),
+                Cow::Borrowed(&4)
+            ]
         );
 
         do_checkpoint(&mut ss, &job_id, &operator_id, 1, &mut rx).await;
@@ -559,13 +526,17 @@ mod test {
         let mut ks = ss.get_key_time_multi_map::<String, i32>('t').await;
 
         assert_eq!(
-            ks.get_time_range(&mut k1.into(), t1, t1 + Duration::from_nanos(1))
-                .await,
-            vec![&1, &2]
+            ks.get_time_range(&mut k1.into(), t1, t1 + Duration::from_nanos(1)),
+            vec![Cow::Borrowed(&1), Cow::Borrowed(&2)]
         );
         assert_eq!(
-            ks.get_time_range(&mut k1.into(), t1, t4).await,
-            vec![&1, &2, &3, &4]
+            ks.get_time_range(&mut k1.into(), t1, t4),
+            vec![
+                Cow::Borrowed(&1),
+                Cow::Borrowed(&2),
+                Cow::Borrowed(&3),
+                Cow::Borrowed(&4)
+            ]
         );
     }
 

@@ -1,3 +1,5 @@
+use crate::judy::tables::global_keyed_map::GlobalKeyedState;
+use crate::judy::tables::key_time_multimap::JudyKeyTimeMultiMap;
 use crate::metrics::CURRENT_FILES_GAUGE;
 use crate::tables::{BlindDataTuple, Compactor, DataTuple};
 use crate::{hash_key, BackingStore, DataOperation, StateStore, BINCODE_CONFIG};
@@ -466,6 +468,20 @@ impl BackingStore for ParquetBackend {
             ));
         }
         result
+    }
+
+    async fn get_global_keyed_state<K: Key, V: Data>(
+        &mut self,
+        table: char,
+    ) -> &mut GlobalKeyedState<K, V> {
+        todo!()
+    }
+
+    async fn get_key_time_multi_map<K: Key, V: Data>(
+        &mut self,
+        table: char,
+    ) -> &mut JudyKeyTimeMultiMap<K, V> {
+        todo!()
     }
 }
 

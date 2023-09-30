@@ -9,6 +9,7 @@ use arroyo_types::Key;
 use bincode::{config, de::Decoder, BorrowDecode, Decode};
 use byteorder::ReadBytesExt;
 use bytes::Bytes;
+use tracing::warn;
 
 pub struct JudyReader<K: Key, V> {
     index_cursor: Cursor<Bytes>,
@@ -25,7 +26,9 @@ impl<K: Key, V> JudyReader<K, V> {
             .offset_contribution_size
             .read_u32_sync(&mut index_cursor)?
             .ok_or_else(|| anyhow::anyhow!("No header size"))?;
-        let data_cursor = BytesWithOffset::new(bytes.slice(header_size as usize..));
+        warn!("byte size: {}, header size: {}", bytes.len(), header_size);
+        index_cursor.set_position(0);
+        let data_cursor = BytesWithOffset::new(bytes);
 
         Ok(Self {
             index_cursor,
@@ -139,6 +142,11 @@ impl<K: Key, V: Decode> JudyReader<K, V> {
         self.data_cursor.seek(SeekFrom::Start(0))?;
         self.as_vec_internal(vec![])
     }
+    pub fn get(&mut self, key: &K) -> Result<Option<V>> {
+        self.get_bytes(key)?
+            .map(|bytes| Ok(bincode::decode_from_slice(&bytes, config::standard())?.0))
+            .transpose()
+    }
     fn as_vec_internal(&mut self, mut prefix: Vec<u8>) -> Result<Vec<(K, V)>> {
         let initial_index_offset = self.index_cursor.position();
         let header_byte = self.index_cursor.read_u8()?;
@@ -178,10 +186,12 @@ impl<K: Key, V: Decode> JudyReader<K, V> {
                 for _ in 0..key_count {
                     let key = self.index_cursor.read_u8()?;
                     keys.push(key);
-                    header
-                        .child_pointer_size
-                        .read_i32_sync(&mut self.index_cursor)?
-                        .unwrap();
+                    offsets.push(
+                        header
+                            .child_pointer_size
+                            .read_i32_sync(&mut self.index_cursor)?
+                            .unwrap(),
+                    );
                 }
                 (keys, offsets)
             }

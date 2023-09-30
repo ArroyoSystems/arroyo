@@ -184,8 +184,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
             ctx.state
                 .get_global_keyed_state('i')
                 .await
-                .insert(ctx.task_info.task_index, *next_transaction_index)
-                .await;
+                .insert(ctx.task_info.task_index, *next_transaction_index);
             self.init_producer(&ctx.task_info)
                 .expect("creating new producer during checkpointing");
         }

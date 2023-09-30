@@ -14,7 +14,7 @@ use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
 };
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+use arroyo_state::judy::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{from_nanos, Data, Record, UserError};
 use aws_config::from_env;
 use aws_sdk_kinesis::{
@@ -226,7 +226,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         ctx: &mut Context<(), T>,
     ) -> anyhow::Result<Vec<BoxedFuture<AsyncNamedResult<AsyncResult>>>> {
         let mut futures = Vec::new();
-        let mut s: GlobalKeyedState<String, ShardState, _> =
+        let mut s: &mut GlobalKeyedState<String, ShardState> =
             ctx.state.get_global_keyed_state('k').await;
         for (shard_id, shard_state) in s
             .get_all()
@@ -242,7 +242,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
             futures.push(
                 shard_state.get_update_shard_iterator_future(self.kinesis_client.as_ref().unwrap()),
             );
-            self.shards.insert(shard_id, shard_state);
+            self.shards.insert(shard_id, shard_state.into_owned());
         }
         let new_futures = self.sync_shards(ctx).await?;
         futures.extend(new_futures.into_iter());
@@ -428,7 +428,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
                             debug!("starting checkpointing {}", ctx.task_info.task_index);
                             let mut s = ctx.state.get_global_keyed_state('k').await;
                             for (shard_id, shard_state) in &self.shards {
-                                s.insert(shard_id.clone(), shard_state.clone()).await;
+                                s.insert(shard_id.clone(), shard_state.clone());
                             }
                             if self.checkpoint(c, ctx).await {
                                 return Ok(SourceFinishType::Immediate);

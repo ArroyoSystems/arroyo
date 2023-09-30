@@ -1,5 +1,6 @@
 use std::io::SeekFrom;
 use std::marker::PhantomData;
+use std::time::SystemTime;
 use std::{collections::BTreeMap, io::Cursor};
 
 use std::convert::TryFrom;
@@ -7,10 +8,11 @@ use std::convert::TryFrom;
 use anyhow::{bail, Result};
 use arroyo_types::{Data, Key};
 use bincode::config::{self};
-use bincode::Decode;
+use bincode::{Decode, Encode};
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWriteExt};
+use tracing::info;
 
 pub mod backend;
 pub mod tables;
@@ -117,14 +119,14 @@ impl JudyNode {
         for child in self.children.values_mut() {
             child.compress_nodes();
         }
-        if self.children.len() == 1 && self.terminal_offset.is_none() {
+        if self.children.len() == 1 && self.terminal_offset.is_none() && !self.is_root {
             // this is a node that doesn't have data and one child, so merge it with its child.
             let (trie_byte, child_node) = self.children.pop_first().unwrap();
             self.common_bytes.push(trie_byte);
             self.common_bytes.extend(child_node.common_bytes);
             self.children = child_node.children;
             self.terminal_offset = child_node.terminal_offset;
-        } else if self.terminal_offset.is_none() && !self.children.is_empty() {
+        } else if self.terminal_offset.is_none() && !self.children.is_empty() && !self.is_root {
             // this node doesn't have data, so we can move the offset contribution up to the parent.
             if let Some(min_child_offset) = self
                 .children
@@ -619,6 +621,7 @@ impl BytesWithOffset {
         let bytes_to_read = self
             .bytes
             .slice(self.position as usize..self.position as usize + 4);
+        self.position += 4;
         Ok(LittleEndian::read_u32(&bytes_to_read))
     }
 
@@ -997,7 +1000,10 @@ mod tests {
         time::SystemTime,
     };
 
-    use crate::judy::BytesWithOffset;
+    use crate::judy::{
+        tables::reader::JudyReader, BytesWithOffset, ImpulseSourceState,
+        PeriodicWatermarkGeneratorState,
+    };
 
     use super::{JudyNode, JudyWriter};
     use bincode::config;
@@ -1128,12 +1134,16 @@ mod tests {
         harness.serialize_files().await?;
 
         i = 0;
+        let mut reader: JudyReader<Vec<u8>, Vec<u8>> =
+            JudyReader::new(harness.finished.as_ref().unwrap().clone())?;
         // Validate the JudyNode
         for (key, expected_data) in &expected_map {
             harness
                 .test_retrieval(key, Some(expected_data.clone()))
                 .await
                 .expect(&format!("failed on key {}", i));
+            let reader_bytes = reader.get_bytes(key)?;
+            assert_eq!(reader_bytes, Some(expected_data.clone().into()));
             i += 1;
         }
         let generated_btree = harness.get_btree_map().await?;
@@ -1157,79 +1167,8 @@ mod tests {
 
     #[tokio::test]
     async fn read_judy_array() -> Result<()> {
-        let keys = vec![
-            vec![1, 251, 8, 18],
-            vec![1, 251, 16, 26],
-            vec![1, 251, 24, 34],
-            vec![1, 251, 32, 42],
-            vec![1, 251, 40, 50],
-            vec![1, 251, 48, 58],
-            vec![1, 251, 56, 67],
-            vec![1, 251, 64, 76],
-            vec![1, 251, 72, 87],
-            vec![1, 251, 80, 95],
-            vec![1, 251, 88, 104],
-            vec![1, 251, 96, 113],
-            vec![1, 251, 104, 122],
-            vec![1, 251, 112, 130],
-            vec![1, 251, 120, 138],
-            vec![1, 251, 128, 146],
-            vec![1, 251, 136, 155],
-            vec![1, 251, 144, 165],
-            vec![1, 251, 152, 173],
-            vec![1, 251, 160, 181],
-            vec![1, 251, 168, 189],
-            vec![1, 251, 176, 198],
-            vec![1, 251, 184, 207],
-            vec![1, 251, 192, 215],
-            vec![1, 251, 200, 223],
-            vec![1, 251, 208, 230],
-            vec![1, 251, 216, 234],
-            vec![1, 251, 224, 238],
-            vec![1, 251, 232, 242],
-            vec![1, 251, 240, 247],
-            vec![1, 251, 248, 251],
-            vec![1, 252, 0, 195, 1, 0],
-            vec![1, 252, 8, 6, 2, 0],
-            vec![1, 252, 20, 112, 1, 0],
-            vec![1, 252, 26, 186, 1, 0],
-            vec![1, 252, 34, 1, 2, 0],
-            vec![1, 252, 40, 39, 1, 0],
-            vec![1, 252, 46, 99, 1, 0],
-            vec![1, 252, 52, 174, 1, 0],
-            vec![1, 252, 58, 250, 1, 0],
-            vec![1, 252, 66, 35, 1, 0],
-            vec![1, 252, 72, 94, 1, 0],
-            vec![1, 252, 78, 170, 1, 0],
-            vec![1, 252, 84, 246, 1, 0],
-            vec![1, 252, 92, 33, 1, 0],
-            vec![1, 252, 98, 90, 1, 0],
-            vec![1, 252, 104, 167, 1, 0],
-            vec![1, 252, 110, 243, 1, 0],
-            vec![1, 252, 118, 31, 2, 0],
-            vec![1, 252, 124, 87, 1, 0],
-            vec![1, 252, 130, 164, 1, 0],
-            vec![1, 252, 136, 240, 1, 0],
-            vec![1, 252, 144, 30, 2, 0],
-            vec![1, 252, 150, 86, 1, 0],
-            vec![1, 252, 156, 162, 1, 0],
-            vec![1, 252, 162, 238, 1, 0],
-            vec![1, 252, 170, 29, 1, 0],
-            vec![1, 252, 176, 82, 1, 0],
-            vec![1, 252, 182, 159, 1, 0],
-            vec![1, 252, 188, 235, 1, 0],
-            vec![1, 252, 196, 28, 1, 0],
-            vec![1, 252, 202, 81, 1, 0],
-            vec![1, 252, 208, 159, 1, 0],
-            vec![1, 252, 214, 235, 1, 0],
-            vec![1, 252, 222, 27, 2, 0],
-            vec![1, 252, 228, 79, 1, 0],
-            vec![1, 252, 234, 155, 1, 0],
-            vec![1, 252, 240, 232, 1, 0],
-            vec![1, 252, 248, 26, 2, 0],
-            vec![1, 252, 254, 78, 1, 0],
-        ];
-        let judy_path = "/tmp/arroyo-process/job_EFpUBhPunQ/job_EFpUBhPunQ/checkpoints/checkpoint-0000001/operator-join_with_expiration_2/table-l-000-judy";
+        let keys: Vec<Vec<u8>> = vec![];
+        let judy_path = "/tmp/arroyo/job_TXDU51LDFM/checkpoints/checkpoint-0000003/operator-slow_impulse_0/table-i-000-0";
         let judy_file = tokio::fs::File::open(judy_path).await?;
         let mut memory_buffer = vec![];
         tokio::io::BufReader::new(judy_file)
@@ -1254,6 +1193,13 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+
+        println!("value at 0 is {:?}", in_memory.get(&vec![0]));
+
+        let mut reader: JudyReader<usize, ImpulseSourceState> = JudyReader::new(bytes.clone())?;
+
+        println!("value is {:?}", reader.get(&0));
+        println!("vec is {:?}", reader.as_vec());
 
         for storage_type in vec![
             StorageType::Memory,
@@ -1323,6 +1269,18 @@ mod tests {
         BTreeMap,
         HashMap,
     }
+}
+
+#[derive(Encode, Decode, Copy, Clone, Debug, PartialEq)]
+pub struct PeriodicWatermarkGeneratorState {
+    last_watermark_emitted_at: SystemTime,
+    max_watermark: SystemTime,
+}
+
+#[derive(Encode, Decode, Debug, Copy, Clone, Eq, PartialEq)]
+pub struct ImpulseSourceState {
+    counter: usize,
+    start_time: SystemTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1442,7 +1400,7 @@ impl<K1: Key, K2: Key, V> InMemoryJudyNode<K1, InMemoryJudyNode<K2, V>> {
         }
         let first_byte = first_key_bytes[0];
         let child = self.children.entry(first_byte).or_default();
-        child.insert_two_key_bytes(&first_key_bytes[1..], second_key, value);
+        child.insert_two_key_bytes(&first_key_bytes[1..], second_key, value)?;
         Ok(())
     }
 }
@@ -1483,7 +1441,7 @@ impl<K: Key, V: Data> InMemoryJudyNode<K, V> {
         let node_data_offset = data_bytes.len() as u32;
         if self.terminal_value.is_some() {
             let mut terminal_value_bytes =
-                bincode::encode_to_vec(&self.terminal_value, config::standard())?;
+                bincode::encode_to_vec(self.terminal_value.as_ref().unwrap(), config::standard())?;
             data_bytes
                 .write_u32_le(terminal_value_bytes.len() as u32)
                 .await?;
@@ -1537,5 +1495,43 @@ impl<K: Key, V: Data> InMemoryJudyNode<K, V> {
             self.children.remove(&first_byte);
         }
         result
+    }
+}
+
+impl<K1: Send, K2: Key, V: Data> InMemoryJudyNode<K1, InMemoryJudyNode<K2, V>> {
+    pub async fn to_judy_bytes(&self) -> Result<Bytes> {
+        let mut data_bytes: Vec<u8> = vec![];
+        let mut root = self.internal_to_judy_node(true, &mut data_bytes).await?;
+        root.compress_nodes();
+        root.optimize_offsets(0);
+        let mut index_bytes = Vec::new();
+        root.serialize(&mut index_bytes).await?;
+        // TODO: not copy like this
+        index_bytes.extend(&data_bytes);
+        Ok(Bytes::from(index_bytes))
+    }
+
+    #[async_recursion::async_recursion]
+    async fn internal_to_judy_node(
+        &self,
+        is_root: bool,
+        mut data_bytes: &mut Vec<u8>,
+    ) -> Result<JudyNode> {
+        let node_data_offset = data_bytes.len() as u32;
+        if let Some(submap) = &self.terminal_value {
+            let mut terminal_value_bytes = submap.to_judy_bytes().await?;
+            data_bytes
+                .write_u32_le(terminal_value_bytes.len() as u32)
+                .await?;
+            data_bytes.append(&mut terminal_value_bytes.to_vec());
+        }
+        let mut judy_node = JudyNode::new();
+        judy_node.is_root = is_root;
+        for (key, child) in self.children.iter() {
+            let child_node = child.internal_to_judy_node(false, &mut data_bytes).await?;
+            judy_node.children.insert(*key, child_node);
+        }
+        judy_node.terminal_offset = self.terminal_value.as_ref().map(|_| node_data_offset);
+        Ok(judy_node)
     }
 }

@@ -6,7 +6,7 @@ use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_rpc::types::Format;
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+use arroyo_state::judy::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
 use governor::{Quota, RateLimiter};
@@ -149,9 +149,9 @@ where
             )
             .create()?;
 
-        let mut s: GlobalKeyedState<i32, KafkaState, _> =
+        let mut s: &mut GlobalKeyedState<i32, KafkaState> =
             ctx.state.get_global_keyed_state('k').await;
-        let state: Vec<&KafkaState> = s.get_all();
+        let state = s.get_all();
 
         // did we restore any partitions?
         let has_state = !state.is_empty();
@@ -262,7 +262,7 @@ where
                                 s.insert(*partition, KafkaState {
                                     partition: *partition2,
                                     offset: *offset + 1,
-                                }).await;
+                                });
                                 topic_partitions.add_partition_offset(
                                     &self.topic, *partition, Offset::Offset(*offset)).unwrap();
                             }

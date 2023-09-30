@@ -4,7 +4,7 @@ use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::types::Format;
 use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+use arroyo_state::judy::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{string_to_map, Data, Message, Record, Watermark};
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
@@ -90,7 +90,7 @@ where
     }
 
     async fn on_start(&mut self, ctx: &mut Context<(), T>) {
-        let s: GlobalKeyedState<(), SSESourceState, _> =
+        let s: &mut GlobalKeyedState<(), SSESourceState> =
             ctx.state.get_global_keyed_state('e').await;
 
         if let Some(state) = s.get(&()) {
@@ -106,9 +106,9 @@ where
         match msg? {
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
-                let mut s: GlobalKeyedState<(), SSESourceState, _> =
+                let s: &mut GlobalKeyedState<(), SSESourceState> =
                     ctx.state.get_global_keyed_state('e').await;
-                s.insert((), self.state.clone()).await;
+                s.insert((), self.state.clone());
 
                 if self.checkpoint(c, ctx).await {
                     return Some(SourceFinishType::Immediate);

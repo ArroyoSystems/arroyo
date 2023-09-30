@@ -7,7 +7,7 @@ use arroyo_rpc::{
     grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior},
     CheckpointEvent, ControlMessage,
 };
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+use arroyo_state::judy::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{Data, Key, Record, TaskInfo};
 use async_trait::async_trait;
 use tracing::warn;
@@ -89,16 +89,15 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
     }
 
     async fn on_start(&mut self, ctx: &mut Context<(), ()>) {
-        let mut tracking_key_state: GlobalKeyedState<
+        let mut tracking_key_state: &mut GlobalKeyedState<
             usize,
             <TPC as TwoPhaseCommitter<K, T>>::DataRecovery,
-            _,
         > = ctx.state.get_global_keyed_state('r').await;
         // take the max of all values
         let state_vec = tracking_key_state
             .get_all()
             .into_iter()
-            .map(|state| state.clone())
+            .map(|state| state.into_owned())
             .collect();
         self.committer
             .init(&ctx.task_info, state_vec)
@@ -107,15 +106,14 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
 
         // subtask 0 is responsible for finishing commits if we were interrupted mid commit.
         if ctx.task_info.task_index == 0 {
-            let mut pre_commit_state: GlobalKeyedState<
+            let mut pre_commit_state: &mut GlobalKeyedState<
                 String,
                 <TPC as TwoPhaseCommitter<K, T>>::PreCommit,
-                _,
             > = ctx.state.get_global_keyed_state('p').await;
             self.pre_commits = pre_commit_state
                 .get_all()
                 .into_iter()
-                .map(|state| state.clone())
+                .map(|state| state.into_owned())
                 .collect();
         }
     }
@@ -145,17 +143,15 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             .checkpoint(&ctx.task_info, checkpoint_barrier.then_stop)
             .await
             .unwrap();
-        let mut recovery_data_state: GlobalKeyedState<usize, _, _> =
+        let recovery_data_state: &mut GlobalKeyedState<usize, _> =
             ctx.state.get_global_keyed_state('r').await;
-        recovery_data_state
-            .insert(ctx.task_info.task_index, recovery_data)
-            .await;
-        let mut pre_commit_state: GlobalKeyedState<String, _, _> =
+        recovery_data_state.insert(ctx.task_info.task_index, recovery_data);
+        let pre_commit_state: &mut GlobalKeyedState<String, _> =
             ctx.state.get_global_keyed_state('p').await;
         self.pre_commits.clear();
         for (key, value) in pre_commits {
             self.pre_commits.push(value.clone());
-            pre_commit_state.insert(key, value).await;
+            pre_commit_state.insert(key, value);
         }
     }
     async fn handle_commit(&mut self, epoch: u32, ctx: &mut crate::engine::Context<(), ()>) {

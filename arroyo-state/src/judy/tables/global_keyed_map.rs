@@ -1,60 +1,90 @@
-use crate::BackingStore;
-use arroyo_types::{Data, Key};
-use std::collections::HashMap;
+use crate::{
+    judy::{
+        backend::{BytesOrFutureBytes, Checkpointing, JudyMessage, JudyQueueItem},
+        InMemoryJudyNode,
+    },
+    BackingStore,
+};
+use arroyo_rpc::grpc::{ParquetStoreData, TableDescriptor};
+use arroyo_types::{CheckpointBarrier, Data, Key};
+use std::{borrow::Cow, collections::HashMap, time::SystemTime};
+use tracing::info;
 
-pub struct GlobalKeyedState<'a, K: Key, V: Data, S: BackingStore> {
-    table: char,
-    parquet: &'a mut S,
-    cache: &'a mut GlobalKeyedStateCache<K, V>,
+use super::reader::JudyReader;
+
+pub struct GlobalKeyedState<K: Key, V: Data> {
+    table_descriptor: TableDescriptor,
+    current_epoch: u32,
+    data: InMemoryJudyNode<K, V>,
 }
 
-impl<'a, K: Key, V: Data, S: BackingStore> GlobalKeyedState<'a, K, V, S> {
-    pub fn new(
-        table: char,
-        backing_store: &'a mut S,
-        cache: &'a mut GlobalKeyedStateCache<K, V>,
-    ) -> Self {
+impl<K: Key, V: Data> GlobalKeyedState<K, V> {
+    pub fn new(table_descriptor: TableDescriptor) -> Self {
         Self {
-            table,
-            parquet: backing_store,
-            cache,
+            table_descriptor,
+            current_epoch: 1,
+            data: InMemoryJudyNode::new(),
         }
     }
 
-    pub async fn insert(&mut self, mut key: K, mut value: V) {
-        self.parquet
-            .write_key_value(self.table, &mut key, &mut value)
-            .await;
-        self.cache.values.insert(key, value);
+    pub async fn from_files(
+        table_descriptor: TableDescriptor,
+        current_epoch: u32,
+        files_for_epoch: Vec<&mut (ParquetStoreData, BytesOrFutureBytes)>,
+    ) -> Self {
+        let mut data = InMemoryJudyNode::new();
+        for (parquet_store_data, ref mut bytes_or_future_bytes) in files_for_epoch {
+            let mut reader: JudyReader<K, V> =
+                JudyReader::new(bytes_or_future_bytes.bytes().await).unwrap();
+            for (key, value) in reader.as_vec().unwrap() {
+                data.insert(&key, value).unwrap();
+            }
+        }
+        Self {
+            table_descriptor,
+            current_epoch,
+            data,
+        }
     }
 
-    pub fn get_all(&mut self) -> Vec<&V> {
-        self.cache.values.values().collect()
+    pub fn insert(&mut self, key: K, mut value: V) {
+        self.data.insert(&key, value).unwrap();
+    }
+
+    pub fn get_all(&mut self) -> Vec<Cow<V>> {
+        self.data
+            .as_vec()
+            .into_iter()
+            .map(|(_, v)| Cow::Borrowed(v))
+            .collect()
     }
 
     pub fn get(&self, key: &K) -> Option<&V> {
-        self.cache.values.get(key)
+        self.data.get(key)
     }
 }
 
-pub struct GlobalKeyedStateCache<K: Key, V: Data> {
-    values: HashMap<K, V>,
-}
-
-impl<K: Key, V: Data> GlobalKeyedStateCache<K, V> {
-    pub async fn from_checkpoint<S: BackingStore>(backing_store: &S, table: char) -> Self {
-        let mut values = HashMap::new();
-        for (key, value) in backing_store.get_global_key_values(table).await {
-            values.insert(key, value);
-        }
-        Self { values }
+#[async_trait::async_trait]
+impl<K: Key, V: Data> Checkpointing for GlobalKeyedState<K, V> {
+    async fn checkpoint(
+        &mut self,
+        barrier: &CheckpointBarrier,
+        watermark: Option<SystemTime>,
+    ) -> Vec<JudyQueueItem> {
+        info!("checkpointing in memory data {:?}", self.data.as_vec());
+        let table_char = self.table_descriptor.name.chars().next().unwrap();
+        vec![JudyQueueItem::Message(JudyMessage::new(
+            table_char.clone(),
+            self.data.to_judy_bytes().await.unwrap(),
+            ParquetStoreData {
+                epoch: barrier.epoch,
+                table: table_char.to_string(),
+                ..Default::default()
+            },
+        ))]
     }
-}
 
-impl<K: Key, V: Data> Default for GlobalKeyedStateCache<K, V> {
-    fn default() -> Self {
-        Self {
-            values: Default::default(),
-        }
+    fn as_any(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

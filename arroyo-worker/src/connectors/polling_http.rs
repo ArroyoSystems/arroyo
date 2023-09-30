@@ -17,7 +17,7 @@ use tokio::time::MissedTickBehavior;
 
 use arroyo_rpc::grpc::StopMode;
 use arroyo_rpc::types::Format;
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+use arroyo_state::judy::tables::global_keyed_map::GlobalKeyedState;
 use tracing::{debug, info, warn};
 use typify::import_types;
 
@@ -115,7 +115,7 @@ where
     }
 
     async fn on_start(&mut self, ctx: &mut Context<(), T>) {
-        let s: GlobalKeyedState<(), PollingHttpSourceState<T>, _> =
+        let s: &mut GlobalKeyedState<(), PollingHttpSourceState<T>> =
             ctx.state.get_global_keyed_state('s').await;
 
         if let Some(state) = s.get(&()) {
@@ -132,9 +132,9 @@ where
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
                 let state = self.state.clone();
-                let mut s: GlobalKeyedState<(), PollingHttpSourceState<T>, _> =
+                let mut s: &mut GlobalKeyedState<(), PollingHttpSourceState<T>> =
                     ctx.state.get_global_keyed_state('s').await;
-                s.insert((), state).await;
+                s.insert((), state);
 
                 if self.checkpoint(c, ctx).await {
                     return Some(SourceFinishType::Immediate);

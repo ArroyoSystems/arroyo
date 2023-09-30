@@ -179,8 +179,7 @@ impl<K: Data, T: Data> NexmarkSourceFunc<K, T> {
                                     config: state.config.clone(),
                                     event_count: generator.events_count_so_far as usize,
                                 },
-                            )
-                            .await;
+                            );
                         debug!("starting checkpointing {}", ctx.task_info.task_index);
                         if self.checkpoint(c, ctx).await {
                             return SourceFinishType::Immediate;

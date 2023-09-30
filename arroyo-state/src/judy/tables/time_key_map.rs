@@ -66,7 +66,8 @@ impl<'a, K: Key, V: Data + PartialEq> TimeKeyMap<'a, K, V, JudyBackend> {
             let mut index_reader = Cursor::new(bytes.clone());
             let mut data_reader = BytesWithOffset::new(bytes);
             JudyNode::fill_btree_map(&mut index_reader, &mut data_reader, &mut result_map, vec![])
-                .await;
+                .await
+                .unwrap();
         }
         result_map
             .into_iter()
@@ -143,7 +144,7 @@ impl<'a, K: Key, V: Data + PartialEq> TimeKeyMap<'a, K, V, JudyBackend> {
                     writer.insert(&key, &value).await?;
                 }
                 let mut write_bytes = Cursor::new(vec![]);
-                writer.serialize(&mut write_bytes);
+                writer.serialize(&mut write_bytes).await.unwrap();
                 Ok(write_bytes.into_inner())
             });
             return Some(fut);

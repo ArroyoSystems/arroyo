@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::SystemTime;
 use std::{marker::PhantomData, time::Duration};
 
@@ -116,8 +117,7 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
             ctx.state
                 .get_key_time_multi_map(table)
                 .await
-                .insert(record.timestamp, key, value)
-                .await;
+                .insert(record.timestamp, key, value);
         }
     }
 
@@ -130,28 +130,28 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
         let record = {
             let mut left_state = ctx.state.get_key_time_multi_map('l').await;
             let left: Vec<T1> = {
-                let left: Vec<&T1> = left_state
-                    .get_time_range(&mut key, window.start, window.end)
-                    .await;
-                left.into_iter().cloned().collect()
+                let left: Vec<Cow<T1>> =
+                    left_state.get_time_range(&mut key, window.start, window.end);
+                left.into_iter().map(|v| v.into_owned()).collect()
             };
 
             let next = self.assigner1.next(window);
-            left_state
-                .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
-                .await;
+            // TODO: manage deletes
+            //left_state
+            //    .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
+            //    .await;
 
             let mut right_state = ctx.state.get_key_time_multi_map('r').await;
             let right: Vec<T2> = {
-                let right: Vec<&T2> = right_state
-                    .get_time_range(&mut key, window.start, window.end)
-                    .await;
-                right.into_iter().cloned().collect()
+                let right: Vec<Cow<T2>> =
+                    right_state.get_time_range(&mut key, window.start, window.end);
+                right.into_iter().map(|v| v.into_owned()).collect()
             };
             let next = self.assigner2.next(window);
-            right_state
-                .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
-                .await;
+            // TODO: manage deletes
+            // right_state
+            //    .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
+            //    .await;
 
             Record {
                 timestamp: window.end - Duration::from_nanos(1),

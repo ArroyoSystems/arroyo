@@ -78,8 +78,7 @@ impl<K: Data, T: DeserializeOwned + Data> FileSourceFunc<K, T> {
                     ctx.state
                         .get_global_keyed_state('f')
                         .await
-                        .insert(self.input_file.clone(), self.lines_read)
-                        .await;
+                        .insert(self.input_file.clone(), self.lines_read);
                     // checkpoint our state
                     if self.checkpoint(c, ctx).await {
                         return SourceFinishType::Immediate;

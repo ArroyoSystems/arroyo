@@ -6,7 +6,7 @@ use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_rpc::types::Format;
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage};
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+use arroyo_state::judy::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
 use fluvio::dataplane::link::ErrorCode;
@@ -14,6 +14,7 @@ use fluvio::metadata::objects::Metadata;
 use fluvio::metadata::topic::TopicSpec;
 use fluvio::{consumer::Record as ConsumerRecord, Fluvio, FluvioConfig, Offset};
 use serde::de::DeserializeOwned;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use tokio::select;
@@ -126,9 +127,9 @@ where
         let partitions = metadata.spec.partitions() as usize;
         info!("Fetched metadata for topic {}", self.topic);
 
-        let mut s: GlobalKeyedState<u32, FluvioState, _> =
+        let mut s: &mut GlobalKeyedState<u32, FluvioState> =
             ctx.state.get_global_keyed_state('f').await;
-        let state: Vec<&FluvioState> = s.get_all();
+        let state: Vec<Cow<FluvioState>> = s.get_all();
 
         // did we restore any partitions?
         let has_state = !state.is_empty();
@@ -219,7 +220,7 @@ where
                                 s.insert(*partition, FluvioState {
                                     partition: *partition2,
                                     offset: *offset + 1,
-                                }).await;
+                                });
                             }
 
                             if self.checkpoint(c, ctx).await {

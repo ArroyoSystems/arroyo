@@ -213,9 +213,9 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
     }
 
     async fn handle_checkpoint(&mut self, _: &CheckpointBarrier, ctx: &mut Context<K, D>) {
-        let mut gs = ctx.state.get_global_keyed_state('s').await;
+        let gs = ctx.state.get_global_keyed_state('s').await;
 
-        gs.insert(ctx.task_info.task_index, self.state_cache).await;
+        gs.insert(ctx.task_info.task_index, self.state_cache);
     }
 
     async fn handle_tick(&mut self, _: u64, ctx: &mut Context<K, D>) {

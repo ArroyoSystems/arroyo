@@ -18,7 +18,7 @@ use super::{BytesWithOffset, JudyNode, JudyWriter};
 pub mod global_keyed_map;
 pub mod key_time_multimap;
 pub mod keyed_map;
-mod reader;
+pub mod reader;
 pub mod time_key_map;
 
 pub struct TimeKeyMap<'a, K: Key, V: Data, S: BackingStore> {
@@ -77,7 +77,8 @@ impl<'a, K: Key, V: Data + PartialEq> TimeKeyMap<'a, K, V, JudyBackend> {
             let mut index_reader = Cursor::new(bytes.clone());
             let mut data_reader = BytesWithOffset::new(bytes);
             JudyNode::fill_btree_map(&mut index_reader, &mut data_reader, &mut result_map, vec![])
-                .await;
+                .await
+                .unwrap();
         }
         result_map
             .into_iter()
@@ -154,7 +155,7 @@ impl<'a, K: Key, V: Data + PartialEq> TimeKeyMap<'a, K, V, JudyBackend> {
                     writer.insert(&key, &value).await?;
                 }
                 let mut write_bytes = Cursor::new(vec![]);
-                writer.serialize(&mut write_bytes);
+                writer.serialize(&mut write_bytes).await?;
                 Ok(write_bytes.into_inner())
             });
             return Some(fut);
@@ -492,61 +493,6 @@ impl<K: Key, V: Data> Default for KeyTimeMultiMapCache<K, V> {
         Self {
             values: Default::default(),
             expirations: Default::default(),
-        }
-    }
-}
-
-pub struct GlobalKeyedState<'a, K: Key, V: Data, S: BackingStore> {
-    table: char,
-    parquet: &'a mut S,
-    cache: &'a mut GlobalKeyedStateCache<K, V>,
-}
-
-impl<'a, K: Key, V: Data, S: BackingStore> GlobalKeyedState<'a, K, V, S> {
-    pub fn new(
-        table: char,
-        backing_store: &'a mut S,
-        cache: &'a mut GlobalKeyedStateCache<K, V>,
-    ) -> Self {
-        Self {
-            table,
-            parquet: backing_store,
-            cache,
-        }
-    }
-    pub async fn insert(&mut self, mut key: K, mut value: V) {
-        self.parquet
-            .write_key_value(self.table, &mut key, &mut value)
-            .await;
-        self.cache.values.insert(key, value);
-    }
-
-    pub fn get_all(&mut self) -> Vec<&V> {
-        self.cache.values.values().collect()
-    }
-
-    pub fn get(&self, key: &K) -> Option<&V> {
-        self.cache.values.get(key)
-    }
-}
-
-pub struct GlobalKeyedStateCache<K: Key, V: Data> {
-    values: HashMap<K, V>,
-}
-impl<K: Key, V: Data> GlobalKeyedStateCache<K, V> {
-    pub async fn from_checkpoint<S: BackingStore>(backing_store: &S, table: char) -> Self {
-        let mut values = HashMap::new();
-        for (key, value) in backing_store.get_global_key_values(table).await {
-            values.insert(key, value);
-        }
-        Self { values }
-    }
-}
-
-impl<K: Key, V: Data> Default for GlobalKeyedStateCache<K, V> {
-    fn default() -> Self {
-        Self {
-            values: Default::default(),
         }
     }
 }
