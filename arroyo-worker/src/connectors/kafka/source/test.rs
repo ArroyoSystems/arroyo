@@ -1,6 +1,7 @@
 use arroyo_state::{BackingStore, StateBackend};
 use rand::Rng;
 use std::time::{Duration, SystemTime};
+use arrow::datatypes::{DataType, Field, Schema};
 
 use crate::connectors::kafka::source;
 use crate::engine::{Context, OutQueue, QueueItem};
@@ -13,12 +14,29 @@ use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use crate::SchemaData;
 
 use super::KafkaSourceFunc;
 
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode, Serialize, Deserialize, PartialEq)]
 struct TestData {
     i: u64,
+}
+
+impl SchemaData for TestData {
+    fn name() -> &'static str {
+        "test"
+    }
+
+    fn schema() -> Schema {
+        Schema::new(vec![
+            Field::new("i", DataType::UInt64, false),
+        ])
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 pub struct KafkaTopicTester {
@@ -65,6 +83,7 @@ impl KafkaTopicTester {
             &self.topic,
             crate::connectors::kafka::SourceOffset::Earliest,
             Format::Json(JsonFormat::default()),
+            None,
             100,
             vec![],
         );
