@@ -181,7 +181,6 @@ export interface components {
     };
     CheckpointCollection: {
       data: (components["schemas"]["Checkpoint"])[];
-      hasMore: boolean;
     };
     CheckpointEventSpan: {
       description: string;
@@ -215,6 +214,7 @@ export interface components {
       definition?: components["schemas"]["SchemaDefinition"] | null;
       fields: (components["schemas"]["SourceField"])[];
       format?: components["schemas"]["Format"] | null;
+      framing?: components["schemas"]["Framing"] | null;
       structName?: string | null;
     };
     ConnectionTable: {
@@ -274,6 +274,12 @@ export interface components {
     }, {
       raw_string: components["schemas"]["RawStringFormat"];
     }]>;
+    Framing: {
+      method: components["schemas"]["FramingMethod"];
+    };
+    FramingMethod: {
+      newline: components["schemas"]["NewlineDelimitedFraming"];
+    };
     Job: {
       /** Format: int64 */
       createdAt: number;
@@ -329,6 +335,10 @@ export interface components {
     };
     /** @enum {string} */
     MetricNames: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure";
+    NewlineDelimitedFraming: {
+      /** Format: int64 */
+      maxLineLength?: number | null;
+    };
     OperatorCheckpointGroup: {
       /** Format: int64 */
       bytes: number;
