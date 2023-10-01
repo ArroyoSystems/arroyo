@@ -470,8 +470,10 @@ fn rust_to_arrow(typ: &Type) -> std::result::Result<DataType, ()> {
                 "f64" => Ok(DataType::Float64),
                 "String" => Ok(DataType::Utf8),
                 "Vec<u8>" => Ok(DataType::Binary),
-                "std::time::SystemTime" => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
-                "std::time::Duration" => Ok(DataType::Duration(TimeUnit::Microsecond)),
+                "SystemTime" | "std::time::SystemTime" => {
+                    Ok(DataType::Timestamp(TimeUnit::Microsecond, None))
+                }
+                "Duration" | "std::time::Duration" => Ok(DataType::Duration(TimeUnit::Microsecond)),
                 _ => Err(()),
             }
         }

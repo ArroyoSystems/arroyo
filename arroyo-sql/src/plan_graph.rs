@@ -1759,7 +1759,7 @@ pub fn get_program(
     );
 
     other_defs.push(format!(
-        "mod udfs {{ {} }}",
+        "mod udfs {{ use std::time::{{SystemTime, Duration}}; {} }}",
         schema_provider
             .udf_defs
             .values()

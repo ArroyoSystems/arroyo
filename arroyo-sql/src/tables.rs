@@ -163,6 +163,7 @@ impl ConnectorTable {
 
         let schema_fields: Result<Vec<SourceField>> = fields
             .iter()
+            .filter(|f| !f.is_virtual())
             .map(|f| {
                 let struct_field = f.struct_field();
                 struct_field.clone().try_into().map_err(|_| {

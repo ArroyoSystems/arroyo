@@ -95,9 +95,6 @@ impl<'a> Iterator for FramingIterator<'a> {
 
                         Some(&self.buf[prev..(prev + length)])
                     }
-                    FramingMethod::LengthDelimited(_) => {
-                        todo!()
-                    }
                 }
             }
             None => {
@@ -112,25 +109,6 @@ pub struct DataDeserializer<T: SchemaData> {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
     _t: PhantomData<T>,
-}
-
-pub fn deserialize_slice<T: DeserializeOwned>(format: &Format, msg: &[u8]) -> Result<T, UserError> {
-    match format {
-        Format::Json(json) => deserialize_slice_json(json, msg),
-        Format::Avro(_) => todo!(),
-        Format::Parquet(_) => todo!(),
-        Format::RawString(_) => deserialize_raw_string(msg),
-    }
-    .map_err(|e| {
-        UserError::new(
-            "Deserialization failed",
-            format!(
-                "Failed to deserialize: '{}': {}",
-                String::from_utf8_lossy(&msg),
-                e
-            ),
-        )
-    })
 }
 
 impl<T: SchemaData> DataDeserializer<T> {

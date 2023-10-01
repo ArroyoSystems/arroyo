@@ -213,7 +213,6 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         Framing,
         FramingMethod,
         NewlineDelimitedFraming,
-        LengthDelimitedFraming,
         PaginationQueryParams,
         CheckpointEventSpan,
         CheckpointSpanType,
