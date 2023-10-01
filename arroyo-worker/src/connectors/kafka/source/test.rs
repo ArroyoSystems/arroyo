@@ -1,10 +1,11 @@
+use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_state::{BackingStore, StateBackend};
 use rand::Rng;
 use std::time::{Duration, SystemTime};
-use arrow::datatypes::{DataType, Field, Schema};
 
 use crate::connectors::kafka::source;
 use crate::engine::{Context, OutQueue, QueueItem};
+use crate::SchemaData;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
@@ -14,7 +15,6 @@ use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use crate::SchemaData;
 
 use super::KafkaSourceFunc;
 
@@ -29,9 +29,7 @@ impl SchemaData for TestData {
     }
 
     fn schema() -> Schema {
-        Schema::new(vec![
-            Field::new("i", DataType::UInt64, false),
-        ])
+        Schema::new(vec![Field::new("i", DataType::UInt64, false)])
     }
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {
