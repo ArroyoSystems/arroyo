@@ -603,6 +603,7 @@ pub fn get_test_expression(
                 type_: arroyo_connectors::kafka::TableType::Source {
                     offset: arroyo_connectors::kafka::SourceOffset::Latest,
                     read_mode: Some(arroyo_connectors::kafka::ReadMode::ReadUncommitted),
+                    group_id: "test-consumer-group".to_string().try_into().unwrap(),
                 },
             },
             Some(&schema),

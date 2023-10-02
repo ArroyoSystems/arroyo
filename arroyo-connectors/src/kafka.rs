@@ -170,6 +170,7 @@ impl Connector for KafkaConnector {
                         Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
                         Some(other) => bail!("invalid value for source.read_mode '{}'", other),
                     },
+                    group_id: opts.remove("source.group_id"),
                 }
             }
             "sink" => {
