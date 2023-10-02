@@ -152,7 +152,7 @@ impl Connector for KafkaConnector {
 
         let connection = KafkaConfig {
             authentication: auth,
-            bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", opts)?)
+            bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", opts)?),
         };
 
         let typ = pull_opt("type", opts)?;
@@ -170,8 +170,7 @@ impl Connector for KafkaConnector {
                         Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
                         Some(other) => bail!("invalid value for source.read_mode '{}'", other),
                     },
-                    group_id: opts.remove("source.group_id")
-                    
+                    group_id: opts.remove("source.group_id"),
                 }
             }
             "sink" => {

@@ -596,14 +596,14 @@ pub fn get_test_expression(
             "test_source",
             KafkaConfig {
                 authentication: arroyo_connectors::kafka::KafkaConfigAuthentication::None {},
-                bootstrap_servers: "localhost:9092".to_string().try_into().unwrap()
+                bootstrap_servers: "localhost:9092".to_string().try_into().unwrap(),
             },
             KafkaTable {
                 topic: "test_topic".to_string(),
                 type_: arroyo_connectors::kafka::TableType::Source {
                     offset: arroyo_connectors::kafka::SourceOffset::Latest,
                     read_mode: Some(arroyo_connectors::kafka::ReadMode::ReadUncommitted),
-                    group_id: "test-consumer-group".to_string().try_into().unwrap()
+                    group_id: "test-consumer-group".to_string().try_into().unwrap(),
                 },
             },
             Some(&schema),

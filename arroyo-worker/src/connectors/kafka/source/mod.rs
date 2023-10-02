@@ -88,7 +88,12 @@ where
             .expect("Invalid connection config for KafkaSource");
         let table: KafkaTable =
             serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let TableType::Source { offset, read_mode, group_id } = &table.type_ else {
+        let TableType::Source {
+            offset,
+            read_mode,
+            group_id,
+        } = &table.type_
+        else {
             panic!("found non-source kafka config in source operator");
         };
         let mut client_configs = client_configs(&connection);
@@ -135,11 +140,12 @@ where
             .set("enable.auto.commit", "false")
             .set(
                 "group.id",
-                self.group_id.clone().unwrap_or_else(|| format!(
-                    "arroyo-{}-{}-consumer",
-                    ctx.task_info.job_id, ctx.task_info.operator_id
-                )
-            )      
+                self.group_id.clone().unwrap_or_else(|| {
+                    format!(
+                        "arroyo-{}-{}-consumer",
+                        ctx.task_info.job_id, ctx.task_info.operator_id
+                    )
+                }),
             )
             .create()?;
 
