@@ -1756,6 +1756,14 @@ impl Program {
             }
         }
     }
+
+    pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
+        let mut tasks_per_operator = HashMap::new();
+        for node in self.graph.node_weights() {
+            tasks_per_operator.insert(node.operator_id.clone(), node.parallelism);
+        }
+        tasks_per_operator
+    }
 }
 
 impl TryFrom<Program> for PipelineProgram {

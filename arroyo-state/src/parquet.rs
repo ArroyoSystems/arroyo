@@ -134,7 +134,7 @@ impl BackingStore for ParquetBackend {
             .unwrap();
     }
 
-    async fn complete_checkpoint(metadata: CheckpointMetadata) {
+    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) {
         debug!("writing checkpoint {:?}", metadata);
         let storage_client = get_storage_provider().await.unwrap();
         let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
@@ -296,7 +296,7 @@ impl BackingStore for ParquetBackend {
                 .await?;
         }
         metadata.min_epoch = min_epoch;
-        Self::complete_checkpoint(metadata).await;
+        Self::write_checkpoint_metadata(metadata).await;
         Ok(())
     }
 

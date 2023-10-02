@@ -173,6 +173,7 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
                 Ok(ControlMessage::LoadCompacted { compacted }) => {
                     ctx.load_compacted(compacted).await;
                 }
+                Ok(ControlMessage::NoOp) => {}
                 Err(_) => {
                     // no messages
                 }

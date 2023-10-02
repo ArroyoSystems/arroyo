@@ -1,6 +1,6 @@
 use crate::states::StateError;
 
-use super::{Context, Finished, State, Transition};
+use super::{Finished, JobContext, State, Transition};
 
 #[derive(Debug)]
 pub struct Finishing {}
@@ -11,7 +11,7 @@ impl State for Finishing {
         "Finishing"
     }
 
-    async fn next(mut self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+    async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         if let Err(e) = ctx
             .job_controller
             .as_mut()

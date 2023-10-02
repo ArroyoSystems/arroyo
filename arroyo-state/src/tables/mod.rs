@@ -1,6 +1,5 @@
-use crate::{BackingStore, DataOperation};
+use crate::DataOperation;
 use arroyo_rpc::grpc::TableType;
-use arroyo_types::{Data, Key};
 use std::collections::HashMap;
 use std::time::SystemTime;
 
@@ -45,7 +44,8 @@ impl Compactor {
                 // keep only the latest entry for each key
                 let mut reduced = HashMap::new();
                 for tuple in tuples.into_iter() {
-                    reduced.insert(tuple.key.clone(), tuple);
+                    let memory_key = (tuple.timestamp, tuple.key.clone());
+                    reduced.insert(memory_key, tuple);
                 }
 
                 reduced.into_values().collect()

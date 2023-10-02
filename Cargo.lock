@@ -388,6 +388,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "bollard",
+ "clap 4.4.5",
+ "open",
+ "reqwest",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "arroyo-api"
 version = "0.6.0"
 dependencies = [
@@ -703,9 +716,11 @@ dependencies = [
  "arrow",
  "arrow-array",
  "arrow-schema",
+ "arroyo-controller",
  "arroyo-rpc",
  "arroyo-sql",
  "arroyo-sql-macro",
+ "arroyo-state",
  "arroyo-types",
  "arroyo-worker",
  "bincode 2.0.0-rc.3",
@@ -717,7 +732,10 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.33",
+ "test-log",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -797,6 +815,7 @@ dependencies = [
  "chrono",
  "eventsource-client",
  "fluvio",
+ "fluvio-future",
  "futures",
  "governor",
  "hex",
@@ -842,7 +861,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81953c529336010edd6d8e358f886d9581267795c61b19475b71314bffa46d35"
 dependencies = [
  "concurrent-queue",
- "event-listener",
+ "event-listener 2.5.3",
  "futures-core",
 ]
 
@@ -919,7 +938,7 @@ version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "287272293e9d8c41773cec55e365490fe034813a2f172f502d6ddcf75b2f582b"
 dependencies = [
- "event-listener",
+ "event-listener 2.5.3",
 ]
 
 [[package]]
@@ -928,7 +947,7 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "479db852db25d9dbf6204e6cb6253698f175c15726470f78af0d918e99d6156e"
 dependencies = [
- "event-listener",
+ "event-listener 2.5.3",
 ]
 
 [[package]]
@@ -954,7 +973,7 @@ dependencies = [
  "autocfg",
  "blocking",
  "cfg-if",
- "event-listener",
+ "event-listener 2.5.3",
  "futures-lite",
  "rustix 0.37.23",
  "signal-hook",
@@ -968,7 +987,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "261803dcc39ba9e72760ba6e16d0199b1eef9fc44e81bffabbebb9f5aea3906c"
 dependencies = [
  "async-mutex",
- "event-listener",
+ "event-listener 2.5.3",
 ]
 
 [[package]]
@@ -1594,6 +1613,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "bollard"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f03db470b3c0213c47e978da93200259a1eb4dae2e5512cba9955e2b540a6fc6"
+dependencies = [
+ "base64 0.21.4",
+ "bollard-stubs",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "hex",
+ "http",
+ "hyper",
+ "hyperlocal",
+ "log",
+ "pin-project-lite",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_repr",
+ "serde_urlencoded",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "url",
+ "winapi",
+]
+
+[[package]]
+name = "bollard-stubs"
+version = "1.43.0-rc.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b58071e8fd9ec1e930efd28e3a90c1251015872a2ce49f81f36421b86466932e"
+dependencies = [
+ "serde",
+ "serde_repr",
+ "serde_with",
+]
+
+[[package]]
 name = "brotli"
 version = "3.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1616,12 +1675,9 @@ dependencies = [
 
 [[package]]
 name = "built"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b99c4cdc7b2c2364182331055623bdf45254fcb679fea565c40c3c11c101889a"
-dependencies = [
- "cargo-lock",
-]
+checksum = "1462f4ab147e1378c64dacd28f03a56d4771d93eab6c325265a35355ce47213d"
 
 [[package]]
 name = "bumpalo"
@@ -1679,18 +1735,6 @@ dependencies = [
  "cc",
  "libc",
  "pkg-config",
-]
-
-[[package]]
-name = "cargo-lock"
-version = "9.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e11c675378efb449ed3ce8de78d75d0d80542fc98487c26aba28eb3b82feac72"
-dependencies = [
- "semver",
- "serde",
- "toml 0.7.8",
- "url",
 ]
 
 [[package]]
@@ -1774,9 +1818,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.3"
+version = "4.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84ed82781cea27b43c9b106a979fe450a13a31aab0500595fb3fc06616de08e6"
+checksum = "824956d0dca8334758a5b7f7e50518d66ea319330cbceedcf76905c2f6ab30e3"
 dependencies = [
  "clap_builder",
  "clap_derive 4.4.2",
@@ -1784,9 +1828,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.4.2"
+version = "4.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bb9faaa7c2ef94b2743a21f5a29e6f0010dff4caa69ac8e9d6cf8b6fa74da08"
+checksum = "122ec64120a49b4563ccaedcbea7818d069ed8e9aa6d829b82d8a4128936b2ab"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1966,7 +2010,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d21d8c5cf5940c13b1d82977fc5d4230714ce76d991c5c00b8a1c791c691dcf"
 dependencies = [
  "chumsky",
- "clap 4.4.3",
+ "clap 4.4.5",
  "codegen_template",
  "heck",
  "indexmap 1.9.3",
@@ -2899,6 +2943,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 
 [[package]]
+name = "event-listener"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29e56284f00d94c1bc7fd3c77027b4623c88c1f53d8d2394c6199f2921dea325"
+dependencies = [
+ "concurrent-queue",
+ "parking",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "eventsource-client"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3011,9 +3066,9 @@ dependencies = [
 
 [[package]]
 name = "fluvio"
-version = "0.19.3"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9800a95a3ee54f3a52709139157d06db8069c8bbedf200601c18a4f57262d05f"
+checksum = "92d4072e03cdcca4e39d8f4a9e7a88776073167af0575c3d309da688f2aa587d"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -3026,7 +3081,7 @@ dependencies = [
  "chrono",
  "derive_builder",
  "dirs 5.0.1",
- "event-listener",
+ "event-listener 3.0.0",
  "fluvio-compression",
  "fluvio-future",
  "fluvio-protocol",
@@ -3041,10 +3096,10 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "siphasher 0.3.11",
+ "siphasher 1.0.0",
  "thiserror",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.1",
  "tracing",
 ]
 
@@ -3065,9 +3120,9 @@ dependencies = [
 
 [[package]]
 name = "fluvio-controlplane-metadata"
-version = "0.22.4"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b07f6e8ed8948dbf50a431007e2ea4b4c23322fbdba9e0f81ab7bfdcb40b809"
+checksum = "cd0337e771c38978625941b31ebce79b708c9252744f23039b9ff0434e251e02"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3087,15 +3142,15 @@ dependencies = [
  "serde",
  "serde_yaml",
  "thiserror",
- "toml 0.7.8",
+ "toml 0.8.1",
  "tracing",
 ]
 
 [[package]]
 name = "fluvio-future"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5f2d572470f98b25383ffe78d9c3fba2b986d9891efd78808025397e54eb1ec"
+checksum = "daf01d41a3439ecf3377477c34d5913241c186d03500a0a6793a6c2688815a61"
 dependencies = [
  "async-io",
  "async-net",
@@ -3109,6 +3164,7 @@ dependencies = [
  "openssl",
  "openssl-sys",
  "pin-project",
+ "socket2 0.5.4",
  "thiserror",
  "tracing",
  "ws_stream_wasm",
@@ -3116,9 +3172,9 @@ dependencies = [
 
 [[package]]
 name = "fluvio-protocol"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74b3ae1ec094677497f10a7ae1988c732814fd36dc0d168fc72f7797d6d7501c"
+checksum = "4d54b310287a78302ccd4abba6bee4bc5c282eb3cb9487963423ca035d675420"
 dependencies = [
  "bytes",
  "content_inspector",
@@ -3150,14 +3206,15 @@ dependencies = [
 
 [[package]]
 name = "fluvio-sc-schema"
-version = "0.19.2"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1c423634e17e00aec63e86cf086cce12380da49fd2f7b76108cc83ea5f85393"
+checksum = "5d013238efa8990a2a14475f65e95eb6e075678657f3107a280e0540b8b57563"
 dependencies = [
  "anyhow",
  "fluvio-controlplane-metadata",
  "fluvio-protocol",
  "fluvio-socket",
+ "fluvio-stream-model",
  "fluvio-types",
  "paste",
  "static_assertions",
@@ -3191,9 +3248,9 @@ dependencies = [
 
 [[package]]
 name = "fluvio-socket"
-version = "0.14.4"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c98e3757dd82cbe51341a9b708e1a03900b0697fc969000a308bed00a1692e1"
+checksum = "62d8541cdb8e64dc462c9c3d572e01fd3eaef2089646e122d7499bb5714ad414"
 dependencies = [
  "async-channel",
  "async-lock",
@@ -3201,10 +3258,11 @@ dependencies = [
  "built",
  "bytes",
  "cfg-if",
- "event-listener",
+ "event-listener 3.0.0",
  "fluvio-future",
  "fluvio-protocol",
  "futures-util",
+ "nix 0.27.1",
  "once_cell",
  "pin-project",
  "semver",
@@ -3216,9 +3274,9 @@ dependencies = [
 
 [[package]]
 name = "fluvio-spu-schema"
-version = "0.14.4"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c591cfbece497c4a9a0f569be186e46318ef2640bd83df02e090e8d570aebbef"
+checksum = "566fff6ae2df7d4e673a82f8e7a0343ee8eadb3c4c7b3b3831d2d4f96e226963"
 dependencies = [
  "bytes",
  "derive_builder",
@@ -3235,23 +3293,25 @@ dependencies = [
 
 [[package]]
 name = "fluvio-stream-model"
-version = "0.9.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce4cd3be07eb0b7fba47358bcaeed22e716bc3f46a738f2b06ed09fbd6b28cec"
+checksum = "6aa567507e050b1a3af1bb6247d8455e8c9c1965ad59935916a820267dcdd43e"
 dependencies = [
  "async-rwlock",
- "event-listener",
+ "event-listener 3.0.0",
+ "k8-types",
  "once_cell",
+ "serde",
  "tracing",
 ]
 
 [[package]]
 name = "fluvio-types"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b80af752955781ec52f30eb0436a94e3e6aed8df8e681e4ba197c78efb1c6f2"
+checksum = "1765d5df0c44810c67a6fabc9fcd1a8a7134ea7a7744a5b88d2b21034b6d3670"
 dependencies = [
- "event-listener",
+ "event-listener 3.0.0",
  "thiserror",
  "tracing",
 ]
@@ -3860,6 +3920,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyperlocal"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fafdf7b2b2de7c9784f76e02c0935e65a8117ec3b768644379983ab333ac98c"
+dependencies = [
+ "futures-util",
+ "hex",
+ "hyper",
+ "pin-project",
+ "tokio",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3992,6 +4065,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28b29a3cd74f0f4598934efe3aeba42bae0eb4680554128851ebbecb02af14e6"
 
 [[package]]
+name = "is-docker"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "928bae27f42bc99b60d9ac7334e3a21d10ad8f1835a4e12ec3ec0464765ed1b3"
+dependencies = [
+ "once_cell",
+]
+
+[[package]]
 name = "is-terminal"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4000,6 +4082,16 @@ dependencies = [
  "hermit-abi 0.3.2",
  "rustix 0.38.13",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "is-wsl"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "173609498df190136aa7dea1a91db051746d339e18476eed5ca40521f02d7aa5"
+dependencies = [
+ "is-docker",
+ "once_cell",
 ]
 
 [[package]]
@@ -4137,6 +4229,16 @@ dependencies = [
  "once_cell",
  "sha2 0.10.7",
  "signature 2.1.0",
+]
+
+[[package]]
+name = "k8-types"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f604a19941d3a538c86e8d2944b99cec1acd46043d9544804f2aaf0342a8401"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4774,6 +4876,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags 2.4.0",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "no-std-compat"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5031,6 +5144,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
+name = "open"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfabf1927dce4d6fdf563d63328a0a506101ced3ec780ca2135747336c98cef8"
+dependencies = [
+ "is-wsl",
+ "libc",
+ "pathdiff",
+]
+
+[[package]]
 name = "openssl"
 version = "0.10.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5272,6 +5396,12 @@ name = "paste"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
+
+[[package]]
+name = "pathdiff"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8835116a5c179084a830efb3adc117ab007512b535bc1a21c991d3b32a6b44dd"
 
 [[package]]
 name = "pem"
@@ -5523,7 +5653,7 @@ dependencies = [
  "findshlibs",
  "libc",
  "log",
- "nix",
+ "nix 0.26.4",
  "once_cell",
  "parking_lot 0.12.1",
  "smallvec",
@@ -5574,7 +5704,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f4c021e1093a56626774e81216a4ce732a735e5bad4868a03f3ed65ca0c3919"
 dependencies = [
  "once_cell",
- "toml_edit",
+ "toml_edit 0.19.15",
 ]
 
 [[package]]
@@ -6665,6 +6795,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_repr"
+version = "0.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8725e1dfadb3a50f7e5ce0b1a540466f6ed3fe7a0fca2ac2b8b831d31316bd00"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.33",
+]
+
+[[package]]
 name = "serde_spanned"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7229,6 +7370,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-log"
+version = "0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9601d162c1d77e62c1ea0bc8116cd1caf143ce3af947536c3c9052a1677fe0c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "textwrap"
 version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7509,7 +7661,19 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit",
+ "toml_edit 0.19.15",
+]
+
+[[package]]
+name = "toml"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bc1433177506450fe920e46a4f9812d0c211f5dd556da10e731a0a3dfa151f0"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit 0.20.1",
 ]
 
 [[package]]
@@ -7526,6 +7690,19 @@ name = "toml_edit"
 version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
+dependencies = [
+ "indexmap 2.0.0",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "winnow",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca676d9ba1a322c1b64eb8045a5ec5c0cfb0c9d08e15e9ff622589ad5221c8fe"
 dependencies = [
  "indexmap 2.0.0",
  "serde",

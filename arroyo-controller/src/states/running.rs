@@ -11,7 +11,7 @@ use crate::states::{fatal, stop_if_desired_running};
 use crate::JobMessage;
 use crate::{job_controller::ControllerProgress, states::StateError};
 
-use super::{Context, State, Transition};
+use super::{JobContext, State, Transition};
 
 // after this amount of time, we consider the job to be healthy and reset the restarts counter
 const HEALTHY_DURATION: Duration = Duration::from_secs(2 * 60);
@@ -28,7 +28,7 @@ impl State for Running {
         "Running"
     }
 
-    async fn next(mut self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+    async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         stop_if_desired_running!(self, ctx.config);
 
         let running_start = Instant::now();

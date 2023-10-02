@@ -18,7 +18,6 @@ use super::SingleFileTable;
 pub struct FileSourceFunc<K: Data, T: DeserializeOwned + Data> {
     input_file: String,
     lines_read: usize,
-    check_frequency: usize,
     _t: PhantomData<(K, T)>,
 }
 
@@ -32,7 +31,6 @@ impl<K: Data, T: DeserializeOwned + Data> FileSourceFunc<K, T> {
         Self {
             input_file: table.path,
             lines_read: 0,
-            check_frequency: 10,
             _t: PhantomData,
         }
     }
@@ -74,33 +72,35 @@ impl<K: Data, T: DeserializeOwned + Data> FileSourceFunc<K, T> {
             self.lines_read += 1;
             i += 1;
 
-            if self.lines_read % self.check_frequency == 0 {
-                match ctx.control_rx.try_recv().ok() {
-                    Some(ControlMessage::Checkpoint(c)) => {
-                        ctx.state
-                            .get_global_keyed_state('f')
-                            .await
-                            .insert(self.input_file.clone(), self.lines_read)
-                            .await;
-                        // checkpoint our state
-                        if self.checkpoint(c, ctx).await {
+            // wait for a control message after each line
+            match ctx.control_rx.recv().await {
+                Some(ControlMessage::Checkpoint(c)) => {
+                    ctx.state
+                        .get_global_keyed_state('f')
+                        .await
+                        .insert(self.input_file.clone(), self.lines_read)
+                        .await;
+                    // checkpoint our state
+                    if self.checkpoint(c, ctx).await {
+                        return SourceFinishType::Immediate;
+                    }
+                }
+                Some(ControlMessage::Stop { mode }) => {
+                    info!("Stopping file source {:?}", mode);
+
+                    match mode {
+                        StopMode::Graceful => {
+                            return SourceFinishType::Graceful;
+                        }
+                        StopMode::Immediate => {
                             return SourceFinishType::Immediate;
                         }
                     }
-                    Some(ControlMessage::Stop { mode }) => {
-                        info!("Stopping file source {:?}", mode);
-
-                        match mode {
-                            StopMode::Graceful => {
-                                return SourceFinishType::Graceful;
-                            }
-                            StopMode::Immediate => {
-                                return SourceFinishType::Immediate;
-                            }
-                        }
-                    }
-                    _ => {}
                 }
+                Some(ControlMessage::NoOp) => {
+                    // No-op messages allow the source to advance and process a record
+                }
+                _ => {}
             }
         }
         info!("file source finished");

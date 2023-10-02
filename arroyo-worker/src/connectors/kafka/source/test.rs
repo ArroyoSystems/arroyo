@@ -238,7 +238,7 @@ async fn test_kafka() {
     })
     .await;
 
-    StateBackend::complete_checkpoint(CheckpointMetadata {
+    StateBackend::write_checkpoint_metadata(CheckpointMetadata {
         job_id: task_info.job_id.clone(),
         epoch: 1,
         min_epoch: 1,

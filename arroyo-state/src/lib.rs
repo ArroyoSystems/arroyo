@@ -109,15 +109,9 @@ pub trait BackingStore {
 
     fn task_info(&self) -> &TaskInfo;
 
-    // prepares a checkpoint to be written
-    #[allow(unused_variables)]
-    async fn initialize_checkpoint(job_id: &str, epoch: u32, operators: &[&str]) -> Result<()> {
-        Ok(())
-    }
-
     async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata);
 
-    async fn complete_checkpoint(metadata: CheckpointMetadata);
+    async fn write_checkpoint_metadata(metadata: CheckpointMetadata);
 
     async fn cleanup_checkpoint(
         metadata: CheckpointMetadata,
@@ -494,7 +488,7 @@ mod test {
             operator_ids: vec![operator_id.to_string()],
         };
 
-        ParquetBackend::complete_checkpoint(checkpoint_metadata.clone()).await;
+        ParquetBackend::write_checkpoint_metadata(checkpoint_metadata.clone()).await;
 
         checkpoint_metadata
     }
@@ -615,7 +609,7 @@ mod test {
         // insert a key/value
 
         let mut ks: KeyedState<usize, i32, _> = ss.get_key_state('t').await;
-        let t1 = SystemTime::now();
+        let t1 = SystemTime::UNIX_EPOCH;
         ks.insert(t1, 1, 1).await;
         assert_eq!(Some(&1), ks.get(&mut 1));
 

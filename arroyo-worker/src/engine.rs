@@ -20,17 +20,17 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_types::{
     from_micros, range_for_server, server_for_hash, CheckpointBarrier, Data, Key, Message, Record,
-    TaskInfo, UserError, Watermark, WorkerId, BYTES_SENT, MESSAGES_SENT,
+    TaskInfo, UserError, Watermark, WorkerId,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
-use prometheus::{labels, IntCounter};
+use prometheus::labels;
 use rand::Rng;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
 
-use crate::metrics::{register_counters, register_queue_gauges, QueueGauges};
+use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::TIMER_TABLE;
 use crate::{LogicalEdge, LogicalNode, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
@@ -47,8 +47,8 @@ pub enum QueueItem {
 impl<K: Key, T: Data> From<QueueItem> for Message<K, T> {
     fn from(value: QueueItem) -> Self {
         match value {
-            crate::engine::QueueItem::Data(datum) => *datum.downcast().unwrap(),
-            crate::engine::QueueItem::Bytes(bs) => {
+            QueueItem::Data(datum) => *datum.downcast().unwrap(),
+            QueueItem::Bytes(bs) => {
                 bincode::decode_from_slice(&bs, config::standard())
                     .unwrap()
                     .0
@@ -132,7 +132,6 @@ pub struct Context<K: Key, T: Data, S: BackingStore = StateBackend> {
     pub watermarks: WatermarkHolder,
     pub state: StateStore<S>,
     pub collector: Collector<K, T>,
-    pub counters: HashMap<&'static str, IntCounter>,
     _ts: PhantomData<(K, T)>,
 }
 
@@ -149,15 +148,13 @@ impl OutQueue {
         Self { tx, serialize }
     }
 
-    pub async fn send(
-        &self,
-        message: Message<impl Key, impl Data>,
-        sent_bytes: &Option<IntCounter>,
-    ) {
+    pub async fn send(&self, task_info: &TaskInfo, message: Message<impl Key, impl Data>) {
         let is_end = message.is_end();
         let item = if self.serialize {
             let bytes = bincode::encode_to_vec(&message, config::standard()).unwrap();
-            sent_bytes.iter().for_each(|c| c.inc_by(bytes.len() as u64));
+            TaskCounters::BytesSent
+                .for_task(task_info)
+                .inc_by(bytes.len() as u64);
 
             QueueItem::Bytes(bytes)
         } else {
@@ -172,10 +169,9 @@ impl OutQueue {
 
 #[derive(Clone)]
 pub struct Collector<K: Key, T: Data> {
+    task_info: TaskInfo,
     out_qs: Vec<Vec<OutQueue>>,
     _ts: PhantomData<(K, T)>,
-    sent_bytes: Option<IntCounter>,
-    sent_messages: Option<IntCounter>,
     tx_queue_rem_gauges: QueueGauges,
     tx_queue_size_gauges: QueueGauges,
 }
@@ -193,7 +189,7 @@ impl<K: Key, T: Data> Collector<K, T> {
             server_for_hash(hash, qs)
         }
 
-        self.sent_messages.iter().for_each(|c| c.inc());
+        TaskCounters::MessagesSent.for_task(&self.task_info).inc();
 
         if self.out_qs.len() == 1 {
             let idx = out_idx(&record.key, self.out_qs[0].len());
@@ -207,7 +203,7 @@ impl<K: Key, T: Data> Collector<K, T> {
                 .for_each(|g| g.set(QUEUE_SIZE as i64));
 
             self.out_qs[0][idx]
-                .send(Message::Record(record), &self.sent_bytes)
+                .send(&self.task_info, Message::Record(record))
                 .await;
         } else {
             let key = record.key.clone();
@@ -224,7 +220,7 @@ impl<K: Key, T: Data> Collector<K, T> {
                     .for_each(|c| c.set(QUEUE_SIZE as i64));
 
                 out_node_qs[idx]
-                    .send(message.clone(), &self.sent_bytes)
+                    .send(&self.task_info, message.clone())
                     .await;
             }
         }
@@ -233,7 +229,7 @@ impl<K: Key, T: Data> Collector<K, T> {
     pub async fn broadcast(&mut self, message: Message<K, T>) {
         for out_node in &self.out_qs {
             for q in out_node {
-                q.send(message.clone(), &self.sent_bytes).await;
+                q.send(&self.task_info, message.clone()).await;
             }
         }
     }
@@ -287,12 +283,11 @@ impl<K: Key, T: Data> Context<K, T> {
             )
         };
 
-        let mut counters = register_counters(&task_info);
         let (tx_queue_size_gauges, tx_queue_rem_gauges) =
             register_queue_gauges(&task_info, &out_qs);
 
         Context {
-            task_info,
+            task_info: task_info.clone(),
             control_rx,
             control_tx,
             watermarks: WatermarkHolder::new(vec![
@@ -300,15 +295,13 @@ impl<K: Key, T: Data> Context<K, T> {
                 input_partitions
             ]),
             collector: Collector::<K, T> {
+                task_info,
                 out_qs,
-                sent_messages: counters.remove(MESSAGES_SENT),
-                sent_bytes: counters.remove(BYTES_SENT),
                 tx_queue_rem_gauges,
                 tx_queue_size_gauges,
                 _ts: PhantomData,
             },
             state,
-            counters,
             _ts: PhantomData,
         }
     }
@@ -603,6 +596,7 @@ impl Program {
     pub fn total_nodes(&self) -> usize {
         self.graph.node_count()
     }
+
     pub fn local_from_logical(name: String, logical: &DiGraph<LogicalNode, LogicalEdge>) -> Self {
         let assignments = logical
             .node_weights()
@@ -617,6 +611,7 @@ impl Program {
             .collect();
         Self::from_logical(name, logical, &assignments)
     }
+
     pub fn from_logical(
         name: String,
         logical: &DiGraph<LogicalNode, LogicalEdge>,
@@ -701,6 +696,15 @@ impl Program {
             name,
             graph: physical,
         }
+    }
+
+    pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
+        let mut tasks_per_operator = HashMap::new();
+        for node in self.graph.node_weights() {
+            let entry = tasks_per_operator.entry(node.id().to_string()).or_insert(0);
+            *entry += 1;
+        }
+        tasks_per_operator
     }
 }
 
