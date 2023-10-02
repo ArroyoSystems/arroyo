@@ -362,12 +362,17 @@ impl CheckpointState {
         db_checkpoint_state: crate::types::public::CheckpointState,
     ) -> anyhow::Result<()> {
         let c = pool.get().await?;
+        let finish_time = if db_checkpoint_state == crate::types::public::CheckpointState::ready {
+            Some(SystemTime::now().into())
+        } else {
+            None
+        };
         let operator_state = serde_json::to_value(&self.operator_details).unwrap();
         controller_queries::update_checkpoint()
             .bind(
                 &c,
                 &operator_state,
-                &None,
+                &finish_time,
                 &db_checkpoint_state,
                 &self.checkpoint_id,
             )
