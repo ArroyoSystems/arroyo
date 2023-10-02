@@ -135,7 +135,14 @@ impl Connector for FileSystemConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
         let write_target = if let Some(path) = opts.remove("path") {
-            Destination::FolderUri { path }
+            if path.starts_with("file:///") {
+                let trimmed_path = path.trim_start_matches("file://");
+                Destination::LocalFilesystem {
+                    local_directory: trimmed_path.to_string(),
+                }
+            } else {
+                Destination::FolderUri { path }
+            }
         } else if let (Some(s3_bucket), Some(s3_directory), Some(aws_region)) = (
             opts.remove("s3_bucket"),
             opts.remove("s3_directory"),

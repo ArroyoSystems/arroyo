@@ -70,18 +70,18 @@ impl<K: Key, T: Data + Sync, V: LocalWriter<T>> LocalFileSystemWriter<K, T, V> {
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
-        let (_object_store, path): (Box<dyn ObjectStore>, Path) = match table.write_target.clone() {
-            Destination::LocalFilesystem { local_directory } => {
-                (Box::new(LocalFileSystem::new()), local_directory.into())
-            }
+        let final_dir = match table.write_target.clone() {
+            Destination::LocalFilesystem { local_directory } => local_directory,
             Destination::S3Bucket { .. } => {
                 unreachable!("shouldn't be using local writer for S3");
             }
             Destination::FolderUri { path } => {
-                object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap()
+                let (_object_store, path) =
+                    object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap();
+                path.to_string()
             }
         };
-        let writer = LocalFileSystemWriter::new(path.to_string(), table);
+        let writer = LocalFileSystemWriter::new(final_dir, table);
         TwoPhaseCommitterOperator::new(writer)
     }
 }
