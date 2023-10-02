@@ -127,8 +127,8 @@ pub struct GCSConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalConfig {
-    path: String,
-    key: Option<String>,
+    pub path: String,
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

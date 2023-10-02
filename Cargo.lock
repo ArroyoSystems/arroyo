@@ -483,6 +483,7 @@ dependencies = [
  "anyhow",
  "arroyo-datastream",
  "arroyo-rpc",
+ "arroyo-storage",
  "arroyo-types",
  "axum",
  "eventsource-client",

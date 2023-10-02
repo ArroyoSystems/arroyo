@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use arroyo_storage::BackendConfig;
 use axum::response::sse::Event;
 use std::convert::Infallible;
 use typify::import_types;
@@ -135,10 +136,9 @@ impl Connector for FileSystemConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
         let write_target = if let Some(path) = opts.remove("path") {
-            if path.starts_with("file:///") {
-                let trimmed_path = path.trim_start_matches("file://");
+            if let BackendConfig::Local(local_config) = BackendConfig::parse_url(&path, false)? {
                 Destination::LocalFilesystem {
-                    local_directory: trimmed_path.to_string(),
+                    local_directory: local_config.path,
                 }
             } else {
                 Destination::FolderUri { path }

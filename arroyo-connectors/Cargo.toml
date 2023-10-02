@@ -9,6 +9,7 @@ kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
+arroyo-storage = { path = "../arroyo-storage" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 
