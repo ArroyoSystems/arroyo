@@ -12,7 +12,7 @@ use arroyo_datastream::{
 
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{quote, ToTokens};
-use syn::{parse_quote, parse_str};
+use syn::{parse_quote, parse_str, Type};
 
 use crate::{
     code_gen::{
@@ -31,6 +31,7 @@ use crate::{
     ArroyoSchemaProvider, SqlConfig,
 };
 use anyhow::Result;
+use petgraph::Direction;
 
 #[derive(Debug, Clone)]
 pub enum PlanOperator {
@@ -884,6 +885,11 @@ pub enum PlanType {
         key: Option<StructDef>,
         value: String,
     },
+    Debezium {
+        key: Option<StructDef>,
+        value_type: String,
+        values: Vec<StructDef>,
+    },
     Updating(Box<PlanType>),
 }
 
@@ -926,6 +932,10 @@ impl PlanType {
                 let value_type = value.get_type();
                 parse_quote!(Vec<#value_type>)
             }
+            PlanType::Debezium { value_type, .. } => {
+                let v: Type = parse_str(value_type).unwrap();
+                parse_quote!(arroyo_types::Debezium<#v>)
+            }
             PlanType::Updating(inner_type) => {
                 let inner_type = inner_type.as_syn_type();
                 parse_quote!(arroyo_types::UpdatingData<#inner_type>)
@@ -937,15 +947,35 @@ impl PlanType {
         match self {
             PlanType::Unkeyed(_)
             | PlanType::UnkeyedList(_)
-            | PlanType::KeyedLiteralTypeValue {
-                key: None,
-                value: _,
-            } => parse_quote!(()),
+            | PlanType::KeyedLiteralTypeValue { key: None, .. }
+            | PlanType::Debezium { key: None, .. } => parse_quote!(()),
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
             | PlanType::KeyedLiteralTypeValue { key: Some(key), .. }
-            | PlanType::KeyedListPair { key, .. } => key.get_type(),
+            | PlanType::KeyedListPair { key, .. }
+            | PlanType::Debezium { key: Some(key), .. } => key.get_type(),
             PlanType::Updating(inner) => inner.key_type(),
+        }
+    }
+
+    fn value_structs(&self) -> Vec<StructDef> {
+        match self {
+            PlanType::Unkeyed(v) => vec![v.clone()],
+            PlanType::UnkeyedList(v) => vec![v.clone()],
+            PlanType::Keyed { value, .. } => vec![value.clone()],
+            PlanType::KeyedPair {
+                left_value,
+                right_value,
+                ..
+            }
+            | PlanType::KeyedListPair {
+                left_value,
+                right_value,
+                ..
+            } => vec![left_value.clone(), right_value.clone()],
+            PlanType::KeyedLiteralTypeValue { .. } => vec![],
+            PlanType::Debezium { values, .. } => values.clone(),
+            PlanType::Updating(v) => v.value_structs(),
         }
     }
 
@@ -959,13 +989,12 @@ impl PlanType {
         match self {
             PlanType::Unkeyed(_)
             | PlanType::UnkeyedList(_)
-            | PlanType::KeyedLiteralTypeValue {
-                key: None,
-                value: _,
-            } => vec![],
+            | PlanType::KeyedLiteralTypeValue { key: None, .. }
+            | PlanType::Debezium { key: None, .. } => vec![],
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
             | PlanType::KeyedLiteralTypeValue { key: Some(key), .. }
+            | PlanType::Debezium { key: Some(key), .. }
             | PlanType::KeyedListPair { key, .. } => key.all_names(),
             PlanType::Updating(inner) => inner.get_key_struct_names(),
         }
@@ -1001,6 +1030,11 @@ impl PlanType {
                 Some(key) => key.all_structs().into_iter().collect(),
                 None => HashSet::new(),
             },
+            PlanType::Debezium { key, values, .. } => key
+                .iter()
+                .flat_map(|key| key.all_structs())
+                .chain(values.iter().flat_map(|value| value.all_structs()))
+                .collect(),
             PlanType::Updating(inner) => inner.get_all_types(),
         }
     }
@@ -1048,6 +1082,13 @@ impl PlanType {
                 key: Some(key),
                 value: value.clone(),
             },
+            PlanType::Debezium {
+                value_type, values, ..
+            } => PlanType::Debezium {
+                key: Some(key),
+                value_type: value_type.clone(),
+                values: values.clone(),
+            },
             PlanType::Updating(inner) => PlanType::Updating(Box::new(inner.with_key(key))),
         }
     }
@@ -1056,19 +1097,11 @@ impl PlanType {
         match self {
             PlanType::Unkeyed(_) => PlanType::Unkeyed(value),
             PlanType::UnkeyedList(_) => PlanType::UnkeyedList(value),
-            PlanType::Keyed { key: _, value: _ } => PlanType::Unkeyed(value),
-            PlanType::KeyedPair {
-                key: _,
-                left_value: _,
-                right_value: _,
-                join_type: _,
-            } => unreachable!(),
-            PlanType::KeyedListPair {
-                key: _,
-                left_value: _,
-                right_value: _,
-            } => unreachable!(),
-            PlanType::KeyedLiteralTypeValue { key: _, value: _ } => unreachable!(),
+            PlanType::Keyed { .. } => PlanType::Unkeyed(value),
+            PlanType::KeyedPair { .. } => unreachable!(),
+            PlanType::KeyedListPair { .. } => unreachable!(),
+            PlanType::KeyedLiteralTypeValue { .. } => unreachable!(),
+            PlanType::Debezium { .. } => unreachable!(),
             PlanType::Updating(inner) => PlanType::Updating(Box::new(inner.with_value(value))),
         }
     }
@@ -1130,10 +1163,15 @@ impl PlanGraph {
     }
 
     fn add_debezium_source(&mut self, source_operator: &SourceOperator) -> NodeIndex {
-        let value_type = source_operator.source.struct_def.get_type();
-        let debezium_type = PlanType::KeyedLiteralTypeValue {
+        let debezium_type = PlanType::Debezium {
             key: None,
-            value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+            value_type: source_operator
+                .source
+                .struct_def
+                .get_type()
+                .to_token_stream()
+                .to_string(),
+            values: vec![source_operator.source.struct_def.clone()],
         };
         let source_node = self.insert_operator(
             PlanOperator::Source(source_operator.name.clone(), source_operator.source.clone()),
@@ -1587,9 +1625,10 @@ impl PlanGraph {
         let input_node = self.get_plan_node(input_index);
         if let PlanType::Updating(inner) = &input_node.output_type {
             let value_type = inner.as_syn_type();
-            let debezium_type = PlanType::KeyedLiteralTypeValue {
+            let debezium_type = PlanType::Debezium {
                 key: None,
-                value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+                value_type: quote!(#value_type).to_string(),
+                values: inner.value_structs(),
             };
             let debezium_index =
                 self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
@@ -1611,9 +1650,10 @@ impl PlanGraph {
             plan_node_index
         } else if matches!(sql_sink.updating_type, SinkUpdateType::Force) {
             let value_type = input_node.output_type.as_syn_type();
-            let debezium_type = PlanType::KeyedLiteralTypeValue {
+            let debezium_type = PlanType::Debezium {
                 key: None,
-                value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+                value_type: quote!(#value_type).to_string(),
+                values: input_node.output_type.value_structs(),
             };
             let debezium_index =
                 self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
@@ -1747,6 +1787,25 @@ pub fn get_program(
         key_structs.extend(key_names);
     });
 
+    // find all types that are produced by a source or consumed by a sink
+    let connector_types: HashSet<_> = plan_graph
+        .graph
+        .externals(Direction::Incoming)
+        .chain(
+            plan_graph
+                .graph
+                .externals(Direction::Outgoing)
+                .flat_map(|idx| {
+                    plan_graph
+                        .graph
+                        .neighbors_directed(idx, Direction::Incoming)
+                }),
+        )
+        .flat_map(|node| plan_graph.graph.node_weight(node).unwrap().get_all_types())
+        .flat_map(|s| s.all_structs_including_named())
+        .map(|t| t.struct_name())
+        .collect();
+
     let types: HashSet<_> = plan_graph
         .graph
         .node_weights()
@@ -1762,9 +1821,11 @@ pub fn get_program(
         .iter()
         .flat_map(|s| s.all_structs_including_named())
         .collect();
+
     other_defs.extend(
         all_types
             .iter()
+            .filter(|t| connector_types.contains(&t.struct_name()))
             .map(|s| s.generate_serializer_items().to_string()),
     );
 
