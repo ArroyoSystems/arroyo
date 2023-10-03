@@ -1,11 +1,13 @@
+use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_state::{BackingStore, StateBackend};
 use rand::Rng;
 use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
 use crate::engine::{Context, OutQueue, QueueItem};
+use crate::SchemaData;
+use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
-use arroyo_rpc::types::{Format, JsonFormat};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
 use arroyo_types::{to_micros, CheckpointBarrier, Message, TaskInfo};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
@@ -19,6 +21,20 @@ use super::KafkaSourceFunc;
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode, Serialize, Deserialize, PartialEq)]
 struct TestData {
     i: u64,
+}
+
+impl SchemaData for TestData {
+    fn name() -> &'static str {
+        "test"
+    }
+
+    fn schema() -> Schema {
+        Schema::new(vec![Field::new("i", DataType::UInt64, false)])
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 pub struct KafkaTopicTester {
@@ -67,6 +83,7 @@ impl KafkaTopicTester {
             self.group_id.clone(),
             crate::connectors::kafka::SourceOffset::Earliest,
             Format::Json(JsonFormat::default()),
+            None,
             100,
             vec![],
         );

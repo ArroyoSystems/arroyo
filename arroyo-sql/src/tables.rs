@@ -5,7 +5,8 @@ use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::{ConnectorOp, Operator};
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, SchemaDefinition, SourceField};
+use arroyo_rpc::formats::{Format, Framing};
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, SchemaDefinition, SourceField};
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -158,8 +159,11 @@ impl ConnectorTable {
 
         let format = Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
 
+        let framing = Framing::from_opts(options).map_err(|e| anyhow!("invalid framing: '{e}'"))?;
+
         let schema_fields: Result<Vec<SourceField>> = fields
             .iter()
+            .filter(|f| !f.is_virtual())
             .map(|f| {
                 let struct_field = f.struct_field();
                 struct_field.clone().try_into().map_err(|_| {
@@ -172,7 +176,7 @@ impl ConnectorTable {
             })
             .collect();
 
-        let schema = ConnectionSchema::try_new(format, None, schema_fields?, None)?;
+        let schema = ConnectionSchema::try_new(format, framing, None, schema_fields?, None)?;
 
         let connection = connector.from_options(name, options, Some(&schema))?;
 

@@ -4,20 +4,6 @@ use tokio_postgres::error::SqlState;
 use tracing::warn;
 use utoipa::OpenApi;
 
-use arroyo_rpc::types::{
-    AvroFormat, Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType,
-    ConfluentSchema, ConnectionProfile, ConnectionProfileCollection, ConnectionProfilePost,
-    ConnectionSchema, ConnectionTable, ConnectionTableCollection, ConnectionTablePost,
-    ConnectionType, Connector, ConnectorCollection, FieldType, Format, Job, JobCollection,
-    JobLogLevel, JobLogMessage, JobLogMessageCollection, JsonFormat, Metric, MetricGroup,
-    MetricNames, OperatorCheckpointGroup, OperatorCheckpointGroupCollection, OperatorMetricGroup,
-    OutputData, PaginationQueryParams, ParquetFormat, Pipeline, PipelineCollection, PipelineEdge,
-    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, PrimitiveType, RawStringFormat,
-    SchemaDefinition, SourceField, SourceFieldType, StopType as StopTypeRest, StructType,
-    SubtaskCheckpointGroup, SubtaskMetrics, TestSourceMessage, TimestampFormat, Udf, UdfLanguage,
-    ValidatePipelinePost,
-};
-
 use crate::connection_profiles::{
     __path_create_connection_profile, __path_get_connection_profiles,
 };
@@ -39,6 +25,19 @@ use crate::pipelines::{
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::{bad_request, log_and_map, ErrorResp};
+use arroyo_rpc::formats::*;
+use arroyo_rpc::types::{
+    Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType, ConfluentSchema,
+    ConnectionProfile, ConnectionProfileCollection, ConnectionProfilePost, ConnectionSchema,
+    ConnectionTable, ConnectionTableCollection, ConnectionTablePost, ConnectionType, Connector,
+    ConnectorCollection, FieldType, Job, JobCollection, JobLogLevel, JobLogMessage,
+    JobLogMessageCollection, Metric, MetricGroup, MetricNames, OperatorCheckpointGroup,
+    OperatorCheckpointGroupCollection, OperatorMetricGroup, OutputData, PaginationQueryParams,
+    Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
+    PipelinePost, PrimitiveType, SchemaDefinition, SourceField, SourceFieldType,
+    StopType as StopTypeRest, StructType, SubtaskCheckpointGroup, SubtaskMetrics,
+    TestSourceMessage, Udf, UdfLanguage, ValidatePipelinePost,
+};
 
 mod cloud;
 mod connection_profiles;
@@ -211,6 +210,9 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         ParquetFormat,
         RawStringFormat,
         TimestampFormat,
+        Framing,
+        FramingMethod,
+        NewlineDelimitedFraming,
         PaginationQueryParams,
         CheckpointEventSpan,
         CheckpointSpanType,

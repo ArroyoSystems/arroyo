@@ -11,7 +11,7 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use arrow_schema::DataType;
-use arroyo_rpc::types::Format;
+use arroyo_rpc::formats::Format;
 use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
 use proc_macro2::TokenStream;
 use quote::quote;

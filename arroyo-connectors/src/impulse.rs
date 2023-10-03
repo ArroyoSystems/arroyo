@@ -20,6 +20,7 @@ pub fn impulse_schema() -> ConnectionSchema {
     // use source_field_type::Type::Primitive;
     ConnectionSchema {
         format: None,
+        framing: None,
         struct_name: Some("arroyo_types::ImpulseEvent".to_string()),
         fields: vec![
             source_field("counter", Primitive(PrimitiveType::UInt64)),
@@ -157,6 +158,7 @@ impl Connector for ImpulseConnector {
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: None,
+            framing: None,
         };
 
         Ok(Connection {

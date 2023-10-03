@@ -1,10 +1,12 @@
+pub mod formats;
 pub mod public_ids;
 pub mod types;
 
 use std::{fs, time::SystemTime};
 
+use crate::formats::{Format, Framing};
 use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
-use crate::types::{Format, PrimitiveType};
+use crate::types::PrimitiveType;
 use arroyo_types::CheckpointBarrier;
 use grpc::{StopMode, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
@@ -153,5 +155,6 @@ pub struct OperatorConfig {
     pub connection: Value,
     pub table: Value,
     pub format: Option<Format>,
+    pub framing: Option<Framing>,
     pub rate_limit: Option<RateLimit>,
 }

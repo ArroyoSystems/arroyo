@@ -4,7 +4,6 @@ use std::{
 };
 
 use arroyo_macro::source_fn;
-use arroyo_rpc::types::Format;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
@@ -20,9 +19,10 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::{debug, info};
 use typify::import_types;
 
+use crate::formats::DataDeserializer;
 use crate::{
     engine::{Context, StreamNode},
-    formats, SourceFinishType,
+    SchemaData, SourceFinishType,
 };
 
 import_types!(schema = "../connector-schemas/websocket/table.json");
@@ -30,24 +30,24 @@ import_types!(schema = "../connector-schemas/websocket/table.json");
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
 pub struct WebsocketSourceState {}
 
-#[derive(StreamNode, Clone)]
+#[derive(StreamNode)]
 pub struct WebsocketSourceFunc<K, T>
 where
     K: DeserializeOwned + Data,
-    T: DeserializeOwned + Data,
+    T: SchemaData,
 {
     url: String,
     subscription_message: Option<String>,
-    format: Format,
+    deserializer: DataDeserializer<T>,
     state: WebsocketSourceState,
-    _t: PhantomData<(K, T)>,
+    _t: PhantomData<K>,
 }
 
 #[source_fn(out_k = (), out_t = T)]
 impl<K, T> WebsocketSourceFunc<K, T>
 where
     K: DeserializeOwned + Data,
-    T: DeserializeOwned + Data,
+    T: SchemaData,
 {
     pub fn from_config(config: &str) -> Self {
         let config: OperatorConfig =
@@ -58,7 +58,10 @@ where
         Self {
             url: table.endpoint,
             subscription_message: table.subscription_message.map(|s| s.into()),
-            format: config.format.expect("WebsocketSource requires a format"),
+            deserializer: DataDeserializer::new(
+                config.format.expect("WebsocketSource requires a format"),
+                config.framing,
+            ),
             state: WebsocketSourceState::default(),
             _t: PhantomData,
         }
@@ -120,6 +123,25 @@ where
         None
     }
 
+    async fn handle_message(
+        &mut self,
+        msg: &[u8],
+        ctx: &mut Context<(), T>,
+    ) -> Result<(), UserError> {
+        let iter = self.deserializer.deserialize_slice(msg);
+        for value in iter {
+            ctx.collector
+                .collect(Record {
+                    timestamp: SystemTime::now(),
+                    key: None,
+                    value: value?,
+                })
+                .await;
+        }
+
+        Ok(())
+    }
+
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
         let ws_stream = match connect_async(&self.url).await {
             Ok((ws_stream, _)) => ws_stream,
@@ -159,21 +181,21 @@ where
                     message = rx.next()  => {
                         match message {
                             Some(Ok(msg)) => {
-                                let data = match msg {
+                                let result = match msg {
                                     tungstenite::Message::Text(t) => {
-                                        formats::deserialize_slice(&self.format, &t.as_bytes()).map(|t| Some(t))
+                                        self.handle_message(&t.as_bytes(), ctx).await
                                     },
                                     tungstenite::Message::Binary(bs) => {
-                                        formats::deserialize_slice(&self.format, &bs).map(|t| Some(t))
+                                        self.handle_message(&bs, ctx).await
                                     },
                                     tungstenite::Message::Ping(d) => {
                                         tx.send(tungstenite::Message::Pong(d)).await
-                                            .map(|_| None)
+                                            .map(|_| ())
                                             .map_err(|e| UserError::new("Failed to send pong to websocket server", e.to_string()))
                                     },
                                     tungstenite::Message::Pong(_) => {
                                         // ignore
-                                        Ok(None)
+                                        Ok(())
                                     },
                                     tungstenite::Message::Close(_) => {
                                         ctx.report_error("Received close frame from server".to_string(), "".to_string()).await;
@@ -181,27 +203,17 @@ where
                                     },
                                     tungstenite::Message::Frame(_) => {
                                         // this should be captured by tungstenite
-                                        Ok(None)
+                                        Ok(())
                                     },
                                 };
 
-                                match data {
-                                    Ok(Some(t)) => {
-                                        ctx.collector.collect(Record {
-                                            timestamp: SystemTime::now(),
-                                            key: None,
-                                            value: t,
-                                        }).await;
-                                    }
-                                    Ok(None) => {}
-                                    Err(e) => {
-                                        errors += 1;
-                                        if last_reported_error.elapsed() > Duration::from_secs(30) {
-                                            ctx.report_error(format!("{} x {}", e.name, errors),
-                                                e.details).await;
-                                            errors = 0;
-                                            last_reported_error = Instant::now();
-                                        }
+                                if let Err(e) = result {
+                                    errors += 1;
+                                    if last_reported_error.elapsed() > Duration::from_secs(30) {
+                                        ctx.report_error(format!("{} x {}", e.name, errors),
+                                            e.details).await;
+                                        errors = 0;
+                                        last_reported_error = Instant::now();
                                     }
                                 };
                             }

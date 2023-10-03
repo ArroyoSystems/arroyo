@@ -14,11 +14,9 @@ use arrow::{
 };
 use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE};
 use arroyo_rpc::{
+    formats::{Format, JsonFormat, TimestampFormat},
     primitive_to_sql,
-    types::{
-        FieldType, Format, JsonFormat, PrimitiveType, SourceField, SourceFieldType, StructType,
-        TimestampFormat,
-    },
+    types::{FieldType, PrimitiveType, SourceField, SourceFieldType, StructType},
 };
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
@@ -472,8 +470,10 @@ fn rust_to_arrow(typ: &Type) -> std::result::Result<DataType, ()> {
                 "f64" => Ok(DataType::Float64),
                 "String" => Ok(DataType::Utf8),
                 "Vec<u8>" => Ok(DataType::Binary),
-                "std::time::SystemTime" => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
-                "std::time::Duration" => Ok(DataType::Duration(TimeUnit::Microsecond)),
+                "SystemTime" | "std::time::SystemTime" => {
+                    Ok(DataType::Timestamp(TimeUnit::Microsecond, None))
+                }
+                "Duration" | "std::time::Duration" => Ok(DataType::Duration(TimeUnit::Microsecond)),
                 _ => Err(()),
             }
         }

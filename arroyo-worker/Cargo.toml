@@ -69,6 +69,7 @@ fluvio = {version = "=0.21", features = ["openssl"]}
 fluvio-future = "0.6.0"
 object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches', features = ["aws"] }
 reqwest = "0.11.20"
+memchr = "2.6.3"
 
 [dev-dependencies]
 test-case = "3"

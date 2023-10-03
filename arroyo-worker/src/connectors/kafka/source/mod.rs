@@ -1,9 +1,10 @@
 use crate::engine::{Context, StreamNode};
-use crate::formats;
+use crate::formats::DataDeserializer;
+use crate::SchemaData;
 use crate::SourceFinishType;
 use arroyo_macro::source_fn;
+use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
-use arroyo_rpc::types::Format;
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
@@ -25,20 +26,20 @@ use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, TableType};
 #[cfg(test)]
 mod test;
 
-#[derive(StreamNode, Clone)]
+#[derive(StreamNode)]
 pub struct KafkaSourceFunc<K, T>
 where
     K: DeserializeOwned + Data,
-    T: DeserializeOwned + Data,
+    T: SchemaData + Data,
 {
     topic: String,
     bootstrap_servers: String,
     group_id: Option<String>,
     offset_mode: super::SourceOffset,
-    format: Format,
+    deserializer: DataDeserializer<T>,
     client_configs: HashMap<String, String>,
     messages_per_second: NonZeroU32,
-    _t: PhantomData<(K, T)>,
+    _t: PhantomData<K>,
 }
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -55,7 +56,7 @@ pub fn tables() -> Vec<TableDescriptor> {
 impl<K, T> KafkaSourceFunc<K, T>
 where
     K: DeserializeOwned + Data,
-    T: DeserializeOwned + Data,
+    T: SchemaData + Data,
 {
     pub fn new(
         servers: &str,
@@ -63,6 +64,7 @@ where
         group: Option<String>,
         offset_mode: super::SourceOffset,
         format: Format,
+        framing: Option<Framing>,
         messages_per_second: u32,
         client_configs: Vec<(&str, &str)>,
     ) -> Self {
@@ -71,7 +73,7 @@ where
             bootstrap_servers: servers.to_string(),
             group_id: group,
             offset_mode,
-            format,
+            deserializer: DataDeserializer::new(format, framing),
             client_configs: client_configs
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
@@ -106,7 +108,10 @@ where
             bootstrap_servers: connection.bootstrap_servers.to_string(),
             group_id: group_id.clone(),
             offset_mode: *offset,
-            format: config.format.expect("Format must be set for Kafka source"),
+            deserializer: DataDeserializer::new(
+                config.format.expect("Format must be set for Kafka source"),
+                config.framing,
+            ),
             client_configs,
             messages_per_second: NonZeroU32::new(
                 config
@@ -237,11 +242,16 @@ where
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                ctx.collector.collect(Record {
-                                    timestamp: from_millis(timestamp as u64),
-                                    key: None,
-                                    value: formats::deserialize_slice(&self.format, v)?,
-                                }).await;
+                                let iter = self.deserializer.deserialize_slice(v);
+
+                                for value in iter {
+                                    ctx.collector.collect(Record {
+                                        timestamp: from_millis(timestamp as u64),
+                                        key: None,
+                                        value: value?,
+                                    }).await;
+                                }
+
                                 offsets.insert(msg.partition(), msg.offset());
                                 rate_limiter.until_ready().await;
                             }

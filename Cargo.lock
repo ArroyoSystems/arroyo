@@ -823,6 +823,7 @@ dependencies = [
  "lazy_static",
  "local-ip-address",
  "md-5 0.10.5",
+ "memchr",
  "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches)",
  "once_cell",
  "ordered-float 3.9.1",

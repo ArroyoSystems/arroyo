@@ -1,9 +1,10 @@
 use crate::engine::{Context, StreamNode};
-use crate::SourceFinishType;
+use crate::formats::DataDeserializer;
+use crate::{SchemaData, SourceFinishType};
 use anyhow::anyhow;
 use arroyo_macro::source_fn;
+use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
-use arroyo_rpc::types::Format;
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
@@ -22,17 +23,17 @@ use tracing::{debug, error, info, warn};
 
 use super::{FluvioTable, SourceOffset, TableType};
 
-#[derive(StreamNode, Clone)]
+#[derive(StreamNode)]
 pub struct FluvioSourceFunc<K, T>
 where
     K: DeserializeOwned + Data,
-    T: DeserializeOwned + Data,
+    T: SchemaData,
 {
     topic: String,
     endpoint: Option<String>,
     offset_mode: SourceOffset,
-    format: Format,
-    _t: PhantomData<(K, T)>,
+    deserializer: DataDeserializer<T>,
+    _t: PhantomData<K>,
 }
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -49,19 +50,20 @@ pub fn tables() -> Vec<TableDescriptor> {
 impl<K, T> FluvioSourceFunc<K, T>
 where
     K: DeserializeOwned + Data,
-    T: DeserializeOwned + Data,
+    T: SchemaData,
 {
     pub fn new(
         endpoint: Option<&str>,
         topic: &str,
         offset_mode: SourceOffset,
         format: Format,
+        framing: Option<Framing>,
     ) -> Self {
         Self {
             topic: topic.to_string(),
             endpoint: endpoint.map(|e| e.to_string()),
             offset_mode,
-            format,
+            deserializer: DataDeserializer::new(format, framing),
             _t: PhantomData,
         }
     }
@@ -79,7 +81,10 @@ where
             topic: table.topic,
             endpoint: table.endpoint.clone(),
             offset_mode: *offset,
-            format: config.format.expect("Format must be specified for fluvio"),
+            deserializer: DataDeserializer::new(
+                config.format.expect("Format must be specified for fluvio"),
+                config.framing,
+            ),
             _t: PhantomData,
         }
     }
@@ -194,11 +199,15 @@ where
                 message = streams.next() => {
                     match message {
                         Some((_, Ok(msg))) => {
-                            ctx.collector.collect(Record {
-                                timestamp: from_millis(msg.timestamp().max(0) as u64),
-                                key: None,
-                                value: crate::formats::deserialize_slice(&self.format, msg.value())?,
-                            }).await;
+                            let timestamp = from_millis(msg.timestamp().max(0) as u64);
+                            let iter = self.deserializer.deserialize_slice(msg.value());
+                            for value in iter {
+                                ctx.collector.collect(Record {
+                                    timestamp,
+                                    key: None,
+                                    value: value?,
+                                }).await;
+                            }
                             offsets.insert(msg.partition(), msg.offset());
                         },
                         Some((p, Err(e))) => {
