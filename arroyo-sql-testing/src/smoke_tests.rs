@@ -745,6 +745,6 @@ CREATE TABLE union_output (
   type = 'sink'
 );
 INSERT INTO union_output
-SELECT counter FROM (SELECT counter * 2 as counter FROM impulse_source)
-UNION ALL (SELECT 2 * counter + 1 as counter FROM impulse_source)"
+SELECT counter FROM (SELECT counter  FROM impulse_source)
+UNION ALL (SELECT 2 * counter FROM impulse_source)"
 }
