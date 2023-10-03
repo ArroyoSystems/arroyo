@@ -77,11 +77,37 @@ pub fn key_time_multi_map_table(
 }
 
 #[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct DeleteTimeKeyOperation {
+    pub timestamp: SystemTime,
+    pub key: Vec<u8>,
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct DeleteKeyOperation {
+    pub key: Vec<u8>,
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct DeleteValueOperation {
+    pub key: Vec<u8>,
+    pub timestamp: SystemTime,
+    pub value: Vec<u8>,
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct DeleteTimeRangeOperation {
+    pub key: Vec<u8>,
+    pub start: u64,
+    pub end: u64,
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
 pub enum DataOperation {
     Insert,
-    DeleteKey,                 // delete single key of a TimeKeyMap or KeyTimeMultiMap
-    DeleteValue,               // delete single value of a KeyTimeMultiMap
-    DeleteTimeRange(u64, u64), // delete all values for key in range (only for KeyTimeMultiMap)
+    DeleteTimeKey(DeleteTimeKeyOperation), // delete single key of a TimeKeyMap
+    DeleteKey(DeleteKeyOperation),         // delete all data for a key in a KeyTimeMultiMap
+    DeleteValue(DeleteValueOperation),     // delete single value of a KeyTimeMultiMap
+    DeleteTimeRange(DeleteTimeRangeOperation), // delete all values for key in range (only for KeyTimeMultiMap)
 }
 
 #[async_trait]
@@ -142,13 +168,15 @@ pub trait BackingStore {
         value: &mut V,
     );
 
-    async fn delete_data_tuple<K: Key>(
+    async fn delete_time_key<K: Key>(
         &mut self,
         table: char,
         table_type: TableType,
         timestamp: SystemTime,
         key: &mut K,
     );
+
+    async fn delete_key<K: Key>(&mut self, table: char, key: &mut K);
 
     async fn delete_data_value<K: Key, V: Data>(
         &mut self,
@@ -166,7 +194,6 @@ pub trait BackingStore {
     );
 
     async fn write_key_value<K: Key, V: Data>(&mut self, table: char, key: &mut K, value: &mut V);
-    async fn delete_key_value<K: Key>(&mut self, table: char, key: &mut K);
 
     async fn get_global_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
     async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;

@@ -1,5 +1,5 @@
 use crate::metrics::TABLE_SIZE_GAUGE;
-use crate::{BackingStore, DataOperation};
+use crate::{BackingStore, DataOperation, BINCODE_CONFIG};
 use arroyo_rpc::grpc::{TableDescriptor, TableType};
 use arroyo_types::{Data, Key, TaskInfo};
 use std::collections::{BTreeMap, HashMap};
@@ -215,13 +215,19 @@ impl<K: Key, V: Data> TimeKeyMapCache<K, V> {
                         .or_default()
                         .insert(tuple.key, tuple.value.unwrap());
                 }
-                DataOperation::DeleteKey => {
+                DataOperation::DeleteTimeKey(op) => {
+                    let key = bincode::decode_from_slice(&op.key, BINCODE_CONFIG)
+                        .unwrap()
+                        .0;
                     persisted_values
-                        .entry(tuple.timestamp)
+                        .entry(op.timestamp)
                         .or_default()
-                        .remove(&tuple.key);
+                        .remove(&key);
                 }
-                DataOperation::DeleteValue => {
+                DataOperation::DeleteKey(..) => {
+                    panic!("Not supported")
+                }
+                DataOperation::DeleteValue(..) => {
                     panic!("Not supported")
                 }
                 DataOperation::DeleteTimeRange(..) => {

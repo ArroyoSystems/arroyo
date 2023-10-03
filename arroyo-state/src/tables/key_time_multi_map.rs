@@ -1,5 +1,5 @@
 use crate::metrics::TABLE_SIZE_GAUGE;
-use crate::{BackingStore, DataOperation, StateBackend};
+use crate::{BackingStore, DataOperation, StateBackend, BINCODE_CONFIG};
 use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor, TableType};
 use arroyo_types::{from_micros, Data, Key, TaskInfo};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -45,14 +45,7 @@ impl<'a, K: Key, V: Data, S: BackingStore> KeyTimeMultiMap<'a, K, V, S> {
     }
 
     pub async fn delete_key(&mut self, mut key: K) {
-        self.backing_store
-            .delete_data_tuple(
-                self.table,
-                TableType::KeyTimeMultiMap,
-                SystemTime::now(),
-                &mut key,
-            )
-            .await;
+        self.backing_store.delete_key(self.table, &mut key).await;
         self.cache.remove_key(&key);
     }
 
@@ -150,26 +143,38 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
                         .or_default()
                         .push(tuple.value.unwrap());
                 }
-                DataOperation::DeleteKey => {
-                    values.remove(&tuple.key);
+                DataOperation::DeleteTimeKey(_) => {
+                    panic!("Not supported")
                 }
-                DataOperation::DeleteValue => {
-                    values.entry(tuple.key).and_modify(|map| {
-                        map.entry(tuple.timestamp).and_modify(|values| {
+                DataOperation::DeleteKey(op) => {
+                    let key = bincode::decode_from_slice(&op.key, BINCODE_CONFIG)
+                        .unwrap()
+                        .0;
+                    values.remove(&key);
+                }
+                DataOperation::DeleteValue(op) => {
+                    let key = bincode::decode_from_slice(&op.key, BINCODE_CONFIG)
+                        .unwrap()
+                        .0;
+                    let value = bincode::decode_from_slice(&op.value, BINCODE_CONFIG)
+                        .unwrap()
+                        .0;
+                    values.entry(key).and_modify(|map| {
+                        map.entry(op.timestamp).and_modify(|values| {
                             // delete first value that matches tuple.value
                             let position = values
                                 .iter()
-                                .position(|value| value == &tuple.value.clone().unwrap());
+                                .position(|stored_value| stored_value == &value);
                             if let Some(position) = position {
                                 values.remove(position);
                             }
                         });
                     });
                 }
-                DataOperation::DeleteTimeRange(start, end) => {
+                DataOperation::DeleteTimeRange(op) => {
                     if let Some(key_map) = values.get_mut(&tuple.key) {
                         key_map.retain(|time, _values| {
-                            !(from_micros(start)..from_micros(end)).contains(time)
+                            !(from_micros(op.start)..from_micros(op.end)).contains(time)
                         });
                         if key_map.is_empty() {
                             values.remove(&tuple.key);
