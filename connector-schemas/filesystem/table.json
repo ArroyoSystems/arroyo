@@ -129,6 +129,14 @@
                     "title": "Inactivity Rollover Seconds",
                     "type": "integer",
                     "description": "number of seconds of inactivity to wait before rolling over to a new file"
+                },
+                "partition_fields": {
+                    "title": "Partition Fields",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "fields to partition the data by"
                 }
             },
             "additionalProperties": false

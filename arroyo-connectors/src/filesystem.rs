@@ -165,13 +165,22 @@ impl Connector for FileSystemConnector {
         let target_file_size = pull_option_to_i64("target_file_size", opts)?;
         let target_part_size = pull_option_to_i64("target_part_size", opts)?;
 
+        let partition_fields = opts.remove("partition_fields").map(|value| {
+            value
+                .split(',')
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>()
+        }).unwrap_or_default();
+
         let file_settings = Some(FileSettings {
             inactivity_rollover_seconds,
             max_parts,
             rollover_seconds,
             target_file_size,
             target_part_size,
+            partition_fields,
         });
+
         let format_settings = match schema
             .ok_or(anyhow!("require schema"))?
             .format
