@@ -46,8 +46,10 @@ impl Compactor {
                 let mut reduced = BTreeMap::new();
                 for tuple in tuples.into_iter() {
                     match tuple.operation {
-                        DataOperation::Insert | DataOperation::DeleteKey => {}
-                        DataOperation::DeleteValue | DataOperation::DeleteTimeRange(..) => {
+                        DataOperation::Insert | DataOperation::DeleteTimeKey(_) => {}
+                        DataOperation::DeleteKey(_)
+                        | DataOperation::DeleteValue(_)
+                        | DataOperation::DeleteTimeRange(_) => {
                             panic!("Not supported")
                         }
                     }
@@ -68,7 +70,7 @@ impl Compactor {
                 for tuple in tuples.into_iter() {
                     let keep_deletes_key =
                         (tuple.timestamp, tuple.key.clone(), tuple.value.clone());
-                    match tuple.operation {
+                    match tuple.operation.clone() {
                         DataOperation::Insert => {
                             values
                                 .entry(tuple.key.clone())
@@ -77,17 +79,18 @@ impl Compactor {
                                 .or_default()
                                 .push(tuple);
                         }
-                        DataOperation::DeleteKey => {
+                        DataOperation::DeleteTimeKey(_) => panic!("Not supported"),
+                        DataOperation::DeleteKey(op) => {
                             // Remove a key. Timestamp is not considered.
-                            values.remove(tuple.key.as_slice());
+                            values.remove(op.key.as_slice());
                             deletes.insert(keep_deletes_key, tuple);
                         }
-                        DataOperation::DeleteValue => {
+                        DataOperation::DeleteValue(op) => {
                             // Remove a single value from a (key -> time -> values).
-                            values.entry(tuple.key.clone()).and_modify(|map| {
-                                map.entry(tuple.timestamp).and_modify(|values| {
+                            values.entry(op.key.clone()).and_modify(|map| {
+                                map.entry(op.timestamp).and_modify(|values| {
                                     let position = values.iter().position(|stored_tuple| {
-                                        stored_tuple.value == tuple.value.clone()
+                                        stored_tuple.value == op.value.clone()
                                     });
                                     if let Some(position) = position {
                                         values.remove(position);
@@ -96,12 +99,12 @@ impl Compactor {
                             });
                             deletes.insert(keep_deletes_key, tuple);
                         }
-                        DataOperation::DeleteTimeRange(start, end) => {
+                        DataOperation::DeleteTimeRange(op) => {
                             // Remove range of times from a key.
                             // Timestamp of tuple is not considered (the range is in the DataOperation).
-                            if let Some(key_map) = values.get_mut(tuple.key.as_slice()) {
+                            if let Some(key_map) = values.get_mut(op.key.as_slice()) {
                                 key_map.retain(|time, _values| {
-                                    !(from_micros(start)..from_micros(end)).contains(time)
+                                    !(from_micros(op.start)..from_micros(op.end)).contains(time)
                                 })
                             }
                             deletes.insert(keep_deletes_key, tuple);
@@ -134,7 +137,7 @@ impl Compactor {
 #[cfg(test)]
 mod test {
     use crate::tables::{BlindDataTuple, Compactor};
-    use crate::DataOperation;
+    use crate::{DataOperation, DeleteTimeKeyOperation, DeleteTimeRangeOperation};
     use arroyo_types::to_micros;
     use std::time::{Duration, SystemTime};
 
@@ -168,7 +171,10 @@ mod test {
             timestamp: t1,
             key: k1.clone(),
             value: v1.clone(),
-            operation: DataOperation::DeleteKey,
+            operation: DataOperation::DeleteTimeKey(DeleteTimeKeyOperation {
+                timestamp: t1,
+                key: k1.clone(),
+            }),
         };
 
         let tuples_in = vec![insert_1.clone(), insert_2.clone(), delete.clone()];
@@ -213,7 +219,11 @@ mod test {
             timestamp: t2,
             key: k1.clone(),
             value: v1.clone(),
-            operation: DataOperation::DeleteTimeRange(to_micros(t1), to_micros(t3)),
+            operation: DataOperation::DeleteTimeRange(DeleteTimeRangeOperation {
+                key: k1.clone(),
+                start: to_micros(t1),
+                end: to_micros(t3),
+            }),
         };
 
         let insert_3 = BlindDataTuple {

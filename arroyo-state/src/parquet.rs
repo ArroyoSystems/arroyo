@@ -1,6 +1,9 @@
 use crate::metrics::CURRENT_FILES_GAUGE;
 use crate::tables::{BlindDataTuple, Compactor, DataTuple};
-use crate::{hash_key, BackingStore, DataOperation, StateStore, BINCODE_CONFIG};
+use crate::{
+    hash_key, BackingStore, DataOperation, DeleteKeyOperation, DeleteTimeKeyOperation,
+    DeleteTimeRangeOperation, DeleteValueOperation, StateStore, BINCODE_CONFIG,
+};
 use anyhow::{Context, Result};
 use arrow_array::RecordBatch;
 use arroyo_rpc::grpc::backend_data::BackendData;
@@ -15,6 +18,7 @@ use arroyo_types::{
     CHECKPOINT_URL_ENV, S3_ENDPOINT_ENV, S3_REGION_ENV,
 };
 use bincode::config;
+use bincode::error::DecodeError;
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -360,7 +364,7 @@ impl BackingStore for ParquetBackend {
             .await;
     }
 
-    async fn delete_data_tuple<K: Key>(
+    async fn delete_time_key<K: Key>(
         &mut self,
         table: char,
         _table_type: TableType,
@@ -373,14 +377,18 @@ impl BackingStore for ParquetBackend {
                 bincode::encode_to_vec(&*key, config::standard()).unwrap(),
             )
         };
+
         self.writer
             .write(
                 table,
                 key_hash,
                 timestamp,
-                key_bytes,
+                key_bytes.clone(),
                 vec![],
-                DataOperation::DeleteKey,
+                DataOperation::DeleteTimeKey(DeleteTimeKeyOperation {
+                    timestamp,
+                    key: key_bytes,
+                }),
             )
             .await;
     }
@@ -399,9 +407,13 @@ impl BackingStore for ParquetBackend {
                 table,
                 key_hash,
                 timestamp,
-                key_bytes,
-                value_bytes,
-                DataOperation::DeleteValue,
+                key_bytes.clone(),
+                vec![],
+                DataOperation::DeleteValue(DeleteValueOperation {
+                    key: key_bytes,
+                    timestamp,
+                    value: value_bytes,
+                }),
             )
             .await;
     }
@@ -424,9 +436,13 @@ impl BackingStore for ParquetBackend {
                 table,
                 key_hash,
                 SystemTime::now(),
-                key_bytes,
+                key_bytes.clone(),
                 vec![],
-                DataOperation::DeleteTimeRange(to_micros(range.start), to_micros(range.end)),
+                DataOperation::DeleteTimeRange(DeleteTimeRangeOperation {
+                    key: key_bytes,
+                    start: to_micros(range.start),
+                    end: to_micros(range.end),
+                }),
             )
             .await;
     }
@@ -436,9 +452,24 @@ impl BackingStore for ParquetBackend {
             .await
     }
 
-    async fn delete_key_value<K: Key>(&mut self, table: char, key: &mut K) {
-        self.delete_data_tuple(table, TableType::Global, SystemTime::UNIX_EPOCH, key)
-            .await
+    async fn delete_key<K: Key>(&mut self, table: char, key: &mut K) {
+        let (key_hash, key_bytes) = {
+            (
+                hash_key(key),
+                bincode::encode_to_vec(&*key, config::standard()).unwrap(),
+            )
+        };
+
+        self.writer
+            .write(
+                table,
+                key_hash,
+                SystemTime::UNIX_EPOCH,
+                key_bytes.clone(),
+                vec![],
+                DataOperation::DeleteKey(DeleteKeyOperation { key: key_bytes }),
+            )
+            .await;
     }
 
     async fn get_global_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)> {
@@ -480,13 +511,19 @@ impl ParquetBackend {
                     DataOperation::Insert => {
                         state_map.insert(tuple.key, tuple.value.unwrap());
                     }
-                    DataOperation::DeleteKey => {
-                        state_map.remove(&tuple.key);
+                    DataOperation::DeleteTimeKey(op) => {
+                        let key = bincode::decode_from_slice(&op.key, BINCODE_CONFIG)
+                            .unwrap()
+                            .0;
+                        state_map.remove(&key);
                     }
-                    DataOperation::DeleteValue => {
+                    DataOperation::DeleteKey(_) => {
                         panic!("Not supported")
                     }
-                    DataOperation::DeleteTimeRange(..) => {
+                    DataOperation::DeleteValue(_) => {
+                        panic!("Not supported")
+                    }
+                    DataOperation::DeleteTimeRange(_) => {
                         panic!("Not supported")
                     }
                 }
