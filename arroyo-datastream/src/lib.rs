@@ -1113,7 +1113,90 @@ impl Program {
             )
         }
 
+        for stream_node in self.graph.node_indices() {
+            if let Err(error) = self.check_incoming_edges_for_node(stream_node) {
+                errors.push(error.to_string());
+            }
+        }
+
         errors
+    }
+
+    fn check_incoming_edges_for_node(&self, node_index: NodeIndex) -> Result<()> {
+        let node_name = &self.graph.node_weight(node_index).unwrap().operator_id;
+        let incoming_edges: Vec<_> = self
+            .graph
+            .edges_directed(node_index, Direction::Incoming)
+            .map(|e| e.weight())
+            .collect();
+        match incoming_edges.len() {
+            0 => return Ok(()),
+            1 => {
+                let edge = incoming_edges[0];
+                if matches!(edge.typ, EdgeType::ShuffleJoin(..)) {
+                    bail!(
+                        "Node {:?} has a shuffle join edge but no other incoming edges",
+                        node_name
+                    );
+                }
+            }
+            2 => {
+                let edge1 = incoming_edges[0];
+                let edge2 = incoming_edges[1];
+                // must either be two sides of a join or multiple direct and shuffle edges with the same type.
+                if let (EdgeType::ShuffleJoin(edge_one), EdgeType::ShuffleJoin(edge_two)) =
+                    (&edge1.typ, &edge2.typ)
+                {
+                    if edge_one == edge_two {
+                        bail!(
+                            "Node {:?} has two shuffle join edges with the same join index",
+                            node_name
+                        );
+                    } else if edge1.key != edge2.key {
+                        bail!(
+                            "Node {:?} has two shuffle join edges with different key types",
+                            node_name
+                        );
+                    }
+                } else if edge1.typ != edge2.typ {
+                    bail!(
+                        "Node {:?} has two incoming edges with different types but isn't a join",
+                        node_name
+                    );
+                } else if edge1.key != edge2.key || edge1.value != edge2.value {
+                    bail!(
+                        "Node {:?} has non-join two incoming edges with different key/value types",
+                        node_name
+                    );
+                }
+            }
+            _ => {
+                // check if there are any shuffle join edges.
+                if incoming_edges
+                    .iter()
+                    .any(|e| matches!(e.typ, EdgeType::ShuffleJoin(_)))
+                {
+                    bail!(
+                            "Node {:?} has more than two incoming edges, but some are shuffle join edges",
+                            node_name
+                        );
+                }
+                // check that the key and value are the same for all inputs
+                if incoming_edges
+                    .iter()
+                    .map(|e| (e.key.as_str(), e.value.as_str()))
+                    .collect::<HashSet<_>>()
+                    .len()
+                    > 1
+                {
+                    bail!(
+                            "Node {:?} has more than two incoming edges, but key/value types are not the same for all inputs",
+                            node_name
+                        );
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn update_parallelism(&mut self, overrides: &HashMap<String, usize>) {

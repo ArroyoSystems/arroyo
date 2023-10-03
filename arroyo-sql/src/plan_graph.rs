@@ -1125,6 +1125,7 @@ impl PlanGraph {
                     }
                 }
             }
+            SqlOperator::Union(inputs) => self.add_union(inputs),
         }
     }
 
@@ -1698,6 +1699,23 @@ impl PlanGraph {
         self.graph
             .add_edge(aggregate_index, unkey_index, unkey_edge);
         unkey_index
+    }
+
+    fn add_union(&mut self, inputs: Vec<SqlOperator>) -> NodeIndex {
+        let input_node_indices = inputs
+            .into_iter()
+            .map(|input| self.add_sql_operator(input))
+            .collect::<Vec<_>>();
+        let first_input = self.get_plan_node(input_node_indices[0]);
+        let union_node = self.insert_operator(PlanOperator::Unkey, first_input.output_type.clone());
+        for input_index in input_node_indices {
+            // add edges
+            let edge = PlanEdge {
+                edge_type: EdgeType::Forward,
+            };
+            self.graph.add_edge(input_index, union_node, edge);
+        }
+        union_node
     }
 }
 

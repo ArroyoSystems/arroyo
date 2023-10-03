@@ -579,7 +579,7 @@ fn impl_stream_node_type(
             use tracing::Instrument;
             use tokio;
 
-            if in_qs.len() != #handler_count {
+            if in_qs.len() < #handler_count {
                 panic!("Wrong number of logical inputs for node {} (expected {}, found {})",
                     task_info.operator_name, #handler_count, in_qs.len());
             }
