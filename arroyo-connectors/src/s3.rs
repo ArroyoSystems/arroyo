@@ -115,6 +115,8 @@ impl Connector for S3Connector {
         let region = pull_opt("region", opts)?;
         let compression_format = match pull_opt("compression_format", opts)?.as_str() {
             "zstd" => CompressionFormat::Zstd,
+            "gzip" => CompressionFormat::Gzip,
+            "none" => CompressionFormat::None,
             other => bail!("unsupported compression format {}", other),
         };
 
@@ -122,7 +124,12 @@ impl Connector for S3Connector {
             None,
             name,
             EmptyConfig {},
-            S3Table { bucket, prefix, region, compression_format },
+            S3Table {
+                bucket,
+                prefix,
+                region,
+                compression_format,
+            },
             schema,
         )
     }

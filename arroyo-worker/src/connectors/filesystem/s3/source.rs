@@ -11,7 +11,7 @@ use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
 use arroyo_types::{Data, Record};
 
-use crate::{engine::Context, SourceFinishType};
+use crate::{engine::Context, SourceFinishType, CompressionFormat};
 
 use super::S3Table;
 
@@ -20,7 +20,7 @@ pub struct S3SourceFunc<K: Data, T: DeserializeOwned + Data> {
     bucket: String,
     prefix: String,
     region: String,
-    compression: String,
+    compression: CompressionFormat,
     check_frequency: usize,
     total_lines_read: usize,
     _t: PhantomData<(K, T)>,
@@ -104,36 +104,40 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                 .unwrap();
             let body = get_res.body;
 
-            if self.compression == "zstd" {
-                let r = ZstdDecoder::new(BufReader::new(body.into_async_read()));
-                match self
-                    .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
-                    .await
-                {
-                    Some(finish_type) => return finish_type,
-                    None => {}
-                }
-            } else if self.compression == "gzip" {
-                let r = GzipDecoder::new(BufReader::new(body.into_async_read()));
-                match self
-                    .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
-                    .await
-                {
-                    Some(finish_type) => return finish_type,
-                    None => {}
-                }
-            } else {
-                match self
-                    .read_file(
-                        ctx,
-                        BufReader::new(body.into_async_read()).lines(),
-                        &obj_key,
-                        prev_lines_read,
-                    )
-                    .await
-                {
-                    Some(finish_type) => return finish_type,
-                    None => {}
+            match self.compression {
+            CompressionFormat::Zstd => {
+                    let r = ZstdDecoder::new(BufReader::new(body.into_async_read()));
+                    match self
+                        .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
+                        .await
+                    {
+                        Some(finish_type) => return finish_type,
+                        None => {}
+                    }
+            }
+            CompressionFormat::Gzip => {
+                    let r = GzipDecoder::new(BufReader::new(body.into_async_read()));
+                    match self
+                        .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
+                        .await
+                    {
+                        Some(finish_type) => return finish_type,
+                        None => {}
+                    }
+            }
+            CompressionFormat::None => {
+                    match self
+                        .read_file(
+                            ctx,
+                            BufReader::new(body.into_async_read()).lines(),
+                            &obj_key,
+                            prev_lines_read,
+                        )
+                        .await
+                    {
+                        Some(finish_type) => return finish_type,
+                        None => {}
+                    }
                 }
             }
         }
