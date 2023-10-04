@@ -165,12 +165,23 @@ impl Connector for FileSystemConnector {
         let target_file_size = pull_option_to_i64("target_file_size", opts)?;
         let target_part_size = pull_option_to_i64("target_part_size", opts)?;
 
-        let partition_fields = opts.remove("partition_fields").map(|value| {
-            value
-                .split(',')
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>()
-        }).unwrap_or_default();
+        let formatting_string = opts.remove("partitioning_time_format");
+        let mut partition_fields = formatting_string
+            .map(|format| vec![PartitionFieldsItem::EventTimePartitionString { format }])
+            .unwrap_or_default();
+
+        partition_fields.extend(
+            opts.remove("partition_fields")
+                .map(|value| {
+                    value
+                        .split(',')
+                        .map(|s| PartitionFieldsItem::FieldName {
+                            field: s.to_string(),
+                        })
+                        .collect::<Vec<PartitionFieldsItem>>()
+                })
+                .unwrap_or_default(),
+        );
 
         let file_settings = Some(FileSettings {
             inactivity_rollover_seconds,

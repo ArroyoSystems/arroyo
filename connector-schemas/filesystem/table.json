@@ -134,7 +134,40 @@
                     "title": "Partition Fields",
                     "type": "array",
                     "items": {
-                        "type": "string"
+                        "type": "object",
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "title": "Event Time Partition String",
+                                "properties": {
+                                    "format": {
+                                        "title": "Format",
+                                        "type": "string",
+                                        "description": "The format of the date string"
+                                    }
+                                },
+                                "required": [
+                                    "format",
+                                    "field"
+                                ],
+                                "additionalProperties": false
+                            },
+                            {
+                                "type": "object",
+                                "title": "Field Name",
+                                "properties": {
+                                    "field": {
+                                        "title": "Field",
+                                        "type": "string",
+                                        "description": "The name of the field"
+                                    }
+                                },
+                                "required": [
+                                    "field"
+                                ],
+                                "additionalProperties": false
+                            }
+                        ]
                     },
                     "description": "fields to partition the data by"
                 }

@@ -11,6 +11,7 @@ use anyhow::{bail, Result};
 use arroyo_rpc::OperatorConfig;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use chrono::{DateTime, Utc};
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{
@@ -47,6 +48,7 @@ pub struct FileSystemSink<
     R: MultiPartWriter<InputType = T> + Send + 'static,
 > {
     sender: Sender<FileSystemMessages<T>>,
+    partitioner: Option<Box<dyn Fn(&Record<K, T>) -> String + Send>>,
     checkpoint_receiver: Receiver<CheckpointData<T>>,
     _ts: PhantomData<(K, R)>,
 }
@@ -128,14 +130,36 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
             Arc::new(object_store),
             receiver,
             checkpoint_sender,
-            table,
+            table.clone(),
         );
         tokio::spawn(async move {
             writer.run().await.unwrap();
         });
+        let partitions = table.file_settings.unwrap().partition_fields;
+        let partition_func: Option<Box<dyn Fn(&Record<K, T>) -> String + Send>> =
+            if partitions.is_empty() {
+                None
+            } else {
+                Some(Box::new(move |record: &Record<K, T>| {
+                    let mut partition = vec![];
+                    for partition_field in &partitions {
+                        if let PartitionFieldsItem::EventTimePartitionString { format: pattern } =
+                            partition_field
+                        {
+                            let datetime: DateTime<Utc> = DateTime::from(record.timestamp);
+                            let formatted_time = datetime.format(pattern).to_string();
+                            partition.push(formatted_time);
+                        } else {
+                            unimplemented!("only support event time partitioning for now");
+                        }
+                    }
+                    partition.join("/")
+                }))
+            };
         TwoPhaseCommitterOperator::new(Self {
             sender,
             checkpoint_receiver,
+            partitioner: partition_func,
             _ts: PhantomData,
         })
     }
@@ -146,6 +170,7 @@ enum FileSystemMessages<T: Data> {
     Data {
         value: T,
         time: SystemTime,
+        partition: Option<String>,
     },
     Init {
         max_file_index: usize,
@@ -168,6 +193,7 @@ enum CheckpointData<T: Data> {
 #[derive(Debug, Decode, Encode, Clone, PartialEq, Eq)]
 struct InProgressFileCheckpoint<T: Data> {
     filename: String,
+    partition: Option<String>,
     data: FileCheckpointData,
     buffered_data: Vec<T>,
 }
@@ -243,7 +269,7 @@ impl CredentialProvider for S3Credentialing {
 
 struct AsyncMultipartFileSystemWriter<T: Data + Sync, R: MultiPartWriter> {
     path: Path,
-    current_writer_name: String,
+    active_writers: HashMap<Option<String>, String>,
     max_file_index: usize,
     subtask_id: usize,
     object_store: Arc<dyn ObjectStore>,
@@ -259,9 +285,16 @@ struct AsyncMultipartFileSystemWriter<T: Data + Sync, R: MultiPartWriter> {
 #[async_trait]
 pub trait MultiPartWriter {
     type InputType: Data;
-    fn new(object_store: Arc<dyn ObjectStore>, path: Path, config: &FileSystemTable) -> Self;
+    fn new(
+        object_store: Arc<dyn ObjectStore>,
+        path: Path,
+        partition: Option<String>,
+        config: &FileSystemTable,
+    ) -> Self;
 
     fn name(&self) -> String;
+
+    fn partition(&self) -> Option<String>;
 
     async fn insert_value(
         &mut self,
@@ -293,6 +326,7 @@ pub trait MultiPartWriter {
 
 async fn from_checkpoint(
     path: &Path,
+    partition: Option<String>,
     checkpoint_data: FileCheckpointData,
     object_store: Arc<dyn ObjectStore>,
 ) -> Result<Option<FileToFinish>> {
@@ -391,6 +425,7 @@ async fn from_checkpoint(
     };
     Ok(Some(FileToFinish {
         filename: path.to_string(),
+        partition,
         multi_part_upload_id: multipart_id,
         completed_parts: parts.into_iter().map(|p| p.content_id).collect(),
     }))
@@ -399,6 +434,7 @@ async fn from_checkpoint(
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct FileToFinish {
     filename: String,
+    partition: Option<String>,
     multi_part_upload_id: String,
     completed_parts: Vec<String>,
 }
@@ -471,7 +507,7 @@ where
     ) -> Self {
         Self {
             path,
-            current_writer_name: "".to_string(),
+            active_writers: HashMap::new(),
             max_file_index: 0,
             subtask_id: 0,
             object_store,
@@ -497,38 +533,20 @@ where
             tokio::select! {
                 Some(message) = self.receiver.recv() => {
                     match message {
-                        FileSystemMessages::Data{value, time} => {
-                            let Some(writer) = self.writers.get_mut(&self.current_writer_name) else {
-                                bail!("expect the current writer to be initialized");
-                            };
-                            if let Some(future) = writer.insert_value(value, time).await? {
-                                self.futures.push(future);
-                            }
+                        FileSystemMessages::Data{value, time, partition} => {
+                            self.get_or_insert_writer(&partition).insert_value(value, time).await?;
                         },
                         FileSystemMessages::Init {max_file_index, subtask_id, recovered_files } => {
-                            if let Some(writer) = self.writers.get_mut(&self.current_writer_name) {
-                                if let Some(future) = writer.close()? {
-                                    self.futures.push(future);
-                                }
-                            }
                             self.max_file_index = max_file_index;
                             self.subtask_id = subtask_id;
-                            let new_writer = self.new_writer();
-                            self.current_writer_name = new_writer.name();
-                            self.writers.insert(new_writer.name(), new_writer);
                             for recovered_file in recovered_files {
                                 if let Some(file_to_finish) = from_checkpoint(
-                                     &Path::parse(&recovered_file.filename)?, recovered_file.data, self.object_store.clone()).await? {
+                                     &Path::parse(&recovered_file.filename)?, recovered_file.partition.clone(), recovered_file.data, self.object_store.clone()).await? {
                                         self.add_part_to_finish(file_to_finish);
                                      }
 
                                 for value in recovered_file.buffered_data {
-                                    let Some(writer) = self.writers.get_mut(&self.current_writer_name) else {
-                                        bail!("expect the current writer to be initialized");
-                                    };
-                                    if let Some(future) = writer.insert_value(value, SystemTime::now()).await? {
-                                        self.futures.push(future);
-                                    }
+                                    self.get_or_insert_writer(&recovered_file.partition).insert_value(value, SystemTime::now()).await?;
                                 }
                             }
                         },
@@ -554,18 +572,21 @@ where
                 }
                 _ = tokio::time::sleep_until(next_policy_check) => {
                     next_policy_check = tokio::time::Instant::now() + Duration::from_millis(100);
-                    if let Some(writer) = self.writers.get_mut(&self.current_writer_name) {
-                        if let Some(stats) = writer.stats() {
-                            if self.rolling_policy.should_roll(&stats){
-                            if let Some(future) = writer.close()? {
+                    let mut removed_partitions = vec![];
+                    for (partition, filename) in &self.active_writers {
+                            let writer = self.writers.get_mut(filename).unwrap();
+                            if let Some(stats) = writer.stats() {
+                            if self.rolling_policy.should_roll(&stats) {
+                                removed_partitions.push(partition.clone());
+                                if let Some(future) = writer.close()? {
                                 self.futures.push(future);
+                                }
+                                self.max_file_index += 1;
                             }
-                            self.max_file_index += 1;
-                            let new_writer = self.new_writer();
-                            self.current_writer_name = new_writer.name();
-                            self.writers.insert(new_writer.name(), new_writer);
                         }
                     }
+                    for partition in removed_partitions {
+                        self.active_writers.remove(&partition);
                     }
                 }
                 else => {
@@ -576,14 +597,33 @@ where
         Ok(())
     }
 
-    fn new_writer(&mut self) -> R {
-        R::new(
-            self.object_store.clone(),
-            format!(
+    fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut R {
+        if !self.active_writers.contains_key(partition) {
+            let new_writer = self.new_writer(partition);
+            self.active_writers
+                .insert(partition.clone(), new_writer.name());
+            self.writers.insert(new_writer.name(), new_writer);
+        }
+        self.writers
+            .get_mut(self.active_writers.get(partition).unwrap())
+            .unwrap()
+    }
+
+    fn new_writer(&mut self, partition: &Option<String>) -> R {
+        let path = match partition {
+            Some(sub_bucket) => format!(
+                "{}/{}/{:0>5}-{:0>3}",
+                self.path, sub_bucket, self.max_file_index, self.subtask_id
+            ),
+            None => format!(
                 "{}/{:0>5}-{:0>3}",
                 self.path, self.max_file_index, self.subtask_id
-            )
-            .into(),
+            ),
+        };
+        R::new(
+            self.object_store.clone(),
+            path.into(),
+            partition.clone(),
             &self.properties,
         )
     }
@@ -630,6 +670,7 @@ where
     async fn finish_file(&mut self, file_to_finish: FileToFinish) -> Result<()> {
         let FileToFinish {
             filename,
+            partition: _,
             multi_part_upload_id,
             completed_parts,
         } = file_to_finish;
@@ -652,7 +693,8 @@ where
     }
 
     async fn stop(&mut self) -> Result<()> {
-        if let Some(writer) = self.writers.get_mut(&self.current_writer_name) {
+        for (_sub_bucket, filename) in &self.active_writers {
+            let mut writer = self.writers.remove(filename).unwrap();
             let close_future: Option<BoxedTryFuture<MultipartCallbackWithName>> = writer.close()?;
             if let Some(future) = close_future {
                 self.futures.push(future);
@@ -671,6 +713,7 @@ where
             let in_progress_checkpoint =
                 CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
                     filename: filename.clone(),
+                    partition: writer.partition(),
                     data: writer.get_in_progress_checkpoint(),
                     buffered_data,
                 });
@@ -681,6 +724,7 @@ where
                 .send(CheckpointData::InProgressFileCheckpoint(
                     InProgressFileCheckpoint {
                         filename: file_to_finish.filename.clone(),
+                        partition: file_to_finish.partition.clone(),
                         data: FileCheckpointData::MultiPartWriterUploadCompleted {
                             multi_part_upload_id: file_to_finish.multi_part_upload_id.clone(),
                             completed_parts: file_to_finish.completed_parts.clone(),
@@ -700,6 +744,7 @@ type BoxedTryFuture<T> = Pin<Box<dyn Future<Output = Result<T>> + Send>>;
 struct MultipartManager {
     object_store: Arc<dyn ObjectStore>,
     location: Path,
+    partition: Option<String>,
     multipart_id: Option<MultipartId>,
     pushed_parts: Vec<UploadPartOrBufferedData>,
     uploaded_parts: usize,
@@ -709,10 +754,11 @@ struct MultipartManager {
 }
 
 impl MultipartManager {
-    fn new(object_store: Arc<dyn ObjectStore>, location: Path) -> Self {
+    fn new(object_store: Arc<dyn ObjectStore>, location: Path, partition: Option<String>) -> Self {
         Self {
             object_store,
             location,
+            partition,
             multipart_id: None,
             pushed_parts: vec![],
             uploaded_parts: 0,
@@ -825,6 +871,7 @@ impl MultipartManager {
         } else {
             Ok(Some(FileToFinish {
                 filename: self.name(),
+                partition: self.partition.clone(),
                 multi_part_upload_id: self
                     .multipart_id
                     .as_ref()
@@ -960,6 +1007,7 @@ impl MultipartManager {
         }
         FileToFinish {
             filename: self.name(),
+            partition: self.partition.clone(),
             multi_part_upload_id: self
                 .multipart_id
                 .as_ref()
@@ -1016,20 +1064,29 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> Mul
 {
     type InputType = BB::InputType;
 
-    fn new(object_store: Arc<dyn ObjectStore>, path: Path, config: &FileSystemTable) -> Self {
+    fn new(
+        object_store: Arc<dyn ObjectStore>,
+        path: Path,
+        partition: Option<String>,
+        config: &FileSystemTable,
+    ) -> Self {
         let batch_builder = BB::new(config);
         let batch_buffering_writer = BBW::new(config);
         let path = format!("{}.{}", path, BBW::suffix()).into();
         Self {
             batch_builder,
             batch_buffering_writer,
-            multipart_manager: MultipartManager::new(object_store, path),
+            multipart_manager: MultipartManager::new(object_store, path, partition),
             stats: None,
         }
     }
 
     fn name(&self) -> String {
         self.multipart_manager.name()
+    }
+
+    fn partition(&self) -> Option<String> {
+        self.multipart_manager.partition.clone()
     }
 
     async fn insert_value(
@@ -1223,11 +1280,17 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
     }
 
     async fn insert_record(&mut self, record: &Record<K, T>) -> Result<()> {
+        let partition = self
+            .partitioner
+            .as_ref()
+            .map(|partition_fn| partition_fn(record));
         let value = record.value.clone();
+
         self.sender
             .send(FileSystemMessages::Data {
                 value,
                 time: record.timestamp,
+                partition,
             })
             .await?;
         Ok(())
@@ -1279,6 +1342,7 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
                 }
                 CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
                     filename,
+                    partition,
                     data,
                     buffered_data,
                 }) => {
@@ -1291,6 +1355,7 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
                             filename.clone(),
                             FileToFinish {
                                 filename,
+                                partition,
                                 multi_part_upload_id,
                                 completed_parts,
                             },
@@ -1298,6 +1363,7 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
                     } else {
                         active_files.push(InProgressFileCheckpoint {
                             filename,
+                            partition,
                             data,
                             buffered_data,
                         })
