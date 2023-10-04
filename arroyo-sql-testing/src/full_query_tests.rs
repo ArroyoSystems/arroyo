@@ -420,3 +420,19 @@ INSERT INTO raw_sink
 SELECT 'test'
 FROM nexmark;
 "}
+
+full_pipeline_codegen! {"polling_http_source",
+"CREATE TABLE polling_source (
+  value TEXT NOT NULL
+) WITH (
+  connector = 'polling_http',
+  endpoint = 'http://localhost:9091',
+  headers = 'Authorization: Bearer 1234,Content-Type: application/json',
+  method = 'POST',
+  body = '{}',
+  format = 'raw_string'
+);
+
+SELECT value
+FROM polling_source;
+"}

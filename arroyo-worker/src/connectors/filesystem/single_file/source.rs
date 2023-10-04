@@ -62,7 +62,7 @@ impl<K: Data, T: DeserializeOwned + Data> FileSourceFunc<K, T> {
         let mut i = 0;
 
         while let Some(s) = lines.next_line().await.unwrap() {
-            while i < self.lines_read {
+            if i < self.lines_read {
                 i += 1;
                 continue;
             }

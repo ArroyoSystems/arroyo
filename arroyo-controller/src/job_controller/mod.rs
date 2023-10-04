@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    env,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -7,14 +8,15 @@ use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
 use arroyo_datastream::Program;
 use arroyo_rpc::grpc::{
-    worker_grpc_client::WorkerGrpcClient, CheckpointReq, JobFinishedReq, StopExecutionReq,
-    StopMode, TaskCheckpointEventType,
+    worker_grpc_client::WorkerGrpcClient, CheckpointReq, JobFinishedReq, LoadCompactedDataReq,
+    StopExecutionReq, StopMode, TaskCheckpointEventType,
 };
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{to_micros, WorkerId};
 
 use deadpool_postgres::Pool;
 
+use arroyo_state::parquet::ParquetBackend;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
@@ -116,7 +118,8 @@ impl RunningJobModel {
                                 if matches!(c.event_type(), TaskCheckpointEventType::FinishedCommit)
                                 {
                                     committing_state
-                                        .subtask_committed(c.operator_id, c.subtask_index)
+                                        .subtask_committed(c.operator_id.clone(), c.subtask_index);
+                                    self.compact_state().await?;
                                 } else {
                                     warn!("unexpected checkpoint event type {:?}", c.event_type())
                                 }
@@ -281,6 +284,45 @@ impl RunningJobModel {
         Ok(())
     }
 
+    async fn compact_state(&mut self) -> anyhow::Result<()> {
+        let compaction_enabled = match env::var("COMPACTION_ENABLED") {
+            Ok(val) => val.to_lowercase() == "true",
+            Err(_) => false,
+        };
+
+        if !compaction_enabled {
+            info!("Compaction is disabled, skipping compaction");
+            return Ok(());
+        }
+
+        info!("Compacting state");
+
+        let mut worker_clients: Vec<WorkerGrpcClient<Channel>> =
+            self.workers.values().map(|w| w.connect.clone()).collect();
+        for (operator_id, parallelism) in self.operator_parallelism.clone() {
+            // compact the operator's state and notify the workers to load the new files
+            if let Ok(Some(compaction_result)) = ParquetBackend::compact_operator(
+                parallelism,
+                self.job_id.clone(),
+                operator_id.clone(),
+                self.epoch.clone(),
+            )
+            .await
+            {
+                for worker_client in &mut worker_clients {
+                    worker_client
+                        .load_compacted_data(LoadCompactedDataReq {
+                            operator_id: compaction_result.operator_id.clone(),
+                            backend_data_to_drop: compaction_result.backend_data_to_drop.clone(),
+                            backend_data_to_load: compaction_result.backend_data_to_load.clone(),
+                        })
+                        .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn finish_checkpoint_if_done(&mut self, pool: &Pool) -> anyhow::Result<()> {
         if self.checkpoint_state.as_ref().unwrap().done() {
             let state = self.checkpoint_state.take().unwrap();
@@ -297,6 +339,8 @@ impl RunningJobModel {
                         checkpointing.finish(pool).await?;
                         self.last_checkpoint = Instant::now();
                         self.checkpoint_state = None;
+                        self.compact_state().await?;
+
                         info!(
                             message = "Finished checkpointing",
                             job_id = self.job_id,
@@ -341,7 +385,7 @@ impl RunningJobModel {
         Ok(())
     }
 
-    pub fn compaction_needed(&self) -> Option<u32> {
+    pub fn cleanup_needed(&self) -> Option<u32> {
         if self.epoch - self.min_epoch > CHECKPOINTS_TO_KEEP && self.epoch % COMPACT_EVERY == 0 {
             Some(self.epoch - CHECKPOINTS_TO_KEEP)
         } else {
@@ -396,7 +440,7 @@ pub struct JobController {
     pool: Pool,
     config: JobConfig,
     model: RunningJobModel,
-    compacting_task: Option<JoinHandle<anyhow::Result<u32>>>,
+    cleanup_task: Option<JoinHandle<anyhow::Result<u32>>>,
 }
 
 impl std::fmt::Debug for JobController {
@@ -404,7 +448,7 @@ impl std::fmt::Debug for JobController {
         f.debug_struct("JobController")
             .field("config", &self.config)
             .field("model", &self.model)
-            .field("compacting", &self.compacting_task.is_some())
+            .field("cleaning", &self.cleanup_task.is_some())
             .finish()
     }
 }
@@ -470,7 +514,7 @@ impl JobController {
                 program,
             },
             config,
-            compacting_task: None,
+            cleanup_task: None,
         }
     }
 
@@ -490,8 +534,8 @@ impl JobController {
         }
 
         // check on compaction
-        if self.compacting_task.is_some() && self.compacting_task.as_ref().unwrap().is_finished() {
-            let task = self.compacting_task.take().unwrap();
+        if self.cleanup_task.is_some() && self.cleanup_task.as_ref().unwrap().is_finished() {
+            let task = self.cleanup_task.take().unwrap();
 
             match task.await {
                 Ok(Ok(min_epoch)) => {
@@ -504,7 +548,7 @@ impl JobController {
                 }
                 Ok(Err(e)) => {
                     error!(
-                        message = "compaction failed",
+                        message = "cleanup failed",
                         job_id = self.config.id,
                         error = format!("{:?}", e)
                     );
@@ -514,7 +558,7 @@ impl JobController {
                 }
                 Err(e) => {
                     error!(
-                        message = "compaction panicked",
+                        message = "cleanup panicked",
                         job_id = self.config.id,
                         error = format!("{:?}", e)
                     );
@@ -525,9 +569,9 @@ impl JobController {
             }
         }
 
-        if let Some(new_epoch) = self.model.compaction_needed() {
-            if self.compacting_task.is_none() && self.model.checkpoint_state.is_none() {
-                self.compacting_task = Some(self.start_compaction(new_epoch));
+        if let Some(new_epoch) = self.model.cleanup_needed() {
+            if self.cleanup_task.is_none() && self.model.checkpoint_state.is_none() {
+                self.cleanup_task = Some(self.start_cleanup(new_epoch));
             }
         }
 
@@ -535,7 +579,7 @@ impl JobController {
         if self.model.checkpoint_state.is_some() {
             self.model.finish_checkpoint_if_done(&self.pool).await?;
         } else if self.model.last_checkpoint.elapsed() > self.config.checkpoint_interval
-            && self.compacting_task.is_none()
+            && self.cleanup_task.is_none()
         {
             // or do we need to start checkpointing?
             self.checkpoint(false).await?;
@@ -633,12 +677,12 @@ impl JobController {
         self.model.operator_parallelism.get(op).cloned()
     }
 
-    fn start_compaction(&self, new_min: u32) -> JoinHandle<anyhow::Result<u32>> {
+    fn start_cleanup(&mut self, new_min: u32) -> JoinHandle<anyhow::Result<u32>> {
         let min_epoch = self.model.min_epoch.max(1);
         let job_id = self.config.id.clone();
         let pool = self.pool.clone();
 
-        info!(message = "Starting compaction", job_id, min_epoch, new_min);
+        info!(message = "Starting cleaning", job_id, min_epoch, new_min);
         let start = Instant::now();
         let cur_epoch = self.model.epoch;
 
@@ -646,7 +690,7 @@ impl JobController {
             let checkpoint = StateBackend::load_checkpoint_metadata(&job_id, cur_epoch)
                 .await
                 .ok_or_else(|| {
-                    anyhow::anyhow!("Couldn't find checkpoint for job during compaction")
+                    anyhow::anyhow!("Couldn't find checkpoint for job during cleaning")
                 })?;
 
             let c = pool.get().await?;
@@ -654,14 +698,14 @@ impl JobController {
                 .bind(&c, &job_id, &(min_epoch as i32), &(new_min as i32))
                 .await?;
 
-            StateBackend::compact_checkpoint(checkpoint, min_epoch, new_min).await?;
+            StateBackend::cleanup_checkpoint(checkpoint, min_epoch, new_min).await?;
 
             controller_queries::mark_checkpoints_compacted()
                 .bind(&c, &job_id, &(new_min as i32))
                 .await?;
 
             info!(
-                message = "Finished compaction",
+                message = "Finished cleaning",
                 job_id,
                 min_epoch,
                 new_min,

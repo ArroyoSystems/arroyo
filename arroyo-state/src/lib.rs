@@ -1,27 +1,33 @@
+use crate::tables::DataTuple;
 use anyhow::Result;
 use arroyo_rpc::grpc::{
     CheckpointMetadata, OperatorCheckpointMetadata, TableDeleteBehavior, TableDescriptor,
     TableType, TableWriteBehavior,
 };
-use arroyo_rpc::ControlResp;
+use arroyo_rpc::{CompactionResult, ControlResp};
 use arroyo_types::{CheckpointBarrier, Data, Key, TaskInfo};
 use async_trait::async_trait;
 use bincode::config::Configuration;
+use bincode::{Decode, Encode};
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::ops::RangeInclusive;
 use std::time::{Duration, SystemTime};
-use tables::{
-    GlobalKeyedState, GlobalKeyedStateCache, KeyTimeMultiMap, KeyTimeMultiMapCache, KeyedState,
-    KeyedStateCache, TimeKeyMap, TimeKeyMapCache,
-};
+use tables::global_keyed_map::{GlobalKeyedState, GlobalKeyedStateCache};
+use tables::key_time_multi_map::{KeyTimeMultiMap, KeyTimeMultiMapCache};
+use tables::keyed_map::{KeyedState, KeyedStateCache};
+use tables::time_key_map::{TimeKeyMap, TimeKeyMapCache};
+use tables::{global_keyed_map, key_time_multi_map, keyed_map, time_key_map};
 use tokio::sync::mpsc::Sender;
 
+mod metrics;
 pub mod parquet;
 pub mod tables;
 
 pub const BINCODE_CONFIG: Configuration = bincode::config::standard();
+pub const FULL_KEY_RANGE: RangeInclusive<u64> = 0..=u64::MAX;
 
 pub type StateBackend = parquet::ParquetBackend;
 
@@ -50,6 +56,25 @@ pub fn timestamp_table(
         delete_behavior: delete_behavior as i32,
         write_behavior: write_behavior as i32,
         retention_micros: retention.as_micros() as u64,
+    }
+}
+
+#[derive(Debug, Encode, Decode)]
+#[repr(u8)]
+pub enum DataOperation {
+    Insert = 0,
+    DeleteKey = 1, // delete single key/value pair of Global/TimeKeyMap
+                   // DeleteValue,  // delete single value of a KeyTimeMultiMap
+                   // DeleteBefore, // delete all values for key before timestamp (only for KeyTimeMultiMap)
+}
+
+impl From<u8> for DataOperation {
+    fn from(op: u8) -> Self {
+        match op {
+            0 => DataOperation::Insert,
+            1 => DataOperation::DeleteKey,
+            _ => panic!("Unknown DataOperation {}", op),
+        }
     }
 }
 
@@ -82,17 +107,19 @@ pub trait BackingStore {
 
     fn name() -> &'static str;
 
-    // parepares a checkpoint to be written
+    fn task_info(&self) -> &TaskInfo;
+
+    // prepares a checkpoint to be written
     #[allow(unused_variables)]
     async fn initialize_checkpoint(job_id: &str, epoch: u32, operators: &[&str]) -> Result<()> {
         Ok(())
     }
 
-    async fn complete_operator_checkpoint(metadata: OperatorCheckpointMetadata);
+    async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata);
 
     async fn complete_checkpoint(metadata: CheckpointMetadata);
 
-    async fn compact_checkpoint(
+    async fn cleanup_checkpoint(
         metadata: CheckpointMetadata,
         old_min_epoch: u32,
         new_min_epoch: u32,
@@ -104,9 +131,9 @@ pub trait BackingStore {
         watermark: Option<SystemTime>,
     ) -> u32;
 
-    async fn get_data_triples<K: Key, V: Data>(&self, table: char) -> Vec<(SystemTime, K, V)>;
+    async fn get_data_tuples<K: Key, V: Data>(&self, table: char) -> Vec<DataTuple<K, V>>;
 
-    async fn write_data_triple<K: Key, V: Data>(
+    async fn write_data_tuple<K: Key, V: Data>(
         &mut self,
         table: char,
         table_type: TableType,
@@ -115,10 +142,21 @@ pub trait BackingStore {
         value: &mut V,
     );
 
+    async fn delete_data_tuple<K: Key>(
+        &mut self,
+        table: char,
+        table_type: TableType,
+        timestamp: SystemTime,
+        key: &mut K,
+    );
+
     async fn write_key_value<K: Key, V: Data>(&mut self, table: char, key: &mut K, value: &mut V);
+    async fn delete_key_value<K: Key>(&mut self, table: char, key: &mut K);
 
     async fn get_global_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
     async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
+
+    async fn load_compacted(&mut self, compaction: CompactionResult);
 }
 
 pub struct StateStore<S: BackingStore> {
@@ -163,6 +201,7 @@ impl<S: BackingStore> StateStore<S> {
     ) -> Self {
         let backend =
             S::from_checkpoint(task_info, checkpoint_metadata.clone(), tables.clone(), tx).await;
+
         StateStore {
             backend,
             task_info: task_info.clone(),
@@ -197,7 +236,7 @@ impl<S: BackingStore> StateStore<S> {
                     .await;
                     Box::new(cache)
                 }
-                None => Box::<tables::TimeKeyMapCache<K, V>>::default(),
+                None => Box::<time_key_map::TimeKeyMapCache<K, V>>::default(),
             };
             e.insert(cache);
         }
@@ -232,7 +271,7 @@ impl<S: BackingStore> StateStore<S> {
                     .await;
                     Box::new(cache)
                 }
-                None => Box::<tables::KeyTimeMultiMapCache<K, V>>::default(),
+                None => Box::<key_time_multi_map::KeyTimeMultiMapCache<K, V>>::default(),
             };
             e.insert(cache);
         }
@@ -261,7 +300,7 @@ impl<S: BackingStore> StateStore<S> {
                         GlobalKeyedStateCache::<K, V>::from_checkpoint(&self.backend, table).await;
                     Box::new(cache)
                 }
-                None => Box::<tables::GlobalKeyedStateCache<K, V>>::default(),
+                None => Box::<global_keyed_map::GlobalKeyedStateCache<K, V>>::default(),
             };
             e.insert(cache);
         }
@@ -286,7 +325,7 @@ impl<S: BackingStore> StateStore<S> {
                         KeyedStateCache::<K, V>::from_checkpoint(&self.backend, table).await;
                     Box::new(cache)
                 }
-                None => Box::<tables::KeyedStateCache<K, V>>::default(),
+                None => Box::<keyed_map::KeyedStateCache<K, V>>::default(),
             };
             e.insert(cache);
         }
@@ -306,23 +345,33 @@ impl<S: BackingStore> StateStore<S> {
     pub async fn checkpoint(&mut self, barrier: CheckpointBarrier, watermark: Option<SystemTime>) {
         self.backend.checkpoint(barrier, watermark).await;
     }
+
+    pub async fn load_compacted(&mut self, compaction: CompactionResult) {
+        self.backend.load_compacted(compaction).await;
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
+    use arroyo_rpc::grpc::{
+        CheckpointMetadata, OperatorCheckpointMetadata, TableDeleteBehavior, TableDescriptor,
+        TableWriteBehavior,
+    };
+    use std::env;
     use test_case::test_case;
     use tokio::sync::mpsc::Receiver;
 
-    use arroyo_rpc::ControlResp;
+    use arroyo_rpc::{CompactionResult, ControlResp};
     use rand::RngCore;
     use std::time::{Duration, SystemTime};
     use tokio::sync::mpsc::channel;
 
     use crate::parquet::ParquetBackend;
-    use crate::tables::{KeyTimeMultiMap, TimeKeyMap};
+    use crate::tables::key_time_multi_map::KeyTimeMultiMap;
+    use crate::tables::keyed_map::KeyedState;
+    use crate::tables::time_key_map::TimeKeyMap;
     use crate::{global_table, timestamp_table, BackingStore, StateStore};
-    use arroyo_types::{CheckpointBarrier, TaskInfo};
+    use arroyo_types::{to_micros, CheckpointBarrier, TaskInfo};
 
     fn default_tables() -> Vec<TableDescriptor> {
         vec![
@@ -355,6 +404,101 @@ mod test {
         )
     }
 
+    async fn parquet_for_test_from_checkpoint(
+        job_id: &str,
+        operator_id: &str,
+        checkpoint_metadata: &CheckpointMetadata,
+    ) -> (StateStore<ParquetBackend>, Receiver<ControlResp>) {
+        let (tx, rx) = channel(10);
+        let task_info = TaskInfo::for_test(&job_id, &operator_id);
+
+        (
+            StateStore::<ParquetBackend>::from_checkpoint(
+                &task_info,
+                checkpoint_metadata.clone(),
+                default_tables(),
+                tx,
+            )
+            .await,
+            rx,
+        )
+    }
+
+    async fn do_compaction(job_id: &str, operator_id: &str, epoch: u32) -> CompactionResult {
+        env::set_var("MIN_FILES_TO_COMPACT", "2");
+        let result = match ParquetBackend::compact_operator(
+            1,
+            job_id.to_string(),
+            operator_id.to_string(),
+            epoch,
+        )
+        .await
+        {
+            Ok(Some(result)) => result,
+            Ok(None) => {
+                panic!("no compaction result")
+            }
+            Err(e) => {
+                panic!("compaction failed: {:?}", e)
+            }
+        };
+        result
+    }
+
+    async fn do_checkpoint(
+        ss: &mut StateStore<impl BackingStore>,
+        job_id: &str,
+        operator_id: &str,
+        epoch: u32,
+        rx: &mut Receiver<ControlResp>,
+    ) -> CheckpointMetadata {
+        ss.backend
+            .checkpoint(
+                CheckpointBarrier {
+                    epoch,
+                    min_epoch: 0,
+                    timestamp: SystemTime::now(),
+                    then_stop: false,
+                },
+                Some(SystemTime::UNIX_EPOCH),
+            )
+            .await;
+        // wait until we get confirmation on the queue
+
+        let message = match rx.recv().await {
+            Some(ControlResp::CheckpointCompleted(c)) => c,
+            _ => panic!("Received unexpected message on command queue"),
+        };
+
+        ParquetBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
+            job_id: job_id.to_string(),
+            operator_id: operator_id.to_string(),
+            epoch,
+            start_time: to_micros(SystemTime::now()),
+            finish_time: to_micros(SystemTime::now()),
+            min_watermark: None,
+            max_watermark: None,
+            has_state: true,
+            tables: default_tables(),
+            backend_data: message.subtask_metadata.backend_data,
+            bytes: 5,
+        })
+        .await;
+
+        let checkpoint_metadata: CheckpointMetadata = CheckpointMetadata {
+            job_id: job_id.to_string(),
+            epoch,
+            min_epoch: 1,
+            start_time: 0,
+            finish_time: 0,
+            operator_ids: vec![operator_id.to_string()],
+        };
+
+        ParquetBackend::complete_checkpoint(checkpoint_metadata.clone()).await;
+
+        checkpoint_metadata
+    }
+
     #[test_case(parquet_for_test().await; "parquet store")]
     #[tokio::test]
     async fn test_global(p: (StateStore<impl BackingStore>, Receiver<ControlResp>)) {
@@ -381,6 +525,8 @@ mod test {
     #[tokio::test]
     async fn test_key_time_multi_map(p: (StateStore<impl BackingStore>, Receiver<ControlResp>)) {
         let (mut ss, mut rx) = p;
+        let job_id = ss.task_info.job_id.clone();
+        let operator_id = ss.task_info.operator_id.clone();
         let mut ks: KeyTimeMultiMap<String, i32, _> = ss.get_key_time_multi_map('t').await;
 
         let k1 = "k1";
@@ -406,23 +552,7 @@ mod test {
             vec![&1, &2, &3, &4]
         );
 
-        ss.backend
-            .checkpoint(
-                CheckpointBarrier {
-                    epoch: 1,
-                    min_epoch: 0,
-                    timestamp: SystemTime::now(),
-                    then_stop: false,
-                },
-                Some(SystemTime::now()),
-            )
-            .await;
-        // wait until we get confirmation on the queue
-        if let Some(ControlResp::CheckpointCompleted(c)) = rx.recv().await {
-            assert_eq!(c.checkpoint_epoch, 1);
-        } else {
-            panic!("Received unexpected message on command queue");
-        }
+        do_checkpoint(&mut ss, &job_id, &operator_id, 1, &mut rx).await;
 
         let mut ks = ss.get_key_time_multi_map::<String, i32>('t').await;
 
@@ -441,6 +571,8 @@ mod test {
     #[tokio::test]
     async fn test_time_key_map(p: (StateStore<impl BackingStore>, Receiver<ControlResp>)) {
         let (mut ss, mut rx) = p;
+        let job_id = ss.task_info.job_id.clone();
+        let operator_id = ss.task_info.operator_id.clone();
 
         let mut ks: TimeKeyMap<usize, i32, _> = ss.get_time_key_map('t', None).await;
 
@@ -462,23 +594,7 @@ mod test {
             vec![(t1, &1, &2), (t2, &1, &3), (t3, &1, &4), (t4, &1, &5)]
         );
 
-        ss.backend
-            .checkpoint(
-                CheckpointBarrier {
-                    epoch: 1,
-                    min_epoch: 0,
-                    timestamp: SystemTime::now(),
-                    then_stop: false,
-                },
-                Some(SystemTime::now()),
-            )
-            .await;
-        // wait until we get confirmation on the queue
-        if let Some(ControlResp::CheckpointCompleted(c)) = rx.recv().await {
-            assert_eq!(c.checkpoint_epoch, 1);
-        } else {
-            panic!("Received unexpected message on command queue");
-        }
+        do_checkpoint(&mut ss, &job_id, &operator_id, 1, &mut rx).await;
 
         let mut ks = ss.get_time_key_map::<usize, i32>('t', None).await;
 
@@ -487,5 +603,80 @@ mod test {
             ks.get_all().await,
             vec![(t1, &1, &2), (t2, &1, &3), (t3, &1, &4), (t4, &1, &5)]
         );
+    }
+
+    #[test_case(parquet_for_test().await; "parquet store")]
+    #[tokio::test]
+    async fn test_key_state_compaction(p: (StateStore<impl BackingStore>, Receiver<ControlResp>)) {
+        let (mut ss, mut rx) = p;
+        let job_id = ss.task_info.job_id.clone();
+        let operator_id = ss.task_info.operator_id.clone();
+
+        // insert a key/value
+
+        let mut ks: KeyedState<usize, i32, _> = ss.get_key_state('t').await;
+        let t1 = SystemTime::now();
+        ks.insert(t1, 1, 1).await;
+        assert_eq!(Some(&1), ks.get(&mut 1));
+
+        // checkpoint 1
+
+        do_checkpoint(&mut ss, &job_id, &operator_id, 1, &mut rx).await;
+
+        // update key
+
+        let mut ks: KeyedState<usize, i32, _> = ss.get_key_state('t').await;
+        ks.insert(t1, 1, 2).await;
+
+        // checkpoint 2
+
+        do_checkpoint(&mut ss, &job_id, &operator_id, 2, &mut rx).await;
+
+        // compact epoch 1 and 2 and load compacted data
+
+        let result = do_compaction(&job_id, &operator_id, 2).await;
+        assert_eq!(2, result.backend_data_to_drop.len());
+        assert_eq!(1, result.backend_data_to_load.len());
+        ss.load_compacted(result).await;
+
+        // update key again
+
+        let mut ks: KeyedState<usize, i32, _> = ss.get_key_state('t').await;
+        ks.insert(t1, 1, 3).await;
+
+        // checkpoint 3
+
+        do_checkpoint(&mut ss, &job_id, &operator_id, 3, &mut rx).await;
+
+        // delete key
+
+        let mut ks: KeyedState<usize, i32, _> = ss.get_key_state('t').await;
+        ks.remove(&mut 1).await;
+
+        // checkpoint 4
+
+        do_checkpoint(&mut ss, &job_id, &operator_id, 4, &mut rx).await;
+
+        // compact epoch 3 and 4
+
+        let result = do_compaction(&job_id, &operator_id, 4).await;
+
+        assert_eq!(2, result.backend_data_to_drop.len());
+        assert_eq!(1, result.backend_data_to_load.len());
+        ss.load_compacted(result).await;
+
+        // checkpoint 5 (contains both previous compactions)
+
+        let checkpoint5 = do_checkpoint(&mut ss, &job_id, &operator_id, 5, &mut rx).await;
+
+        // restore from epoch 5
+
+        let (mut restored, _) =
+            parquet_for_test_from_checkpoint(&job_id, &operator_id, &checkpoint5).await;
+
+        // check that the key is gone
+
+        let ks: KeyedState<usize, i32, _> = restored.get_key_state('t').await;
+        assert_eq!(None, ks.get(&mut 1));
     }
 }

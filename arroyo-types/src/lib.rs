@@ -123,6 +123,7 @@ pub const K8S_WORKER_RESOURCES_ENV: &str = "K8S_WORKER_RESOURCES";
 pub const K8S_WORKER_SLOTS_ENV: &str = "K8S_WORKER_SLOTS";
 pub const K8S_WORKER_VOLUMES_ENV: &str = "K8S_WORKER_VOLUMES";
 pub const K8S_WORKER_VOLUME_MOUNTS_ENV: &str = "K8S_WORKER_VOLUME_MOUNTS";
+pub const K8S_WORKER_CONFIG_MAP_ENV: &str = "K8S_WORKER_CONFIG_MAP";
 
 // telemetry configuration
 pub const DISABLE_TELEMETRY_ENV: &str = "DISABLE_TELEMETRY";
@@ -177,8 +178,7 @@ pub mod ports {
     pub const NODE_ADMIN: u16 = 9291;
 
     pub const API_HTTP: u16 = 8000;
-    pub const API_GRPC: u16 = 8001;
-    pub const API_ADMIN: u16 = 8002;
+    pub const API_ADMIN: u16 = 8001;
 
     pub const COMPILER_GRPC: u16 = 9000;
     pub const COMPILER_ADMIN: u16 = 9001;
@@ -581,7 +581,6 @@ impl TaskInfo {
         labels.insert("operator_id".to_string(), self.operator_id.clone());
         labels.insert("subtask_idx".to_string(), format!("{}", self.task_index));
         labels.insert("operator_name".to_string(), self.operator_name.clone());
-        labels.insert("job_name".to_string(), self.job_id.clone());
         labels
     }
 }
@@ -817,5 +816,59 @@ impl TryFrom<&str> for DateTruncPrecision {
 
             _ => Err(format!("'{}' is not a valid DateTruncPrecision", value)),
         }
+    }
+}
+
+pub fn server_for_hash(x: u64, n: usize) -> usize {
+    let range_size = u64::MAX / (n as u64);
+    (n - 1).min((x / range_size) as usize)
+}
+
+pub fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
+    let range_size = u64::MAX / (n as u64);
+    let start = range_size * (i as u64);
+    let end = if i + 1 == n {
+        u64::MAX
+    } else {
+        start + range_size - 1
+    };
+    start..=end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_range_for_server() {
+        let n = 6;
+
+        for i in 0..(n - 1) {
+            let range1 = range_for_server(i, n);
+            let range2 = range_for_server(i + 1, n);
+
+            assert_eq!(*range1.end() + 1, *range2.start(), "Ranges not adjacent");
+        }
+
+        let last_range = range_for_server(n - 1, n);
+        assert_eq!(
+            *last_range.end(),
+            u64::MAX,
+            "Last range does not contain u64::MAX"
+        );
+    }
+
+    #[test]
+    fn test_server_for_hash() {
+        let n = 2;
+        let x = u64::MAX;
+
+        let server_index = server_for_hash(x, n);
+        let server_range = range_for_server(server_index, n);
+
+        assert!(
+            server_range.contains(&x),
+            "u64::MAX is not in the correct range"
+        );
     }
 }

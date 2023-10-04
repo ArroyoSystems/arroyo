@@ -7,7 +7,7 @@ use arroyo_rpc::{
     grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior},
     CheckpointEvent, ControlMessage,
 };
-use arroyo_state::tables::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{Data, Key, Record, TaskInfo};
 use async_trait::async_trait;
 use tracing::warn;

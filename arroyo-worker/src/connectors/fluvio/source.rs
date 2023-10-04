@@ -6,7 +6,7 @@ use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_rpc::types::Format;
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage};
-use arroyo_state::tables::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
 use fluvio::dataplane::link::ErrorCode;
@@ -240,6 +240,9 @@ where
                         }
                         Some(ControlMessage::Commit{..}) => {
                             return Err(UserError::new("Fluvio source does not support committing", ""));
+                        }
+                        Some(ControlMessage::LoadCompacted {compacted}) => {
+                            ctx.load_compacted(compacted).await;
                         }
                         None => {
 

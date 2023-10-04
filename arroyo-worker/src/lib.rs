@@ -1,25 +1,24 @@
 #![allow(clippy::new_without_default)]
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
-extern crate core;
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use anyhow::Result;
-use arrow::datatypes::Field;
+use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
     CheckpointReq, CheckpointResp, HeartbeatReq, JobFinishedReq, JobFinishedResp,
-    RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp,
-    TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq,
-    TaskStartedReq, WorkerErrorReq, WorkerResources,
+    LoadCompactedDataReq, LoadCompactedDataRes, RegisterWorkerReq, StartExecutionReq,
+    StartExecutionResp, StopExecutionReq, StopExecutionResp, TaskCheckpointCompletedReq,
+    TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerErrorReq,
+    WorkerResources,
 };
-use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, Data, Debezium, NodeId, WorkerId,
-    JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, Data, Debezium, NodeId, RawJson,
+    WorkerId, JOB_ID_ENV, RUN_ID_ENV,
 };
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
@@ -27,7 +26,7 @@ use petgraph::graph::DiGraph;
 use rand::Rng;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::process::exit;
 use std::str::FromStr;
@@ -39,14 +38,16 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
+use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 pub use ordered_float::OrderedFloat;
 
 pub mod connectors;
 pub mod engine;
 pub mod formats;
 mod inq_reader;
+mod metrics;
 mod network_manager;
 pub mod operators;
 mod process_fn;
@@ -98,6 +99,34 @@ impl<T: SchemaData> SchemaData for Debezium<T> {
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {
         unimplemented!("debezium data cannot be written as a raw string");
+    }
+}
+
+impl SchemaData for RawJson {
+    fn name() -> &'static str {
+        "raw_json"
+    }
+
+    fn schema() -> Schema {
+        Schema::new(vec![Field::new("value", DataType::Utf8, false)])
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        Some(self.value.as_bytes().to_vec())
+    }
+}
+
+impl SchemaData for () {
+    fn name() -> &'static str {
+        "empty"
+    }
+
+    fn schema() -> Schema {
+        Schema::empty()
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        None
     }
 }
 
@@ -177,6 +206,7 @@ impl Debug for LogicalNode {
 struct EngineState {
     sources: Vec<Sender<ControlMessage>>,
     sinks: Vec<Sender<ControlMessage>>,
+    operator_controls: HashMap<String, Vec<Sender<ControlMessage>>>, // operator_id -> vec of control tx
     shutdown_tx: broadcast::Sender<bool>,
 }
 
@@ -500,11 +530,13 @@ impl WorkerGrpc for WorkerServer {
 
         let sources = engine.source_controls();
         let sinks = engine.sink_controls();
+        let operator_controls = engine.operator_controls();
 
         let mut state = self.state.lock().unwrap();
         *state = Some(EngineState {
             sources,
             sinks,
+            operator_controls,
             shutdown_tx,
         });
 
@@ -565,6 +597,37 @@ impl WorkerGrpc for WorkerServer {
         }
 
         Ok(Response::new(CheckpointResp {}))
+    }
+
+    async fn load_compacted_data(
+        &self,
+        request: Request<LoadCompactedDataReq>,
+    ) -> Result<Response<LoadCompactedDataRes>, Status> {
+        let req = request.into_inner();
+
+        let nodes = {
+            let state = self.state.lock().unwrap();
+            let s = state.as_ref().unwrap();
+            s.operator_controls.get(&req.operator_id).unwrap().clone()
+        };
+
+        let compacted: CompactionResult = req.into();
+
+        for s in nodes {
+            if let Err(e) = s
+                .send(ControlMessage::LoadCompacted {
+                    compacted: compacted.clone(),
+                })
+                .await
+            {
+                warn!(
+                    "Failed to send LoadCompacted message to operator {}: {}",
+                    compacted.operator_id, e
+                );
+            }
+        }
+
+        return Ok(Response::new(LoadCompactedDataRes {}));
     }
 
     async fn stop_execution(

@@ -375,11 +375,13 @@ impl StorageProvider {
         Ok(format!("{}/{}", self.canonical_url, path))
     }
 
-    pub async fn delete<P: Into<String>>(&self, path: P) -> Result<(), StorageError> {
+    pub async fn delete_if_present<P: Into<String>>(&self, path: P) -> Result<(), StorageError> {
         let path = path.into();
-        self.object_store.delete(&path.into()).await?;
-
-        Ok(())
+        return match self.object_store.delete(&path.into()).await {
+            Ok(_) => Ok(()),
+            Err(object_store::Error::NotFound { .. }) => Ok(()),
+            Err(e) => Err(e.into()),
+        };
     }
 
     /// Produces a URL representation of this path that can be read by other systems,
@@ -527,7 +529,7 @@ mod tests {
             data.clone()
         );
 
-        storage.delete(&key).await.unwrap();
+        storage.delete_if_present(&key).await.unwrap();
 
         assert!(
             !tokio::fs::try_exists(format!("/tmp/arroyo-testing/storage-tests/{}", key))

@@ -158,6 +158,7 @@ impl Connector for KinesisConnector {
         let table = KinesisTable {
             stream_name: pull_opt("stream_name", opts)?,
             type_: table_type,
+            aws_region: opts.remove("aws_region").map(|s| s.to_string()),
         };
 
         Self::from_config(&self, None, name, EmptyConfig {}, table, schema)

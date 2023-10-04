@@ -1,16 +1,13 @@
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
-use std::collections::{BTreeMap, HashMap};
-use std::ops::RangeInclusive;
-
 use std::any::Any;
+use std::collections::{BTreeMap, HashMap};
 use std::{mem, thread};
 
 use std::time::SystemTime;
 
-use arroyo_metrics::{counter_for_task, gauge_for_task};
-use arroyo_state::tables::TimeKeyMap;
+use arroyo_state::tables::time_key_map::TimeKeyMap;
 use bincode::{config, Decode, Encode};
 
 use tracing::{debug, info, warn};
@@ -20,19 +17,20 @@ use arroyo_rpc::grpc::{
     CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
     TaskAssignment,
 };
-use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_types::{
-    from_micros, CheckpointBarrier, Data, Key, Message, Record, TaskInfo, Watermark, WorkerId,
-    BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+    from_micros, range_for_server, server_for_hash, CheckpointBarrier, Data, Key, Message, Record,
+    TaskInfo, UserError, Watermark, WorkerId, BYTES_SENT, MESSAGES_SENT,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
-use prometheus::{labels, IntCounter, IntGauge};
+use prometheus::{labels, IntCounter};
 use rand::Rng;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
 
+use crate::metrics::{register_counters, register_queue_gauges, QueueGauges};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::TIMER_TABLE;
 use crate::{LogicalEdge, LogicalNode, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
@@ -57,21 +55,6 @@ impl<K: Key, T: Data> From<QueueItem> for Message<K, T> {
             }
         }
     }
-}
-fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
-    let range_size = u64::MAX / (n as u64);
-    let start = range_size * (i as u64);
-    let end = if i + 1 == n {
-        u64::MAX
-    } else {
-        start + range_size - 1
-    };
-    start..=end
-}
-
-fn server_for_hash(x: u64, n: usize) -> usize {
-    let range_size = u64::MAX / (n as u64);
-    (n - 1).min((x / range_size) as usize)
 }
 
 pub trait StreamNode: Send {
@@ -193,8 +176,8 @@ pub struct Collector<K: Key, T: Data> {
     _ts: PhantomData<(K, T)>,
     sent_bytes: Option<IntCounter>,
     sent_messages: Option<IntCounter>,
-    tx_queue_rem_gauges: Vec<Vec<Option<IntGauge>>>,
-    tx_queue_size_gauges: Vec<Vec<Option<IntGauge>>>,
+    tx_queue_rem_gauges: QueueGauges,
+    tx_queue_size_gauges: QueueGauges,
 }
 
 impl<K: Key, T: Data> Collector<K, T> {
@@ -304,85 +287,9 @@ impl<K: Key, T: Data> Context<K, T> {
             )
         };
 
-        let mut counters = HashMap::new();
-
-        if let Some(c) = counter_for_task(
-            &task_info,
-            MESSAGES_RECV,
-            "Count of messages received by this subtask",
-            HashMap::new(),
-        ) {
-            counters.insert(MESSAGES_RECV, c);
-        }
-
-        if let Some(c) = counter_for_task(
-            &task_info,
-            MESSAGES_SENT,
-            "Count of messages sent by this subtask",
-            HashMap::new(),
-        ) {
-            counters.insert(MESSAGES_SENT, c);
-        }
-
-        if let Some(c) = counter_for_task(
-            &task_info,
-            BYTES_RECV,
-            "Count of bytes received by this subtask",
-            HashMap::new(),
-        ) {
-            counters.insert(BYTES_RECV, c);
-        }
-
-        if let Some(c) = counter_for_task(
-            &task_info,
-            BYTES_SENT,
-            "Count of bytes sent by this subtask",
-            HashMap::new(),
-        ) {
-            counters.insert(BYTES_SENT, c);
-        }
-
-        let tx_queue_size_gauges = out_qs
-            .iter()
-            .enumerate()
-            .map(|(i, qs)| {
-                qs.iter()
-                    .enumerate()
-                    .map(|(j, _)| {
-                        gauge_for_task(
-                            &task_info,
-                            "arroyo_worker_tx_queue_size",
-                            "Size of a tx queue",
-                            labels! {
-                                "next_node".to_string() => format!("{}", i),
-                                "next_node_idx".to_string() => format!("{}", j)
-                            },
-                        )
-                    })
-                    .collect()
-            })
-            .collect();
-
-        let tx_queue_rem_gauges = out_qs
-            .iter()
-            .enumerate()
-            .map(|(i, qs)| {
-                qs.iter()
-                    .enumerate()
-                    .map(|(j, _)| {
-                        gauge_for_task(
-                            &task_info,
-                            "arroyo_worker_tx_queue_rem",
-                            "Remaining space in a tx queue",
-                            labels! {
-                                "next_node".to_string() => format!("{}", i),
-                                "next_node_idx".to_string() => format!("{}", j)
-                            },
-                        )
-                    })
-                    .collect()
-            })
-            .collect();
+        let mut counters = register_counters(&task_info);
+        let (tx_queue_size_gauges, tx_queue_rem_gauges) =
+            register_queue_gauges(&task_info, &out_qs);
 
         Context {
             task_info,
@@ -500,6 +407,22 @@ impl<K: Key, T: Data> Context<K, T> {
             })
             .await
             .unwrap();
+    }
+
+    pub async fn report_user_error(&mut self, error: UserError) {
+        self.control_tx
+            .send(ControlResp::Error {
+                operator_id: self.task_info.operator_id.clone(),
+                task_index: self.task_info.task_index,
+                message: error.name,
+                details: error.details,
+            })
+            .await
+            .unwrap();
+    }
+
+    pub async fn load_compacted(&mut self, compaction: CompactionResult) {
+        self.state.load_compacted(compaction).await;
     }
 }
 
@@ -848,6 +771,43 @@ impl RunningEngine {
             })
             .collect()
     }
+
+    pub fn operator_controls(&self) -> HashMap<String, Vec<Sender<ControlMessage>>> {
+        let mut controls = HashMap::new();
+
+        self.program
+            .graph
+            .node_indices()
+            .filter(|idx| {
+                let w = self.program.graph.node_weight(*idx).unwrap();
+                self.assignments
+                    .get(&(w.id().to_string(), w.subtask_idx()))
+                    .unwrap()
+                    .worker_id
+                    == self.worker_id.0
+            })
+            .for_each(|idx| {
+                let w = self.program.graph.node_weight(idx).unwrap();
+                let assignment = self
+                    .assignments
+                    .get(&(w.id().to_string(), w.subtask_idx()))
+                    .unwrap();
+                let tx = self
+                    .program
+                    .graph
+                    .node_weight(idx)
+                    .unwrap()
+                    .as_queue()
+                    .tx
+                    .clone();
+                controls
+                    .entry(assignment.operator_id.clone())
+                    .or_insert(vec![])
+                    .push(tx);
+            });
+
+        controls
+    }
 }
 
 impl Engine {
@@ -1182,39 +1142,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-
-    #[test]
-    fn test_range_for_server() {
-        let n = 6;
-
-        for i in 0..(n - 1) {
-            let range1 = range_for_server(i, n);
-            let range2 = range_for_server(i + 1, n);
-
-            assert_eq!(*range1.end() + 1, *range2.start(), "Ranges not adjacent");
-        }
-
-        let last_range = range_for_server(n - 1, n);
-        assert_eq!(
-            *last_range.end(),
-            u64::MAX,
-            "Last range does not contain u64::MAX"
-        );
-    }
-
-    #[test]
-    fn test_server_for_hash() {
-        let n = 2;
-        let x = u64::MAX;
-
-        let server_index = server_for_hash(x, n);
-        let server_range = range_for_server(server_index, n);
-
-        assert!(
-            server_range.contains(&x),
-            "u64::MAX is not in the correct range"
-        );
-    }
 
     #[test]
     fn test_watermark_holder() {

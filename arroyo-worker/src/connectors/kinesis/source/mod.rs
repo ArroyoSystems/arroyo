@@ -14,15 +14,15 @@ use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
 };
-use arroyo_state::tables::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{from_nanos, Data, Record, UserError};
-use aws_config::load_from_env;
+use aws_config::from_env;
 use aws_sdk_kinesis::{
     client::fluent_builders::GetShardIterator,
     model::{Shard, ShardIteratorType},
     output::GetRecordsOutput,
     types::SdkError,
-    Client as KinesisClient,
+    Client as KinesisClient, Region,
 };
 use bincode::{Decode, Encode};
 use futures::stream::StreamExt;
@@ -50,6 +50,7 @@ pub struct KinesisSourceFunc<K: Data, T: Data + DeserializeOwned> {
     stream_name: String,
     format: Format,
     kinesis_client: Option<KinesisClient>,
+    aws_region: Option<String>,
     shards: HashMap<String, ShardState>,
     config: KinesisSourceConfig,
     _phantom: PhantomData<(K, T)>,
@@ -184,6 +185,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         Self {
             stream_name: table.stream_name,
             kinesis_client: None,
+            aws_region: table.aws_region,
             config: kinesis_config,
             shards: HashMap::new(),
             format: config.format.unwrap(),
@@ -370,6 +372,14 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         )))
     }
 
+    async fn init_client(&mut self) {
+        let mut loader = from_env();
+        if let Some(region) = &self.aws_region {
+            loader = loader.region(Region::new(region.clone()));
+        }
+        self.kinesis_client = Some(KinesisClient::new(&loader.load().await));
+    }
+
     /// Runs the Kinesis source, handling incoming records and control messages.
     ///
     /// This method initializes the Kinesis client, initializes the shards, and enters a loop to handle incoming
@@ -378,8 +388,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
     /// * An interval that periodically polls for new shards, initializing their futures.
     /// * Polling off of the control queue, to perform checkpointing and stop the operator.
     async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
-        let config = load_from_env().await;
-        self.kinesis_client = Some(KinesisClient::new(&config));
+        self.init_client().await;
         let starting_futures = self
             .init_shards(ctx)
             .await
@@ -440,6 +449,9 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
                         Some(ControlMessage::Commit { epoch: _ }) => {
                             unreachable!("sources shouldn't receive commit messages");
                         }
+                        Some(ControlMessage::LoadCompacted { compacted }) => {
+                            ctx.load_compacted(compacted).await;
+                        },
                         None => {
 
                         }

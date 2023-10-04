@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
-use arroyo_state::tables::TimeKeyMap;
+use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_types::*;
 use std::time::Duration;
 use tracing::debug;
