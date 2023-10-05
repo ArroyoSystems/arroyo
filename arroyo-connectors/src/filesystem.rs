@@ -174,10 +174,6 @@ impl Connector for FileSystemConnector {
             .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
             .unwrap_or_default();
 
-        if !partition_fields.is_empty() {
-            bail!("partitioning by fields isn't supported yet");
-        }
-
         let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
             Some(Partitioning {
                 time_partition_pattern,
