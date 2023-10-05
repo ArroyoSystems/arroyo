@@ -49,6 +49,7 @@ pub enum Expression {
     WrapType(WrapTypeExpression),
     Case(CaseExpression),
     WindowUDF(WindowType),
+    Unnest(Box<Expression>),
 }
 
 pub struct JoinedPairedStruct {
@@ -250,6 +251,10 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
+            Expression::Unnest(expr) => {
+                let input = expr.generate(input_context);
+                parse_quote!(unnest(#input))
+            }
         }
     }
 
@@ -292,6 +297,16 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::Case(case_statement) => case_statement.expression_type(input_context),
             Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
+            }
+            Expression::Unnest(t) => {
+                match t.expression_type(input_context) {
+                    TypeDef::DataType(DataType::List(inner), _) => {
+                        TypeDef::DataType(inner.data_type().clone(), false)
+                    }
+                    _ => {
+                        unreachable!("unnest argument must be an array");
+                    }
+                }
             }
         }
     }
@@ -405,6 +420,7 @@ impl Expression {
             | Expression::Json(_)
             | Expression::RustUdf(_)
             | Expression::WrapType(_)
+            | Expression::Unnest(_)
             | Expression::Case(_) => Ok(None),
         }
     }
@@ -808,6 +824,12 @@ impl<'a> ExpressionContext<'a> {
                     }
                     let gap = Expression::get_duration(&args[0])?;
                     Ok(Expression::WindowUDF(WindowType::Session { gap }))
+                }
+                "unnest" => {
+                    if args.len() != 1 {
+                        bail!("wrong number of arguments for unnest(), expected one");
+                    }
+                    Ok(Expression::Unnest(Box::new(self.compile_expr(&args[0])?)))
                 }
                 udf => {
                     // get udf from context
