@@ -135,27 +135,7 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
         tokio::spawn(async move {
             writer.run().await.unwrap();
         });
-        let partitions = table.file_settings.unwrap().partition_fields;
-        let partition_func: Option<Box<dyn Fn(&Record<K, T>) -> String + Send>> =
-            if partitions.is_empty() {
-                None
-            } else {
-                Some(Box::new(move |record: &Record<K, T>| {
-                    let mut partition = vec![];
-                    for partition_field in &partitions {
-                        if let PartitionFieldsItem::EventTimePartitionString { format: pattern } =
-                            partition_field
-                        {
-                            let datetime: DateTime<Utc> = DateTime::from(record.timestamp);
-                            let formatted_time = datetime.format(pattern).to_string();
-                            partition.push(formatted_time);
-                        } else {
-                            unimplemented!("only support event time partitioning for now");
-                        }
-                    }
-                    partition.join("/")
-                }))
-            };
+        let partition_func = get_partitioner_from_table(table);
         TwoPhaseCommitterOperator::new(Self {
             sender,
             checkpoint_receiver,
@@ -163,6 +143,26 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
             _ts: PhantomData,
         })
     }
+}
+
+fn get_partitioner_from_table<K: Key, T: Data>(
+    table: FileSystemTable,
+) -> Option<Box<dyn Fn(&Record<K, T>) -> String + Send>> {
+    let Some(partitions) = table.file_settings.unwrap().partitioning else {
+        return None;
+    };
+    // TODO: implement partitions for fields;
+    let Some(TimePartitionPattern { pattern }) = partitions.time_partition_pattern else {
+        return None;
+    };
+
+    Some(Box::new(move |record: &Record<K, T>| {
+        let mut partition = vec![];
+        let datetime: DateTime<Utc> = DateTime::from(record.timestamp);
+        let formatted_time = datetime.format(&pattern).to_string();
+        partition.push(formatted_time);
+        partition.join("/")
+    }))
 }
 
 #[derive(Debug)]
@@ -179,6 +179,7 @@ enum FileSystemMessages<T: Data> {
     },
     Checkpoint {
         subtask_id: usize,
+        watermark: Option<SystemTime>,
         then_stop: bool,
     },
     FilesToFinish(Vec<FileToFinish>),
@@ -270,6 +271,7 @@ impl CredentialProvider for S3Credentialing {
 struct AsyncMultipartFileSystemWriter<T: Data + Sync, R: MultiPartWriter> {
     path: Path,
     active_writers: HashMap<Option<String>, String>,
+    watermark: Option<SystemTime>,
     max_file_index: usize,
     subtask_id: usize,
     object_store: Arc<dyn ObjectStore>,
@@ -444,11 +446,12 @@ enum RollingPolicy {
     SizeLimit(usize),
     InactivityDuration(Duration),
     RolloverDuration(Duration),
+    WatermarkExpiration { pattern: String },
     AnyPolicy(Vec<RollingPolicy>),
 }
 
 impl RollingPolicy {
-    fn should_roll(&self, stats: &MultiPartWriterStats) -> bool {
+    fn should_roll(&self, stats: &MultiPartWriterStats, watermark: Option<SystemTime>) -> bool {
         match self {
             RollingPolicy::PartLimit(part_limit) => stats.parts_written >= *part_limit,
             RollingPolicy::SizeLimit(size_limit) => stats.bytes_written >= *size_limit,
@@ -458,8 +461,25 @@ impl RollingPolicy {
             RollingPolicy::RolloverDuration(duration) => {
                 stats.first_write_at.elapsed() >= *duration
             }
-            RollingPolicy::AnyPolicy(policies) => {
-                policies.iter().any(|policy| policy.should_roll(stats))
+            RollingPolicy::AnyPolicy(policies) => policies
+                .iter()
+                .any(|policy| policy.should_roll(stats, watermark)),
+            RollingPolicy::WatermarkExpiration { pattern } => {
+                let Some(watermark) = watermark else {
+                    return false;
+                };
+                if watermark <= stats.representative_timestamp {
+                    return false;
+                }
+                // if the watermark is greater than the representative and has a different string format,
+                // then this partition is closed and should be rolled over.
+                let datetime: DateTime<Utc> = DateTime::from(watermark);
+                let formatted_time = datetime.format(&pattern).to_string();
+                let representative_datetime: DateTime<Utc> =
+                    DateTime::from(stats.representative_timestamp);
+                let representative_formatted_time =
+                    representative_datetime.format(&pattern).to_string();
+                formatted_time != representative_formatted_time
             }
         }
     }
@@ -481,6 +501,13 @@ impl RollingPolicy {
         let rollover_timeout =
             Duration::from_secs(file_settings.rollover_seconds.unwrap_or(30) as u64);
         policies.push(RollingPolicy::RolloverDuration(rollover_timeout));
+        if let Some(partitioning) = &file_settings.partitioning {
+            if let Some(TimePartitionPattern { pattern }) = &partitioning.time_partition_pattern {
+                policies.push(RollingPolicy::WatermarkExpiration {
+                    pattern: pattern.clone(),
+                });
+            }
+        }
         RollingPolicy::AnyPolicy(policies)
     }
 }
@@ -491,6 +518,7 @@ pub struct MultiPartWriterStats {
     parts_written: usize,
     last_write_at: Instant,
     first_write_at: Instant,
+    representative_timestamp: SystemTime,
 }
 
 impl<T, R> AsyncMultipartFileSystemWriter<T, R>
@@ -508,6 +536,7 @@ where
         Self {
             path,
             active_writers: HashMap::new(),
+            watermark: None,
             max_file_index: 0,
             subtask_id: 0,
             object_store,
@@ -550,7 +579,8 @@ where
                                 }
                             }
                         },
-                        FileSystemMessages::Checkpoint { subtask_id, then_stop } => {
+                        FileSystemMessages::Checkpoint { subtask_id, watermark, then_stop } => {
+                            self.watermark = watermark;
                             self.flush_futures().await?;
                             if then_stop {
                                 self.stop().await?;
@@ -576,7 +606,7 @@ where
                     for (partition, filename) in &self.active_writers {
                             let writer = self.writers.get_mut(filename).unwrap();
                             if let Some(stats) = writer.stats() {
-                            if self.rolling_policy.should_roll(&stats) {
+                            if self.rolling_policy.should_roll(&stats, self.watermark) {
                                 removed_partitions.push(partition.clone());
                                 if let Some(future) = writer.close()? {
                                 self.futures.push(future);
@@ -1100,6 +1130,7 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> Mul
                 parts_written: 0,
                 last_write_at: Instant::now(),
                 first_write_at: Instant::now(),
+                representative_timestamp: SystemTime::now(),
             });
         }
         let stats = self.stats.as_mut().unwrap();
@@ -1319,11 +1350,13 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
     async fn checkpoint(
         &mut self,
         task_info: &TaskInfo,
+        watermark: Option<SystemTime>,
         stopping: bool,
     ) -> Result<(Self::DataRecovery, HashMap<String, Self::PreCommit>)> {
         self.sender
             .send(FileSystemMessages::Checkpoint {
                 subtask_id: task_info.task_index,
+                watermark,
                 then_stop: stopping,
             })
             .await?;
