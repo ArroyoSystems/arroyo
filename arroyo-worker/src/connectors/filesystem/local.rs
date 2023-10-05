@@ -5,6 +5,7 @@ use std::{
 use arroyo_types::{Data, Key, Record, TaskInfo};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use serde::Serialize;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::info;
 
@@ -28,7 +29,7 @@ pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     phantom: PhantomData<(K, D)>,
 }
 
-impl<K: Key, D: Data + Sync, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
+impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
     pub fn new(final_dir: String, table_properties: FileSystemTable) -> Self {
         // TODO: explore configuration options here
         let tmp_dir = format!("{}/__in_progress", final_dir);
@@ -119,7 +120,7 @@ pub struct FilePreCommit {
 }
 
 #[async_trait]
-impl<K: Key, D: Data + Sync, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitter<K, D>
+impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitter<K, D>
     for LocalFileSystemWriter<K, D, V>
 {
     type DataRecovery = LocalFileDataRecovery;

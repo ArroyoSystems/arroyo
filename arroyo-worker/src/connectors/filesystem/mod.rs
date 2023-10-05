@@ -66,7 +66,7 @@ pub type LocalParquetFileSystemSink<K, T, R> = LocalFileSystemWriter<K, T, Parqu
 
 pub type LocalJsonFileSystemSink<K, T> = LocalFileSystemWriter<K, T, JsonLocalWriter>;
 
-impl<K: Key, T: Data + Sync, V: LocalWriter<T>> LocalFileSystemWriter<K, T, V> {
+impl<K: Key, T: Data + Sync + Serialize, V: LocalWriter<T>> LocalFileSystemWriter<K, T, V> {
     pub fn from_config(config_str: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
         let config: OperatorConfig =
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
@@ -88,7 +88,7 @@ impl<K: Key, T: Data + Sync, V: LocalWriter<T>> LocalFileSystemWriter<K, T, V> {
     }
 }
 
-impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
+impl<K: Key, T: Data + Sync + Serialize, R: MultiPartWriter<InputType = T> + Send + 'static>
     FileSystemSink<K, T, R>
 {
     pub fn from_config(config_str: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
@@ -145,24 +145,56 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
     }
 }
 
-fn get_partitioner_from_table<K: Key, T: Data>(
+fn get_partitioner_from_table<K: Key, T: Data + Serialize>(
     table: FileSystemTable,
 ) -> Option<Box<dyn Fn(&Record<K, T>) -> String + Send>> {
     let Some(partitions) = table.file_settings.unwrap().partitioning else {
         return None;
     };
-    // TODO: implement partitions for fields;
-    let Some(TimePartitionPattern { pattern }) = partitions.time_partition_pattern else {
-        return None;
-    };
+    match (
+        partitions.time_partition_pattern,
+        partitions.partition_fields.is_empty(),
+    ) {
+        (None, false) => Some(Box::new(move |record: &Record<K, T>| {
+            partition_string_for_fields(&record.value, &partitions.partition_fields).unwrap()
+        })),
+        (None, true) => None,
+        (Some(TimePartitionPattern { pattern }), false) => {
+            Some(Box::new(move |record: &Record<K, T>| {
+                let time_partition = formatted_time_from_timestamp(record.timestamp, &pattern);
+                let field_partition =
+                    partition_string_for_fields(&record.value, &partitions.partition_fields)
+                        .unwrap();
+                format!("{}/{}", time_partition, field_partition)
+            }))
+        }
+        (Some(TimePartitionPattern { pattern }), true) => {
+            Some(Box::new(move |record: &Record<K, T>| {
+                formatted_time_from_timestamp(record.timestamp, &pattern)
+            }))
+        }
+    }
+}
 
-    Some(Box::new(move |record: &Record<K, T>| {
-        let mut partition = vec![];
-        let datetime: DateTime<Utc> = DateTime::from(record.timestamp);
-        let formatted_time = datetime.format(&pattern).to_string();
-        partition.push(formatted_time);
-        partition.join("/")
-    }))
+fn formatted_time_from_timestamp(timestamp: SystemTime, pattern: &str) -> String {
+    let datetime: DateTime<Utc> = DateTime::from(timestamp);
+    datetime.format(pattern).to_string()
+}
+fn partition_string_for_fields<T: Data + Serialize>(
+    value: &T,
+    partition_fields: &Vec<String>,
+) -> Result<String> {
+    let value = serde_json::to_value(value)?;
+    let fields: Vec<_> = partition_fields
+        .iter()
+        .map(|field| {
+            let field_value = value
+                .get(field)
+                .ok_or_else(|| anyhow::anyhow!("field {} not found in value {:?}", field, value))?;
+            Ok(format!("{}={}", field, field_value))
+        })
+        .collect::<Result<_>>()?;
+    Ok(fields.join("/"))
 }
 
 #[derive(Debug)]
