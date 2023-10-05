@@ -717,7 +717,6 @@ dependencies = [
  "arrow",
  "arrow-array",
  "arrow-schema",
- "arroyo-controller",
  "arroyo-rpc",
  "arroyo-sql",
  "arroyo-sql-macro",

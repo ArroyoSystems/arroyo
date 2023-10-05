@@ -1,5 +1,5 @@
-use crate::job_controller::checkpoint_state::CheckpointState;
-use crate::job_controller::comitting_state::CommittingState;
+use arroyo_state::checkpoint_state::CheckpointState;
+use arroyo_state::committing_state::CommittingState;
 
 pub enum CheckpointingOrCommittingState {
     Checkpointing(CheckpointState),

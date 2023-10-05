@@ -1,21 +1,16 @@
-use crate::job_controller::comitting_state::CommittingState;
-use crate::job_controller::subtask_state::SubtaskState;
-use crate::queries::controller_queries;
+use crate::committing_state::CommittingState;
+use crate::subtask_state::SubtaskState;
+use crate::{BackingStore, StateBackend};
 use anyhow::{anyhow, bail};
-use arroyo_datastream::Program;
 use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
 use arroyo_rpc::grpc::{
     api, backend_data, BackendData, CheckpointMetadata, OperatorCheckpointMetadata,
     TableDescriptor, TableWriteBehavior, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
 };
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::to_micros;
-use deadpool_postgres::Pool;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::SystemTime;
-use time::OffsetDateTime;
 use tracing::{debug, info, warn};
 
 pub struct CheckpointState {
@@ -23,7 +18,7 @@ pub struct CheckpointState {
     checkpoint_id: i64,
     epoch: u32,
     min_epoch: u32,
-    pub start_time: SystemTime,
+    start_time: SystemTime,
     tasks_per_operator: HashMap<String, usize>,
     tasks: HashMap<String, BTreeMap<u32, SubtaskState>>,
     completed_operators: HashSet<String>,
@@ -31,7 +26,7 @@ pub struct CheckpointState {
 
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
-    operator_details: HashMap<String, OperatorCheckpointDetail>,
+    pub operator_details: HashMap<String, OperatorCheckpointDetail>,
 }
 
 impl CheckpointState {
@@ -56,40 +51,30 @@ impl CheckpointState {
         }
     }
 
+    pub fn checkpoint_id(&self) -> i64 {
+        self.checkpoint_id
+    }
+
+    pub fn start_time(&self) -> SystemTime {
+        self.start_time
+    }
+
     pub async fn start(
         job_id: String,
-        organization_id: &str,
+        checkpoint_id: i64,
         epoch: u32,
         min_epoch: u32,
-        program: &Program,
-        pool: &Pool,
+        tasks_per_operator: HashMap<String, usize>,
     ) -> anyhow::Result<Self> {
         // Do the db setup
         info!(message = "Starting checkpointing", job_id, epoch);
-
-        let checkpoint_id = {
-            let c = pool.get().await?;
-            controller_queries::create_checkpoint()
-                .bind(
-                    &c,
-                    &generate_id(IdTypes::Checkpoint),
-                    &organization_id,
-                    &job_id,
-                    &StateBackend::name().to_string(),
-                    &(epoch as i32),
-                    &(min_epoch as i32),
-                    &OffsetDateTime::now_utc(),
-                )
-                .one()
-                .await?
-        };
 
         Ok(Self::new(
             job_id,
             checkpoint_id,
             epoch,
             min_epoch,
-            program.tasks_per_operator(),
+            tasks_per_operator,
         ))
     }
 
@@ -325,23 +310,6 @@ impl CheckpointState {
         CommittingState::new(self.checkpoint_id, self.subtasks_to_commit.clone())
     }
 
-    /// Syncs the operator details to the database so the API/UI can see them
-    pub async fn update_db(&self, pool: &Pool) -> anyhow::Result<()> {
-        let c = pool.get().await?;
-
-        controller_queries::update_checkpoint()
-            .bind(
-                &c,
-                &serde_json::to_value(&self.operator_details).unwrap(),
-                &None,
-                &crate::types::public::CheckpointState::inprogress,
-                &self.checkpoint_id,
-            )
-            .await?;
-
-        Ok(())
-    }
-
     pub async fn save_state(&self) -> anyhow::Result<()> {
         let finish_time = SystemTime::now();
         StateBackend::write_checkpoint_metadata(CheckpointMetadata {
@@ -353,31 +321,6 @@ impl CheckpointState {
             operator_ids: self.completed_operators.iter().cloned().collect(),
         })
         .await;
-        Ok(())
-    }
-
-    pub async fn update_checkpoint_in_db(
-        &self,
-        pool: &Pool,
-        db_checkpoint_state: crate::types::public::CheckpointState,
-    ) -> anyhow::Result<()> {
-        let c = pool.get().await?;
-        let finish_time = if db_checkpoint_state == crate::types::public::CheckpointState::ready {
-            Some(SystemTime::now().into())
-        } else {
-            None
-        };
-        let operator_state = serde_json::to_value(&self.operator_details).unwrap();
-        controller_queries::update_checkpoint()
-            .bind(
-                &c,
-                &operator_state,
-                &finish_time,
-                &db_checkpoint_state,
-                &self.checkpoint_id,
-            )
-            .await?;
-
         Ok(())
     }
 }
