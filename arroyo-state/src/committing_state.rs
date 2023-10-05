@@ -1,7 +1,4 @@
-use crate::queries::controller_queries;
-use deadpool_postgres::Pool;
 use std::collections::HashSet;
-use std::time::SystemTime;
 
 pub struct CommittingState {
     checkpoint_id: i64,
@@ -15,6 +12,11 @@ impl CommittingState {
             subtasks_to_commit,
         }
     }
+
+    pub fn checkpoint_id(&self) -> i64 {
+        self.checkpoint_id
+    }
+
     pub fn subtask_committed(&mut self, operator_id: String, subtask_index: u32) {
         self.subtasks_to_commit
             .remove(&(operator_id, subtask_index));
@@ -22,17 +24,6 @@ impl CommittingState {
 
     pub fn done(&self) -> bool {
         self.subtasks_to_commit.is_empty()
-    }
-
-    pub async fn finish(self, pool: &Pool) -> anyhow::Result<()> {
-        let finish_time = SystemTime::now();
-
-        let c = pool.get().await?;
-        controller_queries::commit_checkpoint()
-            .bind(&c, &finish_time.into(), &self.checkpoint_id)
-            .await?;
-
-        Ok(())
     }
 }
 

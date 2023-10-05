@@ -22,8 +22,11 @@ use tables::time_key_map::{TimeKeyMap, TimeKeyMapCache};
 use tables::{global_keyed_map, key_time_multi_map, keyed_map, time_key_map};
 use tokio::sync::mpsc::Sender;
 
+pub mod checkpoint_state;
+pub mod committing_state;
 mod metrics;
 pub mod parquet;
+mod subtask_state;
 pub mod tables;
 
 pub const BINCODE_CONFIG: Configuration = bincode::config::standard();

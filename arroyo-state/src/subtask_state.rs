@@ -6,9 +6,9 @@ use arroyo_types::from_micros;
 use std::time::SystemTime;
 
 pub struct SubtaskState {
-    pub(crate) start_time: Option<SystemTime>,
-    pub(crate) finish_time: Option<SystemTime>,
-    pub(crate) metadata: Option<SubtaskCheckpointMetadata>,
+    pub start_time: Option<SystemTime>,
+    pub finish_time: Option<SystemTime>,
+    pub metadata: Option<SubtaskCheckpointMetadata>,
 }
 
 impl SubtaskState {

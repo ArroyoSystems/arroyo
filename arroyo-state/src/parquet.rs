@@ -18,7 +18,6 @@ use arroyo_types::{
     CHECKPOINT_URL_ENV, S3_ENDPOINT_ENV, S3_REGION_ENV,
 };
 use bincode::config;
-use bincode::error::DecodeError;
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;

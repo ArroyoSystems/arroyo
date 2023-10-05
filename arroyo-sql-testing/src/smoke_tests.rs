@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::{env, fmt::Debug, time::SystemTime};
 use tokio::sync::mpsc::Receiver;
 
-use arroyo_controller::job_controller::checkpoint_state::CheckpointState;
 use arroyo_rpc::grpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_sql_macro::correctness_run_codegen;
+use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_types::{to_micros, CheckpointBarrier};
 use arroyo_worker::engine::{Program, RunningEngine};
 use arroyo_worker::{
