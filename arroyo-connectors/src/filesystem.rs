@@ -165,23 +165,27 @@ impl Connector for FileSystemConnector {
         let target_file_size = pull_option_to_i64("target_file_size", opts)?;
         let target_part_size = pull_option_to_i64("target_part_size", opts)?;
 
-        let formatting_string = opts.remove("partitioning_time_format");
-        let mut partition_fields = formatting_string
-            .map(|format| vec![PartitionFieldsItem::EventTimePartitionString { format }])
+        let formatting_string = opts.remove("time_partition_pattern");
+        let time_partition_pattern =
+            formatting_string.map(|pattern| TimePartitionPattern { pattern });
+
+        let partition_fields: Vec<_> = opts
+            .remove("partition_fields")
+            .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
             .unwrap_or_default();
 
-        partition_fields.extend(
-            opts.remove("partition_fields")
-                .map(|value| {
-                    value
-                        .split(',')
-                        .map(|s| PartitionFieldsItem::FieldName {
-                            field: s.to_string(),
-                        })
-                        .collect::<Vec<PartitionFieldsItem>>()
-                })
-                .unwrap_or_default(),
-        );
+        if !partition_fields.is_empty() {
+            bail!("partitioning by fields isn't supported yet");
+        }
+
+        let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
+            Some(Partitioning {
+                time_partition_pattern,
+                partition_fields,
+            })
+        } else {
+            None
+        };
 
         let file_settings = Some(FileSettings {
             inactivity_rollover_seconds,
@@ -189,7 +193,7 @@ impl Connector for FileSystemConnector {
             rollover_seconds,
             target_file_size,
             target_part_size,
-            partition_fields,
+            partitioning,
         });
 
         let format_settings = match schema

@@ -130,46 +130,35 @@
                     "type": "integer",
                     "description": "number of seconds of inactivity to wait before rolling over to a new file"
                 },
-                "partition_fields": {
-                    "title": "Partition Fields",
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "oneOf": [
-                            {
-                                "type": "object",
-                                "title": "Event Time Partition String",
-                                "properties": {
-                                    "format": {
-                                        "title": "Format",
-                                        "type": "string",
-                                        "description": "The format of the date string"
-                                    }
-                                },
-                                "required": [
-                                    "format",
-                                    "field"
-                                ],
-                                "additionalProperties": false
+                "partitioning": {
+                    "title": "Partitioning",
+                    "type": "object",
+                    "properties": {
+                        "time_partition_pattern": {
+                            "title": "Time Partition Pattern",
+                            "type": "object",
+                            "properties": {
+                                "pattern": {
+                                    "title": "Pattern",
+                                    "type": "string",
+                                    "description": "The pattern of the date string"
+                                }
                             },
-                            {
-                                "type": "object",
-                                "title": "Field Name",
-                                "properties": {
-                                    "field": {
-                                        "title": "Field",
-                                        "type": "string",
-                                        "description": "The name of the field"
-                                    }
-                                },
-                                "required": [
-                                    "field"
-                                ],
-                                "additionalProperties": false
-                            }
-                        ]
+                            "required": [
+                                "pattern"
+                            ],
+                            "additionalProperties": false
+                        },
+                        "partition_fields": {
+                            "title": "Partition Fields",
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "fields to partition the data by"
+                        }
                     },
-                    "description": "fields to partition the data by"
+                    "additionalProperties": false
                 }
             },
             "additionalProperties": false

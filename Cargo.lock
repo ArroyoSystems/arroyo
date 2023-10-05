@@ -486,6 +486,7 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "axum",
+ "chrono",
  "eventsource-client",
  "futures",
  "rdkafka",
