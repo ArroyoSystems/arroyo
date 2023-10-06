@@ -114,10 +114,10 @@ async fn compact(
     }
 }
 
-async fn advance(engine: &RunningEngine) {
-    // let the engine run for a bit, process 2000 records
+async fn advance(engine: &RunningEngine, count: i32) {
+    // let the engine run for a bit, process some records
     for source in engine.source_controls() {
-        for _ in 0..2000 {
+        for _ in 0..count {
             let _ = source.send(ControlMessage::NoOp).await;
         }
     }
@@ -129,13 +129,14 @@ async fn run_until_finished(engine: &RunningEngine, control_rx: &mut Receiver<Co
             .try_recv()
             .is_err_and(|e| e == TryRecvError::Empty)
     {
-        advance(engine).await;
+        advance(engine, 100).await;
     }
 }
 
 async fn test_checkpoints_and_compaction(
     job_id: String,
     running_engine: &RunningEngine,
+    checkpoint_interval: i32,
     mut control_rx: &mut Receiver<ControlResp>,
     tasks_per_operator: HashMap<String, usize>,
     graph: Graph<LogicalNode, LogicalEdge>,
@@ -151,11 +152,11 @@ async fn test_checkpoints_and_compaction(
     };
 
     // trigger a couple checkpoints
-    advance(running_engine).await;
+    advance(running_engine, checkpoint_interval).await;
     checkpoint(ctx, 1).await;
-    advance(running_engine).await;
+    advance(running_engine, checkpoint_interval).await;
     checkpoint(ctx, 2).await;
-    advance(running_engine).await;
+    advance(running_engine, checkpoint_interval).await;
 
     // compact checkpoint 2
     compact(
@@ -167,7 +168,7 @@ async fn test_checkpoints_and_compaction(
     .await;
 
     // trigger checkpoint 3, which will include the compacted files
-    advance(running_engine).await;
+    advance(running_engine, checkpoint_interval).await;
     checkpoint(ctx, 3).await;
 
     // shut down the engine
@@ -197,7 +198,7 @@ async fn test_checkpoints_and_compaction(
 async fn run_pipeline_and_assert_outputs(
     graph: Graph<LogicalNode, LogicalEdge>,
     job_id: String,
-    checkpoints: bool,
+    checkpoint_interval: i32,
     output_location: String,
     golden_output_location: String,
 ) {
@@ -215,16 +216,15 @@ async fn run_pipeline_and_assert_outputs(
         })
         .await;
 
-    if checkpoints {
-        test_checkpoints_and_compaction(
-            job_id,
-            &running_engine,
-            &mut control_rx,
-            tasks_per_operator,
-            graph,
-        )
-        .await;
-    }
+    test_checkpoints_and_compaction(
+        job_id,
+        &running_engine,
+        checkpoint_interval,
+        &mut control_rx,
+        tasks_per_operator,
+        graph,
+    )
+    .await;
 
     run_until_finished(&running_engine, &mut control_rx).await;
 
@@ -270,7 +270,7 @@ async fn check_output_files(output_location: String, golden_output_location: Str
         });
 }
 
-correctness_run_codegen! {"select_star", true,
+correctness_run_codegen! {"select_star", 2000,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -296,7 +296,7 @@ CREATE TABLE cars_output (
 );
 INSERT INTO cars_output SELECT * FROM cars"}
 
-correctness_run_codegen! {"hourly_by_event_type", true,
+correctness_run_codegen! {"hourly_by_event_type", 2000,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -327,7 +327,7 @@ FROM cars
 GROUP BY 1,2);
 "}
 
-correctness_run_codegen! {"month_loose_watermark", true,
+correctness_run_codegen! {"month_loose_watermark", 2000,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -359,7 +359,7 @@ FROM cars
 GROUP BY 1);
 "}
 
-correctness_run_codegen! {"tight_watermark", true,
+correctness_run_codegen! {"tight_watermark", 2000,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -390,7 +390,7 @@ FROM cars
 GROUP BY 1);
 "}
 
-correctness_run_codegen! {"suspicious_drivers", true,
+correctness_run_codegen! {"suspicious_drivers", 2000,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -422,7 +422,7 @@ GROUP BY 1
 ) WHERE pickups < dropoffs
 "}
 
-correctness_run_codegen! {"most_active_driver_last_hour_unaligned", true,
+correctness_run_codegen! {"most_active_driver_last_hour_unaligned", 2000,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -461,7 +461,7 @@ SELECT * FROM (
          GROUP BY 1,2)) ) where row_number = 1
 "}
 
-correctness_run_codegen! {"most_active_driver_last_hour", true,
+correctness_run_codegen! {"most_active_driver_last_hour", 2000,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -500,7 +500,7 @@ SELECT * FROM (
          GROUP BY 1,2)) ) where row_number = 1
 "}
 
-correctness_run_codegen! {"outer_join", true,
+correctness_run_codegen! {"outer_join", 2000,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -534,7 +534,7 @@ FULL OUTER JOIN
 ON pickups.driver_id = dropoffs.driver_id
 "}
 
-correctness_run_codegen! {"windowed_outer_join", false,
+correctness_run_codegen! {"windowed_outer_join", 2000,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -573,7 +573,7 @@ FULL OUTER JOIN (
 ON dropoffs.window = pickups.window)
 "}
 
-correctness_run_codegen! {"windowed_inner_join", true,
+correctness_run_codegen! {"windowed_inner_join", 2000,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -612,14 +612,16 @@ INNER JOIN (
 ON dropoffs.window = pickups.window)
 "}
 
-correctness_run_codegen! {"aggregates", false,
+correctness_run_codegen! {"aggregates", 10,
 "CREATE TABLE impulse_source (
+  timestamp TIMESTAMP,
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null
 ) WITH (
-  connector = 'impulse',
-  event_rate = '1000000',
-  message_count = '100'
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source'
 );
 CREATE TABLE aggregates (
   min BIGINT,
@@ -636,14 +638,16 @@ CREATE TABLE aggregates (
 INSERT INTO aggregates SELECT min(counter), max(counter), sum(counter), count(*), avg(counter)  FROM impulse_source"}
 
 // test double negative UDF
-correctness_run_codegen! {"double_negative_udf", false,
+correctness_run_codegen! {"double_negative_udf", 10,
 "CREATE TABLE impulse_source (
+  timestamp TIMESTAMP,
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null
 ) WITH (
-  connector = 'impulse',
-  event_rate = '1000000',
-  message_count = '100'
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source'
 );
 CREATE TABLE double_negative_udf (
   counter bigint
@@ -660,14 +664,16 @@ SELECT double_negative(counter) FROM impulse_source",
 }"}
 
 // test UDAF
-correctness_run_codegen! {"udaf", false,
+correctness_run_codegen! {"udaf", 10,
 "CREATE TABLE impulse_source (
+  timestamp TIMESTAMP,
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null
 ) WITH (
-  connector = 'impulse',
-  event_rate = '1000000',
-  message_count = '100'
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source'
 );
 CREATE TABLE udaf (
   median bigint,
@@ -703,14 +709,16 @@ fn max_product(first_arg: Vec<u64>, second_arg: Vec<u64>) -> u64 {
 }"}
 
 // filter updating aggregates
-correctness_run_codegen! {"filter_updating_aggregates", false,
+correctness_run_codegen! {"filter_updating_aggregates", 10,
 "CREATE TABLE impulse_source (
+  timestamp TIMESTAMP,
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null
 ) WITH (
-  connector = 'impulse',
-  event_rate = '1000000',
-  message_count = '100'
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source'
 );
 CREATE TABLE filter_updating_aggregates (
   subtasks BIGINT
@@ -727,14 +735,16 @@ SELECT * FROM (
 )
 WHERE subtasks >= 1"}
 
-correctness_run_codegen! {"union", false,
+correctness_run_codegen! {"union", 10,
 "CREATE TABLE impulse_source (
+  timestamp TIMESTAMP,
   counter bigint unsigned not null,
   subtask_index bigint unsigned not null
 ) WITH (
-  connector = 'impulse',
-  event_rate = '1000000',
-  message_count = '100'
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source'
 );
 CREATE TABLE union_output (
   counter bigint
