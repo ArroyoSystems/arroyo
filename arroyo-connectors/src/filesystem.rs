@@ -196,7 +196,7 @@ impl Connector for FileSystemConnector {
             .ok_or(anyhow!("require schema"))?
             .format
             .as_ref()
-            .unwrap()
+            .ok_or(anyhow!("require format"))?
         {
             Format::Parquet(..) => {
                 let compression = opts
