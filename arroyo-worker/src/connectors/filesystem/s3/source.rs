@@ -11,7 +11,7 @@ use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
 use arroyo_types::{Data, Record};
 
-use crate::{engine::Context, SourceFinishType, CompressionFormat};
+use crate::{connectors::filesystem::s3::CompressionFormat, engine::Context, SourceFinishType};
 
 use super::S3Table;
 
@@ -37,7 +37,7 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
             bucket: table.bucket,
             prefix: table.prefix,
             region: table.region,
-            compression: table.compression_format.to_string(),
+            compression: table.compression_format,
             check_frequency: 100,
             total_lines_read: 0,
             _t: PhantomData,
@@ -105,7 +105,7 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
             let body = get_res.body;
 
             match self.compression {
-            CompressionFormat::Zstd => {
+                CompressionFormat::Zstd => {
                     let r = ZstdDecoder::new(BufReader::new(body.into_async_read()));
                     match self
                         .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
@@ -114,8 +114,8 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                         Some(finish_type) => return finish_type,
                         None => {}
                     }
-            }
-            CompressionFormat::Gzip => {
+                }
+                CompressionFormat::Gzip => {
                     let r = GzipDecoder::new(BufReader::new(body.into_async_read()));
                     match self
                         .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
@@ -124,8 +124,8 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                         Some(finish_type) => return finish_type,
                         None => {}
                     }
-            }
-            CompressionFormat::None => {
+                }
+                CompressionFormat::None => {
                     match self
                         .read_file(
                             ctx,
