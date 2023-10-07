@@ -648,6 +648,7 @@ where
                         }
                     }
                     for partition in removed_partitions {
+                        self.writers.remove(&partition);
                         self.active_writers.remove(&partition);
                     }
                 }

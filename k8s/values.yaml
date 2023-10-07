@@ -1,0 +1,16 @@
+outputDir: "/tmp/arroyo-test"
+global:
+  version: "docker_partitioning"
+volumes:
+  - name: checkpoints
+    hostPath:
+      path: /tmp/arroyo-test
+      type: DirectoryOrCreate
+
+volumeMounts:
+  - name: checkpoints
+    mountPath: /tmp/arroyo-test
+artifactUrl: "s3://arroyo-artifacts"
+checkpointUrl: "s3://arroyo-checkpoints"
+s3:
+  region: "us-west-2"

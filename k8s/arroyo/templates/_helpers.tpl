@@ -97,7 +97,7 @@ Database environment variables
 {{- define "arroyo.databaseEnvVars" -}}
 {{- if .Values.postgresql.deploy }}
 - name: DATABASE_HOST
-  value: "{{- include "arroyo.fullname" . }}-postgresql.{{- default .Release.Namespace }}.svc.cluster.local"
+  value: "partitioning-postgresql"
 - name: DATABASE_PORT
   value: "{{ default "5432" .Values.postgresql.auth.port }}"
 - name: DATABASE_NAME
@@ -105,10 +105,7 @@ Database environment variables
 - name: DATABASE_USER
   value: arroyo
 - name: DATABASE_PASSWORD
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "arroyo.fullname" . }}-postgresql
-      key: password
+  value: arroyo
 {{- else -}}
 - name: DATABASE_HOST
   value: "{{ .Values.postgresql.externalDatabase.host }}"
