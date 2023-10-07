@@ -6,7 +6,7 @@ metadata:
     {{- include "arroyo.labels" . | nindent 4 }}
     app: {{ include "arroyo.fullname" . }}-api
 spec:
-  replicas: {{ .Values.api.replicaCount }}
+  replicas: {{ .Values.api.replicas }}
   selector:
     matchLabels:
       app: {{ include "arroyo.fullname" . }}-api
