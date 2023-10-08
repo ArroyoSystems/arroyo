@@ -49,7 +49,7 @@ pub enum Expression {
     WrapType(WrapTypeExpression),
     Case(CaseExpression),
     WindowUDF(WindowType),
-    Unnest(Box<Expression>),
+    Unnest(Box<Expression>, bool),
 }
 
 pub struct JoinedPairedStruct {
@@ -251,9 +251,13 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
-            Expression::Unnest(expr) => {
-                let input = expr.generate(input_context);
-                parse_quote!(unnest(#input))
+            Expression::Unnest(_, taken) => {
+                if !taken {
+                    panic!("inner value of unnest should have been taken!");
+                } else {
+                    let ident = input_context.variable_ident();
+                    parse_quote!(#ident)
+                }
             }
         }
     }
@@ -298,7 +302,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
-            Expression::Unnest(t) => {
+            Expression::Unnest(t, _) => {
                 match t.expression_type(input_context) {
                     TypeDef::DataType(DataType::List(inner), _) => {
                         TypeDef::DataType(inner.data_type().clone(), false)
@@ -420,7 +424,7 @@ impl Expression {
             | Expression::Json(_)
             | Expression::RustUdf(_)
             | Expression::WrapType(_)
-            | Expression::Unnest(_)
+            | Expression::Unnest(_, _)
             | Expression::Case(_) => Ok(None),
         }
     }
@@ -437,6 +441,109 @@ impl Expression {
                 expression
             ),
         }
+    }
+
+    pub fn traverse_mut<T, F: Fn(&mut T, &mut Expression) -> ()>(&mut self, context: &mut T, f: &F) {
+        match self {
+            Expression::Column(_) => {
+            }
+            Expression::UnaryBoolean(e) => {
+                (&mut *e.input).traverse_mut(context, f);
+            }
+            Expression::Literal(_) => {}
+            Expression::BinaryComparison(e) => {
+                (&mut *e.left).traverse_mut(context, f);
+                (&mut *e.right).traverse_mut(context, f);
+            }
+            Expression::BinaryMath(e) => {
+                (&mut *e.left).traverse_mut(context, f);
+                (&mut *e.right).traverse_mut(context, f);
+            }
+            Expression::StructField(e) => {
+                (&mut *e.struct_expression).traverse_mut(context, f);
+            }
+            Expression::Aggregation(e) => {
+                (&mut *e.producing_expression).traverse_mut(context, f);
+            }
+            Expression::Cast(e) => {
+                (&mut *e.input).traverse_mut(context, f);
+            }
+            Expression::Numeric(e) => {
+                (&mut *e.input).traverse_mut(context, f);
+            }
+            Expression::Date(e) => {
+                match e {
+                    DateTimeFunction::DatePart(_, e) |
+                    DateTimeFunction::DateTrunc(_, e) |
+                    DateTimeFunction::FromUnixTime(e) => {
+                        (&mut *e).traverse_mut(context, f);
+                    }
+                }
+            }
+            Expression::String(e) => {
+                for e in e.expressions() {
+                    e.traverse_mut(context, f);
+                }
+            }
+            Expression::Hash(e) => {
+                (&mut *e.input).traverse_mut(context, f);
+            }
+            Expression::DataStructure(e) => {
+                match e {
+                    DataStructureFunction::Coalesce(exprs) | DataStructureFunction::MakeArray(exprs) => {
+                        for e in exprs {
+                            e.traverse_mut(context, f);
+                        }
+                    }
+                    DataStructureFunction::NullIf { left, right } => {
+                        (&mut *left).traverse_mut(context, f);
+                        (&mut *right).traverse_mut(context, f);
+                    }
+                }
+            }
+            Expression::Json(e) => {
+                (&mut *e.json_string).traverse_mut(context, f);
+                (&mut *e.path).traverse_mut(context, f);
+            }
+            Expression::RustUdf(udf) => {
+                for (_, arg) in &mut udf.args {
+                    arg.traverse_mut(context, f);
+                }
+            }
+            Expression::WrapType(e) => {
+                (&mut *e.arg).traverse_mut(context, f);
+            }
+            Expression::Case(e) => {
+                match e {
+                    CaseExpression::Match { value, matches, default } => {
+                        f(context, &mut *value);
+                        for (l, r) in matches {
+                            (&mut *l).traverse_mut(context, f);
+                            (&mut *r).traverse_mut(context, f);
+                        }
+                        if let Some(default) = default {
+                            default.traverse_mut(context, f);
+                        }
+                    }
+                    CaseExpression::When { condition_pairs, default } => {
+                        for (l, r) in condition_pairs {
+                            (&mut *l).traverse_mut(context, f);
+                            (&mut *r).traverse_mut(context, f);
+                        }
+                        if let Some(default) = default {
+                            (default).traverse_mut(context, f);
+                        }
+                    }
+                }
+            }
+            Expression::WindowUDF(_) => {
+            }
+            Expression::Unnest(n, _) => {
+                (&mut *n).traverse_mut(context, f);
+            }
+        }
+
+        f(context, self);
     }
 }
 
@@ -829,7 +936,7 @@ impl<'a> ExpressionContext<'a> {
                     if args.len() != 1 {
                         bail!("wrong number of arguments for unnest(), expected one");
                     }
-                    Ok(Expression::Unnest(Box::new(self.compile_expr(&args[0])?)))
+                    Ok(Expression::Unnest(Box::new(self.compile_expr(&args[0])?), false))
                 }
                 udf => {
                     // get udf from context
@@ -1967,13 +2074,13 @@ impl SortExpression {
         match sort_expressions.len() {
             0 => parse_quote!(()),
             1 => {
-                let singleton_type = sort_expressions[0].tuple_type(&ValuePointerContext);
+                let singleton_type = sort_expressions[0].tuple_type(&ValuePointerContext::new());
                 parse_quote!((#singleton_type,))
             }
             _ => {
                 let tuple_types: Vec<syn::Type> = sort_expressions
                     .iter()
-                    .map(|sort_expression| sort_expression.tuple_type(&ValuePointerContext))
+                    .map(|sort_expression| sort_expression.tuple_type(&ValuePointerContext::new()))
                     .collect();
                 parse_quote!((#(#tuple_types),*))
             }
@@ -1984,13 +2091,13 @@ impl SortExpression {
         match sort_expressions.len() {
             0 => parse_quote!(()),
             1 => {
-                let singleton_expr = sort_expressions[0].to_syn_expr(&ValuePointerContext);
+                let singleton_expr = sort_expressions[0].to_syn_expr(&ValuePointerContext::new());
                 parse_quote!((#singleton_expr,))
             }
             _ => {
                 let tuple_exprs: Vec<syn::Expr> = sort_expressions
                     .iter()
-                    .map(|sort_expression| sort_expression.to_syn_expr(&ValuePointerContext))
+                    .map(|sort_expression| sort_expression.to_syn_expr(&ValuePointerContext::new()))
                     .collect();
                 parse_quote!((#(#tuple_exprs),*))
             }
@@ -2335,6 +2442,60 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
 }
 
 impl StringFunction {
+    fn expressions(&mut self) -> Vec<&mut Expression> {
+        match self {
+            StringFunction::Ascii(expr)
+            | StringFunction::BitLength(expr)
+            | StringFunction::CharacterLength(expr)
+            | StringFunction::OctetLength(expr)
+            | StringFunction::Btrim(expr, None)
+            | StringFunction::Lower(expr)
+            | StringFunction::Upper(expr)
+            | StringFunction::Chr(expr)
+            | StringFunction::InitCap(expr)
+            | StringFunction::Ltrim(expr, None)
+            | StringFunction::Rtrim(expr, None)
+            | StringFunction::Trim(expr, None)
+            | StringFunction::RegexpMatch(expr, ..)
+            | StringFunction::Reverse(expr) => vec![&mut *expr],
+
+            StringFunction::StartsWith(expr1, expr2)
+            | StringFunction::Left(expr1, expr2)
+            | StringFunction::Repeat(expr1, expr2)
+            | StringFunction::Right(expr1, expr2)
+            | StringFunction::Btrim(expr1, Some(expr2))
+            | StringFunction::Trim(expr1, Some(expr2))
+            | StringFunction::Ltrim(expr1, Some(expr2))
+            | StringFunction::Rtrim(expr1, Some(expr2))
+            | StringFunction::Substr(expr1, expr2, None)
+            | StringFunction::Lpad(expr1, expr2, None)
+            | StringFunction::Rpad(expr1, expr2, None)
+            | StringFunction::RegexpReplace(expr1, _, expr2, None)
+            | StringFunction::Strpos(expr1, expr2) => {
+                vec![&mut *expr1, &mut *expr2]
+            }
+
+            StringFunction::Substr(expr1, expr2, Some(expr3))
+            | StringFunction::Translate(expr1, expr2, expr3)
+            | StringFunction::Lpad(expr1, expr2, Some(expr3))
+            | StringFunction::Rpad(expr1, expr2, Some(expr3))
+            | StringFunction::Replace(expr1, expr2, expr3)
+            | StringFunction::RegexpReplace(expr1, _, expr2, Some(expr3))
+            | StringFunction::SplitPart(expr1, expr2, expr3) => {
+                vec![&mut *expr1, &mut *expr2, &mut *expr3]
+            },
+
+            StringFunction::Concat(exprs) => {
+                exprs.iter_mut().collect()
+            }
+            StringFunction::ConcatWithSeparator(expr, exprs) => {
+                let mut v = vec![&mut **expr];
+                v.extend(exprs.iter_mut());
+                v
+            }
+        }
+    }
+
     fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
         match self {
             StringFunction::Ascii(expr)
@@ -3409,7 +3570,7 @@ impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for RustUdafExpress
         let need_early_exit = self.args.iter().any(|(function_arg, incoming_expression)| {
             !function_arg.is_optional()
                 && incoming_expression
-                    .expression_type(&ValuePointerContext)
+                    .expression_type(&ValuePointerContext::new())
                     .is_optional()
         });
 
@@ -3418,10 +3579,10 @@ impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for RustUdafExpress
             .iter()
             .enumerate()
             .map(|(i, (def, expr))| {
-                let sub_expr = expr.generate(&ValuePointerContext);
+                let sub_expr = expr.generate(&ValuePointerContext::new());
                 let term_expr = match (
                     def.is_optional(),
-                    expr.expression_type(&ValuePointerContext).is_optional(),
+                    expr.expression_type(&ValuePointerContext::new()).is_optional(),
                 ) {
                     (true, true) | (false, false) => parse_quote!(#sub_expr),
                     (true, false) => parse_quote!(Some(#sub_expr)),
@@ -3432,7 +3593,7 @@ impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for RustUdafExpress
                 (arg_init, term_expr)
             })
             .unzip();
-        let single_value_ident = ValuePointerContext.variable_ident();
+        let single_value_ident = ValuePointerContext::new().variable_ident();
 
         let mut vec_init: Vec<syn::Stmt> = Vec::new();
         let mut vec_push: Vec<syn::Stmt> = Vec::new();

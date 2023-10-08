@@ -379,7 +379,7 @@ impl Optimizer for FlatMapFusionOptimizer {
                 },
             ) => {
                 let name = format!("flat_fused({},{})", flatten_name, name);
-                let operator = Operator::FlatMapOperator {
+                let operator = Operator::ArrayMapOperator {
                     name,
                     expression: expression.to_string(),
                     return_type: return_type.clone(),

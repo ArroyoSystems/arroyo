@@ -717,13 +717,13 @@ pub fn updating_data_map_function<InT: Data, OutT: Data>(
 }
 
 #[derive(StreamNode)]
-pub struct FlatMapOperator<InKey: Key, InT: Data, OutKey: Key, OutT: Data> {
+pub struct ArrayMapOperator<InKey: Key, InT: Data, OutKey: Key, OutT: Data> {
     pub name: String,
     pub map_fn: Box<dyn Fn(&Record<InKey, InT>, &TaskInfo) -> Option<Record<OutKey, OutT>> + Send>,
 }
 
 #[process_fn(in_k = InKey, in_t = Vec<InT>, out_k = OutKey, out_t = OutT)]
-impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> FlatMapOperator<InKey, InT, OutKey, OutT> {
+impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> ArrayMapOperator<InKey, InT, OutKey, OutT> {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -743,6 +743,29 @@ impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> FlatMapOperator<InKey, InT,
             if let Some(result) = result {
                 ctx.collector.collect(result).await
             }
+        }
+    }
+}
+
+#[derive(StreamNode)]
+pub struct FlatMapOperator<InKey: Key, InT: Data, OutKey: Key, OutT: Data> {
+    pub name: String,
+    pub flat_map: Box<dyn Fn(&Record<InKey, InT>, &TaskInfo) -> Vec<Record<OutKey, OutT>> + Send>,
+}
+
+#[process_fn(in_k = InKey, in_t = InT, out_k = OutKey, out_t = OutT)]
+impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> FlatMapOperator<InKey, InT, OutKey, OutT> {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+    async fn process_element(
+        &mut self,
+        record: &Record<InKey, InT>,
+        ctx: &mut Context<OutKey, OutT>,
+    ) {
+        let outputs = (self.flat_map)(record, &ctx.task_info);
+        for rec in outputs {
+            ctx.collector.collect(rec).await
         }
     }
 }

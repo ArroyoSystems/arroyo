@@ -14,69 +14,138 @@ use arrow_schema::DataType;
 use arroyo_rpc::formats::Format;
 use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str};
 
 #[derive(Debug, Clone)]
 pub struct Projection {
-    pub field_names: Vec<Column>,
-    pub field_computations: Vec<Expression>,
+    pub fields: Vec<(Column, Expression)>,
     pub format: Option<Format>,
 }
 
 impl Projection {
-    pub fn new(field_names: Vec<Column>, field_computations: Vec<Expression>) -> Self {
+    pub fn new(fields: Vec<(Column, Expression)>) -> Self {
         Self {
-            field_names,
-            field_computations,
+            fields,
             format: None,
         }
     }
 
     pub fn output_struct(&self) -> StructDef {
-        self.expression_type(&ValuePointerContext)
+        self.expression_type(&ValuePointerContext::new())
     }
 }
 
 impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for Projection {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let assignments: Vec<_> = self
-            .field_computations
+            .fields
             .iter()
-            .enumerate()
-            .map(|(i, field)| {
-                let field_name = self.field_names[i].clone();
-                let name = field_name.name;
-                let alias = field_name.relation;
-                let data_type = field.expression_type(input_context);
-                let field_ident = StructField::new(name, alias, data_type).field_ident();
-                let expr = field.generate(input_context);
+            .map(|(col, computation)| {
+                let data_type = computation.expression_type(input_context);
+                let field_ident = StructField::new(col.name.clone(), col.relation.clone(), data_type).field_ident();
+                let expr = computation.generate(input_context);
                 quote!(#field_ident : #expr)
             })
             .collect();
         let output_type = self.expression_type(input_context).get_type();
         parse_quote!(
-                #output_type {
-                    #(#assignments)
-                    ,*
-                }
+            #output_type {
+                #(#assignments)
+                ,*
+            }
         )
     }
 
     fn expression_type(&self, input_context: &ValuePointerContext) -> StructDef {
         let fields = self
-            .field_computations
+            .fields
             .iter()
-            .enumerate()
-            .map(|(i, computation)| {
-                let field_name = self.field_names[i].clone();
+            .map(|(col, computation)| {
                 let field_type = computation.expression_type(&input_context);
-                StructField::new(field_name.name, field_name.relation, field_type)
+                StructField::new(col.name.clone(), col.relation.clone(), field_type)
             })
             .collect();
         StructDef::new(None, fields, self.format.clone())
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct UnnestProjection {
+    pub fields: Vec<(Column, Expression)>,
+    pub unnest_col: Column,
+    pub unnest_inner: Expression,
+    pub unnest_outer: Expression,
+    pub format: Option<Format>,
+}
+
+impl UnnestProjection {
+    pub fn output_struct(&self) -> StructDef {
+        self.expression_type(&ValuePointerContext::new())
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjection {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let array_creating_expr = self.unnest_inner.generate(input_context);
+
+        let handle_optional = if self.unnest_inner.expression_type(input_context).is_optional() {
+            quote! { .flatten() }
+        } else {
+            quote!()
+        };
+
+        let assignments: Vec<_> = self
+            .fields
+            .iter()
+            .map(|(col, expr)| {
+                let name = &col.name;
+                let alias = &col.relation;
+                let data_type = expr.expression_type(input_context);
+                let field_ident = StructField::new(name.clone(), alias.clone(), data_type).field_ident();
+                let expr = expr.generate(input_context);
+                quote!(#field_ident : #expr)
+            })
+            .collect();
+        let output_type = self.expression_type(input_context).get_type();
+
+        let unnest_ctx = ValuePointerContext::with_arg("___unnest");
+        let unnest_expr = self.unnest_outer.generate(&unnest_ctx);
+
+        let unnest_ident = StructField::new(
+            self.unnest_col.name.clone(), self.unnest_col.relation.clone(),
+            self.unnest_outer.expression_type(&unnest_ctx)).field_ident();
+
+        parse_quote!(
+            #array_creating_expr.into_iter()
+                #handle_optional
+                .map(|___unnest| {
+                    #output_type {
+                        #(#assignments),*,
+                        #unnest_ident: #unnest_expr,
+                    }
+                })
+        )
+    }
+
+    fn expression_type(&self, input_context: &ValuePointerContext) -> StructDef {
+        let mut fields: Vec<_> = self
+            .fields
+            .iter()
+            .map(|(col, computation)| {
+                let field_type = computation.expression_type(&input_context);
+                StructField::new(col.name.clone(), col.relation.clone(), field_type)
+            })
+            .collect();
+
+        fields.push(StructField::new(
+            self.unnest_col.name.clone(), self.unnest_col.relation.clone(), self.unnest_outer.expression_type(input_context)
+        ));
+
+        StructDef::new(None, fields, self.format.clone())
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct AggregateProjection {
@@ -402,7 +471,7 @@ impl TwoPhaseAggregateProjection {
             .aggregates
             .iter()
             .map(|(column, computation)| {
-                let field_type = computation.output_type_def(&ValuePointerContext);
+                let field_type = computation.output_type_def(&ValuePointerContext::new());
                 StructField::new(column.name.clone(), column.relation.clone(), field_type)
             })
             .collect();

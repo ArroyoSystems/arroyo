@@ -1,5 +1,5 @@
 use arrow_schema::DataType;
-use quote::quote;
+use quote::{format_ident, quote};
 use quote::ToTokens;
 use syn::parse_quote;
 
@@ -11,15 +11,23 @@ pub trait CodeGenerator<Context, OutputValue, OutputType: ToTokens> {
     fn expression_type(&self, input_context: &Context) -> OutputValue;
 }
 
-pub struct ValuePointerContext;
+pub struct ValuePointerContext {
+    arg: syn::Ident,
+}
 
 impl ValuePointerContext {
     pub fn new() -> Self {
-        ValuePointerContext
+        Self::with_arg("arg")
+    }
+
+    pub fn with_arg(s: &str) -> Self {
+        ValuePointerContext {
+            arg: format_ident!("{}", s)
+        }
     }
 
     pub fn variable_ident(&self) -> syn::Ident {
-        parse_quote!(arg)
+        self.arg.clone()
     }
 
     pub(crate) fn compile_value_map_expr<CG: CodeGenerator<Self, StructDef, syn::Expr>>(
@@ -28,15 +36,35 @@ impl ValuePointerContext {
     ) -> syn::Expr {
         let expr = code_generator.generate(self);
         let arg_ident = self.variable_ident();
-        parse_quote!(
-            {
-                let #arg_ident = &record.value;
-                let value = #expr;
-                arroyo_types::Record {
+        parse_quote!({
+            let #arg_ident = &record.value;
+            let value = #expr;
+            arroyo_types::Record {
                 timestamp: record.timestamp,
                 key: None,
                 value
-        }
+            }
+        })
+    }
+
+    pub(crate) fn compile_flatmap_expr<CG: CodeGenerator<Self, StructDef, syn::Expr>>(
+        &self,
+        code_generator: &CG
+    ) -> syn::Expr {
+        let expr = code_generator.generate(self);
+        let arg_ident = self.variable_ident();
+
+        parse_quote!({
+            let #arg_ident = &record.value;
+            #expr
+            .map(|value| {
+                arroyo_types::Record {
+                    timestamp: record.timestamp,
+                    key: None,
+                    value
+                }
+            })
+            .collect()
         })
     }
 
@@ -48,10 +76,9 @@ impl ValuePointerContext {
     ) -> syn::Expr {
         let expr = code_generator.generate(self);
         let arg_ident = self.variable_ident();
-        parse_quote!(
-            {
-                let value = record.value.map_over_inner(|#arg_ident| #expr)?;
-                Some(arroyo_types::Record {
+        parse_quote!({
+            let value = record.value.map_over_inner(|#arg_ident| #expr)?;
+            Some(arroyo_types::Record {
                 timestamp: record.timestamp,
                 key: None,
                 value
@@ -65,14 +92,13 @@ impl ValuePointerContext {
     ) -> syn::Expr {
         let expr = code_generator.generate(self);
         let arg_ident = self.variable_ident();
-        parse_quote!(
-                {
-                    let #arg_ident = &record.value;
-                    let key = #expr;
-                    arroyo_types::Record {
-                    timestamp: record.timestamp,
-                    key: Some(key),
-                    value: record.value.clone()
+        parse_quote!({
+            let #arg_ident = &record.value;
+            let key = #expr;
+            arroyo_types::Record {
+                timestamp: record.timestamp,
+                key: Some(key),
+                value: record.value.clone()
             }
         })
     }
@@ -104,10 +130,9 @@ impl ValuePointerContext {
             None
         };
 
-        parse_quote!(
-            {
-                let #arg_ident = &record.value;
-                #expr #unwrap
+        parse_quote!({
+            let #arg_ident = &record.value;
+            #expr #unwrap
         })
     }
 
@@ -170,6 +195,22 @@ impl ValuePointerContext {
             }
         )
     }
+
+    // pub(crate) fn compile_unnest_expression<CG: CodeGenerator<Self, TypeDef, syn::Expr>>(&self,
+    //                                         code_generator: CG) -> syn::Expr {
+    //     let expr = code_generator.generate(self);
+    //     let arg_ident = self.variable_ident();
+    //     parse_quote!(
+    //         let #arg_ident = &record.value;
+    //         let value = #expr;
+    //
+    //         for _unnested in #arg_ident {
+    //             arroyo_types::Record {
+    //             timestamp: record.timestamp,
+    //             key: None,
+    //             value
+    //     })
+    // }
 }
 
 pub struct JoinPairContext {
