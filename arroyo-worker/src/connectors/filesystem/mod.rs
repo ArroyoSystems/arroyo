@@ -23,7 +23,7 @@ use object_store::{
 use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::warn;
+use tracing::{info, warn};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
@@ -639,17 +639,24 @@ where
                             let writer = self.writers.get_mut(filename).unwrap();
                             if let Some(stats) = writer.stats() {
                             if self.rolling_policy.should_roll(&stats, self.watermark) {
-                                removed_partitions.push(partition.clone());
+
                                 if let Some(future) = writer.close()? {
                                 self.futures.push(future);
+                                    removed_partitions.push((partition.clone(), false));
+                                } else {
+                                    removed_partitions.push((partition.clone(), true));
                                 }
-                                self.max_file_index += 1;
                             }
                         }
                     }
-                    for partition in removed_partitions {
-                        self.writers.remove(&partition);
-                        self.active_writers.remove(&partition);
+                    if removed_partitions.len() > 0 {
+                        self.max_file_index += 1;
+                    }
+                    for (partition, remove_writer) in removed_partitions {
+                        let file = self.active_writers.remove(&partition).ok_or_else(|| anyhow::anyhow!("can't find writer {:?}", partition))?;
+                        if remove_writer {
+                            self.writers.remove(&file);
+                        }
                     }
                 }
                 else => {
@@ -756,13 +763,16 @@ where
     }
 
     async fn stop(&mut self) -> Result<()> {
-        for (_sub_bucket, filename) in &self.active_writers {
-            let mut writer = self.writers.remove(filename).unwrap();
+        for (_partition, filename) in &self.active_writers {
+            let writer = self.writers.get_mut(filename).unwrap();
             let close_future: Option<BoxedTryFuture<MultipartCallbackWithName>> = writer.close()?;
             if let Some(future) = close_future {
                 self.futures.push(future);
+            } else {
+                self.writers.remove(filename);
             }
         }
+        self.active_writers.clear();
         while let Some(result) = self.futures.next().await {
             let MultipartCallbackWithName { callback, name } = result?;
             self.process_callback(name, callback)?;
