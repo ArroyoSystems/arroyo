@@ -23,7 +23,7 @@ use object_store::{
 use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{info, warn};
+use tracing::warn;
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
@@ -231,7 +231,7 @@ struct InProgressFileCheckpoint<T: Data> {
     buffered_data: Vec<T>,
 }
 
-#[derive(Debug, Decode, Encode, Clone, PartialEq, Eq)]
+#[derive(Decode, Encode, Clone, PartialEq, Eq)]
 pub enum FileCheckpointData {
     Empty,
     MultiPartNotCreated {
@@ -251,6 +251,89 @@ pub enum FileCheckpointData {
         multi_part_upload_id: String,
         completed_parts: Vec<String>,
     },
+}
+
+impl std::fmt::Debug for FileCheckpointData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileCheckpointData::Empty => write!(f, "Empty"),
+            FileCheckpointData::MultiPartNotCreated {
+                parts_to_add,
+                trailing_bytes,
+            } => {
+                write!(f, "MultiPartNotCreated {{ parts_to_add: [")?;
+                for part in parts_to_add {
+                    write!(f, "{} bytes, ", part.len())?;
+                }
+                write!(f, "], trailing_bytes: ")?;
+                if let Some(bytes) = trailing_bytes {
+                    write!(f, "{} bytes", bytes.len())?;
+                } else {
+                    write!(f, "None")?;
+                }
+                write!(f, " }}")
+            }
+            FileCheckpointData::MultiPartInFlight {
+                multi_part_upload_id,
+                in_flight_parts,
+                trailing_bytes,
+            } => {
+                write!(
+                    f,
+                    "MultiPartInFlight {{ multi_part_upload_id: {}, in_flight_parts: [",
+                    multi_part_upload_id
+                )?;
+                for part in in_flight_parts {
+                    match part {
+                        InFlightPartCheckpoint::FinishedPart { content_id, .. } => {
+                            write!(f, "FinishedPart {{ {} bytes }}, ", content_id.len())?
+                        }
+                        InFlightPartCheckpoint::InProgressPart { data, .. } => {
+                            write!(f, "InProgressPart {{ {} bytes }}, ", data.len())?
+                        }
+                    }
+                }
+                write!(f, "], trailing_bytes: ")?;
+                if let Some(bytes) = trailing_bytes {
+                    write!(f, "{} bytes", bytes.len())?;
+                } else {
+                    write!(f, "None")?;
+                }
+                write!(f, " }}")
+            }
+            FileCheckpointData::MultiPartWriterClosed {
+                multi_part_upload_id,
+                in_flight_parts,
+            } => {
+                write!(
+                    f,
+                    "MultiPartWriterClosed {{ multi_part_upload_id: {}, in_flight_parts: [",
+                    multi_part_upload_id
+                )?;
+                for part in in_flight_parts {
+                    match part {
+                        InFlightPartCheckpoint::FinishedPart { content_id, .. } => {
+                            write!(f, "FinishedPart {{ {} bytes }}, ", content_id.len())?
+                        }
+                        InFlightPartCheckpoint::InProgressPart { data, .. } => {
+                            write!(f, "InProgressPart {{ {} bytes }}, ", data.len())?
+                        }
+                    }
+                }
+                write!(f, "] }}")
+            }
+            FileCheckpointData::MultiPartWriterUploadCompleted {
+                multi_part_upload_id,
+                completed_parts,
+            } => {
+                write!(f, "MultiPartWriterUploadCompleted {{ multi_part_upload_id: {}, completed_parts: [", multi_part_upload_id)?;
+                for part in completed_parts {
+                    write!(f, "{} bytes, ", part.len())?;
+                }
+                write!(f, "] }}")
+            }
+        }
+    }
 }
 
 #[derive(Debug, Decode, Encode, Clone, PartialEq, Eq)]
@@ -595,7 +678,9 @@ where
                 Some(message) = self.receiver.recv() => {
                     match message {
                         FileSystemMessages::Data{value, time, partition} => {
-                            self.get_or_insert_writer(&partition).insert_value(value, time).await?;
+                            if let Some(future) = self.get_or_insert_writer(&partition).insert_value(value, time).await? {
+                                self.futures.push(future);
+                            }
                         },
                         FileSystemMessages::Init {max_file_index, subtask_id, recovered_files } => {
                             self.max_file_index = max_file_index;
@@ -783,11 +868,12 @@ where
     async fn take_checkpoint(&mut self, _subtask_id: usize) -> Result<()> {
         for (filename, writer) in self.writers.iter_mut() {
             let buffered_data = writer.currently_buffered_data();
+            let data = writer.get_in_progress_checkpoint();
             let in_progress_checkpoint =
                 CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
                     filename: filename.clone(),
                     partition: writer.partition(),
-                    data: writer.get_in_progress_checkpoint(),
+                    data,
                     buffered_data,
                 });
             self.checkpoint_sender.send(in_progress_checkpoint).await?;
@@ -1214,6 +1300,8 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> Mul
         if self.multipart_manager.closed {
             self.multipart_manager.get_closed_file_checkpoint_data()
         } else {
+            let batch = self.batch_builder.flush_buffer();
+            self.batch_buffering_writer.add_batch_data(batch);
             self.multipart_manager.get_in_progress_checkpoint(
                 self.batch_buffering_writer
                     .get_trailing_bytes_for_checkpoint(),
