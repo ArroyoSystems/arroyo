@@ -96,7 +96,7 @@ impl<K: Key, T: SchemaData + Serialize> FileSink<K, T> {
             .await;
     }
 
-    async fn on_close(&mut self, _ctx: &mut Context<(), ()>) {
+    async fn on_close(&mut self, _ctx: &mut Context<(), ()>, _final_message: &Option<arroyo_types::Message<(), ()>>) {
         self.file.as_mut().unwrap().flush().await.unwrap();
     }
 }

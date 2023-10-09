@@ -59,6 +59,8 @@ pub trait TwoPhaseCommitter<K: Key, T: Data + Sync>: Send + 'static {
         watermark: Option<SystemTime>,
         stopping: bool,
     ) -> Result<(Self::DataRecovery, HashMap<String, Self::PreCommit>)>;
+
+    async fn close(&mut self) -> Result<()>;
 }
 
 #[process_fn(in_k = K, in_t = T)]
@@ -128,7 +130,11 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             .expect("record inserted");
     }
 
-    async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>) {
+    async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>, final_message: &Option<arroyo_types::Message<(), ()>>) {
+        if let Some(arroyo_types::Message::EndOfData) = final_message {
+            self.committer.close().await.unwrap();
+            return;
+        }
         if let Some(ControlMessage::Commit { epoch }) = ctx.control_rx.recv().await {
             self.handle_commit(epoch, ctx).await;
         } else {

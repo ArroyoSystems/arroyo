@@ -176,7 +176,7 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
         self.state_cache = state;
     }
 
-    async fn on_close(&mut self, ctx: &mut Context<K, D>) {
+    async fn on_close(&mut self, ctx: &mut Context<K, D>, _final_message: &Option<Message<K, D>>) {
         // send final watermark on close
         ctx.collector
             .broadcast(Message::Watermark(Watermark::EventTime(from_millis(

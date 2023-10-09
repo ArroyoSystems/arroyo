@@ -291,7 +291,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
             .expect("sent commit event");
     }
 
-    async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>) {
+    async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>, _final_message: &Option<arroyo_types::Message<(), ()>>) {
         if !self.is_committing() {
             return;
         }

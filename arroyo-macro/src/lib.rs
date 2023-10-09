@@ -604,7 +604,7 @@ fn impl_stream_node_type(
                 let name = self.name();
                 #handle_body
 
-                Self::on_close(&mut (*self), &mut ctx).await;
+                Self::on_close(&mut (*self), &mut ctx, &final_message).await;
                 if let Some(final_message) = final_message {
                     ctx.broadcast(final_message).await;
                 }
@@ -774,7 +774,7 @@ fn impl_stream_node_type(
 
     if !methods.contains("on_close") {
         defs.push(quote! {
-            async fn on_close(&mut self, ctx: &mut crate::engine::Context<#out_k, #out_t>) {}
+            async fn on_close(&mut self, ctx: &mut crate::engine::Context<#out_k, #out_t>, final_message: &Option<arroyo_types::Message<#out_k, #out_t>>) {}
         })
     }
 

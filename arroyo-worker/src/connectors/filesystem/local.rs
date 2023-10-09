@@ -247,4 +247,9 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D> + Send + 'static> Two
         };
         Ok((data_recovery, pre_commits))
     }
+
+    async fn close(&mut self) -> Result<()> {
+        self.checkpoint(&TaskInfo::for_test(&"", &""), None, true).await?;
+        Ok(())
+    }
 }

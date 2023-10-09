@@ -23,7 +23,7 @@ use object_store::{
 use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::warn;
+use tracing::{warn, info};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
@@ -848,6 +848,7 @@ where
     }
 
     async fn stop(&mut self) -> Result<()> {
+        info!("stopping! currently {} writers and {} active writers", self.writers.len(), self.active_writers.len());
         for (_partition, filename) in &self.active_writers {
             let writer = self.writers.get_mut(filename).unwrap();
             let close_future: Option<BoxedTryFuture<MultipartCallbackWithName>> = writer.close()?;
@@ -860,8 +861,10 @@ where
         self.active_writers.clear();
         while let Some(result) = self.futures.next().await {
             let MultipartCallbackWithName { callback, name } = result?;
+            info!("received {:?} for {}", callback, name);
             self.process_callback(name, callback)?;
         }
+        info!("stopped! currently {} writers and {} active writers", self.writers.len(), self.active_writers.len());
         Ok(())
     }
 
@@ -1536,5 +1539,15 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
             }
         }
         bail!("checkpoint receiver closed unexpectedly")
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        self.sender.send(FileSystemMessages::Checkpoint {
+            subtask_id: 0,
+            watermark: None,
+            then_stop: true,
+        }).await?;
+        self.checkpoint_receiver.recv().await;
+        Ok(())
     }
 }
