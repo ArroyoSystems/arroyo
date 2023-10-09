@@ -146,6 +146,7 @@ impl ArroyoSchemaProvider {
                 make_scalar_function(fn_impl),
             )),
         );
+
         functions.insert(
             "get_json_objects".to_string(),
             Arc::new(create_udf(
@@ -160,6 +161,21 @@ impl ArroyoSchemaProvider {
                 make_scalar_function(fn_impl),
             )),
         );
+        functions.insert(
+            "extract_json".to_string(),
+            Arc::new(create_udf(
+                "extract_json",
+                vec![DataType::Utf8, DataType::Utf8],
+                Arc::new(DataType::List(Arc::new(Field::new(
+                    "item",
+                    DataType::Utf8,
+                    false,
+                )))),
+                Volatility::Volatile,
+                make_scalar_function(fn_impl),
+            )),
+        );
+
         functions.insert(
             "extract_json_string".to_string(),
             Arc::new(create_udf(

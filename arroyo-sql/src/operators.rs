@@ -121,8 +121,8 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
                 #handle_optional
                 .map(|___unnest| {
                     #output_type {
-                        #(#assignments),*,
                         #unnest_ident: #unnest_expr,
+                        #(#assignments),*
                     }
                 })
         )

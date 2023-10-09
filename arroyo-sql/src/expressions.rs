@@ -884,31 +884,19 @@ impl<'a> ExpressionContext<'a> {
             }
             Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
                 "get_first_json_object" => {
-                    let json_string = Box::new(self.compile_expr(&args[0])?);
-                    let path = Box::new(self.compile_expr(&args[1])?);
-                    Ok(Expression::Json(JsonExpression {
-                        function: JsonFunction::GetFirstJsonObject,
-                        json_string,
-                        path,
-                    }))
+                    JsonExpression::new(JsonFunction::GetFirstJsonObject,
+                                        self.compile_expr(&args[0])?,
+                                                 self.compile_expr(&args[1])?)
                 }
-                "get_json_objects" => {
-                    let json_string = Box::new(self.compile_expr(&args[0])?);
-                    let path = Box::new(self.compile_expr(&args[1])?);
-                    Ok(Expression::Json(JsonExpression {
-                        function: JsonFunction::GetJsonObjects,
-                        json_string,
-                        path,
-                    }))
+                "get_json_objects" | "extract_json" => {
+                    JsonExpression::new(JsonFunction::GetJsonObjects,
+                                        self.compile_expr(&args[0])?,
+                                        self.compile_expr(&args[1])?)
                 }
-                "extract_json_string" => {
-                    let json_string = Box::new(self.compile_expr(&args[0])?);
-                    let path = Box::new(self.compile_expr(&args[1])?);
-                    Ok(Expression::Json(JsonExpression {
-                        function: JsonFunction::ExtractJsonString,
-                        json_string,
-                        path,
-                    }))
+                "extract_json_string" | "json_extract_string" => {
+                    JsonExpression::new(JsonFunction::ExtractJsonString,
+                                        self.compile_expr(&args[0])?,
+                                        self.compile_expr(&args[1])?)
                 }
                 "hop" => {
                     if args.len() != 2 {
@@ -3401,6 +3389,22 @@ pub struct JsonExpression {
 }
 
 impl JsonExpression {
+    fn new(function: JsonFunction, json_string: Expression, path: Expression) -> Result<Expression> {
+        if let Expression::Literal(v) = &path {
+            let ScalarValue::Utf8(Some(v)) = &v.literal else {
+                bail!("Literal argument to {:?} must be a string", function);
+            };
+
+            serde_json_path::JsonPath::parse(v).map_err(|e| anyhow!("invalid json path: {} at position {:?}", v, e.position()))?;
+        }
+
+        Ok(Expression::Json(JsonExpression {
+            function,
+            json_string: Box::new(json_string),
+            path: Box::new(path),
+        }))
+    }
+
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let path_nullable = self.path.expression_type(input_context).is_optional();
         let json_nullable = self
@@ -3414,6 +3418,7 @@ impl JsonExpression {
             JsonFunction::GetJsonObjects => quote!(get_json_objects),
             JsonFunction::ExtractJsonString => quote!(extract_json_string),
         };
+
         // Handle different nullabilities.
         match (path_nullable, json_nullable) {
             (true, true) => parse_quote!({

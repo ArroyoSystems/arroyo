@@ -691,6 +691,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_json_path",
  "syn 2.0.33",
  "tokio",
  "tracing",
@@ -6735,9 +6736,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json_path"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "494fa32f1127343a29297e1cad9d59ccbbe4824be9f546f4f63e86479637ea02"
+checksum = "35c79e076e7e0e91510241afe3c432cb8b5126245153f7141077ffb074d270eb"
 dependencies = [
  "inventory",
  "nom",
@@ -6752,9 +6753,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json_path_core"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41a570e847edac5b01e66cd9981b5adebf504ceb7e8ba22bd6f7a39fec392ad4"
+checksum = "e774ec1b58d942c47f7abbdc30ba876e5525590c5388760185b1fbe283f9f10c"
 dependencies = [
  "inventory",
  "once_cell",
