@@ -2047,7 +2047,9 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 return_type: return_type.into(),
             }),
             Operator::FlattenOperator { name } => GrpcOperator::Flatten(Flatten { name }),
-            Operator::FlatMapOperator { name, expression } => GrpcOperator::FlatMapOperator({ GrpcApi::FlatMapOperator { name, expression } }),
+            Operator::FlatMapOperator { name, expression } => {
+                GrpcOperator::FlatMapOperator({ GrpcApi::FlatMapOperator { name, expression } })
+            }
             Operator::ArrayMapOperator {
                 name,
                 expression,
@@ -2351,7 +2353,9 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     }
                 }
                 GrpcOperator::Flatten(Flatten { name }) => Operator::FlattenOperator { name },
-                GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression }) => Operator::FlatMapOperator { name, expression },
+                GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression }) => {
+                    Operator::FlatMapOperator { name, expression }
+                }
                 GrpcOperator::FlattenExpressionOperator(flatten_expression) => {
                     let return_type = flatten_expression.return_type().into();
                     Operator::ArrayMapOperator {

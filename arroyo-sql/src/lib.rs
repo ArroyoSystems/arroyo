@@ -43,10 +43,10 @@ use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::types::{StructDef, StructField, TypeDef};
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::types::{ConnectionSchema, ConnectionType};
+use datafusion_common::DataFusionError;
 use quote::ToTokens;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
-use datafusion_common::DataFusionError;
 use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
@@ -115,26 +115,24 @@ impl ArroyoSchemaProvider {
         );
         functions.insert(
             "unnest".to_string(),
-            Arc::new(
-                {
-                    let return_type: ReturnTypeFunction = Arc::new(move |args| {
-                        match args.get(0).ok_or_else(|| DataFusionError::Plan("unnest takes one argument".to_string()))? {
-                            DataType::List(t) => {
-                                Ok(Arc::new(t.data_type().clone()))
-                            },
-                            _ => {
-                                Err(DataFusionError::Plan("unnest may only be called on arrays".to_string()))
-                            }
-                        }
-                    });
-                    ScalarUDF::new(
-                        "unnest",
-                        &Signature::any(1, Volatility::Immutable),
-                        &return_type,
-                        &make_scalar_function(fn_impl),
-                    )
-                }
-            )
+            Arc::new({
+                let return_type: ReturnTypeFunction = Arc::new(move |args| {
+                    match args.get(0).ok_or_else(|| {
+                        DataFusionError::Plan("unnest takes one argument".to_string())
+                    })? {
+                        DataType::List(t) => Ok(Arc::new(t.data_type().clone())),
+                        _ => Err(DataFusionError::Plan(
+                            "unnest may only be called on arrays".to_string(),
+                        )),
+                    }
+                });
+                ScalarUDF::new(
+                    "unnest",
+                    &Signature::any(1, Volatility::Immutable),
+                    &return_type,
+                    &make_scalar_function(fn_impl),
+                )
+            }),
         );
         functions.insert(
             "get_first_json_object".to_string(),

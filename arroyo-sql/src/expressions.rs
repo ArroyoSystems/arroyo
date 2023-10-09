@@ -253,7 +253,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             }
             Expression::Unnest(_, taken) => {
                 if !taken {
-                    panic!("inner value of unnest should have been taken!");
+                    panic!("unnest appeared in a non-projection context");
                 } else {
                     let ident = input_context.variable_ident();
                     parse_quote!(#ident)
@@ -302,16 +302,14 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
-            Expression::Unnest(t, _) => {
-                match t.expression_type(input_context) {
-                    TypeDef::DataType(DataType::List(inner), _) => {
-                        TypeDef::DataType(inner.data_type().clone(), false)
-                    }
-                    _ => {
-                        unreachable!("unnest argument must be an array");
-                    }
+            Expression::Unnest(t, _) => match t.expression_type(input_context) {
+                TypeDef::DataType(DataType::List(inner), _) => {
+                    TypeDef::DataType(inner.data_type().clone(), false)
                 }
-            }
+                _ => {
+                    unreachable!("unnest argument must be an array");
+                }
+            },
         }
     }
 }
@@ -443,10 +441,13 @@ impl Expression {
         }
     }
 
-    pub fn traverse_mut<T, F: Fn(&mut T, &mut Expression) -> ()>(&mut self, context: &mut T, f: &F) {
+    pub fn traverse_mut<T, F: Fn(&mut T, &mut Expression) -> ()>(
+        &mut self,
+        context: &mut T,
+        f: &F,
+    ) {
         match self {
-            Expression::Column(_) => {
-            }
+            Expression::Column(_) => {}
             Expression::UnaryBoolean(e) => {
                 (&mut *e.input).traverse_mut(context, f);
             }
@@ -471,15 +472,13 @@ impl Expression {
             Expression::Numeric(e) => {
                 (&mut *e.input).traverse_mut(context, f);
             }
-            Expression::Date(e) => {
-                match e {
-                    DateTimeFunction::DatePart(_, e) |
-                    DateTimeFunction::DateTrunc(_, e) |
-                    DateTimeFunction::FromUnixTime(e) => {
-                        (&mut *e).traverse_mut(context, f);
-                    }
+            Expression::Date(e) => match e {
+                DateTimeFunction::DatePart(_, e)
+                | DateTimeFunction::DateTrunc(_, e)
+                | DateTimeFunction::FromUnixTime(e) => {
+                    (&mut *e).traverse_mut(context, f);
                 }
-            }
+            },
             Expression::String(e) => {
                 for e in e.expressions() {
                     e.traverse_mut(context, f);
@@ -488,19 +487,18 @@ impl Expression {
             Expression::Hash(e) => {
                 (&mut *e.input).traverse_mut(context, f);
             }
-            Expression::DataStructure(e) => {
-                match e {
-                    DataStructureFunction::Coalesce(exprs) | DataStructureFunction::MakeArray(exprs) => {
-                        for e in exprs {
-                            e.traverse_mut(context, f);
-                        }
-                    }
-                    DataStructureFunction::NullIf { left, right } => {
-                        (&mut *left).traverse_mut(context, f);
-                        (&mut *right).traverse_mut(context, f);
+            Expression::DataStructure(e) => match e {
+                DataStructureFunction::Coalesce(exprs)
+                | DataStructureFunction::MakeArray(exprs) => {
+                    for e in exprs {
+                        e.traverse_mut(context, f);
                     }
                 }
-            }
+                DataStructureFunction::NullIf { left, right } => {
+                    (&mut *left).traverse_mut(context, f);
+                    (&mut *right).traverse_mut(context, f);
+                }
+            },
             Expression::Json(e) => {
                 (&mut *e.json_string).traverse_mut(context, f);
                 (&mut *e.path).traverse_mut(context, f);
@@ -513,31 +511,35 @@ impl Expression {
             Expression::WrapType(e) => {
                 (&mut *e.arg).traverse_mut(context, f);
             }
-            Expression::Case(e) => {
-                match e {
-                    CaseExpression::Match { value, matches, default } => {
-                        f(context, &mut *value);
-                        for (l, r) in matches {
-                            (&mut *l).traverse_mut(context, f);
-                            (&mut *r).traverse_mut(context, f);
-                        }
-                        if let Some(default) = default {
-                            default.traverse_mut(context, f);
-                        }
+            Expression::Case(e) => match e {
+                CaseExpression::Match {
+                    value,
+                    matches,
+                    default,
+                } => {
+                    f(context, &mut *value);
+                    for (l, r) in matches {
+                        (&mut *l).traverse_mut(context, f);
+                        (&mut *r).traverse_mut(context, f);
                     }
-                    CaseExpression::When { condition_pairs, default } => {
-                        for (l, r) in condition_pairs {
-                            (&mut *l).traverse_mut(context, f);
-                            (&mut *r).traverse_mut(context, f);
-                        }
-                        if let Some(default) = default {
-                            (default).traverse_mut(context, f);
-                        }
+                    if let Some(default) = default {
+                        default.traverse_mut(context, f);
                     }
                 }
-            }
-            Expression::WindowUDF(_) => {
-            }
+                CaseExpression::When {
+                    condition_pairs,
+                    default,
+                } => {
+                    for (l, r) in condition_pairs {
+                        (&mut *l).traverse_mut(context, f);
+                        (&mut *r).traverse_mut(context, f);
+                    }
+                    if let Some(default) = default {
+                        (default).traverse_mut(context, f);
+                    }
+                }
+            },
+            Expression::WindowUDF(_) => {}
             Expression::Unnest(n, _) => {
                 (&mut *n).traverse_mut(context, f);
             }
@@ -883,21 +885,21 @@ impl<'a> ExpressionContext<'a> {
                 }
             }
             Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
-                "get_first_json_object" => {
-                    JsonExpression::new(JsonFunction::GetFirstJsonObject,
-                                        self.compile_expr(&args[0])?,
-                                                 self.compile_expr(&args[1])?)
-                }
-                "get_json_objects" | "extract_json" => {
-                    JsonExpression::new(JsonFunction::GetJsonObjects,
-                                        self.compile_expr(&args[0])?,
-                                        self.compile_expr(&args[1])?)
-                }
-                "extract_json_string" | "json_extract_string" => {
-                    JsonExpression::new(JsonFunction::ExtractJsonString,
-                                        self.compile_expr(&args[0])?,
-                                        self.compile_expr(&args[1])?)
-                }
+                "get_first_json_object" => JsonExpression::new(
+                    JsonFunction::GetFirstJsonObject,
+                    self.compile_expr(&args[0])?,
+                    self.compile_expr(&args[1])?,
+                ),
+                "get_json_objects" | "extract_json" => JsonExpression::new(
+                    JsonFunction::GetJsonObjects,
+                    self.compile_expr(&args[0])?,
+                    self.compile_expr(&args[1])?,
+                ),
+                "extract_json_string" | "json_extract_string" => JsonExpression::new(
+                    JsonFunction::ExtractJsonString,
+                    self.compile_expr(&args[0])?,
+                    self.compile_expr(&args[1])?,
+                ),
                 "hop" => {
                     if args.len() != 2 {
                         bail!("wrong number of arguments for hop(), expected two");
@@ -924,7 +926,10 @@ impl<'a> ExpressionContext<'a> {
                     if args.len() != 1 {
                         bail!("wrong number of arguments for unnest(), expected one");
                     }
-                    Ok(Expression::Unnest(Box::new(self.compile_expr(&args[0])?), false))
+                    Ok(Expression::Unnest(
+                        Box::new(self.compile_expr(&args[0])?),
+                        false,
+                    ))
                 }
                 udf => {
                     // get udf from context
@@ -2471,11 +2476,9 @@ impl StringFunction {
             | StringFunction::RegexpReplace(expr1, _, expr2, Some(expr3))
             | StringFunction::SplitPart(expr1, expr2, expr3) => {
                 vec![&mut *expr1, &mut *expr2, &mut *expr3]
-            },
-
-            StringFunction::Concat(exprs) => {
-                exprs.iter_mut().collect()
             }
+
+            StringFunction::Concat(exprs) => exprs.iter_mut().collect(),
             StringFunction::ConcatWithSeparator(expr, exprs) => {
                 let mut v = vec![&mut **expr];
                 v.extend(exprs.iter_mut());
@@ -3389,13 +3392,18 @@ pub struct JsonExpression {
 }
 
 impl JsonExpression {
-    fn new(function: JsonFunction, json_string: Expression, path: Expression) -> Result<Expression> {
+    fn new(
+        function: JsonFunction,
+        json_string: Expression,
+        path: Expression,
+    ) -> Result<Expression> {
         if let Expression::Literal(v) = &path {
             let ScalarValue::Utf8(Some(v)) = &v.literal else {
                 bail!("Literal argument to {:?} must be a string", function);
             };
 
-            serde_json_path::JsonPath::parse(v).map_err(|e| anyhow!("invalid json path: {} at position {:?}", v, e.position()))?;
+            serde_json_path::JsonPath::parse(v)
+                .map_err(|e| anyhow!("invalid json path: {} at position {:?}", v, e.position()))?;
         }
 
         Ok(Expression::Json(JsonExpression {
@@ -3587,7 +3595,8 @@ impl CodeGenerator<VecOfPointersContext, TypeDef, syn::Expr> for RustUdafExpress
                 let sub_expr = expr.generate(&ValuePointerContext::new());
                 let term_expr = match (
                     def.is_optional(),
-                    expr.expression_type(&ValuePointerContext::new()).is_optional(),
+                    expr.expression_type(&ValuePointerContext::new())
+                        .is_optional(),
                 ) {
                     (true, true) | (false, false) => parse_quote!(#sub_expr),
                     (true, false) => parse_quote!(Some(#sub_expr)),

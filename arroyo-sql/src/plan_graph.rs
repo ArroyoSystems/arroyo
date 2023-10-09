@@ -150,7 +150,8 @@ impl FusedRecordTransform {
                 RecordTransform::ValueProjection(projection) => {
                     names.push("value_project");
                     let record_type = output_type.record_type();
-                    let record_expression = ValuePointerContext::new().compile_value_map_expr(projection);
+                    let record_expression =
+                        ValuePointerContext::new().compile_value_map_expr(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type =  #record_expression;
                     ));
@@ -174,7 +175,9 @@ impl FusedRecordTransform {
                     ));
                 }
                 RecordTransform::Filter(_) => unreachable!(),
-                RecordTransform::UnnestProjection(p) => unreachable!("unnest projection cannot be fused"),
+                RecordTransform::UnnestProjection(_) => {
+                    unreachable!("unnest projection cannot be fused")
+                }
             }
         }
         let combined: syn::Expr = parse_quote!({
@@ -199,7 +202,8 @@ impl FusedRecordTransform {
                 (RecordTransform::ValueProjection(projection), false) => {
                     names.push("value_project");
                     let record_type = output_type.record_type();
-                    let record_expression = ValuePointerContext::new().compile_value_map_expr(projection);
+                    let record_expression =
+                        ValuePointerContext::new().compile_value_map_expr(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
                     ));
@@ -207,8 +211,8 @@ impl FusedRecordTransform {
                 (RecordTransform::ValueProjection(projection), true) => {
                     names.push("updating_value_project");
                     let record_type = output_type.record_type();
-                    let record_expression =
-                        ValuePointerContext::new().compile_updating_value_map_expression(projection);
+                    let record_expression = ValuePointerContext::new()
+                        .compile_updating_value_map_expression(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression?;
                     ));
@@ -249,7 +253,9 @@ impl FusedRecordTransform {
                             let record: #record_type = #record_expression;
                     ));
                 }
-                (RecordTransform::UnnestProjection(_), _) => unreachable!("unnest projection cannot be fused"),
+                (RecordTransform::UnnestProjection(_), _) => {
+                    unreachable!("unnest projection cannot be fused")
+                }
                 _ => unimplemented!(),
             }
         }
@@ -294,9 +300,7 @@ impl PlanNode {
             RecordTransform::TimestampAssignment(_) | RecordTransform::Filter(_) => {
                 input_type.clone()
             }
-            RecordTransform::UnnestProjection(p) => {
-                input_type.with_value(p.output_struct())
-            }
+            RecordTransform::UnnestProjection(p) => input_type.with_value(p.output_struct()),
         };
         PlanNode {
             operator: PlanOperator::RecordTransform(record_transform),
@@ -754,7 +758,9 @@ impl PlanNode {
                     let bin_type = projection
                         .expression_type(&ValueBinMergingContext::new())
                         .syn_type();
-                    let memory_type = projection.memory_type(&ValuePointerContext::new()).syn_type();
+                    let memory_type = projection
+                        .memory_type(&ValuePointerContext::new())
+                        .syn_type();
                     let memory_add = projection.generate(&MemoryAddingContext::new());
                     let memory_removing_context = MemoryRemovingContext::new();
                     let memory_remove = projection.generate(&memory_removing_context);

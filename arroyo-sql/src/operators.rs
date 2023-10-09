@@ -14,7 +14,7 @@ use arrow_schema::DataType;
 use arroyo_rpc::formats::Format;
 use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
+use quote::quote;
 use syn::{parse_quote, parse_str};
 
 #[derive(Debug, Clone)]
@@ -43,7 +43,9 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for Projection {
             .iter()
             .map(|(col, computation)| {
                 let data_type = computation.expression_type(input_context);
-                let field_ident = StructField::new(col.name.clone(), col.relation.clone(), data_type).field_ident();
+                let field_ident =
+                    StructField::new(col.name.clone(), col.relation.clone(), data_type)
+                        .field_ident();
                 let expr = computation.generate(input_context);
                 quote!(#field_ident : #expr)
             })
@@ -89,7 +91,11 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let array_creating_expr = self.unnest_inner.generate(input_context);
 
-        let handle_optional = if self.unnest_inner.expression_type(input_context).is_optional() {
+        let handle_optional = if self
+            .unnest_inner
+            .expression_type(input_context)
+            .is_optional()
+        {
             quote! { .flatten() }
         } else {
             quote!()
@@ -102,7 +108,8 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
                 let name = &col.name;
                 let alias = &col.relation;
                 let data_type = expr.expression_type(input_context);
-                let field_ident = StructField::new(name.clone(), alias.clone(), data_type).field_ident();
+                let field_ident =
+                    StructField::new(name.clone(), alias.clone(), data_type).field_ident();
                 let expr = expr.generate(input_context);
                 quote!(#field_ident : #expr)
             })
@@ -113,8 +120,11 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
         let unnest_expr = self.unnest_outer.generate(&unnest_ctx);
 
         let unnest_ident = StructField::new(
-            self.unnest_col.name.clone(), self.unnest_col.relation.clone(),
-            self.unnest_outer.expression_type(&unnest_ctx)).field_ident();
+            self.unnest_col.name.clone(),
+            self.unnest_col.relation.clone(),
+            self.unnest_outer.expression_type(&unnest_ctx),
+        )
+        .field_ident();
 
         parse_quote!(
             #array_creating_expr.into_iter()
@@ -139,13 +149,14 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
             .collect();
 
         fields.push(StructField::new(
-            self.unnest_col.name.clone(), self.unnest_col.relation.clone(), self.unnest_outer.expression_type(input_context)
+            self.unnest_col.name.clone(),
+            self.unnest_col.relation.clone(),
+            self.unnest_outer.expression_type(input_context),
         ));
 
         StructDef::new(None, fields, self.format.clone())
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct AggregateProjection {

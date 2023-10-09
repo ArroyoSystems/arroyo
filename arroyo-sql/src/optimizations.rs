@@ -22,7 +22,7 @@ use crate::plan_graph::{
 
 pub fn optimize(graph: &mut DiGraph<PlanNode, PlanEdge>) {
     WindowTopNOptimization::default().optimize(graph);
-    //ExpressionFusionOptimizer::default().optimize(graph);
+    ExpressionFusionOptimizer::default().optimize(graph);
     TwoPhaseOptimization {}.optimize(graph);
 }
 
@@ -147,9 +147,12 @@ impl Optimizer for ExpressionFusionOptimizer {
         node: PlanNode,
         graph: &mut DiGraph<PlanNode, PlanEdge>,
     ) -> bool {
-        if matches!(&node.operator, PlanOperator::RecordTransform(RecordTransform::UnnestProjection(_))) {
-            false
-        } else if matches!(&node.operator, PlanOperator::RecordTransform { .. }) {
+        if matches!(&node.operator, PlanOperator::RecordTransform { .. })
+            && !matches!(
+                &node.operator,
+                PlanOperator::RecordTransform(RecordTransform::UnnestProjection(_))
+            )
+        {
             if matches!(
                 &node.operator,
                 PlanOperator::RecordTransform(RecordTransform::KeyProjection { .. })
@@ -164,7 +167,7 @@ impl Optimizer for ExpressionFusionOptimizer {
             self.builder.fuse_node(&node);
             self.run.push(_node_index);
             false
-        }  else if !self.run.is_empty() {
+        } else if !self.run.is_empty() {
             self.try_finish_optimization(graph)
         } else {
             false

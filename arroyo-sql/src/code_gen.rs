@@ -1,6 +1,6 @@
 use arrow_schema::DataType;
-use quote::{format_ident, quote};
 use quote::ToTokens;
+use quote::{format_ident, quote};
 use syn::parse_quote;
 
 use crate::types::{data_type_as_syn_type, StructDef, TypeDef};
@@ -22,7 +22,7 @@ impl ValuePointerContext {
 
     pub fn with_arg(s: &str) -> Self {
         ValuePointerContext {
-            arg: format_ident!("{}", s)
+            arg: format_ident!("{}", s),
         }
     }
 
@@ -49,7 +49,7 @@ impl ValuePointerContext {
 
     pub(crate) fn compile_flatmap_expr<CG: CodeGenerator<Self, StructDef, syn::Expr>>(
         &self,
-        code_generator: &CG
+        code_generator: &CG,
     ) -> syn::Expr {
         let expr = code_generator.generate(self);
         let arg_ident = self.variable_ident();
@@ -195,22 +195,6 @@ impl ValuePointerContext {
             }
         )
     }
-
-    // pub(crate) fn compile_unnest_expression<CG: CodeGenerator<Self, TypeDef, syn::Expr>>(&self,
-    //                                         code_generator: CG) -> syn::Expr {
-    //     let expr = code_generator.generate(self);
-    //     let arg_ident = self.variable_ident();
-    //     parse_quote!(
-    //         let #arg_ident = &record.value;
-    //         let value = #expr;
-    //
-    //         for _unnested in #arg_ident {
-    //             arroyo_types::Record {
-    //             timestamp: record.timestamp,
-    //             key: None,
-    //             value
-    //     })
-    // }
 }
 
 pub struct JoinPairContext {

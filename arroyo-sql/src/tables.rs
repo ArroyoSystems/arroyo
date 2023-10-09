@@ -416,11 +416,12 @@ impl ConnectorTable {
                         name: t.name(),
                     })
                     .zip(
-                    output_struct
-                        .fields
-                        .iter()
-                        .map(|t| Expression::Column(ColumnExpression::new(t.clone()))))
-                        .collect(),
+                        output_struct
+                            .fields
+                            .iter()
+                            .map(|t| Expression::Column(ColumnExpression::new(t.clone()))),
+                    )
+                    .collect(),
             );
 
             projection.format = Some(format.clone());

@@ -19,6 +19,7 @@ use quote::quote;
 use crate::code_gen::{CodeGenerator, ValuePointerContext, VecAggregationContext};
 use crate::expressions::{AggregateComputation, AggregateResultExtraction, ExpressionContext};
 use crate::external::{ProcessingMode, SqlSink, SqlSource};
+use crate::operators::UnnestProjection;
 use crate::schemas::window_type_def;
 use crate::tables::{Insert, Table};
 use crate::{
@@ -27,7 +28,6 @@ use crate::{
     types::{interval_month_day_nanos_to_duration, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
-use crate::operators::UnnestProjection;
 
 #[derive(Debug, Clone)]
 pub enum SqlOperator {
@@ -87,14 +87,15 @@ impl RecordTransform {
         match self {
             RecordTransform::ValueProjection(projection) => {
                 if is_updating {
-                    let updating_record_expression =
-                        ValuePointerContext::new().compile_updating_value_map_expression(projection);
+                    let updating_record_expression = ValuePointerContext::new()
+                        .compile_updating_value_map_expression(projection);
                     MethodCompiler::optional_record_expression_operator(
                         "updating_value_map",
                         updating_record_expression,
                     )
                 } else {
-                    let record_expression = ValuePointerContext::new().compile_value_map_expr(projection);
+                    let record_expression =
+                        ValuePointerContext::new().compile_value_map_expr(projection);
                     MethodCompiler::record_expression_operator("value_map", record_expression)
                 }
             }
@@ -124,8 +125,8 @@ impl RecordTransform {
                 }
             }
             RecordTransform::TimestampAssignment(timestamp_expression) => {
-                let timestamp_record_expression =
-                    ValuePointerContext::new().compile_timestamp_record_expression(timestamp_expression);
+                let timestamp_record_expression = ValuePointerContext::new()
+                    .compile_timestamp_record_expression(timestamp_expression);
 
                 MethodCompiler::record_expression_operator(
                     "timestamp_assigner",
@@ -487,7 +488,10 @@ impl<'a> SqlPipelineBuilder<'a> {
         let input = self.insert_sql_plan(&filter.input)?;
         let struct_def = input.return_type();
         let ctx = self.ctx(&struct_def);
-        let predicate = ctx.compile_expr(&filter.predicate)?;
+        let mut predicate = ctx.compile_expr(&filter.predicate)?;
+
+        Self::assert_no_unnest("where", &mut predicate)?;
+
         Ok(SqlOperator::RecordTransform(
             Box::new(input),
             RecordTransform::Filter(predicate),
@@ -497,27 +501,36 @@ impl<'a> SqlPipelineBuilder<'a> {
     fn split_unnest(expr: &mut Expression) -> Result<Option<Expression>> {
         let mut c: Option<Result<Expression>> = None;
 
-        expr.traverse_mut(&mut c, &|ctx, e| {
-           match e {
-               Expression::Unnest(expr, taken) => {
-                   if *taken {
-                       ctx.replace(Err(anyhow!("expression contains multiple unnests, which is not currently supported")));
-                   } else {
-                       *taken = true;
-                       ctx.replace(Ok(
-                           *expr.clone()
-                       ));
-                   }
-               }
-               _ => {
-
-               }
-           }
+        expr.traverse_mut(&mut c, &|ctx, e| match e {
+            Expression::Unnest(expr, taken) => {
+                if *taken {
+                    ctx.replace(Err(anyhow!(
+                        "expression contains multiple unnests, which is not currently supported"
+                    )));
+                } else {
+                    *taken = true;
+                    ctx.replace(Ok(*expr.clone()));
+                }
+            }
+            _ => {}
         });
 
         c.transpose()
     }
 
+    fn assert_no_unnest(ctx: &str, expr: &Expression) -> Result<()> {
+        let mut found = false;
+        let mut expr = expr.clone();
+        expr.traverse_mut(&mut found, &|ctx, e| {
+            *ctx = *ctx || matches!(e, Expression::Unnest(_, _));
+        });
+
+        if found {
+            bail!("{} may not include unnest", ctx);
+        } else {
+            Ok(())
+        }
+    }
 
     fn insert_projection(
         &mut self,
@@ -543,7 +556,7 @@ impl<'a> SqlPipelineBuilder<'a> {
         let mut fields: Vec<_> = names.zip(functions).collect();
 
         let mut unnest = None;
-        for (i, (_, expr)) in fields.iter_mut().enumerate(){
+        for (i, (_, expr)) in fields.iter_mut().enumerate() {
             if let Some(e) = Self::split_unnest(expr)? {
                 if unnest.replace((i, e)).is_some() {
                     bail!("multiple columns containing unnest functions, which is not currently supported");
@@ -552,17 +565,18 @@ impl<'a> SqlPipelineBuilder<'a> {
         }
 
         if let Some((i, unnest_inner)) = unnest {
-            println!("found unnest at {}", i);
             let (unnest_col, unnest_outer) = fields.remove(i);
 
-            Ok(SqlOperator::RecordTransform(Box::new(input),
-                        RecordTransform::UnnestProjection(UnnestProjection {
-                            fields,
-                            unnest_col,
-                            unnest_inner,
-                            unnest_outer,
-                            format: None,
-                        })))
+            Ok(SqlOperator::RecordTransform(
+                Box::new(input),
+                RecordTransform::UnnestProjection(UnnestProjection {
+                    fields,
+                    unnest_col,
+                    unnest_inner,
+                    unnest_outer,
+                    format: None,
+                }),
+            ))
         } else {
             let projection = Projection::new(fields);
 
@@ -598,15 +612,17 @@ impl<'a> SqlPipelineBuilder<'a> {
             .zip(aggregate.schema.fields().iter())
             .map(|(expr, field)| {
                 let column = Column::convert(&field.qualified_column());
+
+                let expression = ctx.compile_expr(expr)?;
+                Self::assert_no_unnest("group by", &expression)?;
+
                 let (data_type, extraction) = if let Some(window) = Self::find_window(expr)? {
                     if let WindowType::Instant = window {
                         bail!("don't support instant window in return type yet");
                     }
                     (window_type_def(), AggregateResultExtraction::WindowTake)
                 } else {
-                    let data_type = ctx
-                        .compile_expr(expr)?
-                        .expression_type(&ValuePointerContext::new());
+                    let data_type = expression.expression_type(&ValuePointerContext::new());
                     (data_type, AggregateResultExtraction::KeyColumn)
                 };
                 if let TypeDef::DataType(DataType::Struct(_), _) = &data_type {
@@ -676,9 +692,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             })
             .collect::<Result<Vec<_>>>()?;
         let field_pairs: Vec<_> = field_pairs.into_iter().flatten().collect();
-        let projection = Projection::new(
-            field_pairs
-        );
+        let projection = Projection::new(field_pairs);
 
         Ok(projection)
     }
@@ -829,9 +843,26 @@ impl<'a> SqlPipelineBuilder<'a> {
             .into_iter()
             .unzip();
 
-        let left_key = Projection::new(join_projection_field_names.clone().into_iter().zip(left_computations).collect());
+        left_computations
+            .iter()
+            .chain(right_computations.iter())
+            .map(|e| Self::assert_no_unnest("join", e))
+            .collect::<Result<Vec<()>>>()?;
 
-        let right_key = Projection::new(join_projection_field_names.into_iter().zip(right_computations).collect());
+        let left_key = Projection::new(
+            join_projection_field_names
+                .clone()
+                .into_iter()
+                .zip(left_computations)
+                .collect(),
+        );
+
+        let right_key = Projection::new(
+            join_projection_field_names
+                .into_iter()
+                .zip(right_computations)
+                .collect(),
+        );
 
         Ok(SqlOperator::JoinOperator(
             Box::new(left_input),
@@ -858,25 +889,23 @@ impl<'a> SqlPipelineBuilder<'a> {
             .map_err(|e| anyhow!("failed to plan {}: {}", table_scan.table_name, e))?;
 
         if let Some(projection) = table_scan.projection.as_ref() {
-            let fields: Vec<StructField> = projection
+            let fields = projection
                 .iter()
                 .map(|i| source.return_type().fields[*i].clone())
+                .map(|t| {
+                    (
+                        Column {
+                            relation: Some(table_scan.table_name.to_string()),
+                            name: t.name.clone(),
+                        },
+                        Expression::Column(ColumnExpression::new(t.clone())),
+                    )
+                })
                 .collect();
-
-            let field_names = fields
-                .iter()
-                .map(|t| Column {
-                    relation: Some(table_scan.table_name.to_string()),
-                    name: t.name.clone(),
-                });
-
-            let field_computations = fields
-                .iter()
-                .map(|t| Expression::Column(ColumnExpression::new(t.clone())));
 
             return Ok(SqlOperator::RecordTransform(
                 Box::new(source),
-                RecordTransform::ValueProjection(Projection::new(field_names.zip(field_computations).collect())),
+                RecordTransform::ValueProjection(Projection::new(fields)),
             ));
         }
 
@@ -952,14 +981,16 @@ impl<'a> SqlPipelineBuilder<'a> {
             let field_computations = w
                 .partition_by
                 .iter().skip(1)
-                .map(|expression| {let expr = ctx.compile_expr(expression)?;
-                if expr.get_window_type(&input)?.is_some() {
-                    bail!("window functions can only be partitioned by a window as the first argument");
-                } else {
-                    Ok(expr)
-                }
-            })
-                .collect::<Result<Vec<_>>>()?;
+                .map(|expression| {
+                    let expr = ctx.compile_expr(expression)?;
+                    Self::assert_no_unnest("window", &expr)?;
+                    if expr.get_window_type(&input)?.is_some() {
+                        bail!("window functions can only be partitioned by a window as the first argument");
+                    } else {
+                        Ok(expr)
+                    }
+                })
+            .collect::<Result<Vec<_>>>()?;
 
             let partition = Projection::new(field_names.zip(field_computations).collect());
             let field_name = window.schema.field_names().last().cloned().unwrap();
@@ -1021,19 +1052,19 @@ impl<'a> SqlPipelineBuilder<'a> {
                         }
                         let input_struct = input.return_type();
                         // insert into is done column-wise, and DataFusion will have already coerced all the types.
-                        let mapping = RecordTransform::ValueProjection(Projection::new(
-                            fields
-                                .iter()
-                                .map(|f| Column {
-                                    relation: None,
-                                    name: f.name.clone(),
-                                }).zip(
-                                input_struct
-                                    .fields
+                        let mapping =
+                            RecordTransform::ValueProjection(Projection::new(
+                                fields
                                     .iter()
-                                    .map(|f| Expression::Column(ColumnExpression::new(f.clone()))))
+                                    .map(|f| Column {
+                                        relation: None,
+                                        name: f.name.clone(),
+                                    })
+                                    .zip(input_struct.fields.iter().map(|f| {
+                                        Expression::Column(ColumnExpression::new(f.clone()))
+                                    }))
                                     .collect(),
-                        ));
+                            ));
                         self.planned_tables.insert(
                             name.clone(),
                             SqlOperator::RecordTransform(Box::new(input), mapping),
