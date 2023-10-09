@@ -82,6 +82,20 @@ impl State for Created {
     }
 }
 
+async fn handle_terminal<'a>(ctx: &mut JobContext<'a>) {
+    if let Err(e) = ctx
+        .scheduler
+        .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+        .await
+    {
+        warn!(
+            message = "Failed to clean up cluster",
+            error = format!("{:?}", e),
+            job_id = ctx.config.id
+        );
+    }
+}
+
 #[derive(Debug)]
 pub struct Failed;
 #[async_trait::async_trait]
@@ -91,18 +105,7 @@ impl State for Failed {
     }
 
     async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
-        if let Err(e) = ctx
-            .scheduler
-            .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
-            .await
-        {
-            warn!(
-                message = "Failed to clean up cluster",
-                error = format!("{:?}", e),
-                job_id = ctx.config.id
-            );
-        }
-
+        handle_terminal(ctx).await;
         Ok(Transition::Stop)
     }
 
@@ -120,7 +123,8 @@ impl State for Finished {
         "Finished"
     }
 
-    async fn next(self: Box<Self>, _: &mut JobContext) -> Result<Transition, StateError> {
+    async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+        handle_terminal(ctx).await;
         Ok(Transition::Stop)
     }
 
@@ -139,13 +143,7 @@ impl State for Stopped {
     }
 
     async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
-        if let Err(e) = ctx
-            .scheduler
-            .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
-            .await
-        {
-            return Err(ctx.retryable(self, "failed to clean cluster", e, 20));
-        }
+        handle_terminal(ctx).await;
 
         if ctx.config.stop_mode == StopMode::none && ctx.config.ttl.is_none() {
             Ok(Transition::next(*self, Compiling {}))
