@@ -34,7 +34,7 @@ use arroyo_rpc::types::{
     JobLogMessageCollection, Metric, MetricGroup, MetricNames, OperatorCheckpointGroup,
     OperatorCheckpointGroupCollection, OperatorMetricGroup, OutputData, PaginationQueryParams,
     Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
-    PipelinePost, PrimitiveType, QueryValidationResult, SchemaDefinition, SourceField,
+    PipelinePost, PrimitiveType, QueryValidationResult, PipelineRestart, SchemaDefinition, SourceField,
     SourceFieldType, StopType as StopTypeRest, StructType, SubtaskCheckpointGroup, SubtaskMetrics,
     TestSourceMessage, Udf, UdfLanguage, UdfValidationResult, ValidateQueryPost, ValidateUdfsPost,
 };
@@ -165,6 +165,7 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
     components(schemas(
         PipelinePost,
         PipelinePatch,
+        PipelineRestart,
         Pipeline,
         PipelineGraph,
         PipelineNode,

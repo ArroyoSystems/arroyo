@@ -20,7 +20,7 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::types::{
     Job, JobCollection, PaginationQueryParams, Pipeline, PipelineCollection, PipelineEdge,
     PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, QueryValidationResult, StopType,
-    UdfValidationResult, ValidateQueryPost, ValidateUdfsPost,
+    UdfValidationResult, ValidateQueryPost, ValidateUdfsPost, PipelineRestart
 };
 use arroyo_server_common::log_event;
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
@@ -38,7 +38,7 @@ use crate::rest_utils::{
     authenticate, bad_request, client, log_and_map, not_found, paginate_results, required_field,
     unauthorized, validate_pagination_params, ApiError, BearerAuth, ErrorResp,
 };
-use crate::types::public::{PipelineType, StopMode};
+use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::{connection_tables, to_micros};
 use crate::{handle_db_error, optimizations, AuthData};
 use create_pipeline_req::Config::Sql;
@@ -631,6 +631,60 @@ pub async fn patch_pipeline(
     }
 
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+    Ok(Json(pipeline))
+}
+
+/// Restart a pipeline
+#[utoipa::path(
+    post,
+    path = "/v1/pipelines/{id}/restart",
+    tag = "pipelines",
+    params(
+        ("id" = String, Path, description = "Pipeline id")
+    ),
+    request_body = PipelineRestart,
+    responses(
+      (status = 200, description = "Updated pipeline", body = Pipeline)),
+)]
+pub async fn restart_pipeline(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path(id): Path<String>,
+    WithRejection(Json(req), _): WithRejection<Json<PipelineRestart>, ApiError>,
+) -> Result<Json<Pipeline>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    let job_id = api_queries::get_pipeline_jobs()
+        .bind(&client, &auth_data.organization_id, &id)
+        .one()
+        .await
+        .map_err(log_and_map)?
+        .id;
+
+    let mode = if req.force == Some(true) {
+        RestartMode::force
+    } else {
+        RestartMode::safe
+    };
+
+    let res = api_queries::restart_job()
+        .bind(
+            &client,
+            &OffsetDateTime::now_utc(),
+            &auth_data.user_id,
+            &mode,
+            &job_id,
+            &auth_data.organization_id,
+        )
+        .await
+        .map_err(log_and_map)?;
+
+    if res == 0 {
+        return Err(not_found("Pipeline".to_string()));
+    }
+
+    let pipeline = query_pipeline_by_pub_id(&id, &client, &auth_data).await?;
     Ok(Json(pipeline))
 }
 

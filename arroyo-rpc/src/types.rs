@@ -53,6 +53,12 @@ pub struct PipelinePatch {
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct PipelineRestart {
+    pub force: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct Pipeline {
     pub id: String,
     pub name: String,

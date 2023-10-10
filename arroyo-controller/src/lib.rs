@@ -50,7 +50,7 @@ include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
 use crate::schedulers::{nomad::NomadScheduler, NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::LogLevel;
-use types::public::StopMode;
+use types::public::{StopMode, RestartMode};
 
 pub const CHECKPOINTS_TO_KEEP: u32 = 5;
 
@@ -82,6 +82,8 @@ pub struct JobConfig {
     checkpoint_interval: Duration,
     ttl: Option<Duration>,
     parallelism_overrides: HashMap<String, usize>,
+    restart_nonce: i32,
+    restart_mode: RestartMode,
 }
 
 #[derive(Clone, Debug)]
@@ -96,6 +98,7 @@ pub struct JobStatus {
     restarts: i32,
     pipeline_path: Option<String>,
     wasm_path: Option<String>,
+    restart_nonce: i32,
 }
 
 impl JobStatus {
@@ -611,6 +614,8 @@ impl ControllerServer {
                             .into_iter()
                             .map(|(k, v)| (k.clone(), v.as_u64().unwrap() as usize))
                             .collect(),
+                        restart_nonce: p.config_restart_nonce,
+                        restart_mode: p.restart_mode,
                     };
 
                     let mut jobs = jobs.lock().await;
@@ -626,6 +631,7 @@ impl ControllerServer {
                         restarts: p.restarts,
                         pipeline_path: p.pipeline_path,
                         wasm_path: p.wasm_path,
+                        restart_nonce: p.status_restart_nonce
                     };
 
                     if let Some(sm) = jobs.get_mut(&config.id) {
