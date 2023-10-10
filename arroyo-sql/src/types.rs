@@ -22,7 +22,7 @@ use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, 
 
 use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
-use quote::{format_ident, quote};
+use quote::quote;
 use regex::Regex;
 use syn::PathArguments::AngleBracketed;
 use syn::{parse_quote, parse_str, GenericArgument, Type};
@@ -335,6 +335,8 @@ impl StructDef {
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructField {
     pub name: String,
+    field_name: String,
+    ident: String,
     pub alias: Option<String>,
     pub data_type: TypeDef,
     pub renamed_from: Option<String>,
@@ -346,11 +348,27 @@ impl StructField {
         if let TypeDef::DataType(DataType::Struct(_), _) = &data_type {
             panic!("can't use DataType::Struct as a struct field, should be a StructType");
         }
+
+        let qualified_name = match &alias {
+            Some(alias) => format!("{}_{}", alias, name),
+            None => name.clone(),
+        };
+
+        let re = Regex::new("[^a-zA-Z0-9_]").unwrap();
+        let field_name = re.replace_all(&qualified_name, "_").to_string();
+
+        let (ident, renamed_from) = match parse_str::<Ident>(&field_name) {
+            Ok(_) => (field_name.clone(), None),
+            Err(_) => (format!("r#_{}", field_name), Some(name.clone())),
+        };
+
         Self {
             name,
+            field_name,
             alias,
             data_type,
-            renamed_from: None,
+            ident,
+            renamed_from,
             original_type: None,
         }
     }
@@ -363,7 +381,9 @@ impl StructField {
         original_type: Option<String>,
     ) -> Self {
         Self {
-            name,
+            name: name.clone(),
+            field_name: name.clone(),
+            ident: name.clone(),
             alias,
             data_type,
             renamed_from,
@@ -646,8 +666,7 @@ impl StructField {
     }
 
     pub fn field_name(&self) -> String {
-        let re = Regex::new("[^a-zA-Z0-9_]").unwrap();
-        re.replace_all(&self.qualified_name(), "_").to_string()
+        self.field_name.clone()
     }
 
     pub fn qualified_name(&self) -> String {
@@ -657,23 +676,26 @@ impl StructField {
         }
     }
     pub fn field_array_ident(&self) -> Ident {
-        let field = self.field_ident();
+        let field = &self.ident;
         parse_str(&format!("{}_array", field)).unwrap()
     }
 
     pub fn field_ident(&self) -> Ident {
-        match parse_str(&self.field_name()) {
-            Ok(ident) => ident,
-            Err(_) => {
-                format_ident!("r#_{}", self.field_name())
-            }
-        }
+        parse_str(&self.ident).unwrap_or_else(|e| panic!("invalid ident {}: {:?}", self.ident, e))
     }
 
     fn def(&self, format: &Option<Format>) -> TokenStream {
         let name: Ident = self.field_ident();
         let type_string = self.get_type();
         // special case time fields
+
+        let mut attributes = vec![];
+        if let Some(original) = &self.renamed_from {
+            attributes.push(quote! {
+                #[serde(rename = #original)]
+            });
+        }
+
         if let TypeDef::DataType(DataType::Timestamp(_, _), nullable) = self.data_type {
             match format.as_ref().map(|t| &*t) {
                 Some(Format::Json(JsonFormat {
@@ -681,35 +703,34 @@ impl StructField {
                     ..
                 })) => {
                     if nullable {
-                        return quote! {
+                        attributes.push(quote! {
                             #[serde(default)]
                             #[serde(with = "arroyo_worker::formats::opt_timestamp_as_millis")]
-                            pub #name: #type_string
-                        };
+                        });
                     } else {
-                        return quote! {
+                        attributes.push(quote! {
                             #[serde(with = "arroyo_worker::formats::timestamp_as_millis")]
-                            pub #name: #type_string
-                        };
+                        });
                     }
                 }
                 _ => {
                     if nullable {
-                        return quote!(
+                        attributes.push(quote! {
                             #[serde(default)]
                             #[serde(with = "arroyo_worker::formats::opt_timestamp_as_rfc3339")]
-                            pub #name: #type_string
-                        );
+                        });
                     } else {
-                        return quote!(
+                        attributes.push(quote!(
                             #[serde(with = "arroyo_worker::formats::timestamp_as_rfc3339")]
-                            pub #name: #type_string
-                        );
+                        ));
                     }
                 }
             }
         }
-        quote!(pub #name: #type_string)
+        quote! {
+            #(#attributes )*
+            pub #name: #type_string
+        }
     }
 
     pub fn get_type(&self) -> Type {
