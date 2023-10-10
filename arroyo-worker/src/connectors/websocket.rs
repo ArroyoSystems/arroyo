@@ -199,7 +199,7 @@ where
                                     },
                                     tungstenite::Message::Close(_) => {
                                         ctx.report_error("Received close frame from server".to_string(), "".to_string()).await;
-                                        return SourceFinishType::Final;
+                                        panic!("Received close frame from server");
                                     },
                                     tungstenite::Message::Frame(_) => {
                                         // this should be captured by tungstenite
