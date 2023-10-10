@@ -33,6 +33,7 @@ use petgraph::{Direction, Graph};
 use rand::distributions::Alphanumeric;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use regex::Regex;
 
 pub fn parse_type(s: &str) -> Type {
     let s = s
@@ -1094,6 +1095,50 @@ impl Program {
 
     pub fn dot(&self) -> String {
         format!("{:?}", petgraph::dot::Dot::with_config(&self.graph, &[]))
+    }
+
+    pub fn features(&self) -> HashSet<String> {
+        let mut s = HashSet::new();
+
+        for t in self.graph.node_weights() {
+            match &t.operator {
+                Operator::ConnectorSource(c) | Operator::ConnectorSink(c) => {
+                    s.insert(
+                        Regex::new("::<.*>$")
+                            .unwrap()
+                            .replace(&c.operator, "")
+                            .to_string(),
+                    );
+                }
+                Operator::Window { typ, .. } => {
+                    s.insert(format!("{:?} window", typ));
+                }
+                Operator::WindowJoin { window } => {
+                    s.insert(format!("{:?} window join", window));
+                }
+                Operator::SlidingWindowAggregator(_) => {
+                    s.insert(format!("sliding window aggregator"));
+                }
+                Operator::TumblingWindowAggregator(_) => {
+                    s.insert(format!("tumbling window aggregator"));
+                }
+                Operator::TumblingTopN(_) => {
+                    s.insert(format!("tumbling top n"));
+                }
+                Operator::SlidingAggregatingTopN(_) => {
+                    s.insert(format!("sliding aggregating top n"));
+                }
+                Operator::JoinWithExpiration { .. } => {
+                    s.insert(format!("join with expiration"));
+                }
+                Operator::NonWindowAggregator(_) => {
+                    s.insert(format!("non-window aggregator"));
+                }
+                _ => {}
+            }
+        }
+
+        s
     }
 
     pub fn validate_graph(&self) -> Vec<String> {

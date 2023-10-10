@@ -566,6 +566,7 @@ dependencies = [
  "prost",
  "quote",
  "rand",
+ "regex",
  "serde",
  "syn 2.0.33",
  "tokio",

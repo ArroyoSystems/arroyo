@@ -407,6 +407,7 @@ async fn execute_state<'a>(
                     "job_id": ctx.config.id,
                     "from": state_name,
                     "to": s.state.name(),
+                    "scheduler": std::env::var("SCHEDULER").unwrap_or_else(|_| "process".to_string()),
                     "duration_ms": ctx.last_transitioned_at.elapsed().as_millis() as u64,
                 }),
             );
