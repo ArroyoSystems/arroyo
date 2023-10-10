@@ -50,7 +50,7 @@ include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
 use crate::schedulers::{nomad::NomadScheduler, NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::LogLevel;
-use types::public::{StopMode, RestartMode};
+use types::public::{RestartMode, StopMode};
 
 pub const CHECKPOINTS_TO_KEEP: u32 = 5;
 
@@ -116,6 +116,7 @@ impl JobStatus {
                 &self.pipeline_path,
                 &self.wasm_path,
                 &self.run_id,
+                &self.restart_nonce,
                 &self.id,
             )
             .await
@@ -631,7 +632,7 @@ impl ControllerServer {
                         restarts: p.restarts,
                         pipeline_path: p.pipeline_path,
                         wasm_path: p.wasm_path,
-                        restart_nonce: p.status_restart_nonce
+                        restart_nonce: p.status_restart_nonce,
                     };
 
                     if let Some(sm) = jobs.get_mut(&config.id) {

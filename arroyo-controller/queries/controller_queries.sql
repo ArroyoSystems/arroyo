@@ -33,7 +33,8 @@ SET state = :state,
     restarts = :restarts,
     pipeline_path = :pipeline_path,
     wasm_path = :wasm_path,
-    run_id = :run_id
+    run_id = :run_id,
+    restart_nonce = :restart_nonce
 WHERE id = :job_id;
 
 --! get_program

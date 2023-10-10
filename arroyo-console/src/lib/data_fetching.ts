@@ -441,6 +441,14 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
     await mutate();
   };
 
+  const restartPipeline = async () => {
+    await post('/v1/pipelines/{id}/restart', {
+      params: { path: { id: pipelineId! } },
+      body: {},
+    });
+    await mutate();
+  };
+
   const deletePipeline = async () => {
     const { error } = await del('/v1/pipelines/{id}', {
       params: { path: { id: pipelineId! } },
@@ -455,6 +463,7 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
     pipelineLoading: isLoading,
     updatePipeline,
     deletePipeline,
+    restartPipeline,
   };
 };
 

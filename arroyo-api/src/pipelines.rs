@@ -19,8 +19,8 @@ use arroyo_rpc::grpc::{CheckUdfsReq, ValidationResult};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::types::{
     Job, JobCollection, PaginationQueryParams, Pipeline, PipelineCollection, PipelineEdge,
-    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, QueryValidationResult, StopType,
-    UdfValidationResult, ValidateQueryPost, ValidateUdfsPost, PipelineRestart
+    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, PipelineRestart,
+    QueryValidationResult, StopType, UdfValidationResult, ValidateQueryPost, ValidateUdfsPost,
 };
 use arroyo_server_common::log_event;
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
@@ -532,7 +532,8 @@ pub async fn post_pipeline(
             "is_preview": preview,
             "job_id": job_id,
             "parallelism": pipeline_post.parallelism,
-            "has_udfs": !pipeline_post.udfs.map(|e| e.is_empty()).unwrap_or(false),
+            "has_udfs": pipeline_post.udfs.map(|e| !e.is_empty() && !e[0].definition.trim().is_empty())
+              .unwrap_or(false),
             "features": program.features(),
         }),
     );
@@ -730,7 +731,16 @@ pub async fn get_pipelines(
         has_more,
         data: pipelines
             .into_iter()
-            .map(|p| p.try_into().unwrap())
+            .filter_map(|p| {
+                let id = p.pub_id.clone();
+                match p.try_into() {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        warn!("Failed to map pipeline {} from database: {:?}", id, e);
+                        None
+                    }
+                }
+            })
             .collect(),
     }))
 }

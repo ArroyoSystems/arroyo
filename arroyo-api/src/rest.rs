@@ -29,7 +29,7 @@ use crate::jobs::{
 use crate::metrics::get_operator_metric_groups;
 use crate::pipelines::{
     delete_pipeline, get_pipeline, get_pipeline_jobs, get_pipelines, patch_pipeline, post_pipeline,
-    validate_query, validate_udfs, restart_pipeline
+    restart_pipeline, validate_query, validate_udfs,
 };
 use crate::rest_utils::not_found;
 use crate::ApiDoc;
