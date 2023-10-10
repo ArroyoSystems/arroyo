@@ -22,3 +22,4 @@ tokio = "1"
 tonic = {workspace = true}
 anyhow = "1.0.70"
 prost = "0.11"
+regex = "1.9.5"

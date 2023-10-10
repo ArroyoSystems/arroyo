@@ -38,7 +38,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 
 pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
-pub const GIT_DESCRIBE: &str = env!("VERGEN_GIT_DESCRIBE");
+pub const VERSION: &str = "0.7.0";
 
 #[cfg(not(target_os = "freebsd"))]
 const PYROSCOPE_SERVER_ADDRESS_ENV: &str = "PYROSCOPE_SERVER_ADDRESS";
@@ -118,10 +118,7 @@ pub fn log_event(name: &str, mut props: Value) {
             if let Some(props) = props.as_object_mut() {
                 props.insert("distinct_id".to_string(), Value::String(cluster_id));
                 props.insert("git_sha".to_string(), Value::String(GIT_SHA.to_string()));
-                props.insert(
-                    "git_describe".to_string(),
-                    Value::String(GIT_DESCRIBE.to_string()),
-                );
+                props.insert("version".to_string(), Value::String(VERSION.to_string()));
                 props.insert(
                     "build_timestamp".to_string(),
                     Value::String(BUILD_TIMESTAMP.to_string()),
@@ -171,7 +168,7 @@ async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     serde_json::to_string_pretty(&json!({
         "service": state.name,
         "git_sha": GIT_SHA,
-        "git_describe": GIT_DESCRIBE,
+        "version": VERSION,
         "build_timestamp": BUILD_TIMESTAMP,
     }))
     .unwrap()

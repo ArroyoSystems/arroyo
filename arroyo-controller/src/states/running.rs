@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use time::OffsetDateTime;
+use tokio::time::MissedTickBehavior;
 
 use tracing::error;
 
@@ -10,6 +11,8 @@ use crate::states::rescaling::Rescaling;
 use crate::states::{fatal, stop_if_desired_running};
 use crate::JobMessage;
 use crate::{job_controller::ControllerProgress, states::StateError};
+use arroyo_server_common::log_event;
+use serde_json::json;
 
 use super::{JobContext, State, Transition};
 
@@ -32,6 +35,9 @@ impl State for Running {
         stop_if_desired_running!(self, ctx.config);
 
         let running_start = Instant::now();
+
+        let mut log_interval = tokio::time::interval(Duration::from_secs(60));
+        log_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
             let ttl_end: Option<Duration> = ctx.config.ttl.map(|t| {
@@ -110,6 +116,17 @@ impl State for Running {
                             ))
                         }
                     }
+                }
+                _ = log_interval.tick() => {
+                    log_event(
+                        "job_running",
+                        json!({
+                            "service": "controller",
+                            "job_id": ctx.config.id,
+                            "scheduler": std::env::var("SCHEDULER").unwrap_or_else(|_| "process".to_string()),
+                            "duration_ms": ctx.last_transitioned_at.elapsed().as_millis() as u64,
+                        }),
+                    );
                 }
                 _ = tokio::time::sleep(ttl_end.unwrap_or(Duration::MAX)) => {
                     // TTL has expired, stop the job

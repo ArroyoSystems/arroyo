@@ -118,7 +118,7 @@ pub(crate) async fn create_pipeline<'a>(
     pub_id: &str,
     auth: AuthData,
     tx: &Transaction<'a>,
-) -> Result<i64, ErrorResp> {
+) -> Result<(i64, Program), ErrorResp> {
     let pipeline_type;
     let mut program;
     let connections;
@@ -197,9 +197,9 @@ pub(crate) async fn create_pipeline<'a>(
         }
     }
 
-    let proto_program: PipelineProgram = program.try_into().map_err(log_and_map)?;
+    let proto_program: PipelineProgram = program.clone().try_into().map_err(log_and_map)?;
 
-    let program = proto_program.encode_to_vec();
+    let program_bytes = proto_program.encode_to_vec();
 
     if req.name.is_empty() {
         return Err(required_field("name"));
@@ -215,7 +215,7 @@ pub(crate) async fn create_pipeline<'a>(
             &pipeline_type,
             &text,
             &udfs.map(|t| serde_json::to_value(t).unwrap()),
-            &program,
+            &program_bytes,
         )
         .one()
         .await
@@ -235,7 +235,7 @@ pub(crate) async fn create_pipeline<'a>(
         }
     }
 
-    Ok(pipeline_id)
+    Ok((pipeline_id, program))
 }
 
 impl TryInto<Pipeline> for DbPipeline {
@@ -399,6 +399,7 @@ pub async fn post_pipeline(
             parallelism: pipeline_post.parallelism,
             udfs: pipeline_post
                 .udfs
+                .clone()
                 .unwrap_or(vec![])
                 .into_iter()
                 .map(|u| CreateUdf {
@@ -418,7 +419,7 @@ pub async fn post_pipeline(
         .await
         .map_err(log_and_map)?;
 
-    let pipeline_id = pipelines::create_pipeline(
+    let (pipeline_id, program) = pipelines::create_pipeline(
         &create_pipeline_req,
         &pipeline_pub_id,
         auth_data.clone(),
@@ -442,12 +443,21 @@ pub async fn post_pipeline(
     .await?;
 
     transaction.commit().await.map_err(log_and_map)?;
+
     log_event(
         "job_created",
-        json!({"service": "api", "is_preview": preview, "job_id": job_id}),
+        json!({
+            "service": "api",
+            "is_preview": preview,
+            "job_id": job_id,
+            "parallelism": pipeline_post.parallelism,
+            "has_udfs": !pipeline_post.udfs.map(|e| e.is_empty()).unwrap_or(false),
+            "features": program.features(),
+        }),
     );
 
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
+
     Ok(Json(pipeline))
 }
 
