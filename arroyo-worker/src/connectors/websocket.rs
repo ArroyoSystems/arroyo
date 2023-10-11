@@ -155,7 +155,7 @@ where
             }
         };
 
-        let mut last_reported_error = Instant::now();
+        let mut last_reported_error: Option<Instant> = None;
         let mut errors = 0;
 
         let (mut tx, mut rx) = ws_stream.split();
@@ -209,11 +209,11 @@ where
 
                                 if let Err(e) = result {
                                     errors += 1;
-                                    if last_reported_error.elapsed() > Duration::from_secs(30) {
+                                    if last_reported_error.map(|i| i.elapsed() > Duration::from_secs(30)).unwrap_or(true) {
                                         ctx.report_error(format!("{} x {}", e.name, errors),
                                             e.details).await;
                                         errors = 0;
-                                        last_reported_error = Instant::now();
+                                        last_reported_error = Some(Instant::now());
                                     }
                                 };
                             }

@@ -30,6 +30,7 @@ use syn::{parse_quote, parse_str, GenericArgument, Type};
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructDef {
     pub name: Option<String>,
+    generated: bool,
     pub fields: Vec<StructField>,
     pub format: Option<Format>,
 }
@@ -43,6 +44,7 @@ impl StructDef {
     pub fn for_fields(fields: Vec<StructField>) -> Self {
         Self {
             name: None,
+            generated: true,
             fields,
             format: None,
         }
@@ -50,6 +52,7 @@ impl StructDef {
 
     pub fn for_name(name: Option<String>, fields: Vec<StructField>) -> Self {
         Self {
+            generated: name.is_none(),
             name,
             fields,
             format: None,
@@ -59,14 +62,21 @@ impl StructDef {
     pub fn for_format(fields: Vec<StructField>, format: Option<Format>) -> Self {
         Self {
             name: None,
+            generated: true,
             fields,
             format,
         }
     }
 
-    pub fn new(name: Option<String>, fields: Vec<StructField>, format: Option<Format>) -> Self {
+    pub fn new(
+        name: Option<String>,
+        generated: bool,
+        fields: Vec<StructField>,
+        format: Option<Format>,
+    ) -> Self {
         Self {
             name,
+            generated,
             fields,
             format,
         }
@@ -239,7 +249,7 @@ impl StructDef {
             })
             .collect();
 
-        let schema_data_impl = if self.name.is_none() {
+        let schema_data_impl = if self.generated {
             // generate a SchemaData impl but only for generated types
             let name = self.struct_name();
 
