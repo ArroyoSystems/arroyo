@@ -29,6 +29,7 @@ mod delta;
 pub mod json;
 pub mod local;
 pub mod parquet;
+pub mod s3;
 pub mod single_file;
 
 use crate::SchemaData;
