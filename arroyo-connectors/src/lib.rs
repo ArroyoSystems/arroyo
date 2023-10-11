@@ -31,6 +31,7 @@ pub mod kinesis;
 pub mod nexmark;
 pub mod polling_http;
 pub mod redis;
+pub mod s3;
 pub mod single_file;
 pub mod sse;
 pub mod webhook;
@@ -52,6 +53,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     );
     m.insert("redis", Box::new(redis::RedisConnector {}));
     m.insert("single_file", Box::new(single_file::SingleFileConnector {}));
+    m.insert("s3", Box::new(s3::S3Connector {}));
     m.insert("sse", Box::new(SSEConnector {}));
     m.insert("webhook", Box::new(webhook::WebhookConnector {}));
     m.insert("websocket", Box::new(WebsocketConnector {}));
