@@ -90,6 +90,7 @@ impl Connector for S3Connector {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
+            framing: None,
             format: Some(format),
         };
 

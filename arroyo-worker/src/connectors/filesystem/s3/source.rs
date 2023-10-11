@@ -4,7 +4,6 @@ use std::time::SystemTime;
 use anyhow::Result;
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
 use aws_sdk_s3::Region;
-use serde::de::DeserializeOwned;
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines},
     select,
@@ -12,38 +11,40 @@ use tokio::{
 use tracing::info;
 
 use arroyo_macro::{source_fn, StreamNode};
-use arroyo_rpc::{grpc::StopMode, types::Format, ControlMessage, ControlResp, OperatorConfig};
+use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_types::{Data, Record, UserError};
 
 use crate::{
-    connectors::filesystem::s3::CompressionFormat, engine::Context, formats, SourceFinishType,
+    connectors::filesystem::s3::CompressionFormat, engine::Context, formats::DataDeserializer,
+    SchemaData, SourceFinishType,
 };
 
 use super::S3Table;
 
 #[derive(StreamNode)]
-pub struct S3SourceFunc<K: Data, T: DeserializeOwned + Data> {
+pub struct S3SourceFunc<K: Data, T: SchemaData + Data> {
     bucket: String,
     prefix: String,
     region: String,
-    format: Format,
+    deserializer: DataDeserializer<T>,
     compression: CompressionFormat,
     total_lines_read: usize,
     _t: PhantomData<(K, T)>,
 }
 
 #[source_fn(out_t = T)]
-impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
+impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
     pub fn from_config(config_str: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config_str).expect("Invalid config for S3SourceFunc");
         let table: S3Table =
             serde_json::from_value(config.table).expect("Invalid table config for S3SourceFunc");
+        let format = config.format.expect("Format must be set for S3 source");
         Self {
             bucket: table.bucket,
             prefix: table.prefix,
             region: table.region,
-            format: config.format.expect("Format must be set for S3 source"),
+            deserializer: DataDeserializer::new(format, config.framing),
             compression: table.compression_format,
             total_lines_read: 0,
             _t: PhantomData,
@@ -190,15 +191,18 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                                 lines_read += 1;
                                 continue;
                             }
-                            ctx.collector
-                                .collect(Record{
-                                    key: None,
-                                    value: formats::deserialize_slice(&self.format, line.as_bytes())?,
-                                    timestamp: SystemTime::now(),
-                                })
-                                .await;
-                            self.total_lines_read += 1;
-                            lines_read += 1;
+                            let iter = self.deserializer.deserialize_slice(line.as_bytes());
+                            for value in iter {
+                                ctx.collector
+                                    .collect(Record{
+                                        timestamp: SystemTime::now(),
+                                        key: None,
+                                        value: value?,
+                                    })
+                                    .await;
+                                self.total_lines_read += 1;
+                                lines_read += 1;
+                            }
                         }
                         None => return Ok(Some(SourceFinishType::Final))
                     }
