@@ -100,8 +100,8 @@ pub struct DeleteValueOperation {
 #[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
 pub struct DeleteTimeRangeOperation {
     pub key: Vec<u8>,
-    pub start: u64,
-    pub end: u64,
+    pub start: SystemTime,
+    pub end: SystemTime,
 }
 
 #[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]

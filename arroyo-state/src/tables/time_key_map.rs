@@ -92,12 +92,15 @@ impl<'a, K: Key, V: Data + PartialEq, S: BackingStore> TimeKeyMap<'a, K, V, S> {
             .collect()
     }
 
-    pub fn remove(&mut self, event_time: SystemTime, k: &mut K) -> Option<V> {
+    pub async fn remove(&mut self, event_time: SystemTime, k: &mut K) -> Option<V> {
         if let Some(m) = self.cache.buffered_values.get_mut(&event_time) {
             m.remove(k);
         }
 
         if let Some(m) = self.cache.persisted_values.get_mut(&event_time) {
+            self.store
+                .delete_time_key(self.table, TableType::TimeKeyMap, event_time, k)
+                .await;
             m.remove(k)
         } else {
             None
