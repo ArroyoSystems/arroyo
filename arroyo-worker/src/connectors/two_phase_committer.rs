@@ -8,7 +8,7 @@ use arroyo_rpc::{
     CheckpointEvent, ControlMessage,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{Data, Key, Record, TaskInfo};
+use arroyo_types::{Data, Key, Record, TaskInfo, Watermark};
 use async_trait::async_trait;
 use tracing::warn;
 
@@ -56,6 +56,7 @@ pub trait TwoPhaseCommitter<K: Key, T: Data + Sync>: Send + 'static {
     async fn checkpoint(
         &mut self,
         task_info: &TaskInfo,
+        watermark: Option<SystemTime>,
         stopping: bool,
     ) -> Result<(Self::DataRecovery, HashMap<String, Self::PreCommit>)>;
 }
@@ -142,7 +143,16 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
     ) {
         let (recovery_data, pre_commits) = self
             .committer
-            .checkpoint(&ctx.task_info, checkpoint_barrier.then_stop)
+            .checkpoint(
+                &ctx.task_info,
+                ctx.watermark()
+                    .map(|watermark| match watermark {
+                        Watermark::EventTime(watermark) => Some(watermark),
+                        arroyo_types::Watermark::Idle => None,
+                    })
+                    .flatten(),
+                checkpoint_barrier.then_stop,
+            )
             .await
             .unwrap();
         let mut recovery_data_state: GlobalKeyedState<usize, _, _> =
