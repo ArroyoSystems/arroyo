@@ -16,14 +16,14 @@ use tokio::select;
 use tokio::time::MissedTickBehavior;
 
 use arroyo_rpc::grpc::StopMode;
-use arroyo_rpc::types::Format;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use tracing::{debug, info, warn};
 use typify::import_types;
 
+use crate::formats::DataDeserializer;
 use crate::{
     engine::{Context, StreamNode},
-    formats, SchemaData, SourceFinishType,
+    SchemaData, SourceFinishType,
 };
 
 import_types!(schema = "../connector-schemas/polling_http/table.json");
@@ -37,21 +37,21 @@ where
     K: Send + 'static,
     T: SchemaData,
 {
-    state: PollingHttpSourceState<T>,
+    state: PollingHttpSourceState,
     client: reqwest::Client,
-    format: Format,
     endpoint: url::Url,
     method: reqwest::Method,
     body: Option<Bytes>,
     polling_interval: Duration,
     emit_behavior: EmitBehavior,
+    deserializer: DataDeserializer<T>,
 
     _t: PhantomData<(K, T)>,
 }
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
-pub struct PollingHttpSourceState<T: SchemaData> {
-    last_message: Option<T>,
+pub struct PollingHttpSourceState {
+    last_message: Option<Vec<u8>>,
 }
 
 #[source_fn(out_k = (), out_t = T)]
@@ -79,6 +79,13 @@ where
             })
             .collect();
 
+        let deserializer = DataDeserializer::new(
+            config
+                .format
+                .expect("polling http source must have a format configured"),
+            config.framing,
+        );
+
         Self {
             state: PollingHttpSourceState { last_message: None },
             client: reqwest::ClientBuilder::new()
@@ -86,9 +93,6 @@ where
                 .timeout(Duration::from_secs(5))
                 .build()
                 .expect("could not construct http client"),
-            format: config
-                .format
-                .expect("polling http source must have a format configured"),
             endpoint: url::Url::from_str(&table.endpoint).expect("invalid endpoint"),
             method: match table.method {
                 None | Some(Method::Get) => reqwest::Method::GET,
@@ -102,6 +106,7 @@ where
                 .map(|d| Duration::from_millis(d as u64))
                 .unwrap_or(DEFAULT_POLLING_INTERVAL),
             emit_behavior: table.emit_behavior.unwrap_or(EmitBehavior::All),
+            deserializer,
             _t: PhantomData,
         }
     }
@@ -115,7 +120,7 @@ where
     }
 
     async fn on_start(&mut self, ctx: &mut Context<(), T>) {
-        let s: GlobalKeyedState<(), PollingHttpSourceState<T>, _> =
+        let s: GlobalKeyedState<(), PollingHttpSourceState, _> =
             ctx.state.get_global_keyed_state('s').await;
 
         if let Some(state) = s.get(&()) {
@@ -132,7 +137,7 @@ where
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
                 let state = self.state.clone();
-                let mut s: GlobalKeyedState<(), PollingHttpSourceState<T>, _> =
+                let mut s: GlobalKeyedState<(), PollingHttpSourceState, _> =
                     ctx.state.get_global_keyed_state('s').await;
                 s.insert((), state).await;
 
@@ -158,11 +163,12 @@ where
             ControlMessage::LoadCompacted { compacted } => {
                 ctx.load_compacted(compacted).await;
             }
+            ControlMessage::NoOp => {}
         }
         None
     }
 
-    async fn request(&mut self) -> Result<T, UserError> {
+    async fn request(&mut self) -> Result<Vec<u8>, UserError> {
         let mut request = self
             .client
             .request(self.method.clone(), self.endpoint.clone());
@@ -213,7 +219,7 @@ where
                 }
             }
 
-            Ok(formats::deserialize_slice(&self.format, &buf)?)
+            Ok(buf)
         } else {
             let status = resp.status();
             let bytes = resp.bytes().await;
@@ -246,21 +252,31 @@ where
                 select! {
                     _ = timer.tick()  => {
                         match self.request().await {
-                            Ok(value) => {
+                            Ok(buf) => {
                                 if self.emit_behavior == EmitBehavior::Changed {
-                                    if Some(&value) == self.state.last_message.as_ref() {
+                                    if Some(&buf) == self.state.last_message.as_ref() {
                                         continue;
                                     }
                                 }
 
-                                // TODO: should be possible to get rid of this clone
-                                self.state.last_message = Some(value.clone());
+                                let iter = self.deserializer.deserialize_slice(&buf);
 
-                                ctx.collect(Record {
-                                    timestamp: SystemTime::now(),
-                                    key: None,
-                                    value,
-                                }).await;
+                                for record in iter {
+                                    match record {
+                                        Ok(value) => {
+                                            ctx.collect(Record {
+                                                timestamp: SystemTime::now(),
+                                                key: None,
+                                                value,
+                                            }).await;
+                                        }
+                                        Err(e) => {
+                                            ctx.report_user_error(e).await;
+                                        }
+                                    }
+                                }
+
+                                self.state.last_message = Some(buf);
                             }
                             Err(e) => {
                                 ctx.report_user_error(e).await;

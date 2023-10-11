@@ -133,8 +133,7 @@ export function Connections() {
         <ModalCloseButton />
         <ModalBody>
           <Code colorScheme="black" width="100%" p={4}>
-            {/* toJson -> parse -> stringify to get around the inabilityof JSON.stringify to handle BigInt */}
-            <pre>{JSON.stringify(selected?.config)}</pre>
+            <pre style={{ overflowX: 'auto' }}>{JSON.stringify(selected?.config, null, 2)}</pre>
           </Code>
         </ModalBody>
         <ModalFooter>

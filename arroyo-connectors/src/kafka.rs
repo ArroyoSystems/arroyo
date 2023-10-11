@@ -95,6 +95,7 @@ impl Connector for KafkaConnector {
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: Some(format),
+            framing: schema.framing.clone(),
         };
 
         Ok(Connection {
@@ -170,6 +171,7 @@ impl Connector for KafkaConnector {
                         Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
                         Some(other) => bail!("invalid value for source.read_mode '{}'", other),
                     },
+                    group_id: opts.remove("source.group_id"),
                 }
             }
             "sink" => {

@@ -1,8 +1,9 @@
 use crate::engine::Context;
-use crate::{formats, SourceFinishType};
+use crate::formats::DataDeserializer;
+use crate::{SchemaData, SourceFinishType};
 use arroyo_macro::{source_fn, StreamNode};
+use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
-use arroyo_rpc::types::Format;
 use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{string_to_map, Data, Message, Record, Watermark};
@@ -25,27 +26,33 @@ pub struct SSESourceState {
     last_id: Option<String>,
 }
 
-#[derive(StreamNode, Clone)]
+#[derive(StreamNode)]
 pub struct SSESourceFunc<K, T>
 where
     K: DeserializeOwned + Data,
-    T: DeserializeOwned + Data,
+    T: SchemaData,
 {
     url: String,
     headers: Vec<(String, String)>,
     events: Vec<String>,
-    format: Format,
+    deserializer: DataDeserializer<T>,
     state: SSESourceState,
-    _t: PhantomData<(K, T)>,
+    _t: PhantomData<K>,
 }
 
 #[source_fn(out_k = (), out_t = T)]
 impl<K, T> SSESourceFunc<K, T>
 where
     K: DeserializeOwned + Data,
-    T: DeserializeOwned + Data,
+    T: SchemaData,
 {
-    pub fn new(url: &str, headers: Vec<(&str, &str)>, events: Vec<&str>, format: Format) -> Self {
+    pub fn new(
+        url: &str,
+        headers: Vec<(&str, &str)>,
+        events: Vec<&str>,
+        format: Format,
+        framing: Option<Framing>,
+    ) -> Self {
         SSESourceFunc {
             url: url.to_string(),
             headers: headers
@@ -53,7 +60,7 @@ where
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             events: events.into_iter().map(|s| s.to_string()).collect(),
-            format,
+            deserializer: DataDeserializer::new(format, framing),
             state: SSESourceState::default(),
             _t: PhantomData,
         }
@@ -75,7 +82,10 @@ where
                 .events
                 .map(|e| e.split(',').map(|e| e.to_string()).collect())
                 .unwrap_or_else(std::vec::Vec::new),
-            format: config.format.expect("SSESource requires a format"),
+            deserializer: DataDeserializer::new(
+                config.format.expect("SSESource requires a format"),
+                config.framing,
+            ),
             state: SSESourceState::default(),
             _t: PhantomData,
         }
@@ -132,6 +142,7 @@ where
             ControlMessage::LoadCompacted { compacted } => {
                 ctx.load_compacted(compacted).await;
             }
+            ControlMessage::NoOp => {}
         }
         None
     }
@@ -167,30 +178,33 @@ where
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            match formats::deserialize_slice(&self.format, &event.data.as_bytes()) {
-                                                Ok(value) => {
-                                                    ctx.collector.collect(Record {
-                                                        timestamp: SystemTime::now(),
-                                                        key: None,
-                                                        value,
-                                                    }).await;
-                                                }
-                                                Err(e) => {
-                                                    errors += 1;
-                                                    if last_reported_error.elapsed() > Duration::from_secs(30) {
-                                                        ctx.control_tx.send(
-                                                            ControlResp::Error {
-                                                                operator_id: ctx.task_info.operator_id.clone(),
-                                                                task_index: ctx.task_info.task_index,
-                                                                message: format!("{} x {}", e.name, errors),
-                                                                details: e.details,
-                                                        }).await.unwrap();
-                                                        errors = 0;
-                                                        last_reported_error = Instant::now();
+                                            let iter = self.deserializer.deserialize_slice(&event.data.as_bytes());
+
+                                            for v in iter {
+                                                match v {
+                                                    Ok(value) => {
+                                                        ctx.collector.collect(Record {
+                                                            timestamp: SystemTime::now(),
+                                                            key: None,
+                                                            value,
+                                                        }).await;
+                                                    }
+                                                    Err(e) => {
+                                                        errors += 1;
+                                                        if last_reported_error.elapsed() > Duration::from_secs(30) {
+                                                            ctx.control_tx.send(
+                                                                ControlResp::Error {
+                                                                    operator_id: ctx.task_info.operator_id.clone(),
+                                                                    task_index: ctx.task_info.task_index,
+                                                                    message: format!("{} x {}", e.name, errors),
+                                                                    details: e.details,
+                                                            }).await.unwrap();
+                                                            errors = 0;
+                                                            last_reported_error = Instant::now();
+                                                        }
                                                     }
                                                 }
                                             }
-
                                         }
                                     }
                                     SSE::Comment(s) => {

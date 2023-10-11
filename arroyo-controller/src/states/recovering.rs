@@ -5,14 +5,14 @@ use arroyo_rpc::grpc::StopMode;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
-use super::{compiling::Compiling, Context, State, StateError, Transition};
+use super::{compiling::Compiling, JobContext, State, StateError, Transition};
 
 #[derive(Debug)]
 pub struct Recovering {}
 
 impl Recovering {
     // tries, with increasing levels of force, to tear down the existing cluster
-    async fn cleanup<'a>(&mut self, ctx: &mut Context<'a>) -> anyhow::Result<()> {
+    async fn cleanup<'a>(&mut self, ctx: &mut JobContext<'a>) -> anyhow::Result<()> {
         let job_controller = ctx.job_controller.as_mut().unwrap();
 
         // first try to stop it gracefully
@@ -90,7 +90,7 @@ impl State for Recovering {
         "Recovering"
     }
 
-    async fn next(mut self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+    async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         // tear down the existing cluster
         if let Err(e) = self.cleanup(ctx).await {
             return Err(ctx.retryable(self, "failed to tear down existing cluster", e, 10));

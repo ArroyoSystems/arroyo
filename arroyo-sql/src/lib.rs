@@ -41,7 +41,9 @@ use tables::{schema_defs, ConnectorTable, Insert, Table};
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::types::{StructDef, StructField, TypeDef};
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, JsonFormat};
+use arroyo_rpc::formats::{Format, JsonFormat};
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType};
+use datafusion_common::DataFusionError;
 use quote::ToTokens;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
@@ -112,6 +114,27 @@ impl ArroyoSchemaProvider {
             )),
         );
         functions.insert(
+            "unnest".to_string(),
+            Arc::new({
+                let return_type: ReturnTypeFunction = Arc::new(move |args| {
+                    match args.get(0).ok_or_else(|| {
+                        DataFusionError::Plan("unnest takes one argument".to_string())
+                    })? {
+                        DataType::List(t) => Ok(Arc::new(t.data_type().clone())),
+                        _ => Err(DataFusionError::Plan(
+                            "unnest may only be called on arrays".to_string(),
+                        )),
+                    }
+                });
+                ScalarUDF::new(
+                    "unnest",
+                    &Signature::any(1, Volatility::Immutable),
+                    &return_type,
+                    &make_scalar_function(fn_impl),
+                )
+            }),
+        );
+        functions.insert(
             "get_first_json_object".to_string(),
             Arc::new(create_udf(
                 "get_first_json_object",
@@ -121,6 +144,7 @@ impl ArroyoSchemaProvider {
                 make_scalar_function(fn_impl),
             )),
         );
+
         functions.insert(
             "get_json_objects".to_string(),
             Arc::new(create_udf(
@@ -135,6 +159,21 @@ impl ArroyoSchemaProvider {
                 make_scalar_function(fn_impl),
             )),
         );
+        functions.insert(
+            "extract_json".to_string(),
+            Arc::new(create_udf(
+                "extract_json",
+                vec![DataType::Utf8, DataType::Utf8],
+                Arc::new(DataType::List(Arc::new(Field::new(
+                    "item",
+                    DataType::Utf8,
+                    false,
+                )))),
+                Volatility::Volatile,
+                make_scalar_function(fn_impl),
+            )),
+        );
+
         functions.insert(
             "extract_json_string".to_string(),
             Arc::new(create_udf(
@@ -580,6 +619,7 @@ pub fn get_test_expression(
     let struct_def = test_struct_def();
     let schema = ConnectionSchema {
         format: Some(Format::Json(JsonFormat::default())),
+        framing: None,
         struct_name: struct_def.name.clone(),
         fields: struct_def
             .fields
@@ -603,6 +643,7 @@ pub fn get_test_expression(
                 type_: arroyo_connectors::kafka::TableType::Source {
                     offset: arroyo_connectors::kafka::SourceOffset::Latest,
                     read_mode: Some(arroyo_connectors::kafka::ReadMode::ReadUncommitted),
+                    group_id: "test-consumer-group".to_string().try_into().unwrap(),
                 },
             },
             Some(&schema),

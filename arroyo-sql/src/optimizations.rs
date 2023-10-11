@@ -11,7 +11,7 @@ use petgraph::visit::Dfs;
 use petgraph::Direction::{self, Incoming, Outgoing};
 
 use quote::quote;
-use tracing::info;
+use tracing::debug;
 
 use crate::code_gen::ValueBinMergingContext;
 use crate::operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection};
@@ -147,7 +147,12 @@ impl Optimizer for ExpressionFusionOptimizer {
         node: PlanNode,
         graph: &mut DiGraph<PlanNode, PlanEdge>,
     ) -> bool {
-        if matches!(&node.operator, PlanOperator::RecordTransform { .. }) {
+        if matches!(&node.operator, PlanOperator::RecordTransform { .. })
+            && !matches!(
+                &node.operator,
+                PlanOperator::RecordTransform(RecordTransform::UnnestProjection(_))
+            )
+        {
             if matches!(
                 &node.operator,
                 PlanOperator::RecordTransform(RecordTransform::KeyProjection { .. })
@@ -212,6 +217,9 @@ impl FusedExpressionOperatorBuilder {
                         self.add_projection(node.output_type.is_updating())
                     }
                     RecordTransform::Filter(_) => self.add_filter(node.output_type.is_updating()),
+                    RecordTransform::UnnestProjection(_) => {
+                        return false;
+                    }
                 }
                 true
             }
@@ -379,7 +387,7 @@ impl Optimizer for WindowTopNOptimization {
                 }
             }
             SearchTarget::Limit => {
-                info!("looking for limit, current operator is {:?}", node.operator);
+                debug!("looking for limit, current operator is {:?}", node.operator);
                 if let PlanOperator::RecordTransform(RecordTransform::Filter(filter)) =
                     node.operator
                 {

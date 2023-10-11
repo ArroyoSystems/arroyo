@@ -91,6 +91,7 @@ impl Connector for BlackholeConnector {
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: None,
+            framing: None,
         };
 
         Ok(Connection {
@@ -99,6 +100,7 @@ impl Connector for BlackholeConnector {
             connection_type: ConnectionType::Sink,
             schema: s.cloned().unwrap_or_else(|| ConnectionSchema {
                 format: None,
+                framing: None,
                 struct_name: None,
                 fields: vec![],
                 definition: None,

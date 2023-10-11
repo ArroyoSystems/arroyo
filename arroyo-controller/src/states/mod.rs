@@ -77,8 +77,22 @@ impl State for Created {
         "Created"
     }
 
-    async fn next(self: Box<Self>, _: &mut Context) -> Result<Transition, StateError> {
+    async fn next(self: Box<Self>, _: &mut JobContext) -> Result<Transition, StateError> {
         Ok(Transition::next(*self, Compiling))
+    }
+}
+
+async fn handle_terminal<'a>(ctx: &mut JobContext<'a>) {
+    if let Err(e) = ctx
+        .scheduler
+        .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
+        .await
+    {
+        warn!(
+            message = "Failed to clean up cluster",
+            error = format!("{:?}", e),
+            job_id = ctx.config.id
+        );
     }
 }
 
@@ -90,19 +104,8 @@ impl State for Failed {
         "Failed"
     }
 
-    async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
-        if let Err(e) = ctx
-            .scheduler
-            .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
-            .await
-        {
-            warn!(
-                message = "Failed to clean up cluster",
-                error = format!("{:?}", e),
-                job_id = ctx.config.id
-            );
-        }
-
+    async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+        handle_terminal(ctx).await;
         Ok(Transition::Stop)
     }
 
@@ -120,7 +123,8 @@ impl State for Finished {
         "Finished"
     }
 
-    async fn next(self: Box<Self>, _: &mut Context) -> Result<Transition, StateError> {
+    async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+        handle_terminal(ctx).await;
         Ok(Transition::Stop)
     }
 
@@ -138,14 +142,8 @@ impl State for Stopped {
         "Stopped"
     }
 
-    async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
-        if let Err(e) = ctx
-            .scheduler
-            .stop_workers(&ctx.config.id, Some(ctx.status.run_id), true)
-            .await
-        {
-            return Err(ctx.retryable(self, "failed to clean cluster", e, 20));
-        }
+    async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+        handle_terminal(ctx).await;
 
         if ctx.config.stop_mode == StopMode::none && ctx.config.ttl.is_none() {
             Ok(Transition::next(*self, Compiling {}))
@@ -212,7 +210,7 @@ impl TransitionTo<Scheduling> for Rescaling {
 
 impl TransitionTo<Compiling> for Recovering {}
 
-fn done_transition(ctx: &mut Context) {
+fn done_transition(ctx: &mut JobContext) {
     ctx.status.finish_time = Some(OffsetDateTime::now_utc());
     ctx.job_controller = None;
 }
@@ -316,7 +314,7 @@ macro_rules! stop_if_desired_non_running {
 pub(crate) use stop_if_desired_non_running;
 pub(crate) use stop_if_desired_running;
 
-pub struct Context<'a> {
+pub struct JobContext<'a> {
     config: JobConfig,
     status: &'a mut JobStatus,
     program: &'a mut Program,
@@ -328,7 +326,7 @@ pub struct Context<'a> {
     last_transitioned_at: Instant,
 }
 
-impl<'a> Context<'a> {
+impl<'a> JobContext<'a> {
     pub fn handle(&mut self, msg: JobMessage) -> Result<(), StateError> {
         warn!("unhandled job message {:?}", msg);
         Ok(())
@@ -358,10 +356,10 @@ pub trait State: Sync + Send + 'static + Debug {
         false
     }
 
-    async fn next(self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError>;
+    async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError>;
 }
 
-type TransitionFn = Box<dyn Fn(&mut Context) + Send>;
+type TransitionFn = Box<dyn Fn(&mut JobContext) + Send>;
 
 pub trait TransitionTo<S: State> {
     fn update_status(&self) -> TransitionFn {
@@ -388,8 +386,8 @@ impl Transition {
 
 async fn execute_state<'a>(
     state: Box<dyn State>,
-    mut ctx: Context<'a>,
-) -> (Option<Box<dyn State>>, Context<'a>) {
+    mut ctx: JobContext<'a>,
+) -> (Option<Box<dyn State>>, JobContext<'a>) {
     let state_name = state.name();
 
     let next: Option<Box<dyn State>> = match state.next(&mut ctx).await {
@@ -409,6 +407,7 @@ async fn execute_state<'a>(
                     "job_id": ctx.config.id,
                     "from": state_name,
                     "to": s.state.name(),
+                    "scheduler": std::env::var("SCHEDULER").unwrap_or_else(|_| "process".to_string()),
                     "duration_ms": ctx.last_transitioned_at.elapsed().as_millis() as u64,
                 }),
             );
@@ -523,7 +522,7 @@ pub async fn run_to_completion(
             .unwrap()
     };
 
-    let mut ctx = Context {
+    let mut ctx = JobContext {
         config: config.read().unwrap().clone(),
         status: &mut status,
         program: &mut program,

@@ -5,7 +5,7 @@ use arroyo_rpc::grpc::StopMode;
 use tokio::time::timeout;
 use tracing::{error, info};
 
-use super::{Context, State, Stopped, Transition};
+use super::{JobContext, State, Stopped, Transition};
 
 const FINISH_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -26,7 +26,7 @@ impl State for Stopping {
         "Stopping"
     }
 
-    async fn next(mut self: Box<Self>, ctx: &mut Context) -> Result<Transition, StateError> {
+    async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         match (ctx.job_controller.as_mut(), self.stop_mode) {
             (Some(job_controller), StopBehavior::StopJob(stop_mode)) => {
                 if let Err(e) = job_controller.stop_job(stop_mode).await {

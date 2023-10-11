@@ -31,6 +31,11 @@
                                 "read_committed",
                                 "read_uncommitted"
                             ]
+                        },
+                        "group_id": {
+                            "type": "string",
+                            "title": "group id",
+                            "description": "Sets the Group ID of the consumer for Kafka source. If not specified, an automatically generated ID will be used. CAUTION: Using one consumer group for multiple pipelines may result in incomplete data"
                         }
                     },
                     "required": [

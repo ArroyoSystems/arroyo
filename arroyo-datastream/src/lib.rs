@@ -33,6 +33,7 @@ use petgraph::{Direction, Graph};
 use rand::distributions::Alphanumeric;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use regex::Regex;
 
 pub fn parse_type(s: &str) -> Type {
     let s = s
@@ -346,10 +347,14 @@ pub enum Operator {
     FlattenOperator {
         name: String,
     },
-    FlatMapOperator {
+    ArrayMapOperator {
         name: String,
         expression: String,
         return_type: ExpressionReturnType,
+    },
+    FlatMapOperator {
+        name: String,
+        expression: String,
     },
     SlidingWindowAggregator(SlidingWindowAggregator),
     TumblingWindowAggregator(TumblingWindowAggregator),
@@ -432,11 +437,15 @@ impl Debug for Operator {
                 expression: _,
                 return_type,
             } => write!(f, "expression<{}:{:?}>", name, return_type),
-            Operator::FlatMapOperator {
+            Operator::ArrayMapOperator {
                 name,
                 expression: _,
                 return_type,
-            } => write!(f, "flat_map<{}:{:?}>", name, return_type),
+            } => write!(f, "array_map<{}:{:?}>", name, return_type),
+            Operator::FlatMapOperator {
+                name,
+                expression: _,
+            } => write!(f, "flat_map<{}>", name),
             Operator::SlidingWindowAggregator(SlidingWindowAggregator { width, slide, .. }) => {
                 write!(
                     f,
@@ -1096,6 +1105,50 @@ impl Program {
         format!("{:?}", petgraph::dot::Dot::with_config(&self.graph, &[]))
     }
 
+    pub fn features(&self) -> HashSet<String> {
+        let mut s = HashSet::new();
+
+        for t in self.graph.node_weights() {
+            match &t.operator {
+                Operator::ConnectorSource(c) | Operator::ConnectorSink(c) => {
+                    s.insert(
+                        Regex::new("::<.*>$")
+                            .unwrap()
+                            .replace(&c.operator, "")
+                            .to_string(),
+                    );
+                }
+                Operator::Window { typ, .. } => {
+                    s.insert(format!("{:?} window", typ));
+                }
+                Operator::WindowJoin { window } => {
+                    s.insert(format!("{:?} window join", window));
+                }
+                Operator::SlidingWindowAggregator(_) => {
+                    s.insert(format!("sliding window aggregator"));
+                }
+                Operator::TumblingWindowAggregator(_) => {
+                    s.insert(format!("tumbling window aggregator"));
+                }
+                Operator::TumblingTopN(_) => {
+                    s.insert(format!("tumbling top n"));
+                }
+                Operator::SlidingAggregatingTopN(_) => {
+                    s.insert(format!("sliding aggregating top n"));
+                }
+                Operator::JoinWithExpiration { .. } => {
+                    s.insert(format!("join with expiration"));
+                }
+                Operator::NonWindowAggregator(_) => {
+                    s.insert(format!("non-window aggregator"));
+                }
+                _ => {}
+            }
+        }
+
+        s
+    }
+
     pub fn validate_graph(&self) -> Vec<String> {
         let mut errors = vec![];
         // check that if we have a window function, we also have a watermark assigner
@@ -1113,7 +1166,90 @@ impl Program {
             )
         }
 
+        for stream_node in self.graph.node_indices() {
+            if let Err(error) = self.check_incoming_edges_for_node(stream_node) {
+                errors.push(error.to_string());
+            }
+        }
+
         errors
+    }
+
+    fn check_incoming_edges_for_node(&self, node_index: NodeIndex) -> Result<()> {
+        let node_name = &self.graph.node_weight(node_index).unwrap().operator_id;
+        let incoming_edges: Vec<_> = self
+            .graph
+            .edges_directed(node_index, Direction::Incoming)
+            .map(|e| e.weight())
+            .collect();
+        match incoming_edges.len() {
+            0 => return Ok(()),
+            1 => {
+                let edge = incoming_edges[0];
+                if matches!(edge.typ, EdgeType::ShuffleJoin(..)) {
+                    bail!(
+                        "Node {:?} has a shuffle join edge but no other incoming edges",
+                        node_name
+                    );
+                }
+            }
+            2 => {
+                let edge1 = incoming_edges[0];
+                let edge2 = incoming_edges[1];
+                // must either be two sides of a join or multiple direct and shuffle edges with the same type.
+                if let (EdgeType::ShuffleJoin(edge_one), EdgeType::ShuffleJoin(edge_two)) =
+                    (&edge1.typ, &edge2.typ)
+                {
+                    if edge_one == edge_two {
+                        bail!(
+                            "Node {:?} has two shuffle join edges with the same join index",
+                            node_name
+                        );
+                    } else if edge1.key != edge2.key {
+                        bail!(
+                            "Node {:?} has two shuffle join edges with different key types",
+                            node_name
+                        );
+                    }
+                } else if edge1.typ != edge2.typ {
+                    bail!(
+                        "Node {:?} has two incoming edges with different types but isn't a join",
+                        node_name
+                    );
+                } else if edge1.key != edge2.key || edge1.value != edge2.value {
+                    bail!(
+                        "Node {:?} has non-join two incoming edges with different key/value types",
+                        node_name
+                    );
+                }
+            }
+            _ => {
+                // check if there are any shuffle join edges.
+                if incoming_edges
+                    .iter()
+                    .any(|e| matches!(e.typ, EdgeType::ShuffleJoin(_)))
+                {
+                    bail!(
+                            "Node {:?} has more than two incoming edges, but some are shuffle join edges",
+                            node_name
+                        );
+                }
+                // check that the key and value are the same for all inputs
+                if incoming_edges
+                    .iter()
+                    .map(|e| (e.key.as_str(), e.value.as_str()))
+                    .collect::<HashSet<_>>()
+                    .len()
+                    > 1
+                {
+                    bail!(
+                            "Node {:?} has more than two incoming edges, but key/value types are not the same for all inputs",
+                            node_name
+                        );
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn update_parallelism(&mut self, overrides: &HashMap<String, usize>) {
@@ -1423,10 +1559,10 @@ impl Program {
                 Operator::FlattenOperator { name } => {
                     let k = parse_type(&output.unwrap().weight().key);
                     let t = parse_type(&output.unwrap().weight().value);
-                 quote! {
-                    Box::new(FlattenOperator::<#k, #t>::new(#name.to_string()))
-                }
-            },
+                    quote! {
+                        Box::new(FlattenOperator::<#k, #t>::new(#name.to_string()))
+                    }
+                },
                 Operator::ExpressionOperator { name, expression, return_type } => {
                     let expr : syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
@@ -1461,7 +1597,21 @@ impl Program {
                         },
                     }
                 },
-                Operator::FlatMapOperator { name, expression, return_type } => {
+                Operator::FlatMapOperator { name, expression } => {
+                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+                    let out_k = parse_type(&output.unwrap().weight().key);
+                    let out_t = parse_type(&output.unwrap().weight().value);
+                    let func: syn::ExprClosure = parse_quote!(|record, _| {#expr});
+                    quote! {
+                        Box::new(FlatMapOperator::<#in_k, #in_t, #out_k, #out_t>{
+                            name: #name.to_string(),
+                            flat_map: Box::new(#func),
+                        })
+                    }
+                },
+                Operator::ArrayMapOperator { name, expression, return_type } => {
                     let expr : syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
@@ -1497,7 +1647,7 @@ impl Program {
                     };
                     let func: syn::ExprClosure = parse_str(&quote!(#closure).to_string()).unwrap();
                     quote! {
-                        Box::new(FlatMapOperator::<#in_k, #in_t, #out_k, #out_t> {
+                        Box::new(ArrayMapOperator::<#in_k, #in_t, #out_k, #out_t> {
                             name: #name.to_string(),
                             map_fn: Box::new(#func),
                         })
@@ -1756,6 +1906,14 @@ impl Program {
             }
         }
     }
+
+    pub fn tasks_per_operator(&self) -> HashMap<String, usize> {
+        let mut tasks_per_operator = HashMap::new();
+        for node in self.graph.node_weights() {
+            tasks_per_operator.insert(node.operator_id.clone(), node.parallelism);
+        }
+        tasks_per_operator
+    }
 }
 
 impl TryFrom<Program> for PipelineProgram {
@@ -1889,7 +2047,10 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 return_type: return_type.into(),
             }),
             Operator::FlattenOperator { name } => GrpcOperator::Flatten(Flatten { name }),
-            Operator::FlatMapOperator {
+            Operator::FlatMapOperator { name, expression } => {
+                GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression })
+            }
+            Operator::ArrayMapOperator {
                 name,
                 expression,
                 return_type,
@@ -2192,9 +2353,12 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     }
                 }
                 GrpcOperator::Flatten(Flatten { name }) => Operator::FlattenOperator { name },
+                GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression }) => {
+                    Operator::FlatMapOperator { name, expression }
+                }
                 GrpcOperator::FlattenExpressionOperator(flatten_expression) => {
                     let return_type = flatten_expression.return_type().into();
-                    Operator::FlatMapOperator {
+                    Operator::ArrayMapOperator {
                         name: flatten_expression.name,
                         expression: flatten_expression.expression,
                         return_type,

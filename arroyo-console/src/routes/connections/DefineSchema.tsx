@@ -1,9 +1,20 @@
-import { Button, Code, FormControl, FormLabel, Link, Select, Stack, Text } from '@chakra-ui/react';
-import React, { ChangeEvent, Dispatch, ReactElement, useState } from 'react';
+import {
+  Button,
+  Code,
+  FormControl,
+  FormHelperText,
+  FormLabel,
+  Link,
+  Select,
+  Stack,
+  Text,
+} from '@chakra-ui/react';
+import React, { ChangeEvent, ChangeEventHandler, Dispatch, ReactElement, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { JsonSchemaEditor } from './JsonSchemaEditor';
 import { Connector } from '../../lib/data_fetching';
 import { ConfluentSchemaEditor } from './ConfluentSchemaEditor';
+import { components } from '../../gen/api-types';
 
 const JsonEditor = ({
   connector,
@@ -179,6 +190,7 @@ export const DefineSchema = ({
 }) => {
   type DataFormatOption = { name: string; value: string; el?: ReactElement; disabled?: boolean };
   const [selectedFormat, setSelectedFormat] = useState<string | undefined>(undefined);
+  const [selectedFraming, setSelectedFraming] = useState<string | undefined>(undefined);
 
   const formats: DataFormatOption[] = [
     {
@@ -203,7 +215,29 @@ export const DefineSchema = ({
     },
   ];
 
-  const onChange = (e: ChangeEvent<DataFormatOption>) => {
+  type FramingOption = {
+    name: string;
+    value?: { method: components['schemas']['FramingMethod'] };
+    el?: ReactElement;
+    disabled?: boolean;
+  };
+  const framingMethods: FramingOption[] = [
+    {
+      name: 'None',
+    },
+    {
+      name: 'Newline',
+      value: {
+        method: {
+          newline: {
+            maxLineLength: null,
+          },
+        },
+      },
+    },
+  ];
+
+  const onFormatChange = (e: ChangeEvent<DataFormatOption>) => {
     if (String(e.target.value) == 'json') {
       setSelectedFormat('json');
       setState({
@@ -231,11 +265,43 @@ export const DefineSchema = ({
     }
   };
 
+  const onFramingChange: ChangeEventHandler<HTMLSelectElement> = e => {
+    setSelectedFraming(e.target.value);
+    setState({
+      ...state,
+      schema: {
+        ...state.schema,
+        fields: [],
+        framing: framingMethods.find(f => f.name == e.target.value)!.value,
+      },
+    });
+  };
+
   return (
     <Stack spacing={8}>
       <FormControl>
+        <FormLabel>Framing</FormLabel>
+        <Select maxW={'lg'} value={selectedFraming} onChange={onFramingChange}>
+          {framingMethods.map(f => (
+            <option key={f.name} value={f.name} disabled={f.disabled}>
+              {f.name}
+            </option>
+          ))}
+        </Select>
+        <FormHelperText maxW={'lg'}>
+          Framing describes how records are framed within the input data. If each input event
+          contains a single record this can be left as None.
+        </FormHelperText>
+      </FormControl>
+
+      <FormControl>
         <FormLabel>Data format</FormLabel>
-        <Select maxW={'lg'} placeholder="Select format" value={selectedFormat} onChange={onChange}>
+        <Select
+          maxW={'lg'}
+          placeholder="Select format"
+          value={selectedFormat}
+          onChange={onFormatChange}
+        >
           {formats.map(f => (
             <option key={f.value} value={f.value} disabled={f.disabled}>
               {f.name}

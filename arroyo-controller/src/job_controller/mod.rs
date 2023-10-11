@@ -15,15 +15,20 @@ use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{to_micros, WorkerId};
 
 use deadpool_postgres::Pool;
+use time::OffsetDateTime;
 
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_state::parquet::ParquetBackend;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
+use crate::types::public::CheckpointState as DbCheckpointState;
 use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
+use arroyo_state::committing_state::CommittingState;
 
-use self::checkpointer::{CheckpointState, CheckpointingOrCommittingState, CommittingState};
+use self::checkpointer::CheckpointingOrCommittingState;
 
 mod checkpointer;
 
@@ -97,6 +102,58 @@ impl std::fmt::Debug for RunningJobModel {
 }
 
 impl RunningJobModel {
+    pub async fn update_db(checkpoint_state: &CheckpointState, pool: &Pool) -> anyhow::Result<()> {
+        let c = pool.get().await?;
+
+        controller_queries::update_checkpoint()
+            .bind(
+                &c,
+                &serde_json::to_value(&checkpoint_state.operator_details).unwrap(),
+                &None,
+                &DbCheckpointState::inprogress,
+                &checkpoint_state.checkpoint_id(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn update_checkpoint_in_db(
+        checkpoint_state: &CheckpointState,
+        pool: &Pool,
+        db_checkpoint_state: DbCheckpointState,
+    ) -> anyhow::Result<()> {
+        let c = pool.get().await?;
+        let finish_time = if db_checkpoint_state == DbCheckpointState::ready {
+            Some(SystemTime::now().into())
+        } else {
+            None
+        };
+        let operator_state = serde_json::to_value(&checkpoint_state.operator_details).unwrap();
+        controller_queries::update_checkpoint()
+            .bind(
+                &c,
+                &operator_state,
+                &finish_time,
+                &db_checkpoint_state,
+                &checkpoint_state.checkpoint_id(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn finish_committing(checkpoint_id: i64, pool: &Pool) -> anyhow::Result<()> {
+        let finish_time = SystemTime::now();
+
+        let c = pool.get().await?;
+        controller_queries::commit_checkpoint()
+            .bind(&c, &finish_time.into(), &checkpoint_id)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn handle_message(&mut self, msg: RunningMessage, pool: &Pool) -> anyhow::Result<()> {
         match msg {
             RunningMessage::TaskCheckpointEvent(c) => {
@@ -112,7 +169,7 @@ impl RunningJobModel {
                         match checkpoint_state {
                             CheckpointingOrCommittingState::Checkpointing(checkpoint_state) => {
                                 checkpoint_state.checkpoint_event(c)?;
-                                checkpoint_state.update_db(pool).await?
+                                Self::update_db(checkpoint_state, pool).await?
                             }
                             CheckpointingOrCommittingState::Committing(committing_state) => {
                                 if matches!(c.event_type(), TaskCheckpointEventType::FinishedCommit)
@@ -149,8 +206,8 @@ impl RunningJobModel {
                         else {
                             bail!("Received checkpoint finished but not checkpointing");
                         };
-                        checkpoint_state.checkpoint_finished(c).await;
-                        checkpoint_state.update_db(pool).await?;
+                        checkpoint_state.checkpoint_finished(c).await?;
+                        Self::update_db(checkpoint_state, pool).await?;
                     }
                 } else {
                     warn!(
@@ -269,17 +326,33 @@ impl RunningJobModel {
                 .await?;
         }
 
-        self.checkpoint_state = Some(CheckpointingOrCommittingState::Checkpointing(
-            CheckpointState::start(
-                self.job_id.clone(),
-                organization_id,
-                self.epoch,
-                self.min_epoch,
-                &self.program,
-                pool,
-            )
-            .await?,
-        ));
+        let checkpoint_id: i64 = {
+            let c = pool.get().await?;
+            controller_queries::create_checkpoint()
+                .bind(
+                    &c,
+                    &generate_id(IdTypes::Checkpoint),
+                    &organization_id,
+                    &self.job_id.clone(),
+                    &StateBackend::name().to_string(),
+                    &(self.epoch as i32),
+                    &(self.min_epoch as i32),
+                    &OffsetDateTime::now_utc(),
+                )
+                .one()
+                .await?
+        };
+
+        let state = CheckpointState::start(
+            self.job_id.clone(),
+            checkpoint_id,
+            self.epoch,
+            self.min_epoch,
+            self.program.tasks_per_operator(),
+        )
+        .await?;
+
+        self.checkpoint_state = Some(CheckpointingOrCommittingState::Checkpointing(state));
 
         Ok(())
     }
@@ -328,15 +401,21 @@ impl RunningJobModel {
             let state = self.checkpoint_state.take().unwrap();
             match state {
                 CheckpointingOrCommittingState::Checkpointing(checkpointing) => {
+                    checkpointing.save_state().await?;
                     let committing_state = checkpointing.committing_state();
                     let duration = checkpointing
-                        .start_time
+                        .start_time()
                         .elapsed()
                         .unwrap_or(Duration::ZERO)
                         .as_secs_f32();
                     // shortcut if committing is unnecessary
                     if committing_state.done() {
-                        checkpointing.finish(pool).await?;
+                        Self::update_checkpoint_in_db(
+                            &checkpointing,
+                            pool,
+                            DbCheckpointState::ready,
+                        )
+                        .await?;
                         self.last_checkpoint = Instant::now();
                         self.checkpoint_state = None;
                         self.compact_state().await?;
@@ -348,7 +427,12 @@ impl RunningJobModel {
                             duration
                         );
                     } else {
-                        checkpointing.pre_commit_finish(pool).await?;
+                        Self::update_checkpoint_in_db(
+                            &checkpointing,
+                            pool,
+                            DbCheckpointState::committing,
+                        )
+                        .await?;
                         self.checkpoint_state =
                             Some(CheckpointingOrCommittingState::Committing(committing_state));
                         info!(
@@ -371,7 +455,7 @@ impl RunningJobModel {
                     }
                 }
                 CheckpointingOrCommittingState::Committing(committing) => {
-                    committing.finish(pool).await?;
+                    Self::finish_committing(committing.checkpoint_id(), pool).await?;
                     self.last_checkpoint = Instant::now();
                     self.checkpoint_state = None;
                     info!(

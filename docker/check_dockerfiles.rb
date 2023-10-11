@@ -23,7 +23,7 @@ DOCKERFILES.each do |dockerfile|
   File.open(dockerfile, 'r') do |f|
     body = f.read
     members.each do |member|
-      if !body.include?(member)
+      if !body.include?(" #{member} ")
         puts "ERROR: #{dockerfile} does not include #{member}"
         exit 1
       end

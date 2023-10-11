@@ -6,7 +6,7 @@ imagePullSecrets: []
 
 # service-specific configuration
 api:
-  replicas: 1x
+  replicas: 1
   resources:
     limits: {}
     requests:
@@ -165,4 +165,3 @@ volumes: []
 volumeMounts: []
 
 existingConfigMap: ""
-  

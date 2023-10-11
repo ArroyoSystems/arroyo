@@ -1,11 +1,13 @@
+use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_state::{BackingStore, StateBackend};
 use rand::Rng;
 use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
 use crate::engine::{Context, OutQueue, QueueItem};
+use crate::SchemaData;
+use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
-use arroyo_rpc::types::{Format, JsonFormat};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
 use arroyo_types::{to_micros, CheckpointBarrier, Message, TaskInfo};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
@@ -21,9 +23,24 @@ struct TestData {
     i: u64,
 }
 
+impl SchemaData for TestData {
+    fn name() -> &'static str {
+        "test"
+    }
+
+    fn schema() -> Schema {
+        Schema::new(vec![Field::new("i", DataType::UInt64, false)])
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        None
+    }
+}
+
 pub struct KafkaTopicTester {
     topic: String,
     server: String,
+    group_id: Option<String>,
 }
 
 impl KafkaTopicTester {
@@ -63,8 +80,10 @@ impl KafkaTopicTester {
         let mut kafka: KafkaSourceFunc<(), TestData> = KafkaSourceFunc::new(
             &self.server,
             &self.topic,
+            self.group_id.clone(),
             crate::connectors::kafka::SourceOffset::Earliest,
             Format::Json(JsonFormat::default()),
+            None,
             100,
             vec![],
         );
@@ -192,6 +211,7 @@ async fn test_kafka() {
     let mut kafka_topic_tester = KafkaTopicTester {
         topic: "arroyo-source".to_string(),
         server: "0.0.0.0:9092".to_string(),
+        group_id: Some("test-consumer-group".to_string()),
     };
 
     let mut task_info = arroyo_types::get_test_task_info();
@@ -235,7 +255,7 @@ async fn test_kafka() {
     })
     .await;
 
-    StateBackend::complete_checkpoint(CheckpointMetadata {
+    StateBackend::write_checkpoint_metadata(CheckpointMetadata {
         job_id: task_info.job_id.clone(),
         epoch: 1,
         min_epoch: 1,

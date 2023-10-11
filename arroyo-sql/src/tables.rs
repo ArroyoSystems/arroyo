@@ -5,7 +5,8 @@ use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::{ConnectorOp, Operator};
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, SchemaDefinition, SourceField};
+use arroyo_rpc::formats::{Format, Framing};
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, SchemaDefinition, SourceField};
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -158,8 +159,11 @@ impl ConnectorTable {
 
         let format = Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
 
+        let framing = Framing::from_opts(options).map_err(|e| anyhow!("invalid framing: '{e}'"))?;
+
         let schema_fields: Result<Vec<SourceField>> = fields
             .iter()
+            .filter(|f| !f.is_virtual())
             .map(|f| {
                 let struct_field = f.struct_field();
                 struct_field.clone().try_into().map_err(|_| {
@@ -172,7 +176,7 @@ impl ConnectorTable {
             })
             .collect();
 
-        let schema = ConnectionSchema::try_new(format, None, schema_fields?, None)?;
+        let schema = ConnectionSchema::try_new(format, framing, None, schema_fields?, None)?;
 
         let connection = connector.from_options(name, options, Some(&schema))?;
 
@@ -214,14 +218,14 @@ impl ConnectorTable {
 
     fn virtual_field_projection(&self) -> Result<Option<Projection>> {
         if self.has_virtual_fields() {
-            let (field_names, field_computations) = self
+            let fields = self
                 .fields
                 .iter()
                 .map(|field| {
                     match field {
                         FieldSpec::StructField(struct_field) => Ok((Column{relation: None, name: struct_field.name.clone()}, Expression::Column(ColumnExpression::new(struct_field.clone())))),
                         FieldSpec::VirtualField { field, expression } => {
-                            let expression_type_def = expression.expression_type(&ValuePointerContext);
+                            let expression_type_def = expression.expression_type(&ValuePointerContext::new());
                             let expression_return_type = expression_type_def.as_datatype().expect("virtual fields shouldn't return structs");
                             let expression_nullability = expression_type_def.is_optional();
                             let field_return_type = field.data_type.as_datatype().expect("virtual fields shouldn't return structs");
@@ -239,7 +243,7 @@ impl ConnectorTable {
                                 ))
                             } else {
                                 let force_nullability = field_nullability && !expression_nullability;
-                                let cast_expr = CastExpression::new(Box::new(expression.clone()), field_return_type, &crate::code_gen::ValuePointerContext, force_nullability)?;
+                                let cast_expr = CastExpression::new(Box::new(expression.clone()), field_return_type, &crate::code_gen::ValuePointerContext::new(), force_nullability)?;
                                 Ok((
                                     Column {
                                         relation: None,
@@ -249,9 +253,9 @@ impl ConnectorTable {
                             }
                     }
                 }
-                }).collect::<Result<Vec<_>>>()?.into_iter().unzip();
+                }).collect::<Result<Vec<_>>>()?.into_iter().collect();
 
-            Ok(Some(Projection::new(field_names, field_computations)))
+            Ok(Some(Projection::new(fields)))
         } else {
             Ok(None)
         }
@@ -353,6 +357,7 @@ impl ConnectorTable {
             id: self.id,
             struct_def: StructDef::new(
                 self.type_name.clone(),
+                self.type_name.is_none(),
                 self.fields
                     .iter()
                     .filter_map(|field| match field {
@@ -411,11 +416,12 @@ impl ConnectorTable {
                         relation: t.alias.clone(),
                         name: t.name(),
                     })
-                    .collect(),
-                output_struct
-                    .fields
-                    .iter()
-                    .map(|t| Expression::Column(ColumnExpression::new(t.clone())))
+                    .zip(
+                        output_struct
+                            .fields
+                            .iter()
+                            .map(|t| Expression::Column(ColumnExpression::new(t.clone()))),
+                    )
                     .collect(),
             );
 

@@ -83,6 +83,7 @@ message Operator {
     ExpressionOperator expression_operator = 13;
     Flatten flatten = 14;
     FlattenExpressionOperator flatten_expression_operator = 15;
+    FlatMapOperator flat_map_operator = 27;
     SlidingWindowAggregator sliding_window_aggregator = 17;
     TumblingWindowAggregator tumbling_window_aggregator = 18;
     TumblingTopN tumbling_top_n = 19;
@@ -188,6 +189,11 @@ message FlattenExpressionOperator {
   string name = 1;
   string expression= 2;
   ExpressionReturnType return_type = 3;
+}
+
+message FlatMapOperator {
+  string name = 1;
+  string expression = 2;
 }
 
 message SlidingWindowAggregator {

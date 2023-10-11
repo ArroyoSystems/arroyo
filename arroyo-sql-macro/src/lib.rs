@@ -6,7 +6,7 @@ use arroyo_sql::{
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_str, Expr, LitStr, Token};
+use syn::{parse_str, Expr, LitInt, LitStr, Token};
 
 /// This macro is used to generate a test function for a single test case.
 /// Used in the `arroyo-sql-testing` crate.
@@ -209,6 +209,7 @@ impl Parse for PipelineCase {
 
 struct CorrectnessTestCase {
     test_name: LitStr,
+    checkpoint_interval: LitInt,
     query: LitStr,
     udfs: Option<LitStr>,
 }
@@ -216,6 +217,8 @@ struct CorrectnessTestCase {
 impl Parse for CorrectnessTestCase {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let test_name = input.parse()?;
+        input.parse::<Token![,]>()?;
+        let checkpoint_interval = input.parse()?;
         input.parse::<Token![,]>()?;
         let query = input.parse()?;
         let udfs = if input.parse::<Token![,]>().is_ok() {
@@ -225,6 +228,7 @@ impl Parse for CorrectnessTestCase {
         };
         Ok(Self {
             test_name,
+            checkpoint_interval,
             query,
             udfs,
         })
@@ -237,6 +241,7 @@ pub fn correctness_run_codegen(input: TokenStream) -> TokenStream {
         syn::parse_macro_input!(input as CorrectnessTestCase);
     let query_string = correctness_case.query.value();
     let test_name = correctness_case.test_name.value();
+    let checkpoint_interval: i32 = correctness_case.checkpoint_interval.base10_parse().unwrap();
     // replace $input_file with the current directory and then inputs/query_name.json
     let physical_input_dir = format!(
         "{}/arroyo-sql-testing/inputs/",
@@ -274,14 +279,14 @@ pub fn correctness_run_codegen(input: TokenStream) -> TokenStream {
     .into();
 
     quote!(
-        #[ignore]
-        #[tokio::test]
+        #[test(tokio::test)]
         async fn #test_ident() {
             let graph = #module_ident::make_graph();
             let name = #test_name.to_string();
+            let checkpoint_interval = #checkpoint_interval;
             let output_location = #physical_output.to_string();
             let golden_output_location = #golden_output_location.to_string();
-            run_pipeline_and_assert_outputs(graph, name, output_location, golden_output_location).await;
+            run_pipeline_and_assert_outputs(graph, name, checkpoint_interval, output_location, golden_output_location).await;
         }
         #module
     )

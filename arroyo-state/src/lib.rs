@@ -13,7 +13,7 @@ use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::ops::RangeInclusive;
+use std::ops::{Range, RangeInclusive};
 use std::time::{Duration, SystemTime};
 use tables::global_keyed_map::{GlobalKeyedState, GlobalKeyedStateCache};
 use tables::key_time_multi_map::{KeyTimeMultiMap, KeyTimeMultiMapCache};
@@ -22,8 +22,11 @@ use tables::time_key_map::{TimeKeyMap, TimeKeyMapCache};
 use tables::{global_keyed_map, key_time_multi_map, keyed_map, time_key_map};
 use tokio::sync::mpsc::Sender;
 
+pub mod checkpoint_state;
+pub mod committing_state;
 mod metrics;
 pub mod parquet;
+mod subtask_state;
 pub mod tables;
 
 pub const BINCODE_CONFIG: Configuration = bincode::config::standard();
@@ -59,23 +62,55 @@ pub fn timestamp_table(
     }
 }
 
-#[derive(Debug, Encode, Decode)]
-#[repr(u8)]
-pub enum DataOperation {
-    Insert = 0,
-    DeleteKey = 1, // delete single key/value pair of Global/TimeKeyMap
-                   // DeleteValue,  // delete single value of a KeyTimeMultiMap
-                   // DeleteBefore, // delete all values for key before timestamp (only for KeyTimeMultiMap)
+pub fn key_time_multi_map_table(
+    name: impl Into<String>,
+    description: impl Into<String>,
+    delete_behavior: TableDeleteBehavior,
+    write_behavior: TableWriteBehavior,
+    retention: Duration,
+) -> TableDescriptor {
+    TableDescriptor {
+        name: name.into(),
+        description: description.into(),
+        table_type: TableType::KeyTimeMultiMap as i32,
+        delete_behavior: delete_behavior as i32,
+        write_behavior: write_behavior as i32,
+        retention_micros: retention.as_micros() as u64,
+    }
 }
 
-impl From<u8> for DataOperation {
-    fn from(op: u8) -> Self {
-        match op {
-            0 => DataOperation::Insert,
-            1 => DataOperation::DeleteKey,
-            _ => panic!("Unknown DataOperation {}", op),
-        }
-    }
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct DeleteTimeKeyOperation {
+    pub timestamp: SystemTime,
+    pub key: Vec<u8>,
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct DeleteKeyOperation {
+    pub key: Vec<u8>,
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct DeleteValueOperation {
+    pub key: Vec<u8>,
+    pub timestamp: SystemTime,
+    pub value: Vec<u8>,
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub struct DeleteTimeRangeOperation {
+    pub key: Vec<u8>,
+    pub start: u64,
+    pub end: u64,
+}
+
+#[derive(Debug, Encode, Decode, PartialEq, Eq, Clone)]
+pub enum DataOperation {
+    Insert,
+    DeleteTimeKey(DeleteTimeKeyOperation), // delete single key of a TimeKeyMap
+    DeleteKey(DeleteKeyOperation),         // delete all data for a key in a KeyTimeMultiMap
+    DeleteValue(DeleteValueOperation),     // delete single value of a KeyTimeMultiMap
+    DeleteTimeRange(DeleteTimeRangeOperation), // delete all values for key in range (only for KeyTimeMultiMap)
 }
 
 #[async_trait]
@@ -109,15 +144,9 @@ pub trait BackingStore {
 
     fn task_info(&self) -> &TaskInfo;
 
-    // prepares a checkpoint to be written
-    #[allow(unused_variables)]
-    async fn initialize_checkpoint(job_id: &str, epoch: u32, operators: &[&str]) -> Result<()> {
-        Ok(())
-    }
-
     async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata);
 
-    async fn complete_checkpoint(metadata: CheckpointMetadata);
+    async fn write_checkpoint_metadata(metadata: CheckpointMetadata);
 
     async fn cleanup_checkpoint(
         metadata: CheckpointMetadata,
@@ -142,7 +171,7 @@ pub trait BackingStore {
         value: &mut V,
     );
 
-    async fn delete_data_tuple<K: Key>(
+    async fn delete_time_key<K: Key>(
         &mut self,
         table: char,
         table_type: TableType,
@@ -150,8 +179,24 @@ pub trait BackingStore {
         key: &mut K,
     );
 
+    async fn delete_key<K: Key>(&mut self, table: char, key: &mut K);
+
+    async fn delete_data_value<K: Key, V: Data>(
+        &mut self,
+        table: char,
+        timestamp: SystemTime,
+        key: &mut K,
+        value: &mut V,
+    );
+
+    async fn delete_time_range<K: Key>(
+        &mut self,
+        table: char,
+        key: &mut K,
+        range: Range<SystemTime>,
+    );
+
     async fn write_key_value<K: Key, V: Data>(&mut self, table: char, key: &mut K, value: &mut V);
-    async fn delete_key_value<K: Key>(&mut self, table: char, key: &mut K);
 
     async fn get_global_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
     async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
@@ -222,6 +267,11 @@ impl<S: BackingStore> StateStore<S> {
         table: char,
         watermark: Option<SystemTime>,
     ) -> TimeKeyMap<K, V, S> {
+        // make sure table is correct type
+        if self.table_descriptors.get(&table).unwrap().table_type != TableType::TimeKeyMap as i32 {
+            panic!("Table {} is not a TimeKeyMap", table);
+        }
+
         // this is done because populating it is async, so can't use or_insert().
         if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
             let cache: Box<dyn Any + Send> = match &self.restore_from {
@@ -257,6 +307,13 @@ impl<S: BackingStore> StateStore<S> {
         &mut self,
         table: char,
     ) -> KeyTimeMultiMap<K, V, S> {
+        // make sure table is correct type
+        if self.table_descriptors.get(&table).unwrap().table_type
+            != TableType::KeyTimeMultiMap as i32
+        {
+            panic!("Table {} is not a KeyTimeMultiMap", table);
+        }
+
         // this is done because populating it is async, so can't use or_insert().
         if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
             let cache: Box<dyn Any + Send> = match &self.restore_from {
@@ -292,6 +349,11 @@ impl<S: BackingStore> StateStore<S> {
         &mut self,
         table: char,
     ) -> GlobalKeyedState<K, V, S> {
+        // make sure table is correct type
+        if self.table_descriptors.get(&table).unwrap().table_type != TableType::Global as i32 {
+            panic!("Table {} is not Global", table);
+        }
+
         // this is done because populating it is async, so can't use or_insert().
         if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
             let cache: Box<dyn Any + Send> = match &self.restore_from {
@@ -318,6 +380,11 @@ impl<S: BackingStore> StateStore<S> {
     }
 
     pub async fn get_key_state<K: Key, V: Data>(&mut self, table: char) -> KeyedState<K, V, S> {
+        // make sure table is correct type
+        if self.table_descriptors.get(&table).unwrap().table_type != TableType::TimeKeyMap as i32 {
+            panic!("Table {} is not a TimeKeyMap", table);
+        }
+
         if let std::collections::hash_map::Entry::Vacant(e) = self.caches.entry(table) {
             let cache: Box<dyn Any + Send> = match &self.restore_from {
                 Some(_restore_from) => {
@@ -370,7 +437,9 @@ mod test {
     use crate::tables::key_time_multi_map::KeyTimeMultiMap;
     use crate::tables::keyed_map::KeyedState;
     use crate::tables::time_key_map::TimeKeyMap;
-    use crate::{global_table, timestamp_table, BackingStore, StateStore};
+    use crate::{
+        global_table, key_time_multi_map_table, timestamp_table, BackingStore, StateStore,
+    };
     use arroyo_types::{to_micros, CheckpointBarrier, TaskInfo};
 
     fn default_tables() -> Vec<TableDescriptor> {
@@ -379,6 +448,13 @@ mod test {
             timestamp_table(
                 "t",
                 "time",
+                TableDeleteBehavior::NoReadsBeforeWatermark,
+                TableWriteBehavior::NoWritesBeforeWatermark,
+                Duration::ZERO,
+            ),
+            key_time_multi_map_table(
+                "m",
+                "multi",
                 TableDeleteBehavior::NoReadsBeforeWatermark,
                 TableWriteBehavior::NoWritesBeforeWatermark,
                 Duration::ZERO,
@@ -494,7 +570,7 @@ mod test {
             operator_ids: vec![operator_id.to_string()],
         };
 
-        ParquetBackend::complete_checkpoint(checkpoint_metadata.clone()).await;
+        ParquetBackend::write_checkpoint_metadata(checkpoint_metadata.clone()).await;
 
         checkpoint_metadata
     }
@@ -527,7 +603,7 @@ mod test {
         let (mut ss, mut rx) = p;
         let job_id = ss.task_info.job_id.clone();
         let operator_id = ss.task_info.operator_id.clone();
-        let mut ks: KeyTimeMultiMap<String, i32, _> = ss.get_key_time_multi_map('t').await;
+        let mut ks: KeyTimeMultiMap<String, i32, _> = ss.get_key_time_multi_map('m').await;
 
         let k1 = "k1";
         let t1 = SystemTime::now();
@@ -554,7 +630,7 @@ mod test {
 
         do_checkpoint(&mut ss, &job_id, &operator_id, 1, &mut rx).await;
 
-        let mut ks = ss.get_key_time_multi_map::<String, i32>('t').await;
+        let mut ks = ss.get_key_time_multi_map::<String, i32>('m').await;
 
         assert_eq!(
             ks.get_time_range(&mut k1.into(), t1, t1 + Duration::from_nanos(1))
@@ -564,6 +640,94 @@ mod test {
         assert_eq!(
             ks.get_time_range(&mut k1.into(), t1, t4).await,
             vec![&1, &2, &3, &4]
+        );
+    }
+
+    #[test_case(parquet_for_test().await; "parquet store")]
+    #[tokio::test]
+    async fn test_key_time_multi_map_compaction(
+        p: (StateStore<impl BackingStore>, Receiver<ControlResp>),
+    ) {
+        let (mut ss, mut rx) = p;
+        let job_id = ss.task_info.job_id.clone();
+        let operator_id = ss.task_info.operator_id.clone();
+        let mut mm: KeyTimeMultiMap<String, i32, _> = ss.get_key_time_multi_map('m').await;
+
+        let k1 = "k1";
+        let k2 = "k2";
+
+        let t1 = SystemTime::now();
+        let t2 = t1 + Duration::from_secs(1);
+        let t3 = t2 + Duration::from_secs(1);
+
+        // insert some data
+
+        mm.insert(t1, k1.into(), 1).await;
+        mm.insert(t1, k1.into(), 2).await;
+
+        mm.insert(t2, k1.into(), 1).await;
+        mm.insert(t2, k1.into(), 2).await;
+        mm.insert(t2, k1.into(), 3).await;
+
+        mm.insert(t3, k1.into(), 1).await;
+        mm.insert(t3, k1.into(), 2).await;
+
+        mm.insert(t1, k2.into(), 1).await;
+
+        assert_eq!(
+            vec![&1, &2],
+            mm.get_time_range(&mut k1.into(), t1, t2).await
+        );
+        assert_eq!(
+            vec![&1, &2, &3],
+            mm.get_time_range(&mut k1.into(), t2, t3).await
+        );
+        assert_eq!(vec![&1], mm.get_time_range(&mut k2.into(), t1, t3).await);
+
+        // checkpoint 1
+
+        do_checkpoint(&mut ss, &job_id, &operator_id, 1, &mut rx).await;
+
+        // delete:
+        //  - a value from k1 at t1
+        //  - all values from k1 for the t2-t3 range
+        //  - the key k2
+
+        let mut mm: KeyTimeMultiMap<String, i32, _> = ss.get_key_time_multi_map('m').await;
+        mm.delete_value(t1, k1.into(), 2).await;
+        mm.clear_time_range(&mut k1.into(), t2, t3).await;
+        mm.delete_key(k2.into()).await;
+
+        assert_eq!(vec![&1], mm.get_time_range(&mut k1.into(), t1, t2).await);
+        assert_eq!(
+            Vec::<&i32>::new(),
+            mm.get_time_range(&mut k1.into(), t2, t3).await
+        );
+        assert_eq!(
+            Vec::<&i32>::new(),
+            mm.get_time_range(&mut k2.into(), t1, t3).await
+        );
+
+        // checkpoint 2
+
+        do_checkpoint(&mut ss, &job_id, &operator_id, 2, &mut rx).await;
+
+        // compact epoch 1 and 2 and load compacted data
+
+        let result = do_compaction(&job_id, &operator_id, 2).await;
+        assert_eq!(2, result.backend_data_to_drop.len());
+        assert_eq!(1, result.backend_data_to_load.len());
+        ss.load_compacted(result).await;
+
+        let mut mm: KeyTimeMultiMap<String, i32, _> = ss.get_key_time_multi_map('m').await;
+        assert_eq!(vec![&1], mm.get_time_range(&mut k1.into(), t1, t2).await);
+        assert_eq!(
+            Vec::<&i32>::new(),
+            mm.get_time_range(&mut k1.into(), t2, t3).await
+        );
+        assert_eq!(
+            Vec::<&i32>::new(),
+            mm.get_time_range(&mut k2.into(), t1, t3).await
         );
     }
 
@@ -615,7 +779,7 @@ mod test {
         // insert a key/value
 
         let mut ks: KeyedState<usize, i32, _> = ss.get_key_state('t').await;
-        let t1 = SystemTime::now();
+        let t1 = SystemTime::UNIX_EPOCH;
         ks.insert(t1, 1, 1).await;
         assert_eq!(Some(&1), ks.get(&mut 1));
 

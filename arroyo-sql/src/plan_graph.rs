@@ -12,7 +12,7 @@ use arroyo_datastream::{
 
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{quote, ToTokens};
-use syn::{parse_quote, parse_str};
+use syn::{parse_quote, parse_str, Type};
 
 use crate::{
     code_gen::{
@@ -31,6 +31,7 @@ use crate::{
     ArroyoSchemaProvider, SqlConfig,
 };
 use anyhow::Result;
+use petgraph::Direction;
 
 #[derive(Debug, Clone)]
 pub enum PlanOperator {
@@ -126,7 +127,7 @@ impl FusedRecordTransform {
                 panic!("FusedRecordTransform.to_predicate_operator() called on non-predicate expression");
             };
             names.push("filter");
-            predicates.push(predicate.generate(&ValuePointerContext));
+            predicates.push(predicate.generate(&ValuePointerContext::new()));
         }
         let predicate: syn::Expr = parse_quote!( {
             let arg = &record.value;
@@ -149,7 +150,8 @@ impl FusedRecordTransform {
                 RecordTransform::ValueProjection(projection) => {
                     names.push("value_project");
                     let record_type = output_type.record_type();
-                    let record_expression = ValuePointerContext.compile_value_map_expr(projection);
+                    let record_expression =
+                        ValuePointerContext::new().compile_value_map_expr(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type =  #record_expression;
                     ));
@@ -158,7 +160,7 @@ impl FusedRecordTransform {
                     names.push("key_project");
                     let record_type = output_type.record_type();
                     let record_expression =
-                        ValuePointerContext.compile_key_map_expression(projection);
+                        ValuePointerContext::new().compile_key_map_expression(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
                     ));
@@ -166,13 +168,16 @@ impl FusedRecordTransform {
                 RecordTransform::TimestampAssignment(timestamp_expression) => {
                     names.push("timestamp_assignment");
                     let record_type = output_type.record_type();
-                    let record_expression = ValuePointerContext
+                    let record_expression = ValuePointerContext::new()
                         .compile_timestamp_record_expression(timestamp_expression);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
                     ));
                 }
                 RecordTransform::Filter(_) => unreachable!(),
+                RecordTransform::UnnestProjection(_) => {
+                    unreachable!("unnest projection cannot be fused")
+                }
             }
         }
         let combined: syn::Expr = parse_quote!({
@@ -197,7 +202,8 @@ impl FusedRecordTransform {
                 (RecordTransform::ValueProjection(projection), false) => {
                     names.push("value_project");
                     let record_type = output_type.record_type();
-                    let record_expression = ValuePointerContext.compile_value_map_expr(projection);
+                    let record_expression =
+                        ValuePointerContext::new().compile_value_map_expr(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
                     ));
@@ -205,8 +211,8 @@ impl FusedRecordTransform {
                 (RecordTransform::ValueProjection(projection), true) => {
                     names.push("updating_value_project");
                     let record_type = output_type.record_type();
-                    let record_expression =
-                        ValuePointerContext.compile_updating_value_map_expression(projection);
+                    let record_expression = ValuePointerContext::new()
+                        .compile_updating_value_map_expression(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression?;
                     ));
@@ -214,7 +220,7 @@ impl FusedRecordTransform {
                 (RecordTransform::KeyProjection(projection), false) => {
                     names.push("key_project");
                     let record_expression =
-                        ValuePointerContext.compile_key_map_expression(projection);
+                        ValuePointerContext::new().compile_key_map_expression(projection);
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
@@ -223,7 +229,7 @@ impl FusedRecordTransform {
                 (RecordTransform::Filter(predicate), false) => {
                     names.push("filter");
                     let predicate_expression =
-                        ValuePointerContext.compile_filter_expression(predicate);
+                        ValuePointerContext::new().compile_filter_expression(predicate);
                     record_expressions.push(parse_quote!(
                         if !#predicate_expression {
                             return None;
@@ -232,7 +238,7 @@ impl FusedRecordTransform {
                 }
                 (RecordTransform::Filter(predicate), true) => {
                     names.push("updating_filter");
-                    let record_expression = ValuePointerContext
+                    let record_expression = ValuePointerContext::new()
                         .compile_updating_filter_optional_record_expression(predicate);
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
@@ -240,12 +246,15 @@ impl FusedRecordTransform {
                 }
                 (RecordTransform::TimestampAssignment(timestamp_expression), false) => {
                     names.push("timestamp_assignment");
-                    let record_expression = ValuePointerContext
+                    let record_expression = ValuePointerContext::new()
                         .compile_timestamp_record_expression(timestamp_expression);
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
                     ));
+                }
+                (RecordTransform::UnnestProjection(_), _) => {
+                    unreachable!("unnest projection cannot be fused")
                 }
                 _ => unimplemented!(),
             }
@@ -291,6 +300,7 @@ impl PlanNode {
             RecordTransform::TimestampAssignment(_) | RecordTransform::Filter(_) => {
                 input_type.clone()
             }
+            RecordTransform::UnnestProjection(p) => input_type.with_value(p.output_struct()),
         };
         PlanNode {
             operator: PlanOperator::RecordTransform(record_transform),
@@ -567,7 +577,7 @@ impl PlanNode {
                     .into_token_stream()
                     .to_string();
                 let bin_type = aggregating_projection
-                    .bin_type(&ValuePointerContext)
+                    .bin_type(&ValuePointerContext::new())
                     .syn_type()
                     .into_token_stream()
                     .to_string();
@@ -594,11 +604,11 @@ impl PlanNode {
                 let sort_tuple = SortExpression::sort_tuple_type(order_by);
                 let sort_key_type = quote!(#sort_tuple).to_string();
 
-                let partition_expr = partition_projection.generate(&ValuePointerContext);
-                let partition_arg = ValuePointerContext.variable_ident();
+                let partition_expr = partition_projection.generate(&ValuePointerContext::new());
+                let partition_arg = ValuePointerContext::new().variable_ident();
                 let partition_function: syn::ExprClosure =
                     parse_quote!(|#partition_arg| {#partition_expr});
-                let projection_expr = converting_projection.generate(&ValuePointerContext);
+                let projection_expr = converting_projection.generate(&ValuePointerContext::new());
 
                 let sort_tokens = SortExpression::sort_tuple_expression(order_by);
 
@@ -748,7 +758,9 @@ impl PlanNode {
                     let bin_type = projection
                         .expression_type(&ValueBinMergingContext::new())
                         .syn_type();
-                    let memory_type = projection.memory_type(&ValuePointerContext).syn_type();
+                    let memory_type = projection
+                        .memory_type(&ValuePointerContext::new())
+                        .syn_type();
                     let memory_add = projection.generate(&MemoryAddingContext::new());
                     let memory_removing_context = MemoryRemovingContext::new();
                     let memory_remove = projection.generate(&memory_removing_context);
@@ -884,6 +896,11 @@ pub enum PlanType {
         key: Option<StructDef>,
         value: String,
     },
+    Debezium {
+        key: Option<StructDef>,
+        value_type: String,
+        values: Vec<StructDef>,
+    },
     Updating(Box<PlanType>),
 }
 
@@ -926,6 +943,10 @@ impl PlanType {
                 let value_type = value.get_type();
                 parse_quote!(Vec<#value_type>)
             }
+            PlanType::Debezium { value_type, .. } => {
+                let v: Type = parse_str(value_type).unwrap();
+                parse_quote!(arroyo_types::Debezium<#v>)
+            }
             PlanType::Updating(inner_type) => {
                 let inner_type = inner_type.as_syn_type();
                 parse_quote!(arroyo_types::UpdatingData<#inner_type>)
@@ -937,15 +958,35 @@ impl PlanType {
         match self {
             PlanType::Unkeyed(_)
             | PlanType::UnkeyedList(_)
-            | PlanType::KeyedLiteralTypeValue {
-                key: None,
-                value: _,
-            } => parse_quote!(()),
+            | PlanType::KeyedLiteralTypeValue { key: None, .. }
+            | PlanType::Debezium { key: None, .. } => parse_quote!(()),
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
             | PlanType::KeyedLiteralTypeValue { key: Some(key), .. }
-            | PlanType::KeyedListPair { key, .. } => key.get_type(),
+            | PlanType::KeyedListPair { key, .. }
+            | PlanType::Debezium { key: Some(key), .. } => key.get_type(),
             PlanType::Updating(inner) => inner.key_type(),
+        }
+    }
+
+    fn value_structs(&self) -> Vec<StructDef> {
+        match self {
+            PlanType::Unkeyed(v) => vec![v.clone()],
+            PlanType::UnkeyedList(v) => vec![v.clone()],
+            PlanType::Keyed { value, .. } => vec![value.clone()],
+            PlanType::KeyedPair {
+                left_value,
+                right_value,
+                ..
+            }
+            | PlanType::KeyedListPair {
+                left_value,
+                right_value,
+                ..
+            } => vec![left_value.clone(), right_value.clone()],
+            PlanType::KeyedLiteralTypeValue { .. } => vec![],
+            PlanType::Debezium { values, .. } => values.clone(),
+            PlanType::Updating(v) => v.value_structs(),
         }
     }
 
@@ -959,13 +1000,12 @@ impl PlanType {
         match self {
             PlanType::Unkeyed(_)
             | PlanType::UnkeyedList(_)
-            | PlanType::KeyedLiteralTypeValue {
-                key: None,
-                value: _,
-            } => vec![],
+            | PlanType::KeyedLiteralTypeValue { key: None, .. }
+            | PlanType::Debezium { key: None, .. } => vec![],
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
             | PlanType::KeyedLiteralTypeValue { key: Some(key), .. }
+            | PlanType::Debezium { key: Some(key), .. }
             | PlanType::KeyedListPair { key, .. } => key.all_names(),
             PlanType::Updating(inner) => inner.get_key_struct_names(),
         }
@@ -1001,6 +1041,11 @@ impl PlanType {
                 Some(key) => key.all_structs().into_iter().collect(),
                 None => HashSet::new(),
             },
+            PlanType::Debezium { key, values, .. } => key
+                .iter()
+                .flat_map(|key| key.all_structs())
+                .chain(values.iter().flat_map(|value| value.all_structs()))
+                .collect(),
             PlanType::Updating(inner) => inner.get_all_types(),
         }
     }
@@ -1048,6 +1093,13 @@ impl PlanType {
                 key: Some(key),
                 value: value.clone(),
             },
+            PlanType::Debezium {
+                value_type, values, ..
+            } => PlanType::Debezium {
+                key: Some(key),
+                value_type: value_type.clone(),
+                values: values.clone(),
+            },
             PlanType::Updating(inner) => PlanType::Updating(Box::new(inner.with_key(key))),
         }
     }
@@ -1056,19 +1108,11 @@ impl PlanType {
         match self {
             PlanType::Unkeyed(_) => PlanType::Unkeyed(value),
             PlanType::UnkeyedList(_) => PlanType::UnkeyedList(value),
-            PlanType::Keyed { key: _, value: _ } => PlanType::Unkeyed(value),
-            PlanType::KeyedPair {
-                key: _,
-                left_value: _,
-                right_value: _,
-                join_type: _,
-            } => unreachable!(),
-            PlanType::KeyedListPair {
-                key: _,
-                left_value: _,
-                right_value: _,
-            } => unreachable!(),
-            PlanType::KeyedLiteralTypeValue { key: _, value: _ } => unreachable!(),
+            PlanType::Keyed { .. } => PlanType::Unkeyed(value),
+            PlanType::KeyedPair { .. } => unreachable!(),
+            PlanType::KeyedListPair { .. } => unreachable!(),
+            PlanType::KeyedLiteralTypeValue { .. } => unreachable!(),
+            PlanType::Debezium { .. } => unreachable!(),
             PlanType::Updating(inner) => PlanType::Updating(Box::new(inner.with_value(value))),
         }
     }
@@ -1125,14 +1169,20 @@ impl PlanGraph {
                     }
                 }
             }
+            SqlOperator::Union(inputs) => self.add_union(inputs),
         }
     }
 
     fn add_debezium_source(&mut self, source_operator: &SourceOperator) -> NodeIndex {
-        let value_type = source_operator.source.struct_def.get_type();
-        let debezium_type = PlanType::KeyedLiteralTypeValue {
+        let debezium_type = PlanType::Debezium {
             key: None,
-            value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+            value_type: source_operator
+                .source
+                .struct_def
+                .get_type()
+                .to_token_stream()
+                .to_string(),
+            values: vec![source_operator.source.struct_def.clone()],
         };
         let source_node = self.insert_operator(
             PlanOperator::Source(source_operator.name.clone(), source_operator.source.clone()),
@@ -1198,10 +1248,10 @@ impl PlanGraph {
         }
 
         let strategy = if let Some(watermark_expression) = source_operator.watermark_column {
-            let arg_ident = ValuePointerContext.variable_ident();
-            let expression = watermark_expression.generate(&ValuePointerContext);
+            let arg_ident = ValuePointerContext::new().variable_ident();
+            let expression = watermark_expression.generate(&ValuePointerContext::new());
             let null_checked_expression = if watermark_expression
-                .expression_type(&ValuePointerContext)
+                .expression_type(&ValuePointerContext::new())
                 .is_optional()
             {
                 parse_quote!(#expression.unwrap_or_else(|| std::time::SystemTime::now()))
@@ -1586,9 +1636,10 @@ impl PlanGraph {
         let input_node = self.get_plan_node(input_index);
         if let PlanType::Updating(inner) = &input_node.output_type {
             let value_type = inner.as_syn_type();
-            let debezium_type = PlanType::KeyedLiteralTypeValue {
+            let debezium_type = PlanType::Debezium {
                 key: None,
-                value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+                value_type: quote!(#value_type).to_string(),
+                values: inner.value_structs(),
             };
             let debezium_index =
                 self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
@@ -1610,9 +1661,10 @@ impl PlanGraph {
             plan_node_index
         } else if matches!(sql_sink.updating_type, SinkUpdateType::Force) {
             let value_type = input_node.output_type.as_syn_type();
-            let debezium_type = PlanType::KeyedLiteralTypeValue {
+            let debezium_type = PlanType::Debezium {
                 key: None,
-                value: quote!(arroyo_types::Debezium<#value_type>).to_string(),
+                value_type: quote!(#value_type).to_string(),
+                values: input_node.output_type.value_structs(),
             };
             let debezium_index =
                 self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
@@ -1699,6 +1751,23 @@ impl PlanGraph {
             .add_edge(aggregate_index, unkey_index, unkey_edge);
         unkey_index
     }
+
+    fn add_union(&mut self, inputs: Vec<SqlOperator>) -> NodeIndex {
+        let input_node_indices = inputs
+            .into_iter()
+            .map(|input| self.add_sql_operator(input))
+            .collect::<Vec<_>>();
+        let first_input = self.get_plan_node(input_node_indices[0]);
+        let union_node = self.insert_operator(PlanOperator::Unkey, first_input.output_type.clone());
+        for input_index in input_node_indices {
+            // add edges
+            let edge = PlanEdge {
+                edge_type: EdgeType::Forward,
+            };
+            self.graph.add_edge(input_index, union_node, edge);
+        }
+        union_node
+    }
 }
 
 impl From<PlanGraph> for DiGraph<StreamNode, StreamEdge> {
@@ -1729,6 +1798,25 @@ pub fn get_program(
         key_structs.extend(key_names);
     });
 
+    // find all types that are produced by a source or consumed by a sink
+    let connector_types: HashSet<_> = plan_graph
+        .graph
+        .externals(Direction::Incoming)
+        .chain(
+            plan_graph
+                .graph
+                .externals(Direction::Outgoing)
+                .flat_map(|idx| {
+                    plan_graph
+                        .graph
+                        .neighbors_directed(idx, Direction::Incoming)
+                }),
+        )
+        .flat_map(|node| plan_graph.graph.node_weight(node).unwrap().get_all_types())
+        .flat_map(|s| s.all_structs_including_named())
+        .map(|t| t.struct_name())
+        .collect();
+
     let types: HashSet<_> = plan_graph
         .graph
         .node_weights()
@@ -1744,9 +1832,11 @@ pub fn get_program(
         .iter()
         .flat_map(|s| s.all_structs_including_named())
         .collect();
+
     other_defs.extend(
         all_types
             .iter()
+            .filter(|t| connector_types.contains(&t.struct_name()))
             .map(|s| s.generate_serializer_items().to_string()),
     );
 
@@ -1759,7 +1849,7 @@ pub fn get_program(
     );
 
     other_defs.push(format!(
-        "mod udfs {{ {} }}",
+        "mod udfs {{ use std::time::{{SystemTime, Duration}}; {} }}",
         schema_provider
             .udf_defs
             .values()

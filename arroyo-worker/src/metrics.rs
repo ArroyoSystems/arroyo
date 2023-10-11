@@ -1,49 +1,70 @@
 use crate::engine::OutQueue;
-use arroyo_metrics::{counter_for_task, gauge_for_task};
+use arroyo_metrics::gauge_for_task;
 use arroyo_types::{TaskInfo, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT};
-use prometheus::{labels, IntCounter, IntGauge};
-use std::collections::HashMap;
+use lazy_static::lazy_static;
+use prometheus::{labels, register_int_counter_vec, IntCounter, IntCounterVec, IntGauge};
 
-pub fn register_counters(task_info: &TaskInfo) -> HashMap<&'static str, IntCounter> {
-    let mut counters = HashMap::new();
-
-    if let Some(c) = counter_for_task(
-        &task_info,
+lazy_static! {
+    pub static ref TASK_METRIC_LABELS: Vec<&'static str> =
+        vec!["operator_id", "subtask_idx", "operator_name"];
+    pub static ref MESSAGE_RECV_COUNTER: IntCounterVec = register_int_counter_vec!(
         MESSAGES_RECV,
         "Count of messages received by this subtask",
-        HashMap::new(),
-    ) {
-        counters.insert(MESSAGES_RECV, c);
-    }
-
-    if let Some(c) = counter_for_task(
-        &task_info,
+        &TASK_METRIC_LABELS
+    )
+    .unwrap();
+    pub static ref MESSAGES_SENT_COUNTER: IntCounterVec = register_int_counter_vec!(
         MESSAGES_SENT,
         "Count of messages sent by this subtask",
-        HashMap::new(),
-    ) {
-        counters.insert(MESSAGES_SENT, c);
-    }
-
-    if let Some(c) = counter_for_task(
-        &task_info,
+        &TASK_METRIC_LABELS
+    )
+    .unwrap();
+    pub static ref BYTES_RECEIVED_COUNTER: IntCounterVec = register_int_counter_vec!(
         BYTES_RECV,
         "Count of bytes received by this subtask",
-        HashMap::new(),
-    ) {
-        counters.insert(BYTES_RECV, c);
-    }
-
-    if let Some(c) = counter_for_task(
-        &task_info,
+        &TASK_METRIC_LABELS
+    )
+    .unwrap();
+    pub static ref BYTES_SENT_COUNTER: IntCounterVec = register_int_counter_vec!(
         BYTES_SENT,
         "Count of bytes sent by this subtask",
-        HashMap::new(),
-    ) {
-        counters.insert(BYTES_SENT, c);
-    }
+        &TASK_METRIC_LABELS
+    )
+    .unwrap();
+}
 
-    counters
+pub enum TaskCounters {
+    MessagesReceived,
+    MessagesSent,
+    BytesReceived,
+    BytesSent,
+}
+
+impl TaskCounters {
+    pub fn for_task(&self, task_info: &TaskInfo) -> IntCounter {
+        match self {
+            TaskCounters::MessagesReceived => MESSAGE_RECV_COUNTER.with_label_values(&[
+                &task_info.operator_id,
+                &task_info.task_index.to_string(),
+                &task_info.operator_name,
+            ]),
+            TaskCounters::MessagesSent => MESSAGES_SENT_COUNTER.with_label_values(&[
+                &task_info.operator_id,
+                &task_info.task_index.to_string(),
+                &task_info.operator_name,
+            ]),
+            TaskCounters::BytesReceived => BYTES_RECEIVED_COUNTER.with_label_values(&[
+                &task_info.operator_id,
+                &task_info.task_index.to_string(),
+                &task_info.operator_name,
+            ]),
+            TaskCounters::BytesSent => BYTES_SENT_COUNTER.with_label_values(&[
+                &task_info.operator_id,
+                &task_info.task_index.to_string(),
+                &task_info.operator_name,
+            ]),
+        }
+    }
 }
 
 pub type QueueGauges = Vec<Vec<Option<IntGauge>>>;

@@ -468,11 +468,15 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
             Watermark::EventTime(watermark) => {
                 let mut left_state: KeyTimeMultiMap<K, T1, _> =
                     ctx.state.get_key_time_multi_map('l').await;
-                left_state.expire_entries_before(watermark - self.left_expiration);
+                left_state
+                    .expire_entries_before(watermark - self.left_expiration)
+                    .await;
 
                 let mut right_state: KeyTimeMultiMap<K, T2, _> =
                     ctx.state.get_key_time_multi_map('r').await;
-                right_state.expire_entries_before(watermark - self.right_expiration);
+                right_state
+                    .expire_entries_before(watermark - self.right_expiration)
+                    .await;
             }
             Watermark::Idle => (),
         };

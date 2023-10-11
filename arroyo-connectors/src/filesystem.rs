@@ -1,9 +1,11 @@
 use anyhow::{anyhow, bail, Result};
+use arroyo_storage::BackendConfig;
 use axum::response::sse::Event;
 use std::convert::Infallible;
 use typify::import_types;
 
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, Format, TestSourceMessage};
+use arroyo_rpc::formats::Format;
+use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 
@@ -115,6 +117,7 @@ impl Connector for FileSystemConnector {
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: Some(format),
+            framing: schema.framing.clone(),
         };
 
         Ok(Connection {
@@ -135,7 +138,13 @@ impl Connector for FileSystemConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
         let write_target = if let Some(path) = opts.remove("path") {
-            Destination::FolderUri { path }
+            if let BackendConfig::Local(local_config) = BackendConfig::parse_url(&path, false)? {
+                Destination::LocalFilesystem {
+                    local_directory: local_config.path,
+                }
+            } else {
+                Destination::FolderUri { path }
+            }
         } else if let (Some(s3_bucket), Some(s3_directory), Some(aws_region)) = (
             opts.remove("s3_bucket"),
             opts.remove("s3_directory"),

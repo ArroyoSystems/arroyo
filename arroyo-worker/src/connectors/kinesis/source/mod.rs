@@ -9,7 +9,6 @@ use std::{
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
 use arroyo_macro::{source_fn, StreamNode};
-use arroyo_rpc::types::Format;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
@@ -27,14 +26,14 @@ use aws_sdk_kinesis::{
 use bincode::{Decode, Encode};
 use futures::stream::StreamExt;
 use futures::{stream::FuturesUnordered, Future};
-use serde::de::DeserializeOwned;
 use tokio::{
     select,
     time::{Duration, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
 
-use crate::{engine::Context, formats, SourceFinishType};
+use crate::formats::DataDeserializer;
+use crate::{engine::Context, SchemaData, SourceFinishType};
 
 use super::{KinesisTable, SourceOffset, TableType};
 
@@ -46,14 +45,14 @@ pub enum KinesisOffset {
     Timestamp(SystemTime),
 }
 #[derive(StreamNode)]
-pub struct KinesisSourceFunc<K: Data, T: Data + DeserializeOwned> {
+pub struct KinesisSourceFunc<K: Data, T: SchemaData> {
     stream_name: String,
-    format: Format,
+    deserializer: DataDeserializer<T>,
     kinesis_client: Option<KinesisClient>,
     aws_region: Option<String>,
     shards: HashMap<String, ShardState>,
     config: KinesisSourceConfig,
-    _phantom: PhantomData<(K, T)>,
+    _phantom: PhantomData<K>,
 }
 
 struct KinesisSourceConfig {
@@ -174,7 +173,7 @@ enum AsyncResult {
 }
 
 #[source_fn(out_k = (), out_t = T)]
-impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
+impl<K: Data, T: SchemaData> KinesisSourceFunc<K, T> {
     pub fn from_config(config: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config).expect("Invalid config for KinesisSource");
@@ -188,7 +187,12 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
             aws_region: table.aws_region,
             config: kinesis_config,
             shards: HashMap::new(),
-            format: config.format.unwrap(),
+            deserializer: DataDeserializer::new(
+                config
+                    .format
+                    .expect("format must be set for kinesis source"),
+                config.framing,
+            ),
             _phantom: PhantomData,
         }
     }
@@ -452,6 +456,7 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
                         Some(ControlMessage::LoadCompacted { compacted }) => {
                             ctx.load_compacted(compacted).await;
                         },
+                        Some(ControlMessage::NoOp ) => {}
                         None => {
 
                         }
@@ -469,14 +474,17 @@ impl<K: Data, T: Data + DeserializeOwned> KinesisSourceFunc<K, T> {
         let records = get_records_output.records.unwrap_or_default();
         for record in records {
             let data = record.data.unwrap().into_inner();
-            let value = formats::deserialize_slice(&self.format, &data)?;
+
             let timestamp = record.approximate_arrival_timestamp.unwrap();
-            let output_record = Record {
-                timestamp: from_nanos(timestamp.as_nanos() as u128),
-                key: None,
-                value,
-            };
-            ctx.collect(output_record).await;
+            let iter = self.deserializer.deserialize_slice(&data);
+            for value in iter {
+                let output_record = Record {
+                    timestamp: from_nanos(timestamp.as_nanos() as u128),
+                    key: None,
+                    value: value?,
+                };
+                ctx.collect(output_record).await;
+            }
         }
         Ok(get_records_output.next_shard_iterator)
     }

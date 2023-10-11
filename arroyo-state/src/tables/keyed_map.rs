@@ -48,7 +48,7 @@ impl<'a, K: Key, V: Data, S: BackingStore> KeyedState<'a, K, V, S> {
     pub async fn remove(&mut self, key: &mut K) {
         self.cache.remove(&key);
         self.backing_state
-            .delete_key_value::<K>(self.table, key)
+            .delete_time_key(self.table, TableType::Global, SystemTime::UNIX_EPOCH, key)
             .await;
     }
 
