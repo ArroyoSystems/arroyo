@@ -25,7 +25,7 @@ use syn::{parse_quote, parse_str, GenericArgument, PathArguments, Type, TypePath
 
 use anyhow::{anyhow, bail, Result};
 
-use crate::Operator::FusedWasmUDFs;
+use crate::Operator::{FlatMapOperator, FusedWasmUDFs};
 use arroyo_rpc::grpc::api::{
     Aggregator, JobEdge, JobGraph, JobNode, PipelineProgram, ProgramNode, WasmFunction,
 };
@@ -347,10 +347,14 @@ pub enum Operator {
     FlattenOperator {
         name: String,
     },
-    FlatMapOperator {
+    ArrayMapOperator {
         name: String,
         expression: String,
         return_type: ExpressionReturnType,
+    },
+    FlatMapOperator {
+        name: String,
+        expression: String,
     },
     SlidingWindowAggregator(SlidingWindowAggregator),
     TumblingWindowAggregator(TumblingWindowAggregator),
@@ -433,11 +437,15 @@ impl Debug for Operator {
                 expression: _,
                 return_type,
             } => write!(f, "expression<{}:{:?}>", name, return_type),
-            Operator::FlatMapOperator {
+            Operator::ArrayMapOperator {
                 name,
                 expression: _,
                 return_type,
-            } => write!(f, "flat_map<{}:{:?}>", name, return_type),
+            } => write!(f, "array_map<{}:{:?}>", name, return_type),
+            Operator::FlatMapOperator {
+                name,
+                expression: _,
+            } => write!(f, "flat_map<{}>", name),
             Operator::SlidingWindowAggregator(SlidingWindowAggregator { width, slide, .. }) => {
                 write!(
                     f,
@@ -1551,10 +1559,10 @@ impl Program {
                 Operator::FlattenOperator { name } => {
                     let k = parse_type(&output.unwrap().weight().key);
                     let t = parse_type(&output.unwrap().weight().value);
-                 quote! {
-                    Box::new(FlattenOperator::<#k, #t>::new(#name.to_string()))
-                }
-            },
+                    quote! {
+                        Box::new(FlattenOperator::<#k, #t>::new(#name.to_string()))
+                    }
+                },
                 Operator::ExpressionOperator { name, expression, return_type } => {
                     let expr : syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
@@ -1589,7 +1597,21 @@ impl Program {
                         },
                     }
                 },
-                Operator::FlatMapOperator { name, expression, return_type } => {
+                Operator::FlatMapOperator { name, expression } => {
+                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+                    let out_k = parse_type(&output.unwrap().weight().key);
+                    let out_t = parse_type(&output.unwrap().weight().value);
+                    let func: syn::ExprClosure = parse_quote!(|record, _| {#expr});
+                    quote! {
+                        Box::new(FlatMapOperator::<#in_k, #in_t, #out_k, #out_t>{
+                            name: #name.to_string(),
+                            flat_map: Box::new(#func),
+                        })
+                    }
+                },
+                Operator::ArrayMapOperator { name, expression, return_type } => {
                     let expr : syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
@@ -1625,7 +1647,7 @@ impl Program {
                     };
                     let func: syn::ExprClosure = parse_str(&quote!(#closure).to_string()).unwrap();
                     quote! {
-                        Box::new(FlatMapOperator::<#in_k, #in_t, #out_k, #out_t> {
+                        Box::new(ArrayMapOperator::<#in_k, #in_t, #out_k, #out_t> {
                             name: #name.to_string(),
                             map_fn: Box::new(#func),
                         })
@@ -2025,7 +2047,10 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 return_type: return_type.into(),
             }),
             Operator::FlattenOperator { name } => GrpcOperator::Flatten(Flatten { name }),
-            Operator::FlatMapOperator {
+            Operator::FlatMapOperator { name, expression } => {
+                GrpcOperator::FlatMapOperator({ GrpcApi::FlatMapOperator { name, expression } })
+            }
+            Operator::ArrayMapOperator {
                 name,
                 expression,
                 return_type,
@@ -2328,9 +2353,12 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     }
                 }
                 GrpcOperator::Flatten(Flatten { name }) => Operator::FlattenOperator { name },
+                GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression }) => {
+                    Operator::FlatMapOperator { name, expression }
+                }
                 GrpcOperator::FlattenExpressionOperator(flatten_expression) => {
                     let return_type = flatten_expression.return_type().into();
-                    Operator::FlatMapOperator {
+                    Operator::ArrayMapOperator {
                         name: flatten_expression.name,
                         expression: flatten_expression.expression,
                         return_type,

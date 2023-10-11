@@ -127,7 +127,7 @@ impl FusedRecordTransform {
                 panic!("FusedRecordTransform.to_predicate_operator() called on non-predicate expression");
             };
             names.push("filter");
-            predicates.push(predicate.generate(&ValuePointerContext));
+            predicates.push(predicate.generate(&ValuePointerContext::new()));
         }
         let predicate: syn::Expr = parse_quote!( {
             let arg = &record.value;
@@ -150,7 +150,8 @@ impl FusedRecordTransform {
                 RecordTransform::ValueProjection(projection) => {
                     names.push("value_project");
                     let record_type = output_type.record_type();
-                    let record_expression = ValuePointerContext.compile_value_map_expr(projection);
+                    let record_expression =
+                        ValuePointerContext::new().compile_value_map_expr(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type =  #record_expression;
                     ));
@@ -159,7 +160,7 @@ impl FusedRecordTransform {
                     names.push("key_project");
                     let record_type = output_type.record_type();
                     let record_expression =
-                        ValuePointerContext.compile_key_map_expression(projection);
+                        ValuePointerContext::new().compile_key_map_expression(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
                     ));
@@ -167,13 +168,16 @@ impl FusedRecordTransform {
                 RecordTransform::TimestampAssignment(timestamp_expression) => {
                     names.push("timestamp_assignment");
                     let record_type = output_type.record_type();
-                    let record_expression = ValuePointerContext
+                    let record_expression = ValuePointerContext::new()
                         .compile_timestamp_record_expression(timestamp_expression);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
                     ));
                 }
                 RecordTransform::Filter(_) => unreachable!(),
+                RecordTransform::UnnestProjection(_) => {
+                    unreachable!("unnest projection cannot be fused")
+                }
             }
         }
         let combined: syn::Expr = parse_quote!({
@@ -198,7 +202,8 @@ impl FusedRecordTransform {
                 (RecordTransform::ValueProjection(projection), false) => {
                     names.push("value_project");
                     let record_type = output_type.record_type();
-                    let record_expression = ValuePointerContext.compile_value_map_expr(projection);
+                    let record_expression =
+                        ValuePointerContext::new().compile_value_map_expr(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
                     ));
@@ -206,8 +211,8 @@ impl FusedRecordTransform {
                 (RecordTransform::ValueProjection(projection), true) => {
                     names.push("updating_value_project");
                     let record_type = output_type.record_type();
-                    let record_expression =
-                        ValuePointerContext.compile_updating_value_map_expression(projection);
+                    let record_expression = ValuePointerContext::new()
+                        .compile_updating_value_map_expression(projection);
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression?;
                     ));
@@ -215,7 +220,7 @@ impl FusedRecordTransform {
                 (RecordTransform::KeyProjection(projection), false) => {
                     names.push("key_project");
                     let record_expression =
-                        ValuePointerContext.compile_key_map_expression(projection);
+                        ValuePointerContext::new().compile_key_map_expression(projection);
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
@@ -224,7 +229,7 @@ impl FusedRecordTransform {
                 (RecordTransform::Filter(predicate), false) => {
                     names.push("filter");
                     let predicate_expression =
-                        ValuePointerContext.compile_filter_expression(predicate);
+                        ValuePointerContext::new().compile_filter_expression(predicate);
                     record_expressions.push(parse_quote!(
                         if !#predicate_expression {
                             return None;
@@ -233,7 +238,7 @@ impl FusedRecordTransform {
                 }
                 (RecordTransform::Filter(predicate), true) => {
                     names.push("updating_filter");
-                    let record_expression = ValuePointerContext
+                    let record_expression = ValuePointerContext::new()
                         .compile_updating_filter_optional_record_expression(predicate);
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
@@ -241,12 +246,15 @@ impl FusedRecordTransform {
                 }
                 (RecordTransform::TimestampAssignment(timestamp_expression), false) => {
                     names.push("timestamp_assignment");
-                    let record_expression = ValuePointerContext
+                    let record_expression = ValuePointerContext::new()
                         .compile_timestamp_record_expression(timestamp_expression);
                     let record_type = output_type.record_type();
                     record_expressions.push(parse_quote!(
                             let record: #record_type = #record_expression;
                     ));
+                }
+                (RecordTransform::UnnestProjection(_), _) => {
+                    unreachable!("unnest projection cannot be fused")
                 }
                 _ => unimplemented!(),
             }
@@ -292,6 +300,7 @@ impl PlanNode {
             RecordTransform::TimestampAssignment(_) | RecordTransform::Filter(_) => {
                 input_type.clone()
             }
+            RecordTransform::UnnestProjection(p) => input_type.with_value(p.output_struct()),
         };
         PlanNode {
             operator: PlanOperator::RecordTransform(record_transform),
@@ -568,7 +577,7 @@ impl PlanNode {
                     .into_token_stream()
                     .to_string();
                 let bin_type = aggregating_projection
-                    .bin_type(&ValuePointerContext)
+                    .bin_type(&ValuePointerContext::new())
                     .syn_type()
                     .into_token_stream()
                     .to_string();
@@ -595,11 +604,11 @@ impl PlanNode {
                 let sort_tuple = SortExpression::sort_tuple_type(order_by);
                 let sort_key_type = quote!(#sort_tuple).to_string();
 
-                let partition_expr = partition_projection.generate(&ValuePointerContext);
-                let partition_arg = ValuePointerContext.variable_ident();
+                let partition_expr = partition_projection.generate(&ValuePointerContext::new());
+                let partition_arg = ValuePointerContext::new().variable_ident();
                 let partition_function: syn::ExprClosure =
                     parse_quote!(|#partition_arg| {#partition_expr});
-                let projection_expr = converting_projection.generate(&ValuePointerContext);
+                let projection_expr = converting_projection.generate(&ValuePointerContext::new());
 
                 let sort_tokens = SortExpression::sort_tuple_expression(order_by);
 
@@ -749,7 +758,9 @@ impl PlanNode {
                     let bin_type = projection
                         .expression_type(&ValueBinMergingContext::new())
                         .syn_type();
-                    let memory_type = projection.memory_type(&ValuePointerContext).syn_type();
+                    let memory_type = projection
+                        .memory_type(&ValuePointerContext::new())
+                        .syn_type();
                     let memory_add = projection.generate(&MemoryAddingContext::new());
                     let memory_removing_context = MemoryRemovingContext::new();
                     let memory_remove = projection.generate(&memory_removing_context);
@@ -1237,10 +1248,10 @@ impl PlanGraph {
         }
 
         let strategy = if let Some(watermark_expression) = source_operator.watermark_column {
-            let arg_ident = ValuePointerContext.variable_ident();
-            let expression = watermark_expression.generate(&ValuePointerContext);
+            let arg_ident = ValuePointerContext::new().variable_ident();
+            let expression = watermark_expression.generate(&ValuePointerContext::new());
             let null_checked_expression = if watermark_expression
-                .expression_type(&ValuePointerContext)
+                .expression_type(&ValuePointerContext::new())
                 .is_optional()
             {
                 parse_quote!(#expression.unwrap_or_else(|| std::time::SystemTime::now()))

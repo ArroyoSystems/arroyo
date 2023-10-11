@@ -442,3 +442,9 @@ full_pipeline_codegen! {"aliases",
 SELECT 'a' as \"1\"
 from nexmark;
 "}
+
+full_pipeline_codegen! {"unnest",
+"
+select cast(unnest(extract_json('{\"a\": [1, 2, 3]}', '$.a[*]')) as int) + 5, bid.auction
+from nexmark;
+"}
