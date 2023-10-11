@@ -1,17 +1,23 @@
 use std::marker::PhantomData;
 use std::time::SystemTime;
 
+use anyhow::Result;
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
 use aws_sdk_s3::Region;
 use serde::de::DeserializeOwned;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines};
+use tokio::{
+    io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines},
+    select,
+};
 use tracing::info;
 
 use arroyo_macro::{source_fn, StreamNode};
-use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
-use arroyo_types::{Data, Record};
+use arroyo_rpc::{grpc::StopMode, types::Format, ControlMessage, ControlResp, OperatorConfig};
+use arroyo_types::{Data, Record, UserError};
 
-use crate::{connectors::filesystem::s3::CompressionFormat, engine::Context, SourceFinishType};
+use crate::{
+    connectors::filesystem::s3::CompressionFormat, engine::Context, formats, SourceFinishType,
+};
 
 use super::S3Table;
 
@@ -20,8 +26,8 @@ pub struct S3SourceFunc<K: Data, T: DeserializeOwned + Data> {
     bucket: String,
     prefix: String,
     region: String,
+    format: Format,
     compression: CompressionFormat,
-    check_frequency: usize,
     total_lines_read: usize,
     _t: PhantomData<(K, T)>,
 }
@@ -37,8 +43,8 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
             bucket: table.bucket,
             prefix: table.prefix,
             region: table.region,
+            format: config.format.expect("Format must be set for S3 source"),
             compression: table.compression_format,
-            check_frequency: 100,
             total_lines_read: 0,
             _t: PhantomData,
         }
@@ -53,8 +59,27 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
     }
 
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
+        match self.run_int(ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.control_tx
+                    .send(ControlResp::Error {
+                        operator_id: ctx.task_info.operator_id.clone(),
+                        task_index: ctx.task_info.task_index,
+                        message: e.name.clone(),
+                        details: e.details.clone(),
+                    })
+                    .await
+                    .unwrap();
+
+                panic!("{}: {}", e.name, e.details);
+            }
+        }
+    }
+
+    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
         if ctx.task_info.task_index != 0 {
-            return SourceFinishType::Final;
+            return Ok(SourceFinishType::Final);
         }
         let (prev_s3_key, prev_lines_read) = ctx
             .state
@@ -109,20 +134,20 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                     let r = ZstdDecoder::new(BufReader::new(body.into_async_read()));
                     match self
                         .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
-                        .await
+                        .await?
                     {
-                        Some(finish_type) => return finish_type,
-                        None => {}
+                        Some(finish_type) => return Ok(finish_type),
+                        None => (),
                     }
                 }
                 CompressionFormat::Gzip => {
                     let r = GzipDecoder::new(BufReader::new(body.into_async_read()));
                     match self
                         .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
-                        .await
+                        .await?
                     {
-                        Some(finish_type) => return finish_type,
-                        None => {}
+                        Some(finish_type) => return Ok(finish_type),
+                        None => (),
                     }
                 }
                 CompressionFormat::None => {
@@ -133,16 +158,16 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
                             &obj_key,
                             prev_lines_read,
                         )
-                        .await
+                        .await?
                     {
-                        Some(finish_type) => return finish_type,
-                        None => {}
+                        Some(finish_type) => return Ok(finish_type),
+                        None => (),
                     }
                 }
             }
         }
         info!("S3 source finished");
-        SourceFinishType::Final
+        Ok(SourceFinishType::Final)
     }
 
     async fn read_file<R: AsyncBufRead + Unpin>(
@@ -151,68 +176,81 @@ impl<K: Data, T: DeserializeOwned + Data> S3SourceFunc<K, T> {
         mut reader: Lines<R>,
         obj_key: &str,
         prev_lines_read: usize,
-    ) -> Option<SourceFinishType> {
+    ) -> Result<Option<SourceFinishType>, UserError> {
         let mut lines_read = 0;
-        while let Ok(Some(s)) = reader.next_line().await {
-            // if we're restoring from checkpoint, skip until we find the line we were on
-            if lines_read < prev_lines_read {
-                lines_read += 1;
-                continue;
-            }
-            // json! will correctly handle escaping
-            let value = serde_json::from_value(serde_json::json!({
-                "value": s
-            }))
-            .unwrap();
-            ctx.collector
-                .collect(Record::<(), T>::from_value(SystemTime::now(), value).unwrap())
-                .await;
-            self.total_lines_read += 1;
-            lines_read += 1;
-            match self.check_control_message(ctx, &obj_key, lines_read).await {
-                None => {}
-                finish_type => return finish_type,
+        loop {
+            select! {
+                line_res = reader.next_line() => {
+                    let line_res = line_res.map_err(|err| UserError::new(
+                        "could not read next line from S3 file", err.to_string()))?;
+                    match line_res {
+                        Some(line) => {
+                            // if we're restoring from checkpoint, skip until we find the line we were on
+                            if lines_read < prev_lines_read {
+                                lines_read += 1;
+                                continue;
+                            }
+                            ctx.collector
+                                .collect(Record{
+                                    key: None,
+                                    value: formats::deserialize_slice(&self.format, line.as_bytes())?,
+                                    timestamp: SystemTime::now(),
+                                })
+                                .await;
+                            self.total_lines_read += 1;
+                            lines_read += 1;
+                        }
+                        None => return Ok(Some(SourceFinishType::Final))
+                    }
+                },
+                msg_res = ctx.control_rx.recv() => {
+                    if let Some(control_message) = msg_res {
+                        match self.process_control_message(ctx, control_message, &obj_key, lines_read).await {
+                            Some(finish_type) => return Ok(Some(finish_type)),
+                            None => ()
+                        }
+                    }
+                }
             }
         }
-        None
     }
 
-    async fn check_control_message(
+    async fn process_control_message(
         &mut self,
         ctx: &mut Context<(), T>,
+        control_message: ControlMessage,
         s3_key: &str,
         lines_read: usize,
     ) -> Option<SourceFinishType> {
-        if self.total_lines_read % self.check_frequency == 0 {
-            match ctx.control_rx.try_recv().ok() {
-                Some(ControlMessage::Checkpoint(c)) => {
-                    ctx.state
-                        .get_global_keyed_state('a')
-                        .await
-                        .insert(self.prefix.clone(), (s3_key.to_string(), lines_read))
-                        .await;
-                    // checkpoint our state
-                    if self.checkpoint(c, ctx).await {
+        match control_message {
+            ControlMessage::Checkpoint(c) => {
+                ctx.state
+                    .get_global_keyed_state('a')
+                    .await
+                    .insert(self.prefix.clone(), (s3_key.to_string(), lines_read))
+                    .await;
+                // checkpoint our state
+                if self.checkpoint(c, ctx).await {
+                    Some(SourceFinishType::Immediate)
+                } else {
+                    None
+                }
+            }
+            ControlMessage::Stop { mode } => {
+                info!("Stopping S3 source {:?}", mode);
+                match mode {
+                    StopMode::Graceful => {
+                        return Some(SourceFinishType::Graceful);
+                    }
+                    StopMode::Immediate => {
                         return Some(SourceFinishType::Immediate);
                     }
                 }
-                Some(ControlMessage::Stop { mode }) => {
-                    info!("Stopping S3 source {:?}", mode);
-                    match mode {
-                        StopMode::Graceful => {
-                            return Some(SourceFinishType::Graceful);
-                        }
-                        StopMode::Immediate => {
-                            return Some(SourceFinishType::Immediate);
-                        }
-                    }
-                }
-                Some(ControlMessage::Commit { .. }) => {
-                    unreachable!("sources shouldn't receive commit messages");
-                }
-                _ => {}
             }
+            ControlMessage::Commit { .. } => {
+                unreachable!("sources shouldn't receive commit messages");
+            }
+            _ => None,
         }
-        None
     }
 }
