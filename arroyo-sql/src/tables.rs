@@ -357,6 +357,7 @@ impl ConnectorTable {
             id: self.id,
             struct_def: StructDef::new(
                 self.type_name.clone(),
+                self.type_name.is_none(),
                 self.fields
                     .iter()
                     .filter_map(|field| match field {

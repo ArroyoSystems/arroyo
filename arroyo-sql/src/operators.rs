@@ -68,7 +68,7 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for Projection {
                 StructField::new(col.name.clone(), col.relation.clone(), field_type)
             })
             .collect();
-        StructDef::new(None, fields, self.format.clone())
+        StructDef::new(None, true, fields, self.format.clone())
     }
 }
 
@@ -154,7 +154,7 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
             self.unnest_outer.expression_type(input_context),
         ));
 
-        StructDef::new(None, fields, self.format.clone())
+        StructDef::new(None, true, fields, self.format.clone())
     }
 }
 
@@ -220,7 +220,7 @@ impl CodeGenerator<VecAggregationContext, StructDef, syn::Expr> for AggregatePro
                 .iter()
                 .map(|(struct_field, _expr)| struct_field.clone()),
         );
-        StructDef::new(None, fields, None)
+        StructDef::new(None, true, fields, None)
     }
 }
 

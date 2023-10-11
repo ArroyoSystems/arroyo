@@ -25,7 +25,7 @@ use syn::{parse_quote, parse_str, GenericArgument, PathArguments, Type, TypePath
 
 use anyhow::{anyhow, bail, Result};
 
-use crate::Operator::{FlatMapOperator, FusedWasmUDFs};
+use crate::Operator::FusedWasmUDFs;
 use arroyo_rpc::grpc::api::{
     Aggregator, JobEdge, JobGraph, JobNode, PipelineProgram, ProgramNode, WasmFunction,
 };
@@ -2048,7 +2048,7 @@ impl From<Operator> for GrpcApi::operator::Operator {
             }),
             Operator::FlattenOperator { name } => GrpcOperator::Flatten(Flatten { name }),
             Operator::FlatMapOperator { name, expression } => {
-                GrpcOperator::FlatMapOperator({ GrpcApi::FlatMapOperator { name, expression } })
+                GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression })
             }
             Operator::ArrayMapOperator {
                 name,

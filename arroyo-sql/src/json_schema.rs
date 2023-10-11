@@ -129,6 +129,8 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
             }
         }).collect();
 
+        let serializer_items = StructDef::new(Some(name.to_string()), true, fields.clone(), None)
+            .generate_serializer_items();
         let name = format_ident!("{}", name);
         defs.push(quote!{
             #[derive(Clone, Debug, bincode::Encode, bincode::Decode, PartialEq,  PartialOrd, serde::Serialize, serde::Deserialize)]
@@ -136,6 +138,8 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
                 #(#struct_fields)
                 ,*
             }
+
+            #serializer_items
         }.to_string());
     }
 
