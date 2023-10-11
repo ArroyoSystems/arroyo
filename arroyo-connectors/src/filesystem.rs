@@ -165,18 +165,38 @@ impl Connector for FileSystemConnector {
         let target_file_size = pull_option_to_i64("target_file_size", opts)?;
         let target_part_size = pull_option_to_i64("target_part_size", opts)?;
 
+        let formatting_string = opts.remove("time_partition_pattern");
+        let time_partition_pattern =
+            formatting_string.map(|pattern| TimePartitionPattern { pattern });
+
+        let partition_fields: Vec<_> = opts
+            .remove("partition_fields")
+            .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
+            .unwrap_or_default();
+
+        let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
+            Some(Partitioning {
+                time_partition_pattern,
+                partition_fields,
+            })
+        } else {
+            None
+        };
+
         let file_settings = Some(FileSettings {
             inactivity_rollover_seconds,
             max_parts,
             rollover_seconds,
             target_file_size,
             target_part_size,
+            partitioning,
         });
+
         let format_settings = match schema
             .ok_or(anyhow!("require schema"))?
             .format
             .as_ref()
-            .unwrap()
+            .ok_or(anyhow!("require format"))?
         {
             Format::Parquet(..) => {
                 let compression = opts
