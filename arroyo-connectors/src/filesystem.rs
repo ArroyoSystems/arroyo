@@ -78,7 +78,10 @@ impl Connector for FileSystemConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
         let is_local = match &table.write_target {
-            Destination::FolderUri { path } => path.starts_with("file:/"),
+            Destination::FolderUri {
+                path,
+                storage_options: _,
+            } => path.starts_with("file:/"),
             Destination::S3Bucket { .. } => false,
             Destination::LocalFilesystem { .. } => true,
         };
@@ -138,12 +141,15 @@ impl Connector for FileSystemConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
         let write_target = if let Some(path) = opts.remove("path") {
-            if let BackendConfig::Local(local_config) = BackendConfig::parse_url(&path, false)? {
-                Destination::LocalFilesystem {
-                    local_directory: local_config.path,
-                }
-            } else {
-                Destination::FolderUri { path }
+            let storage_options: std::collections::HashMap<String, String> = opts
+                .iter()
+                .filter(|(k, _)| k.starts_with("storage."))
+                .map(|(k, v)| (k.trim_start_matches("storage.").to_string(), v.to_string()))
+                .collect();
+            opts.retain(|k, _| !k.starts_with("storage."));
+            Destination::FolderUri {
+                path,
+                storage_options,
             }
         } else if let (Some(s3_bucket), Some(s3_directory), Some(aws_region)) = (
             opts.remove("s3_bucket"),
