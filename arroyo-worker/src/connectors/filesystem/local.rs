@@ -42,7 +42,7 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             final_dir,
             next_file_index: 0,
             subtask_id: 0,
-            partitioner: get_partitioner_from_table(table_properties.clone()),
+            partitioner: get_partitioner_from_table(&table_properties),
             finished_files: Vec::new(),
             rolling_policy: RollingPolicy::from_file_settings(
                 table_properties.file_settings.as_ref().unwrap(),

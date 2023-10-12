@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use arroyo_rpc::OperatorConfig;
+use arroyo_storage::StorageProvider;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use chrono::{DateTime, Utc};
@@ -77,7 +78,10 @@ impl<K: Key, T: Data + Sync + Serialize, V: LocalWriter<T>> LocalFileSystemWrite
             Destination::S3Bucket { .. } => {
                 unreachable!("shouldn't be using local writer for S3");
             }
-            Destination::FolderUri { path } => {
+            Destination::FolderUri {
+                path,
+                storage_options: _,
+            } => {
                 let (_object_store, path) =
                     object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap();
                 path.to_string()
@@ -96,46 +100,40 @@ impl<K: Key, T: Data + Sync + Serialize, R: MultiPartWriter<InputType = T> + Sen
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
-        let (object_store, path): (Box<dyn ObjectStore>, Path) = match table.write_target.clone() {
+        let (url, storage_options) = match table.write_target.clone() {
             Destination::LocalFilesystem { local_directory } => {
-                (Box::new(LocalFileSystem::new()), local_directory.into())
+                unreachable!()
             }
             Destination::S3Bucket {
                 s3_bucket,
                 s3_directory,
                 aws_region,
             } => {
-                (
-                    Box::new(
-                        // use default credentials
-                        AmazonS3Builder::from_env()
-                            .with_bucket_name(s3_bucket)
-                            .with_credentials(Arc::new(S3Credentialing::try_new().unwrap()))
-                            .with_region(aws_region)
-                            .build()
-                            .unwrap(),
-                    ),
-                    s3_directory.into(),
-                )
+                todo!()
             }
-            Destination::FolderUri { path } => {
-                object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap()
-            }
+            Destination::FolderUri {
+                path,
+                storage_options,
+            } => (path, storage_options),
         };
 
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
-        let mut writer = AsyncMultipartFileSystemWriter::<T, R>::new(
-            path,
-            Arc::new(object_store),
-            receiver,
-            checkpoint_sender,
-            table.clone(),
-        );
+        let partition_func = get_partitioner_from_table(&table);
         tokio::spawn(async move {
+            let path: Path = StorageProvider::get_key(&url).unwrap().into();
+            let provider = StorageProvider::for_url_with_options(&url, storage_options)
+                .await
+                .unwrap();
+            let mut writer = AsyncMultipartFileSystemWriter::<T, R>::new(
+                path,
+                Arc::new(provider),
+                receiver,
+                checkpoint_sender,
+                table.clone(),
+            );
             writer.run().await.unwrap();
         });
-        let partition_func = get_partitioner_from_table(table);
         TwoPhaseCommitterOperator::new(Self {
             sender,
             checkpoint_receiver,
@@ -146,9 +144,9 @@ impl<K: Key, T: Data + Sync + Serialize, R: MultiPartWriter<InputType = T> + Sen
 }
 
 fn get_partitioner_from_table<K: Key, T: Data + Serialize>(
-    table: FileSystemTable,
+    table: &FileSystemTable,
 ) -> Option<Box<dyn Fn(&Record<K, T>) -> String + Send>> {
-    let Some(partitions) = table.file_settings.unwrap().partitioning else {
+    let Some(partitions) = table.file_settings.as_ref().unwrap().partitioning.clone() else {
         return None;
     };
     match (
@@ -389,7 +387,7 @@ struct AsyncMultipartFileSystemWriter<T: Data + Sync, R: MultiPartWriter> {
     watermark: Option<SystemTime>,
     max_file_index: usize,
     subtask_id: usize,
-    object_store: Arc<dyn ObjectStore>,
+    object_store: Arc<StorageProvider>,
     writers: HashMap<String, R>,
     receiver: Receiver<FileSystemMessages<T>>,
     checkpoint_sender: Sender<CheckpointData<T>>,
@@ -403,7 +401,7 @@ struct AsyncMultipartFileSystemWriter<T: Data + Sync, R: MultiPartWriter> {
 pub trait MultiPartWriter {
     type InputType: Data;
     fn new(
-        object_store: Arc<dyn ObjectStore>,
+        object_store: Arc<StorageProvider>,
         path: Path,
         partition: Option<String>,
         config: &FileSystemTable,
@@ -445,7 +443,7 @@ async fn from_checkpoint(
     path: &Path,
     partition: Option<String>,
     checkpoint_data: FileCheckpointData,
-    object_store: Arc<dyn ObjectStore>,
+    object_store: Arc<StorageProvider>,
 ) -> Result<Option<FileToFinish>> {
     let mut parts = vec![];
     let multipart_id = match checkpoint_data {
@@ -643,7 +641,7 @@ where
 {
     fn new(
         path: Path,
-        object_store: Arc<dyn ObjectStore>,
+        object_store: Arc<StorageProvider>,
         receiver: Receiver<FileSystemMessages<T>>,
         checkpoint_sender: Sender<CheckpointData<T>>,
         writer_properties: FileSystemTable,
@@ -901,7 +899,7 @@ where
 type BoxedTryFuture<T> = Pin<Box<dyn Future<Output = Result<T>> + Send>>;
 
 struct MultipartManager {
-    object_store: Arc<dyn ObjectStore>,
+    object_store: Arc<StorageProvider>,
     location: Path,
     partition: Option<String>,
     multipart_id: Option<MultipartId>,
@@ -913,7 +911,7 @@ struct MultipartManager {
 }
 
 impl MultipartManager {
-    fn new(object_store: Arc<dyn ObjectStore>, location: Path, partition: Option<String>) -> Self {
+    fn new(object_store: Arc<StorageProvider>, location: Path, partition: Option<String>) -> Self {
         Self {
             object_store,
             location,
@@ -1224,7 +1222,7 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> Mul
     type InputType = BB::InputType;
 
     fn new(
-        object_store: Arc<dyn ObjectStore>,
+        object_store: Arc<StorageProvider>,
         path: Path,
         partition: Option<String>,
         config: &FileSystemTable,

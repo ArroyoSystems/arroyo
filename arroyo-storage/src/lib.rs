@@ -11,6 +11,7 @@ use bytes::Bytes;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::path::Path;
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
+use object_store::{MultipartId, UploadPart};
 use regex::{Captures, Regex};
 use thiserror::Error;
 
@@ -247,20 +248,32 @@ fn last<I: Sized, const COUNT: usize>(opts: [Option<I>; COUNT]) -> Option<I> {
 
 impl StorageProvider {
     pub async fn for_url(url: &str) -> Result<Self, StorageError> {
+        Self::for_url_with_options(url, HashMap::new()).await
+    }
+    pub async fn for_url_with_options(
+        url: &str,
+        options: HashMap<String, String>,
+    ) -> Result<Self, StorageError> {
         let config: BackendConfig = BackendConfig::parse_url(url, false)?;
 
         match config {
-            BackendConfig::S3(config) => Self::construct_s3(config).await,
+            BackendConfig::S3(config) => Self::construct_s3(config, options).await,
             BackendConfig::GCS(config) => Self::construct_gcs(config),
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }
     }
-
     pub async fn get_url(url: &str) -> Result<Bytes, StorageError> {
+        Self::get_url_with_options(url, HashMap::new()).await
+    }
+
+    pub async fn get_url_with_options(
+        url: &str,
+        options: HashMap<String, String>,
+    ) -> Result<Bytes, StorageError> {
         let config: BackendConfig = BackendConfig::parse_url(url, true)?;
 
         let provider = match config {
-            BackendConfig::S3(config) => Self::construct_s3(config).await,
+            BackendConfig::S3(config) => Self::construct_s3(config, options).await,
             BackendConfig::GCS(config) => Self::construct_gcs(config),
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }?;
@@ -277,12 +290,31 @@ impl StorageProvider {
         result
     }
 
-    async fn construct_s3(mut config: S3Config) -> Result<Self, StorageError> {
+    pub fn get_key(url: &str) -> Result<String, StorageError> {
+        let config = BackendConfig::parse_url(url, true)?;
+        let key = match &config {
+            BackendConfig::S3(s3) => s3.key.as_ref(),
+            BackendConfig::GCS(gcs) => gcs.key.as_ref(),
+            BackendConfig::Local(local) => local.key.as_ref(),
+        }
+        .ok_or_else(|| StorageError::NoKeyInUrl)?;
+        Ok(key.clone())
+    }
+
+    async fn construct_s3(
+        mut config: S3Config,
+        options: HashMap<String, String>,
+    ) -> Result<Self, StorageError> {
         let credentials = Arc::new(ArroyoCredentialProvider::try_new()?);
 
-        let mut builder = AmazonS3Builder::from_env()
-            .with_bucket_name(&config.bucket)
-            .with_credentials(credentials.clone());
+        let mut builder = AmazonS3Builder::from_env().with_bucket_name(&config.bucket);
+        //.with_credentials(credentials.clone());
+        for (key, value) in options {
+            let s3_config_key = key.parse().map_err(|_| {
+                StorageError::CredentialsError(format!("invalid S3 config key: {}", key))
+            })?;
+            builder = builder.with_config(s3_config_key, value);
+        }
 
         let default_region = credentials.default_region().await;
         config.region = config.region.or(default_region);
@@ -384,6 +416,41 @@ impl StorageProvider {
         };
     }
 
+    pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
+        Ok(self
+            .object_store
+            .start_multipart(path)
+            .await
+            .map_err(|e| Into::<StorageError>::into(e))?)
+    }
+
+    pub async fn add_multipart(
+        &self,
+        path: &Path,
+        multipart_id: &MultipartId,
+        part_number: usize,
+        bytes: Bytes,
+    ) -> Result<UploadPart, StorageError> {
+        Ok(self
+            .object_store
+            .add_multipart(path, multipart_id, part_number, bytes)
+            .await
+            .map_err(|e| Into::<StorageError>::into(e))?)
+    }
+
+    pub async fn close_multipart(
+        &self,
+        path: &Path,
+        multipart_id: &MultipartId,
+        parts: Vec<UploadPart>,
+    ) -> Result<(), StorageError> {
+        Ok(self
+            .object_store
+            .close_multipart(path, multipart_id, parts)
+            .await
+            .map_err(|e| Into::<StorageError>::into(e))?)
+    }
+
     /// Produces a URL representation of this path that can be read by other systems,
     /// in particular Nomad's artifact fetcher and Arroyo's artifact fetcher.
     pub fn canonical_url(&self) -> &str {
@@ -397,7 +464,7 @@ impl StorageProvider {
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
+    use std::{collections::HashMap, time::SystemTime};
 
     use arroyo_types::to_nanos;
 
