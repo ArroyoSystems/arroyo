@@ -448,3 +448,10 @@ full_pipeline_codegen! {"unnest",
 select cast(unnest(extract_json('{\"a\": [1, 2, 3]}', '$.a[*]')) as int) + 5, bid.auction
 from nexmark;
 "}
+
+full_pipeline_codegen! {"unnest_multiple_projections",
+"
+select extract_json_string(unnested, '$.a'), extract_json_string(unnested, '$.b') FROM (
+  select unnest(extract_json(bid.url, '$.a[*]')) as unnested
+  from nexmark);
+"}
