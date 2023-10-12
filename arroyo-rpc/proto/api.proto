@@ -46,6 +46,7 @@ message CreateJobReq {
 message PipelineProgram {
   repeated string types = 1;
   repeated string other_defs = 2;
+  repeated string udfs = 5;
   repeated ProgramNode nodes = 3;
   repeated ProgramEdge edges = 4;
 }

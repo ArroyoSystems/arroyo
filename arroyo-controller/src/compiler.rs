@@ -319,6 +319,13 @@ wasm-opt = false
         };
         info!("{}", self.program.dot());
 
+        let udfs: Vec<TokenStream> = self
+            .program
+            .udfs
+            .iter()
+            .map(|t| parse_str(t).unwrap())
+            .collect();
+
         let other_defs: Vec<TokenStream> = self
             .program
             .other_defs
@@ -328,6 +335,7 @@ wasm-opt = false
 
         let make_graph_function = self.program.make_graph_function();
 
+        // TODO: move udfs to udfs crate
         prettyplease::unparse(&parse_quote! {
             #imports
 
@@ -338,6 +346,8 @@ wasm-opt = false
 
                 arroyo_worker::WorkerServer::new(#name, #hash, graph).start().unwrap();
             }
+
+            #(#udfs )*
 
             #(#other_defs )*
         })

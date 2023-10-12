@@ -97,12 +97,19 @@ export interface paths {
      */
     post: operations["post_pipeline"];
   };
-  "/v1/pipelines/validate": {
+  "/v1/pipelines/validate_query": {
     /**
      * Get a pipeline graph 
      * @description Get a pipeline graph
      */
-    post: operations["validate_pipeline"];
+    post: operations["validate_query"];
+  };
+  "/v1/pipelines/validate_udfs": {
+    /**
+     * Validate UDFs 
+     * @description Validate UDFs
+     */
+    post: operations["validate_udfs"];
   };
   "/v1/pipelines/{id}": {
     /**
@@ -422,6 +429,10 @@ export interface components {
     };
     /** @enum {string} */
     PrimitiveType: "int32" | "int64" | "u_int32" | "u_int64" | "f32" | "f64" | "bool" | "string" | "bytes" | "unix_millis" | "unix_micros" | "unix_nanos" | "date_time" | "json";
+    QueryValidationResult: {
+      errors?: (string)[] | null;
+      graph?: components["schemas"]["PipelineGraph"] | null;
+    };
     RawStringFormat: Record<string, never>;
     SchemaDefinition: OneOf<[{
       json_schema: string;
@@ -472,9 +483,16 @@ export interface components {
     };
     /** @enum {string} */
     UdfLanguage: "rust";
-    ValidatePipelinePost: {
+    UdfValidationResult: {
+      errors?: (string)[] | null;
+      udfsRs?: string | null;
+    };
+    ValidateQueryPost: {
       query: string;
       udfs?: (components["schemas"]["Udf"])[] | null;
+    };
+    ValidateUdfsPost: {
+      udfsRs: string;
     };
   };
   responses: never;
@@ -711,17 +729,36 @@ export interface operations {
    * Get a pipeline graph 
    * @description Get a pipeline graph
    */
-  validate_pipeline: {
+  validate_query: {
     requestBody: {
       content: {
-        "application/json": components["schemas"]["ValidatePipelinePost"];
+        "application/json": components["schemas"]["ValidateQueryPost"];
       };
     };
     responses: {
-      /** @description Created pipeline and job */
+      /** @description Validated query */
       200: {
         content: {
-          "application/json": components["schemas"]["PipelineGraph"];
+          "application/json": components["schemas"]["QueryValidationResult"];
+        };
+      };
+    };
+  };
+  /**
+   * Validate UDFs 
+   * @description Validate UDFs
+   */
+  validate_udfs: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ValidateUdfsPost"];
+      };
+    };
+    responses: {
+      /** @description Validated query */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UdfValidationResult"];
         };
       };
     };
