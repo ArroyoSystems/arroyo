@@ -21,7 +21,7 @@ use crate::pipelines::__path_get_pipelines;
 use crate::pipelines::__path_post_pipeline;
 use crate::pipelines::{
     __path_delete_pipeline, __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline,
-    __path_validate_pipeline,
+    __path_validate_query, __path_validate_udfs,
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::{bad_request, log_and_map, ErrorResp};
@@ -34,9 +34,9 @@ use arroyo_rpc::types::{
     JobLogMessageCollection, Metric, MetricGroup, MetricNames, OperatorCheckpointGroup,
     OperatorCheckpointGroupCollection, OperatorMetricGroup, OutputData, PaginationQueryParams,
     Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
-    PipelinePost, PrimitiveType, SchemaDefinition, SourceField, SourceFieldType,
-    StopType as StopTypeRest, StructType, SubtaskCheckpointGroup, SubtaskMetrics,
-    TestSourceMessage, Udf, UdfLanguage, ValidatePipelinePost,
+    PipelinePost, PrimitiveType, QueryValidationResult, SchemaDefinition, SourceField,
+    SourceFieldType, StopType as StopTypeRest, StructType, SubtaskCheckpointGroup, SubtaskMetrics,
+    TestSourceMessage, Udf, UdfLanguage, UdfValidationResult, ValidateQueryPost, ValidateUdfsPost,
 };
 
 mod cloud;
@@ -138,7 +138,8 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
     servers((url = "/api/")),
     paths(
         ping,
-        validate_pipeline,
+        validate_query,
+        validate_udfs,
         post_pipeline,
         patch_pipeline,
         get_pipeline,
@@ -162,7 +163,6 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         get_checkpoint_details,
     ),
     components(schemas(
-        ValidatePipelinePost,
         PipelinePost,
         PipelinePatch,
         Pipeline,
@@ -219,6 +219,10 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         OperatorCheckpointGroupCollection,
         SubtaskCheckpointGroup,
         OperatorCheckpointGroup,
+        ValidateQueryPost,
+        QueryValidationResult,
+        ValidateUdfsPost,
+        UdfValidationResult
     )),
     tags(
         (name = "ping", description = "Ping endpoint"),

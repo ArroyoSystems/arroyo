@@ -710,6 +710,7 @@ impl<T: Data> Stream<T> {
         Program {
             types: vec![],
             other_defs: vec![],
+            udfs: vec![],
             graph: self.graph.take(),
         }
     }
@@ -989,6 +990,7 @@ impl<K: Key, T: Data> KeyedStream<K, T> {
         Program {
             types: vec![],
             other_defs: vec![],
+            udfs: vec![],
             graph: self.graph.take(),
         }
     }
@@ -1077,6 +1079,7 @@ impl<K: Key, T1: Data, T2: Data, F: Fn(&Option<K>, &T1) -> T2> BiFunc<K, T1, T2>
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct Program {
     pub types: Vec<String>,
+    pub udfs: Vec<String>,
     pub other_defs: Vec<String>,
     #[bincode(with_serde)]
     pub graph: DiGraph<StreamNode, StreamEdge>,
@@ -1087,6 +1090,7 @@ impl Program {
         Program {
             types: vec![],
             other_defs: vec![],
+            udfs: vec![],
             graph: s.graph.take(),
         }
     }
@@ -1962,6 +1966,7 @@ impl TryFrom<Program> for PipelineProgram {
         Ok(PipelineProgram {
             types: program.types,
             other_defs: program.other_defs,
+            udfs: program.udfs,
             nodes,
             edges,
         })
@@ -2237,6 +2242,7 @@ impl TryFrom<PipelineProgram> for Program {
         let mut graph = DiGraph::with_capacity(program.nodes.len(), program.edges.len());
         let types = program.types;
         let other_defs = program.other_defs;
+        let udfs = program.udfs;
         let mut nodes: Vec<_> = vec![];
         for node in program.nodes {
             let node_pair = (
@@ -2267,6 +2273,7 @@ impl TryFrom<PipelineProgram> for Program {
         Ok(Program {
             types,
             other_defs,
+            udfs,
             graph,
         })
     }

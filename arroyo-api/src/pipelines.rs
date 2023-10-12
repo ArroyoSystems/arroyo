@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -14,10 +14,13 @@ use arroyo_rpc::grpc::api::{
     create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, CreateUdf, PipelineProgram,
     Udf, UdfLanguage,
 };
+use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
+use arroyo_rpc::grpc::{CheckUdfsReq, ValidationResult};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::types::{
     Job, JobCollection, PaginationQueryParams, Pipeline, PipelineCollection, PipelineEdge,
-    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, StopType, ValidatePipelinePost,
+    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, QueryValidationResult, StopType,
+    UdfValidationResult, ValidateQueryPost, ValidateUdfsPost,
 };
 use arroyo_server_common::log_event;
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
@@ -46,26 +49,30 @@ async fn compile_sql<'e, E>(
     sql: &CreateSqlJob,
     auth_data: &AuthData,
     tx: &E,
-) -> Result<(Program, Vec<i64>), ErrorResp>
+) -> anyhow::Result<(Program, Vec<i64>)>
 where
     E: GenericClient,
 {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
-    for (i, udf) in sql.udfs.iter().enumerate() {
+    for udf in sql.udfs.iter() {
         match UdfLanguage::from_i32(udf.language) {
             Some(UdfLanguage::Rust) => {
                 schema_provider
                     .add_rust_udf(&udf.definition)
-                    .map_err(|e| bad_request(format!("Could not process UDF: {:?}", e)))?;
+                    .map_err(|e| anyhow!(format!("Could not process UDF: {:?}", e)))?;
             }
             None => {
-                return Err(required_field(&format!("udfs[{}].language", i)));
+                return Err(anyhow!("Unsupported UDF language."));
             }
         }
     }
 
-    for table in connection_tables::get_all_connection_tables(auth_data, tx).await? {
+    let tables = connection_tables::get_all_connection_tables(auth_data, tx)
+        .await
+        .map_err(|e| anyhow!(e.message))?;
+
+    for table in tables {
         let Some(connector) = connector_for_type(&table.connector) else {
             warn!(
                 "Saved table found with unknown connector {}",
@@ -74,18 +81,16 @@ where
             continue;
         };
 
-        let connection = connector
-            .from_config(
-                Some(table.id),
-                &table.name,
-                &table
-                    .connection_profile
-                    .map(|c| c.config.clone())
-                    .unwrap_or(json!({})),
-                &table.config,
-                Some(&table.schema),
-            )
-            .map_err(log_and_map)?;
+        let connection = connector.from_config(
+            Some(table.id),
+            &table.name,
+            &table
+                .connection_profile
+                .map(|c| c.config.clone())
+                .unwrap_or(json!({})),
+            &table.config,
+            Some(&table.schema),
+        )?;
 
         schema_provider.add_connector_table(connection);
     }
@@ -101,7 +106,7 @@ where
     .with_context(|| "failed to generate SQL program")
     .map_err(|err| {
         warn!("{:?}", err);
-        bad_request(format!("{}", err.root_cause()))
+        anyhow!(format!("{}", err.root_cause()))
     })?;
 
     Ok((program, connections))
@@ -153,7 +158,9 @@ pub(crate) async fn create_pipeline<'a>(
             }
 
             pipeline_type = PipelineType::sql;
-            (program, connections) = compile_sql(&sql, &auth, tx).await?;
+            (program, connections) = compile_sql(&sql, &auth, tx)
+                .await
+                .map_err(|e| bad_request(e.to_string()))?;
             text = Some(sql.query);
             udfs = Some(
                 sql.udfs
@@ -306,29 +313,27 @@ impl Into<Job> for DbPipelineJob {
 /// Get a pipeline graph
 #[utoipa::path(
     post,
-    path = "/v1/pipelines/validate",
+    path = "/v1/pipelines/validate_query",
     tag = "pipelines",
-    request_body = ValidatePipelinePost,
+    request_body = ValidateQueryPost,
     responses(
-        (status = 200, description = "Created pipeline and job", body = PipelineGraph),
+        (status = 200, description = "Validated query", body = QueryValidationResult),
     ),
 )]
-pub async fn validate_pipeline(
+pub async fn validate_query(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    WithRejection(Json(validate_pipeline_post), _): WithRejection<
-        Json<ValidatePipelinePost>,
-        ApiError,
-    >,
-) -> Result<Json<PipelineGraph>, ErrorResp> {
+    WithRejection(Json(validate_query_post), _): WithRejection<Json<ValidateQueryPost>, ApiError>,
+) -> Result<Json<QueryValidationResult>, ErrorResp> {
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
     let sql = CreateSqlJob {
-        query: validate_pipeline_post.query,
+        query: validate_query_post.query,
         parallelism: 1,
-        udfs: validate_pipeline_post
+        udfs: validate_query_post
             .udfs
+            .clone()
             .unwrap_or(vec![])
             .into_iter()
             .map(|u| CreateUdf {
@@ -339,35 +344,111 @@ pub async fn validate_pipeline(
         preview: false,
     };
 
-    let (mut program, _) = compile_sql(&sql, &auth_data, &client).await?;
-    optimizations::optimize(&mut program.graph);
+    let pipeline_graph_validation_result = match compile_sql(&sql, &auth_data, &client).await {
+        Ok((mut program, _)) => {
+            optimizations::optimize(&mut program.graph);
+            let nodes = program
+                .graph
+                .node_weights()
+                .map(|node| PipelineNode {
+                    node_id: node.operator_id.to_string(),
+                    operator: format!("{:?}", node),
+                    parallelism: node.clone().parallelism as u32,
+                })
+                .collect();
 
-    let nodes = program
-        .graph
-        .node_weights()
-        .map(|node| PipelineNode {
-            node_id: node.operator_id.to_string(),
-            operator: format!("{:?}", node),
-            parallelism: node.clone().parallelism as u32,
-        })
-        .collect();
-    let edges = program
-        .graph
-        .edge_references()
-        .map(|edge| {
-            let src = program.graph.node_weight(edge.source()).unwrap();
-            let target = program.graph.node_weight(edge.target()).unwrap();
-            PipelineEdge {
-                src_id: src.operator_id.to_string(),
-                dest_id: target.operator_id.to_string(),
-                key_type: edge.weight().key.to_string(),
-                value_type: edge.weight().value.to_string(),
-                edge_type: format!("{:?}", edge.weight().typ),
+            let edges = program
+                .graph
+                .edge_references()
+                .map(|edge| {
+                    let src = program.graph.node_weight(edge.source()).unwrap();
+                    let target = program.graph.node_weight(edge.target()).unwrap();
+                    PipelineEdge {
+                        src_id: src.operator_id.to_string(),
+                        dest_id: target.operator_id.to_string(),
+                        key_type: edge.weight().key.to_string(),
+                        value_type: edge.weight().value.to_string(),
+                        edge_type: format!("{:?}", edge.weight().typ),
+                    }
+                })
+                .collect();
+
+            QueryValidationResult {
+                graph: Some(PipelineGraph { nodes, edges }),
+                errors: None,
             }
-        })
-        .collect();
+        }
+        Err(e) => QueryValidationResult {
+            graph: None,
+            errors: Some(vec![e.to_string()]),
+        },
+    };
 
-    Ok(Json(PipelineGraph { nodes, edges }))
+    Ok(Json(pipeline_graph_validation_result))
+}
+
+/// Validate UDFs
+#[utoipa::path(
+    post,
+    path = "/v1/pipelines/validate_udfs",
+    tag = "pipelines",
+    request_body = ValidateUdfsPost,
+    responses(
+        (status = 200, description = "Validated query", body = UdfValidationResult),
+    ),
+)]
+pub async fn validate_udfs(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    WithRejection(Json(validate_udfs_post), _): WithRejection<Json<ValidateUdfsPost>, ApiError>,
+) -> Result<Json<UdfValidationResult>, ErrorResp> {
+    let _auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    // Return an ok (valid) if the controller is not available or if it fails to validate the UDFs
+
+    let mut controller = match ControllerGrpcClient::connect(state.controller_addr.clone()).await {
+        Ok(controller) => controller,
+        Err(e) => {
+            warn!(
+                "Failed to connect to controller, skipping UDF validation: {}",
+                e
+            );
+            return Ok(Json(UdfValidationResult {
+                udfs_rs: Some(validate_udfs_post.udfs_rs),
+                errors: None,
+            }));
+        }
+    };
+
+    let check_udfs_resp = match controller
+        .check_udfs(CheckUdfsReq {
+            udfs_rs: validate_udfs_post.udfs_rs.clone(),
+        })
+        .await
+    {
+        Ok(resp) => resp.into_inner(),
+        Err(e) => {
+            warn!("Controller failed to validate UDF: {}", e);
+            return Ok(Json(UdfValidationResult {
+                udfs_rs: Some(validate_udfs_post.udfs_rs),
+                errors: None,
+            }));
+        }
+    };
+
+    let udf_validation_result = if check_udfs_resp.result == ValidationResult::Error as i32 {
+        UdfValidationResult {
+            udfs_rs: None,
+            errors: Some(check_udfs_resp.errors),
+        }
+    } else {
+        UdfValidationResult {
+            udfs_rs: Some(validate_udfs_post.udfs_rs),
+            errors: None,
+        }
+    };
+
+    Ok(Json(udf_validation_result))
 }
 
 /// Create a new pipeline

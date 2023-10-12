@@ -8,9 +8,29 @@ use utoipa::{IntoParams, ToSchema};
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ValidatePipelinePost {
+pub struct ValidateQueryPost {
     pub query: String,
-    pub udfs: Option<Vec<Udf>>,
+    pub udfs: Option<Vec<Udf>>, // needed for query validation but are not themselves validated
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryValidationResult {
+    pub graph: Option<PipelineGraph>,
+    pub errors: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateUdfsPost {
+    pub udfs_rs: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UdfValidationResult {
+    pub udfs_rs: Option<String>,
+    pub errors: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -128,7 +148,7 @@ pub struct Job {
     pub created_at: u64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum UdfLanguage {
     Rust,

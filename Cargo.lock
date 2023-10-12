@@ -471,6 +471,7 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "prost",
+ "serde_json",
  "tokio",
  "tonic",
  "tracing",

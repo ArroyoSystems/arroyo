@@ -237,7 +237,7 @@ impl ArroyoSchemaProvider {
 
         for item in file.items {
             let Item::Fn(mut function) = item else {
-                bail!("not a function");
+                continue;
             };
 
             let mut args: Vec<TypeDef> = vec![];

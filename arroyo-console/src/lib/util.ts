@@ -171,7 +171,7 @@ export function relativeTime(timestamp: number): string {
 }
 
 export const formatError = (error: any) => {
-  if ('error' in error && typeof error.error === 'string') {
+  if ('error' in Object.keys(error) && typeof error.error === 'string') {
     return error.error;
   } else {
     return 'Something went wrong.';
