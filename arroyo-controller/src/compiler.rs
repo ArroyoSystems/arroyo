@@ -172,6 +172,7 @@ bincode = "=2.0.0-rc.3"
 bincode_derive = "=2.0.0-rc.3"
 serde = "1.0"
 serde_json = "1.0"
+regex = "1"
 arrow = {{ workspace = true }}
 parquet = {{ workspace = true }}
 arrow-array = {{ workspace = true }}
