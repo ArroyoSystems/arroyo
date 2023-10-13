@@ -135,7 +135,6 @@ impl Compactor {
 mod test {
     use crate::tables::{BlindDataTuple, Compactor};
     use crate::{DataOperation, DeleteTimeKeyOperation, DeleteTimeRangeOperation};
-    use arroyo_types::to_micros;
     use std::time::{Duration, SystemTime};
 
     #[tokio::test]

@@ -337,7 +337,10 @@ impl SqlOperator {
             SqlOperator::Source(source) => source.source.processing_mode == ProcessingMode::Update,
             SqlOperator::Aggregator(input, aggregate_operator) => {
                 input.is_updating()
-                    || (!input.has_window() && aggregate_operator.window == WindowType::Instant)
+                    || (!input.has_window() && aggregate_operator.window == WindowType::Instant
+                        // non-windowed aggregates without aggregate functions are not updating, as
+                        // they cannot have retractions
+                        && !aggregate_operator.aggregating.aggregates.is_empty())
             }
             SqlOperator::JoinOperator(left, right, join_operator) => {
                 // the join will be updating if one of the sides is updating or if a non-window side is nullable.

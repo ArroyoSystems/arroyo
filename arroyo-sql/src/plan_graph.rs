@@ -91,6 +91,7 @@ pub enum PlanOperator {
     StreamOperator(String, Operator),
     ToDebezium,
     FromDebezium,
+    FromUpdating,
     Sink(String, SqlSink),
 }
 
@@ -335,6 +336,7 @@ impl PlanNode {
             PlanOperator::Sink(name, _) => format!("sink_{}", name),
             PlanOperator::ToDebezium => "to_debezium".to_string(),
             PlanOperator::FromDebezium => "from_debezium".to_string(),
+            PlanOperator::FromUpdating => "from_updating".to_string(),
             PlanOperator::NonWindowAggregate { .. } => "non_window_aggregate".to_string(),
         }
     }
@@ -733,6 +735,18 @@ impl PlanNode {
                         timestamp: record.timestamp,
                         key: None,
                         value: record.value.clone().into(),
+                    }
+                })
+                .to_string(),
+                return_type: ExpressionReturnType::Record,
+            },
+            PlanOperator::FromUpdating => Operator::ExpressionOperator {
+                name: "from_updating".into(),
+                expression: quote!({
+                    arroyo_types::Record {
+                        timestamp: record.timestamp,
+                        key: None,
+                        value: record.value.lower(),
                     }
                 })
                 .to_string(),
@@ -1718,11 +1732,12 @@ impl PlanGraph {
         };
         self.graph.add_edge(input_index, key_index, key_edge);
         let aggregate_projection = aggregate.aggregating;
+
         let aggregate_struct = aggregate_projection.expression_type(&VecAggregationContext::new());
         let aggregate_operator = PlanOperator::NonWindowAggregate {
             input_is_update: input_updating,
             expiration: Duration::from_secs(60 * 60 * 24),
-            projection: aggregate_projection.try_into().unwrap(),
+            projection: aggregate_projection.clone().try_into().unwrap(),
         };
 
         let aggregate_index = self.insert_operator(
@@ -1742,14 +1757,31 @@ impl PlanGraph {
         let unkey_operator = PlanOperator::Unkey;
         let unkey_index = self.insert_operator(
             unkey_operator,
-            PlanType::Updating(Box::new(PlanType::Unkeyed(aggregate_struct))),
+            PlanType::Updating(Box::new(PlanType::Unkeyed(aggregate_struct.clone()))),
         );
         let unkey_edge = PlanEdge {
             edge_type: EdgeType::Forward,
         };
         self.graph
             .add_edge(aggregate_index, unkey_index, unkey_edge);
-        unkey_index
+
+        if input_updating || !aggregate_projection.aggregates.is_empty() {
+            unkey_index
+        } else {
+            // this is a select distinct, without any aggregates -- so there's no possibility
+            // of retractions and we can change it back to non-updating
+            let index = self.insert_operator(
+                PlanOperator::FromUpdating,
+                PlanType::Unkeyed(aggregate_struct),
+            );
+            let edge = PlanEdge {
+                edge_type: EdgeType::Forward,
+            };
+
+            self.graph.add_edge(unkey_index, index, edge);
+
+            index
+        }
     }
 
     fn add_union(&mut self, inputs: Vec<SqlOperator>) -> NodeIndex {
