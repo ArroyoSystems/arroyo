@@ -780,7 +780,7 @@ dependencies = [
  "arroyo-types",
  "async-trait",
  "bytes",
- "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
+ "object_store",
  "regex",
  "rusoto_core",
  "thiserror",
@@ -829,7 +829,7 @@ dependencies = [
  "local-ip-address",
  "md-5 0.10.5",
  "memchr",
- "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches)",
+ "object_store",
  "once_cell",
  "ordered-float 3.9.1",
  "parquet",
@@ -2454,7 +2454,7 @@ dependencies = [
  "lazy_static",
  "log",
  "num_cpus",
- "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
+ "object_store",
  "parking_lot 0.12.1",
  "parquet",
  "percent-encoding",
@@ -2481,7 +2481,7 @@ dependencies = [
  "arrow-array",
  "chrono",
  "num_cpus",
- "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
+ "object_store",
  "parquet",
  "sqlparser",
 ]
@@ -2497,7 +2497,7 @@ dependencies = [
  "datafusion-expr",
  "hashbrown 0.14.0",
  "log",
- "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
+ "object_store",
  "parking_lot 0.12.1",
  "rand",
  "tempfile",
@@ -5084,34 +5084,6 @@ dependencies = [
 [[package]]
 name = "object_store"
 version = "0.6.1"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
-dependencies = [
- "async-trait",
- "base64 0.21.4",
- "bytes",
- "chrono",
- "futures",
- "humantime",
- "hyper",
- "itertools 0.10.5",
- "parking_lot 0.12.1",
- "percent-encoding",
- "quick-xml",
- "rand",
- "reqwest",
- "ring 0.16.20",
- "serde",
- "serde_json",
- "snafu",
- "tokio",
- "tracing",
- "url",
- "walkdir",
-]
-
-[[package]]
-name = "object_store"
-version = "0.6.1"
 source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "async-trait",
@@ -5368,7 +5340,7 @@ dependencies = [
  "lz4",
  "num",
  "num-bigint",
- "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
+ "object_store",
  "paste",
  "seq-macro",
  "snap",
