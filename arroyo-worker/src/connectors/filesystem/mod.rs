@@ -1268,9 +1268,7 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>>
         } else {
             None
         };
-        if let Some(bytes) = self.batch_buffering_writer.close(final_batch) {
-            self.multipart_manager.write_next_part(bytes)
-        } else if self.multipart_manager.all_uploads_finished() {
+        if self.multipart_manager.all_uploads_finished() {
             // Return a finished file future
             let name = self.multipart_manager.name();
             Ok(Some(Box::pin(async move {
