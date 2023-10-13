@@ -379,7 +379,13 @@ impl<K: Key, T: Data> Context<K, T> {
         let mut timer_state: TimeKeyMap<K, TimerValue<K, D>, _> =
             self.state.get_time_key_map(TIMER_TABLE, None).await;
 
-        timer_state.remove(event_time, key).map(|v| v.data)
+        timer_state.remove(event_time, key).await.map(|v| v.data)
+    }
+
+    pub async fn flush_timers<D: Data + PartialEq + Eq>(&mut self) {
+        let mut timer_state: TimeKeyMap<K, TimerValue<K, D>, _> =
+            self.state.get_time_key_map(TIMER_TABLE, None).await;
+        timer_state.flush().await;
     }
 
     pub async fn collect(&mut self, record: Record<K, T>) {

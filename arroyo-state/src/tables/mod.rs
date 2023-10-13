@@ -1,6 +1,5 @@
 use crate::DataOperation;
 use arroyo_rpc::grpc::TableType;
-use arroyo_types::from_micros;
 use std::collections::{BTreeMap, HashMap};
 use std::time::SystemTime;
 
@@ -103,9 +102,7 @@ impl Compactor {
                             // Remove range of times from a key.
                             // Timestamp of tuple is not considered (the range is in the DataOperation).
                             if let Some(key_map) = values.get_mut(op.key.as_slice()) {
-                                key_map.retain(|time, _values| {
-                                    !(from_micros(op.start)..from_micros(op.end)).contains(time)
-                                })
+                                key_map.retain(|time, _values| !(op.start..op.end).contains(time))
                             }
                             deletes.insert(keep_deletes_key, tuple);
                         }
@@ -221,8 +218,8 @@ mod test {
             value: v1.clone(),
             operation: DataOperation::DeleteTimeRange(DeleteTimeRangeOperation {
                 key: k1.clone(),
-                start: to_micros(t1),
-                end: to_micros(t3),
+                start: t1,
+                end: t3,
             }),
         };
 

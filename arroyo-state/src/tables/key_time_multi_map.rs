@@ -173,9 +173,7 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
                 }
                 DataOperation::DeleteTimeRange(op) => {
                     if let Some(key_map) = values.get_mut(&tuple.key) {
-                        key_map.retain(|time, _values| {
-                            !(from_micros(op.start)..from_micros(op.end)).contains(time)
-                        });
+                        key_map.retain(|time, _values| !(op.start..op.end).contains(time));
                         if key_map.is_empty() {
                             values.remove(&tuple.key);
                         }

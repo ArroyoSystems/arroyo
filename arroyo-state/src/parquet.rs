@@ -14,7 +14,7 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::{grpc, CheckpointCompleted, CompactionResult, ControlResp};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{
-    from_micros, range_for_server, to_micros, CheckpointBarrier, Data, Key, TaskInfo,
+    from_nanos, range_for_server, to_micros, to_nanos, CheckpointBarrier, Data, Key, TaskInfo,
     CHECKPOINT_URL_ENV, S3_ENDPOINT_ENV, S3_REGION_ENV,
 };
 use bincode::config;
@@ -223,7 +223,6 @@ impl BackingStore for ParquetBackend {
         let writer_current_files = current_files.clone();
 
         let storage = get_storage_provider().await.unwrap();
-
         Self {
             epoch: metadata.epoch + 1,
             min_epoch: metadata.min_epoch,
@@ -439,8 +438,8 @@ impl BackingStore for ParquetBackend {
                 vec![],
                 DataOperation::DeleteTimeRange(DeleteTimeRangeOperation {
                     key: key_bytes,
-                    start: to_micros(range.start),
-                    end: to_micros(range.end),
+                    start: range.start,
+                    end: range.end,
                 }),
             )
             .await;
@@ -793,7 +792,7 @@ impl ParquetBackend {
             let time_array = batch
                 .column(1)
                 .as_any()
-                .downcast_ref::<arrow_array::TimestampMicrosecondArray>()
+                .downcast_ref::<arrow_array::TimestampNanosecondArray>()
                 .expect("Column 1 is not a TimestampMicrosecondArray");
             let key_array = batch
                 .column(2)
@@ -815,7 +814,7 @@ impl ParquetBackend {
                     continue;
                 }
 
-                let timestamp = from_micros(time_array.value(index) as u64);
+                let timestamp = from_nanos(time_array.value(index) as u128);
 
                 let key: K = bincode::decode_from_slice(key_array.value(index), BINCODE_CONFIG)
                     .unwrap()
@@ -869,8 +868,8 @@ impl ParquetBackend {
             let time_array = batch
                 .column(1)
                 .as_any()
-                .downcast_ref::<arrow_array::TimestampMicrosecondArray>()
-                .expect("Column 1 is not a TimestampMicrosecondArray");
+                .downcast_ref::<arrow_array::TimestampNanosecondArray>()
+                .expect("Column 1 is not a TimestampNanosecondArray");
             let key_array = batch
                 .column(2)
                 .as_any()
@@ -892,7 +891,7 @@ impl ParquetBackend {
                     continue;
                 }
 
-                let timestamp = from_micros(time_array.value(index) as u64);
+                let timestamp = from_nanos(time_array.value(index) as u128);
 
                 let key = key_array.value(index).to_owned();
                 let value = value_array.value(index).to_owned();
@@ -979,7 +978,7 @@ impl ParquetCompactFileWriter {
                     table: self.table_char.to_string(),
                     min_routing_key: stats.min_routing_key,
                     max_routing_key: stats.max_routing_key,
-                    max_timestamp_micros: to_micros(stats.max_timestamp),
+                    max_timestamp_micros: arroyo_types::to_micros(stats.max_timestamp) + 1,
                     min_required_timestamp_micros: None,
                     generation: self.new_generation,
                 }));
@@ -1109,7 +1108,7 @@ struct ParquetCheckpoint {
 struct RecordBatchBuilder {
     key_hash_builder: arrow_array::builder::PrimitiveBuilder<arrow_array::types::UInt64Type>,
     start_time_array:
-        arrow_array::builder::PrimitiveBuilder<arrow_array::types::TimestampMicrosecondType>,
+        arrow_array::builder::PrimitiveBuilder<arrow_array::types::TimestampNanosecondType>,
     key_bytes: arrow_array::builder::BinaryBuilder,
     data_bytes: arrow_array::builder::BinaryBuilder,
     parquet_stats: ParquetStats,
@@ -1146,7 +1145,7 @@ impl RecordBatchBuilder {
 
         self.key_hash_builder.append_value(key_hash);
         self.start_time_array
-            .append_value(to_micros(timestamp) as i64);
+            .append_value(to_nanos(timestamp) as i64);
         self.key_bytes.append_value(key);
         self.data_bytes.append_value(data);
 
@@ -1162,7 +1161,7 @@ impl RecordBatchBuilder {
             return None;
         }
         let start_time_array: arrow_array::PrimitiveArray<
-            arrow_array::types::TimestampMicrosecondType,
+            arrow_array::types::TimestampNanosecondType,
         > = self.start_time_array.finish();
         let key_array: arrow_array::BinaryArray = self.key_bytes.finish();
         let data_array: arrow_array::BinaryArray = self.data_bytes.finish();
@@ -1188,7 +1187,7 @@ impl RecordBatchBuilder {
             arrow::datatypes::Field::new("key_hash", arrow::datatypes::DataType::UInt64, false),
             arrow::datatypes::Field::new(
                 "start_time",
-                arrow::datatypes::DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
+                arrow::datatypes::DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None),
                 false,
             ),
             arrow::datatypes::Field::new("key_bytes", arrow::datatypes::DataType::Binary, false),
@@ -1208,7 +1207,7 @@ impl Default for RecordBatchBuilder {
                 arrow_array::types::UInt64Type,
             >::with_capacity(1024),
             start_time_array: arrow_array::builder::PrimitiveBuilder::<
-                arrow_array::types::TimestampMicrosecondType,
+                arrow_array::types::TimestampNanosecondType,
             >::with_capacity(1024),
             key_bytes: arrow_array::builder::BinaryBuilder::default(),
             data_bytes: arrow_array::builder::BinaryBuilder::default(),
@@ -1364,7 +1363,7 @@ impl ParquetFlusher {
                         table: table.to_string(),
                         min_routing_key: stats.min_routing_key,
                         max_routing_key: stats.max_routing_key,
-                        max_timestamp_micros: to_micros(stats.max_timestamp),
+                        max_timestamp_micros: arroyo_types::to_micros(stats.max_timestamp) + 1,
                         min_required_timestamp_micros: None,
                         generation: 0,
                     });
