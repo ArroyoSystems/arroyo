@@ -1848,7 +1848,8 @@ pub fn get_program(
             .map(|(_, v)| v),
     );
 
-    other_defs.push(format!(
+    let mut udfs = vec![];
+    udfs.push(format!(
         "mod udfs {{ use std::time::{{SystemTime, Duration}}; {} }}",
         schema_provider
             .udf_defs
@@ -1866,6 +1867,7 @@ pub fn get_program(
             // in wasm
             types: vec![],
             other_defs,
+            udfs,
             graph,
         },
         sources,

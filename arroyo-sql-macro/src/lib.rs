@@ -169,6 +169,10 @@ fn get_pipeline_module(
     .unwrap();
 
     let function = program.make_graph_function();
+
+    let udfs: Vec<proc_macro2::TokenStream> =
+        program.udfs.iter().map(|t| parse_str(t).unwrap()).collect();
+
     let other_defs: Vec<proc_macro2::TokenStream> = program
         .other_defs
         .iter()
@@ -192,6 +196,8 @@ fn get_pipeline_module(
             use serde::{Deserialize, Serialize};
 
             #function
+
+            #(#udfs)*
 
             #(#other_defs)*
         }
