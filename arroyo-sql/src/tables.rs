@@ -384,14 +384,14 @@ impl ConnectorTable {
     pub fn as_sql_sink(&self, mut input: SqlOperator) -> Result<SqlOperator> {
         match self.connection_type {
             ConnectionType::Source => {
-                bail!("Inserting into a source is not allowed")
+                bail!("inserting into a source is not allowed")
             }
             ConnectionType::Sink => {}
         }
 
         if self.has_virtual_fields() {
             // TODO: I think it would be reasonable and possibly useful to support this
-            bail!("Virtual fields are not currently supported in sinks");
+            bail!("virtual fields are not currently supported in sinks");
         }
 
         let updating_type = if self.is_update() {
@@ -401,7 +401,7 @@ impl ConnectorTable {
         };
 
         if updating_type == SinkUpdateType::Disallow && input.is_updating() {
-            bail!("Sink does not support update messages, cannot be used with an updating query");
+            bail!("sink does not support update messages, cannot be used with an updating query");
         }
 
         if let Some(format) = &self.format {
