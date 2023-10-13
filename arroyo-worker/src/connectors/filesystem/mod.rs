@@ -197,6 +197,7 @@ struct InProgressFileCheckpoint<T: Data> {
     partition: Option<String>,
     data: FileCheckpointData,
     buffered_data: Vec<T>,
+    representative_timestamp: SystemTime,
 }
 
 #[derive(Decode, Encode, Clone, PartialEq, Eq)]
@@ -794,14 +795,15 @@ where
 
     async fn take_checkpoint(&mut self, _subtask_id: usize) -> Result<()> {
         for (filename, writer) in self.writers.iter_mut() {
-            let buffered_data = writer.currently_buffered_data();
             let data = writer.get_in_progress_checkpoint();
+            let buffered_data = writer.currently_buffered_data();
             let in_progress_checkpoint =
                 CheckpointData::InProgressFileCheckpoint(InProgressFileCheckpoint {
                     filename: filename.clone(),
                     partition: writer.partition(),
                     data,
                     buffered_data,
+                    representative_timestamp: writer.stats().as_ref().unwrap().representative_timestamp,
                 });
             self.checkpoint_sender.send(in_progress_checkpoint).await?;
         }
@@ -816,6 +818,8 @@ where
                             completed_parts: file_to_finish.completed_parts.clone(),
                         },
                         buffered_data: vec![],
+                        // TODO: this is only needed if there is buffered data, so this is a dummy value
+                        representative_timestamp: SystemTime::now(),
                     },
                 ))
                 .await?;
@@ -1178,7 +1182,7 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> Mul
     async fn insert_value(
         &mut self,
         value: Self::InputType,
-        _time: SystemTime,
+        time: SystemTime,
     ) -> Result<Option<BoxedTryFuture<MultipartCallbackWithName>>> {
         if self.stats.is_none() {
             self.stats = Some(MultiPartWriterStats {
@@ -1186,7 +1190,7 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> Mul
                 parts_written: 0,
                 last_write_at: Instant::now(),
                 first_write_at: Instant::now(),
-                representative_timestamp: SystemTime::now(),
+                representative_timestamp: time,
             });
         }
         let stats = self.stats.as_mut().unwrap();
@@ -1434,6 +1438,7 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
                     partition,
                     data,
                     buffered_data,
+                    representative_timestamp
                 }) => {
                     if let FileCheckpointData::MultiPartWriterUploadCompleted {
                         multi_part_upload_id,
@@ -1455,6 +1460,7 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
                             partition,
                             data,
                             buffered_data,
+                            representative_timestamp
                         })
                     }
                 }
