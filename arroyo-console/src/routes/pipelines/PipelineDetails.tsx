@@ -63,7 +63,7 @@ export function PipelineDetails() {
 
   let { pipelineId: id } = useParams();
 
-  const { pipeline, pipelineError, updatePipeline } = usePipeline(id, true);
+  const { pipeline, pipelineError, updatePipeline, restartPipeline } = usePipeline(id, true);
   const { jobs, jobsError } = usePipelineJobs(id, true);
   const job = jobs?.length ? jobs[0] : undefined;
   const { checkpoints } = useJobCheckpoints(id, job?.id);
@@ -256,17 +256,29 @@ export function PipelineDetails() {
   let actionButton = <></>;
   if (pipeline) {
     editPipelineButton = <Button onClick={onConfigModalOpen}>Edit</Button>;
-    actionButton = (
-      <Button
-        isDisabled={pipeline.action == null}
-        onClick={async () => {
-          await updateJobState(pipeline.action!);
-        }}
-      >
-        {pipeline.actionInProgress ? <Spinner size="xs" mr={2} /> : null}
-        {pipeline.actionText}
-      </Button>
-    );
+    if (job.state == 'Failed') {
+      actionButton = (
+        <Button
+          onClick={async () => {
+            await restartPipeline();
+          }}
+        >
+          Restart
+        </Button>
+      );
+    } else {
+      actionButton = (
+        <Button
+          isDisabled={pipeline.action == null}
+          onClick={async () => {
+            await updateJobState(pipeline.action!);
+          }}
+        >
+          {pipeline.actionInProgress ? <Spinner size="xs" mr={2} /> : null}
+          {pipeline.actionText}
+        </Button>
+      );
+    }
   }
 
   const headerArea = (

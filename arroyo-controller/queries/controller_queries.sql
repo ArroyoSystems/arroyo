@@ -16,7 +16,10 @@ SELECT
     restarts,
     run_id,
     pipeline_path,
-    wasm_path
+    wasm_path,
+    job_configs.restart_nonce as config_restart_nonce,
+    job_statuses.restart_nonce as status_restart_nonce,
+    restart_mode
 FROM job_configs
 LEFT JOIN job_statuses ON job_configs.id = job_statuses.id;
 
@@ -30,7 +33,8 @@ SET state = :state,
     restarts = :restarts,
     pipeline_path = :pipeline_path,
     wasm_path = :wasm_path,
-    run_id = :run_id
+    run_id = :run_id,
+    restart_nonce = :restart_nonce
 WHERE id = :job_id;
 
 --! get_program
