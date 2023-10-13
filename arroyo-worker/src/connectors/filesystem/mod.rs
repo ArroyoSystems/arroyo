@@ -18,7 +18,7 @@ use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{path::Path, MultipartId, UploadPart};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{warn, info};
+use tracing::warn;
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
@@ -814,9 +814,12 @@ where
                     partition: writer.partition(),
                     data,
                     buffered_data,
-                    representative_timestamp: writer.stats().as_ref().unwrap().representative_timestamp,
+                    representative_timestamp: writer
+                        .stats()
+                        .as_ref()
+                        .unwrap()
+                        .representative_timestamp,
                 });
-            info!("checkpoint for {} is {:?}", filename, in_progress_checkpoint);
             self.checkpoint_sender.send(in_progress_checkpoint).await?;
         }
         for file_to_finish in &self.files_to_finish {
@@ -1450,7 +1453,7 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
                     partition,
                     data,
                     buffered_data,
-                    representative_timestamp
+                    representative_timestamp,
                 }) => {
                     if let FileCheckpointData::MultiPartWriterUploadCompleted {
                         multi_part_upload_id,
@@ -1472,7 +1475,7 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
                             partition,
                             data,
                             buffered_data,
-                            representative_timestamp
+                            representative_timestamp,
                         })
                     }
                 }
