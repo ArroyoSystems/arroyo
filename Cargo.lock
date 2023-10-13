@@ -189,7 +189,7 @@ checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
 [[package]]
 name = "arrow"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "ahash 0.8.3",
  "arrow-arith",
@@ -210,7 +210,7 @@ dependencies = [
 [[package]]
 name = "arrow-arith"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -224,7 +224,7 @@ dependencies = [
 [[package]]
 name = "arrow-array"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "ahash 0.8.3",
  "arrow-buffer",
@@ -240,7 +240,7 @@ dependencies = [
 [[package]]
 name = "arrow-buffer"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "half",
  "num",
@@ -249,7 +249,7 @@ dependencies = [
 [[package]]
 name = "arrow-cast"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -266,7 +266,7 @@ dependencies = [
 [[package]]
 name = "arrow-csv"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -284,7 +284,7 @@ dependencies = [
 [[package]]
 name = "arrow-data"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-buffer",
  "arrow-schema",
@@ -295,7 +295,7 @@ dependencies = [
 [[package]]
 name = "arrow-ipc"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -308,7 +308,7 @@ dependencies = [
 [[package]]
 name = "arrow-json"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "arrow-ord"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -341,7 +341,7 @@ dependencies = [
 [[package]]
 name = "arrow-row"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -355,7 +355,7 @@ dependencies = [
 [[package]]
 name = "arrow-schema"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "serde",
 ]
@@ -363,7 +363,7 @@ dependencies = [
 [[package]]
 name = "arrow-select"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -375,7 +375,7 @@ dependencies = [
 [[package]]
 name = "arrow-string"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -780,7 +780,7 @@ dependencies = [
  "arroyo-types",
  "async-trait",
  "bytes",
- "object_store",
+ "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
  "regex",
  "rusoto_core",
  "thiserror",
@@ -828,7 +828,7 @@ dependencies = [
  "local-ip-address",
  "md-5 0.10.5",
  "memchr",
- "object_store",
+ "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches)",
  "once_cell",
  "ordered-float 3.9.1",
  "parquet",
@@ -2452,7 +2452,7 @@ dependencies = [
  "lazy_static",
  "log",
  "num_cpus",
- "object_store",
+ "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
  "parking_lot 0.12.1",
  "parquet",
  "percent-encoding",
@@ -2479,7 +2479,7 @@ dependencies = [
  "arrow-array",
  "chrono",
  "num_cpus",
- "object_store",
+ "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
  "parquet",
  "sqlparser",
 ]
@@ -2495,7 +2495,7 @@ dependencies = [
  "datafusion-expr",
  "hashbrown 0.14.0",
  "log",
- "object_store",
+ "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
  "parking_lot 0.12.1",
  "rand",
  "tempfile",
@@ -5098,6 +5098,34 @@ dependencies = [
  "rand",
  "reqwest",
  "ring",
+ "serde",
+ "serde_json",
+ "snafu",
+ "tokio",
+ "tracing",
+ "url",
+ "walkdir",
+]
+
+[[package]]
+name = "object_store"
+version = "0.6.1"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
+dependencies = [
+ "async-trait",
+ "base64 0.21.4",
+ "bytes",
+ "chrono",
+ "futures",
+ "humantime",
+ "hyper",
+ "itertools 0.10.5",
+ "parking_lot 0.12.1",
+ "percent-encoding",
+ "quick-xml",
+ "rand",
+ "reqwest",
+ "ring",
  "rustls-pemfile",
  "serde",
  "serde_json",
@@ -5318,7 +5346,7 @@ dependencies = [
 [[package]]
 name = "parquet"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -5338,7 +5366,7 @@ dependencies = [
  "lz4",
  "num",
  "num-bigint",
- "object_store",
+ "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches-1)",
  "paste",
  "seq-macro",
  "snap",
