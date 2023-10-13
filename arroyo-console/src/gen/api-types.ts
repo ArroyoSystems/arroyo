@@ -135,6 +135,13 @@ export interface paths {
      */
     get: operations["get_pipeline_jobs"];
   };
+  "/v1/pipelines/{id}/restart": {
+    /**
+     * Restart a pipeline 
+     * @description Restart a pipeline
+     */
+    post: operations["restart_pipeline"];
+  };
   "/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints": {
     /**
      * List a job's checkpoints 
@@ -426,6 +433,9 @@ export interface components {
       preview?: boolean | null;
       query: string;
       udfs?: (components["schemas"]["Udf"])[] | null;
+    };
+    PipelineRestart: {
+      force?: boolean | null;
     };
     /** @enum {string} */
     PrimitiveType: "int32" | "int64" | "u_int32" | "u_int64" | "f32" | "f64" | "bool" | "string" | "bytes" | "unix_millis" | "unix_micros" | "unix_nanos" | "date_time" | "json";
@@ -840,6 +850,31 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["JobCollection"];
+        };
+      };
+    };
+  };
+  /**
+   * Restart a pipeline 
+   * @description Restart a pipeline
+   */
+  restart_pipeline: {
+    parameters: {
+      path: {
+        /** @description Pipeline id */
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PipelineRestart"];
+      };
+    };
+    responses: {
+      /** @description Updated pipeline */
+      200: {
+        content: {
+          "application/json": components["schemas"]["Pipeline"];
         };
       };
     };

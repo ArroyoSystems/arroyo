@@ -191,6 +191,11 @@ where
                 .collect()
         };
 
+        info!(
+            "partition map for {}-{}: {:?}",
+            self.topic, ctx.task_info.task_index, our_partitions
+        );
+
         let topic_partitions = TopicPartitionList::from_topic_map(&our_partitions)?;
 
         consumer.assign(&topic_partitions)?;

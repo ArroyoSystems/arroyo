@@ -169,6 +169,9 @@ pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option
         ("Recovering", true) => ("Stop", Some(Checkpoint), InProgress),
         ("Recovering", false) => ("Stopping", Option::None, InProgress),
 
+        ("Restarting", true) => ("Stop", Some(Checkpoint), InProgress),
+        ("Restarting", false) => ("Stopping", Option::None, InProgress),
+
         ("Stopping", true) => ("Stopping", Some(Checkpoint), InProgress),
         ("Stopping", false) => ("Stopping", Option::None, InProgress),
 
