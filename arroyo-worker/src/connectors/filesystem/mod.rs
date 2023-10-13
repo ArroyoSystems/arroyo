@@ -127,20 +127,15 @@ fn get_partitioner_from_table<K: Key, T: Data + Serialize>(
             partition_string_for_fields(&record.value, &partitions.partition_fields).unwrap()
         })),
         (None, true) => None,
-        (Some(TimePartitionPattern { pattern }), false) => {
-            Some(Box::new(move |record: &Record<K, T>| {
-                let time_partition = formatted_time_from_timestamp(record.timestamp, &pattern);
-                let field_partition =
-                    partition_string_for_fields(&record.value, &partitions.partition_fields)
-                        .unwrap();
-                format!("{}/{}", time_partition, field_partition)
-            }))
-        }
-        (Some(TimePartitionPattern { pattern }), true) => {
-            Some(Box::new(move |record: &Record<K, T>| {
-                formatted_time_from_timestamp(record.timestamp, &pattern)
-            }))
-        }
+        (Some(pattern), false) => Some(Box::new(move |record: &Record<K, T>| {
+            let time_partition = formatted_time_from_timestamp(record.timestamp, &pattern);
+            let field_partition =
+                partition_string_for_fields(&record.value, &partitions.partition_fields).unwrap();
+            format!("{}/{}", time_partition, field_partition)
+        })),
+        (Some(pattern), true) => Some(Box::new(move |record: &Record<K, T>| {
+            formatted_time_from_timestamp(record.timestamp, &pattern)
+        })),
     }
 }
 
@@ -557,7 +552,7 @@ impl RollingPolicy {
             Duration::from_secs(file_settings.rollover_seconds.unwrap_or(30) as u64);
         policies.push(RollingPolicy::RolloverDuration(rollover_timeout));
         if let Some(partitioning) = &file_settings.partitioning {
-            if let Some(TimePartitionPattern { pattern }) = &partitioning.time_partition_pattern {
+            if let Some(pattern) = &partitioning.time_partition_pattern {
                 policies.push(RollingPolicy::WatermarkExpiration {
                     pattern: pattern.clone(),
                 });

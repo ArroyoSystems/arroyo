@@ -153,14 +153,12 @@ impl Connector for FileSystemConnector {
         let target_file_size = pull_option_to_i64("target_file_size", opts)?;
         let target_part_size = pull_option_to_i64("target_part_size", opts)?;
 
-        let formatting_string = opts.remove("time_partition_pattern");
-        let time_partition_pattern =
-            formatting_string.map(|pattern| TimePartitionPattern { pattern });
-
         let partition_fields: Vec<_> = opts
             .remove("partition_fields")
             .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
             .unwrap_or_default();
+
+        let time_partition_pattern = opts.remove("time_partition_pattern");
 
         let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
             Some(Partitioning {
@@ -184,8 +182,9 @@ impl Connector for FileSystemConnector {
             .ok_or(anyhow!("require schema"))?
             .format
             .as_ref()
-            .ok_or(anyhow!("require format"))?
-        {
+            .ok_or(anyhow!(
+                "filesystem sink requires a format, such as json or parquet"
+            ))? {
             Format::Parquet(..) => {
                 let compression = opts
                     .remove("parquet_compression")

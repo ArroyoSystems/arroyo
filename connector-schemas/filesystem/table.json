@@ -95,19 +95,10 @@
                     "properties": {
                         "time_partition_pattern": {
                             "title": "Time Partition Pattern",
-                            "type": "object",
-                            "properties": {
-                                "pattern": {
-                                    "title": "Pattern",
-                                    "type": "string",
-                                    "description": "The pattern of the date string"
-                                }
+                            "type": "string",
+                            "description": "The pattern of the date string"
+                            
                             },
-                            "required": [
-                                "pattern"
-                            ],
-                            "additionalProperties": false
-                        },
                         "partition_fields": {
                             "title": "Partition Fields",
                             "type": "array",
