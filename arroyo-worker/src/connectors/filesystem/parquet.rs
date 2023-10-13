@@ -316,6 +316,6 @@ impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWrite
     }
 
     fn stats(&self) -> MultiPartWriterStats {
-        todo!()
+        self.stats.as_ref().unwrap().clone()
     }
 }

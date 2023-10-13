@@ -15,13 +15,7 @@ use bincode::{Decode, Encode};
 use chrono::{DateTime, Utc};
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
-use object_store::{
-    aws::{AmazonS3Builder, AwsCredential},
-    local::LocalFileSystem,
-    path::Path,
-    CredentialProvider, MultipartId, ObjectStore, UploadPart,
-};
-use rusoto_core::credential::{DefaultCredentialsProvider, ProvideAwsCredentials};
+use object_store::{path::Path, MultipartId, UploadPart};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::warn;
@@ -73,20 +67,7 @@ impl<K: Key, T: Data + Sync + Serialize, V: LocalWriter<T>> LocalFileSystemWrite
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
-        let final_dir = match table.write_target.clone() {
-            Destination::LocalFilesystem { local_directory } => local_directory,
-            Destination::S3Bucket { .. } => {
-                unreachable!("shouldn't be using local writer for S3");
-            }
-            Destination::FolderUri {
-                path,
-                storage_options: _,
-            } => {
-                let (_object_store, path) =
-                    object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap();
-                path.to_string()
-            }
-        };
+        let final_dir = table.write_target.path.clone();
         let writer = LocalFileSystemWriter::new(final_dir, table);
         TwoPhaseCommitterOperator::new(writer)
     }
@@ -100,31 +81,20 @@ impl<K: Key, T: Data + Sync + Serialize, R: MultiPartWriter<InputType = T> + Sen
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
-        let (url, storage_options) = match table.write_target.clone() {
-            Destination::LocalFilesystem { local_directory } => {
-                unreachable!()
-            }
-            Destination::S3Bucket {
-                s3_bucket,
-                s3_directory,
-                aws_region,
-            } => {
-                todo!()
-            }
-            Destination::FolderUri {
-                path,
-                storage_options,
-            } => (path, storage_options),
-        };
 
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
         let partition_func = get_partitioner_from_table(&table);
         tokio::spawn(async move {
-            let path: Path = StorageProvider::get_key(&url).unwrap().into();
-            let provider = StorageProvider::for_url_with_options(&url, storage_options)
-                .await
-                .unwrap();
+            let path: Path = StorageProvider::get_key(&table.write_target.path)
+                .unwrap()
+                .into();
+            let provider = StorageProvider::for_url_with_options(
+                &table.write_target.path,
+                table.write_target.storage_options.clone(),
+            )
+            .await
+            .unwrap();
             let mut writer = AsyncMultipartFileSystemWriter::<T, R>::new(
                 path,
                 Arc::new(provider),
@@ -338,47 +308,6 @@ impl std::fmt::Debug for FileCheckpointData {
 pub enum InFlightPartCheckpoint {
     FinishedPart { part: usize, content_id: String },
     InProgressPart { part: usize, data: Vec<u8> },
-}
-
-struct S3Credentialing {
-    credentials_provider: DefaultCredentialsProvider,
-}
-
-impl Debug for S3Credentialing {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("S3Credentialing").finish()
-    }
-}
-
-impl S3Credentialing {
-    fn try_new() -> Result<Self> {
-        Ok(Self {
-            credentials_provider: DefaultCredentialsProvider::new()?,
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl CredentialProvider for S3Credentialing {
-    #[doc = " The type of credential returned by this provider"]
-    type Credential = AwsCredential;
-
-    /// Return a credential
-    async fn get_credential(&self) -> object_store::Result<Arc<Self::Credential>> {
-        let credentials = self
-            .credentials_provider
-            .credentials()
-            .await
-            .map_err(|err| object_store::Error::Generic {
-                store: "s3",
-                source: Box::new(err),
-            })?;
-        Ok(Arc::new(AwsCredential {
-            key_id: credentials.aws_access_key_id().to_string(),
-            secret_key: credentials.aws_secret_access_key().to_string(),
-            token: credentials.token().clone(),
-        }))
-    }
 }
 
 struct AsyncMultipartFileSystemWriter<T: Data + Sync, R: MultiPartWriter> {
