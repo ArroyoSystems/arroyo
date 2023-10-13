@@ -26,7 +26,7 @@ impl ArroyoCredentialProvider {
         Ok(Self { provider: inner })
     }
 
-    pub async fn default_region(&self) -> Option<String> {
+    pub async fn default_region() -> Option<String> {
         ProfileProvider::region().ok()?
     }
 }

@@ -8,6 +8,7 @@ use std::{
 use arroyo_types::{S3_ENDPOINT_ENV, S3_REGION_ENV};
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
+use object_store::aws::AmazonS3ConfigKey;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::path::Path;
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
@@ -118,6 +119,21 @@ pub struct S3Config {
     region: Option<String>,
     bucket: String,
     key: Option<String>,
+}
+
+impl S3Config {
+    pub fn new(bucket: String, region: String, key: String) -> Self {
+        Self {
+            endpoint: None,
+            region: Some(region),
+            bucket,
+            key: Some(key),
+        }
+    }
+
+    pub fn canonical_url(&self) -> String {
+        todo!()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,18 +321,23 @@ impl StorageProvider {
         mut config: S3Config,
         options: HashMap<String, String>,
     ) -> Result<Self, StorageError> {
-        let credentials = Arc::new(ArroyoCredentialProvider::try_new()?);
-
         let mut builder = AmazonS3Builder::from_env().with_bucket_name(&config.bucket);
-        //.with_credentials(credentials.clone());
+        let mut aws_key_manually_set = false;
         for (key, value) in options {
             let s3_config_key = key.parse().map_err(|_| {
                 StorageError::CredentialsError(format!("invalid S3 config key: {}", key))
             })?;
+            if AmazonS3ConfigKey::AccessKeyId == s3_config_key {
+                aws_key_manually_set = true;
+            }
             builder = builder.with_config(s3_config_key, value);
         }
+        if !aws_key_manually_set {
+            let credentials = Arc::new(ArroyoCredentialProvider::try_new()?);
+            builder = builder.with_credentials(credentials);
+        }
 
-        let default_region = credentials.default_region().await;
+        let default_region = ArroyoCredentialProvider::default_region().await;
         config.region = config.region.or(default_region);
         if let Some(region) = &config.region {
             builder = builder.with_region(region);
@@ -464,7 +485,7 @@ impl StorageProvider {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, time::SystemTime};
+    use std::time::SystemTime;
 
     use arroyo_types::to_nanos;
 
