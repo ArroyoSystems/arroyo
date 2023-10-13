@@ -1418,12 +1418,17 @@ impl StructFieldExpression {
                 struct_expression,
                 field_name: column.to_string(),
             })),
-            ScalarValue::Int64(Some(index)) => Ok(Expression::DataStructure(
-                DataStructureFunction::ArrayIndex {
-                    array_expression: struct_expression,
-                    index: *index as usize,
-                },
-            )),
+            ScalarValue::Int64(Some(index)) => {
+                if *index <= 0 {
+                    bail!("the index into a list must be greater than 0")
+                }
+                Ok(Expression::DataStructure(
+                    DataStructureFunction::ArrayIndex {
+                        array_expression: struct_expression,
+                        index: *index as usize,
+                    },
+                ))
+            }
             _ => bail!("don't support key {:?} for index lookups", key),
         }
     }
