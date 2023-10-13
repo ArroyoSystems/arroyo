@@ -18,7 +18,7 @@ use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{path::Path, MultipartId, UploadPart};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::warn;
+use tracing::{warn, info};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
@@ -191,13 +191,25 @@ enum CheckpointData<T: Data> {
     Finished { max_file_index: usize },
 }
 
-#[derive(Debug, Decode, Encode, Clone, PartialEq, Eq)]
+#[derive(Decode, Encode, Clone, PartialEq, Eq)]
 struct InProgressFileCheckpoint<T: Data> {
     filename: String,
     partition: Option<String>,
     data: FileCheckpointData,
     buffered_data: Vec<T>,
     representative_timestamp: SystemTime,
+}
+
+impl<T: Data> std::fmt::Debug for InProgressFileCheckpoint<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InProgressFileCheckpoint")
+            .field("filename", &self.filename)
+            .field("partition", &self.partition)
+            .field("data", &self.data)
+            .field("buffered_data_len", &self.buffered_data.len())
+            .field("representative_timestamp", &self.representative_timestamp)
+            .finish()
+    }
 }
 
 #[derive(Decode, Encode, Clone, PartialEq, Eq)]
@@ -770,8 +782,7 @@ where
         let location = Path::parse(&filename)?;
         self.object_store
             .close_multipart(&location, &multi_part_upload_id, parts)
-            .await
-            .unwrap();
+            .await?;
         Ok(())
     }
 
@@ -805,6 +816,7 @@ where
                     buffered_data,
                     representative_timestamp: writer.stats().as_ref().unwrap().representative_timestamp,
                 });
+            info!("checkpoint for {} is {:?}", filename, in_progress_checkpoint);
             self.checkpoint_sender.send(in_progress_checkpoint).await?;
         }
         for file_to_finish in &self.files_to_finish {
@@ -1268,7 +1280,9 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>>
         } else {
             None
         };
-        if self.multipart_manager.all_uploads_finished() {
+        if let Some(bytes) = self.batch_buffering_writer.close(final_batch) {
+            self.multipart_manager.write_next_part(bytes)
+        } else if self.multipart_manager.all_uploads_finished() {
             // Return a finished file future
             let name = self.multipart_manager.name();
             Ok(Some(Box::pin(async move {
