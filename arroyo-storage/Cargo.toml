@@ -19,3 +19,4 @@ regex = "1.9.5"
 thiserror = "1"
 tokio = { version = "1", features = ["fs"] }
 async-trait = "0.1.73"
+webpki = ">=0.22.2"
