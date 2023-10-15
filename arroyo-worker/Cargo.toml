@@ -17,7 +17,7 @@ arroyo-metrics =  { path = "../arroyo-metrics" }
 
 rand = "0.8"
 bincode = "2.0.0-rc.3"
-wasmtime = "10.0"
+wasmtime = "=10.0.2"
 lazy_static = "1.4.0"
 petgraph = "0.6"
 chrono = "0.4"
