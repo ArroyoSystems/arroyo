@@ -73,7 +73,7 @@ function Sidebar() {
           <Stack justify="space-between" spacing="1" width="full">
             <Stack spacing="4" shouldWrapChildren>
               <Link to={'/'}>
-                <img width="140px" src="/logo.svg" />
+                <img width="160px" src="/logo.svg" />
               </Link>
               <Stack spacing="1">
                 <NavButton label="Home" to="/" icon={FiHome} />
