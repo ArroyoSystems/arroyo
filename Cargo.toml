@@ -38,6 +38,7 @@ arrow = { version = "43.0.0" }
 arrow-buffer = { version = "43.0.0" }
 arrow-array = { version = "43.0.0" }
 arrow-schema = { version = "43.0.0" }
+object_store = { version = "0.6.1" }
 parquet = { version = "43.0.0" }
 
 [profile.release]
@@ -55,3 +56,4 @@ arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arr
 arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
 arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
 arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}

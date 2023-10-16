@@ -189,7 +189,7 @@ checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
 [[package]]
 name = "arrow"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "ahash 0.8.3",
  "arrow-arith",
@@ -210,7 +210,7 @@ dependencies = [
 [[package]]
 name = "arrow-arith"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -224,7 +224,7 @@ dependencies = [
 [[package]]
 name = "arrow-array"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "ahash 0.8.3",
  "arrow-buffer",
@@ -240,7 +240,7 @@ dependencies = [
 [[package]]
 name = "arrow-buffer"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "half",
  "num",
@@ -249,7 +249,7 @@ dependencies = [
 [[package]]
 name = "arrow-cast"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -266,7 +266,7 @@ dependencies = [
 [[package]]
 name = "arrow-csv"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -284,7 +284,7 @@ dependencies = [
 [[package]]
 name = "arrow-data"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-buffer",
  "arrow-schema",
@@ -295,7 +295,7 @@ dependencies = [
 [[package]]
 name = "arrow-ipc"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -308,7 +308,7 @@ dependencies = [
 [[package]]
 name = "arrow-json"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "arrow-ord"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -341,7 +341,7 @@ dependencies = [
 [[package]]
 name = "arrow-row"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -355,7 +355,7 @@ dependencies = [
 [[package]]
 name = "arrow-schema"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "serde",
 ]
@@ -363,7 +363,7 @@ dependencies = [
 [[package]]
 name = "arrow-select"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -375,7 +375,7 @@ dependencies = [
 [[package]]
 name = "arrow-string"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -487,6 +487,7 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "axum",
+ "chrono",
  "eventsource-client",
  "futures",
  "rdkafka",
@@ -779,11 +780,12 @@ dependencies = [
  "arroyo-types",
  "async-trait",
  "bytes",
- "object_store 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "object_store",
  "regex",
  "rusoto_core",
  "thiserror",
  "tokio",
+ "webpki 0.22.4",
 ]
 
 [[package]]
@@ -808,6 +810,7 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-state",
+ "arroyo-storage",
  "arroyo-types",
  "async-stream",
  "async-trait",
@@ -826,7 +829,7 @@ dependencies = [
  "local-ip-address",
  "md-5 0.10.5",
  "memchr",
- "object_store 0.6.1 (git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches)",
+ "object_store",
  "once_cell",
  "ordered-float 3.9.1",
  "parquet",
@@ -1114,7 +1117,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
- "ring",
+ "ring 0.16.20",
  "time",
  "tokio",
  "tower",
@@ -1246,7 +1249,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "regex",
- "ring",
+ "ring 0.16.20",
  "time",
  "tracing",
 ]
@@ -1989,6 +1992,7 @@ dependencies = [
  "arroyo-storage",
  "regex",
  "tokio",
+ "webpki 0.22.4",
 ]
 
 [[package]]
@@ -2078,18 +2082,18 @@ dependencies = [
 
 [[package]]
 name = "cranelift-bforest"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c289b8eac3a97329a524e953b5fd68a8416ca629e1a37287f12d9e0760aadbc"
+checksum = "7aae6f552c4c0ccfb30b9559b77bc985a387d998e1736cbbe6b14c903f3656cf"
 dependencies = [
  "cranelift-entity",
 ]
 
 [[package]]
 name = "cranelift-codegen"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bf07ba80f53fa7f7dc97b11087ea867f7ae4621cfca21a909eca92c0b96c7d9"
+checksum = "95551de96900cefae691ce895ff2abc691ae3a0b97911a76b45faf99e432937b"
 dependencies = [
  "bumpalo",
  "cranelift-bforest",
@@ -2108,42 +2112,42 @@ dependencies = [
 
 [[package]]
 name = "cranelift-codegen-meta"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40a7ca088173130c5c033e944756e3e441fbf3f637f32b4f6eb70252580c6dd4"
+checksum = "36a3ad7b2bb03de3383f258b00ca29d80234bebd5130cb6ef3bae37ada5baab0"
 dependencies = [
  "cranelift-codegen-shared",
 ]
 
 [[package]]
 name = "cranelift-codegen-shared"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0114095ec7d2fbd658ed100bd007006360bc2530f57c6eee3d3838869140dbf9"
+checksum = "915918fee4142c85fb04bafe0bcd697e2fd6c15a260301ea6f8d2ea332a30e86"
 
 [[package]]
 name = "cranelift-control"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d56031683a55a949977e756d21826eb17a1f346143a1badc0e120a15615cd38"
+checksum = "37e447d548cd7f4fcb87fbd10edbd66a4f77966d17785ed50a08c8f3835483c8"
 dependencies = [
  "arbitrary",
 ]
 
 [[package]]
 name = "cranelift-entity"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6565198b5684367371e2b946ceca721eb36965e75e3592fad12fc2e15f65d7b"
+checksum = "9d8ab3352a1e5966968d7ab424bd3de8e6b58314760745c3817c2eec3fa2f918"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "cranelift-frontend"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25f28cc44847c8b98cb921e6bfc0f7b228f4d27519376fea724d181da91709a6"
+checksum = "1bffa38431f7554aa1594f122263b87c9e04abc55c9f42b81d37342ac44f79f0"
 dependencies = [
  "cranelift-codegen",
  "log",
@@ -2153,15 +2157,15 @@ dependencies = [
 
 [[package]]
 name = "cranelift-isle"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80b658177e72178c438f7de5d6645c56d97af38e17fcb0b500459007b4e05cc5"
+checksum = "84cef66a71c77938148b72bf006892c89d6be9274a08f7e669ff15a56145d701"
 
 [[package]]
 name = "cranelift-native"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf1c7de7221e6afcc5e13ced3b218faab3bc65b47eac67400046a05418aecd6a"
+checksum = "f33c7e5eb446e162d2d10b17fe68e1f091020cc2e4e38b5501c21099600b0a1b"
 dependencies = [
  "cranelift-codegen",
  "libc",
@@ -2170,9 +2174,9 @@ dependencies = [
 
 [[package]]
 name = "cranelift-wasm"
-version = "0.97.1"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76b0d28ebe8edb6b503630c489aa4669f1e2d13b97bec7271a0fcb0e159be3ad"
+checksum = "632f7b64fa6a8c5b980eb6a17ef22089e15cb9f779f1ed3bd3072beab0686c09"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
@@ -2450,7 +2454,7 @@ dependencies = [
  "lazy_static",
  "log",
  "num_cpus",
- "object_store 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "object_store",
  "parking_lot 0.12.1",
  "parquet",
  "percent-encoding",
@@ -2477,7 +2481,7 @@ dependencies = [
  "arrow-array",
  "chrono",
  "num_cpus",
- "object_store 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "object_store",
  "parquet",
  "sqlparser",
 ]
@@ -2493,7 +2497,7 @@ dependencies = [
  "datafusion-expr",
  "hashbrown 0.14.0",
  "log",
- "object_store 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "object_store",
  "parking_lot 0.12.1",
  "rand",
  "tempfile",
@@ -3881,7 +3885,7 @@ dependencies = [
  "rustls-native-certs",
  "tokio",
  "tokio-rustls 0.22.0",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -4381,7 +4385,7 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 dependencies = [
- "spin",
+ "spin 0.5.2",
 ]
 
 [[package]]
@@ -5080,8 +5084,7 @@ dependencies = [
 [[package]]
 name = "object_store"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27c776db4f332b571958444982ff641d2531417a326ca368995073b639205d58"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "async-trait",
  "base64 0.21.4",
@@ -5096,36 +5099,8 @@ dependencies = [
  "quick-xml",
  "rand",
  "reqwest",
- "ring",
+ "ring 0.16.20",
  "rustls-pemfile",
- "serde",
- "serde_json",
- "snafu",
- "tokio",
- "tracing",
- "url",
- "walkdir",
-]
-
-[[package]]
-name = "object_store"
-version = "0.6.1"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
-dependencies = [
- "async-trait",
- "base64 0.21.4",
- "bytes",
- "chrono",
- "futures",
- "humantime",
- "hyper",
- "itertools 0.10.5",
- "parking_lot 0.12.1",
- "percent-encoding",
- "quick-xml",
- "rand",
- "reqwest",
- "ring",
  "serde",
  "serde_json",
  "snafu",
@@ -5345,7 +5320,7 @@ dependencies = [
 [[package]]
 name = "parquet"
 version = "43.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#9bd18bd29955da4292c0f6c83091bb2f28dd6cf6"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -5365,7 +5340,7 @@ dependencies = [
  "lz4",
  "num",
  "num-bigint",
- "object_store 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "object_store",
  "paste",
  "seq-macro",
  "snap",
@@ -6243,10 +6218,24 @@ dependencies = [
  "cc",
  "libc",
  "once_cell",
- "spin",
- "untrusted",
+ "spin 0.5.2",
+ "untrusted 0.7.1",
  "web-sys",
  "winapi",
+]
+
+[[package]]
+name = "ring"
+version = "0.17.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9babe80d5c16becf6594aa32ad2be8fe08498e7ae60b77de8df700e67f191d7e"
+dependencies = [
+ "cc",
+ "getrandom",
+ "libc",
+ "spin 0.9.8",
+ "untrusted 0.9.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -6474,9 +6463,9 @@ checksum = "35edb675feee39aec9c99fa5ff985081995a06d594114ae14cbe797ad7b7a6d7"
 dependencies = [
  "base64 0.13.1",
  "log",
- "ring",
+ "ring 0.16.20",
  "sct 0.6.1",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -6486,7 +6475,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd8d6c9f025a446bc4d18ad9632e69aec8f287aa84499ee335599fabd20c3fd8"
 dependencies = [
  "log",
- "ring",
+ "ring 0.16.20",
  "rustls-webpki",
  "sct 0.7.0",
 ]
@@ -6514,12 +6503,12 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.101.6"
+version = "0.101.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c7d5dece342910d9ba34d259310cae3e0154b873b35408b787b59bce53d34fe"
+checksum = "45a27e3b59326c16e23d30aeb7a36a24cc0d29e71d68ff611cdfb4a01d013bed"
 dependencies = [
- "ring",
- "untrusted",
+ "ring 0.16.20",
+ "untrusted 0.7.1",
 ]
 
 [[package]]
@@ -6600,8 +6589,8 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b362b83898e0e69f38515b82ee15aa80636befe47c3b6d3d89a911e78fc228ce"
 dependencies = [
- "ring",
- "untrusted",
+ "ring 0.16.20",
+ "untrusted 0.7.1",
 ]
 
 [[package]]
@@ -6610,8 +6599,8 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d53dcdb7c9f8158937a7981b48accfd39a43af418591a5d008c7b22b5e1b7ca4"
 dependencies = [
- "ring",
- "untrusted",
+ "ring 0.16.20",
+ "untrusted 0.7.1",
 ]
 
 [[package]]
@@ -7084,6 +7073,12 @@ name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
+
+[[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 
 [[package]]
 name = "spki"
@@ -7593,7 +7588,7 @@ checksum = "bc6844de72e57df1980054b38be3a9f4702aba4858be64dd700181a8a6d0e1b6"
 dependencies = [
  "rustls 0.19.1",
  "tokio",
- "webpki",
+ "webpki 0.21.4",
 ]
 
 [[package]]
@@ -8098,6 +8093,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
+name = "untrusted"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
 name = "url"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8348,9 +8349,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd02b992d828b91efaf2a7499b21205fe4ab3002e401e3fe0f227aaeb4001d93"
+checksum = "1bc104ced94ff0a6981bde77a0bc29aab4af279914a4143b8d1af9fd4b2c9d41"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8383,18 +8384,18 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-asm-macros"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "284466ef356ce2d909bc0ad470b60c4d0df5df2de9084457e118131b3c779b92"
+checksum = "d2b28e5661a9b5f7610a62ab3c69222fa161f7bd31d04529e856461d8c3e706b"
 dependencies = [
  "cfg-if",
 ]
 
 [[package]]
 name = "wasmtime-cache"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efc78cfe1a758d1336f447a47af6ec05e0df2c03c93440d70faf80e17fbb001e"
+checksum = "3f58ddfe801df3886feaf466d883ea37e941bcc6d841b9f644a08c7acabfe7f8"
 dependencies = [
  "anyhow",
  "base64 0.21.4",
@@ -8412,9 +8413,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-component-macro"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8e916103436a6d84faa4c2083e2e98612a323c2cc6147ec419124f67c764c9c"
+checksum = "39725d9633fb064bd3a6d83c5ea5077289256de0862d3d96295822edb13419c0"
 dependencies = [
  "anyhow",
  "proc-macro2",
@@ -8427,15 +8428,15 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-component-util"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f20a5135ec5ef01080e674979b02d6fa5eebaa2b0c2d6660513ee9956a1bf624"
+checksum = "1153feafc824f95dc69472cb89a3396b3b05381f781a7508b01840f9df7b1a51"
 
 [[package]]
 name = "wasmtime-cranelift"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e1aa99cbf3f8edb5ad8408ba380f5ab481528ecd8a5053acf758e006d6727fd"
+checksum = "4fc1e39ce9aa0fa0b319541ed423960b06cfa7343eca1574f811ea34275739c2"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -8456,9 +8457,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-cranelift-shared"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cce31fd55978601acc103acbb8a26f81c89a6eae12d3a1c59f34151dfa609484"
+checksum = "2dd32739326690e51c76551d7cbf29d371e7de4dc7b37d2d503be314ab5b7d04"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -8472,9 +8473,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-environ"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41f9e58e0ee7d43ff13e75375c726b16bce022db798d3a099a65eeaa7d7a544b"
+checksum = "32b60e4ae5c9ae81750d8bc59110bf25444aa1d9266c19999c3b64b801db3c73"
 dependencies = [
  "anyhow",
  "cranelift-entity",
@@ -8491,9 +8492,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-fiber"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14309cbdf2c395258b124a24757c727403070c0465a28bcc780c4f82f4bca5ff"
+checksum = "7dd40c8d869916ee6b1f3fcf1858c52041445475ca8550aee81c684c0eb530ca"
 dependencies = [
  "cc",
  "cfg-if",
@@ -8504,9 +8505,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-jit"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0f2eaeb01bb67266416507829bd8e0bb60278444e4cbd048e280833ebeaa02"
+checksum = "655b23a10eddfe7814feb548a466f3f25aa4bb4f43098a147305c544a2de28e1"
 dependencies = [
  "addr2line 0.19.0",
  "anyhow",
@@ -8530,9 +8531,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-jit-debug"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f42e59d62542bfb73ce30672db7eaf4084a60b434b688ac4f05b287d497de082"
+checksum = "e46b7e98979a69d3df093076bde8431204e3c96a770e8d216fea365c627d88a4"
 dependencies = [
  "object 0.30.4",
  "once_cell",
@@ -8541,9 +8542,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-jit-icache-coherence"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b49ceb7e2105a8ebe5614d7bbab6f6ef137a284e371633af60b34925493081f"
+checksum = "6fb1e7c68ede63dc7a98c3e473162954e224951854e229c8b4e74697fe17dbdd"
 dependencies = [
  "cfg-if",
  "libc",
@@ -8552,9 +8553,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-runtime"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a5de4762421b0b2b19e02111ca403632852b53e506e03b4b227ffb0fbfa63c2"
+checksum = "843e33bf9e0f0c57902c87a1dea1389cc23865c65f007214318dbdfcb3fd4ae5"
 dependencies = [
  "anyhow",
  "cc",
@@ -8578,9 +8579,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-types"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcbb7c138f797192f46afdd3ec16f85ef007c3bb45fa8e5174031f17b0be4c4a"
+checksum = "7473a07bebd85671bada453123e3d465c8e0a59668ff79f5004076e6a2235ef5"
 dependencies = [
  "cranelift-entity",
  "serde",
@@ -8590,9 +8591,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-wit-bindgen"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3334b0466a4d340de345cda83474d1d2c429770c3d667877971407672bc618a"
+checksum = "f114407efbd09e4ef67053b6ae54c16455a821ef2f6096597fcba83b7625e59c"
 dependencies = [
  "anyhow",
  "heck",
@@ -8636,8 +8637,18 @@ version = "0.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8e38c0608262c46d4a56202ebabdeb094cef7e560ca7a226c6bf055188aa4ea"
 dependencies = [
- "ring",
- "untrusted",
+ "ring 0.16.20",
+ "untrusted 0.7.1",
+]
+
+[[package]]
+name = "webpki"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
+dependencies = [
+ "ring 0.17.3",
+ "untrusted 0.9.0",
 ]
 
 [[package]]

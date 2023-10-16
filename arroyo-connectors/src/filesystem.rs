@@ -9,7 +9,7 @@ use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 
-use crate::{pull_option_to_i64, Connection, EmptyConfig};
+use crate::{pull_opt, pull_option_to_i64, Connection, EmptyConfig};
 
 use super::Connector;
 
@@ -77,10 +77,10 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let is_local = match &table.write_target {
-            Destination::FolderUri { path } => path.starts_with("file:/"),
-            Destination::S3Bucket { .. } => false,
-            Destination::LocalFilesystem { .. } => true,
+        let backend_config = BackendConfig::parse_url(&table.write_target.path, true)?;
+        let is_local = match &backend_config {
+            BackendConfig::Local { .. } => true,
+            _ => false,
         };
         let (description, operator) = match (&table.format_settings, is_local) {
             (Some(FormatSettings::Parquet { .. }), true) => (
@@ -137,27 +137,15 @@ impl Connector for FileSystemConnector {
         opts: &mut std::collections::HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let write_target = if let Some(path) = opts.remove("path") {
-            if let BackendConfig::Local(local_config) = BackendConfig::parse_url(&path, false)? {
-                Destination::LocalFilesystem {
-                    local_directory: local_config.path,
-                }
-            } else {
-                Destination::FolderUri { path }
-            }
-        } else if let (Some(s3_bucket), Some(s3_directory), Some(aws_region)) = (
-            opts.remove("s3_bucket"),
-            opts.remove("s3_directory"),
-            opts.remove("aws_region"),
-        ) {
-            Destination::S3Bucket {
-                s3_bucket,
-                s3_directory,
-                aws_region,
-            }
-        } else {
-            bail!("Target for filesystem connector incorrectly specified. Should be a URI path or a triple of s3_bucket, s3_directory, and aws_region");
-        };
+        let storage_options: std::collections::HashMap<String, String> = opts
+            .iter()
+            .filter(|(k, _)| k.starts_with("storage."))
+            .map(|(k, v)| (k.trim_start_matches("storage.").to_string(), v.to_string()))
+            .collect();
+        opts.retain(|k, _| !k.starts_with("storage."));
+
+        let storage_url = pull_opt("path", opts)?;
+        BackendConfig::parse_url(&storage_url, true)?;
 
         let inactivity_rollover_seconds = pull_option_to_i64("inactivity_rollover_seconds", opts)?;
         let max_parts = pull_option_to_i64("max_parts", opts)?;
@@ -165,19 +153,38 @@ impl Connector for FileSystemConnector {
         let target_file_size = pull_option_to_i64("target_file_size", opts)?;
         let target_part_size = pull_option_to_i64("target_part_size", opts)?;
 
+        let partition_fields: Vec<_> = opts
+            .remove("partition_fields")
+            .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
+            .unwrap_or_default();
+
+        let time_partition_pattern = opts.remove("time_partition_pattern");
+
+        let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
+            Some(Partitioning {
+                time_partition_pattern,
+                partition_fields,
+            })
+        } else {
+            None
+        };
+
         let file_settings = Some(FileSettings {
             inactivity_rollover_seconds,
             max_parts,
             rollover_seconds,
             target_file_size,
             target_part_size,
+            partitioning,
         });
+
         let format_settings = match schema
             .ok_or(anyhow!("require schema"))?
             .format
             .as_ref()
-            .unwrap()
-        {
+            .ok_or(anyhow!(
+                "filesystem sink requires a format, such as json or parquet"
+            ))? {
             Format::Parquet(..) => {
                 let compression = opts
                     .remove("parquet_compression")
@@ -204,7 +211,10 @@ impl Connector for FileSystemConnector {
             name,
             EmptyConfig {},
             FileSystemTable {
-                write_target,
+                write_target: FolderUrl {
+                    path: storage_url,
+                    storage_options,
+                },
                 file_settings,
                 format_settings,
             },

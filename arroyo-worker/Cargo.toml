@@ -11,13 +11,14 @@ kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-macro = { path = "../arroyo-macro" }
 arroyo-state = { path = "../arroyo-state" }
+arroyo-storage = { path = "../arroyo-storage" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
 
 rand = "0.8"
 bincode = "2.0.0-rc.3"
-wasmtime = "10.0"
+wasmtime = "=10.0.2"
 lazy_static = "1.4.0"
 petgraph = "0.6"
 chrono = "0.4"
@@ -67,7 +68,7 @@ regress = "0.6.0"
 tokio-tungstenite = { version = "0.20.1", features = ["native-tls"] }
 fluvio = {version = "=0.21", features = ["openssl"]}
 fluvio-future = "0.6.0"
-object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches', features = ["aws"] }
+object_store = {workspace = true }
 reqwest = "0.11.20"
 memchr = "2.6.3"
 
