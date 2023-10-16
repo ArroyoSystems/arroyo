@@ -775,6 +775,16 @@ correctness_run_codegen! {"union", 10,
   format = 'json',
   type = 'source'
 );
+CREATE TABLE second_impulse_source (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source'
+);
 CREATE TABLE union_output (
   counter bigint
 ) WITH (
@@ -784,8 +794,8 @@ CREATE TABLE union_output (
   type = 'sink'
 );
 INSERT INTO union_output
-SELECT counter FROM (SELECT counter  FROM impulse_source)
-UNION ALL (SELECT 2 * counter FROM impulse_source)"
+SELECT counter  FROM impulse_source
+UNION ALL SELECT counter FROM second_impulse_source"
 }
 
 correctness_run_codegen! {"session_window", 10,

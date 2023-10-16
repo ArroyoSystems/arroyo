@@ -20,7 +20,7 @@ use crate::{
         MemoryAddingContext, MemoryAggregatingContext, MemoryRemovingContext,
         ValueBinMergingContext, ValuePointerContext, VecAggregationContext,
     },
-    expressions::SortExpression,
+    expressions::{Column, ColumnExpression, Expression, SortExpression},
     external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource},
     operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
@@ -887,7 +887,7 @@ pub struct PlanEdge {
     pub edge_type: EdgeType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanType {
     Unkeyed(StructDef),
     UnkeyedList(StructDef),
@@ -1787,12 +1787,43 @@ impl PlanGraph {
     fn add_union(&mut self, inputs: Vec<SqlOperator>) -> NodeIndex {
         let input_node_indices = inputs
             .into_iter()
-            .map(|input| self.add_sql_operator(input))
+            .map(|input| (input.return_type(), self.add_sql_operator(input)))
             .collect::<Vec<_>>();
-        let first_input = self.get_plan_node(input_node_indices[0]);
+        let (first_struct, first_index) = input_node_indices[0].clone();
+        let first_input = self.get_plan_node(first_index);
         let union_node = self.insert_operator(PlanOperator::Unkey, first_input.output_type.clone());
-        for input_index in input_node_indices {
-            // add edges
+        for (input_struct, mut input_index) in input_node_indices {
+            if first_struct != input_struct {
+                // create a record transformation from input_struct to first struct.
+                // We've validated the lengths and types
+                let fields = first_struct
+                    .fields
+                    .iter()
+                    .zip(input_struct.fields.iter())
+                    .map(|(f1, f2)| {
+                        (
+                            Column {
+                                relation: f1.alias.clone(),
+                                name: f1.name(),
+                            },
+                            Expression::Column(ColumnExpression::new(f2.clone())),
+                        )
+                    })
+                    .collect();
+                let projection = RecordTransform::ValueProjection(Projection {
+                    fields,
+                    format: None,
+                });
+                let input_node = self.get_plan_node(input_index);
+                let plan_node = PlanNode::from_record_transform(projection, input_node);
+                let edge = PlanEdge {
+                    edge_type: EdgeType::Forward,
+                };
+                let conversion_index = self.graph.add_node(plan_node);
+                self.graph.add_edge(input_index, conversion_index, edge);
+                input_index = conversion_index;
+            }
+            // now merge into union node.
             let edge = PlanEdge {
                 edge_type: EdgeType::Forward,
             };

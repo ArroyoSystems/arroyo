@@ -21,6 +21,7 @@ use arroyo_rpc::{
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
 use datafusion_common::ScalarValue;
+use datafusion_expr::type_coercion::other;
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use regex::Regex;
@@ -339,6 +340,16 @@ impl StructDef {
                 }
             }
         }
+    }
+
+    pub(crate) fn field_types_match(&self, other: &StructDef) -> bool {
+        if self.fields.len() != other.fields.len() {
+            return false;
+        }
+        self.fields
+            .iter()
+            .zip(other.fields.iter())
+            .all(|(a, b)| a.data_type == b.data_type)
     }
 }
 
