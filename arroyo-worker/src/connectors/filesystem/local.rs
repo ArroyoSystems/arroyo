@@ -1,10 +1,11 @@
 use std::{
-    collections::HashMap, fs::create_dir_all, marker::PhantomData, path::Path, time::Instant,
+    collections::HashMap, fs::create_dir_all, marker::PhantomData, path::Path, time::SystemTime,
 };
 
 use arroyo_types::{Data, Key, Record, TaskInfo};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use serde::Serialize;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::info;
 
@@ -12,24 +13,23 @@ use crate::connectors::two_phase_committer::TwoPhaseCommitter;
 
 use anyhow::{bail, Result};
 
-use super::{FileSystemTable, MultiPartWriterStats, RollingPolicy};
+use super::{get_partitioner_from_table, FileSystemTable, MultiPartWriterStats, RollingPolicy};
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     // writer to a local tmp file
-    writer: Option<V>,
+    writers: HashMap<Option<String>, V>,
     tmp_dir: String,
     final_dir: String,
     next_file_index: usize,
     subtask_id: usize,
+    partitioner: Option<Box<dyn Fn(&Record<K, D>) -> String + Send>>,
     finished_files: Vec<FilePreCommit>,
-    first_write: Option<Instant>,
-    last_write: Option<Instant>,
     rolling_policy: RollingPolicy,
     table_properties: FileSystemTable,
     phantom: PhantomData<(K, D)>,
 }
 
-impl<K: Key, D: Data + Sync, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
+impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
     pub fn new(final_dir: String, table_properties: FileSystemTable) -> Self {
         // TODO: explore configuration options here
         let tmp_dir = format!("{}/__in_progress", final_dir);
@@ -37,14 +37,13 @@ impl<K: Key, D: Data + Sync, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
         create_dir_all(&tmp_dir).unwrap();
 
         Self {
-            writer: None,
+            writers: HashMap::new(),
             tmp_dir,
             final_dir,
             next_file_index: 0,
             subtask_id: 0,
+            partitioner: get_partitioner_from_table(&table_properties),
             finished_files: Vec::new(),
-            first_write: None,
-            last_write: None,
             rolling_policy: RollingPolicy::from_file_settings(
                 table_properties.file_settings.as_ref().unwrap(),
             ),
@@ -53,56 +52,57 @@ impl<K: Key, D: Data + Sync, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
         }
     }
 
-    fn should_roll(&mut self) -> bool {
-        if !self.first_write.is_some() {
-            return false;
-        }
-        if let Some(writer) = self.writer.as_mut() {
-            let bytes_written = writer.sync().unwrap();
-            let stats = MultiPartWriterStats {
-                bytes_written,
-                parts_written: 0,
-                last_write_at: self.last_write.unwrap(),
-                first_write_at: self.first_write.unwrap(),
+    fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut V {
+        if !self.writers.contains_key(partition) {
+            let file_name = match partition {
+                Some(partition) => {
+                    // make sure the partition directory exists in tmp and final
+                    create_dir_all(&format!("{}/{}", self.tmp_dir, partition)).unwrap();
+                    create_dir_all(&format!("{}/{}", self.final_dir, partition)).unwrap();
+                    format!(
+                        "{}/{:>05}-{:>03}.{}",
+                        partition,
+                        self.next_file_index,
+                        self.subtask_id,
+                        V::file_suffix()
+                    )
+                }
+                None => format!(
+                    "{:>05}-{:>03}.{}",
+                    self.next_file_index,
+                    self.subtask_id,
+                    V::file_suffix()
+                ),
             };
-            self.rolling_policy.should_roll(&stats)
-        } else {
-            false
+            self.writers.insert(
+                partition.clone(),
+                V::new(
+                    format!("{}/{}", self.tmp_dir, file_name),
+                    format!("{}/{}", self.final_dir, file_name),
+                    &self.table_properties,
+                ),
+            );
+            self.next_file_index += 1;
         }
-    }
-
-    fn init_writer(&mut self) -> Result<()> {
-        let file_name = format!(
-            "{:>05}-{:>03}.{}",
-            self.next_file_index,
-            self.subtask_id,
-            V::file_suffix()
-        );
-        self.writer = Some(V::new(
-            format!("{}/{}", self.tmp_dir, file_name),
-            format!("{}/{}", self.final_dir, file_name),
-            &self.table_properties,
-        ));
-        self.next_file_index += 1;
-        self.first_write = Some(Instant::now());
-        Ok(())
+        self.writers.get_mut(&partition).unwrap()
     }
 }
 
 pub trait LocalWriter<T: Data>: Send + 'static {
     fn new(tmp_path: String, final_path: String, table_properties: &FileSystemTable) -> Self;
     fn file_suffix() -> &'static str;
-    fn write(&mut self, value: T) -> Result<()>;
+    fn write(&mut self, value: T, timestamp: SystemTime) -> Result<()>;
     // returns the total size of the file
     fn sync(&mut self) -> Result<usize>;
     fn close(&mut self) -> Result<FilePreCommit>;
     fn checkpoint(&mut self) -> Result<Option<CurrentFileRecovery>>;
+    fn stats(&self) -> MultiPartWriterStats;
 }
 
 #[derive(Debug, Clone, Decode, Encode, PartialEq, PartialOrd)]
 pub struct LocalFileDataRecovery {
     next_file_index: usize,
-    current_file: Option<CurrentFileRecovery>,
+    current_files: Vec<CurrentFileRecovery>,
 }
 
 #[derive(Debug, Clone, Decode, Encode, PartialEq, PartialOrd)]
@@ -120,7 +120,7 @@ pub struct FilePreCommit {
 }
 
 #[async_trait]
-impl<K: Key, D: Data + Sync, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitter<K, D>
+impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitter<K, D>
     for LocalFileSystemWriter<K, D, V>
 {
     type DataRecovery = LocalFileDataRecovery;
@@ -139,7 +139,7 @@ impl<K: Key, D: Data + Sync, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitt
         let mut recovered_files = Vec::new();
         for LocalFileDataRecovery {
             next_file_index,
-            current_file,
+            current_files,
         } in data_recovery
         {
             max_file_index = max_file_index.max(next_file_index);
@@ -149,29 +149,28 @@ impl<K: Key, D: Data + Sync, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitt
             if task_info.task_index > 0 {
                 continue;
             }
-            let Some(CurrentFileRecovery {
+            for CurrentFileRecovery {
                 tmp_file,
                 bytes_written,
                 suffix,
                 destination,
-            }) = current_file
-            else {
-                continue;
-            };
-            let mut file = OpenOptions::new()
-                .write(true)
-                .open(tmp_file.clone())
-                .await?;
-            file.set_len(bytes_written as u64).await?;
-            if let Some(suffix) = suffix {
-                file.write_all(&suffix).await?;
+            } in current_files
+            {
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .open(tmp_file.clone())
+                    .await?;
+                file.set_len(bytes_written as u64).await?;
+                if let Some(suffix) = suffix {
+                    file.write_all(&suffix).await?;
+                }
+                file.flush().await?;
+                file.sync_all().await?;
+                recovered_files.push(FilePreCommit {
+                    tmp_file,
+                    destination,
+                })
             }
-            file.flush().await?;
-            file.sync_all().await?;
-            recovered_files.push(FilePreCommit {
-                tmp_file,
-                destination,
-            })
         }
         self.subtask_id = task_info.task_index;
         self.finished_files = recovered_files;
@@ -180,11 +179,11 @@ impl<K: Key, D: Data + Sync, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitt
     }
 
     async fn insert_record(&mut self, record: &Record<K, D>) -> Result<()> {
-        if self.first_write.is_none() {
-            self.init_writer()?;
-        };
-        self.writer.as_mut().unwrap().write(record.value.clone())?;
-        self.last_write = Some(Instant::now());
+        let partition = self.partitioner.as_ref().map(|f| f(record));
+        let writer = self.get_or_insert_writer(&partition);
+        writer
+            .write(record.value.clone(), record.timestamp)
+            .unwrap();
         Ok(())
     }
 
@@ -218,12 +217,20 @@ impl<K: Key, D: Data + Sync, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitt
     async fn checkpoint(
         &mut self,
         _task_info: &TaskInfo,
+        watermark: Option<SystemTime>,
         stopping: bool,
     ) -> Result<(Self::DataRecovery, HashMap<String, Self::PreCommit>)> {
-        if self.should_roll() || stopping {
-            let pre_commit = self.writer.take().unwrap().close()?;
-            self.first_write = None;
-            self.last_write = None;
+        let mut partitions_to_roll = vec![];
+        for (partition, writer) in self.writers.iter_mut() {
+            writer.sync()?;
+            let stats = writer.stats();
+            if self.rolling_policy.should_roll(&stats, watermark) || stopping {
+                partitions_to_roll.push(partition.clone());
+            }
+        }
+        for partition in partitions_to_roll {
+            let mut writer = self.writers.remove(&partition).unwrap();
+            let pre_commit = writer.close()?;
             self.finished_files.push(pre_commit);
         }
         let mut pre_commits = HashMap::new();
@@ -232,12 +239,11 @@ impl<K: Key, D: Data + Sync, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitt
         }
         let data_recovery = LocalFileDataRecovery {
             next_file_index: self.next_file_index,
-            current_file: self
-                .writer
-                .as_mut()
-                .map(|writer| writer.checkpoint())
-                .transpose()?
-                .flatten(),
+            current_files: self
+                .writers
+                .iter_mut()
+                .filter_map(|(_partition, writer)| writer.checkpoint().transpose())
+                .collect::<Result<_>>()?,
         };
         Ok((data_recovery, pre_commits))
     }

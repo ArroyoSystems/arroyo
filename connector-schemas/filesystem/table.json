@@ -4,66 +4,25 @@
     "properties": {
         "write_target": {
             "type": "object",
-            "title": "Destination",
-            "oneOf": [
-                {
-                    "type": "object",
-                    "title": "Folder URI",
-                    "properties": {
-                        "Path": {
-                            "title": "Path",
-                            "type": "string",
-                            "description": "URI of the folder to write to"
-                        }
-                    },
-                    "required": [
-                        "Path"
-                    ],
-                    "additionalProperties": false
+            "title": "Folder URL",
+            "properties": {
+                "Path": {
+                    "title": "Path",
+                    "type": "string",
+                    "description": "URI of the folder to write to"
                 },
-                {
+                "Storage options": {
                     "type": "object",
-                    "title": "Local Filesystem",
-                    "properties": {
-                        "Local Directory": {
-                            "title": "Directory",
-                            "type": "string",
-                            "description": "local directory to write to"
-                        }
-                    },
-                    "required": [
-                        "Local Directory"
-                    ],
-                    "additionalProperties": false
-                },
-                {
-                    "type": "object",
-                    "title": "S3 Bucket",
-                    "properties": {
-                        "S3 Bucket": {
-                            "title": "Bucket Name",
-                            "type": "string",
-                            "description": "bucket to write to"
-                        },
-                        "S3 Directory": {
-                            "title": "Directory",
-                            "type": "string",
-                            "description": "S3 directory to write to"
-                        },
-                        "AWS Region": {
-                            "title": "AWS Region",
-                            "type": "string",
-                            "description": "AWS region to write to"
-                        }
-                    },
-                    "required": [
-                        "S3 Bucket",
-                        "S3 Directory",
-                        "AWS Region"
-                    ],
-                    "additionalProperties": false
+                    "title": "Storage Options",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 }
-            ]
+            },
+            "required": [
+                "Path"
+            ],
+            "additionalProperties": false
         },
         "format_settings": {
             "type": "object",
@@ -129,6 +88,27 @@
                     "title": "Inactivity Rollover Seconds",
                     "type": "integer",
                     "description": "number of seconds of inactivity to wait before rolling over to a new file"
+                },
+                "partitioning": {
+                    "title": "Partitioning",
+                    "type": "object",
+                    "properties": {
+                        "time_partition_pattern": {
+                            "title": "Time Partition Pattern",
+                            "type": "string",
+                            "description": "The pattern of the date string"
+                            
+                            },
+                        "partition_fields": {
+                            "title": "Partition Fields",
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "fields to partition the data by"
+                        }
+                    },
+                    "additionalProperties": false
                 }
             },
             "additionalProperties": false
