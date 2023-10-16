@@ -1108,7 +1108,10 @@ impl<'a> SqlPipelineBuilder<'a> {
         // check that all inputs have the same schema, updating behavior and windowing behavior
         let first_input = &inputs[0];
         for input in &inputs[1..] {
-            if input.return_type() != first_input.return_type() {
+            if !first_input
+                .return_type()
+                .field_types_match(&input.return_type())
+            {
                 bail!("union inputs must have the same schema");
             }
             if input.is_updating() != first_input.is_updating() {
