@@ -2,20 +2,9 @@ use regex::Regex;
 
 pub fn regexp_match(argument: String, regex: String) -> Vec<String> {
     let re = Regex::new(&regex).unwrap();
-    match re.captures(argument.as_str()) {
-        Some(caps) => caps
-            .iter()
-            .enumerate()
-            .filter_map(|(i, cap)| {
-                if i != 0 {
-                    cap.map(|m| m.as_str().to_owned())
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        None => vec![],
-    }
+    re.find_iter(&argument.as_str())
+        .map(|val| val.as_str().to_string())
+        .collect()
 }
 
 pub fn regexp_replace(argument: String, regex: String, replacement: String) -> String {

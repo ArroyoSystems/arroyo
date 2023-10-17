@@ -1023,12 +1023,27 @@ mod tests {
     // test regexp_match see https://www.postgresql.org/docs/current/functions-string.html
     single_test_codegen!(
         "regexp_match",
-        "regexp_match(non_nullable_string, 'https://www.nexmark.com/([a-z]+)/([a-z]+)')[1]",
+        "regexp_match(non_nullable_string, '/[a-z.]+')[1]",
         arroyo_sql::TestStruct {
             non_nullable_string: "https://www.nexmark.com/eoax/oad/cidro/item.htm?query=1".into(),
             ..Default::default()
         },
-        Some("eoax".to_string())
+        Some("/www.nexmark.com".to_string())
+    );
+
+    single_test_codegen!(
+        "regexp_match_multiple",
+        "regexp_match(non_nullable_string, '[a-z]+')",
+        arroyo_sql::TestStruct {
+            non_nullable_string: "there are 5 words here".into(),
+            ..Default::default()
+        },
+        vec![
+            "there".to_string(),
+            "are".to_string(),
+            "words".to_string(),
+            "here".to_string()
+        ]
     );
 
     // test regexp_replace
