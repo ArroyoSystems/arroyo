@@ -21,7 +21,6 @@ use arroyo_rpc::{
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
 use datafusion_common::ScalarValue;
-use datafusion_expr::type_coercion::other;
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use regex::Regex;
