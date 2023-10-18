@@ -10,6 +10,12 @@ use std::time::Duration;
 
 use crate::{jobs, pipelines, types};
 use arroyo_datastream::{ConnectorOp, Operator, Program};
+use arroyo_rpc::api_types::pipelines::{
+    Job, Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch, PipelinePost,
+    PipelineRestart, QueryValidationResult, StopType, ValidateQueryPost,
+};
+use arroyo_rpc::api_types::udfs::{UdfValidationResult, ValidateUdfsPost};
+use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
 use arroyo_rpc::grpc::api::{
     create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, CreateUdf, PipelineProgram,
     Udf, UdfLanguage,
@@ -17,11 +23,6 @@ use arroyo_rpc::grpc::api::{
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{CheckUdfsReq, ValidationResult};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_rpc::types::{
-    Job, JobCollection, PaginationQueryParams, Pipeline, PipelineCollection, PipelineEdge,
-    PipelineGraph, PipelineNode, PipelinePatch, PipelinePost, PipelineRestart,
-    QueryValidationResult, StopType, UdfValidationResult, ValidateQueryPost, ValidateUdfsPost,
-};
 use arroyo_server_common::log_event;
 use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
 use petgraph::visit::EdgeRef;

@@ -9,7 +9,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::{connect_async, tungstenite};
 use typify::import_types;
 
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::{pull_opt, Connection, EmptyConfig};
@@ -32,8 +32,8 @@ impl Connector for WebsocketConnector {
         "websocket"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "websocket".to_string(),
             name: "Websocket".to_string(),
             icon: ICON.to_string(),

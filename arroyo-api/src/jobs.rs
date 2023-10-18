@@ -1,6 +1,15 @@
 use crate::queries::api_queries::{
     DbCheckpoint, DbLogMessage, DbPipelineJob, GetOperatorErrorsParams,
 };
+use arroyo_rpc::api_types::checkpoints::{
+    Checkpoint, CheckpointEventSpan, CheckpointSpanType, OperatorCheckpointGroup,
+    SubtaskCheckpointGroup,
+};
+use arroyo_rpc::api_types::pipelines::{JobLogLevel, JobLogMessage, OutputData, StopType};
+use arroyo_rpc::api_types::{
+    CheckpointCollection, JobCollection, JobLogMessageCollection,
+    OperatorCheckpointGroupCollection, PaginationQueryParams,
+};
 use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::{
     CreateJobReq, JobStatus, OperatorCheckpointDetail, TaskCheckpointDetail,
@@ -32,12 +41,6 @@ use crate::rest_utils::{
 };
 use crate::types::public::LogLevel;
 use crate::{queries::api_queries, to_micros, types::public, AuthData};
-use arroyo_rpc::types::{
-    Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType, JobCollection,
-    JobLogLevel, JobLogMessage, JobLogMessageCollection, OperatorCheckpointGroup,
-    OperatorCheckpointGroupCollection, OutputData, PaginationQueryParams, StopType,
-    SubtaskCheckpointGroup,
-};
 
 pub(crate) async fn create_job<'a>(
     request: CreateJobReq,

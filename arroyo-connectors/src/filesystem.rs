@@ -4,8 +4,8 @@ use axum::response::sse::Event;
 use std::convert::Infallible;
 use typify::import_types;
 
+use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 
@@ -28,8 +28,8 @@ impl Connector for FileSystemConnector {
         "filesystem"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "filesystem".to_string(),
             name: "FileSystem Sink".to_string(),
             icon: "".to_string(),

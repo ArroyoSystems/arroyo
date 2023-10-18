@@ -1,6 +1,6 @@
 use anyhow::bail;
-use arroyo_rpc::types::FieldType::Primitive;
-use arroyo_rpc::types::{
+use arroyo_rpc::api_types::connections::FieldType::Primitive;
+use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, FieldType, SourceFieldType, StructType, TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
@@ -17,7 +17,7 @@ const ICON: &str = include_str!("../resources/nexmark.svg");
 import_types!(schema = "../connector-schemas/nexmark/table.json");
 
 pub fn nexmark_schema() -> ConnectionSchema {
-    use arroyo_rpc::types::PrimitiveType::*;
+    use arroyo_rpc::api_types::connections::PrimitiveType::*;
     ConnectionSchema {
         format: None,
         framing: None,
@@ -96,8 +96,8 @@ impl Connector for NexmarkConnector {
         "nexmark"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "nexmark".to_string(),
             name: "Nexmark".to_string(),
             icon: ICON.to_string(),

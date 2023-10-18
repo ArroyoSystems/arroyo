@@ -17,12 +17,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
 use arroyo_connectors::{connector_for_type, ErasedConnector};
-use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_rpc::types::{
+use arroyo_rpc::api_types::connections::{
     ConfluentSchema, ConfluentSchemaQueryParams, ConnectionProfile, ConnectionSchema,
-    ConnectionTable, ConnectionTableCollection, ConnectionTablePost, PaginationQueryParams,
-    SchemaDefinition,
+    ConnectionTable, ConnectionTablePost, SchemaDefinition,
 };
+use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
+use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_sql::json_schema::convert_json_schema;
 use arroyo_sql::types::{StructField, TypeDef};
 
