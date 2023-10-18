@@ -41,6 +41,15 @@ pub struct AppState {
     pub(crate) pool: Pool,
 }
 
+impl AppState {
+    pub fn new(controller_addr: String, pool: Pool) -> Self {
+        Self {
+            controller_addr,
+            pool,
+        }
+    }
+}
+
 /// Ping endpoint
 #[utoipa::path(
     get,

@@ -5,7 +5,8 @@ use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 use std::time::Duration;
 
 use crate::{jobs, pipelines, types};
@@ -28,7 +29,7 @@ use petgraph::visit::EdgeRef;
 use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
@@ -886,4 +887,57 @@ pub async fn query_job_by_pub_id(
     let res: DbPipelineJob = job.ok_or_else(|| not_found("Job".to_string()))?;
 
     Ok(res.into())
+}
+
+pub async fn register_pipelines_in_folder(path: &str, state: AppState) -> Result<(), ErrorResp> {
+    // get a list of all non-deleted pipeline names
+    let pipelines = get_pipelines(
+        State(state.clone()),
+        None,
+        Query(PaginationQueryParams {
+            starting_after: None,
+            limit: None,
+        }),
+    )
+    .await?;
+    let pipeline_names: HashSet<_> = pipelines
+        .data
+        .iter()
+        .map(|pipeline| pipeline.name.clone())
+        .collect();
+
+    // list all files in path, for each with a suffix of .sql,
+    // check if NAME.sql exists, if not make a pipeline
+    // with the name NAME and the query from the file
+    let mut paths = tokio::fs::read_dir(path).await.map_err(log_and_map)?;
+
+    while let Some(path) = paths.next_entry().await.map_err(log_and_map)? {
+        let path = path.path();
+        let file_name = path.file_name().unwrap().to_string_lossy();
+        if !file_name.ends_with(".sql") {
+            continue;
+        }
+
+        let name = file_name.trim_end_matches(".sql");
+        if pipeline_names.contains(name) {
+            continue;
+        }
+
+        let query = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(log_and_map)?;
+        let pipeline_post = PipelinePost {
+            name: name.into(),
+            parallelism: 1,
+            preview: None,
+            query,
+            udfs: None,
+        };
+        let json = Json(pipeline_post);
+        let with_rejection = WithRejection(json, PhantomData);
+        let result =
+            post_pipeline(axum::extract::State(state.clone()), None, with_rejection).await?;
+        info!("wrote {:?}", result);
+    }
+    Ok(())
 }

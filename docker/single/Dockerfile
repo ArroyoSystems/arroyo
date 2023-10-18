@@ -106,4 +106,5 @@ COPY docker/single/supervisord.conf /opt/arroyo/src/docker/single/supervisord.co
 COPY docker/single/entrypoint.sh /entrypoint.sh
 EXPOSE 8000 9000 9190 9191
 RUN mkdir -p /tmp/arroyo/build
+RUN mkdir -p /opt/arroyo/pipelines
 ENTRYPOINT ["/entrypoint.sh"]

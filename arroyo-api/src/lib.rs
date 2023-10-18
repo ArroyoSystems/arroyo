@@ -47,7 +47,7 @@ mod connectors;
 mod jobs;
 mod metrics;
 mod optimizations;
-mod pipelines;
+pub mod pipelines;
 pub mod rest;
 mod rest_utils;
 

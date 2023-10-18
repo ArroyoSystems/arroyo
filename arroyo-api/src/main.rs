@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::{select, sync::broadcast};
 use tokio_postgres::NoTls;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
-use arroyo_api::rest;
+use arroyo_api::rest::{self, AppState};
 use arroyo_server_common::{log_event, start_admin_server};
 use arroyo_types::{ports, service_port, DatabaseConfig, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV};
 
@@ -55,6 +55,24 @@ pub async fn main() {
             debug!("Failed to get cluster info {:?}", e);
         }
     };
+    let controller_addr = std::env::var(CONTROLLER_ADDR_ENV)
+        .unwrap_or_else(|_| format!("http://localhost:{}", ports::CONTROLLER_GRPC));
+    let args = std::env::args().collect::<Vec<_>>();
+    match args.get(1) {
+        Some(arg) if arg == "--pipelines" => {
+            if let Some(path) = args.get(2) {
+                if let Err(err) = arroyo_api::pipelines::register_pipelines_in_folder(
+                    path,
+                    AppState::new(controller_addr, pool.clone()),
+                )
+                .await
+                {
+                    error!("Failed to register pipelines: {:?}", err);
+                }
+            }
+        }
+        _ => {}
+    }
 
     server(pool).await;
 }
