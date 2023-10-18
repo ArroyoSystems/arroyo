@@ -3,10 +3,11 @@ use axum::Json;
 use axum_extra::extract::WithRejection;
 
 use arroyo_connectors::connector_for_type;
+use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionProfilePost};
+use arroyo_rpc::api_types::ConnectionProfileCollection;
 use tracing::warn;
 
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_rpc::types::{ConnectionProfile, ConnectionProfileCollection, ConnectionProfilePost};
 
 use crate::handle_db_error;
 use crate::queries::api_queries;

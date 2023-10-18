@@ -16,10 +16,12 @@ use arrow_schema::{IntervalUnit, TimeUnit, DECIMAL128_MAX_PRECISION, DECIMAL_DEF
 use arroyo_rpc::{
     formats::{Format, JsonFormat, TimestampFormat},
     primitive_to_sql,
-    types::{FieldType, PrimitiveType, SourceField, SourceFieldType, StructType},
 };
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
+use arroyo_rpc::api_types::connections::{
+    FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
+};
 use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;

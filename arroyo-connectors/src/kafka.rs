@@ -7,7 +7,7 @@ use typify::import_types;
 use axum::response::sse::Event;
 use std::time::{Duration, Instant};
 
-use arroyo_rpc::types::{ConnectionSchema, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{ConnectionSchema, TestSourceMessage};
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     message::BorrowedMessage,
@@ -38,8 +38,8 @@ impl Connector for KafkaConnector {
         "kafka"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "kafka".to_string(),
             name: "Kafka".to_string(),
             icon: ICON.to_string(),

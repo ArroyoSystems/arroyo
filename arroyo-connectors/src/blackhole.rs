@@ -1,4 +1,4 @@
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
 use std::convert::Infallible;
@@ -17,8 +17,8 @@ impl Connector for BlackholeConnector {
         "null"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "blackhole".to_string(),
             name: "Blackhole".to_string(),
             icon: ICON.to_string(),

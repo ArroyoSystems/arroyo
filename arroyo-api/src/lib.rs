@@ -25,21 +25,8 @@ use crate::pipelines::{
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::{bad_request, log_and_map, ErrorResp};
+use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::formats::*;
-use arroyo_rpc::types::{
-    Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType, ConfluentSchema,
-    ConnectionProfile, ConnectionProfileCollection, ConnectionProfilePost, ConnectionSchema,
-    ConnectionTable, ConnectionTableCollection, ConnectionTablePost, ConnectionType, Connector,
-    ConnectorCollection, FieldType, Job, JobCollection, JobLogLevel, JobLogMessage,
-    JobLogMessageCollection, Metric, MetricGroup, MetricNames, OperatorCheckpointGroup,
-    OperatorCheckpointGroupCollection, OperatorMetricGroup, OutputData, PaginationQueryParams,
-    Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
-    PipelinePost, PipelineRestart, PrimitiveType, QueryValidationResult, SchemaDefinition,
-    SourceField, SourceFieldType, StopType as StopTypeRest, StructType, SubtaskCheckpointGroup,
-    SubtaskMetrics, TestSourceMessage, Udf, UdfLanguage, UdfValidationResult, ValidateQueryPost,
-    ValidateUdfsPost,
-};
-
 mod cloud;
 mod connection_profiles;
 mod connection_tables;
@@ -173,8 +160,7 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         PipelineNode,
         PipelineEdge,
         Job,
-        StopTypeRest,
-        Udf,
+        StopType,
         UdfLanguage,
         PipelineCollection,
         JobCollection,
@@ -225,7 +211,8 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         ValidateQueryPost,
         QueryValidationResult,
         ValidateUdfsPost,
-        UdfValidationResult
+        UdfValidationResult,
+        Udf,
     )),
     tags(
         (name = "ping", description = "Ping endpoint"),

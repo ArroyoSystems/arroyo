@@ -1,8 +1,8 @@
 use anyhow::{anyhow, bail, Context};
-use arroyo_rpc::primitive_to_sql;
-use arroyo_rpc::types::{
+use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType,
 };
+use arroyo_rpc::primitive_to_sql;
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
 use blackhole::BlackholeConnector;
@@ -87,7 +87,7 @@ pub trait Connector: Send {
         serde_json::from_value(s.clone())
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector;
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector;
 
     fn table_type(&self, config: Self::ProfileT, table: Self::TableT) -> ConnectionType;
 
@@ -130,7 +130,7 @@ pub trait Connector: Send {
 pub trait ErasedConnector: Send {
     fn name(&self) -> &'static str;
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector;
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector;
 
     fn validate_config(&self, s: &serde_json::Value) -> Result<(), serde_json::Error>;
 
@@ -182,7 +182,7 @@ impl<C: Connector> ErasedConnector for C {
         self.name()
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
         self.metadata()
     }
 

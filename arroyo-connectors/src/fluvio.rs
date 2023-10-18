@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::types::{ConnectionSchema, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
@@ -23,8 +23,8 @@ impl Connector for FluvioConnector {
         "fluvio"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "fluvio".to_string(),
             name: "Fluvio".to_string(),
             icon: ICON.to_string(),

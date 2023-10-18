@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::types::FieldType::Primitive;
-use arroyo_rpc::types::{ConnectionSchema, PrimitiveType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::FieldType::Primitive;
+use arroyo_rpc::api_types::connections::{ConnectionSchema, PrimitiveType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
@@ -40,8 +40,8 @@ impl Connector for ImpulseConnector {
         "impulse"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "impulse".to_string(),
             name: "Impulse".to_string(),
             icon: ICON.to_string(),

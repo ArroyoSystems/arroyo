@@ -5,8 +5,10 @@ use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::{ConnectorOp, Operator};
+use arroyo_rpc::api_types::connections::{
+    ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
+};
 use arroyo_rpc::formats::{Format, Framing};
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, SchemaDefinition, SourceField};
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{

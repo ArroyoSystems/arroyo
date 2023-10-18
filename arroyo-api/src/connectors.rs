@@ -1,6 +1,6 @@
 use crate::rest_utils::ErrorResp;
 use arroyo_connectors::connectors;
-use arroyo_rpc::types::ConnectorCollection;
+use arroyo_rpc::api_types::ConnectorCollection;
 use axum::Json;
 
 /// List all connectors
