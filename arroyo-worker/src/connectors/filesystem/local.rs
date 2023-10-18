@@ -36,7 +36,10 @@ impl<K: Key, D: Data + Sync, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
         // make sure final_dir and tmp_dir exists
         create_dir_all(&tmp_dir).unwrap();
 
-        let file_settings = if let TableType::Sink { ref file_settings, .. } = table_properties.type_ {
+        let file_settings = if let TableType::Sink {
+            ref file_settings, ..
+        } = table_properties.type_
+        {
             file_settings.as_ref().unwrap()
         } else {
             unreachable!("LocalFileSystemWriter can only be used as a sink")

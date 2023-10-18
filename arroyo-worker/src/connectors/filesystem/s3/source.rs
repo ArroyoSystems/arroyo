@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use anyhow::Result;
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncBufRead, BufReader, Lines},
+    io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines},
     select,
 };
 use tracing::info;

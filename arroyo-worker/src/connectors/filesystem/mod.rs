@@ -104,7 +104,9 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
 
         let (object_store, path): (Box<dyn ObjectStore>, Path) = match table.type_ {
-            TableType::Sink { ref write_target, .. } => {
+            TableType::Sink {
+                ref write_target, ..
+            } => {
                 match write_target.clone().unwrap() {
                     Destination::LocalFilesystem { local_directory } => {
                         (Box::new(LocalFileSystem::new()), local_directory.into())
@@ -485,7 +487,10 @@ where
         checkpoint_sender: Sender<CheckpointData<T>>,
         writer_properties: FileSystemTable,
     ) -> Self {
-        let file_settings = if let TableType::Sink { ref file_settings, .. } = writer_properties.type_ {
+        let file_settings = if let TableType::Sink {
+            ref file_settings, ..
+        } = writer_properties.type_
+        {
             file_settings.as_ref().unwrap()
         } else {
             unreachable!("AsyncMultipartFileSystemWriter can only be used as a sink");
