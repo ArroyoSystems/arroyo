@@ -13,6 +13,7 @@ arroyo-macro = { path = "../arroyo-macro" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
+arroyo-storage = { path = "../arroyo-storage" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
 
 rand = "0.8"

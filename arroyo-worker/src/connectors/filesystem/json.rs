@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::{
     local::{CurrentFileRecovery, LocalWriter},
-    BatchBufferingWriter, BatchBuilder, FileSettings,
+    BatchBufferingWriter, BatchBuilder, FileSettings, TableType,
 };
 
 pub struct PassThrough<D: Data> {
@@ -46,10 +46,14 @@ impl<D: Data + Serialize> BatchBufferingWriter for JsonWriter<D> {
     type BatchData = D;
 
     fn new(config: &super::FileSystemTable) -> Self {
-        let target_part_size = if let Some(FileSettings {
-            target_part_size: Some(target_part_size),
+        let target_part_size = if let TableType::Sink {
+            file_settings:
+                Some(FileSettings {
+                    target_part_size: Some(target_part_size),
+                    ..
+                }),
             ..
-        }) = config.file_settings
+        } = config.type_
         {
             target_part_size as usize
         } else {

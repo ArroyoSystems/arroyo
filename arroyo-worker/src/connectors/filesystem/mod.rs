@@ -71,15 +71,22 @@ impl<K: Key, T: Data + Sync, V: LocalWriter<T>> LocalFileSystemWriter<K, T, V> {
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
-        let final_dir = match table.write_target.clone() {
-            Destination::LocalFilesystem { local_directory } => local_directory,
-            Destination::S3Bucket { .. } => {
-                unreachable!("shouldn't be using local writer for S3");
+        let final_dir = match table.type_.clone() {
+            TableType::Sink { write_target, .. } => {
+                match write_target.expect("destination is required") {
+                    Destination::LocalFilesystem { local_directory } => local_directory,
+                    Destination::S3Bucket { .. } => {
+                        unreachable!("shouldn't be using local writer for S3");
+                    }
+                    Destination::FolderUri { path } => {
+                        let (_object_store, path) =
+                            object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap();
+                        path.to_string()
+                    }
+                }
             }
-            Destination::FolderUri { path } => {
-                let (_object_store, path) =
-                    object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap();
-                path.to_string()
+            TableType::Source { .. } => {
+                unreachable!("shouldn't be using local writer for source");
             }
         };
         let writer = LocalFileSystemWriter::new(final_dir, table);
@@ -95,30 +102,38 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
-        let (object_store, path): (Box<dyn ObjectStore>, Path) = match table.write_target.clone() {
-            Destination::LocalFilesystem { local_directory } => {
-                (Box::new(LocalFileSystem::new()), local_directory.into())
+
+        let (object_store, path): (Box<dyn ObjectStore>, Path) = match table.type_ {
+            TableType::Sink { ref write_target, .. } => {
+                match write_target.clone().unwrap() {
+                    Destination::LocalFilesystem { local_directory } => {
+                        (Box::new(LocalFileSystem::new()), local_directory.into())
+                    }
+                    Destination::S3Bucket {
+                        s3_bucket,
+                        s3_directory,
+                        aws_region,
+                    } => {
+                        (
+                            Box::new(
+                                // use default credentials
+                                AmazonS3Builder::from_env()
+                                    .with_bucket_name(s3_bucket)
+                                    .with_credentials(Arc::new(S3Credentialing::try_new().unwrap()))
+                                    .with_region(aws_region)
+                                    .build()
+                                    .unwrap(),
+                            ),
+                            s3_directory.into(),
+                        )
+                    }
+                    Destination::FolderUri { path } => {
+                        object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap()
+                    }
+                }
             }
-            Destination::S3Bucket {
-                s3_bucket,
-                s3_directory,
-                aws_region,
-            } => {
-                (
-                    Box::new(
-                        // use default credentials
-                        AmazonS3Builder::from_env()
-                            .with_bucket_name(s3_bucket)
-                            .with_credentials(Arc::new(S3Credentialing::try_new().unwrap()))
-                            .with_region(aws_region)
-                            .build()
-                            .unwrap(),
-                    ),
-                    s3_directory.into(),
-                )
-            }
-            Destination::FolderUri { path } => {
-                object_store::parse_url(&url::Url::parse(&path).unwrap()).unwrap()
+            TableType::Source { .. } => {
+                unreachable!("shouldn't be using local writer for source");
             }
         };
 
@@ -470,6 +485,11 @@ where
         checkpoint_sender: Sender<CheckpointData<T>>,
         writer_properties: FileSystemTable,
     ) -> Self {
+        let file_settings = if let TableType::Sink { ref file_settings, .. } = writer_properties.type_ {
+            file_settings.as_ref().unwrap()
+        } else {
+            unreachable!("AsyncMultipartFileSystemWriter can only be used as a sink");
+        };
         Self {
             path,
             current_writer_name: "".to_string(),
@@ -481,9 +501,7 @@ where
             checkpoint_sender,
             futures: FuturesUnordered::new(),
             files_to_finish: Vec::new(),
-            rolling_policy: RollingPolicy::from_file_settings(
-                writer_properties.file_settings.as_ref().unwrap(),
-            ),
+            rolling_policy: RollingPolicy::from_file_settings(file_settings),
             properties: writer_properties,
         }
     }

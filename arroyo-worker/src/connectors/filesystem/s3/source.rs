@@ -3,16 +3,17 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
-use aws_sdk_s3::Region;
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines},
+    io::{AsyncBufReadExt, AsyncBufRead, BufReader, Lines},
     select,
 };
 use tracing::info;
 
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp, OperatorConfig};
+use arroyo_storage::StorageProvider;
 use arroyo_types::{Data, Record, UserError};
+use futures::stream::StreamExt;
 
 use crate::{
     connectors::filesystem::s3::CompressionFormat, engine::Context, formats::DataDeserializer,
@@ -82,6 +83,20 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
         if ctx.task_info.task_index != 0 {
             return Ok(SourceFinishType::Final);
         }
+
+        let storage_provider = StorageProvider::for_url(&format!(
+            "https://{}.amazonaws.com/{}/{}",
+            self.region, self.bucket, self.prefix
+        ))
+        .await
+        .map_err(|err| UserError::new("failed to create storage provider", err.to_string()))?;
+
+        // TODO: sort by creation time
+        let mut file_paths = storage_provider
+            .list_stream(self.prefix.clone())
+            .await
+            .map_err(|err| UserError::new("could not list files", err.to_string()))?;
+
         let (prev_s3_key, prev_lines_read) = ctx
             .state
             .get_global_keyed_state('a')
@@ -90,27 +105,14 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
             .map(|v: &(String, usize)| v.clone())
             .unwrap_or_default();
 
-        let config = aws_config::from_env()
-            .region(Region::new(self.region.clone()))
-            .load()
-            .await;
-
-        let client = aws_sdk_s3::Client::new(&config);
-
-        // TODO: sort by creation date
-        let list_res = client
-            .list_objects_v2()
-            .bucket(self.bucket.clone())
-            .set_prefix(Some(self.prefix.clone()))
-            .send()
-            .await
-            .unwrap();
         let mut prev_file_found = prev_s3_key == "";
 
-        let mut contents = list_res.contents.unwrap();
+        // let mut contents = list_res.contents.unwrap();
 
-        while let Some(obj) = contents.pop() {
-            let obj_key = obj.key.unwrap();
+        while let Some(path) = file_paths.next().await {
+            let obj_key = path
+                .map(|p| p.to_string())
+                .map_err(|err| UserError::new("could not get next path", err.to_string()))?;
             if obj_key.ends_with('/') {
                 continue;
             }
@@ -121,18 +123,11 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
             }
             prev_file_found = true;
 
-            let get_res = client
-                .get_object()
-                .bucket(self.bucket.clone())
-                .key(obj_key.clone())
-                .send()
-                .await
-                .unwrap();
-            let body = get_res.body;
+            let stream_reader = storage_provider.get_stream(&obj_key).await.unwrap();
 
             match self.compression {
                 CompressionFormat::Zstd => {
-                    let r = ZstdDecoder::new(BufReader::new(body.into_async_read()));
+                    let r = ZstdDecoder::new(BufReader::new(stream_reader));
                     match self
                         .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
                         .await?
@@ -142,7 +137,7 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
                     }
                 }
                 CompressionFormat::Gzip => {
-                    let r = GzipDecoder::new(BufReader::new(body.into_async_read()));
+                    let r = GzipDecoder::new(BufReader::new(stream_reader));
                     match self
                         .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
                         .await?
@@ -155,7 +150,7 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
                     match self
                         .read_file(
                             ctx,
-                            BufReader::new(body.into_async_read()).lines(),
+                            BufReader::new(stream_reader).lines(),
                             &obj_key,
                             prev_lines_read,
                         )
