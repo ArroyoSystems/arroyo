@@ -11,7 +11,6 @@ kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-macro = { path = "../arroyo-macro" }
 arroyo-state = { path = "../arroyo-state" }
-arroyo-storage = { path = "../arroyo-storage" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-storage = { path = "../arroyo-storage" }
