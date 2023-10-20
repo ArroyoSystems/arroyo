@@ -319,6 +319,18 @@ pub enum UpdatingData<T: Data> {
     Append(T),
 }
 
+impl<T: Data> UpdatingData<T> {
+    pub fn lower(&self) -> T {
+        match self {
+            UpdatingData::Retract(_) => {
+                panic!("cannot lower retractions")
+            }
+            UpdatingData::Update { new, .. } => new.clone(),
+            UpdatingData::Append(t) => t.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(try_from = "DebeziumShadow<T>")]
 pub struct Debezium<T: Data> {

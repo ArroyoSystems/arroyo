@@ -8,7 +8,7 @@ use reqwest::{Client, Request};
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::{construct_http_client, pull_opt, pull_option_to_i64, Connection, EmptyConfig};
@@ -84,8 +84,8 @@ impl Connector for PollingHTTPConnector {
         "polling_http"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "polling_http".to_string(),
             name: "Polling HTTP".to_string(),
             icon: ICON.to_string(),

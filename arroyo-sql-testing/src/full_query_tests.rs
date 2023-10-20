@@ -448,3 +448,26 @@ full_pipeline_codegen! {"unnest",
 select cast(unnest(extract_json('{\"a\": [1, 2, 3]}', '$.a[*]')) as int) + 5, bid.auction
 from nexmark;
 "}
+
+full_pipeline_codegen! {"unnest_multiple_projections",
+"
+select extract_json_string(unnested, '$.a'), extract_json_string(unnested, '$.b') FROM (
+  select unnest(extract_json(bid.url, '$.a[*]')) as unnested
+  from nexmark);
+"}
+
+full_pipeline_codegen! {"non_updating_select_distinct",
+"CREATE TABLE non_updating_sink (
+   url TEXT
+) WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'sink',
+  topic = 'outputs',
+  format = 'json'
+);
+
+INSERT INTO non_updating_sink
+select distinct(bid.url)
+from nexmark;
+"}

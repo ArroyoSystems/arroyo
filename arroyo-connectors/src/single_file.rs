@@ -3,7 +3,7 @@ use axum::response::sse::Event;
 use std::convert::Infallible;
 use typify::import_types;
 
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 
@@ -26,8 +26,8 @@ impl Connector for SingleFileConnector {
         "single_file"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "single_file_source".to_string(),
             name: "Single File Source".to_string(),
             icon: "".to_string(),

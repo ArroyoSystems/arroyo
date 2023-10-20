@@ -5,8 +5,10 @@ use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::{ConnectorOp, Operator};
+use arroyo_rpc::api_types::connections::{
+    ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
+};
 use arroyo_rpc::formats::{Format, Framing};
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, SchemaDefinition, SourceField};
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -384,14 +386,14 @@ impl ConnectorTable {
     pub fn as_sql_sink(&self, mut input: SqlOperator) -> Result<SqlOperator> {
         match self.connection_type {
             ConnectionType::Source => {
-                bail!("Inserting into a source is not allowed")
+                bail!("inserting into a source is not allowed")
             }
             ConnectionType::Sink => {}
         }
 
         if self.has_virtual_fields() {
             // TODO: I think it would be reasonable and possibly useful to support this
-            bail!("Virtual fields are not currently supported in sinks");
+            bail!("virtual fields are not currently supported in sinks");
         }
 
         let updating_type = if self.is_update() {
@@ -401,7 +403,7 @@ impl ConnectorTable {
         };
 
         if updating_type == SinkUpdateType::Disallow && input.is_updating() {
-            bail!("Sink does not support update messages, cannot be used with an updating query");
+            bail!("sink does not support update messages, cannot be used with an updating query");
         }
 
         if let Some(format) = &self.format {

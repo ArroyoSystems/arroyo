@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-compiler-service"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 
 [dependencies]
@@ -14,3 +14,4 @@ prost = "0.11"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 anyhow = "1.0.75"
+serde_json = "1.0.106"

@@ -41,8 +41,8 @@ use tables::{schema_defs, ConnectorTable, Insert, Table};
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::types::{StructDef, StructField, TypeDef};
+use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType};
 use arroyo_rpc::formats::{Format, JsonFormat};
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType};
 use datafusion_common::DataFusionError;
 use quote::ToTokens;
 use std::time::{Duration, SystemTime};
@@ -237,7 +237,7 @@ impl ArroyoSchemaProvider {
 
         for item in file.items {
             let Item::Fn(mut function) = item else {
-                bail!("not a function");
+                continue;
             };
 
             let mut args: Vec<TypeDef> = vec![];

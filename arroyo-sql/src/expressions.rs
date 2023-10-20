@@ -256,7 +256,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
                     panic!("unnest appeared in a non-projection context");
                 } else {
                     let ident = input_context.variable_ident();
-                    parse_quote!(#ident)
+                    parse_quote!(#ident.clone())
                 }
             }
         }
@@ -497,6 +497,12 @@ impl Expression {
                 DataStructureFunction::NullIf { left, right } => {
                     (&mut *left).traverse_mut(context, f);
                     (&mut *right).traverse_mut(context, f);
+                }
+                DataStructureFunction::ArrayIndex {
+                    array_expression,
+                    index: _,
+                } => {
+                    (&mut *array_expression).traverse_mut(context, f);
                 }
             },
             Expression::Json(e) => {
@@ -1412,7 +1418,18 @@ impl StructFieldExpression {
                 struct_expression,
                 field_name: column.to_string(),
             })),
-            _ => bail!("don't support key {:?} for struct field lookup", key),
+            ScalarValue::Int64(Some(index)) => {
+                if *index <= 0 {
+                    bail!("the index into a list must be greater than 0")
+                }
+                Ok(Expression::DataStructure(
+                    DataStructureFunction::ArrayIndex {
+                        array_expression: struct_expression,
+                        index: *index as usize,
+                    },
+                ))
+            }
+            _ => bail!("don't support key {:?} for index lookups", key),
         }
     }
 }
@@ -2549,7 +2566,7 @@ impl StringFunction {
                     || expr3.expression_type(input_context).is_optional(),
             ),
             StringFunction::RegexpMatch(expr1, _) => TypeDef::DataType(
-                DataType::Utf8,
+                DataType::List(Arc::new(Field::new("items", DataType::Utf8, true))),
                 expr1.expression_type(input_context).is_optional(),
             ),
             StringFunction::Strpos(expr1, expr2) => TypeDef::DataType(
@@ -3233,6 +3250,10 @@ pub enum DataStructureFunction {
         right: Box<Expression>,
     },
     MakeArray(Vec<Expression>),
+    ArrayIndex {
+        array_expression: Box<Expression>,
+        index: usize,
+    },
 }
 
 impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DataStructureFunction {
@@ -3345,6 +3366,29 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DataStructureFun
                     }
                 }
             }
+            DataStructureFunction::ArrayIndex {
+                array_expression,
+                index,
+            } => {
+                let array_expr = array_expression.generate(input_context);
+                let array_nullable = array_expression
+                    .expression_type(input_context)
+                    .is_optional();
+                match array_nullable {
+                    true => parse_quote!({
+                        let array = #array_expr;
+                        if let Some(array) = array {
+                            array.get(#index - 1).cloned()
+                        } else {
+                            None
+                        }
+                    }),
+                    false => parse_quote!({
+                        let array = #array_expr;
+                        array.get(#index - 1).cloned()
+                    }),
+                }
+            }
         }
     }
     fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
@@ -3372,6 +3416,21 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DataStructureFun
                     DataType::List(Arc::new(Field::new("items", primitive_type, nullable))),
                     false,
                 )
+            }
+            DataStructureFunction::ArrayIndex {
+                array_expression,
+                index: _,
+            } => {
+                let TypeDef::DataType(DataType::List(field), _) =
+                    array_expression.expression_type(input_context)
+                else {
+                    unreachable!(
+                        "array_index should only be called on a list, not on {:?}, {:?}",
+                        array_expression.expression_type(input_context),
+                        array_expression
+                    )
+                };
+                TypeDef::DataType(field.data_type().clone(), true)
             }
         }
     }

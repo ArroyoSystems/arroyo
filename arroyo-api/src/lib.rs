@@ -21,24 +21,12 @@ use crate::pipelines::__path_get_pipelines;
 use crate::pipelines::__path_post_pipeline;
 use crate::pipelines::{
     __path_delete_pipeline, __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline,
-    __path_validate_pipeline,
+    __path_restart_pipeline, __path_validate_query, __path_validate_udfs,
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::{bad_request, log_and_map, ErrorResp};
+use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::formats::*;
-use arroyo_rpc::types::{
-    Checkpoint, CheckpointCollection, CheckpointEventSpan, CheckpointSpanType, ConfluentSchema,
-    ConnectionProfile, ConnectionProfileCollection, ConnectionProfilePost, ConnectionSchema,
-    ConnectionTable, ConnectionTableCollection, ConnectionTablePost, ConnectionType, Connector,
-    ConnectorCollection, FieldType, Job, JobCollection, JobLogLevel, JobLogMessage,
-    JobLogMessageCollection, Metric, MetricGroup, MetricNames, OperatorCheckpointGroup,
-    OperatorCheckpointGroupCollection, OperatorMetricGroup, OutputData, PaginationQueryParams,
-    Pipeline, PipelineCollection, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch,
-    PipelinePost, PrimitiveType, SchemaDefinition, SourceField, SourceFieldType,
-    StopType as StopTypeRest, StructType, SubtaskCheckpointGroup, SubtaskMetrics,
-    TestSourceMessage, Udf, UdfLanguage, ValidatePipelinePost,
-};
-
 mod cloud;
 mod connection_profiles;
 mod connection_tables;
@@ -138,9 +126,11 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
     servers((url = "/api/")),
     paths(
         ping,
-        validate_pipeline,
+        validate_query,
+        validate_udfs,
         post_pipeline,
         patch_pipeline,
+        restart_pipeline,
         get_pipeline,
         delete_pipeline,
         get_pipelines,
@@ -162,16 +152,15 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         get_checkpoint_details,
     ),
     components(schemas(
-        ValidatePipelinePost,
         PipelinePost,
         PipelinePatch,
+        PipelineRestart,
         Pipeline,
         PipelineGraph,
         PipelineNode,
         PipelineEdge,
         Job,
-        StopTypeRest,
-        Udf,
+        StopType,
         UdfLanguage,
         PipelineCollection,
         JobCollection,
@@ -219,6 +208,11 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         OperatorCheckpointGroupCollection,
         SubtaskCheckpointGroup,
         OperatorCheckpointGroup,
+        ValidateQueryPost,
+        QueryValidationResult,
+        ValidateUdfsPost,
+        UdfValidationResult,
+        Udf,
     )),
     tags(
         (name = "ping", description = "Ping endpoint"),

@@ -29,7 +29,7 @@ use crate::jobs::{
 use crate::metrics::get_operator_metric_groups;
 use crate::pipelines::{
     delete_pipeline, get_pipeline, get_pipeline_jobs, get_pipelines, patch_pipeline, post_pipeline,
-    validate_pipeline,
+    restart_pipeline, validate_query, validate_udfs,
 };
 use crate::rest_utils::not_found;
 use crate::ApiDoc;
@@ -120,9 +120,11 @@ pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
         .route("/pipelines", post(post_pipeline))
         .route("/pipelines", get(get_pipelines))
         .route("/jobs", get(get_jobs))
-        .route("/pipelines/validate", post(validate_pipeline))
+        .route("/pipelines/validate_query", post(validate_query))
+        .route("/pipelines/validate_udfs", post(validate_udfs))
         .route("/pipelines/:id", patch(patch_pipeline))
         .route("/pipelines/:id", get(get_pipeline))
+        .route("/pipelines/:id/restart", post(restart_pipeline))
         .route("/pipelines/:id", delete(delete_pipeline))
         .nest("/pipelines/:id/jobs", jobs_routes)
         .fallback(api_fallback);

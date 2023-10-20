@@ -324,7 +324,7 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
                 delete_behavior: TableDeleteBehavior::NoReadsBeforeWatermark as i32,
                 write_behavior: TableWriteBehavior::NoWritesBeforeWatermark as i32,
                 // we always write the largest end in the list of windows
-                retention_micros: 0 as u64,
+                retention_micros: MAX_SESSION_SIZE.as_micros() as u64,
             },
             TableDescriptor {
                 name: "s".to_string(),
@@ -332,7 +332,7 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
                 table_type: TableType::TimeKeyMap as i32,
                 delete_behavior: TableDeleteBehavior::NoReadsBeforeWatermark as i32,
                 write_behavior: TableWriteBehavior::NoWritesBeforeWatermark as i32,
-                retention_micros: MAX_SESSION_SIZE.as_micros() as u64,
+                retention_micros: 0 as u64,
             },
         ]
     }
@@ -424,6 +424,14 @@ impl<K: Key, T: Data, OutT: Data> SessionWindowFunc<K, T, OutT> {
         state
             .clear_time_range(&mut key, window.start, window.end)
             .await;
+    }
+
+    async fn handle_checkpoint(
+        &mut self,
+        _checkpoint_barrier: &arroyo_types::CheckpointBarrier,
+        ctx: &mut Context<K, OutT>,
+    ) {
+        ctx.flush_timers::<Window>().await;
     }
 }
 

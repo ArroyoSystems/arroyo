@@ -168,6 +168,9 @@ message WorkerErrorReq {
 message WorkerErrorRes {
 }
 
+message CheckUdfsReq {
+  string udfs_rs = 1;
+}
 
 service ControllerGrpc {
   rpc RegisterNode(RegisterNodeReq) returns (RegisterNodeResp);
@@ -185,6 +188,8 @@ service ControllerGrpc {
 
   rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
   rpc WorkerError(WorkerErrorReq) returns (WorkerErrorRes);
+  rpc CheckUdfs(CheckUdfsReq) returns (CheckUdfsResp);
+
 }
 
 message ParquetStoreData {
@@ -425,6 +430,18 @@ message CompileQueryResp {
   string wasm_fns_path = 2;
 }
 
+
+enum ValidationResult {
+  Ok = 0;
+  Error = 1;
+}
+
+message CheckUdfsResp {
+  ValidationResult result = 1;
+  repeated string errors = 2;
+}
+
 service CompilerGrpc {
   rpc CompileQuery(CompileQueryReq) returns (CompileQueryResp);
+  rpc CheckUdfs(CheckUdfsReq) returns (CheckUdfsResp);
 }

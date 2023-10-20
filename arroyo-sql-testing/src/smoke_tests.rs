@@ -208,6 +208,13 @@ async fn run_pipeline_and_assert_outputs(
     }
 
     let program = Program::local_from_logical(job_id.clone(), &graph);
+    run_completely(
+        Program::local_from_logical(job_id.clone(), &graph),
+        job_id.clone(),
+        output_location.clone(),
+        golden_output_location.clone(),
+    )
+    .await;
     let tasks_per_operator = program.tasks_per_operator();
     let engine = Engine::for_local(program, job_id.clone());
     let (running_engine, mut control_rx) = engine
@@ -231,10 +238,32 @@ async fn run_pipeline_and_assert_outputs(
     check_output_files(output_location, golden_output_location).await;
 }
 
+async fn run_completely(
+    program: Program,
+    job_id: String,
+    output_location: String,
+    golden_output_location: String,
+) {
+    let tasks_per_operator = program.tasks_per_operator();
+    let engine = Engine::for_local(program, job_id.clone());
+    let (running_engine, mut control_rx) = engine
+        .start(StreamConfig {
+            restore_epoch: None,
+        })
+        .await;
+
+    run_until_finished(&running_engine, &mut control_rx).await;
+
+    check_output_files(output_location.clone(), golden_output_location).await;
+    if std::path::Path::new(&output_location).exists() {
+        std::fs::remove_file(&output_location).unwrap();
+    }
+}
+
 async fn check_output_files(output_location: String, golden_output_location: String) {
     let mut output_lines: Vec<_> = read_to_string(output_location.clone())
         .await
-        .unwrap()
+        .expect(&format!("output file not found at {}", output_location))
         .lines()
         .map(|x| x.to_string())
         .collect();
@@ -746,6 +775,16 @@ correctness_run_codegen! {"union", 10,
   format = 'json',
   type = 'source'
 );
+CREATE TABLE second_impulse_source (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source'
+);
 CREATE TABLE union_output (
   counter bigint
 ) WITH (
@@ -755,6 +794,78 @@ CREATE TABLE union_output (
   type = 'sink'
 );
 INSERT INTO union_output
-SELECT counter FROM (SELECT counter  FROM impulse_source)
-UNION ALL (SELECT 2 * counter FROM impulse_source)"
+SELECT counter  FROM impulse_source
+UNION ALL SELECT counter FROM second_impulse_source"
 }
+
+correctness_run_codegen! {"session_window", 10,
+"CREATE TABLE impulse_source (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source',
+  event_time_field = 'timestamp'
+);
+
+CREATE TABLE session_window_output (
+  start timestamp,
+  end timestamp,
+  user_id bigint,
+  rows bigint,
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'json',
+  type = 'sink'
+);
+
+INSERT INTO session_window_output
+SELECT window.start, window.end, user_id, rows FROM (
+    SELECT SESSION(interval '20 seconds') as window, Case when counter%10=0 then 0 else counter END as user_id, count(*) as rows
+    FROM impulse_source GROUP BY window, user_id);
+"}
+
+correctness_run_codegen! {"offset_impulse_join", 10,
+"CREATE TABLE impulse_source (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source',
+  event_time_field = 'timestamp'
+);
+CREATE TABLE delayed_impulse_source (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null,
+  watermark timestamp GENERATED ALWAYS AS (timestamp - INTERVAL '10 minute')
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source',
+  event_time_field = 'timestamp',
+  watermark_field = 'watermark'
+);
+CREATE TABLe offset_output (
+  start timestamp,
+  counter bigint 
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'json',
+  type = 'sink'
+);
+INSERT INTO offset_output
+SELECT window.start, a.counter as counter 
+FROM (SELECT TUMBLE(interval '1 second'),  counter, count(*) FROM impulse_source GROUP BY 1,2) a
+
+JOIN (SELECT TUMBLE(interval '1 second') as window, counter , count(*) FROM delayed_impulse_source GROUP BY 1,2) b
+ON a.counter = b.counter;"}

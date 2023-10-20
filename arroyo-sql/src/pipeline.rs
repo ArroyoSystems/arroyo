@@ -19,7 +19,7 @@ use quote::quote;
 use crate::code_gen::{CodeGenerator, ValuePointerContext, VecAggregationContext};
 use crate::expressions::{AggregateComputation, AggregateResultExtraction, ExpressionContext};
 use crate::external::{ProcessingMode, SqlSink, SqlSource};
-use crate::operators::UnnestProjection;
+use crate::operators::{UnnestFieldType, UnnestProjection};
 use crate::schemas::window_type_def;
 use crate::tables::{Insert, Table};
 use crate::{
@@ -337,7 +337,10 @@ impl SqlOperator {
             SqlOperator::Source(source) => source.source.processing_mode == ProcessingMode::Update,
             SqlOperator::Aggregator(input, aggregate_operator) => {
                 input.is_updating()
-                    || (!input.has_window() && aggregate_operator.window == WindowType::Instant)
+                    || (!input.has_window() && aggregate_operator.window == WindowType::Instant
+                        // non-windowed aggregates without aggregate functions are not updating, as
+                        // they cannot have retractions
+                        && !aggregate_operator.aggregating.aggregates.is_empty())
             }
             SqlOperator::JoinOperator(left, right, join_operator) => {
                 // the join will be updating if one of the sides is updating or if a non-window side is nullable.
@@ -553,32 +556,38 @@ impl<'a> SqlPipelineBuilder<'a> {
             .iter()
             .map(|field| Column::convert(&field.qualified_column()));
 
-        let mut fields: Vec<_> = names.zip(functions).collect();
+        let fields: Vec<_> = names.zip(functions).collect();
 
         let mut unnest = None;
-        for (i, (_, expr)) in fields.iter_mut().enumerate() {
-            if let Some(e) = Self::split_unnest(expr)? {
-                if unnest.replace((i, e)).is_some() {
-                    bail!("multiple columns containing unnest functions, which is not currently supported");
-                }
-            }
-        }
+        let fields = fields
+            .into_iter()
+            .map(|(col, mut expr)| {
+                let typ = if let Some(e) = Self::split_unnest(&mut expr)? {
+                    if let Some(prev) = unnest.replace(e) {
+                        if &prev != unnest.as_ref().unwrap() {
+                            bail!("multiple unnested values, which is not currently supported");
+                        }
+                    }
+                    UnnestFieldType::UnnestOuter
+                } else {
+                    UnnestFieldType::Default
+                };
 
-        if let Some((i, unnest_inner)) = unnest {
-            let (unnest_col, unnest_outer) = fields.remove(i);
+                Ok((col, expr, typ))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
+        if let Some(unnest_inner) = unnest {
             Ok(SqlOperator::RecordTransform(
                 Box::new(input),
                 RecordTransform::UnnestProjection(UnnestProjection {
                     fields,
-                    unnest_col,
                     unnest_inner,
-                    unnest_outer,
                     format: None,
                 }),
             ))
         } else {
-            let projection = Projection::new(fields);
+            let projection = Projection::new(fields.into_iter().map(|(a, b, _)| (a, b)).collect());
 
             Ok(SqlOperator::RecordTransform(
                 Box::new(input),
@@ -1099,7 +1108,10 @@ impl<'a> SqlPipelineBuilder<'a> {
         // check that all inputs have the same schema, updating behavior and windowing behavior
         let first_input = &inputs[0];
         for input in &inputs[1..] {
-            if input.return_type() != first_input.return_type() {
+            if !first_input
+                .return_type()
+                .field_types_match(&input.return_type())
+            {
                 bail!("union inputs must have the same schema");
             }
             if input.is_updating() != first_input.is_updating() {

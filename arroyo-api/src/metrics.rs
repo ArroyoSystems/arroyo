@@ -8,10 +8,10 @@ use std::{collections::HashMap, env, time::SystemTime};
 use crate::pipelines::query_job_by_pub_id;
 use crate::rest::AppState;
 use crate::rest_utils::{authenticate, client, BearerAuth, ErrorResp};
-use arroyo_rpc::types::{
-    Metric, MetricGroup, MetricNames, OperatorMetricGroup, OperatorMetricGroupCollection,
-    SubtaskMetrics,
+use arroyo_rpc::api_types::metrics::{
+    Metric, MetricGroup, MetricNames, OperatorMetricGroup, SubtaskMetrics,
 };
+use arroyo_rpc::api_types::OperatorMetricGroupCollection;
 use arroyo_types::{
     to_millis, API_METRICS_RATE_ENV, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
     TX_QUEUE_REM, TX_QUEUE_SIZE,

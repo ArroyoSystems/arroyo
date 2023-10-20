@@ -1,11 +1,16 @@
-use std::{fs::File, io::Write, marker::PhantomData};
+use std::{
+    fs::File,
+    io::Write,
+    marker::PhantomData,
+    time::{Instant, SystemTime},
+};
 
 use arroyo_types::Data;
 use serde::Serialize;
 
 use super::{
     local::{CurrentFileRecovery, LocalWriter},
-    BatchBufferingWriter, BatchBuilder, FileSettings, TableType,
+    BatchBufferingWriter, BatchBuilder, FileSettings, MultiPartWriterStats, TableType,
 };
 
 pub struct PassThrough<D: Data> {
@@ -116,6 +121,7 @@ pub struct JsonLocalWriter {
     tmp_path: String,
     final_path: String,
     file: File,
+    stats: Option<MultiPartWriterStats>,
 }
 
 impl<D: Data + Serialize> LocalWriter<D> for JsonLocalWriter {
@@ -129,6 +135,7 @@ impl<D: Data + Serialize> LocalWriter<D> for JsonLocalWriter {
             tmp_path,
             final_path,
             file,
+            stats: None,
         }
     }
 
@@ -136,7 +143,18 @@ impl<D: Data + Serialize> LocalWriter<D> for JsonLocalWriter {
         "json"
     }
 
-    fn write(&mut self, value: D) -> anyhow::Result<()> {
+    fn write(&mut self, value: D, timestamp: SystemTime) -> anyhow::Result<()> {
+        if self.stats.is_none() {
+            self.stats = Some(MultiPartWriterStats {
+                bytes_written: 0,
+                parts_written: 0,
+                first_write_at: Instant::now(),
+                last_write_at: Instant::now(),
+                representative_timestamp: timestamp,
+            });
+        } else {
+            self.stats.as_mut().unwrap().last_write_at = Instant::now();
+        }
         self.file
             .write_all(serde_json::to_vec(&value)?.as_slice())?;
         self.file.write_all(b"\n")?;
@@ -146,6 +164,7 @@ impl<D: Data + Serialize> LocalWriter<D> for JsonLocalWriter {
     fn sync(&mut self) -> anyhow::Result<usize> {
         self.file.flush()?;
         let size = self.file.metadata()?.len() as usize;
+        self.stats.as_mut().unwrap().bytes_written = size;
         Ok(size)
     }
 
@@ -169,5 +188,9 @@ impl<D: Data + Serialize> LocalWriter<D> for JsonLocalWriter {
         } else {
             Ok(None)
         }
+    }
+
+    fn stats(&self) -> MultiPartWriterStats {
+        self.stats.clone().unwrap()
     }
 }

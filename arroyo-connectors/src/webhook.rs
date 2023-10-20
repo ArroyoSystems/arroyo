@@ -9,7 +9,7 @@ use serde_json::json;
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
-use arroyo_rpc::types::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::{construct_http_client, pull_opt, Connection, EmptyConfig};
@@ -76,8 +76,8 @@ impl Connector for WebhookConnector {
         "webhook"
     }
 
-    fn metadata(&self) -> arroyo_rpc::types::Connector {
-        arroyo_rpc::types::Connector {
+    fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
+        arroyo_rpc::api_types::connections::Connector {
             id: "webhook".to_string(),
             name: "Webhook".to_string(),
             icon: ICON.to_string(),

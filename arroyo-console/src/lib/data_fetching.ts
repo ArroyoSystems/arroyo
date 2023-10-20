@@ -115,8 +115,12 @@ const operatorErrorsKey = (pipelineId?: string, jobId?: string) => {
   };
 };
 
-const pipelineGraphKey = (query?: string, udfsInput?: string) => {
+const queryValidationKey = (query?: string, udfsInput?: string) => {
   return query ? { key: 'PipelineGraph', query, udfsInput } : null;
+};
+
+const udfsValidationKey = (udfsInput?: string) => {
+  return udfsInput ? { key: 'UdfsValidation', udfsInput } : null;
 };
 
 const pipelineKey = (pipelineId?: string) => {
@@ -329,9 +333,9 @@ export const useCheckpointDetails = (pipelineId?: string, jobId?: string, epoch?
   };
 };
 
-const pipelineGraphFetcher = () => {
+const queryValidationFetcher = () => {
   return async (params: { key: string; query?: string; udfsInput: string }) => {
-    const { data, error } = await post('/v1/pipelines/validate', {
+    const { data, error } = await post('/v1/pipelines/validate_query', {
       body: {
         query: params.query ?? '',
         udfs: [{ language: 'rust', definition: params.udfsInput }],
@@ -341,16 +345,42 @@ const pipelineGraphFetcher = () => {
   };
 };
 
-export const usePipelineGraph = (query?: string, udfsInput?: string) => {
-  const { data, error } = useSWR<schemas['PipelineGraph']>(
-    pipelineGraphKey(query, udfsInput),
-    pipelineGraphFetcher(),
+export const useQueryValidation = (query?: string, udfsInput?: string) => {
+  const { data, error, isLoading } = useSWR<schemas['QueryValidationResult']>(
+    queryValidationKey(query, udfsInput),
+    queryValidationFetcher(),
     { revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false }
   );
 
   return {
-    pipelineGraph: data,
-    pipelineGraphError: error,
+    queryValidation: data,
+    queryValidationError: error,
+    queryValidationLoading: isLoading,
+  };
+};
+
+const udfsValidationFetcher = () => {
+  return async (params: { key: string; udfsInput: string }) => {
+    const { data, error } = await post('/v1/pipelines/validate_udfs', {
+      body: {
+        udfsRs: params.udfsInput,
+      },
+    });
+    return processResponse(data, error);
+  };
+};
+
+export const useUdfsValidation = (udfsInput?: string) => {
+  const { data, error, isLoading } = useSWR<schemas['UdfValidationResult']>(
+    udfsValidationKey(udfsInput),
+    udfsValidationFetcher(),
+    { revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false }
+  );
+
+  return {
+    udfsValidation: data,
+    udfsValidationError: error,
+    udfsValidationLoading: isLoading,
   };
 };
 
@@ -411,6 +441,14 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
     await mutate();
   };
 
+  const restartPipeline = async () => {
+    await post('/v1/pipelines/{id}/restart', {
+      params: { path: { id: pipelineId! } },
+      body: {},
+    });
+    await mutate();
+  };
+
   const deletePipeline = async () => {
     const { error } = await del('/v1/pipelines/{id}', {
       params: { path: { id: pipelineId! } },
@@ -425,6 +463,7 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
     pipelineLoading: isLoading,
     updatePipeline,
     deletePipeline,
+    restartPipeline,
   };
 };
 

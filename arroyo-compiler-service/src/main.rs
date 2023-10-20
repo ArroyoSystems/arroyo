@@ -1,17 +1,19 @@
 use std::process::{exit, Output};
+use std::str::from_utf8;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{io, path::PathBuf, str::FromStr, sync::Arc};
 
 use arroyo_rpc::grpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
-    CompileQueryReq, CompileQueryResp,
+    CheckUdfsReq, CheckUdfsResp, CompileQueryReq, CompileQueryResp, ValidationResult,
 };
 
 use arroyo_server_common::start_admin_server;
 use arroyo_storage::StorageProvider;
 use arroyo_types::{grpc_port, ports, ARTIFACT_URL_ENV};
 use prost::Message;
+use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::{process::Command, sync::Mutex};
 use tonic::{transport::Server, Request, Response, Status};
@@ -175,6 +177,13 @@ impl CompileService {
 
         tokio::fs::write(build_dir.join("wasm-fns/src/lib.rs"), &req.wasm_fns).await?;
 
+        // make sure udfs.rs exists
+        tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(build_dir.join("udfs/src/udfs.rs"))
+            .await?;
+
         let result = self.get_output().await?;
 
         if !result.status.success() {
@@ -260,5 +269,76 @@ impl CompilerGrpc for CompileService {
             e.downcast::<Status>()
                 .unwrap_or_else(|e| Status::internal(e.to_string()))
         })
+    }
+
+    async fn check_udfs(
+        &self,
+        request: Request<CheckUdfsReq>,
+    ) -> Result<Response<CheckUdfsResp>, Status> {
+        info!("Checking UDFs");
+        let start = Instant::now();
+
+        // write udf to build_dir udfs module
+        let build_dir = &self.build_dir;
+        tokio::fs::write(
+            build_dir.join("udfs/src/udfs.rs"),
+            &request.into_inner().udfs_rs,
+        )
+        .await
+        .unwrap();
+
+        let output = Command::new("cargo")
+            .current_dir(&self.build_dir)
+            .arg("check")
+            .arg("--package=udfs")
+            .arg("--message-format=json")
+            .output()
+            .await?;
+
+        info!(
+            "Finished running cargo check on udfs crate after {:.2}s, exit code: {:?}",
+            start.elapsed().as_secs_f32(),
+            output.status.code()
+        );
+
+        if output.status.success() {
+            return Ok(Response::new(CheckUdfsResp {
+                result: ValidationResult::Ok as i32,
+                errors: vec![],
+            }));
+        }
+
+        let stdout = from_utf8(&output.stdout)
+            .map_err(|_| Status::internal("Failed to parse cargo output"))?;
+        let stderr = from_utf8(&output.stderr)
+            .map_err(|_| Status::internal("Failed to parse cargo output"))?;
+
+        let mut lines: Vec<&str> = stdout.lines().collect();
+        lines.extend(stderr.lines());
+
+        // parse output.stdout as json
+        let mut errors = vec![];
+        for line in lines {
+            let line_json: serde_json::Result<Value> = serde_json::from_str(&line.to_string());
+            if let Ok(line_json) = line_json {
+                if line_json["reason"] == "compiler-message"
+                    && line_json["message"]["level"] == "error"
+                {
+                    errors.push(
+                        line_json["message"]["rendered"]
+                            .to_string()
+                            .trim_matches(|c| c == '"')
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        info!("Cargo check on udfs crate found {} errors", errors.len());
+
+        return Ok(Response::new(CheckUdfsResp {
+            result: ValidationResult::Error as i32,
+            errors,
+        }));
     }
 }

@@ -36,6 +36,7 @@ mod compiling;
 mod finishing;
 mod recovering;
 mod rescaling;
+mod restarting;
 mod running;
 mod scheduling;
 mod stopping;
@@ -106,7 +107,12 @@ impl State for Failed {
 
     async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         handle_terminal(ctx).await;
-        Ok(Transition::Stop)
+        if ctx.config.restart_nonce != ctx.status.restart_nonce {
+            // the user has requested a restart
+            Ok(Transition::next(*self, Compiling {}))
+        } else {
+            Ok(Transition::Stop)
+        }
     }
 
     fn is_terminal(&self) -> bool {
@@ -209,6 +215,15 @@ impl TransitionTo<Scheduling> for Rescaling {
 }
 
 impl TransitionTo<Compiling> for Recovering {}
+impl TransitionTo<Compiling> for Failed {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restart_nonce = ctx.config.restart_nonce;
+            ctx.status.restarts = 0;
+            ctx.status.failure_message = None;
+        })
+    }
+}
 
 fn done_transition(ctx: &mut JobContext) {
     ctx.status.finish_time = Some(OffsetDateTime::now_utc());
@@ -233,6 +248,24 @@ impl TransitionTo<Finished> for Finishing {
         Box::new(done_transition)
     }
 }
+
+impl TransitionTo<Restarting> for Running {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.restart_nonce = ctx.config.restart_nonce;
+        })
+    }
+}
+impl TransitionTo<Restarting> for Restarting {}
+impl TransitionTo<Scheduling> for Restarting {
+    fn update_status(&self) -> TransitionFn {
+        Box::new(|ctx| {
+            ctx.status.run_id += 1;
+        })
+    }
+}
+impl TransitionTo<Stopping> for Restarting {}
+impl TransitionTo<CheckpointStopping> for Restarting {}
 
 // Macro to handle stopping behavior from a running state, where we want to
 // support checkpoint stopping
@@ -311,6 +344,7 @@ macro_rules! stop_if_desired_non_running {
     };
 }
 
+use crate::states::restarting::Restarting;
 pub(crate) use stop_if_desired_non_running;
 pub(crate) use stop_if_desired_running;
 

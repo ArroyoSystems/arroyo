@@ -43,8 +43,9 @@ import {
   useJobOutput,
   useOperatorErrors,
   usePipeline,
-  usePipelineGraph,
   usePipelineJobs,
+  useQueryValidation,
+  useUdfsValidation,
 } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';
@@ -60,6 +61,8 @@ import { HiOutlineBookOpen } from 'react-icons/hi';
 import { TourContext, TourSteps } from '../../tour';
 import CreatePipelineTourModal from '../../components/CreatePipelineTourModal';
 import TourCompleteModal from '../../components/TourCompleteModal';
+import SyntaxHighlighter from 'react-syntax-highlighter';
+import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
 function useQuery() {
   const { search } = useLocation();
@@ -79,10 +82,12 @@ export function CreatePipeline() {
   const [queryInputToCheck, setQueryInputToCheck] = useState<string>('');
   const [udfsInput, setUdfsInput] = useState<string>('');
   const [udfsInputToCheck, setUdfsInputToCheck] = useState<string>('');
-  const { pipelineGraph, pipelineGraphError } = usePipelineGraph(
+  const { queryValidation, queryValidationError, queryValidationLoading } = useQueryValidation(
     queryInputToCheck,
     udfsInputToCheck
   );
+  const { udfsValidation, udfsValidationError, udfsValidationLoading } =
+    useUdfsValidation(udfsInputToCheck);
   const { operatorMetricGroups } = useJobMetrics(pipelineId, job?.id);
 
   const { isOpen, onOpen, onClose } = useDisclosure();
@@ -97,7 +102,9 @@ export function CreatePipeline() {
   const { pipeline: copyFrom, pipelineLoading: copyFromLoading } = usePipeline(
     queryParams.get('from') ?? undefined
   );
-  const hasErrors = operatorErrorsPages?.length && operatorErrorsPages[0].data.length > 0;
+  const hasValidationErrors = queryValidation?.errors?.length || udfsValidation?.errors?.length;
+  const hasOperatorErrors = operatorErrorsPages?.length && operatorErrorsPages[0].data.length > 0;
+
   const { tourActive, tourStep, setTourStep, disableTour } = useContext(TourContext);
 
   const {
@@ -170,6 +177,12 @@ export function CreatePipeline() {
     }
   }, [job?.id]);
 
+  useEffect(() => {
+    if (hasValidationErrors) {
+      setTabIndex(2);
+    }
+  }, [hasValidationErrors]);
+
   // Top-level loading state
   if (copyFromLoading || connectionTablesLoading) {
     return <Loading />;
@@ -184,11 +197,27 @@ export function CreatePipeline() {
 
   const pipelineIsValid = async () => {
     check();
-    const { error } = await post('/v1/pipelines/validate', {
-      body: { query: queryInput, udfs: [{ language: 'rust', definition: udfsInput }] },
-    });
+    const { data: queryValidation, error: queryValidationError } = await post(
+      '/v1/pipelines/validate_query',
+      {
+        body: { query: queryInput, udfs: [{ language: 'rust', definition: udfsInput }] },
+      }
+    );
+    const { data: udfsValiation, error: udfsValiationError } = await post(
+      '/v1/pipelines/validate_udfs',
+      {
+        body: {
+          udfsRs: udfsInput,
+        },
+      }
+    );
 
-    return error == undefined;
+    return (
+      queryValidation?.graph &&
+      !udfsValiation?.errors?.length &&
+      queryValidationError == undefined &&
+      udfsValiationError == undefined
+    );
   };
 
   const preview = async () => {
@@ -420,27 +449,35 @@ export function CreatePipeline() {
     </TabPanel>
   );
 
-  if (pipelineGraph) {
+  if (queryValidationLoading || udfsValidationLoading) {
     previewPipelineTab = (
       <TabPanel height="100%" position="relative">
-        <Box
-          style={{
-            top: 0,
-            bottom: 0,
-            left: 0,
-            right: 0,
-            position: 'absolute',
-          }}
-          overflow="auto"
-        >
-          <PipelineGraphViewer
-            graph={pipelineGraph}
-            operatorMetricGroups={operatorMetricGroups}
-            setActiveOperator={() => {}}
-          />
-        </Box>
+        <Loading />
       </TabPanel>
     );
+  } else {
+    if (queryValidation?.graph) {
+      previewPipelineTab = (
+        <TabPanel height="100%" position="relative">
+          <Box
+            style={{
+              top: 0,
+              bottom: 0,
+              left: 0,
+              right: 0,
+              position: 'absolute',
+            }}
+            overflow="auto"
+          >
+            <PipelineGraphViewer
+              graph={queryValidation.graph}
+              operatorMetricGroups={operatorMetricGroups}
+              setActiveOperator={() => {}}
+            />
+          </Box>
+        </TabPanel>
+      );
+    }
   }
 
   let previewResultsTabContent = <Text>Preview your SQL to see outputs.</Text>;
@@ -478,9 +515,41 @@ export function CreatePipeline() {
     </TabPanel>
   );
 
-  const errorsTab = (
-    <TabPanel overflowX="auto" height="100%" position="relative">
-      {hasErrors ? (
+  const validationErrorAlert = (
+    <Alert status="error">
+      <AlertIcon />
+      <AlertDescription>
+        <Text>Validation error</Text>
+      </AlertDescription>
+    </Alert>
+  );
+
+  let errorsTab = <></>;
+  if (hasValidationErrors) {
+    if (queryValidation?.errors) {
+      errorsTab = (
+        <TabPanel overflow="auto" height={'100%'}>
+          <Box overflow={'auto'}>
+            {validationErrorAlert}
+            <SyntaxHighlighter language="text" style={vs2015} customStyle={{ borderRadius: '5px' }}>
+              {queryValidation.errors[0]}
+            </SyntaxHighlighter>
+          </Box>
+        </TabPanel>
+      );
+    } else if (udfsValidation?.errors) {
+      errorsTab = (
+        <TabPanel overflowX="auto" height="100%" position="relative">
+          {validationErrorAlert}
+          <SyntaxHighlighter language="text" style={vs2015} customStyle={{ borderRadius: '5px' }}>
+            {JSON.parse(`"${udfsValidation.errors.join('\\n')}"`)}
+          </SyntaxHighlighter>
+        </TabPanel>
+      );
+    }
+  } else if (hasOperatorErrors) {
+    errorsTab = (
+      <TabPanel overflowX="auto" height="100%" position="relative">
         <Box
           style={{
             top: 0,
@@ -499,14 +568,18 @@ export function CreatePipeline() {
             setCurrentData={setOperatorErrors}
           />
         </Box>
-      ) : (
-        <Text>Job errors will appear here.</Text>
-      )}
-    </TabPanel>
-  );
+      </TabPanel>
+    );
+  } else {
+    errorsTab = (
+      <TabPanel overflowX="auto" height="100%" position="relative">
+        <Text>Compilation and job errors will appear here.</Text>
+      </TabPanel>
+    );
+  }
 
   const previewTabsContent = (
-    <TabPanels display={'flex'} flexDirection={'column'} flex={1}>
+    <TabPanels display={'flex'} flexDirection={'column'} flex={1} minHeight={0}>
       {previewPipelineTab}
       {previewResultsTab}
       {errorsTab}
@@ -574,9 +647,12 @@ export function CreatePipeline() {
     </Flex>
   );
 
+  // TODO: design UI to show all errors
   let errorMessage;
-  if (pipelineGraphError) {
-    errorMessage = formatError(pipelineGraphError);
+  if (queryValidationError) {
+    errorMessage = formatError(queryValidationError);
+  } else if (udfsValidationError) {
+    errorMessage = formatError(udfsValidationError);
   } else if (job?.state == 'Failed') {
     errorMessage = 'Job failed. See "Errors" tab for more details.';
   } else {
@@ -613,6 +689,11 @@ export function CreatePipeline() {
     );
   }
 
+  let errorsTabIcon = <></>;
+  if (hasValidationErrors || hasOperatorErrors) {
+    errorsTabIcon = <Icon as={WarningIcon} color={'red.400'} ml={2} />;
+  }
+
   const tabs = (
     <Tabs
       display={'flex'}
@@ -620,6 +701,7 @@ export function CreatePipeline() {
       index={tabIndex}
       onChange={i => setTabIndex(i)}
       flex={1}
+      overflow={'auto'}
     >
       <TabList>
         <Flex width={'100%'} justifyContent={'space-between'}>
@@ -633,7 +715,7 @@ export function CreatePipeline() {
             </Tab>
             <Tab>
               <Text>Errors</Text>
-              {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}
+              {errorsTabIcon}
             </Tab>
           </Flex>
           {buttonGroup}

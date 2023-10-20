@@ -179,6 +179,15 @@ SET
    parallelism_overrides = COALESCE(:parallelism_overrides, parallelism_overrides)
 WHERE id = :job_id AND organization_id = :organization_id;
 
+--! restart_job(mode)
+UPDATE job_configs
+SET
+   updated_at = :updated_at,
+   updated_by = :updated_by,
+   restart_nonce = restart_nonce + 1,
+   restart_mode = :mode
+WHERE id = :job_id AND organization_id = :organization_id;
+
 --! create_job(ttl_micros?)
 INSERT INTO job_configs
 (id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros)

@@ -3,8 +3,8 @@ use axum::response::sse::Event;
 use std::convert::Infallible;
 use typify::import_types;
 
-use arroyo_rpc::types::TestSourceMessage;
-use arroyo_rpc::{types, OperatorConfig};
+use arroyo_rpc::api_types::connections::TestSourceMessage;
+use arroyo_rpc::{api_types, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -29,8 +29,8 @@ impl Connector for KinesisConnector {
         "kinesis"
     }
 
-    fn metadata(&self) -> types::Connector {
-        types::Connector {
+    fn metadata(&self) -> api_types::connections::Connector {
+        api_types::connections::Connector {
             id: "kinesis".to_string(),
             name: "Kinesis Connector".to_string(),
             icon: ICON.to_string(),

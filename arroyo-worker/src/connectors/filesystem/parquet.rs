@@ -1,4 +1,10 @@
-use std::{fs::File, io::Write, marker::PhantomData, sync::Arc};
+use std::{
+    fs::File,
+    io::Write,
+    marker::PhantomData,
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
 
 use arrow_array::RecordBatch;
 use arroyo_types::RecordBatchBuilder;
@@ -10,7 +16,8 @@ use parquet::{
 
 use super::{
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
-    BatchBufferingWriter, BatchBuilder, FileSettings, FileSystemTable, TableType,
+    BatchBufferingWriter, BatchBuilder, FileSettings, FileSystemTable, MultiPartWriterStats,
+    TableType,
 };
 use super::{Compression, FormatSettings};
 
@@ -227,6 +234,7 @@ pub struct ParquetLocalWriter<V: RecordBatchBuilder> {
     file: File,
     destination_path: String,
     shared_buffer: SharedBuffer,
+    stats: Option<MultiPartWriterStats>,
 }
 
 impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWriter<V> {
@@ -248,6 +256,7 @@ impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWrite
             file,
             destination_path: final_path,
             shared_buffer,
+            stats: None,
         }
     }
 
@@ -255,7 +264,18 @@ impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWrite
         "parquet"
     }
 
-    fn write(&mut self, value: V::Data) -> anyhow::Result<()> {
+    fn write(&mut self, value: V::Data, timestamp: SystemTime) -> anyhow::Result<()> {
+        if self.stats.is_none() {
+            self.stats = Some(MultiPartWriterStats {
+                bytes_written: 0,
+                parts_written: 0,
+                first_write_at: Instant::now(),
+                last_write_at: Instant::now(),
+                representative_timestamp: timestamp,
+            });
+        } else {
+            self.stats.as_mut().unwrap().last_write_at = Instant::now();
+        }
         self.builder.add_data(Some(value));
         Ok(())
     }
@@ -267,6 +287,7 @@ impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWrite
         // get size of the file
         let metadata = self.file.metadata()?;
         let size = metadata.len() as usize;
+        self.stats.as_mut().unwrap().bytes_written = size;
         buffer.clear();
         Ok(size)
     }
@@ -305,5 +326,9 @@ impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWrite
             suffix: Some(trailing_bytes),
             destination: self.destination_path.clone(),
         }))
+    }
+
+    fn stats(&self) -> MultiPartWriterStats {
+        self.stats.as_ref().unwrap().clone()
     }
 }

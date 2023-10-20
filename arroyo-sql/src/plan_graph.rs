@@ -20,7 +20,7 @@ use crate::{
         MemoryAddingContext, MemoryAggregatingContext, MemoryRemovingContext,
         ValueBinMergingContext, ValuePointerContext, VecAggregationContext,
     },
-    expressions::SortExpression,
+    expressions::{Column, ColumnExpression, Expression, SortExpression},
     external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource},
     operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection},
     optimizations::optimize,
@@ -91,6 +91,7 @@ pub enum PlanOperator {
     StreamOperator(String, Operator),
     ToDebezium,
     FromDebezium,
+    FromUpdating,
     Sink(String, SqlSink),
 }
 
@@ -335,6 +336,7 @@ impl PlanNode {
             PlanOperator::Sink(name, _) => format!("sink_{}", name),
             PlanOperator::ToDebezium => "to_debezium".to_string(),
             PlanOperator::FromDebezium => "from_debezium".to_string(),
+            PlanOperator::FromUpdating => "from_updating".to_string(),
             PlanOperator::NonWindowAggregate { .. } => "non_window_aggregate".to_string(),
         }
     }
@@ -738,6 +740,18 @@ impl PlanNode {
                 .to_string(),
                 return_type: ExpressionReturnType::Record,
             },
+            PlanOperator::FromUpdating => Operator::ExpressionOperator {
+                name: "from_updating".into(),
+                expression: quote!({
+                    arroyo_types::Record {
+                        timestamp: record.timestamp,
+                        key: None,
+                        value: record.value.lower(),
+                    }
+                })
+                .to_string(),
+                return_type: ExpressionReturnType::Record,
+            },
             PlanOperator::NonWindowAggregate {
                 input_is_update,
                 projection,
@@ -873,7 +887,7 @@ pub struct PlanEdge {
     pub edge_type: EdgeType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanType {
     Unkeyed(StructDef),
     UnkeyedList(StructDef),
@@ -1718,11 +1732,12 @@ impl PlanGraph {
         };
         self.graph.add_edge(input_index, key_index, key_edge);
         let aggregate_projection = aggregate.aggregating;
+
         let aggregate_struct = aggregate_projection.expression_type(&VecAggregationContext::new());
         let aggregate_operator = PlanOperator::NonWindowAggregate {
             input_is_update: input_updating,
             expiration: Duration::from_secs(60 * 60 * 24),
-            projection: aggregate_projection.try_into().unwrap(),
+            projection: aggregate_projection.clone().try_into().unwrap(),
         };
 
         let aggregate_index = self.insert_operator(
@@ -1742,25 +1757,73 @@ impl PlanGraph {
         let unkey_operator = PlanOperator::Unkey;
         let unkey_index = self.insert_operator(
             unkey_operator,
-            PlanType::Updating(Box::new(PlanType::Unkeyed(aggregate_struct))),
+            PlanType::Updating(Box::new(PlanType::Unkeyed(aggregate_struct.clone()))),
         );
         let unkey_edge = PlanEdge {
             edge_type: EdgeType::Forward,
         };
         self.graph
             .add_edge(aggregate_index, unkey_index, unkey_edge);
-        unkey_index
+
+        if input_updating || !aggregate_projection.aggregates.is_empty() {
+            unkey_index
+        } else {
+            // this is a select distinct, without any aggregates -- so there's no possibility
+            // of retractions and we can change it back to non-updating
+            let index = self.insert_operator(
+                PlanOperator::FromUpdating,
+                PlanType::Unkeyed(aggregate_struct),
+            );
+            let edge = PlanEdge {
+                edge_type: EdgeType::Forward,
+            };
+
+            self.graph.add_edge(unkey_index, index, edge);
+
+            index
+        }
     }
 
     fn add_union(&mut self, inputs: Vec<SqlOperator>) -> NodeIndex {
         let input_node_indices = inputs
             .into_iter()
-            .map(|input| self.add_sql_operator(input))
+            .map(|input| (input.return_type(), self.add_sql_operator(input)))
             .collect::<Vec<_>>();
-        let first_input = self.get_plan_node(input_node_indices[0]);
+        let (first_struct, first_index) = input_node_indices[0].clone();
+        let first_input = self.get_plan_node(first_index);
         let union_node = self.insert_operator(PlanOperator::Unkey, first_input.output_type.clone());
-        for input_index in input_node_indices {
-            // add edges
+        for (input_struct, mut input_index) in input_node_indices {
+            if first_struct != input_struct {
+                // create a record transformation from input_struct to first struct.
+                // We've validated the lengths and types
+                let fields = first_struct
+                    .fields
+                    .iter()
+                    .zip(input_struct.fields.iter())
+                    .map(|(f1, f2)| {
+                        (
+                            Column {
+                                relation: f1.alias.clone(),
+                                name: f1.name(),
+                            },
+                            Expression::Column(ColumnExpression::new(f2.clone())),
+                        )
+                    })
+                    .collect();
+                let projection = RecordTransform::ValueProjection(Projection {
+                    fields,
+                    format: None,
+                });
+                let input_node = self.get_plan_node(input_index);
+                let plan_node = PlanNode::from_record_transform(projection, input_node);
+                let edge = PlanEdge {
+                    edge_type: EdgeType::Forward,
+                };
+                let conversion_index = self.graph.add_node(plan_node);
+                self.graph.add_edge(input_index, conversion_index, edge);
+                input_index = conversion_index;
+            }
+            // now merge into union node.
             let edge = PlanEdge {
                 edge_type: EdgeType::Forward,
             };
@@ -1848,7 +1911,8 @@ pub fn get_program(
             .map(|(_, v)| v),
     );
 
-    other_defs.push(format!(
+    let mut udfs = vec![];
+    udfs.push(format!(
         "mod udfs {{ use std::time::{{SystemTime, Duration}}; {} }}",
         schema_provider
             .udf_defs
@@ -1866,6 +1930,7 @@ pub fn get_program(
             // in wasm
             types: vec![],
             other_defs,
+            udfs,
             graph,
         },
         sources,

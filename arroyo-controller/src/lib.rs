@@ -2,13 +2,14 @@
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 
+use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
-    GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
-    OutputData, RegisterNodeReq, RegisterNodeResp, RegisterWorkerReq, RegisterWorkerResp,
-    TaskCheckpointCompletedReq, TaskCheckpointCompletedResp, TaskFailedReq, TaskFailedResp,
-    TaskFinishedReq, TaskFinishedResp, TaskStartedReq, TaskStartedResp, WorkerFinishedReq,
-    WorkerFinishedResp,
+    CheckUdfsReq, CheckUdfsResp, GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp,
+    HeartbeatReq, HeartbeatResp, OutputData, RegisterNodeReq, RegisterNodeResp, RegisterWorkerReq,
+    RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp, TaskFailedReq,
+    TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, TaskStartedResp,
+    ValidationResult, WorkerFinishedReq, WorkerFinishedResp,
 };
 use arroyo_rpc::grpc::{
     SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
@@ -16,7 +17,9 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::log_event;
-use arroyo_types::{from_micros, ports, DatabaseConfig, NodeId, WorkerId};
+use arroyo_types::{
+    from_micros, ports, DatabaseConfig, NodeId, WorkerId, REMOTE_COMPILER_ENDPOINT_ENV,
+};
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
@@ -27,6 +30,7 @@ use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
+use syn::{parse_file, Item};
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::error::TrySendError;
@@ -46,7 +50,7 @@ include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
 use crate::schedulers::{nomad::NomadScheduler, NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::LogLevel;
-use types::public::StopMode;
+use types::public::{RestartMode, StopMode};
 
 pub const CHECKPOINTS_TO_KEEP: u32 = 5;
 
@@ -78,6 +82,8 @@ pub struct JobConfig {
     checkpoint_interval: Duration,
     ttl: Option<Duration>,
     parallelism_overrides: HashMap<String, usize>,
+    restart_nonce: i32,
+    restart_mode: RestartMode,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +98,7 @@ pub struct JobStatus {
     restarts: i32,
     pipeline_path: Option<String>,
     wasm_path: Option<String>,
+    restart_nonce: i32,
 }
 
 impl JobStatus {
@@ -109,6 +116,7 @@ impl JobStatus {
                 &self.pipeline_path,
                 &self.wasm_path,
                 &self.run_id,
+                &self.restart_nonce,
                 &self.id,
             )
             .await
@@ -427,6 +435,48 @@ impl ControllerGrpc for ControllerServer {
             Err(err) => Err(Status::from_error(Box::new(err))),
         }
     }
+
+    async fn check_udfs(
+        &self,
+        request: Request<CheckUdfsReq>,
+    ) -> Result<Response<CheckUdfsResp>, Status> {
+        let endpoint = env::var(REMOTE_COMPILER_ENDPOINT_ENV)
+            .map_err(|_| Status::unavailable("Remote compiler is required for checking UDFs"))?;
+
+        let mut client = CompilerGrpcClient::connect(endpoint).await.map_err(|e| {
+            Status::unavailable(format!("Failed to connect to compiler service: {}", e))
+        })?;
+
+        let udfs_rs = request.into_inner().udfs_rs.clone();
+
+        {
+            let result = match parse_file(udfs_rs.as_str()) {
+                Ok(result) => result,
+                Err(e) => {
+                    return Ok(Response::new(CheckUdfsResp {
+                        result: ValidationResult::Error as i32,
+                        errors: vec![e.to_string()],
+                    }));
+                }
+            };
+
+            for item in result.items {
+                match item {
+                    Item::Fn(_) | Item::Use(_) => {}
+                    _ => {
+                        return Ok(Response::new(CheckUdfsResp {
+                            result: ValidationResult::Error as i32,
+                            errors: vec![
+                                "Only functions and use statements are allowed in UDFs".to_string()
+                            ],
+                        }))
+                    }
+                }
+            }
+        }
+
+        client.check_udfs(CheckUdfsReq { udfs_rs }).await
+    }
 }
 
 impl ControllerServer {
@@ -565,6 +615,8 @@ impl ControllerServer {
                             .into_iter()
                             .map(|(k, v)| (k.clone(), v.as_u64().unwrap() as usize))
                             .collect(),
+                        restart_nonce: p.config_restart_nonce,
+                        restart_mode: p.restart_mode,
                     };
 
                     let mut jobs = jobs.lock().await;
@@ -580,6 +632,7 @@ impl ControllerServer {
                         restarts: p.restarts,
                         pipeline_path: p.pipeline_path,
                         wasm_path: p.wasm_path,
+                        restart_nonce: p.status_restart_nonce,
                     };
 
                     if let Some(sm) = jobs.get_mut(&config.id) {

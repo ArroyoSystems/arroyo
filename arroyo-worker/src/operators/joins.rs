@@ -178,4 +178,12 @@ impl<K: Key, T1: Data, T2: Data, W1: TimeWindowAssigner<K, T1>, W2: TimeWindowAs
     ) {
         Self::store(record, self.assigner2, 'r', ctx).await;
     }
+
+    async fn handle_checkpoint(
+        &mut self,
+        _checkpoint: &CheckpointBarrier,
+        ctx: &mut Context<K, (Vec<T1>, Vec<T2>)>,
+    ) {
+        ctx.flush_timers::<Window>().await;
+    }
 }

@@ -8,6 +8,7 @@ use tracing::error;
 use crate::states::finishing::Finishing;
 use crate::states::recovering::Recovering;
 use crate::states::rescaling::Rescaling;
+use crate::states::restarting::Restarting;
 use crate::states::{fatal, stop_if_desired_running};
 use crate::JobMessage;
 use crate::{job_controller::ControllerProgress, states::StateError};
@@ -54,6 +55,12 @@ impl State for Running {
                     match msg {
                         Some(JobMessage::ConfigUpdate(c)) => {
                             stop_if_desired_running!(self, &c);
+
+                            if c.restart_nonce != ctx.status.restart_nonce {
+                                return Ok(Transition::next(*self, Restarting {
+                                    mode: c.restart_mode
+                                }));
+                            }
 
                             let job_controller = ctx.job_controller.as_ref().unwrap();
                             for (op, p) in &c.parallelism_overrides {
