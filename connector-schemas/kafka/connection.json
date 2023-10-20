@@ -49,6 +49,20 @@
                     "additionalProperties": false
                 }
             ]
+        },
+        "schemaRegistry": {
+            "type": "object",
+            "properties": {
+                "endpoint": {
+                    "title": "Endpoint",
+                    "type": "string",
+                    "description": "The endpoint for your Confluent Schema Registry",
+                    "examples": [
+                        "http://localhost:8081"
+                    ],
+                    "format": "uri"
+                }
+            }
         }
     },
     "required": [

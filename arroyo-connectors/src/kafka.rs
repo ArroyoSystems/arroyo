@@ -154,6 +154,7 @@ impl Connector for KafkaConnector {
         let connection = KafkaConfig {
             authentication: auth,
             bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", opts)?),
+            schema_registry: None,
         };
 
         let typ = pull_opt("type", opts)?;

@@ -18,7 +18,7 @@ use tracing::warn;
 
 use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::api_types::connections::{
-    ConfluentSchema, ConfluentSchemaQueryParams, ConnectionProfile, ConnectionSchema,
+    ConnectionProfile, ConnectionSchema,
     ConnectionTable, ConnectionTablePost, SchemaDefinition,
 };
 use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
@@ -479,39 +479,4 @@ pub(crate) async fn test_schema(
             Ok(())
         }
     }
-}
-
-/// Get a Confluent Schema
-#[utoipa::path(
-    get,
-    path = "/v1/connection_tables/schemas/confluent",
-    tag = "connection_tables",
-    params(
-        ("topic" = String, Query, description = "Confluent topic name"),
-        ("endpoint" = String, Query, description = "Confluent schema registry endpoint"),
-    ),
-    responses(
-        (status = 200, description = "Got Confluent Schema", body = ConfluentSchema),
-    ),
-)]
-pub(crate) async fn get_confluent_schema(
-    query_params: Query<ConfluentSchemaQueryParams>,
-) -> Result<Json<ConfluentSchema>, ErrorResp> {
-    // TODO: ensure only external URLs can be hit
-
-
-    if let Err(e) = convert_json_schema(&query_params.topic, schema) {
-        warn!(
-            "Schema from schema registry is not valid: '{}': {}",
-            schema, e
-        );
-        return Err(bad_request(format!(
-            "Schema from schema registry is not valid: {}",
-            e
-        )));
-    }
-
-    Ok(Json(ConfluentSchema {
-        schema: schema.to_string(),
-    }))
 }

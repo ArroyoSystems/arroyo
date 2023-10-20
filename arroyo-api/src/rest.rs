@@ -19,7 +19,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::connection_profiles::{create_connection_profile, get_connection_profiles};
 use crate::connection_tables::{
-    create_connection_table, delete_connection_table, get_confluent_schema, get_connection_tables,
+    create_connection_table, delete_connection_table, get_connection_tables,
     test_connection_table, test_schema,
 };
 use crate::connectors::get_connectors;
@@ -112,10 +112,6 @@ pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
         .route("/connection_tables", post(create_connection_table))
         .route("/connection_tables/test", post(test_connection_table))
         .route("/connection_tables/schemas/test", post(test_schema))
-        .route(
-            "/connection_tables/schemas/confluent",
-            get(get_confluent_schema),
-        )
         .route("/connection_tables/:id", delete(delete_connection_table))
         .route("/pipelines", post(post_pipeline))
         .route("/pipelines", get(get_pipelines))

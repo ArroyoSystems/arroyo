@@ -64,7 +64,7 @@ impl ConfluentSchemaResolver {
     }
 
 
-    async fn get_schema(&self, version: Option<u32>) -> anyhow::Result<String> {
+    async fn get_schema(&self, version: Option<u32>) -> anyhow::Result<ConfluentSchemaResponse> {
         let url = self.endpoint.join(
             &version.map(|v| format!("{}", v)).unwrap_or_else(|| "latest".to_string())).unwrap();
 
