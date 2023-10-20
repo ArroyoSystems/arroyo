@@ -3,10 +3,12 @@ import {
   AlertIcon,
   Box,
   Button,
+  Flex,
   FormControl,
   FormErrorMessage,
   FormHelperText,
   FormLabel,
+  IconButton,
   Input,
   Select,
   Stack,
@@ -17,7 +19,8 @@ import { useFormik } from 'formik';
 
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
-import { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
+import { AddIcon, DeleteIcon } from '@chakra-ui/icons';
 
 function StringWidget({
   path,
@@ -158,6 +161,102 @@ function SelectWidget({
   );
 }
 
+export function ArrayWidget({
+  schema,
+  onChange,
+  path,
+  values,
+  errors,
+}: {
+  schema: JSONSchema7;
+  onChange: (e: React.ChangeEvent<any>) => void;
+  path: string;
+  values: any;
+  errors: any;
+}) {
+  const add = () => {
+    // @ts-ignore
+    onChange({ target: { name: path, value: [...(values || []), undefined] } });
+  };
+
+  const deleteItem = (index: number) => {
+    values.splice(index, 1);
+    // @ts-ignore
+    onChange({ target: { name: path, value: values } });
+  };
+
+  const itemsSchema = schema.items as JSONSchema7;
+
+  const example =
+    itemsSchema.examples && Array.isArray(itemsSchema.examples)
+      ? (itemsSchema.examples[0] as string)
+      : undefined;
+
+  const arrayItem = (v: string, i: number) => {
+    switch (itemsSchema.type) {
+      case 'string':
+        return (
+          <StringWidget
+            path={`${path}.${i}`}
+            title={itemsSchema.title + ` ${i + 1}`}
+            value={v}
+            errors={errors}
+            onChange={onChange}
+            maxLength={itemsSchema.maxLength}
+            description={itemsSchema.description}
+            placeholder={example}
+          />
+        );
+      default:
+        console.warn('Unsupported array item type', itemsSchema.type);
+        return <></>;
+    }
+  };
+
+  return (
+    <Box>
+      <fieldset key={schema.title} style={{ border: '1px solid #888', borderRadius: '8px' }}>
+        <legend
+          style={{
+            marginLeft: '8px',
+            paddingLeft: '16px',
+            paddingRight: '16px',
+          }}
+        >
+          {schema.title}
+        </legend>
+        <FormControl isInvalid={errors[path]}>
+          <Stack p={4} gap={2}>
+            {errors[path] ? (
+              <FormErrorMessage>{errors[path]}</FormErrorMessage>
+            ) : (
+              schema.description && (
+                <FormHelperText mt={0} pb={2}>
+                  {schema.description}
+                </FormHelperText>
+              )
+            )}
+            {values?.map((value: any, index: number) => (
+              <Flex alignItems={'flex-end'} gap={2} key={index}>
+                {arrayItem(value, index)}
+                <IconButton
+                  width={8}
+                  height={8}
+                  minWidth={0}
+                  aria-label="Delete item"
+                  onClick={() => deleteItem(index)}
+                  icon={<DeleteIcon width={3} />}
+                />
+              </Flex>
+            ))}
+            <IconButton mt={1} height={8} aria-label="Add item" onClick={add} icon={<AddIcon />} />
+          </Stack>
+        </FormControl>
+      </fieldset>
+    </Box>
+  );
+}
+
 export function FormInner({
   schema,
   onChange,
@@ -180,137 +279,156 @@ export function FormInner({
 
   return (
     <Stack spacing={6}>
-      {Object.keys(schema.properties || {}).map(key => {
-        const property = schema.properties![key];
-        if (typeof property == 'object') {
-          switch (property.type) {
-            case 'string':
-              if (property.enum) {
+      {Object.keys(schema.properties || {})
+        .filter(key => {
+          const property = schema.properties![key];
+          // @ts-ignore
+          return !property.deprecated ?? true;
+        })
+        .map(key => {
+          const property = schema.properties![key];
+          if (typeof property == 'object') {
+            switch (property.type) {
+              case 'string':
+                if (property.enum) {
+                  return (
+                    <SelectWidget
+                      path={(path ? `${path}.` : '') + key}
+                      key={key}
+                      title={property.title || key}
+                      description={property.description}
+                      placeholder="Select an option"
+                      options={property.enum.map(value => ({
+                        value: value!.toString(),
+                        label: value!.toString(),
+                      }))}
+                      value={values[key]}
+                      onChange={onChange}
+                    />
+                  );
+                } else {
+                  return (
+                    <StringWidget
+                      path={(path ? `${path}.` : '') + key}
+                      key={key}
+                      title={property.title || key}
+                      description={property.description}
+                      required={schema.required?.includes(key)}
+                      maxLength={property.maxLength}
+                      // @ts-ignore
+                      placeholder={property.examples ? (property.examples[0] as string) : undefined}
+                      value={values[key]}
+                      errors={errors}
+                      onChange={onChange}
+                    />
+                  );
+                }
+              case 'number':
+              case 'integer': {
                 return (
-                  <SelectWidget
-                    path={(path ? `${path}.` : '') + key}
-                    key={key}
-                    title={property.title || key}
-                    description={property.description}
-                    placeholder="Select an option"
-                    options={property.enum.map(value => ({
-                      value: value!.toString(),
-                      label: value!.toString(),
-                    }))}
-                    value={values[key]}
-                    onChange={onChange}
-                  />
-                );
-              } else {
-                return (
-                  <StringWidget
+                  <NumberWidget
                     path={(path ? `${path}.` : '') + key}
                     key={key}
                     title={property.title || key}
                     description={property.description}
                     required={schema.required?.includes(key)}
-                    maxLength={property.maxLength}
-                    // @ts-ignore
-                    placeholder={property.examples ? (property.examples[0] as string) : undefined}
+                    type={property.type}
+                    placeholder={
+                      // @ts-ignore
+                      property.examples ? (property.examples[0] as number) : undefined
+                    }
+                    min={property.minimum}
+                    max={property.maximum}
                     value={values[key]}
                     errors={errors}
                     onChange={onChange}
                   />
                 );
+                342;
               }
-            case 'number':
-            case 'integer': {
-              return (
-                <NumberWidget
-                  path={(path ? `${path}.` : '') + key}
-                  key={key}
-                  title={property.title || key}
-                  description={property.description}
-                  required={schema.required?.includes(key)}
-                  type={property.type}
-                  placeholder={
-                    // @ts-ignore
-                    property.examples ? (property.examples[0] as number) : undefined
-                  }
-                  min={property.minimum}
-                  max={property.maximum}
-                  value={values[key]}
-                  errors={errors}
-                  onChange={onChange}
-                />
-              );
-              342;
-            }
-            case 'object': {
-              if (property.oneOf) {
-                const typeKey = '__meta.' + key + '.type';
-                const value = ((values.__meta || {})[key] || {}).type;
+              case 'array': {
                 return (
-                  <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
-                    <legend
-                      style={{ marginLeft: '8px', paddingLeft: '16px', paddingRight: '16px' }}
-                    >
-                      {property.title || key}
-                    </legend>
-                    <Stack p={4}>
-                      <SelectWidget
-                        path={typeKey}
-                        placeholder="Select an option"
-                        description={property.description}
-                        required={schema.required?.includes(key)}
-                        options={property.oneOf.map(oneOf => ({
-                          // @ts-ignore
-                          value: oneOf.title!,
-                          // @ts-ignore
-                          label: oneOf.title!,
-                        }))}
-                        value={value}
-                        onChange={onChange}
-                      />
-
-                      {value != undefined && (
-                        <Box p={4}>
-                          <FormInner
-                            path={key}
+                  <ArrayWidget
+                    path={(path ? `${path}.` : '') + key}
+                    key={key}
+                    schema={property}
+                    values={values[key]}
+                    errors={errors}
+                    onChange={onChange}
+                  />
+                );
+              }
+              case 'object': {
+                if (property.oneOf) {
+                  const typeKey = '__meta.' + key + '.type';
+                  const value = ((values.__meta || {})[key] || {}).type;
+                  // @ts-ignore
+                  const inSchema = property.oneOf.find(x => x.title == value) || property.oneOf[0];
+                  return (
+                    <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
+                      <legend
+                        style={{ marginLeft: '8px', paddingLeft: '16px', paddingRight: '16px' }}
+                      >
+                        {property.title || key}
+                      </legend>
+                      <Stack p={4}>
+                        <SelectWidget
+                          path={typeKey}
+                          placeholder="Select an option"
+                          description={property.description}
+                          required={schema.required?.includes(key)}
+                          options={property.oneOf.map(oneOf => ({
                             // @ts-ignore
-                            schema={property.oneOf.find(x => x.title == value) || property.oneOf[0]}
-                            errors={errors}
-                            onChange={onChange}
-                            values={values[key] || {}}
-                          />
-                        </Box>
-                      )}
-                    </Stack>
-                  </fieldset>
-                );
-              } else if ((values[key].properties?.length || 0) > 0) {
-                return (
-                  <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
-                    <legend
-                      style={{ marginLeft: '8px', paddingLeft: '16px', paddingRight: '16px' }}
-                    >
-                      {property.title || key}
-                    </legend>
-                    <Box p={4}>
-                      <FormInner
-                        path={key}
-                        // @ts-ignore
-                        schema={property}
-                        errors={errors}
-                        onChange={onChange}
-                        values={values[key] || {}}
-                      />
-                    </Box>
-                  </fieldset>
-                );
+                            value: oneOf.title!,
+                            // @ts-ignore
+                            label: oneOf.title!,
+                          }))}
+                          value={value}
+                          onChange={onChange}
+                        />
+                        {value != undefined && (
+                          <Box p={4}>
+                            <FormInner
+                              path={key}
+                              // @ts-ignore
+                              schema={inSchema}
+                              errors={errors}
+                              onChange={onChange}
+                              values={values[key] || {}}
+                            />
+                          </Box>
+                        )}
+                      </Stack>
+                    </fieldset>
+                  );
+                } else if ((values[key].properties?.length || 0) > 0) {
+                  return (
+                    <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
+                      <legend
+                        style={{ marginLeft: '8px', paddingLeft: '16px', paddingRight: '16px' }}
+                      >
+                        {property.title || key}
+                      </legend>
+                      <Box p={4}>
+                        <FormInner
+                          path={key}
+                          // @ts-ignore
+                          schema={property}
+                          errors={errors}
+                          onChange={onChange}
+                          values={values[key] || {}}
+                        />
+                      </Box>
+                    </fieldset>
+                  );
+                }
               }
-            }
-            default: {
-              console.warn('Unsupported field type', property.type);
+              default: {
+                console.warn('Unsupported field type', property.type);
+              }
             }
           }
-        }
-      })}
+        })}
     </Stack>
   );
 }

@@ -11,14 +11,35 @@
             ],
             "format": "uri"
         },
+        "headers": {
+            "title": "Headers",
+            "type": "string",
+            "description": "Comma separated list of headers to send with the request",
+            "pattern": "([a-zA-Z0-9-]+: ?.+,)*([a-zA-Z0-9-]+: ?.+)",
+            "examples": ["Authentication: digest 1234,Content-Type: application/json"]
+        },
         "subscription_message": {
             "title": "Subscription Message",
             "type": "string",
+            "description": "[Deprecated] An optional message to send after the socket is opened.",
             "maxLength": 2048,
-            "description": "An optional message to send after the socket is opened",
             "examples": [
                 "{\"type\":\"subscribe\",\"channels\":[\"updates\"]}"
-            ]
+            ],
+            "deprecated": true
+        },
+        "subscription_messages": {
+            "title": "Subscription Messages",
+            "type": "array",
+            "description": "An optional array of messages to send after the socket is opened. The messages will be sent in order.",
+            "items": {
+                "title": "Subscription Message",
+                "type": "string",
+                "maxLength": 2048,
+                "examples": [
+                    "{\"type\":\"subscribe\",\"channels\":[\"updates\"]}"
+                ]
+            }
         }
     },
     "required": [
