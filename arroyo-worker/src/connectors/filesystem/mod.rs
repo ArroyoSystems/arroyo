@@ -31,8 +31,8 @@ use arroyo_types::*;
 pub mod json;
 pub mod local;
 pub mod parquet;
-pub mod source;
 pub mod single_file;
+pub mod source;
 
 use self::{
     json::{JsonLocalWriter, JsonWriter, PassThrough},
