@@ -91,7 +91,7 @@ impl Connector for FileSystemConnector {
                 ref write_target,
                 ..
             } => {
-                let backend_config = BackendConfig::parse_url(&table.write_target.path, true)?;
+                let backend_config = BackendConfig::parse_url(&write_target.path, true)?;
                 let is_local = match &backend_config {
                     BackendConfig::Local { .. } => true,
                     _ => false,
@@ -115,7 +115,7 @@ impl Connector for FileSystemConnector {
                     ),
                     (None, _) => bail!("have to have some format settings"),
                 };
-                (desc, op, ConnectionType::Sink)
+                (description, operator, ConnectionType::Sink)
             }
         };
 
@@ -168,19 +168,20 @@ impl Connector for FileSystemConnector {
                         EmptyConfig {},
                         FileSystemTable {
                             type_: TableType::Source {
-                                read_source: Some(S3 {
-                                    bucket: Some(bucket),
-                                    compression_format: Some(
-                                        compression_format.as_str().try_into().map_err(|_| {
+                                read_source: S3 {
+                                    bucket,
+                                    compression_format: compression_format
+                                        .as_str()
+                                        .try_into()
+                                        .map_err(|_| {
                                             anyhow::anyhow!(
                                                 "unsupported compression format: {}",
                                                 compression_format
                                             )
                                         })?,
-                                    ),
-                                    prefix: Some(prefix),
-                                    region: Some(region),
-                                }),
+                                    prefix,
+                                    region,
+                                },
                             },
                         },
                         schema,
@@ -266,12 +267,14 @@ impl Connector for FileSystemConnector {
                     name,
                     EmptyConfig {},
                     FileSystemTable {
-                        write_target: FolderUrl {
-                            path: storage_url,
-                            storage_options,
+                        type_: TableType::Sink {
+                            write_target: FolderUrl {
+                                path: storage_url,
+                                storage_options,
+                            },
+                            file_settings,
+                            format_settings,
                         },
-                        file_settings,
-                        format_settings,
                     },
                     schema,
                 )

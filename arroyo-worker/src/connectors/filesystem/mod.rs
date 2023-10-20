@@ -69,7 +69,9 @@ impl<K: Key, T: Data + Sync + Serialize, V: LocalWriter<T>> LocalFileSystemWrite
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
         let final_dir = match table.type_ {
-            TableType::Sink { write_target, .. } => write_target.path.clone(),
+            TableType::Sink {
+                ref write_target, ..
+            } => write_target.path.clone(),
             TableType::Source { .. } => {
                 unreachable!("shouldn't be using local writer for source");
             }
@@ -88,12 +90,12 @@ impl<K: Key, T: Data + Sync + Serialize, R: MultiPartWriter<InputType = T> + Sen
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
 
-        let path: &Path = match table.type_ {
+        let write_target = match table.type_ {
             TableType::Sink {
                 ref write_target, ..
-            } => write_target.path.as_ref(),
+            } => write_target.clone(),
             TableType::Source { .. } => {
-                unreachable!("shouldn't be using local writer for source");
+                unreachable!("multi-part writer can only be used as sink");
             }
         };
 
@@ -101,10 +103,10 @@ impl<K: Key, T: Data + Sync + Serialize, R: MultiPartWriter<InputType = T> + Sen
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
         let partition_func = get_partitioner_from_table(&table);
         tokio::spawn(async move {
-            let path: Path = StorageProvider::get_key(path).unwrap().into();
+            let path: Path = StorageProvider::get_key(&write_target.path).unwrap().into();
             let provider = StorageProvider::for_url_with_options(
-                &table.write_target.path,
-                table.write_target.storage_options.clone(),
+                &write_target.path,
+                write_target.storage_options.clone(),
             )
             .await
             .unwrap();
@@ -129,8 +131,16 @@ impl<K: Key, T: Data + Sync + Serialize, R: MultiPartWriter<InputType = T> + Sen
 fn get_partitioner_from_table<K: Key, T: Data + Serialize>(
     table: &FileSystemTable,
 ) -> Option<Box<dyn Fn(&Record<K, T>) -> String + Send>> {
-    let Some(partitions) = table.file_settings.as_ref().unwrap().partitioning.clone() else {
-        return None;
+    let partitions = match table.type_ {
+        TableType::Sink {
+            file_settings:
+                Some(FileSettings {
+                    partitioning: Some(ref partitions),
+                    ..
+                }),
+            ..
+        } => partitions.clone(),
+        _ => return None,
     };
     match (
         partitions.time_partition_pattern,

@@ -13,7 +13,9 @@ use crate::connectors::two_phase_committer::TwoPhaseCommitter;
 
 use anyhow::{bail, Result};
 
-use super::{get_partitioner_from_table, FileSystemTable, MultiPartWriterStats, RollingPolicy, TableType};
+use super::{
+    get_partitioner_from_table, FileSystemTable, MultiPartWriterStats, RollingPolicy, TableType,
+};
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     // writer to a local tmp file
@@ -36,12 +38,10 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
         // make sure final_dir and tmp_dir exists
         create_dir_all(&tmp_dir).unwrap();
 
-        let file_settings = if let TableType::Sink {
+        let TableType::Sink {
             ref file_settings, ..
         } = table_properties.type_
-        {
-            file_settings.as_ref().unwrap()
-        } else {
+        else {
             unreachable!("LocalFileSystemWriter can only be used as a sink")
         };
 
@@ -53,9 +53,7 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             subtask_id: 0,
             partitioner: get_partitioner_from_table(&table_properties),
             finished_files: Vec::new(),
-            rolling_policy: RollingPolicy::from_file_settings(
-                table_properties.file_settings.as_ref().unwrap(),
-            ),
+            rolling_policy: RollingPolicy::from_file_settings(file_settings.as_ref().unwrap()),
             table_properties,
             phantom: PhantomData,
         }

@@ -82,48 +82,23 @@ impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
 
         let (storage_provider, compression_format, prefix) = match &self.table {
             TableType::Source { read_source } => match read_source {
-                Some(S3 {
+                S3 {
                     bucket,
                     compression_format,
                     ref prefix,
                     region,
-                }) => {
+                } => {
                     let storage_provider = StorageProvider::for_url(&format!(
                         "https://{}.amazonaws.com/{}/{}",
-                        region.as_ref().ok_or(UserError::new(
-                            "invalid table config",
-                            "region must be set for S3 source".to_string()
-                        ))?,
-                        bucket.as_ref().ok_or(UserError::new(
-                            "invalid table config",
-                            "bucket must be set for S3 source"
-                        ))?,
-                        prefix.as_ref().ok_or(UserError::new(
-                            "invalid table config",
-                            "prefix must be set for S3 source"
-                        ))?
+                        region,
+                        bucket,
+                        prefix.clone()
                     ))
                     .await
                     .map_err(|err| {
                         UserError::new("failed to create storage provider", err.to_string())
                     })?;
-                    (
-                        storage_provider,
-                        compression_format.ok_or(UserError::new(
-                            "invalid table config",
-                            "compression_format must be set for S3 source".to_string(),
-                        ))?,
-                        prefix.clone().ok_or(UserError::new(
-                            "invalid table config",
-                            "prefix must be set for S3 source".to_string(),
-                        ))?,
-                    )
-                }
-                None => {
-                    return Err(UserError::new(
-                        "invalid table config",
-                        "no read source specified for filesystem source".to_string(),
-                    ))
+                    (storage_provider, compression_format.clone(), prefix.clone())
                 }
             },
             TableType::Sink { .. } => {
