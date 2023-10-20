@@ -38,7 +38,7 @@ impl Connector for FileSystemConnector {
             source: true,
             sink: true,
             testing: false,
-            hidden: true,
+            hidden: false,
             custom_schemas: true,
             connection_config: None,
             table_config: TABLE_SCHEMA.to_owned(),
@@ -169,17 +169,19 @@ impl Connector for FileSystemConnector {
                         EmptyConfig {},
                         FileSystemTable {
                             type_: TableType::Source {
-                                bucket: Some(bucket),
-                                compression_format: Some(
-                                    compression_format.clone().try_into().map_err(|_| {
-                                        anyhow::anyhow!(
-                                            "unsupported compression format: {}",
-                                            compression_format
-                                        )
-                                    })?,
-                                ),
-                                prefix: Some(prefix),
-                                region: Some(region),
+                                read_source: Some(S3 {
+                                    bucket: Some(bucket),
+                                    compression_format: Some(
+                                        compression_format.as_str().try_into().map_err(|_| {
+                                            anyhow::anyhow!(
+                                                "unsupported compression format: {}",
+                                                compression_format
+                                            )
+                                        })?,
+                                    ),
+                                    prefix: Some(prefix),
+                                    region: Some(region),
+                                }),
                             },
                         },
                         schema,

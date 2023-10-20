@@ -9,39 +9,45 @@
         {
           "type": "object",
           "title": "Source",
-          "oneOf": [
-            {
+          "properties": {
+            "read_source": {
               "type": "object",
-              "title": "S3",
-              "properties": {
-                "bucket": {
-                  "title": "Bucket Name",
-                  "type": "string",
-                  "description": "bucket to read from"
-                },
-                "prefix": {
-                  "title": "Prefix",
-                  "type": "string",
-                  "description": "S3 prefix to read from"
-                },
-                "region": {
-                  "title": "AWS Region",
-                  "type": "string",
-                  "description": "AWS region to read from"
-                },
-                "compression_format": {
-                  "title": "Compression format",
-                  "type": "string",
-                  "description": "Compression format of the files in S3",
-                  "enum": [
-                    "none",
-                    "zstd",
-                    "gzip"
-                  ]
+              "title": "Source",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "title": "S3",
+                  "properties": {
+                    "bucket": {
+                      "title": "Bucket Name",
+                      "type": "string",
+                      "description": "bucket to read from"
+                    },
+                    "prefix": {
+                      "title": "Prefix",
+                      "type": "string",
+                      "description": "S3 prefix to read from"
+                    },
+                    "region": {
+                      "title": "AWS Region",
+                      "type": "string",
+                      "description": "AWS region to read from"
+                    },
+                    "compression_format": {
+                      "title": "Compression format",
+                      "type": "string",
+                      "description": "Compression format of the files in S3",
+                      "enum": [
+                        "none",
+                        "zstd",
+                        "gzip"
+                      ]
+                    }
+                  }
                 }
-              }
+              ]
             }
-          ]
+          }
         },
         {
           "type": "object",

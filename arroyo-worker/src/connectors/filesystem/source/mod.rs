@@ -3,6 +3,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
+use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, BufReader, Lines},
     select,
@@ -14,50 +15,45 @@ use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{Data, Record, UserError};
 use futures::stream::StreamExt;
+use typify::import_types;
 
-use crate::{
-    connectors::filesystem::s3::CompressionFormat, engine::Context, formats::DataDeserializer,
-    SchemaData, SourceFinishType,
-};
+use crate::{engine::Context, formats::DataDeserializer, SchemaData, SourceFinishType};
 
-use super::S3Table;
+import_types!(schema = "../connector-schemas/filesystem/table.json");
 
 #[derive(StreamNode)]
-pub struct S3SourceFunc<K: Data, T: SchemaData + Data> {
-    bucket: String,
-    prefix: String,
-    region: String,
+pub struct FileSystemSourceFunc<K: Data, T: SchemaData + Data> {
+    table: TableType,
     deserializer: DataDeserializer<T>,
-    compression: CompressionFormat,
     total_lines_read: usize,
     _t: PhantomData<(K, T)>,
 }
 
 #[source_fn(out_t = T)]
-impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
+impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
     pub fn from_config(config_str: &str) -> Self {
         let config: OperatorConfig =
-            serde_json::from_str(config_str).expect("Invalid config for S3SourceFunc");
-        let table: S3Table =
-            serde_json::from_value(config.table).expect("Invalid table config for S3SourceFunc");
-        let format = config.format.expect("Format must be set for S3 source");
+            serde_json::from_str(config_str).expect("Invalid config for FileSystemSourceFunc");
+        let table: TableType = serde_json::from_value(config.table)
+            .expect("Invalid table config for FileSystemSourceFunc");
+        let format = config
+            .format
+            .expect("Format must be set for filesystem source");
+
         Self {
-            bucket: table.bucket,
-            prefix: table.prefix,
-            region: table.region,
+            table,
             deserializer: DataDeserializer::new(format, config.framing),
-            compression: table.compression_format,
             total_lines_read: 0,
             _t: PhantomData,
         }
     }
 
     pub fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
-        vec![arroyo_state::global_table('a', "s3")]
+        vec![arroyo_state::global_table('a', "fs")]
     }
 
     fn name(&self) -> String {
-        "S3".to_string()
+        "FileSystem".to_string()
     }
 
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
@@ -84,16 +80,63 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
             return Ok(SourceFinishType::Final);
         }
 
-        let storage_provider = StorageProvider::for_url(&format!(
-            "https://{}.amazonaws.com/{}/{}",
-            self.region, self.bucket, self.prefix
-        ))
-        .await
-        .map_err(|err| UserError::new("failed to create storage provider", err.to_string()))?;
+        let (storage_provider, compression_format, prefix) = match &self.table {
+            TableType::Source { read_source } => match read_source {
+                Some(S3 {
+                    bucket,
+                    compression_format,
+                    ref prefix,
+                    region,
+                }) => {
+                    let storage_provider = StorageProvider::for_url(&format!(
+                        "https://{}.amazonaws.com/{}/{}",
+                        region.as_ref().ok_or(UserError::new(
+                            "invalid table config",
+                            "region must be set for S3 source".to_string()
+                        ))?,
+                        bucket.as_ref().ok_or(UserError::new(
+                            "invalid table config",
+                            "bucket must be set for S3 source"
+                        ))?,
+                        prefix.as_ref().ok_or(UserError::new(
+                            "invalid table config",
+                            "prefix must be set for S3 source"
+                        ))?
+                    ))
+                    .await
+                    .map_err(|err| {
+                        UserError::new("failed to create storage provider", err.to_string())
+                    })?;
+                    (
+                        storage_provider,
+                        compression_format.ok_or(UserError::new(
+                            "invalid table config",
+                            "compression_format must be set for S3 source".to_string(),
+                        ))?,
+                        prefix.clone().ok_or(UserError::new(
+                            "invalid table config",
+                            "prefix must be set for S3 source".to_string(),
+                        ))?,
+                    )
+                }
+                None => {
+                    return Err(UserError::new(
+                        "invalid table config",
+                        "no read source specified for filesystem source".to_string(),
+                    ))
+                }
+            },
+            TableType::Sink { .. } => {
+                return Err(UserError::new(
+                    "invalid table config",
+                    "filesystem source cannot be used as a sink".to_string(),
+                ))
+            }
+        };
 
         // TODO: sort by creation time
         let mut file_paths = storage_provider
-            .list_stream(self.prefix.clone())
+            .list_stream(prefix.clone())
             .await
             .map_err(|err| UserError::new("could not list files", err.to_string()))?;
 
@@ -101,7 +144,7 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
             .state
             .get_global_keyed_state('a')
             .await
-            .get(&self.prefix)
+            .get(&prefix)
             .map(|v: &(String, usize)| v.clone())
             .unwrap_or_default();
 
@@ -125,11 +168,17 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
 
             let stream_reader = storage_provider.get_stream(&obj_key).await.unwrap();
 
-            match self.compression {
+            match compression_format {
                 CompressionFormat::Zstd => {
                     let r = ZstdDecoder::new(BufReader::new(stream_reader));
                     match self
-                        .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
+                        .read_file(
+                            ctx,
+                            BufReader::new(r).lines(),
+                            &prefix,
+                            &obj_key,
+                            prev_lines_read,
+                        )
                         .await?
                     {
                         Some(finish_type) => return Ok(finish_type),
@@ -139,7 +188,13 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
                 CompressionFormat::Gzip => {
                     let r = GzipDecoder::new(BufReader::new(stream_reader));
                     match self
-                        .read_file(ctx, BufReader::new(r).lines(), &obj_key, prev_lines_read)
+                        .read_file(
+                            ctx,
+                            BufReader::new(r).lines(),
+                            &prefix,
+                            &obj_key,
+                            prev_lines_read,
+                        )
                         .await?
                     {
                         Some(finish_type) => return Ok(finish_type),
@@ -151,6 +206,7 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
                         .read_file(
                             ctx,
                             BufReader::new(stream_reader).lines(),
+                            &prefix,
                             &obj_key,
                             prev_lines_read,
                         )
@@ -170,6 +226,7 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
         &mut self,
         ctx: &mut Context<(), T>,
         mut reader: Lines<R>,
+        prefix: &str,
         obj_key: &str,
         prev_lines_read: usize,
     ) -> Result<Option<SourceFinishType>, UserError> {
@@ -204,7 +261,7 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
                 },
                 msg_res = ctx.control_rx.recv() => {
                     if let Some(control_message) = msg_res {
-                        match self.process_control_message(ctx, control_message, &obj_key, lines_read).await {
+                        match self.process_control_message(ctx, control_message, &prefix, &obj_key, lines_read).await {
                             Some(finish_type) => return Ok(Some(finish_type)),
                             None => ()
                         }
@@ -218,7 +275,8 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
         &mut self,
         ctx: &mut Context<(), T>,
         control_message: ControlMessage,
-        s3_key: &str,
+        prefix: &str,
+        key: &str,
         lines_read: usize,
     ) -> Option<SourceFinishType> {
         match control_message {
@@ -226,7 +284,7 @@ impl<K: Data, T: SchemaData + Data> S3SourceFunc<K, T> {
                 ctx.state
                     .get_global_keyed_state('a')
                     .await
-                    .insert(self.prefix.clone(), (s3_key.to_string(), lines_read))
+                    .insert(prefix.to_string(), (key.to_string(), lines_read))
                     .await;
                 // checkpoint our state
                 if self.checkpoint(c, ctx).await {
