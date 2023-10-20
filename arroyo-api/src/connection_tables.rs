@@ -498,79 +498,7 @@ pub(crate) async fn get_confluent_schema(
     query_params: Query<ConfluentSchemaQueryParams>,
 ) -> Result<Json<ConfluentSchema>, ErrorResp> {
     // TODO: ensure only external URLs can be hit
-    let url = format!(
-        "{}/subjects/{}-value/versions/latest",
-        query_params.endpoint, query_params.topic
-    );
-    let resp = reqwest::get(url).await.map_err(|e| {
-        warn!("Got error response from schema registry: {:?}", e);
-        match e.status() {
-            Some(StatusCode::NOT_FOUND) => bad_request(format!(
-                "Could not find value schema for topic '{}'",
-                query_params.topic
-            )),
 
-            Some(code) => bad_request(format!("Schema registry returned error: {}", code)),
-            None => {
-                warn!(
-                    "Unknown error connecting to schema registry {}: {:?}",
-                    query_params.endpoint, e
-                );
-                bad_request(format!(
-                    "Could not connect to Schema Registry at {}: unknown error",
-                    query_params.endpoint
-                ))
-            }
-        }
-    })?;
-
-    if !resp.status().is_success() {
-        let message = format!(
-            "Received an error status code from the provided endpoint: {} {}",
-            resp.status().as_u16(),
-            resp.bytes()
-                .await
-                .map(|bs| String::from_utf8_lossy(&bs).to_string())
-                .unwrap_or_else(|_| "<failed to read body>".to_string())
-        );
-        return Err(bad_request(message));
-    }
-
-    let value: serde_json::Value = resp.json().await.map_err(|e| {
-        warn!("Invalid json from schema registry: {:?}", e);
-        bad_request(format!(
-            "Schema registry returned invalid JSON: {}",
-            e.to_string()
-        ))
-    })?;
-
-    let schema_type = value
-        .get("schemaType")
-        .ok_or_else(|| {
-            bad_request(
-                "The JSON returned from this endpoint was unexpected. Please confirm that the URL is correct."
-                    .to_string(),
-            )
-        })?
-        .as_str();
-
-    if schema_type != Some("JSON") {
-        return Err(bad_request(
-            "Only JSON schema types are supported currently".to_string(),
-        ));
-    }
-
-    let schema = value
-        .get("schema")
-        .ok_or_else(|| {
-            return bad_request("Missing 'schema' field in schema registry response".to_string());
-        })?
-        .as_str()
-        .ok_or_else(|| {
-            return bad_request(
-                "The 'schema' field in the schema registry response is not a string".to_string(),
-            );
-        })?;
 
     if let Err(e) = convert_json_schema(&query_params.topic, schema) {
         warn!(

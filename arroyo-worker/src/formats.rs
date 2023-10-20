@@ -1,11 +1,13 @@
 use std::sync::Arc;
 use std::{collections::HashMap, marker::PhantomData};
+use apache_avro::Schema;
 
 use arrow::datatypes::{Field, Fields};
-use arroyo_rpc::formats::{Format, Framing, FramingMethod, JsonFormat};
+use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod, JsonFormat};
 use arroyo_types::UserError;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use tokio::sync::Mutex;
 
 use crate::SchemaData;
 
@@ -52,6 +54,14 @@ fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> 
         { "value": String::from_utf8_lossy(msg) }
     };
     Ok(serde_json::from_value(json).unwrap())
+}
+
+fn deserialize_slice_avro<T: DeserializeOwned>(
+    format: &AvroFormat,
+    schema_registry: Arc<Mutex<HashMap<[u8; 4], Schema>>>,
+    msg: &[u8],
+) {
+
 }
 
 pub struct FramingIterator<'a> {
@@ -105,33 +115,42 @@ impl<'a> Iterator for FramingIterator<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct DataDeserializer<T: SchemaData> {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
+    schema_registry: Arc<Mutex<HashMap<[u8; 4], Schema>>>,
+    schema_resolver: Arc<Box<dyn SchemaResolver>>,
     _t: PhantomData<T>,
 }
 
+
 impl<T: SchemaData> DataDeserializer<T> {
-    pub fn new(format: Format, framing: Option<Framing>) -> Self {
+    pub fn new(format: Format, framing: Option<Framing>,) -> Self {
+        if let Format::Avro(avro) = &format {
+
+        };
+
         Self {
             format: Arc::new(format),
             framing: framing.map(|f| Arc::new(f)),
             _t: PhantomData,
         }
     }
+
     pub fn deserialize_slice<'a>(
         &self,
         msg: &'a [u8],
     ) -> impl Iterator<Item = Result<T, UserError>> + 'a {
-        let format = self.format.clone();
+        let new_self = self.clone();
         FramingIterator::new(self.framing.clone(), msg)
-            .map(move |t| Self::deserialize_single(format.clone(), t))
+            .map(move |t| new_self.deserialize_single(t))
     }
 
-    fn deserialize_single(format: Arc<Format>, msg: &[u8]) -> Result<T, UserError> {
-        match &*format {
+    fn deserialize_single(&self, msg: &[u8]) -> Result<T, UserError> {
+        match &*self.format {
             Format::Json(json) => deserialize_slice_json(json, msg),
-            Format::Avro(_) => todo!(),
+            Format::Avro(avro) => deserialie_slice_avro(),
             Format::Parquet(_) => todo!(),
             Format::RawString(_) => deserialize_raw_string(msg),
         }

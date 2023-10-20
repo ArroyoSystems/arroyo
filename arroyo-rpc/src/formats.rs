@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
+use serde_json::Value;
 use utoipa::ToSchema;
+use arroyo_types::UserError;
 
 #[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
@@ -92,8 +95,30 @@ impl JsonFormat {
 pub struct RawStringFormat {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+pub struct ConfluentSchemaRegistryConfig {
+    endpoint: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct AvroFormat {}
+pub struct AvroFormat {
+    pub writer_schema: Option<String>,
+    pub confluent_schema_registry: Option<ConfluentSchemaRegistryConfig>,
+}
+
+impl AvroFormat {
+    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
+        let confluent_schema_registry = opts.remove("avro.confluent_schema_registry.endpoint")
+            .map(|endpoint| ConfluentSchemaRegistryConfig {
+                endpoint
+            });
+
+        Ok(Self {
+            writer_schema: None,
+            confluent_schema_registry,
+        })
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -118,7 +143,7 @@ impl Format {
             "json" => Format::Json(JsonFormat::from_opts(false, opts)?),
             "debezium_json" => Format::Json(JsonFormat::from_opts(true, opts)?),
             "protobuf" => return Err("protobuf is not yet supported".to_string()),
-            "avro" => return Err("avro is not yet supported".to_string()),
+            "avro" => Format::Avro(AvroFormat::from_opts(opts)?),
             "raw_string" => Format::RawString(RawStringFormat {}),
             "parquet" => Format::Parquet(ParquetFormat {}),
             f => return Err(format!("Unknown format '{}'", f)),
