@@ -1,16 +1,20 @@
 use std::convert::Infallible;
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
+use arroyo_types::string_to_map;
 use axum::response::sse::Event;
 use futures::{SinkExt, StreamExt};
-use tokio::sync::mpsc::Sender;
-use tokio_tungstenite::{connect_async, tungstenite};
-use typify::import_types;
-
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
+use tokio_tungstenite::tungstenite::handshake::client::generate_key;
+use tokio_tungstenite::tungstenite::http::Uri;
+use tokio_tungstenite::{connect_async, tungstenite};
+use tungstenite::http::Request;
+use typify::import_types;
 
 use crate::{pull_opt, Connection, EmptyConfig};
 
@@ -72,7 +76,55 @@ impl Connector for WebsocketConnector {
                 }
             };
 
-            let ws_stream = match connect_async(&table.endpoint).await {
+            let headers =
+                match string_to_map(table.headers.as_ref().map(|t| t.0.as_str()).unwrap_or(""))
+                    .ok_or_else(|| anyhow!("Headers are invalid; should be comma-separated pairs"))
+                {
+                    Ok(headers) => headers,
+                    Err(e) => {
+                        send(true, true, format!("Failed to parse headers: {:?}", e)).await;
+                        return;
+                    }
+                };
+
+            let uri = match Uri::from_str(&table.endpoint.to_string()) {
+                Ok(uri) => uri,
+                Err(e) => {
+                    send(true, true, format!("Failed to parse endpoint: {:?}", e)).await;
+                    return;
+                }
+            };
+
+            let host = match uri.host() {
+                Some(host) => host,
+                None => {
+                    send(true, true, "Endpoint must have a host".to_string()).await;
+                    return;
+                }
+            };
+
+            let mut request_builder = Request::builder().uri(&table.endpoint);
+
+            for (k, v) in headers {
+                request_builder = request_builder.header(k, v);
+            }
+
+            let request = match request_builder
+                .header("Host", host)
+                .header("Sec-WebSocket-Key", generate_key())
+                .header("Sec-WebSocket-Version", "13")
+                .header("Connection", "Upgrade")
+                .header("Upgrade", "websocket")
+                .body(())
+            {
+                Ok(request) => request,
+                Err(e) => {
+                    send(true, true, format!("Failed to build request: {:?}", e)).await;
+                    return;
+                }
+            };
+
+            let ws_stream = match connect_async(request).await {
                 Ok((ws_stream, _)) => ws_stream,
                 Err(e) => {
                     send(
@@ -94,7 +146,7 @@ impl Connector for WebsocketConnector {
 
             let (mut tx, mut rx) = ws_stream.split();
 
-            if let Some(msg) = table.subscription_message {
+            for msg in table.subscription_messages {
                 match tx
                     .send(tungstenite::Message::Text(msg.clone().into()))
                     .await
@@ -159,6 +211,15 @@ impl Connector for WebsocketConnector {
     ) -> anyhow::Result<crate::Connection> {
         let description = format!("WebsocketSource<{}>", table.endpoint);
 
+        if let Some(headers) = &table.headers {
+            string_to_map(headers).ok_or_else(|| {
+                anyhow!(
+                    "Invalid format for headers; should be a \
+                    comma-separated list of colon-separated key value pairs"
+                )
+            })?;
+        }
+
         let schema = schema
             .map(|s| s.to_owned())
             .ok_or_else(|| anyhow!("no schema defined for WebSocket connection"))?;
@@ -195,7 +256,26 @@ impl Connector for WebsocketConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
         let endpoint = pull_opt("endpoint", opts)?;
-        let subscription_message = opts.remove("subscription_message");
+        let headers = opts.remove("headers");
+        let mut subscription_messages = vec![];
+
+        // add the single subscription message if it exists
+        if let Some(message) = opts.remove("subscription_message") {
+            subscription_messages.push(SubscriptionMessage(message));
+
+            if opts.contains_key("subscription_messages.0") {
+                return Err(anyhow!(
+                    "Cannot specify both 'subscription_message' and 'subscription_messages.0'"
+                ));
+            }
+        }
+
+        // add the indexed subscription messages if they exist
+        let mut message_index = 0;
+        while let Some(message) = opts.remove(&format!("subscription_messages.{}", message_index)) {
+            subscription_messages.push(SubscriptionMessage(message));
+            message_index += 1;
+        }
 
         self.from_config(
             None,
@@ -203,7 +283,9 @@ impl Connector for WebsocketConnector {
             EmptyConfig {},
             WebsocketTable {
                 endpoint,
-                subscription_message: subscription_message.map(SubscriptionMessage),
+                headers: headers.map(Headers),
+                subscription_message: None,
+                subscription_messages,
             },
             schema,
         )
