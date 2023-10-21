@@ -10,19 +10,22 @@ use cornucopia_async::GenericClient;
 use cornucopia_async::Params;
 use futures_util::stream::Stream;
 use http::StatusCode;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::convert::Infallible;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use arroyo_connectors::{connector_for_type, ErasedConnector};
+use arroyo_connectors::{Connector, connector_for_type, ErasedConnector};
+use arroyo_connectors::kafka::{KafkaConfig, KafkaConnector, KafkaTable};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema,
     ConnectionTable, ConnectionTablePost, SchemaDefinition,
 };
 use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
+use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::schema_resolver::{ConfluentSchemaResolver, ConfluentSchemaType};
 use arroyo_sql::json_schema::convert_json_schema;
 use arroyo_sql::types::{StructField, TypeDef};
 
@@ -95,8 +98,9 @@ async fn get_and_validate_connector<E: GenericClient>(
         .transpose()
         .map_err(|e| bad_request(format!("Invalid schema: {}", e)))?;
 
-    let schema = if let Some(schema) = &schema {
-        Some(expand_schema(&req.name, schema)?)
+    let schema = if let Some(schema) = schema {
+        let name = connector.name();
+        Some(expand_schema(&req.name, name, schema, &req.config, &profile_config).await?)
     } else {
         None
     };
@@ -137,6 +141,7 @@ pub(crate) async fn delete_connection_table(
 }
 
 /// Test a Connection Table
+#[axum::debug_handler]
 #[utoipa::path(
     post,
     path = "/v1/connection_tables/test",
@@ -413,31 +418,70 @@ pub(crate) async fn get_connection_tables(
 
 // attempts to fill in the SQL schema from a schema object that may just have a json-schema or
 // other source schema. schemas stored in the database should always be expanded first.
-pub(crate) fn expand_schema(
+pub(crate) async fn expand_schema(
     name: &str,
-    schema: &ConnectionSchema,
+    connector: &str,
+    schema: ConnectionSchema,
+    table_config: &Value,
+    profile_config: &Value,
 ) -> Result<ConnectionSchema, ErrorResp> {
-    let mut schema = schema.clone();
+    let Some(format) = schema.format.as_ref() else {
+        return Ok(schema);
+    };
+
+    match format {
+        Format::Json(_) => expand_json_schema(name, connector, schema, table_config, profile_config).await,
+        Format::Avro(_) => todo!(),
+        Format::Parquet(_) => Ok(schema),
+        Format::RawString(_) => Ok(schema),
+    }
+
+}
+
+async fn expand_json_schema(name: &str, connector: &str, mut schema: ConnectionSchema, table_config: &Value, profile_config: &Value) -> Result<ConnectionSchema, ErrorResp> {
+    if let Some(Format::Json(JsonFormat { confluent_schema_registry: true, .. })) = &schema.format {
+        if connector != "kafka" {
+            return Err(bad_request("confluent schema registry can only be used for Kafka connections".to_string()));
+        }
+
+        // we unwrap here because this should already have been validated
+        let profile: KafkaConfig = serde_json::from_value(profile_config.clone())
+            .expect("invalid kafka config");
+
+        let table: KafkaTable = serde_json::from_value(table_config.clone())
+            .expect("invalid kafka table");
+
+        let schema_registry = profile.schema_registry.as_ref().ok_or_else(||
+            bad_request("schema registry must be configured on the Kafka connection profile".to_string()))?;
+
+        let resolver = ConfluentSchemaResolver::new(&schema_registry.endpoint, &table.topic)
+            .map_err(|e| bad_request(format!("failed to fetch schemas from schema repository: {}", e)))?;
+
+        let schema_response = resolver.get_schema(None).await
+            .map_err(|e| bad_request(format!("failed to fetch schemas from schema repository: {}", e)))?;
+
+        if schema_response.schema_type != ConfluentSchemaType::Json {
+            return Err(bad_request(format!("Format configured is json, but confluent schema repository returned a {:?} schema",
+                                   schema_response.schema_type)));
+        }
+
+        schema.definition = Some(SchemaDefinition::JsonSchema(schema_response.schema));
+    }
 
     if let Some(d) = &schema.definition {
         let fields = match d {
-            SchemaDefinition::JsonSchema(json) => convert_json_schema(name, &json)
+            SchemaDefinition::JsonSchema(json) => convert_json_schema(&name, &json)
                 .map_err(|e| bad_request(format!("Invalid json-schema: {}", e)))?,
-            SchemaDefinition::ProtobufSchema(_) => {
-                return Err(bad_request(
-                    "Protobuf schemas are not yet supported".to_string(),
-                ))
-            }
-            SchemaDefinition::AvroSchema(_) => {
-                return Err(bad_request(
-                    "Avro schemas are not yet supported".to_string(),
-                ))
-            }
             SchemaDefinition::RawSchema(_) => vec![StructField::new(
                 "value".to_string(),
                 None,
                 TypeDef::DataType(DataType::Utf8, false),
             )],
+            _ => {
+                return Err(bad_request(
+                    "Invalid schema type for json format".to_string(),
+                ))
+            }
         };
 
         let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
@@ -447,6 +491,7 @@ pub(crate) fn expand_schema(
     }
 
     Ok(schema)
+
 }
 
 /// Test a Connection Schema

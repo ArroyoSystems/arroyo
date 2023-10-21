@@ -140,7 +140,7 @@ const pingFetcher = async () => {
 
 export const usePing = () => {
   const { data, error, isLoading } = useSWR('ping', pingFetcher, {
-    refreshInterval: 1000,
+    refreshInterval: 3000000,
     onErrorRetry: (error, key, config, revalidate, {}) => {
       // explicitly define this function to override the exponential backoff
       setTimeout(() => revalidate(), 1000);

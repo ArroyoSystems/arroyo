@@ -33,10 +33,11 @@ pub enum ConfluentSchemaType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfluentSchemaResponse {
-    pub name: String,
-    pub version: String,
-    pub schema_type: ConfluentSchemaType,
+    pub id: u32,
     pub schema: String,
+    pub schema_type: ConfluentSchemaType,
+    pub subject: String,
+    pub version: u32,
 }
 
 pub struct ConfluentSchemaResolver {
