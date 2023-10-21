@@ -82,7 +82,7 @@ impl Connector for FileSystemConnector {
     ) -> anyhow::Result<crate::Connection> {
         let (description, operator, connection_type) = match table.type_ {
             TableType::Source { .. } => (
-                "FileSystem<S3>".to_string(),
+                "FileSystem".to_string(),
                 "connectors::filesystem::source::FileSystemSourceFunc",
                 ConnectionType::Source,
             ),
