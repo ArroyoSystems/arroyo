@@ -34,3 +34,5 @@ futures = "0.3.28"
 tokio-tungstenite = { version = "0.20.1", features = ["native-tls"] }
 axum = {version = "0.6.12"}
 reqwest = "0.11.20"
+rand = "0.8.5"
+base64 = "0.13.1"

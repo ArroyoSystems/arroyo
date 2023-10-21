@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::{
     marker::PhantomData,
     time::{Duration, Instant, SystemTime},
@@ -9,14 +10,17 @@ use arroyo_rpc::{
     ControlMessage, OperatorConfig,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{Data, Message, Record, UserError, Watermark};
+use arroyo_types::{string_to_map, Data, Message, Record, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::select;
+use tokio_tungstenite::tungstenite::handshake::client::generate_key;
+use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::{debug, info};
+use tungstenite::http::Request;
 use typify::import_types;
 
 use crate::formats::DataDeserializer;
@@ -37,7 +41,8 @@ where
     T: SchemaData,
 {
     url: String,
-    subscription_message: Option<String>,
+    headers: Vec<(String, String)>,
+    subscription_messages: Vec<String>,
     deserializer: DataDeserializer<T>,
     state: WebsocketSourceState,
     _t: PhantomData<K>,
@@ -55,9 +60,25 @@ where
         let table: WebsocketTable =
             serde_json::from_value(config.table).expect("Invalid table config for WebsocketSource");
 
+        // Include subscription_message for backwards compatibility
+        let mut subscription_messages = vec![];
+        if let Some(message) = table.subscription_message {
+            subscription_messages.push(message.to_string());
+        };
+        subscription_messages.extend(
+            table
+                .subscription_messages
+                .into_iter()
+                .map(|m| m.to_string()),
+        );
+
         Self {
             url: table.endpoint,
-            subscription_message: table.subscription_message.map(|s| s.into()),
+            headers: string_to_map(table.headers.as_ref().map(|t| t.0.as_str()).unwrap_or(""))
+                .expect("Invalid header map")
+                .into_iter()
+                .collect(),
+            subscription_messages,
             deserializer: DataDeserializer::new(
                 config.format.expect("WebsocketSource requires a format"),
                 config.framing,
@@ -143,7 +164,47 @@ where
     }
 
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
-        let ws_stream = match connect_async(&self.url).await {
+        let uri = match Uri::from_str(&self.url.to_string()) {
+            Ok(uri) => uri,
+            Err(e) => {
+                ctx.report_error("Failed to parse endpoint".to_string(), format!("{:?}", e))
+                    .await;
+                panic!("Failed to parse endpoint: {:?}", e);
+            }
+        };
+
+        let host = match uri.host() {
+            Some(host) => host,
+            None => {
+                ctx.report_error("Endpoint must have a host".to_string(), "".to_string())
+                    .await;
+                panic!("Endpoint must have a host");
+            }
+        };
+
+        let mut request_builder = Request::builder().uri(&self.url);
+
+        for (k, v) in &self.headers {
+            request_builder = request_builder.header(k, v);
+        }
+
+        let request = match request_builder
+            .header("Host", host)
+            .header("Sec-WebSocket-Key", generate_key())
+            .header("Sec-WebSocket-Version", "13")
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .body(())
+        {
+            Ok(request) => request,
+            Err(e) => {
+                ctx.report_error("Failed to build request".to_string(), format!("{:?}", e))
+                    .await;
+                panic!("Failed to build request: {:?}", e);
+            }
+        };
+
+        let ws_stream = match connect_async(request).await {
             Ok((ws_stream, _)) => ws_stream,
             Err(e) => {
                 ctx.report_error(
@@ -160,7 +221,7 @@ where
 
         let (mut tx, mut rx) = ws_stream.split();
 
-        if let Some(msg) = &self.subscription_message {
+        for msg in &self.subscription_messages {
             if let Err(e) = tx.send(tungstenite::Message::Text(msg.clone())).await {
                 ctx.report_error(
                     "Failed to send subscription message to websocket server".to_string(),
