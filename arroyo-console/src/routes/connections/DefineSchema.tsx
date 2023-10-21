@@ -12,17 +12,19 @@ import {
 import React, { ChangeEvent, ChangeEventHandler, Dispatch, ReactElement, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { JsonSchemaEditor } from './JsonSchemaEditor';
-import { Connector } from '../../lib/data_fetching';
+import {ConnectionProfile, Connector, useConnectionProfiles} from '../../lib/data_fetching';
 import { ConfluentSchemaEditor } from './ConfluentSchemaEditor';
 import { components } from '../../gen/api-types';
 
 const JsonEditor = ({
   connector,
+  connectionProfiles,
   state,
   setState,
   next,
 }: {
   connector: Connector;
+  connectionProfiles: Array<ConnectionProfile>,
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
   next: () => void;
@@ -32,7 +34,13 @@ const JsonEditor = ({
     { name: 'JSON Schema', value: 'json' },
     { name: 'Unstructured JSON', value: 'unstructured' },
   ];
-  if (connector.id == 'kafka') {
+
+  let connectionProfile = null;
+  if (state.connectionProfileId != null) {
+    connectionProfile = connectionProfiles.find(c => c.id == state.connectionProfileId);
+  }
+
+  if (connector.id == 'kafka' && connectionProfile != null && (connectionProfile.config as any).schemaRegistry != null) {
     schemaTypeOptions.push({ name: 'Confluent Schema Registry', value: 'confluent' });
   }
 
@@ -84,7 +92,7 @@ const JsonEditor = ({
           ...state,
           schema: {
             ...state.schema,
-            definition: { json_schema: '' },
+            definition: null,
             fields: [],
             format: { json: { unstructured: false, confluentSchemaRegistry: true } },
           },
@@ -192,11 +200,18 @@ export const DefineSchema = ({
   const [selectedFormat, setSelectedFormat] = useState<string | undefined>(undefined);
   const [selectedFraming, setSelectedFraming] = useState<string | undefined>(undefined);
 
+  let { connectionProfiles, connectionProfilesLoading } = useConnectionProfiles();
+
+  if (connectionProfilesLoading) {
+    return <></>;
+  }
+
+
   const formats: DataFormatOption[] = [
     {
       name: 'JSON',
       value: 'json',
-      el: <JsonEditor connector={connector} state={state} setState={setState} next={next} />,
+      el: <JsonEditor connector={connector} connectionProfiles={connectionProfiles!} state={state} setState={setState} next={next} />,
     },
     {
       name: 'Raw String',

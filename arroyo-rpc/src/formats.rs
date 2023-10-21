@@ -103,19 +103,12 @@ pub struct ConfluentSchemaRegistryConfig {
 #[serde(rename_all = "camelCase")]
 pub struct AvroFormat {
     pub writer_schema: Option<String>,
-    pub confluent_schema_registry: Option<ConfluentSchemaRegistryConfig>,
 }
 
 impl AvroFormat {
     pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
-        let confluent_schema_registry = opts.remove("avro.confluent_schema_registry.endpoint")
-            .map(|endpoint| ConfluentSchemaRegistryConfig {
-                endpoint
-            });
-
         Ok(Self {
             writer_schema: None,
-            confluent_schema_registry,
         })
     }
 }

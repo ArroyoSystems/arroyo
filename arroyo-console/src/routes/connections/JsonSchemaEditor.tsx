@@ -24,7 +24,6 @@ export function JsonSchemaEditor({
   const valid = tested == editor?.getValue() && errors?.length == 0;
 
   const testSchema = async () => {
-    console.log('testing schema');
     setTesting(true);
     setErrors(null);
     const { error } = await post('/v1/connection_tables/schemas/test', {

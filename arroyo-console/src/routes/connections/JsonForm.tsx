@@ -344,7 +344,6 @@ export function FormInner({
                     onChange={onChange}
                   />
                 );
-                342;
               }
               case 'array': {
                 return (
@@ -401,7 +400,7 @@ export function FormInner({
                       </Stack>
                     </fieldset>
                   );
-                } else if ((values[key].properties?.length || 0) > 0) {
+                } else if (property.properties != undefined) {
                   return (
                     <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
                       <legend

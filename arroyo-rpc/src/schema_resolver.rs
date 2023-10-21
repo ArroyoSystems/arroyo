@@ -22,7 +22,7 @@ impl SchemaResolver for FailingSchemaResolver {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum ConfluentSchemaType {
     Avro,
@@ -39,7 +39,7 @@ pub struct ConfluentSchemaResponse {
     pub schema: String,
 }
 
-struct ConfluentSchemaResolver {
+pub struct ConfluentSchemaResolver {
     endpoint: Url,
     topic: String,
     client: Client,
@@ -64,7 +64,7 @@ impl ConfluentSchemaResolver {
     }
 
 
-    async fn get_schema(&self, version: Option<u32>) -> anyhow::Result<ConfluentSchemaResponse> {
+    pub async fn get_schema(&self, version: Option<u32>) -> anyhow::Result<ConfluentSchemaResponse> {
         let url = self.endpoint.join(
             &version.map(|v| format!("{}", v)).unwrap_or_else(|| "latest".to_string())).unwrap();
 
