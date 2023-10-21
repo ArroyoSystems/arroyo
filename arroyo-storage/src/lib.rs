@@ -422,7 +422,7 @@ impl StorageProvider {
             .map_err(|e| Into::<StorageError>::into(e))
     }
 
-    pub async fn list_stream<P: Into<String>>(
+    pub async fn list_as_stream<P: Into<String>>(
         &self,
         path: P,
     ) -> Result<impl Stream<Item = Result<Path, object_store::Error>> + '_, StorageError> {
@@ -451,7 +451,7 @@ impl StorageProvider {
         Ok(bytes)
     }
 
-    pub async fn get_stream<P: Into<String>>(
+    pub async fn get_as_stream<P: Into<String>>(
         &self,
         path: P,
     ) -> Result<impl tokio::io::AsyncRead, StorageError> {

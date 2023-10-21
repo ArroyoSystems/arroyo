@@ -111,7 +111,7 @@ impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
 
         // TODO: sort by creation time
         let mut file_paths = storage_provider
-            .list_stream(prefix.clone())
+            .list_as_stream(prefix.clone())
             .await
             .map_err(|err| UserError::new("could not list files", err.to_string()))?;
 
@@ -141,7 +141,7 @@ impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
             }
             prev_file_found = true;
 
-            let stream_reader = storage_provider.get_stream(&obj_key).await.unwrap();
+            let stream_reader = storage_provider.get_as_stream(&obj_key).await.unwrap();
 
             match compression_format {
                 CompressionFormat::Zstd => {
