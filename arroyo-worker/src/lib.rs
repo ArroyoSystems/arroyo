@@ -9,11 +9,11 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
-    CheckpointReq, CheckpointResp, HeartbeatReq, JobFinishedReq, JobFinishedResp,
-    LoadCompactedDataReq, LoadCompactedDataRes, RegisterWorkerReq, StartExecutionReq,
-    StartExecutionResp, StopExecutionReq, StopExecutionResp, TaskCheckpointCompletedReq,
-    TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerErrorReq,
-    WorkerResources,
+    CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq,
+    JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes, RegisterWorkerReq,
+    StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp,
+    TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq,
+    TaskStartedReq, WorkerErrorReq, WorkerResources,
 };
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
@@ -566,7 +566,10 @@ impl WorkerGrpc for WorkerServer {
             };
             for sender in &senders {
                 sender
-                    .send(ControlMessage::Commit { epoch: req.epoch })
+                    .send(ControlMessage::Commit {
+                        epoch: req.epoch,
+                        commit_data: HashMap::new(),
+                    })
                     .await
                     .unwrap();
             }
@@ -597,6 +600,49 @@ impl WorkerGrpc for WorkerServer {
         }
 
         Ok(Response::new(CheckpointResp {}))
+    }
+
+    async fn commit(&self, request: Request<CommitReq>) -> Result<Response<CommitResp>, Status> {
+        let req = request.into_inner();
+        let sender_commit_map_pairs = {
+            let state_mutex = self.state.lock().unwrap();
+            let Some(state) = state_mutex.as_ref() else {
+                return Err(Status::failed_precondition(
+                    "Worker has not yet started execution",
+                ));
+            };
+            info!("committing func");
+            let mut sender_commit_map_pairs = vec![];
+            info!("committing data is {:?}", req.committing_data);
+            for (operator_id, commit_operator) in req.committing_data {
+                let nodes = state.operator_controls.get(&operator_id).unwrap().clone();
+                let commit_map: HashMap<_, _> = commit_operator
+                    .committing_data
+                    .into_iter()
+                    .map(|(table, backend_data)| {
+                        (
+                            table.chars().next().unwrap(),
+                            backend_data.commit_data_by_subtask,
+                        )
+                    })
+                    .collect();
+                sender_commit_map_pairs.push((nodes, commit_map));
+            }
+            sender_commit_map_pairs
+        };
+        for (senders, commit_map) in sender_commit_map_pairs {
+            for sender in senders {
+                sender
+                    .send(ControlMessage::Commit {
+                        epoch: req.epoch,
+                        commit_data: commit_map.clone(),
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+        info!("finished sending commits");
+        Ok(Response::new(CommitResp {}))
     }
 
     async fn load_compacted_data(

@@ -202,6 +202,7 @@ pub trait BackingStore {
     async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
 
     async fn load_compacted(&mut self, compaction: CompactionResult);
+    async fn insert_committing_data(&mut self, table: char, committing_data: Vec<u8>);
 }
 
 pub struct StateStore<S: BackingStore> {
@@ -416,6 +417,12 @@ impl<S: BackingStore> StateStore<S> {
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         self.backend.load_compacted(compaction).await;
     }
+
+    pub async fn insert_committing_data(&mut self, table: char, committing_data: Vec<u8>) {
+        self.backend
+            .insert_committing_data(table, committing_data)
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -558,6 +565,7 @@ mod test {
             tables: default_tables(),
             backend_data: message.subtask_metadata.backend_data,
             bytes: 5,
+            commit_data: None,
         })
         .await;
 

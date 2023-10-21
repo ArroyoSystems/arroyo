@@ -483,6 +483,17 @@ impl BackingStore for ParquetBackend {
     async fn load_compacted(&mut self, compaction: CompactionResult) {
         self.writer.load_compacted_data(compaction).await;
     }
+
+    async fn insert_committing_data(&mut self, table: char, committing_data: Vec<u8>) {
+        self.writer
+            .sender
+            .send(ParquetQueueItem::CommitData {
+                table,
+                data: committing_data,
+            })
+            .await
+            .unwrap();
+    }
 }
 
 impl ParquetBackend {
@@ -1017,6 +1028,7 @@ impl ParquetWriter {
                 .map(|table| (table.name.chars().next().unwrap(), table.clone()))
                 .collect(),
             builders: HashMap::new(),
+            commit_data: HashMap::new(),
             current_files,
             load_compacted_tx,
             new_compacted: vec![],
@@ -1085,6 +1097,7 @@ impl ParquetWriter {
 enum ParquetQueueItem {
     Write(ParquetWrite),
     Checkpoint(ParquetCheckpoint),
+    CommitData { table: char, data: Vec<u8> },
 }
 
 #[derive(Debug)]
@@ -1225,6 +1238,7 @@ struct ParquetFlusher {
     task_info: TaskInfo,
     table_descriptors: HashMap<char, TableDescriptor>,
     builders: HashMap<char, RecordBatchBuilder>,
+    commit_data: HashMap<char, Vec<u8>>,
     current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>, // table -> epoch -> file
     load_compacted_tx: Receiver<CompactionResult>,
     new_compacted: Vec<ParquetStoreData>,
@@ -1329,6 +1343,9 @@ impl ParquetFlusher {
                         Some(ParquetQueueItem::Checkpoint(epoch)) => {
                             checkpoint_epoch = Some(epoch);
                         },
+                        Some(ParquetQueueItem::CommitData{table, data}) => {
+                            self.commit_data.insert(table, data);
+                        }
                         None => {
                             debug!("Parquet flusher closed");
                             return Ok(false);
@@ -1440,6 +1457,11 @@ impl ParquetFlusher {
                 watermark: cp.watermark.map(to_micros),
                 backend_data: checkpoint_backend_data,
                 bytes: bytes as u64,
+                committing_data: self
+                    .commit_data
+                    .drain()
+                    .map(|(table, data)| (table.to_string(), data))
+                    .collect(),
             };
             self.control_tx
                 .send(ControlResp::CheckpointCompleted(CheckpointCompleted {

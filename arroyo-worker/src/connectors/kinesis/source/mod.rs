@@ -450,7 +450,7 @@ impl<K: Data, T: SchemaData> KinesisSourceFunc<K, T> {
                                 }
                             }
                         }
-                        Some(ControlMessage::Commit { epoch: _ }) => {
+                        Some(ControlMessage::Commit { .. }) => {
                             unreachable!("sources shouldn't receive commit messages");
                         }
                         Some(ControlMessage::LoadCompacted { compacted }) => {
@@ -458,7 +458,6 @@ impl<K: Data, T: SchemaData> KinesisSourceFunc<K, T> {
                         },
                         Some(ControlMessage::NoOp ) => {}
                         None => {
-
                         }
                     }
                 }

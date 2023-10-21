@@ -136,7 +136,7 @@ where
                     }
                 }
             }
-            ControlMessage::Commit { epoch: _ } => {
+            ControlMessage::Commit { .. } => {
                 unreachable!("sources shouldn't receive commit messages");
             }
             ControlMessage::LoadCompacted { compacted } => {

@@ -2,6 +2,7 @@ pub mod api_types;
 pub mod formats;
 pub mod public_ids;
 
+use std::collections::HashMap;
 use std::{fs, time::SystemTime};
 
 use crate::api_types::connections::PrimitiveType;
@@ -32,9 +33,16 @@ pub mod grpc {
 #[derive(Debug)]
 pub enum ControlMessage {
     Checkpoint(CheckpointBarrier),
-    Stop { mode: StopMode },
-    Commit { epoch: u32 },
-    LoadCompacted { compacted: CompactionResult },
+    Stop {
+        mode: StopMode,
+    },
+    Commit {
+        epoch: u32,
+        commit_data: HashMap<char, HashMap<u32, Vec<u8>>>,
+    },
+    LoadCompacted {
+        compacted: CompactionResult,
+    },
     NoOp,
 }
 

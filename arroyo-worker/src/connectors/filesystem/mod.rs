@@ -18,7 +18,7 @@ use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{path::Path, MultipartId, UploadPart};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::warn;
+use tracing::{info, warn};
 use typify::import_types;
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
@@ -1402,6 +1402,10 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
         _task_info: &TaskInfo,
         pre_commit: Vec<Self::PreCommit>,
     ) -> Result<()> {
+        info!("multipart commit running");
+        for file_to_finish in &pre_commit {
+            warn!("finishing {:?}", file_to_finish);
+        }
         self.sender
             .send(FileSystemMessages::FilesToFinish(pre_commit))
             .await?;

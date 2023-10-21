@@ -167,7 +167,7 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
                         }
                     }
                 }
-                Ok(ControlMessage::Commit { epoch: _ }) => {
+                Ok(ControlMessage::Commit { .. }) => {
                     unreachable!("sources shouldn't receive commit messages");
                 }
                 Ok(ControlMessage::LoadCompacted { compacted }) => {
