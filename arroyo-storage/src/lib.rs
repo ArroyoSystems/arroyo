@@ -282,6 +282,20 @@ impl StorageProvider {
         Self::get_url_with_options(url, HashMap::new()).await
     }
 
+    pub async fn ensure_valid(storage: &Self) -> Result<(), StorageError> {
+        let url = match &storage.config {
+            BackendConfig::S3(_cfg) => "s3://non-existent-bucket/fake_dir",
+            BackendConfig::GCS(_cfg) => "gs://non-existent-bucket/fake_dir",
+            BackendConfig::Local(_cfg) => "/usr/bin/non-existing-file",
+        };
+        let result = storage.get(url).await;
+        match result {
+            Err(StorageError::ObjectStore(object_store::Error::NotFound {path:_, source:_ })) => Ok(()),
+            Err(err) => Err(err),
+            other => other.map(|_x| ())
+        }
+    }
+
     pub async fn get_url_with_options(
         url: &str,
         options: HashMap<String, String>,
