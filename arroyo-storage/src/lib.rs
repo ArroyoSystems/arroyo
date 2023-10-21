@@ -10,9 +10,10 @@ use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
 use object_store::aws::AmazonS3ConfigKey;
 use object_store::gcp::GoogleCloudStorageBuilder;
+use object_store::multipart::PartId;
 use object_store::path::Path;
+use object_store::MultipartId;
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
-use object_store::{MultipartId, UploadPart};
 use regex::{Captures, Regex};
 use thiserror::Error;
 
@@ -440,9 +441,10 @@ impl StorageProvider {
     pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
         Ok(self
             .object_store
-            .start_multipart(path)
+            .initiate_multipart_upload(path)
             .await
-            .map_err(|e| Into::<StorageError>::into(e))?)
+            .map_err(|e| Into::<StorageError>::into(e))?
+            .0)
     }
 
     pub async fn add_multipart(
@@ -451,10 +453,12 @@ impl StorageProvider {
         multipart_id: &MultipartId,
         part_number: usize,
         bytes: Bytes,
-    ) -> Result<UploadPart, StorageError> {
+    ) -> Result<PartId, StorageError> {
         Ok(self
             .object_store
-            .add_multipart(path, multipart_id, part_number, bytes)
+            .get_put_part(path, multipart_id)
+            .await?
+            .put_part(bytes, part_number)
             .await
             .map_err(|e| Into::<StorageError>::into(e))?)
     }
@@ -463,11 +467,13 @@ impl StorageProvider {
         &self,
         path: &Path,
         multipart_id: &MultipartId,
-        parts: Vec<UploadPart>,
+        parts: Vec<PartId>,
     ) -> Result<(), StorageError> {
         Ok(self
             .object_store
-            .close_multipart(path, multipart_id, parts)
+            .get_put_part(path, multipart_id)
+            .await?
+            .complete(parts)
             .await
             .map_err(|e| Into::<StorageError>::into(e))?)
     }

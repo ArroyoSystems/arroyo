@@ -782,7 +782,7 @@ dependencies = [
  "arroyo-types",
  "async-trait",
  "bytes",
- "object_store",
+ "object_store 0.7.1",
  "regex",
  "rusoto_core",
  "thiserror",
@@ -831,7 +831,7 @@ dependencies = [
  "local-ip-address",
  "md-5 0.10.5",
  "memchr",
- "object_store",
+ "object_store 0.7.1",
  "once_cell",
  "ordered-float 3.9.1",
  "parquet",
@@ -1764,9 +1764,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chrono"
-version = "0.4.30"
+version = "0.4.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "defd4e7873dbddba6c7c91e199c7fcb946abc4a6a4ac3195400bcfb01b5de877"
+checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -2456,7 +2456,7 @@ dependencies = [
  "lazy_static",
  "log",
  "num_cpus",
- "object_store",
+ "object_store 0.6.1",
  "parking_lot 0.12.1",
  "parquet",
  "percent-encoding",
@@ -2483,7 +2483,7 @@ dependencies = [
  "arrow-array",
  "chrono",
  "num_cpus",
- "object_store",
+ "object_store 0.6.1",
  "parquet",
  "sqlparser",
 ]
@@ -2499,7 +2499,7 @@ dependencies = [
  "datafusion-expr",
  "hashbrown 0.14.0",
  "log",
- "object_store",
+ "object_store 0.6.1",
  "parking_lot 0.12.1",
  "rand",
  "tempfile",
@@ -5086,7 +5086,28 @@ dependencies = [
 [[package]]
 name = "object_store"
 version = "0.6.1"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=43.0.0/arroyo_patches#1ee79ea0973a28bb7e8112024576e24a90eabe92"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27c776db4f332b571958444982ff641d2531417a326ca368995073b639205d58"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "humantime",
+ "itertools 0.10.5",
+ "parking_lot 0.12.1",
+ "percent-encoding",
+ "snafu",
+ "tokio",
+ "tracing",
+ "url",
+ "walkdir",
+]
+
+[[package]]
+name = "object_store"
+version = "0.7.1"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=object_store/put_part_api#6062e6b1286297922bbf658eecef293dda19a643"
 dependencies = [
  "async-trait",
  "base64 0.21.4",
@@ -5095,13 +5116,13 @@ dependencies = [
  "futures",
  "humantime",
  "hyper",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "parking_lot 0.12.1",
  "percent-encoding",
  "quick-xml",
  "rand",
  "reqwest",
- "ring 0.16.20",
+ "ring 0.17.3",
  "rustls-pemfile",
  "serde",
  "serde_json",
@@ -5342,7 +5363,7 @@ dependencies = [
  "lz4",
  "num",
  "num-bigint",
- "object_store",
+ "object_store 0.6.1",
  "paste",
  "seq-macro",
  "snap",
@@ -5899,9 +5920,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.28.2"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce5e73202a820a31f8a0ee32ada5e21029c81fd9e3ebf668a40832e4219d9d1"
+checksum = "eff6510e86862b57b210fd8cbe8ed3f0d7d600b9c2863cd4549a2e033c66e956"
 dependencies = [
  "memchr",
  "serde",

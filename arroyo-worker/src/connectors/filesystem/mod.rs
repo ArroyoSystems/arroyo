@@ -15,7 +15,7 @@ use bincode::{Decode, Encode};
 use chrono::{DateTime, Utc};
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
-use object_store::{path::Path, MultipartId, UploadPart};
+use object_store::{multipart::PartId, path::Path, MultipartId};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::warn;
@@ -362,7 +362,7 @@ pub trait MultiPartWriter {
     fn handle_completed_part(
         &mut self,
         part_idx: usize,
-        upload_part: UploadPart,
+        upload_part: PartId,
     ) -> Result<Option<FileToFinish>>;
 
     fn get_in_progress_checkpoint(&mut self) -> FileCheckpointData;
@@ -421,7 +421,7 @@ async fn from_checkpoint(
                     InFlightPartCheckpoint::FinishedPart {
                         part: _,
                         content_id,
-                    } => parts.push(UploadPart { content_id }),
+                    } => parts.push(PartId { content_id }),
                     InFlightPartCheckpoint::InProgressPart { part, data } => {
                         let upload_part = object_store
                             .add_multipart(path, &multi_part_upload_id, part, data.into())
@@ -453,7 +453,7 @@ async fn from_checkpoint(
                     InFlightPartCheckpoint::FinishedPart {
                         part: _,
                         content_id,
-                    } => parts.push(UploadPart { content_id }),
+                    } => parts.push(PartId { content_id }),
                     InFlightPartCheckpoint::InProgressPart { part: _, data } => {
                         let upload_part = object_store
                             .add_multipart(path, &multi_part_upload_id, part_index, data.into())
@@ -470,7 +470,7 @@ async fn from_checkpoint(
             completed_parts,
         } => {
             for content_id in completed_parts {
-                parts.push(UploadPart { content_id })
+                parts.push(PartId { content_id })
             }
             multi_part_upload_id
         }
@@ -770,7 +770,7 @@ where
         }
         let parts: Vec<_> = completed_parts
             .into_iter()
-            .map(|content_id| UploadPart {
+            .map(|content_id| PartId {
                 content_id: content_id.clone(),
             })
             .collect();
@@ -846,7 +846,7 @@ struct MultipartManager {
     location: Path,
     partition: Option<String>,
     multipart_id: Option<MultipartId>,
-    pushed_parts: Vec<UploadPartOrBufferedData>,
+    pushed_parts: Vec<PartIdOrBufferedData>,
     uploaded_parts: usize,
     pushed_size: usize,
     parts_to_add: Vec<PartToUpload>,
@@ -902,11 +902,10 @@ impl MultipartManager {
         &mut self,
         part_to_upload: PartToUpload,
     ) -> Result<BoxedTryFuture<MultipartCallbackWithName>> {
-        self.pushed_parts
-            .push(UploadPartOrBufferedData::BufferedData {
-                // TODO: use Bytes to avoid clone
-                data: part_to_upload.byte_data.clone(),
-            });
+        self.pushed_parts.push(PartIdOrBufferedData::BufferedData {
+            // TODO: use Bytes to avoid clone
+            data: part_to_upload.byte_data.clone(),
+        });
         let location = self.location.clone();
         let multipart_id = self
             .multipart_id
@@ -961,9 +960,9 @@ impl MultipartManager {
     fn handle_completed_part(
         &mut self,
         part_idx: usize,
-        upload_part: UploadPart,
+        upload_part: PartId,
     ) -> Result<Option<FileToFinish>> {
-        self.pushed_parts[part_idx] = UploadPartOrBufferedData::UploadPart(upload_part);
+        self.pushed_parts[part_idx] = PartIdOrBufferedData::PartId(upload_part);
         self.uploaded_parts += 1;
 
         if !self.all_uploads_finished() {
@@ -981,10 +980,10 @@ impl MultipartManager {
                     .pushed_parts
                     .iter()
                     .map(|part| match part {
-                        UploadPartOrBufferedData::UploadPart(upload_part) => {
+                        PartIdOrBufferedData::PartId(upload_part) => {
                             Ok(upload_part.content_id.clone())
                         }
-                        UploadPartOrBufferedData::BufferedData { .. } => {
+                        PartIdOrBufferedData::BufferedData { .. } => {
                             bail!("unfinished part in get_complete_multipart_future")
                         }
                     })
@@ -1021,10 +1020,8 @@ impl MultipartManager {
                     .pushed_parts
                     .iter()
                     .map(|val| match val {
-                        UploadPartOrBufferedData::UploadPart(upload_part) => {
-                            upload_part.content_id.clone()
-                        }
-                        UploadPartOrBufferedData::BufferedData { .. } => {
+                        PartIdOrBufferedData::PartId(upload_part) => upload_part.content_id.clone(),
+                        PartIdOrBufferedData::BufferedData { .. } => {
                             unreachable!("unfinished part in get_closed_file_checkpoint_data")
                         }
                     })
@@ -1036,13 +1033,13 @@ impl MultipartManager {
                 .iter()
                 .enumerate()
                 .map(|(part_index, part)| match part {
-                    UploadPartOrBufferedData::UploadPart(upload_part) => {
+                    PartIdOrBufferedData::PartId(upload_part) => {
                         InFlightPartCheckpoint::FinishedPart {
                             part: part_index,
                             content_id: upload_part.content_id.clone(),
                         }
                     }
-                    UploadPartOrBufferedData::BufferedData { data } => {
+                    PartIdOrBufferedData::BufferedData { data } => {
                         InFlightPartCheckpoint::InProgressPart {
                             part: part_index,
                             data: data.clone(),
@@ -1080,13 +1077,11 @@ impl MultipartManager {
             .iter()
             .enumerate()
             .map(|(part_index, part)| match part {
-                UploadPartOrBufferedData::UploadPart(upload_part) => {
-                    InFlightPartCheckpoint::FinishedPart {
-                        part: part_index,
-                        content_id: upload_part.content_id.clone(),
-                    }
-                }
-                UploadPartOrBufferedData::BufferedData { data } => {
+                PartIdOrBufferedData::PartId(upload_part) => InFlightPartCheckpoint::FinishedPart {
+                    part: part_index,
+                    content_id: upload_part.content_id.clone(),
+                },
+                PartIdOrBufferedData::BufferedData { data } => {
                     InFlightPartCheckpoint::InProgressPart {
                         part: part_index,
                         data: data.clone(),
@@ -1117,10 +1112,8 @@ impl MultipartManager {
                 .pushed_parts
                 .iter()
                 .map(|part| match part {
-                    UploadPartOrBufferedData::UploadPart(upload_part) => {
-                        upload_part.content_id.clone()
-                    }
-                    UploadPartOrBufferedData::BufferedData { .. } => {
+                    PartIdOrBufferedData::PartId(upload_part) => upload_part.content_id.clone(),
+                    PartIdOrBufferedData::BufferedData { .. } => {
                         unreachable!("unfinished part in get_finished_file")
                     }
                 })
@@ -1231,7 +1224,7 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> Mul
     fn handle_completed_part(
         &mut self,
         part_idx: usize,
-        upload_part: UploadPart,
+        upload_part: PartId,
     ) -> Result<Option<FileToFinish>> {
         self.multipart_manager
             .handle_completed_part(part_idx, upload_part)
@@ -1301,8 +1294,8 @@ struct PartToUpload {
 }
 
 #[derive(Debug)]
-enum UploadPartOrBufferedData {
-    UploadPart(UploadPart),
+enum PartIdOrBufferedData {
+    PartId(PartId),
     BufferedData { data: Vec<u8> },
 }
 
@@ -1317,7 +1310,7 @@ pub enum MultipartCallback {
     },
     CompletedPart {
         part_idx: usize,
-        upload_part: UploadPart,
+        upload_part: PartId,
     },
     UploadsFinished,
 }
