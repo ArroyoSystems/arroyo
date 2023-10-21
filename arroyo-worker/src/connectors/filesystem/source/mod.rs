@@ -115,7 +115,7 @@ impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
             .await
             .map_err(|err| UserError::new("could not list files", err.to_string()))?;
 
-        let (prev_s3_key, prev_lines_read) = ctx
+        let (prev_key, prev_lines_read) = ctx
             .state
             .get_global_keyed_state('a')
             .await
@@ -123,7 +123,7 @@ impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
             .map(|v: &(String, usize)| v.clone())
             .unwrap_or_default();
 
-        let mut prev_file_found = prev_s3_key == "";
+        let mut prev_file_found = prev_key == "";
 
         // let mut contents = list_res.contents.unwrap();
 
@@ -136,7 +136,7 @@ impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
             }
 
             // if restoring from checkpoint, skip until we find the file we were on
-            if !prev_file_found && obj_key != prev_s3_key {
+            if !prev_file_found && obj_key != prev_key {
                 continue;
             }
             prev_file_found = true;
@@ -193,7 +193,7 @@ impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
                 }
             }
         }
-        info!("S3 source finished");
+        info!("FileSystem source finished");
         Ok(SourceFinishType::Final)
     }
 
@@ -210,7 +210,7 @@ impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
             select! {
                 line_res = reader.next_line() => {
                     let line_res = line_res.map_err(|err| UserError::new(
-                        "could not read next line from S3 file", err.to_string()))?;
+                        "could not read next line from file", err.to_string()))?;
                     match line_res {
                         Some(line) => {
                             // if we're restoring from checkpoint, skip until we find the line we were on
@@ -269,7 +269,7 @@ impl<K: Data, T: SchemaData + Data> FileSystemSourceFunc<K, T> {
                 }
             }
             ControlMessage::Stop { mode } => {
-                info!("Stopping S3 source {:?}", mode);
+                info!("Stopping FileSystem source {:?}", mode);
                 match mode {
                     StopMode::Graceful => {
                         return Some(SourceFinishType::Graceful);
