@@ -1,10 +1,12 @@
 use std::sync::Arc;
 use anyhow::{anyhow, bail};
 use apache_avro::Schema;
-use apache_avro::schema::UnionSchema;
-use arrow_schema::{DataType, Field, FieldRef, Fields};
-use tracing::warn;
+use arrow_schema::{DataType};
+use proc_macro2::Ident;
+use quote::quote;
 use crate::types::{StructDef, StructField, TypeDef};
+
+pub const ROOT_NAME: &str = "ArroyoAvroRoot";
 
 pub fn convert_avro_schema(name: &str, schema: &str) -> anyhow::Result<Vec<StructField>> {
     let schema = Schema::parse_str(schema)
@@ -19,6 +21,25 @@ pub fn convert_avro_schema(name: &str, schema: &str) -> anyhow::Result<Vec<Struc
             bail!("top-level schema must be a record")
         }
     }
+}
+
+pub fn get_defs(name: &str, schema: &str) -> anyhow::Result<String> {
+    let fields = convert_avro_schema(name, schema)?;
+
+    let sd = StructDef::new(Some(ROOT_NAME.to_string()), true, fields, None);
+    let defs: Vec<_> = sd.all_structs_including_named().iter()
+        .map(|p| vec![syn::parse_str(&p.def(false)).unwrap(), p.generate_serializer_items()])
+        .flatten()
+        .collect();
+
+    let mod_ident: Ident = syn::parse_str(name).unwrap();
+    Ok(quote! {
+        mod #mod_ident {
+            use crate::*;
+            #(#defs)
+            *
+        }
+    }.to_string())
 }
 
 fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {

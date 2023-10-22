@@ -260,7 +260,7 @@ pub async fn create_connection_table(
         .unwrap()
         .to_string();
 
-    if let Some(schema) = &req.schema {
+    if let Some(schema) = &schema {
         if schema.definition.is_none() {
             return Err(required_field("schema.definition"));
         }
@@ -436,7 +436,6 @@ pub(crate) async fn expand_schema(
         Format::Parquet(_) => Ok(schema),
         Format::RawString(_) => Ok(schema),
     }
-
 }
 
 async fn expand_avro_schema(name: &str, connector: &str, mut schema: ConnectionSchema, table_config: &Value, profile_config: &Value) -> Result<ConnectionSchema, ErrorResp> {
