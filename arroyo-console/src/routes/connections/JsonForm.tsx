@@ -140,7 +140,7 @@ function SelectWidget({
   onChange: (e: React.ChangeEvent<any>) => void;
 }) {
   return (
-    <FormControl>
+    <FormControl isRequired={required}>
       {title && <FormLabel>{title}</FormLabel>}
       <Select
         placeholder={placeholder}
@@ -298,6 +298,7 @@ export function FormInner({
                       title={property.title || key}
                       description={property.description}
                       placeholder="Select an option"
+                      required={schema.required?.includes(key)}
                       options={property.enum.map(value => ({
                         value: value!.toString(),
                         label: value!.toString(),

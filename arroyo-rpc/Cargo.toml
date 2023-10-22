@@ -19,6 +19,7 @@ utoipa = "3"
 anyhow = "1.0.75"
 reqwest = "0.11.22"
 log = "0.4.20"
+tracing = "0.1.40"
 
 [build-dependencies]
 tonic-build = { workspace = true }

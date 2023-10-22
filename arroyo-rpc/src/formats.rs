@@ -102,13 +102,13 @@ pub struct ConfluentSchemaRegistryConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AvroFormat {
-    pub writer_schema: Option<String>,
+    pub confluent_schema_registry: bool
 }
 
 impl AvroFormat {
     pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
         Ok(Self {
-            writer_schema: None,
+            confluent_schema_registry: false
         })
     }
 }

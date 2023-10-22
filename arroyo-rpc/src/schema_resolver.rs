@@ -3,7 +3,7 @@ use anyhow::{anyhow, bail};
 use arroyo_types::UserError;
 use reqwest::{Client, StatusCode, Url};
 use serde_json::Value;
-use log::warn;
+use tracing::warn;
 use serde::{Deserialize, Serialize};
 
 pub trait SchemaResolver {
@@ -22,9 +22,10 @@ impl SchemaResolver for FailingSchemaResolver {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum ConfluentSchemaType {
+    #[default]
     Avro,
     Json,
     Protobuf
@@ -35,6 +36,7 @@ pub enum ConfluentSchemaType {
 pub struct ConfluentSchemaResponse {
     pub id: u32,
     pub schema: String,
+    #[serde(default)]
     pub schema_type: ConfluentSchemaType,
     pub subject: String,
     pub version: u32,
@@ -69,7 +71,7 @@ impl ConfluentSchemaResolver {
         let url = self.endpoint.join(
             &version.map(|v| format!("{}", v)).unwrap_or_else(|| "latest".to_string())).unwrap();
 
-        let resp = reqwest::get(url).await.map_err(|e| {
+        let resp = reqwest::get(url.clone()).await.map_err(|e| {
             warn!("Got error response from schema registry: {:?}", e);
             match e.status() {
                 Some(StatusCode::NOT_FOUND) => anyhow!(
@@ -101,9 +103,9 @@ impl ConfluentSchemaResolver {
         }
 
         resp.json().await.map_err(|e| {
-            warn!("Invalid json from schema registry: {:?}", e);
+            warn!("Invalid json from schema registry: {:?} for request {:?}", e, url);
             anyhow!(
-                "Schema registry response could not be deserialied: {}", e
+                "Schema registry response could not be deserialized: {}", e
             )
         })
     }

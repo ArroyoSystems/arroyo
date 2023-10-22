@@ -23,9 +23,10 @@ use arroyo_rpc::api_types::connections::{
     ConnectionTable, ConnectionTablePost, SchemaDefinition,
 };
 use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
-use arroyo_rpc::formats::{Format, JsonFormat};
+use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_rpc::schema_resolver::{ConfluentSchemaResolver, ConfluentSchemaType};
+use arroyo_rpc::schema_resolver::{ConfluentSchemaResolver, ConfluentSchemaResponse, ConfluentSchemaType};
+use arroyo_sql::avro;
 use arroyo_sql::json_schema::convert_json_schema;
 use arroyo_sql::types::{StructField, TypeDef};
 
@@ -134,7 +135,7 @@ pub(crate) async fn delete_connection_table(
         .map_err(|e| handle_delete("connection_table", "pipelines", e))?;
 
     if deleted == 0 {
-        return Err(not_found("Connection table".to_string()));
+        return Err(not_found("Connection table"));
     }
 
     Ok(())
@@ -431,34 +432,44 @@ pub(crate) async fn expand_schema(
 
     match format {
         Format::Json(_) => expand_json_schema(name, connector, schema, table_config, profile_config).await,
-        Format::Avro(_) => todo!(),
+        Format::Avro(_) => expand_avro_schema(name, connector, schema, table_config, profile_config).await,
         Format::Parquet(_) => Ok(schema),
         Format::RawString(_) => Ok(schema),
     }
 
 }
 
-async fn expand_json_schema(name: &str, connector: &str, mut schema: ConnectionSchema, table_config: &Value, profile_config: &Value) -> Result<ConnectionSchema, ErrorResp> {
-    if let Some(Format::Json(JsonFormat { confluent_schema_registry: true, .. })) = &schema.format {
-        if connector != "kafka" {
-            return Err(bad_request("confluent schema registry can only be used for Kafka connections".to_string()));
+async fn expand_avro_schema(name: &str, connector: &str, mut schema: ConnectionSchema, table_config: &Value, profile_config: &Value) -> Result<ConnectionSchema, ErrorResp> {
+    if let Some(Format::Avro(AvroFormat { confluent_schema_registry: true, .. })) = &schema.format {
+        let schema_response = get_schema(connector, table_config, profile_config).await?;
+
+        if schema_response.schema_type != ConfluentSchemaType::Avro {
+            return Err(bad_request(format!("Format configured is avro, but confluent schema repository returned a {:?} schema",
+                                           schema_response.schema_type)));
         }
 
-        // we unwrap here because this should already have been validated
-        let profile: KafkaConfig = serde_json::from_value(profile_config.clone())
-            .expect("invalid kafka config");
+        schema.definition = Some(SchemaDefinition::AvroSchema(schema_response.schema));
+    }
 
-        let table: KafkaTable = serde_json::from_value(table_config.clone())
-            .expect("invalid kafka table");
 
-        let schema_registry = profile.schema_registry.as_ref().ok_or_else(||
-            bad_request("schema registry must be configured on the Kafka connection profile".to_string()))?;
+    let Some(SchemaDefinition::AvroSchema(definition)) = schema.definition.as_ref() else {
+        return Err(bad_request("avro format requires an avro schema be set"));
+    };
 
-        let resolver = ConfluentSchemaResolver::new(&schema_registry.endpoint, &table.topic)
-            .map_err(|e| bad_request(format!("failed to fetch schemas from schema repository: {}", e)))?;
+    let fields: Result<_, String> = avro::convert_avro_schema(&name, &definition)
+        .map_err(|e| bad_request(format!("Invalid avro schema: {}", e)))?
+        .into_iter().map(|f| f.try_into()).collect();
 
-        let schema_response = resolver.get_schema(None).await
-            .map_err(|e| bad_request(format!("failed to fetch schemas from schema repository: {}", e)))?;
+
+    schema.fields = fields
+        .map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
+
+    Ok(schema)
+}
+
+async fn expand_json_schema(name: &str, connector: &str, mut schema: ConnectionSchema, table_config: &Value, profile_config: &Value) -> Result<ConnectionSchema, ErrorResp> {
+    if let Some(Format::Json(JsonFormat { confluent_schema_registry: true, .. })) = &schema.format {
+        let schema_response = get_schema(connector, table_config, profile_config).await?;
 
         if schema_response.schema_type != ConfluentSchemaType::Json {
             return Err(bad_request(format!("Format configured is json, but confluent schema repository returned a {:?} schema",
@@ -479,7 +490,7 @@ async fn expand_json_schema(name: &str, connector: &str, mut schema: ConnectionS
             )],
             _ => {
                 return Err(bad_request(
-                    "Invalid schema type for json format".to_string(),
+                    "Invalid schema type for json format",
                 ))
             }
         };
@@ -492,6 +503,28 @@ async fn expand_json_schema(name: &str, connector: &str, mut schema: ConnectionS
 
     Ok(schema)
 
+}
+
+async fn get_schema(connector: &str, table_config: &Value, profile_config: &Value) -> Result<ConfluentSchemaResponse, ErrorResp> {
+    if connector != "kafka" {
+        return Err(bad_request("confluent schema registry can only be used for Kafka connections"));
+    }
+
+    // we unwrap here because this should already have been validated
+    let profile: KafkaConfig = serde_json::from_value(profile_config.clone())
+        .expect("invalid kafka config");
+
+    let table: KafkaTable = serde_json::from_value(table_config.clone())
+        .expect("invalid kafka table");
+
+    let schema_registry = profile.schema_registry.as_ref().ok_or_else(||
+        bad_request("schema registry must be configured on the Kafka connection profile"))?;
+
+    let resolver = ConfluentSchemaResolver::new(&schema_registry.endpoint, &table.topic)
+        .map_err(|e| bad_request(format!("failed to fetch schemas from schema repository: {}", e)))?;
+
+    resolver.get_schema(None).await
+        .map_err(|e| bad_request(format!("failed to fetch schemas from schema repository: {}", e)))
 }
 
 /// Test a Connection Schema

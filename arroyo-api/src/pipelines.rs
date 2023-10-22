@@ -600,7 +600,7 @@ pub async fn patch_pipeline(
             .opt()
             .await
             .map_err(log_and_map)?
-            .ok_or_else(|| not_found("Job".to_string()))?;
+            .ok_or_else(|| not_found("Job"))?;
 
         let program = PipelineProgram::decode(&res.program[..]).map_err(log_and_map)?;
         let map: HashMap<String, u32> = program
@@ -629,7 +629,7 @@ pub async fn patch_pipeline(
         .map_err(log_and_map)?;
 
     if res == 0 {
-        return Err(not_found("Job".to_string()));
+        return Err(not_found("Job"));
     }
 
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &client, &auth_data).await?;
@@ -683,7 +683,7 @@ pub async fn restart_pipeline(
         .map_err(log_and_map)?;
 
     if res == 0 {
-        return Err(not_found("Pipeline".to_string()));
+        return Err(not_found("Pipeline"));
     }
 
     let pipeline = query_pipeline_by_pub_id(&id, &client, &auth_data).await?;
@@ -814,7 +814,7 @@ pub async fn delete_pipeline(
         .map_err(log_and_map)?;
 
     if count != 1 {
-        return Err(not_found("Pipeline".to_string()));
+        return Err(not_found("Pipeline"));
     }
 
     Ok(())
@@ -864,7 +864,7 @@ pub async fn query_pipeline_by_pub_id(
         .await
         .map_err(log_and_map)?;
 
-    let res = pipeline.ok_or_else(|| not_found("Pipeline".to_string()))?;
+    let res = pipeline.ok_or_else(|| not_found("Pipeline"))?;
 
     res.try_into()
 }
@@ -884,7 +884,7 @@ pub async fn query_job_by_pub_id(
         .await
         .map_err(log_and_map)?;
 
-    let res: DbPipelineJob = job.ok_or_else(|| not_found("Job".to_string()))?;
+    let res: DbPipelineJob = job.ok_or_else(|| not_found("Job"))?;
 
     Ok(res.into())
 }

@@ -12,6 +12,7 @@ pub(crate) mod code_gen;
 pub mod expressions;
 pub mod external;
 pub mod json_schema;
+pub mod avro;
 mod operators;
 mod optimizations;
 mod pipeline;

@@ -1,0 +1,115 @@
+use std::sync::Arc;
+use anyhow::{anyhow, bail};
+use apache_avro::Schema;
+use apache_avro::schema::UnionSchema;
+use arrow_schema::{DataType, Field, FieldRef, Fields};
+use tracing::warn;
+use crate::types::{StructDef, StructField, TypeDef};
+
+pub fn convert_avro_schema(name: &str, schema: &str) -> anyhow::Result<Vec<StructField>> {
+    let schema = Schema::parse_str(schema)
+        .map_err(|e| anyhow!("avro schema is not valid: {:?}", e))?;
+
+    let (typedef, _) = to_typedef(name, &schema);
+    match typedef {
+        TypeDef::StructDef(sd, _) => {
+            Ok(sd.fields)
+        }
+        TypeDef::DataType(_, _) => {
+            bail!("top-level schema must be a record")
+        }
+    }
+}
+
+fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {
+    match schema {
+        Schema::Null => {
+            (TypeDef::DataType(DataType::Null, false), None)
+        }
+        Schema::Boolean => {
+            (TypeDef::DataType(DataType::Boolean, false), None)
+        }
+        Schema::Int => {
+            (TypeDef::DataType(DataType::Int32, false), None)
+        }
+        Schema::Long => {
+            (TypeDef::DataType(DataType::Int64, false), None)
+        }
+        Schema::Float => {
+            (TypeDef::DataType(DataType::Float32, false), None)
+        }
+        Schema::Double => {
+            (TypeDef::DataType(DataType::Float64, false), None)
+        }
+        Schema::Bytes => {
+            (TypeDef::DataType(DataType::Binary, false), None)
+        }
+        Schema::String => {
+            (TypeDef::DataType(DataType::Utf8, false), None)
+        }
+        // Schema::Array(t) => {
+        //     let dt = match to_typedef(source_name, t) {
+        //         (TypeDef::StructDef(sd, _), _) => {
+        //             let fields: Vec<Field> = sd.fields.into_iter()
+        //                 .map(|f| f.into())
+        //                 .collect();
+        //
+        //             DataType::Struct(Fields::from(fields))
+        //         },
+        //         (TypeDef::DataType(dt, _), _) => {
+        //             dt
+        //         }
+        //     };
+        //
+        //     (TypeDef::DataType(DataType::List(Arc::new(Field::new("",  dt,false))), false), None)
+        // }
+        Schema::Union(union) => {
+            // currently just support unions that have [t, null] as variants, which is the
+            // avro way to represent optional fields
+
+            let (nulls, not_nulls): (Vec<_>, Vec<_>) = union.variants().iter().partition(|v| matches!(v, Schema::Null));
+
+            if nulls.len() == 1 && not_nulls.len() == 1 {
+                let (dt, original) = to_typedef(source_name, not_nulls[0]);
+                (dt.to_optional(), original)
+            } else {
+                (
+                    TypeDef::DataType(DataType::Utf8, false),
+                    Some("json".to_string()),
+                )
+            }
+        }
+        Schema::Record(record) => {
+            let fields = record.fields.iter().map(|f| {
+                let (ft, original) = to_typedef(source_name, &f.schema);
+                StructField::with_rename(f.name.clone(), None, ft, None, original)
+            }).collect();
+
+            (
+                TypeDef::StructDef(StructDef::for_name(Some(format!("{}::{}", source_name, record.name.name)), fields), false),
+                None
+            )
+        }
+        _ => {
+            (
+                TypeDef::DataType(DataType::Utf8, false),
+                Some("json".to_string()),
+            )
+        }
+        // Schema::Enum(_) => {}
+        // Schema::Fixed(_) => {}
+        // Schema::Decimal(_) => {}
+        // Schema::Uuid => {}
+        // Schema::Date => {}
+        // Schema::TimeMillis => {}
+        // Schema::TimeMicros => {}
+        // Schema::TimestampMillis => {}
+        // Schema::TimestampMicros => {}
+        // Schema::LocalTimestampMillis => {}
+        // Schema::LocalTimestampMicros => {}
+        // Schema::Duration => {}
+        // Schema::Ref { .. } => {}
+    }
+}
+
+

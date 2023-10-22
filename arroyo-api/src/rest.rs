@@ -55,7 +55,7 @@ pub async fn ping() -> impl IntoResponse {
 }
 
 pub async fn api_fallback() -> impl IntoResponse {
-    not_found("Route".to_string())
+    not_found("Route")
 }
 
 pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {

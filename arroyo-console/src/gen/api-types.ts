@@ -177,8 +177,7 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     AvroFormat: {
-      confluentSchemaRegistry?: components["schemas"]["ConfluentSchemaRegistryConfig"] | null;
-      writerSchema?: string | null;
+      confluentSchemaRegistry: boolean;
     };
     Checkpoint: {
       backend: string;
@@ -202,9 +201,6 @@ export interface components {
     };
     /** @enum {string} */
     CheckpointSpanType: "alignment" | "sync" | "async" | "committing";
-    ConfluentSchemaRegistryConfig: {
-      endpoint: string;
-    };
     ConnectionProfile: {
       config: unknown;
       connector: string;
