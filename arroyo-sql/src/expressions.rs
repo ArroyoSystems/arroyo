@@ -18,7 +18,7 @@ use datafusion_expr::{
     aggregate_function,
     expr::{AggregateUDF, Alias, ScalarFunction, ScalarUDF, Sort},
     type_coercion::aggregates::{avg_return_type, sum_return_type},
-    BinaryExpr, BuiltinScalarFunction, Expr, TryCast,
+    BinaryExpr, BuiltinScalarFunction, Expr, GetFieldAccess, TryCast,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -607,7 +607,9 @@ impl<'a> ExpressionContext<'a> {
                 | datafusion_expr::Operator::BitwiseOr
                 | datafusion_expr::Operator::BitwiseXor
                 | datafusion_expr::Operator::BitwiseShiftRight
-                | datafusion_expr::Operator::BitwiseShiftLeft => bail!("{:?} is unimplemented", op),
+                | datafusion_expr::Operator::BitwiseShiftLeft
+                | datafusion_expr::Operator::ArrowAt
+                | datafusion_expr::Operator::AtArrow => bail!("{:?} is unimplemented", op),
             },
             Expr::Not(_) => bail!("NOT is unimplemented"),
             Expr::IsNotNull(expr) => Ok(UnaryBooleanExpression::new(
@@ -646,8 +648,8 @@ impl<'a> ExpressionContext<'a> {
                 UnaryOperator::Negative,
                 Box::new(self.compile_expr(expr)?),
             )),
-            Expr::GetIndexedField(datafusion_expr::GetIndexedField { expr, key }) => {
-                StructFieldExpression::new(Box::new(self.compile_expr(expr)?), key)
+            Expr::GetIndexedField(datafusion_expr::GetIndexedField { expr, field }) => {
+                StructFieldExpression::new(Box::new(self.compile_expr(expr)?), field)
             }
             Expr::AggregateFunction(datafusion_expr::expr::AggregateFunction {
                 fun,
@@ -873,9 +875,7 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::Cot => bail!("cot not implemented yet"),
                     BuiltinScalarFunction::ArrayAppend
                     | BuiltinScalarFunction::ArrayConcat
-                    | BuiltinScalarFunction::ArrayContains
                     | BuiltinScalarFunction::ArrayDims
-                    | BuiltinScalarFunction::ArrayFill
                     | BuiltinScalarFunction::ArrayLength
                     | BuiltinScalarFunction::ArrayNdims
                     | BuiltinScalarFunction::ArrayPosition
@@ -885,9 +885,24 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::ArrayReplace
                     | BuiltinScalarFunction::ArrayToString
                     | BuiltinScalarFunction::Cardinality
-                    | BuiltinScalarFunction::TrimArray => {
+                    | BuiltinScalarFunction::ArrayHas
+                    | BuiltinScalarFunction::ArrayHasAll
+                    | BuiltinScalarFunction::ArrayHasAny
+                    | BuiltinScalarFunction::ArrayPopBack
+                    | BuiltinScalarFunction::ArrayElement
+                    | BuiltinScalarFunction::ArrayEmpty
+                    | BuiltinScalarFunction::ArrayRemoveN
+                    | BuiltinScalarFunction::ArrayRemoveAll
+                    | BuiltinScalarFunction::ArrayRepeat
+                    | BuiltinScalarFunction::ArrayReplaceN
+                    | BuiltinScalarFunction::ArrayReplaceAll
+                    | BuiltinScalarFunction::ArraySlice
+                    | BuiltinScalarFunction::Flatten => {
                         bail!("array functions not implemented yet")
                     }
+                    BuiltinScalarFunction::Isnan => todo!(),
+                    BuiltinScalarFunction::Iszero => todo!(),
+                    BuiltinScalarFunction::Nanvl => todo!(),
                 }
             }
             Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
@@ -1412,24 +1427,29 @@ pub struct StructFieldExpression {
 }
 
 impl StructFieldExpression {
-    fn new(struct_expression: Box<Expression>, key: &ScalarValue) -> Result<Expression> {
+    fn new(struct_expression: Box<Expression>, key: &GetFieldAccess) -> Result<Expression> {
         match key {
-            ScalarValue::Utf8(Some(column)) => Ok(Expression::StructField(Self {
+            GetFieldAccess::NamedStructField {
+                name: ScalarValue::Utf8(Some(column)),
+            } => Ok(Expression::StructField(Self {
                 struct_expression,
                 field_name: column.to_string(),
             })),
-            ScalarValue::Int64(Some(index)) => {
-                if *index <= 0 {
+            GetFieldAccess::ListIndex { key } => {
+                let Expr::Literal(ScalarValue::Int64(Some(index))) = **key else {
+                    bail!("list indices must be scalar integers");
+                };
+                if index <= 0 {
                     bail!("the index into a list must be greater than 0")
                 }
                 Ok(Expression::DataStructure(
                     DataStructureFunction::ArrayIndex {
                         array_expression: struct_expression,
-                        index: *index as usize,
+                        index: index as usize,
                     },
                 ))
             }
-            _ => bail!("don't support key {:?} for index lookups", key),
+            _ => bail!("don't support key {:?} for field access", key),
         }
     }
 }

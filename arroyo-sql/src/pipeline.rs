@@ -427,9 +427,8 @@ impl<'a> SqlPipelineBuilder<'a> {
                 }
                 datafusion_expr::DdlStatement::CreateMemoryTable(create_memory_table) => {
                     bail!(
-                        "creating memory tables is not currently supported: {:?}, {:?}",
+                        "creating memory tables is not currently supported: {:?}",
                         create_memory_table.input,
-                        create_memory_table.primary_key
                     )
                 }
                 datafusion_expr::DdlStatement::CreateView(_) => {
@@ -462,6 +461,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             LogicalPlan::DescribeTable(_) => bail!("describe table not currently supported"),
             LogicalPlan::Unnest(_) => bail!("unnest not currently supported"),
             LogicalPlan::Statement(_) => bail!("statements not currently supported"),
+            LogicalPlan::Copy(_) => bail!("copy not currently supported"),
         }
     }
 
@@ -469,7 +469,7 @@ impl<'a> SqlPipelineBuilder<'a> {
         &mut self,
         dml_statement: &datafusion_expr::logical_plan::DmlStatement,
     ) -> Result<SqlOperator> {
-        if !matches!(dml_statement.op, WriteOp::Insert) {
+        if !matches!(dml_statement.op, WriteOp::InsertInto) {
             bail!("only insert statements are currently supported")
         }
         let input = self.insert_sql_plan(&dml_statement.input)?;

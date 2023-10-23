@@ -714,7 +714,7 @@ impl Insert {
         match &logical_plan {
             LogicalPlan::Dml(DmlStatement {
                 table_name,
-                op: WriteOp::Insert,
+                op: WriteOp::InsertInto,
                 input,
                 ..
             }) => {
