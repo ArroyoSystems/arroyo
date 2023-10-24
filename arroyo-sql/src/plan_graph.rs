@@ -1912,15 +1912,14 @@ pub fn get_program(
     );
 
     let mut udfs = vec![];
-    udfs.push(format!(
-        "mod udfs {{ use std::time::{{SystemTime, Duration}}; {} }}",
+    udfs.push(
         schema_provider
             .udf_defs
             .values()
             .map(|u| u.def.as_str())
             .collect::<Vec<_>>()
-            .join("\n\n")
-    ));
+            .join("\n\n"),
+    );
 
     let graph: DiGraph<StreamNode, StreamEdge> = plan_graph.into();
 
