@@ -195,6 +195,14 @@ impl<K: Key, T: Data, OutT: Data, W: TimeWindowAssigner<K, T>> KeyedWindowFunc<K
             .clear_time_range(&mut key, SystemTime::UNIX_EPOCH, next.start)
             .await;
     }
+
+    async fn handle_checkpoint(
+        &mut self,
+        _checkpoint_barrier: &arroyo_types::CheckpointBarrier,
+        ctx: &mut Context<K, OutT>,
+    ) {
+        ctx.flush_timers::<Window>().await;
+    }
 }
 
 #[derive(StreamNode)]
