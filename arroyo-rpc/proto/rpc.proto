@@ -423,6 +423,7 @@ message CompileQueryReq {
   string types = 2;
   string pipeline = 3;
   string wasm_fns = 4;
+  string udfs = 5;
 }
 
 message CompileQueryResp {

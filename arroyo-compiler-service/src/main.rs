@@ -177,12 +177,7 @@ impl CompileService {
 
         tokio::fs::write(build_dir.join("wasm-fns/src/lib.rs"), &req.wasm_fns).await?;
 
-        // make sure udfs.rs exists
-        tokio::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(build_dir.join("udfs/src/udfs.rs"))
-            .await?;
+        tokio::fs::write(build_dir.join("udfs/src/lib.rs"), &req.udfs).await?;
 
         let result = self.get_output().await?;
 
@@ -281,7 +276,7 @@ impl CompilerGrpc for CompileService {
         // write udf to build_dir udfs module
         let build_dir = &self.build_dir;
         tokio::fs::write(
-            build_dir.join("udfs/src/udfs.rs"),
+            build_dir.join("udfs/src/lib.rs"),
             &request.into_inner().udfs_rs,
         )
         .await
