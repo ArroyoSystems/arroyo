@@ -197,7 +197,9 @@ fn get_pipeline_module(
 
             #function
 
-            #(#udfs)*
+            mod udfs {
+               #(#udfs)*
+            }
 
             #(#other_defs)*
         }
