@@ -19,8 +19,8 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::connection_profiles::{create_connection_profile, get_connection_profiles};
 use crate::connection_tables::{
-    create_connection_table, delete_connection_table, get_connection_tables,
-    test_connection_table, test_schema,
+    create_connection_table, delete_connection_table, get_connection_tables, test_connection_table,
+    test_schema,
 };
 use crate::connectors::get_connectors;
 use crate::jobs::{

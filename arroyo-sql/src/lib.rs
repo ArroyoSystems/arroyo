@@ -8,11 +8,11 @@ use arroyo_connectors::{Connection, Connector};
 use arroyo_datastream::Program;
 use datafusion::physical_plan::functions::make_scalar_function;
 
+pub mod avro;
 pub(crate) mod code_gen;
 pub mod expressions;
 pub mod external;
 pub mod json_schema;
-pub mod avro;
 mod operators;
 mod optimizations;
 mod pipeline;

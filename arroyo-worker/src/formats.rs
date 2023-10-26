@@ -1,13 +1,16 @@
+use apache_avro::{Reader, Schema};
 use std::sync::Arc;
 use std::{collections::HashMap, marker::PhantomData};
-use apache_avro::Schema;
 
 use arrow::datatypes::{Field, Fields};
 use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod, JsonFormat};
+use arroyo_rpc::schema_resolver::{FailingSchemaResolver, SchemaResolver};
 use arroyo_types::UserError;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
+use tracing::log::kv::Source;
+use tracing::warn;
 
 use crate::SchemaData;
 
@@ -56,12 +59,74 @@ fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> 
     Ok(serde_json::from_value(json).unwrap())
 }
 
-fn deserialize_slice_avro<T: DeserializeOwned>(
+async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
     format: &AvroFormat,
     schema_registry: Arc<Mutex<HashMap<[u8; 4], Schema>>>,
-    msg: &[u8],
-) {
+    resolver: Arc<dyn SchemaResolver>,
+    mut msg: &'a [u8],
+) -> Result<impl Iterator<Item = Result<T, UserError>> + 'a, String> {
+    let id = if format.confluent_schema_registry {
+        let magic_byte = msg[0];
+        if magic_byte != 0 {
+            return Err(format!("data was not encoded with schema registry wire format; magic byte has unexpected value: {}", magic_byte));
+        }
 
+        let id = [msg[1], msg[2], msg[3], msg[4]];
+        msg = &msg[5..];
+        id
+    } else {
+        [0, 0, 0, 0]
+    };
+
+    let mut registry = schema_registry.lock().await;
+
+    let mut reader = if format.embedded_schema {
+        Reader::new(&msg[..]).map_err(|e| format!("invalid Avro schema in message: {:?}", e))?
+    } else {
+        let schema = if registry.contains_key(&id) {
+            registry.get(&id).unwrap()
+        } else {
+            let new_schema = resolver.resolve_schema(id).await?.ok_or_else(|| {
+                format!(
+                    "could not resolve schema for message with id {}",
+                    u32::from_le_bytes(id)
+                )
+            })?;
+
+            let new_schema = Schema::parse_str(&new_schema)
+                .map_err(|e| format!("invalid avro schema: {:?}", e))?;
+
+            registry.insert(id, new_schema);
+
+            registry.get(&id).unwrap()
+        };
+
+        Reader::with_schema(schema, &msg[..])
+            .map_err(|e| format!("invalid avro schema: {:?}", e))?
+    };
+
+    let messages: Vec<_> = reader.collect();
+    Ok(messages.into_iter().map(|record| {
+        apache_avro::from_value::<T>(&record.map_err(|e| {
+            UserError::new(
+                "Deserialization failed",
+                format!(
+                    "Failed to deserialize from avro: {:?}",
+                    e
+                ),
+            )
+        })?)
+        .map_err(|e| {
+            UserError::new(
+                "Deserialization failed",
+                format!("Failed to convert avro message into struct type: {:?}", e),
+            )
+        })
+    }))
+
+    // let record = reader.next()
+    //     .ok_or_else(|| "avro record did not contain any messages")?
+    //     .map_err(|e| e.to_string())?;
 }
 
 pub struct FramingIterator<'a> {
@@ -120,38 +185,56 @@ pub struct DataDeserializer<T: SchemaData> {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
     schema_registry: Arc<Mutex<HashMap<[u8; 4], Schema>>>,
-    schema_resolver: Arc<Box<dyn SchemaResolver>>,
+    schema_resolver: Arc<dyn SchemaResolver + Sync>,
     _t: PhantomData<T>,
 }
 
-
 impl<T: SchemaData> DataDeserializer<T> {
-    pub fn new(format: Format, framing: Option<Framing>,) -> Self {
-        if let Format::Avro(avro) = &format {
+    pub fn new(format: Format, framing: Option<Framing>) -> Self {
+        Self::with_schema_resolver(format, framing, Arc::new(FailingSchemaResolver::new()))
+    }
 
-        };
-
+    pub fn with_schema_resolver(
+        format: Format,
+        framing: Option<Framing>,
+        schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    ) -> Self {
         Self {
             format: Arc::new(format),
             framing: framing.map(|f| Arc::new(f)),
+            schema_registry: Arc::new(Mutex::new(HashMap::new())),
+            schema_resolver,
             _t: PhantomData,
         }
     }
 
-    pub fn deserialize_slice<'a>(
+    pub async fn deserialize_slice<'a>(
         &self,
         msg: &'a [u8],
-    ) -> impl Iterator<Item = Result<T, UserError>> + 'a {
-        let new_self = self.clone();
-        FramingIterator::new(self.framing.clone(), msg)
-            .map(move |t| new_self.deserialize_single(t))
+    ) -> Result<impl Iterator<Item = Result<T, UserError>> + 'a, UserError> {
+        match &*self.format {
+            Format::Avro(avro) => {
+                deserialize_slice_avro(
+                    avro,
+                    self.schema_registry.clone(),
+                    self.schema_resolver.clone(),
+                    msg,
+                )
+                .await
+            }
+            _ => {
+                let new_self = self.clone();
+                Ok(FramingIterator::new(self.framing.clone(), msg)
+                    .map(move |t| new_self.deserialize_single(t)))
+            }
+        }
     }
 
     fn deserialize_single(&self, msg: &[u8]) -> Result<T, UserError> {
         match &*self.format {
             Format::Json(json) => deserialize_slice_json(json, msg),
-            Format::Avro(avro) => deserialie_slice_avro(),
-            Format::Parquet(_) => todo!(),
+            Format::Avro(avro) => unreachable!("avro should be handled by here"),
+            Format::Parquet(_) => todo!("parquet is not supported as an input format"),
             Format::RawString(_) => deserialize_raw_string(msg),
         }
         .map_err(|e| {

@@ -1,24 +1,30 @@
-use std::time::Duration;
 use anyhow::{anyhow, bail};
-use arroyo_types::UserError;
+use async_trait::async_trait;
 use reqwest::{Client, StatusCode, Url};
-use serde_json::Value;
-use tracing::warn;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tracing::warn;
 
-pub trait SchemaResolver {
-    fn resolve_schema(&self, id: [u8; 4]) -> Result<Option<String>, UserError>;
+#[async_trait]
+pub trait SchemaResolver: Send {
+    async fn resolve_schema(&self, id: [u8; 4]) -> Result<Option<String>, String>;
 }
 
-pub struct FailingSchemaResolver {
+pub struct FailingSchemaResolver {}
+
+impl FailingSchemaResolver {
+    pub fn new() -> Self {
+        FailingSchemaResolver {}
+    }
 }
 
+#[async_trait]
 impl SchemaResolver for FailingSchemaResolver {
-    fn resolve_schema(&self, id: [u8; 4]) -> Result<Option<String>, UserError> {
-        Err(UserError {
-            name: "Could not deserialize".to_string(),
-            details: format!("Schema with id {:?} not available, and no schema registry configured", id),
-        })
+    async fn resolve_schema(&self, id: [u8; 4]) -> Result<Option<String>, String> {
+        Err(format!(
+            "Schema with id {:?} not available, and no schema registry configured",
+            id
+        ))
     }
 }
 
@@ -28,7 +34,7 @@ pub enum ConfluentSchemaType {
     #[default]
     Avro,
     Json,
-    Protobuf
+    Protobuf,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -52,11 +58,12 @@ impl ConfluentSchemaResolver {
     pub fn new(endpoint: &str, topic: &str) -> anyhow::Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(5))
-            .build().unwrap();
+            .build()
+            .unwrap();
 
-
-        let endpoint: Url =
-            format!("{}/subjects/{}-value/versions/", endpoint, topic).as_str().try_into()
+        let endpoint: Url = format!("{}/subjects/{}-value/versions/", endpoint, topic)
+            .as_str()
+            .try_into()
             .map_err(|e| anyhow!("{} is not a valid url", endpoint))?;
 
         Ok(Self {
@@ -66,21 +73,30 @@ impl ConfluentSchemaResolver {
         })
     }
 
+    pub async fn get_schema(
+        &self,
+        version: Option<u32>,
+    ) -> anyhow::Result<ConfluentSchemaResponse> {
+        let url = self
+            .endpoint
+            .join(
+                &version
+                    .map(|v| format!("{}", v))
+                    .unwrap_or_else(|| "latest".to_string()),
+            )
+            .unwrap();
 
-    pub async fn get_schema(&self, version: Option<u32>) -> anyhow::Result<ConfluentSchemaResponse> {
-        let url = self.endpoint.join(
-            &version.map(|v| format!("{}", v)).unwrap_or_else(|| "latest".to_string())).unwrap();
-
-        let resp = reqwest::get(url.clone()).await.map_err(|e| {
+        let resp = self.client.get(url.clone()).send().await.map_err(|e| {
             warn!("Got error response from schema registry: {:?}", e);
             match e.status() {
-                Some(StatusCode::NOT_FOUND) => anyhow!(
-                    "Could not find value schema for topic '{}'",
-                    self.topic),
+                Some(StatusCode::NOT_FOUND) => {
+                    anyhow!("Could not find value schema for topic '{}'", self.topic)
+                }
 
                 Some(code) => anyhow!("Schema registry returned error: {}", code),
                 None => {
-                    warn!("Unknown error connecting to schema registry {}: {:?}",
+                    warn!(
+                        "Unknown error connecting to schema registry {}: {:?}",
                         self.endpoint, e
                     );
                     anyhow!(
@@ -103,10 +119,22 @@ impl ConfluentSchemaResolver {
         }
 
         resp.json().await.map_err(|e| {
-            warn!("Invalid json from schema registry: {:?} for request {:?}", e, url);
-            anyhow!(
-                "Schema registry response could not be deserialized: {}", e
-            )
+            warn!(
+                "Invalid json from schema registry: {:?} for request {:?}",
+                e, url
+            );
+            anyhow!("Schema registry response could not be deserialized: {}", e)
         })
+    }
+}
+
+#[async_trait]
+impl SchemaResolver for ConfluentSchemaResolver {
+    async fn resolve_schema(&self, id: [u8; 4]) -> Result<Option<String>, String> {
+        let version = u32::from_be_bytes(id);
+        self.get_schema(Some(version))
+            .await
+            .map(|s| Some(s.schema))
+            .map_err(|e| e.to_string())
     }
 }

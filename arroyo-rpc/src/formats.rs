@@ -1,10 +1,10 @@
+use arroyo_types::UserError;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
-use serde_json::Value;
 use utoipa::ToSchema;
-use arroyo_types::UserError;
 
 #[derive(
     Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default, Hash, PartialOrd, ToSchema,
@@ -102,13 +102,15 @@ pub struct ConfluentSchemaRegistryConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AvroFormat {
-    pub confluent_schema_registry: bool
+    pub confluent_schema_registry: bool,
+    pub embedded_schema: bool,
 }
 
 impl AvroFormat {
     pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
         Ok(Self {
-            confluent_schema_registry: false
+            confluent_schema_registry: false,
+            embedded_schema: false,
         })
     }
 }

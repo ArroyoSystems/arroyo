@@ -259,24 +259,29 @@ where
                                     }
                                 }
 
-                                let iter = self.deserializer.deserialize_slice(&buf);
+                                match self.deserializer.deserialize_slice(&buf).await {
+                                    Ok(iter) => {
+                                        for record in iter {
+                                            match record {
+                                                Ok(value) => {
+                                                    ctx.collect(Record {
+                                                        timestamp: SystemTime::now(),
+                                                        key: None,
+                                                        value,
+                                                    }).await;
+                                                }
+                                                Err(e) => {
+                                                    ctx.report_user_error(e).await;
+                                                }
+                                            }
+                                        }
 
-                                for record in iter {
-                                    match record {
-                                        Ok(value) => {
-                                            ctx.collect(Record {
-                                                timestamp: SystemTime::now(),
-                                                key: None,
-                                                value,
-                                            }).await;
-                                        }
-                                        Err(e) => {
-                                            ctx.report_user_error(e).await;
-                                        }
+                                        self.state.last_message = Some(buf);
+                                    }
+                                    Err(e) => {
+                                        ctx.report_user_error(e).await;
                                     }
                                 }
-
-                                self.state.last_message = Some(buf);
                             }
                             Err(e) => {
                                 ctx.report_user_error(e).await;
