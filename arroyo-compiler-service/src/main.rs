@@ -42,7 +42,7 @@ pub async fn main() {
         .await
         .expect("unable to construct storage provider");
 
-    storage.ensure_valid()?;
+    storage.check_object_store()?;
     let last_used = Arc::new(AtomicU64::new(to_millis(SystemTime::now())));
 
     let service = CompileService {

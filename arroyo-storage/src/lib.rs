@@ -282,17 +282,20 @@ impl StorageProvider {
         Self::get_url_with_options(url, HashMap::new()).await
     }
 
-    pub async fn ensure_valid(storage: &Self) -> Result<(), StorageError> {
-        let url = match &storage.config {
+    pub async fn check_object_store(&self) -> Result<(), StorageError> {
+        let url = match &self.config {
             BackendConfig::S3(_cfg) => "s3://non-existent-bucket/fake_dir",
             BackendConfig::GCS(_cfg) => "gs://non-existent-bucket/fake_dir",
             BackendConfig::Local(_cfg) => "/usr/bin/non-existing-file",
         };
-        let result = storage.get(url).await;
+        let result = self.get(url).await;
         match result {
-            Err(StorageError::ObjectStore(object_store::Error::NotFound {path:_, source:_ })) => Ok(()),
+            Err(StorageError::ObjectStore(object_store::Error::NotFound {
+                path: _,
+                source: _,
+            })) => Ok(()),
             Err(err) => Err(err),
-            other => other.map(|_x| ())
+            other => other.map(|_x| ()),
         }
     }
 
@@ -638,5 +641,23 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_check_object_storage_ok() {
+        let storage = StorageProvider::for_url("s3://mybucket/puppy.jpg")
+            .await
+            .unwrap();
+        let check_result = storage.check_object_store().await;
+        assert!(matches!(check_result, Ok(_)))
+    }
+
+    #[tokio::test]
+    async fn test_check_object_storage_ok() {
+        let storage = StorageProvider::for_url("s3://mybucket/puppy.jpg")
+            .await
+            .unwrap();
+        let check_result = storage.check_object_store().await;
+        assert!(matches!(check_result, Err(_)))
     }
 }
