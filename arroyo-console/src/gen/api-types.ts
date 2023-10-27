@@ -178,6 +178,7 @@ export interface components {
   schemas: {
     AvroFormat: {
       confluentSchemaRegistry: boolean;
+      embeddedSchema: boolean;
     };
     Checkpoint: {
       backend: string;

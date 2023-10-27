@@ -727,11 +727,11 @@ impl StructField {
                     if nullable {
                         attributes.push(quote! {
                             #[serde(default)]
-                            #[serde(with = "arroyo_worker::formats::opt_timestamp_as_millis")]
+                            #[serde(with = "arroyo_worker::formats::json::opt_timestamp_as_millis")]
                         });
                     } else {
                         attributes.push(quote! {
-                            #[serde(with = "arroyo_worker::formats::timestamp_as_millis")]
+                            #[serde(with = "arroyo_worker::formats::json::timestamp_as_millis")]
                         });
                     }
                 }
@@ -739,11 +739,11 @@ impl StructField {
                     if nullable {
                         attributes.push(quote! {
                             #[serde(default)]
-                            #[serde(with = "arroyo_worker::formats::opt_timestamp_as_rfc3339")]
+                            #[serde(with = "arroyo_worker::formats::json::opt_timestamp_as_rfc3339")]
                         });
                     } else {
                         attributes.push(quote!(
-                            #[serde(with = "arroyo_worker::formats::timestamp_as_rfc3339")]
+                            #[serde(with = "arroyo_worker::formats::json::timestamp_as_rfc3339")]
                         ));
                     }
                 }

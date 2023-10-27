@@ -7,7 +7,7 @@ use tracing::warn;
 
 #[async_trait]
 pub trait SchemaResolver: Send {
-    async fn resolve_schema(&self, id: [u8; 4]) -> Result<Option<String>, String>;
+    async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String>;
 }
 
 pub struct FailingSchemaResolver {}
@@ -20,9 +20,9 @@ impl FailingSchemaResolver {
 
 #[async_trait]
 impl SchemaResolver for FailingSchemaResolver {
-    async fn resolve_schema(&self, id: [u8; 4]) -> Result<Option<String>, String> {
+    async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String> {
         Err(format!(
-            "Schema with id {:?} not available, and no schema registry configured",
+            "Schema with id {} not available, and no schema registry configured",
             id
         ))
     }
@@ -130,9 +130,8 @@ impl ConfluentSchemaResolver {
 
 #[async_trait]
 impl SchemaResolver for ConfluentSchemaResolver {
-    async fn resolve_schema(&self, id: [u8; 4]) -> Result<Option<String>, String> {
-        let version = u32::from_be_bytes(id);
-        self.get_schema(Some(version))
+    async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String> {
+        self.get_schema(Some(id))
             .await
             .map(|s| Some(s.schema))
             .map_err(|e| e.to_string())

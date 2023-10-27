@@ -102,7 +102,10 @@ pub struct ConfluentSchemaRegistryConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AvroFormat {
+    #[serde(default)]
     pub confluent_schema_registry: bool,
+
+    #[serde(default)]
     pub embedded_schema: bool,
 }
 

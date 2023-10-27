@@ -476,7 +476,7 @@ impl<K: Data, T: SchemaData> KinesisSourceFunc<K, T> {
             let data = record.data.unwrap().into_inner();
 
             let timestamp = record.approximate_arrival_timestamp.unwrap();
-            let iter = self.deserializer.deserialize_slice(&data);
+            let iter = self.deserializer.deserialize_slice(&data).await;
             for value in iter {
                 let output_record = Record {
                     timestamp: from_nanos(timestamp.as_nanos() as u128),

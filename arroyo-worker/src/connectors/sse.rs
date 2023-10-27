@@ -178,7 +178,7 @@ where
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            let iter = self.deserializer.deserialize_slice(&event.data.as_bytes());
+                                            let iter = self.deserializer.deserialize_slice(&event.data.as_bytes()).await;
 
                                             for v in iter {
                                                 match v {

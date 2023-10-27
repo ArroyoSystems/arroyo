@@ -1,20 +1,10 @@
-use apache_avro::{Reader, Schema};
-use std::sync::Arc;
-use std::{collections::HashMap, marker::PhantomData};
-
+use std::collections::HashMap;
 use arrow::datatypes::{Field, Fields};
-use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod, JsonFormat};
-use arroyo_rpc::schema_resolver::{FailingSchemaResolver, SchemaResolver};
-use arroyo_types::UserError;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
-use tracing::log::kv::Source;
-use tracing::warn;
+use arroyo_rpc::formats::JsonFormat;
 
-use crate::SchemaData;
-
-fn deserialize_slice_json<T: DeserializeOwned>(
+pub fn deserialize_slice_json<T: DeserializeOwned>(
     format: &JsonFormat,
     msg: &[u8],
 ) -> Result<T, String> {
@@ -52,248 +42,6 @@ fn deserialize_slice_json<T: DeserializeOwned>(
     }
 }
 
-fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> {
-    let json = json! {
-        { "value": String::from_utf8_lossy(msg) }
-    };
-    Ok(serde_json::from_value(json).unwrap())
-}
-
-async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
-    format: &AvroFormat,
-    schema_registry: Arc<Mutex<HashMap<[u8; 4], Schema>>>,
-    resolver: Arc<dyn SchemaResolver>,
-    mut msg: &'a [u8],
-) -> Result<impl Iterator<Item = Result<T, UserError>> + 'a, String> {
-    let id = if format.confluent_schema_registry {
-        let magic_byte = msg[0];
-        if magic_byte != 0 {
-            return Err(format!("data was not encoded with schema registry wire format; magic byte has unexpected value: {}", magic_byte));
-        }
-
-        let id = [msg[1], msg[2], msg[3], msg[4]];
-        msg = &msg[5..];
-        id
-    } else {
-        [0, 0, 0, 0]
-    };
-
-    let mut registry = schema_registry.lock().await;
-
-    let mut reader = if format.embedded_schema {
-        Reader::new(&msg[..]).map_err(|e| format!("invalid Avro schema in message: {:?}", e))?
-    } else {
-        let schema = if registry.contains_key(&id) {
-            registry.get(&id).unwrap()
-        } else {
-            let new_schema = resolver.resolve_schema(id).await?.ok_or_else(|| {
-                format!(
-                    "could not resolve schema for message with id {}",
-                    u32::from_le_bytes(id)
-                )
-            })?;
-
-            let new_schema = Schema::parse_str(&new_schema)
-                .map_err(|e| format!("invalid avro schema: {:?}", e))?;
-
-            registry.insert(id, new_schema);
-
-            registry.get(&id).unwrap()
-        };
-
-        Reader::with_schema(schema, &msg[..])
-            .map_err(|e| format!("invalid avro schema: {:?}", e))?
-    };
-
-    let messages: Vec<_> = reader.collect();
-    Ok(messages.into_iter().map(|record| {
-        apache_avro::from_value::<T>(&record.map_err(|e| {
-            UserError::new(
-                "Deserialization failed",
-                format!(
-                    "Failed to deserialize from avro: {:?}",
-                    e
-                ),
-            )
-        })?)
-        .map_err(|e| {
-            UserError::new(
-                "Deserialization failed",
-                format!("Failed to convert avro message into struct type: {:?}", e),
-            )
-        })
-    }))
-
-    // let record = reader.next()
-    //     .ok_or_else(|| "avro record did not contain any messages")?
-    //     .map_err(|e| e.to_string())?;
-}
-
-pub struct FramingIterator<'a> {
-    framing: Option<Arc<Framing>>,
-    buf: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> FramingIterator<'a> {
-    pub fn new(framing: Option<Arc<Framing>>, buf: &'a [u8]) -> Self {
-        Self {
-            framing,
-            buf,
-            offset: 0,
-        }
-    }
-}
-
-impl<'a> Iterator for FramingIterator<'a> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.offset >= self.buf.len() {
-            return None;
-        }
-
-        match &self.framing {
-            Some(framing) => {
-                match &framing.method {
-                    FramingMethod::Newline(newline) => {
-                        let end = memchr::memchr('\n' as u8, &self.buf[self.offset..])
-                            .map(|i| self.offset + i)
-                            .unwrap_or(self.buf.len());
-
-                        let prev = self.offset;
-                        self.offset = end + 1;
-
-                        // enforce max len if set
-                        let length =
-                            (end - prev).min(newline.max_line_length.unwrap_or(u64::MAX) as usize);
-
-                        Some(&self.buf[prev..(prev + length)])
-                    }
-                }
-            }
-            None => {
-                self.offset = self.buf.len();
-                Some(self.buf)
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct DataDeserializer<T: SchemaData> {
-    format: Arc<Format>,
-    framing: Option<Arc<Framing>>,
-    schema_registry: Arc<Mutex<HashMap<[u8; 4], Schema>>>,
-    schema_resolver: Arc<dyn SchemaResolver + Sync>,
-    _t: PhantomData<T>,
-}
-
-impl<T: SchemaData> DataDeserializer<T> {
-    pub fn new(format: Format, framing: Option<Framing>) -> Self {
-        Self::with_schema_resolver(format, framing, Arc::new(FailingSchemaResolver::new()))
-    }
-
-    pub fn with_schema_resolver(
-        format: Format,
-        framing: Option<Framing>,
-        schema_resolver: Arc<dyn SchemaResolver + Sync>,
-    ) -> Self {
-        Self {
-            format: Arc::new(format),
-            framing: framing.map(|f| Arc::new(f)),
-            schema_registry: Arc::new(Mutex::new(HashMap::new())),
-            schema_resolver,
-            _t: PhantomData,
-        }
-    }
-
-    pub async fn deserialize_slice<'a>(
-        &self,
-        msg: &'a [u8],
-    ) -> Result<impl Iterator<Item = Result<T, UserError>> + 'a, UserError> {
-        match &*self.format {
-            Format::Avro(avro) => {
-                deserialize_slice_avro(
-                    avro,
-                    self.schema_registry.clone(),
-                    self.schema_resolver.clone(),
-                    msg,
-                )
-                .await
-            }
-            _ => {
-                let new_self = self.clone();
-                Ok(FramingIterator::new(self.framing.clone(), msg)
-                    .map(move |t| new_self.deserialize_single(t)))
-            }
-        }
-    }
-
-    fn deserialize_single(&self, msg: &[u8]) -> Result<T, UserError> {
-        match &*self.format {
-            Format::Json(json) => deserialize_slice_json(json, msg),
-            Format::Avro(avro) => unreachable!("avro should be handled by here"),
-            Format::Parquet(_) => todo!("parquet is not supported as an input format"),
-            Format::RawString(_) => deserialize_raw_string(msg),
-        }
-        .map_err(|e| {
-            UserError::new(
-                "Deserialization failed",
-                format!(
-                    "Failed to deserialize: '{}': {}",
-                    String::from_utf8_lossy(&msg),
-                    e
-                ),
-            )
-        })
-    }
-}
-
-pub struct DataSerializer<T: SchemaData> {
-    kafka_schema: Value,
-    #[allow(unused)]
-    json_schema: Value,
-    format: Format,
-    _t: PhantomData<T>,
-}
-
-impl<T: SchemaData> DataSerializer<T> {
-    pub fn new(format: Format) -> Self {
-        Self {
-            kafka_schema: arrow_to_kafka_json(T::name(), T::schema().fields()),
-            json_schema: arrow_to_json_schema(T::schema().fields()),
-            format,
-            _t: PhantomData,
-        }
-    }
-
-    pub fn to_vec(&self, record: &T) -> Option<Vec<u8>> {
-        match &self.format {
-            Format::Json(json) => {
-                let v = if json.include_schema {
-                    let record = json! {{
-                        "schema": self.kafka_schema,
-                        "payload": record
-                    }};
-
-                    serde_json::to_vec(&record).unwrap()
-                } else {
-                    serde_json::to_vec(record).unwrap()
-                };
-
-                if json.confluent_schema_registry {
-                    todo!("Serializing to confluent schema registry is not yet supported");
-                }
-
-                Some(v)
-            }
-            Format::Avro(_) => todo!(),
-            Format::Parquet(_) => todo!(),
-            Format::RawString(_) => record.to_raw_string(),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct MilliSecondsSystemTimeVisitor;
@@ -308,15 +56,15 @@ pub mod timestamp_as_millis {
     use super::MilliSecondsSystemTimeVisitor;
 
     pub fn serialize<S>(t: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
+        where
+            S: Serializer,
     {
         serializer.serialize_u64(to_millis(*t))
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
-    where
-        D: Deserializer<'de>,
+        where
+            D: Deserializer<'de>,
     {
         deserializer.deserialize_i64(MilliSecondsSystemTimeVisitor)
     }
@@ -330,8 +78,8 @@ pub mod timestamp_as_millis {
 
         /// Deserialize a timestamp in milliseconds since the epoch
         fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-        where
-            E: de::Error,
+            where
+                E: de::Error,
         {
             if value >= 0 {
                 Ok(from_millis(value as u64))
@@ -342,8 +90,8 @@ pub mod timestamp_as_millis {
 
         /// Deserialize a timestamp in milliseconds since the epoch
         fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-        where
-            E: de::Error,
+            where
+                E: de::Error,
         {
             Ok(from_millis(value))
         }
@@ -363,8 +111,8 @@ pub mod opt_timestamp_as_millis {
     use super::{MilliSecondsSystemTimeVisitor, OptMilliSecondsSystemTimeVisitor};
 
     pub fn serialize<S>(t: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
+        where
+            S: Serializer,
     {
         if let Some(t) = t {
             serializer.serialize_some(&to_millis(*t))
@@ -374,8 +122,8 @@ pub mod opt_timestamp_as_millis {
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
-    where
-        D: Deserializer<'de>,
+        where
+            D: Deserializer<'de>,
     {
         deserializer.deserialize_option(OptMilliSecondsSystemTimeVisitor)
     }
@@ -389,8 +137,8 @@ pub mod opt_timestamp_as_millis {
 
         /// Deserialize a timestamp in milliseconds since the epoch
         fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-        where
-            D: Deserializer<'de>,
+            where
+                D: Deserializer<'de>,
         {
             Ok(Some(
                 deserializer.deserialize_any(MilliSecondsSystemTimeVisitor)?,
@@ -398,8 +146,8 @@ pub mod opt_timestamp_as_millis {
         }
 
         fn visit_none<E>(self) -> Result<Self::Value, E>
-        where
-            E: de::Error,
+            where
+                E: de::Error,
         {
             Ok(None)
         }
@@ -417,16 +165,16 @@ pub mod timestamp_as_rfc3339 {
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(t: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
+        where
+            S: Serializer,
     {
         let dt: DateTime<Utc> = (*t).into();
         serializer.serialize_str(&dt.to_rfc3339())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
-    where
-        D: Deserializer<'de>,
+        where
+            D: Deserializer<'de>,
     {
         let raw: chrono::DateTime<Utc> = DateTime::deserialize(deserializer)?;
         Ok(from_nanos(raw.timestamp_nanos() as u128))
@@ -441,8 +189,8 @@ pub mod opt_timestamp_as_rfc3339 {
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(t: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
+        where
+            S: Serializer,
     {
         if let Some(t) = *t {
             let dt: DateTime<Utc> = t.into();
@@ -453,15 +201,15 @@ pub mod opt_timestamp_as_rfc3339 {
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
-    where
-        D: Deserializer<'de>,
+        where
+            D: Deserializer<'de>,
     {
         let raw = Option::<DateTime<Utc>>::deserialize(deserializer)?;
         Ok(raw.map(|raw| from_nanos(raw.timestamp_nanos() as u128)))
     }
 }
 
-fn field_to_json_schema(field: &Field) -> Value {
+pub fn field_to_json_schema(field: &Field) -> Value {
     match field.data_type() {
         arrow::datatypes::DataType::Null => {
             json! {{ "type": "null" }}
@@ -519,7 +267,7 @@ fn field_to_json_schema(field: &Field) -> Value {
     }
 }
 
-fn arrow_to_json_schema(fields: &Fields) -> Value {
+pub fn arrow_to_json_schema(fields: &Fields) -> Value {
     let props: HashMap<String, Value> = fields
         .iter()
         .map(|f| (f.name().clone(), field_to_json_schema(f)))
@@ -537,7 +285,7 @@ fn arrow_to_json_schema(fields: &Fields) -> Value {
     }}
 }
 
-fn field_to_kafka_json(field: &Field) -> Value {
+pub fn field_to_kafka_json(field: &Field) -> Value {
     use arrow::datatypes::DataType::*;
 
     let typ = match field.data_type() {
@@ -605,7 +353,7 @@ fn field_to_kafka_json(field: &Field) -> Value {
 
 // For some reason Kafka uses it's own bespoke almost-but-not-quite JSON schema format
 // https://www.confluent.io/blog/kafka-connect-deep-dive-converters-serialization-explained/#json-schemas
-fn arrow_to_kafka_json(name: &str, fields: &Fields) -> Value {
+pub fn arrow_to_kafka_json(name: &str, fields: &Fields) -> Value {
     let fields: Vec<_> = fields.iter().map(|f| field_to_kafka_json(&*f)).collect();
     json! {{
         "type": "struct",
@@ -613,81 +361,4 @@ fn arrow_to_kafka_json(name: &str, fields: &Fields) -> Value {
         "fields": fields,
         "optional": false,
     }}
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::formats::FramingIterator;
-    use arroyo_rpc::formats::{Framing, FramingMethod, NewlineDelimitedFraming};
-    use std::sync::Arc;
-
-    #[test]
-    fn test_line_framing() {
-        let framing = Some(Arc::new(Framing {
-            method: FramingMethod::Newline(NewlineDelimitedFraming {
-                max_line_length: None,
-            }),
-        }));
-
-        let result: Vec<_> = FramingIterator::new(framing.clone(), "one block".as_bytes())
-            .map(|t| String::from_utf8(t.to_vec()).unwrap())
-            .collect();
-
-        assert_eq!(vec!["one block".to_string()], result);
-
-        let result: Vec<_> = FramingIterator::new(
-            framing.clone(),
-            "one block\ntwo block\nthree block".as_bytes(),
-        )
-        .map(|t| String::from_utf8(t.to_vec()).unwrap())
-        .collect();
-
-        assert_eq!(
-            vec![
-                "one block".to_string(),
-                "two block".to_string(),
-                "three block".to_string()
-            ],
-            result
-        );
-
-        let result: Vec<_> = FramingIterator::new(
-            framing.clone(),
-            "one block\ntwo block\nthree block\n".as_bytes(),
-        )
-        .map(|t| String::from_utf8(t.to_vec()).unwrap())
-        .collect();
-
-        assert_eq!(
-            vec![
-                "one block".to_string(),
-                "two block".to_string(),
-                "three block".to_string()
-            ],
-            result
-        );
-    }
-
-    #[test]
-    fn test_max_line_length() {
-        let framing = Some(Arc::new(Framing {
-            method: FramingMethod::Newline(NewlineDelimitedFraming {
-                max_line_length: Some(5),
-            }),
-        }));
-
-        let result: Vec<_> =
-            FramingIterator::new(framing, "one block\ntwo block\nwhole".as_bytes())
-                .map(|t| String::from_utf8(t.to_vec()).unwrap())
-                .collect();
-
-        assert_eq!(
-            vec![
-                "one b".to_string(),
-                "two b".to_string(),
-                "whole".to_string()
-            ],
-            result
-        );
-    }
 }
