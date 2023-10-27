@@ -112,27 +112,32 @@ pub enum DataOperation {
     DeleteValue(DeleteValueOperation),     // delete single value of a KeyTimeMultiMap
     DeleteTimeRange(DeleteTimeRangeOperation), // delete all values for key in range (only for KeyTimeMultiMap)
 }
-
 #[async_trait]
 pub trait BackingStore {
-    // prepares a checkpoint to be loaded, e.g., by deleting future data
+    /// prepares a checkpoint to be loaded, e.g., by deleting future data
     async fn prepare_checkpoint_load(metadata: &CheckpointMetadata) -> Result<()>;
 
+    /// loads the latest checkpoint metadata for a given job id
     async fn load_latest_checkpoint_metadata(job_id: &str) -> Option<CheckpointMetadata>;
 
+    /// loads the checkpoint metadata for a given job id and epoch
     async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Option<CheckpointMetadata>;
 
+    /// loads the operator checkpoint metadata for a given job id, operator id, and epoch
     async fn load_operator_metadata(
         job_id: &str,
         operator_id: &str,
         epoch: u32,
     ) -> Option<OperatorCheckpointMetadata>;
 
+    /// creates a new instance of the BackingStore for the given task info.
     async fn new(
         task_info: &TaskInfo,
         tables: Vec<TableDescriptor>,
         control_tx: Sender<ControlResp>,
     ) -> Self;
+
+    /// creates a new instance of the BackingStore from a checkpoint
     async fn from_checkpoint(
         task_info: &TaskInfo,
         metadata: CheckpointMetadata,
@@ -140,28 +145,37 @@ pub trait BackingStore {
         control_tx: Sender<ControlResp>,
     ) -> Self;
 
+    /// returns the name of the BackingStore implementation
     fn name() -> &'static str;
 
+    /// returns the task info associated with the BackingStore instance
     fn task_info(&self) -> &TaskInfo;
 
+    /// writes the operator checkpoint metadata to the backing store
     async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata);
 
+    /// writes the checkpoint metadata to the backing store
     async fn write_checkpoint_metadata(metadata: CheckpointMetadata);
 
+    /// cleans up a checkpoint by deleting data that is no longer needed
     async fn cleanup_checkpoint(
         metadata: CheckpointMetadata,
         old_min_epoch: u32,
         new_min_epoch: u32,
     ) -> Result<()>;
 
+    /// creates a checkpoint of the current state of the BackingStore instance,
+    /// returning the checkpoint epoch
     async fn checkpoint(
         &mut self,
         barrier: CheckpointBarrier,
         watermark: Option<SystemTime>,
     ) -> u32;
 
+    /// gets the data tuples for a given table
     async fn get_data_tuples<K: Key, V: Data>(&self, table: char) -> Vec<DataTuple<K, V>>;
 
+    /// writes a data tuple to the backing store
     async fn write_data_tuple<K: Key, V: Data>(
         &mut self,
         table: char,
@@ -171,6 +185,7 @@ pub trait BackingStore {
         value: &mut V,
     );
 
+    /// deletes a time-key pair from the backing store
     async fn delete_time_key<K: Key>(
         &mut self,
         table: char,
@@ -179,8 +194,10 @@ pub trait BackingStore {
         key: &mut K,
     );
 
+    /// deletes a key from the backing store
     async fn delete_key<K: Key>(&mut self, table: char, key: &mut K);
 
+    /// deletes a data value from the backing store
     async fn delete_data_value<K: Key, V: Data>(
         &mut self,
         table: char,
@@ -189,6 +206,7 @@ pub trait BackingStore {
         value: &mut V,
     );
 
+    /// deletes a time range from the backing store
     async fn delete_time_range<K: Key>(
         &mut self,
         table: char,
@@ -196,12 +214,21 @@ pub trait BackingStore {
         range: Range<SystemTime>,
     );
 
+    /// writes a key-value pair to the backing store
     async fn write_key_value<K: Key, V: Data>(&mut self, table: char, key: &mut K, value: &mut V);
 
+    /// gets the global key-value pairs for a given table
     async fn get_global_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
+
+    /// gets the key-value pairs for a given table
     async fn get_key_values<K: Key, V: Data>(&self, table: char) -> Vec<(K, V)>;
 
+    /// loads a compacted state into the BackingStore instance
     async fn load_compacted(&mut self, compaction: CompactionResult);
+
+    /// inserts committing data into the BackingStore instance
+    /// this data will be passed to all subtasks of the operator in the commit message.
+    async fn insert_committing_data(&mut self, epoch: u32, table: char, committing_data: Vec<u8>);
 }
 
 pub struct StateStore<S: BackingStore> {
@@ -416,6 +443,17 @@ impl<S: BackingStore> StateStore<S> {
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         self.backend.load_compacted(compaction).await;
     }
+
+    pub async fn insert_committing_data(
+        &mut self,
+        epoch: u32,
+        table: char,
+        committing_data: Vec<u8>,
+    ) {
+        self.backend
+            .insert_committing_data(epoch, table, committing_data)
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -558,6 +596,7 @@ mod test {
             tables: default_tables(),
             backend_data: message.subtask_metadata.backend_data,
             bytes: 5,
+            commit_data: None,
         })
         .await;
 

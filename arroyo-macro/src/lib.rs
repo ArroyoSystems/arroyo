@@ -529,8 +529,8 @@ fn impl_stream_node_type(
                         match control_message {
                             arroyo_rpc::ControlMessage::Checkpoint(_) => tracing::warn!("shouldn't receive checkpoint"),
                             arroyo_rpc::ControlMessage::Stop { mode: _ } => tracing::warn!("shouldn't receive stop"),
-                            arroyo_rpc::ControlMessage::Commit { epoch } => {
-                                self.handle_commit(epoch, &mut ctx).await;
+                            arroyo_rpc::ControlMessage::Commit { epoch, commit_data } => {
+                                self.handle_commit(epoch, commit_data, &mut ctx).await;
                             },
                             arroyo_rpc::ControlMessage::LoadCompacted { compacted } => {
                                 ctx.load_compacted(compacted).await;
@@ -802,7 +802,7 @@ fn impl_stream_node_type(
 
     if !methods.contains("handle_commit") {
         defs.push(quote! {
-            async fn handle_commit(&mut self, epoch: u32, ctx: &mut Context<#out_k, #out_t>) {
+            async fn handle_commit(&mut self, epoch: u32, commit_data: std::collections::HashMap<char, std::collections::HashMap<u32, Vec<u8>>>, ctx: &mut Context<#out_k, #out_t>) {
                 tracing::warn!("default handling of commit with epoch {:?}", epoch);
             }
         })

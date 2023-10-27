@@ -212,7 +212,7 @@ checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
 [[package]]
 name = "arrow"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#0209c94ea4e3d924936e2127f89a885805aae1b4"
 dependencies = [
  "ahash 0.8.3",
  "arrow-arith",
@@ -233,7 +233,8 @@ dependencies = [
 [[package]]
 name = "arrow-arith"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "895263144bd4a69751cbe6a34a53f26626e19770b313a9fa792c415cd0e78f11"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -247,7 +248,7 @@ dependencies = [
 [[package]]
 name = "arrow-array"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#0209c94ea4e3d924936e2127f89a885805aae1b4"
 dependencies = [
  "ahash 0.8.3",
  "arrow-buffer",
@@ -263,7 +264,7 @@ dependencies = [
 [[package]]
 name = "arrow-buffer"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#0209c94ea4e3d924936e2127f89a885805aae1b4"
 dependencies = [
  "bytes",
  "half",
@@ -273,7 +274,8 @@ dependencies = [
 [[package]]
 name = "arrow-cast"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35e8b9990733a9b635f656efda3c9b8308c7a19695c9ec2c7046dd154f9b144b"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -290,7 +292,8 @@ dependencies = [
 [[package]]
 name = "arrow-csv"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "646fbb4e11dd0afb8083e883f53117713b8caadb4413b3c9e63e3f535da3683c"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -308,7 +311,8 @@ dependencies = [
 [[package]]
 name = "arrow-data"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da900f31ff01a0a84da0572209be72b2b6f980f3ea58803635de47913191c188"
 dependencies = [
  "arrow-buffer",
  "arrow-schema",
@@ -319,7 +323,8 @@ dependencies = [
 [[package]]
 name = "arrow-ipc"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2707a8d7ee2d345d045283ece3ae43416175873483e5d96319c929da542a0b1f"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -332,7 +337,8 @@ dependencies = [
 [[package]]
 name = "arrow-json"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d1b91a63c356d14eedc778b76d66a88f35ac8498426bb0799a769a49a74a8b4"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -351,7 +357,8 @@ dependencies = [
 [[package]]
 name = "arrow-ord"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "584325c91293abbca7aaaabf8da9fe303245d641f5f4a18a6058dc68009c7ebf"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -365,7 +372,8 @@ dependencies = [
 [[package]]
 name = "arrow-row"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e32afc1329f7b372463b21c6ca502b07cf237e1ed420d87706c1770bb0ebd38"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -379,7 +387,7 @@ dependencies = [
 [[package]]
 name = "arrow-schema"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#0209c94ea4e3d924936e2127f89a885805aae1b4"
 dependencies = [
  "serde",
 ]
@@ -387,7 +395,8 @@ dependencies = [
 [[package]]
 name = "arrow-select"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73b3ca55356d1eae07cf48808d8c462cea674393ae6ad1e0b120f40b422eb2b4"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -399,7 +408,8 @@ dependencies = [
 [[package]]
 name = "arrow-string"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af1433ce02590cae68da0a18ed3a3ed868ffac2c6f24c533ddd2067f7ee04b4a"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -815,7 +825,7 @@ dependencies = [
  "bytes",
  "object_store",
  "regex",
- "rusoto_core",
+ "rusoto_core 0.48.0",
  "thiserror",
  "tokio",
  "webpki 0.22.4",
@@ -853,6 +863,7 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "bytes",
  "chrono",
+ "deltalake",
  "eventsource-client",
  "fluvio",
  "fluvio-future",
@@ -876,7 +887,7 @@ dependencies = [
  "regex",
  "regress",
  "reqwest",
- "rusoto_core",
+ "rusoto_core 0.48.0",
  "rusoto_s3",
  "serde",
  "serde_json",
@@ -2699,6 +2710,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "deltalake"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f889be5851e2633239a5329f57eac565ef4fc37b5d283d1532ca1aaa8d74c9"
+dependencies = [
+ "arrow",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-cast",
+ "arrow-ord",
+ "arrow-row",
+ "arrow-schema",
+ "arrow-select",
+ "async-trait",
+ "bytes",
+ "cfg-if",
+ "chrono",
+ "dynamodb_lock",
+ "errno",
+ "futures",
+ "itertools 0.11.0",
+ "lazy_static",
+ "libc",
+ "log",
+ "num-bigint",
+ "num-traits",
+ "num_cpus",
+ "object_store",
+ "once_cell",
+ "parking_lot 0.12.1",
+ "parquet",
+ "percent-encoding",
+ "rand",
+ "regex",
+ "rusoto_core 0.47.0",
+ "rusoto_credential 0.47.0",
+ "rusoto_dynamodb",
+ "rusoto_sts",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "der"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2887,6 +2945,22 @@ name = "dyn-clone"
 version = "1.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbfc4744c1b8f2a09adc0e55242f60b1af195d88596bd8700be74418c056c555"
+
+[[package]]
+name = "dynamodb_lock"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fff628406c318f098017c78e203b5b6466e0610fc48be865ebb9ae0eb229b4c8"
+dependencies = [
+ "async-trait",
+ "log",
+ "maplit",
+ "rusoto_core 0.47.0",
+ "rusoto_dynamodb",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "ecdsa"
@@ -4747,6 +4821,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "maplit"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
+
+[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5413,7 +5493,7 @@ dependencies = [
 [[package]]
 name = "parquet"
 version = "46.0.0"
-source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#30a13a193d24c5ea4c954f2092e81ee80a7af134"
+source = "git+https://github.com/ArroyoSystems/arrow-rs?branch=46.0.0/parquet_bytes#0209c94ea4e3d924936e2127f89a885805aae1b4"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -6384,6 +6464,31 @@ dependencies = [
 
 [[package]]
 name = "rusoto_core"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b4f000e8934c1b4f70adde180056812e7ea6b1a247952db8ee98c94cd3116cc"
+dependencies = [
+ "async-trait",
+ "base64 0.13.1",
+ "bytes",
+ "crc32fast",
+ "futures",
+ "http",
+ "hyper",
+ "hyper-rustls 0.22.1",
+ "lazy_static",
+ "log",
+ "rusoto_credential 0.47.0",
+ "rusoto_signature 0.47.0",
+ "rustc_version",
+ "serde",
+ "serde_json",
+ "tokio",
+ "xml-rs",
+]
+
+[[package]]
+name = "rusoto_core"
 version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1db30db44ea73551326269adcf7a2169428a054f14faf9e1768f2163494f2fa2"
@@ -6398,13 +6503,31 @@ dependencies = [
  "hyper-tls",
  "lazy_static",
  "log",
- "rusoto_credential",
- "rusoto_signature",
+ "rusoto_credential 0.48.0",
+ "rusoto_signature 0.48.0",
  "rustc_version",
  "serde",
  "serde_json",
  "tokio",
  "xml-rs",
+]
+
+[[package]]
+name = "rusoto_credential"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a46b67db7bb66f5541e44db22b0a02fed59c9603e146db3a9e633272d3bac2f"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "dirs-next",
+ "futures",
+ "hyper",
+ "serde",
+ "serde_json",
+ "shlex",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -6426,6 +6549,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusoto_dynamodb"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7935e1f9ca57c4ee92a4d823dcd698eb8c992f7e84ca21976ae72cd2b03016e7"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "rusoto_core 0.47.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rusoto_s3"
 version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6434,8 +6571,34 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
- "rusoto_core",
+ "rusoto_core 0.48.0",
  "xml-rs",
+]
+
+[[package]]
+name = "rusoto_signature"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6264e93384b90a747758bcc82079711eacf2e755c3a8b5091687b5349d870bcc"
+dependencies = [
+ "base64 0.13.1",
+ "bytes",
+ "chrono",
+ "digest 0.9.0",
+ "futures",
+ "hex",
+ "hmac 0.11.0",
+ "http",
+ "hyper",
+ "log",
+ "md-5 0.9.1",
+ "percent-encoding",
+ "pin-project-lite",
+ "rusoto_credential 0.47.0",
+ "rustc_version",
+ "serde",
+ "sha2 0.9.9",
+ "tokio",
 ]
 
 [[package]]
@@ -6457,11 +6620,26 @@ dependencies = [
  "md-5 0.9.1",
  "percent-encoding",
  "pin-project-lite",
- "rusoto_credential",
+ "rusoto_credential 0.48.0",
  "rustc_version",
  "serde",
  "sha2 0.9.9",
  "tokio",
+]
+
+[[package]]
+name = "rusoto_sts"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e7edd42473ac006fd54105f619e480b0a94136e7f53cf3fb73541363678fd92"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "rusoto_core 0.47.0",
+ "serde_urlencoded",
+ "xml-rs",
 ]
 
 [[package]]

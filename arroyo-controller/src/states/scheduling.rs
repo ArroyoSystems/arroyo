@@ -14,7 +14,9 @@ use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
 use anyhow::anyhow;
-use arroyo_state::{parquet::get_storage_env_vars, BackingStore, StateBackend};
+use arroyo_state::{
+    committing_state::CommittingState, parquet::get_storage_env_vars, BackingStore, StateBackend,
+};
 
 use crate::{
     job_controller::JobController,
@@ -368,6 +370,7 @@ impl State for Scheduling {
             metadata.min_epoch = min_epoch;
             if needs_commits {
                 let mut commit_subtasks = HashSet::new();
+                let mut committing_data = HashMap::new();
                 for operator_id in &metadata.operator_ids {
                     let operator_metadata =
                         StateBackend::load_operator_metadata(&ctx.config.id, operator_id, epoch)
@@ -378,6 +381,18 @@ impl State for Scheduling {
                             operator_id, ctx.config.id
                         );
                     };
+                    if let Some(commit_data) = operator_metadata.commit_data {
+                        committing_data.insert(
+                            operator_id.clone(),
+                            commit_data
+                                .committing_data
+                                .into_iter()
+                                .map(|(table, commit_data_map)| {
+                                    (table, commit_data_map.commit_data_by_subtask)
+                                })
+                                .collect(),
+                        );
+                    }
                     if operator_metadata.has_state
                         && operator_metadata
                             .tables
@@ -396,7 +411,7 @@ impl State for Scheduling {
                         }
                     }
                 }
-                committing_state = Some((id, commit_subtasks));
+                committing_state = Some(CommittingState::new(id, commit_subtasks, committing_data));
             }
             StateBackend::write_checkpoint_metadata(metadata).await;
         }
