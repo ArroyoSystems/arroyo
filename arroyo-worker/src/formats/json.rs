@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use arrow::datatypes::{Field, Fields};
+use arroyo_rpc::formats::JsonFormat;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use arroyo_rpc::formats::JsonFormat;
+use std::collections::HashMap;
 
 pub fn deserialize_slice_json<T: DeserializeOwned>(
     format: &JsonFormat,
@@ -42,7 +42,6 @@ pub fn deserialize_slice_json<T: DeserializeOwned>(
     }
 }
 
-
 #[derive(Debug)]
 pub struct MilliSecondsSystemTimeVisitor;
 
@@ -56,15 +55,15 @@ pub mod timestamp_as_millis {
     use super::MilliSecondsSystemTimeVisitor;
 
     pub fn serialize<S>(t: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         serializer.serialize_u64(to_millis(*t))
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         deserializer.deserialize_i64(MilliSecondsSystemTimeVisitor)
     }
@@ -78,8 +77,8 @@ pub mod timestamp_as_millis {
 
         /// Deserialize a timestamp in milliseconds since the epoch
         fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
+        where
+            E: de::Error,
         {
             if value >= 0 {
                 Ok(from_millis(value as u64))
@@ -90,8 +89,8 @@ pub mod timestamp_as_millis {
 
         /// Deserialize a timestamp in milliseconds since the epoch
         fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
+        where
+            E: de::Error,
         {
             Ok(from_millis(value))
         }
@@ -111,8 +110,8 @@ pub mod opt_timestamp_as_millis {
     use super::{MilliSecondsSystemTimeVisitor, OptMilliSecondsSystemTimeVisitor};
 
     pub fn serialize<S>(t: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         if let Some(t) = t {
             serializer.serialize_some(&to_millis(*t))
@@ -122,8 +121,8 @@ pub mod opt_timestamp_as_millis {
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         deserializer.deserialize_option(OptMilliSecondsSystemTimeVisitor)
     }
@@ -137,8 +136,8 @@ pub mod opt_timestamp_as_millis {
 
         /// Deserialize a timestamp in milliseconds since the epoch
         fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-            where
-                D: Deserializer<'de>,
+        where
+            D: Deserializer<'de>,
         {
             Ok(Some(
                 deserializer.deserialize_any(MilliSecondsSystemTimeVisitor)?,
@@ -146,8 +145,8 @@ pub mod opt_timestamp_as_millis {
         }
 
         fn visit_none<E>(self) -> Result<Self::Value, E>
-            where
-                E: de::Error,
+        where
+            E: de::Error,
         {
             Ok(None)
         }
@@ -165,16 +164,16 @@ pub mod timestamp_as_rfc3339 {
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(t: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         let dt: DateTime<Utc> = (*t).into();
         serializer.serialize_str(&dt.to_rfc3339())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         let raw: chrono::DateTime<Utc> = DateTime::deserialize(deserializer)?;
         Ok(from_nanos(raw.timestamp_nanos() as u128))
@@ -189,8 +188,8 @@ pub mod opt_timestamp_as_rfc3339 {
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(t: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         if let Some(t) = *t {
             let dt: DateTime<Utc> = t.into();
@@ -201,8 +200,8 @@ pub mod opt_timestamp_as_rfc3339 {
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         let raw = Option::<DateTime<Utc>>::deserialize(deserializer)?;
         Ok(raw.map(|raw| from_nanos(raw.timestamp_nanos() as u128)))

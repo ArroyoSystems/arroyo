@@ -107,13 +107,26 @@ pub struct AvroFormat {
 
     #[serde(default)]
     pub embedded_schema: bool,
+
+    #[serde(default)]
+    pub into_json: bool,
 }
 
 impl AvroFormat {
     pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
         Ok(Self {
-            confluent_schema_registry: false,
-            embedded_schema: false,
+            confluent_schema_registry: opts
+                .remove("avro.confluent_schema_registry")
+                .filter(|t| t == "true")
+                .is_some(),
+            embedded_schema: opts
+                .remove("avro.include_schema")
+                .filter(|t| t == "true")
+                .is_some(),
+            into_json: opts
+                .remove("avro.into_json")
+                .filter(|t| t == "true")
+                .is_some(),
         })
     }
 }

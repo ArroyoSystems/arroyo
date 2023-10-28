@@ -5,6 +5,7 @@ use crate::SourceFinishType;
 use arroyo_macro::source_fn;
 use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
+use arroyo_rpc::schema_resolver::{ConfluentSchemaResolver, FailingSchemaResolver, SchemaResolver};
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
@@ -21,7 +22,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tracing::{debug, error, info, warn};
-use arroyo_rpc::schema_resolver::{ConfluentSchemaResolver, FailingSchemaResolver, SchemaResolver};
 
 use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, TableType};
 
@@ -105,12 +105,15 @@ where
             client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
         }
 
-        let schema_resolver: Arc<dyn SchemaResolver + Sync> = if let Some(schema_registry) = &connection.schema_registry {
-            Arc::new(ConfluentSchemaResolver::new(&schema_registry.endpoint, &table.topic)
-                .expect("failed to construct confluent schema resolver"))
-        }  else {
-            Arc::new(FailingSchemaResolver::new())
-        };
+        let schema_resolver: Arc<dyn SchemaResolver + Sync> =
+            if let Some(schema_registry) = &connection.schema_registry {
+                Arc::new(
+                    ConfluentSchemaResolver::new(&schema_registry.endpoint, &table.topic)
+                        .expect("failed to construct confluent schema resolver"),
+                )
+            } else {
+                Arc::new(FailingSchemaResolver::new())
+            };
 
         Self {
             topic: table.topic,

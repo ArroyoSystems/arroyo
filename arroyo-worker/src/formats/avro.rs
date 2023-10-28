@@ -1,11 +1,13 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use apache_avro::{from_avro_datum, Reader, Schema};
-use serde::de::DeserializeOwned;
-use tokio::sync::Mutex;
+use apache_avro::types::{Value as AvroValue, Value};
+use apache_avro::{from_avro_datum, Decimal, Reader, Schema};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_types::UserError;
+use serde::de::DeserializeOwned;
+use serde_json::{json, Value as JsonValue};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
     format: &AvroFormat,
@@ -29,21 +31,24 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
     let mut registry = schema_registry.lock().await;
 
     let messages = if format.embedded_schema {
-        Reader::new(&msg[..]).map_err(|e| format!("invalid Avro schema in message: {:?}", e))?
+        Reader::new(&msg[..])
+            .map_err(|e| format!("invalid Avro schema in message: {:?}", e))?
             .collect()
     } else {
         let schema = if registry.contains_key(&id) {
             registry.get(&id).unwrap()
         } else {
-            let new_schema = resolver.resolve_schema(id).await?.ok_or_else(|| {
+            let new_schema = resolver
+                .resolve_schema(id)
+                .await?
+                .ok_or_else(|| format!("could not resolve schema for message with id {}", id))?;
+
+            let new_schema = Schema::parse_str(&new_schema).map_err(|e| {
                 format!(
-                    "could not resolve schema for message with id {}",
-                    id
+                    "schema from Confluent Schema registry is not valid: {:?}",
+                    e
                 )
             })?;
-
-            let new_schema = Schema::parse_str(&new_schema)
-                .map_err(|e| format!("schema from Confluent Schema registry is not valid: {:?}", e))?;
 
             registry.insert(id, new_schema);
 
@@ -61,39 +66,98 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
         }
     };
 
-    Ok(messages.into_iter().map(|record| {
-        apache_avro::from_value::<T>(&record.map_err(|e| {
+    let into_json = format.into_json;
+    Ok(messages.into_iter().map(move |record| {
+        let value = record.map_err(|e| {
             UserError::new(
                 "Deserialization failed",
-                format!(
-                    "Failed to deserialize from avro: {:?}",
-                    e
-                ),
+                format!("Failed to deserialize from avro: {:?}", e),
             )
-        })?)
-            .map_err(|e| {
+        })?;
+
+        if into_json {
+            Ok(serde_json::from_value(json!({"value": avro_to_json(value).to_string()})).unwrap())
+        } else {
+            apache_avro::from_value::<T>(&value).map_err(|e| {
                 UserError::new(
                     "Deserialization failed",
                     format!("Failed to convert avro message into struct type: {:?}", e),
                 )
             })
+        }
     }))
-
-
-    // let record = reader.next()
-    //     .ok_or_else(|| "avro record did not contain any messages")?
-    //     .map_err(|e| e.to_string())?;
 }
 
+fn convert_float(f: f64) -> JsonValue {
+    match serde_json::Number::from_f64(f) {
+        Some(n) => JsonValue::Number(n),
+        None => JsonValue::String(
+            (if f.is_infinite() && f.is_sign_positive() {
+                "+Inf"
+            } else if f.is_infinite() {
+                "-Inf"
+            } else {
+                "NaN"
+            })
+            .to_string(),
+        ),
+    }
+}
+
+fn encode_vec(v: Vec<u8>) -> JsonValue {
+    JsonValue::String(v.into_iter().map(char::from).collect())
+}
+
+fn avro_to_json(value: AvroValue) -> JsonValue {
+    match value {
+        Value::Null => JsonValue::Null,
+        Value::Boolean(b) => JsonValue::Bool(b),
+        Value::Int(i) | Value::Date(i) | Value::TimeMillis(i) => {
+            JsonValue::Number(serde_json::Number::from(i))
+        }
+        Value::Long(i)
+        | Value::TimeMicros(i)
+        | Value::TimestampMillis(i)
+        | Value::TimestampMicros(i)
+        | Value::LocalTimestampMillis(i)
+        | Value::LocalTimestampMicros(i) => JsonValue::Number(serde_json::Number::from(i)),
+        Value::Float(f) => convert_float(f as f64),
+        Value::Double(f) => convert_float(f),
+        Value::String(s) | Value::Enum(_, s) => JsonValue::String(s),
+        // this isn't the standard Avro json encoding, which just
+        Value::Bytes(b) | Value::Fixed(_, b) => encode_vec(b),
+        Value::Union(_, b) => avro_to_json(*b),
+        Value::Array(a) => JsonValue::Array(a.into_iter().map(|v| avro_to_json(v)).collect()),
+        Value::Map(m) => {
+            JsonValue::Object(m.into_iter().map(|(k, v)| (k, avro_to_json(v))).collect())
+        }
+        Value::Record(rec) => {
+            JsonValue::Object(rec.into_iter().map(|(k, v)| (k, avro_to_json(v))).collect())
+        }
+
+        Value::Decimal(d) => {
+            let b: Vec<u8> = d.try_into().unwrap_or_else(|_| vec![]);
+            encode_vec(b)
+        }
+        Value::Duration(d) => {
+            json!({
+               "months": u32::from(d.months()),
+               "days": u32::from(d.days()),
+               "milliseconds": u32::from(d.millis())
+            })
+        }
+        Value::Uuid(u) => JsonValue::String(u.to_string()),
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use async_trait::async_trait;
-    use arroyo_rpc::formats::{AvroFormat, Format};
-    use arroyo_rpc::schema_resolver::SchemaResolver;
     use crate::formats::DataDeserializer;
     use crate::SchemaData;
+    use arroyo_rpc::formats::{AvroFormat, Format};
+    use arroyo_rpc::schema_resolver::SchemaResolver;
+    use async_trait::async_trait;
+    use std::sync::Arc;
 
     struct TestSchemaResolver {
         schema: String,
@@ -110,14 +174,14 @@ mod tests {
     }
 
     #[derive(
-    Clone,
-    Debug,
-    bincode::Encode,
-    bincode::Decode,
-    PartialEq,
-    PartialOrd,
-    serde::Serialize,
-    serde::Deserialize
+        Clone,
+        Debug,
+        bincode::Encode,
+        bincode::Decode,
+        PartialEq,
+        PartialOrd,
+        serde::Serialize,
+        serde::Deserialize,
     )]
     pub struct ArroyoAvroRoot {
         pub store_id: i32,
@@ -130,14 +194,14 @@ mod tests {
     }
 
     #[derive(
-    Clone,
-    Debug,
-    bincode::Encode,
-    bincode::Decode,
-    PartialEq,
-    PartialOrd,
-    serde::Serialize,
-    serde::Deserialize
+        Clone,
+        Debug,
+        bincode::Encode,
+        bincode::Decode,
+        PartialEq,
+        PartialOrd,
+        serde::Serialize,
+        serde::Deserialize,
     )]
     pub struct OrderLine {
         pub product_id: i32,
@@ -153,18 +217,24 @@ mod tests {
         }
         fn schema() -> arrow::datatypes::Schema {
             let fields: Vec<arrow::datatypes::Field> = vec![
-                arrow::datatypes::Field::new("store_id",
-                                             arrow::datatypes::DataType::Int32, false),
-                arrow::datatypes::Field::new("store_order_id",
-                                             arrow::datatypes::DataType::Int32, false),
-                arrow::datatypes::Field::new("coupon_code",
-                                             arrow::datatypes::DataType::Int32, false),
-                arrow::datatypes::Field::new("date", arrow::datatypes::DataType::Utf8,
-                                             false),
-                arrow::datatypes::Field::new("status",
-                                             arrow::datatypes::DataType::Utf8, false),
-                arrow::datatypes::Field::new("order_lines",
-                                             arrow::datatypes::DataType::Utf8, false),
+                arrow::datatypes::Field::new("store_id", arrow::datatypes::DataType::Int32, false),
+                arrow::datatypes::Field::new(
+                    "store_order_id",
+                    arrow::datatypes::DataType::Int32,
+                    false,
+                ),
+                arrow::datatypes::Field::new(
+                    "coupon_code",
+                    arrow::datatypes::DataType::Int32,
+                    false,
+                ),
+                arrow::datatypes::Field::new("date", arrow::datatypes::DataType::Utf8, false),
+                arrow::datatypes::Field::new("status", arrow::datatypes::DataType::Utf8, false),
+                arrow::datatypes::Field::new(
+                    "order_lines",
+                    arrow::datatypes::DataType::Utf8,
+                    false,
+                ),
             ];
             arrow::datatypes::Schema::new(fields)
         }
@@ -243,10 +313,12 @@ mod tests {
   "type": "record"
 }"#;
 
-        let message = [0u8, 0, 0, 0, 1, 8, 200, 223, 1, 144, 31, 186, 159, 2, 16, 97, 99, 99,
-            101, 112, 116, 101, 100, 4, 156, 1, 10, 112, 105, 122, 122, 97, 4, 102, 102, 102, 102, 102,
-            230, 38, 64, 102, 102, 102, 102, 102, 230, 54, 64, 84, 14, 100, 101, 115, 115, 101, 114, 116,
-            2, 113, 61, 10, 215, 163, 112, 26, 64, 113, 61, 10, 215, 163, 112, 26, 64, 0, 10];
+        let message = [
+            0u8, 0, 0, 0, 1, 8, 200, 223, 1, 144, 31, 186, 159, 2, 16, 97, 99, 99, 101, 112, 116,
+            101, 100, 4, 156, 1, 10, 112, 105, 122, 122, 97, 4, 102, 102, 102, 102, 102, 230, 38,
+            64, 102, 102, 102, 102, 102, 230, 54, 64, 84, 14, 100, 101, 115, 115, 101, 114, 116, 2,
+            113, 61, 10, 215, 163, 112, 26, 64, 113, 61, 10, 215, 163, 112, 26, 64, 0, 10,
+        ];
 
         let mut deserializer = DataDeserializer::with_schema_resolver(
             Format::Avro(AvroFormat {
@@ -257,9 +329,11 @@ mod tests {
             Arc::new(TestSchemaResolver {
                 schema: schema.to_string(),
                 id: 1,
-            }));
+            }),
+        );
 
-        let v: Vec<Result<ArroyoAvroRoot, _>> = deserializer.deserialize_slice(&message[..]).await.collect();
+        let v: Vec<Result<ArroyoAvroRoot, _>> =
+            deserializer.deserialize_slice(&message[..]).await.collect();
 
         for i in v {
             println!("{:?}", i.unwrap());
