@@ -4,7 +4,6 @@ use apache_avro::Schema;
 use arrow_schema::DataType;
 use proc_macro2::Ident;
 use quote::quote;
-use std::sync::Arc;
 
 pub const ROOT_NAME: &str = "ArroyoAvroRoot";
 
@@ -52,28 +51,20 @@ fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {
     match schema {
         Schema::Null => (TypeDef::DataType(DataType::Null, false), None),
         Schema::Boolean => (TypeDef::DataType(DataType::Boolean, false), None),
-        Schema::Int => (TypeDef::DataType(DataType::Int32, false), None),
-        Schema::Long => (TypeDef::DataType(DataType::Int64, false), None),
+        Schema::Int | Schema::TimeMillis => (TypeDef::DataType(DataType::Int32, false), None),
+        Schema::Long
+        | Schema::TimeMicros
+        | Schema::TimestampMillis
+        | Schema::LocalTimestampMillis
+        | Schema::LocalTimestampMicros => (TypeDef::DataType(DataType::Int64, false), None),
         Schema::Float => (TypeDef::DataType(DataType::Float32, false), None),
         Schema::Double => (TypeDef::DataType(DataType::Float64, false), None),
-        Schema::Bytes => (TypeDef::DataType(DataType::Binary, false), None),
-        Schema::String => (TypeDef::DataType(DataType::Utf8, false), None),
-        // Schema::Array(t) => {
-        //     let dt = match to_typedef(source_name, t) {
-        //         (TypeDef::StructDef(sd, _), _) => {
-        //             let fields: Vec<Field> = sd.fields.into_iter()
-        //                 .map(|f| f.into())
-        //                 .collect();
-        //
-        //             DataType::Struct(Fields::from(fields))
-        //         },
-        //         (TypeDef::DataType(dt, _), _) => {
-        //             dt
-        //         }
-        //     };
-        //
-        //     (TypeDef::DataType(DataType::List(Arc::new(Field::new("",  dt,false))), false), None)
-        // }
+        Schema::Bytes | Schema::Fixed(_) | Schema::Decimal(_) => {
+            (TypeDef::DataType(DataType::Binary, false), None)
+        }
+        Schema::String | Schema::Enum(_) | Schema::Uuid => {
+            (TypeDef::DataType(DataType::Utf8, false), None)
+        }
         Schema::Union(union) => {
             // currently just support unions that have [t, null] as variants, which is the
             // avro way to represent optional fields
@@ -117,18 +108,6 @@ fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {
         _ => (
             TypeDef::DataType(DataType::Utf8, false),
             Some("json".to_string()),
-        ), // Schema::Enum(_) => {}
-           // Schema::Fixed(_) => {}
-           // Schema::Decimal(_) => {}
-           // Schema::Uuid => {}
-           // Schema::Date => {}
-           // Schema::TimeMillis => {}
-           // Schema::TimeMicros => {}
-           // Schema::TimestampMillis => {}
-           // Schema::TimestampMicros => {}
-           // Schema::LocalTimestampMillis => {}
-           // Schema::LocalTimestampMicros => {}
-           // Schema::Duration => {}
-           // Schema::Ref { .. } => {}
+        ),
     }
 }

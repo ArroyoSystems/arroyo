@@ -9,15 +9,14 @@ use axum_extra::extract::WithRejection;
 use cornucopia_async::GenericClient;
 use cornucopia_async::Params;
 use futures_util::stream::Stream;
-use http::StatusCode;
 use serde_json::{json, Value};
 use std::convert::Infallible;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use arroyo_connectors::kafka::{KafkaConfig, KafkaConnector, KafkaTable};
-use arroyo_connectors::{connector_for_type, Connector, ErasedConnector};
+use arroyo_connectors::kafka::{KafkaConfig, KafkaTable};
+use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, SchemaDefinition,
 };

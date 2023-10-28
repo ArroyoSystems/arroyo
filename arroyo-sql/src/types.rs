@@ -748,7 +748,19 @@ impl StructField {
                     }
                 }
             }
+        } else if let Some("json") = self.original_type.as_ref().map(|i| i.as_str()) {
+            if self.nullable() {
+                attributes.push(quote!(
+                    #[serde(default)]
+                    #[serde(deserialize_with = "arroyo_worker::deserialize_raw_json_opt")]
+                ))
+            } else {
+                attributes.push(quote! {
+                    #[serde(deserialize_with = "arroyo_worker::deserialize_raw_json")]
+                })
+            }
         }
+
         quote! {
             #(#attributes )*
             pub #name: #type_string

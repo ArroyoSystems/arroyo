@@ -64,7 +64,7 @@ impl ConfluentSchemaResolver {
         let endpoint: Url = format!("{}/subjects/{}-value/versions/", endpoint, topic)
             .as_str()
             .try_into()
-            .map_err(|e| anyhow!("{} is not a valid url", endpoint))?;
+            .map_err(|_| anyhow!("{} is not a valid url", endpoint))?;
 
         Ok(Self {
             client,

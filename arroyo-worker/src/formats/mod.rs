@@ -1,12 +1,11 @@
 mod avro;
 pub mod json;
 
-use apache_avro::{from_avro_datum, Reader, Schema};
+use apache_avro::Schema;
 use std::sync::Arc;
 use std::{collections::HashMap, marker::PhantomData};
 
-use arrow::datatypes::{Field, Fields};
-use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod, JsonFormat};
+use arroyo_rpc::formats::{Format, Framing, FramingMethod};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, SchemaResolver};
 use arroyo_types::UserError;
 use serde::de::DeserializeOwned;
@@ -104,7 +103,7 @@ impl<T: SchemaData> DataDeserializer<T> {
     pub async fn deserialize_slice<'a>(
         &mut self,
         msg: &'a [u8],
-    ) -> Box<dyn Iterator<Item = Result<T, UserError>> + 'a + Send> {
+    ) -> impl Iterator<Item = Result<T, UserError>> + 'a + Send {
         match &*self.format {
             Format::Avro(avro) => {
                 let schema_registry = self.schema_registry.clone();
@@ -115,7 +114,8 @@ impl<T: SchemaData> DataDeserializer<T> {
                     Ok(iter) => Box::new(iter),
                     Err(e) => Box::new(
                         vec![Err(UserError::new("Avro deserialization failed", e))].into_iter(),
-                    ),
+                    )
+                        as Box<dyn Iterator<Item = Result<T, UserError>> + Send>,
                 }
             }
             _ => {
@@ -123,7 +123,7 @@ impl<T: SchemaData> DataDeserializer<T> {
                 Box::new(
                     FramingIterator::new(self.framing.clone(), msg)
                         .map(move |t| new_self.deserialize_single(t)),
-                )
+                ) as Box<dyn Iterator<Item = Result<T, UserError>> + Send>
             }
         }
     }
@@ -195,15 +195,9 @@ impl<T: SchemaData> DataSerializer<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::{DataDeserializer, FramingIterator};
-    use crate::SchemaData;
-    use arroyo_rpc::formats::{
-        AvroFormat, Format, Framing, FramingMethod, NewlineDelimitedFraming,
-    };
-    use arroyo_rpc::schema_resolver::SchemaResolver;
-    use async_trait::async_trait;
+    use crate::formats::FramingIterator;
+    use arroyo_rpc::formats::{Framing, FramingMethod, NewlineDelimitedFraming};
     use std::sync::Arc;
-    use std::time::SystemTime;
 
     #[test]
     fn test_line_framing() {

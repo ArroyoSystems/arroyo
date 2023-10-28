@@ -1,8 +1,6 @@
-use arroyo_types::UserError;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::str::FromStr;
 use utoipa::ToSchema;
 
@@ -109,7 +107,7 @@ pub struct AvroFormat {
     pub embedded_schema: bool,
 
     #[serde(default)]
-    pub into_json: bool,
+    pub into_unstructured_json: bool,
 }
 
 impl AvroFormat {
@@ -123,8 +121,8 @@ impl AvroFormat {
                 .remove("avro.include_schema")
                 .filter(|t| t == "true")
                 .is_some(),
-            into_json: opts
-                .remove("avro.into_json")
+            into_unstructured_json: opts
+                .remove("avro.into_unstructured_json")
                 .filter(|t| t == "true")
                 .is_some(),
         })

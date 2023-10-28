@@ -1,5 +1,5 @@
 use apache_avro::types::{Value as AvroValue, Value};
-use apache_avro::{from_avro_datum, Decimal, Reader, Schema};
+use apache_avro::{from_avro_datum, Reader, Schema};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_types::UserError;
@@ -66,7 +66,7 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
         }
     };
 
-    let into_json = format.into_json;
+    let into_json = format.into_unstructured_json;
     Ok(messages.into_iter().map(move |record| {
         let value = record.map_err(|e| {
             UserError::new(
@@ -78,7 +78,9 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
         if into_json {
             Ok(serde_json::from_value(json!({"value": avro_to_json(value).to_string()})).unwrap())
         } else {
-            apache_avro::from_value::<T>(&value).map_err(|e| {
+            // for now round-trip through json in order to handle unsupported avro features
+            // as that allows us to rely on raw json deserialization
+            serde_json::from_value(avro_to_json(value)).map_err(|e| {
                 UserError::new(
                     "Deserialization failed",
                     format!("Failed to convert avro message into struct type: {:?}", e),

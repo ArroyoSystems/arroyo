@@ -176,7 +176,10 @@ pub mod timestamp_as_rfc3339 {
         D: Deserializer<'de>,
     {
         let raw: chrono::DateTime<Utc> = DateTime::deserialize(deserializer)?;
-        Ok(from_nanos(raw.timestamp_nanos() as u128))
+        Ok(from_nanos(
+            raw.timestamp_nanos_opt()
+                .expect("could not represent time as a number of nanoseconds") as u128,
+        ))
     }
 }
 
@@ -204,7 +207,13 @@ pub mod opt_timestamp_as_rfc3339 {
         D: Deserializer<'de>,
     {
         let raw = Option::<DateTime<Utc>>::deserialize(deserializer)?;
-        Ok(raw.map(|raw| from_nanos(raw.timestamp_nanos() as u128)))
+        Ok(raw.map(|raw| {
+            from_nanos(
+                raw.timestamp_nanos_opt()
+                    .expect("could not represent time as a number of nanoseconds")
+                    as u128,
+            )
+        }))
     }
 }
 
