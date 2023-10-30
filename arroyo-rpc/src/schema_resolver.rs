@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail};
+use apache_avro::Schema;
 use async_trait::async_trait;
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,9 @@ pub trait SchemaResolver: Send {
     async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String>;
 }
 
+/// A schema resolver that return errors when schemas are requests; this is intended
+/// to be used when schemas as embedded into the message and we do not expect to
+/// dynamically resolve them.
 pub struct FailingSchemaResolver {}
 
 impl FailingSchemaResolver {
@@ -25,6 +29,30 @@ impl SchemaResolver for FailingSchemaResolver {
             "Schema with id {} not available, and no schema registry configured",
             id
         ))
+    }
+}
+
+pub struct FixedSchemaResolver {
+    id: u32,
+    schema: String,
+}
+impl FixedSchemaResolver {
+    pub fn new(id: u32, schema: Schema) -> Self {
+        FixedSchemaResolver {
+            id,
+            schema: schema.canonical_form(),
+        }
+    }
+}
+
+#[async_trait]
+impl SchemaResolver for FixedSchemaResolver {
+    async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String> {
+        if id == self.id {
+            Ok(Some(self.schema.clone()))
+        } else {
+            Err(format!("Unexpected schema id {}, expected {}", id, self.id))
+        }
     }
 }
 

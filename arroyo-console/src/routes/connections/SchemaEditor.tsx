@@ -2,19 +2,19 @@ import { Dispatch, useEffect, useRef, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { Alert, AlertIcon, Box, Button, List, ListItem, Stack } from '@chakra-ui/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import {ConnectionSchema, post} from '../../lib/data_fetching';
+import { ConnectionSchema, post } from '../../lib/data_fetching';
 import { formatError } from '../../lib/util';
 
 export function SchemaEditor({
   state,
   setState,
   next,
-  format
+  format,
 }: {
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
   next: () => void;
-  format: 'avro' | 'json',
+  format: 'avro' | 'json';
 }) {
   const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoEl = useRef(null);
@@ -90,13 +90,13 @@ export function SchemaEditor({
           // @ts-ignore
           format: {},
           // @ts-ignore
-          definition: {}
+          definition: {},
         };
 
-        schema.format![format] = { };
+        // @ts-ignore
+        schema.format![format] = {};
         // @ts-ignore
         schema.definition![format + '_schema'] = e.getValue();
-
 
         setState({
           ...state,

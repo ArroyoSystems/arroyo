@@ -429,6 +429,7 @@ name = "arroyo-api"
 version = "0.7.0"
 dependencies = [
  "anyhow",
+ "apache-avro",
  "argon2",
  "arrow",
  "arrow-schema",
@@ -659,6 +660,7 @@ name = "arroyo-rpc"
 version = "0.7.0"
 dependencies = [
  "anyhow",
+ "apache-avro",
  "arroyo-types",
  "async-trait",
  "bincode 2.0.0-rc.3",

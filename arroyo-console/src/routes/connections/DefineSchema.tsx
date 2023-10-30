@@ -12,7 +12,12 @@ import {
 import React, { ChangeEvent, ChangeEventHandler, Dispatch, ReactElement, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { SchemaEditor } from './SchemaEditor';
-import {ConnectionProfile, ConnectionSchema, Connector, useConnectionProfiles} from '../../lib/data_fetching';
+import {
+  ConnectionProfile,
+  ConnectionSchema,
+  Connector,
+  useConnectionProfiles,
+} from '../../lib/data_fetching';
 import { ConfluentSchemaEditor } from './ConfluentSchemaEditor';
 import { components } from '../../gen/api-types';
 
@@ -25,16 +30,14 @@ const SchemaFormatEditor = ({
   format,
 }: {
   connector: Connector;
-  connectionProfiles: Array<ConnectionProfile>,
+  connectionProfiles: Array<ConnectionProfile>;
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
   next: () => void;
-  format: 'json' | 'avro',
+  format: 'json' | 'avro';
 }) => {
   type SchemaTypeOption = { name: string; value: string };
-  let schemaTypeOptions: SchemaTypeOption[] = [
-    { name: format + ' schema', value: 'schema' },
-  ];
+  let schemaTypeOptions: SchemaTypeOption[] = [{ name: format + ' schema', value: 'schema' }];
 
   if (format == 'json') {
     schemaTypeOptions.push({ name: 'Unstructured JSON', value: 'unstructured' });
@@ -45,25 +48,29 @@ const SchemaFormatEditor = ({
     connectionProfile = connectionProfiles.find(c => c.id == state.connectionProfileId);
   }
 
-  if (connector.id == 'kafka' && connectionProfile != null && (connectionProfile.config as any).schemaRegistry != null) {
+  if (
+    connector.id == 'kafka' &&
+    connectionProfile != null &&
+    (connectionProfile.config as any).schemaRegistry != null
+  ) {
     schemaTypeOptions.push({ name: 'Confluent Schema Registry', value: 'confluent' });
   }
 
   let def_name: 'json_schema' | 'avro_schema';
   switch (format) {
     case 'json':
-        def_name = 'json_schema';
-        break;
+      def_name = 'json_schema';
+      break;
     case 'avro':
-        def_name = 'avro_schema';
-        break;
+      def_name = 'avro_schema';
+      break;
     default:
-        throw new Error("unknown format: " + format);
+      throw new Error('unknown format: ' + format);
   }
 
   let editor;
   let value;
-  if ((state.schema?.format![format] || {})["confluentSchemaRegistry"]) {
+  if ((state.schema?.format![format] || {})['confluentSchemaRegistry']) {
     editor = <ConfluentSchemaEditor state={state} setState={setState} next={next} />;
     value = 'confluent';
   } else if (state.schema?.format?.json?.unstructured) {
@@ -83,7 +90,7 @@ const SchemaFormatEditor = ({
     value = 'unstructured';
   } else if ((state.schema?.definition || {})[def_name] != undefined) {
     editor = <SchemaEditor state={state} setState={setState} next={next} format={format} />;
-    value = "schema";
+    value = 'schema';
   } else {
     editor = null;
     value = undefined;
@@ -98,11 +105,11 @@ const SchemaFormatEditor = ({
             ...state.schema,
             // @ts-ignore
             definition: {
-              [def_name]: ''
+              [def_name]: '',
             },
             fields: [],
             // @ts-ignore
-            format: {[format]: {  }},
+            format: { [format]: {} },
           },
         });
         break;
@@ -138,22 +145,17 @@ const SchemaFormatEditor = ({
             definition: undefined,
             fields: [],
             // @ts-ignore
-            format: { [format]: { } },
+            format: { [format]: {} },
           },
         });
-      }
+    }
   };
 
   return (
     <Stack spacing={8}>
       <FormControl>
         <FormLabel>Schema type</FormLabel>
-        <Select
-          maxW={'lg'}
-          placeholder="Select schema type"
-          value={value}
-          onChange={onChange}
-        >
+        <Select maxW={'lg'} placeholder="Select schema type" value={value} onChange={onChange}>
           {schemaTypeOptions.map(s => {
             return (
               <option key={s.value} value={s.value}>
@@ -168,7 +170,6 @@ const SchemaFormatEditor = ({
     </Stack>
   );
 };
-
 
 const RawStringEditor = ({
   state,
@@ -239,17 +240,34 @@ export const DefineSchema = ({
     return <></>;
   }
 
-
   const formats: DataFormatOption[] = [
     {
       name: 'JSON',
       value: 'json',
-      el: <SchemaFormatEditor connector={connector} connectionProfiles={connectionProfiles!} state={state} setState={setState} next={next} format={'json'} />,
+      el: (
+        <SchemaFormatEditor
+          connector={connector}
+          connectionProfiles={connectionProfiles!}
+          state={state}
+          setState={setState}
+          next={next}
+          format={'json'}
+        />
+      ),
     },
     {
       name: 'Avro',
       value: 'avro',
-      el: <SchemaFormatEditor connector={connector} connectionProfiles={connectionProfiles!} state={state} setState={setState} next={next} format={'avro'} />,
+      el: (
+        <SchemaFormatEditor
+          connector={connector}
+          connectionProfiles={connectionProfiles!}
+          state={state}
+          setState={setState}
+          next={next}
+          format={'avro'}
+        />
+      ),
     },
     {
       name: 'Raw String',
@@ -290,20 +308,20 @@ export const DefineSchema = ({
     setSelectedFormat(format);
 
     let schema: ConnectionSchema = {
-        ...state.schema,
+      ...state.schema,
       // @ts-ignore
-        format: {},
-        fields: [],
+      format: {},
+      fields: [],
       // @ts-ignore
-        definition: {}
+      definition: {},
     };
 
     // @ts-ignore
     schema.format[format] = {};
 
     setState({
-        ...state,
-      schema
+      ...state,
+      schema,
     });
   };
 

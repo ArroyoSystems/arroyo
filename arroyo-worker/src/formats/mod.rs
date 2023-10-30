@@ -5,8 +5,8 @@ use apache_avro::Schema;
 use std::sync::Arc;
 use std::{collections::HashMap, marker::PhantomData};
 
-use arroyo_rpc::formats::{Format, Framing, FramingMethod};
-use arroyo_rpc::schema_resolver::{FailingSchemaResolver, SchemaResolver};
+use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
+use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_types::UserError;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -83,7 +83,18 @@ pub struct DataDeserializer<T: SchemaData> {
 
 impl<T: SchemaData> DataDeserializer<T> {
     pub fn new(format: Format, framing: Option<Framing>) -> Self {
-        Self::with_schema_resolver(format, framing, Arc::new(FailingSchemaResolver::new()))
+        let resolver = if let Format::Avro(AvroFormat {
+            reader_schema: Some(schema),
+            ..
+        }) = &format
+        {
+            Arc::new(FixedSchemaResolver::new(0, schema.clone().into()))
+                as Arc<dyn SchemaResolver + Sync>
+        } else {
+            Arc::new(FailingSchemaResolver::new()) as Arc<dyn SchemaResolver + Sync>
+        };
+
+        Self::with_schema_resolver(format, framing, resolver)
     }
 
     pub fn with_schema_resolver(

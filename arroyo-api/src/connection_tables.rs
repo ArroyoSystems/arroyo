@@ -470,6 +470,13 @@ async fn expand_avro_schema(
         return Err(bad_request("avro format requires an avro schema be set"));
     };
 
+    if let Some(Format::Avro(format)) = &mut schema.format {
+        format.add_reader_schema(
+            apache_avro::Schema::parse_str(&definition)
+                .map_err(|e| bad_request(format!("Avro schema is invalid: {:?}", e)))?,
+        );
+    }
+
     let fields: Result<_, String> = avro::convert_avro_schema(&name, &definition)
         .map_err(|e| bad_request(format!("Invalid avro schema: {}", e)))?
         .into_iter()

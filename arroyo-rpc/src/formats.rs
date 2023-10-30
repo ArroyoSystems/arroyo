@@ -1,6 +1,7 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use utoipa::ToSchema;
 
@@ -97,6 +98,58 @@ pub struct ConfluentSchemaRegistryConfig {
     endpoint: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SerializableAvroSchema(pub apache_avro::Schema);
+
+impl Eq for SerializableAvroSchema {}
+
+impl Hash for SerializableAvroSchema {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.canonical_form().hash(state);
+    }
+}
+
+impl PartialOrd for SerializableAvroSchema {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.0
+            .canonical_form()
+            .partial_cmp(&other.0.canonical_form())
+    }
+}
+
+impl From<SerializableAvroSchema> for apache_avro::Schema {
+    fn from(value: SerializableAvroSchema) -> Self {
+        value.0
+    }
+}
+
+impl<'a> From<&'a SerializableAvroSchema> for &'a apache_avro::Schema {
+    fn from(value: &'a SerializableAvroSchema) -> Self {
+        &value.0
+    }
+}
+
+impl Serialize for SerializableAvroSchema {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.canonical_form().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SerializableAvroSchema {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self(
+            apache_avro::Schema::parse_str(&String::deserialize(deserializer)?)
+                .map_err(|e| serde::de::Error::custom(format!("Invalid avro schema: {:?}", e)))?,
+        ))
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AvroFormat {
@@ -108,24 +161,42 @@ pub struct AvroFormat {
 
     #[serde(default)]
     pub into_unstructured_json: bool,
+
+    #[serde(default)]
+    #[schema(read_only, value_type = String)]
+    pub reader_schema: Option<SerializableAvroSchema>,
 }
 
 impl AvroFormat {
+    pub fn new(
+        confluent_schema_registry: bool,
+        embedded_schema: bool,
+        into_unstructured_json: bool,
+    ) -> Self {
+        Self {
+            confluent_schema_registry,
+            embedded_schema,
+            into_unstructured_json,
+            reader_schema: None,
+        }
+    }
+
     pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Self, String> {
-        Ok(Self {
-            confluent_schema_registry: opts
-                .remove("avro.confluent_schema_registry")
+        Ok(Self::new(
+            opts.remove("avro.confluent_schema_registry")
                 .filter(|t| t == "true")
                 .is_some(),
-            embedded_schema: opts
-                .remove("avro.include_schema")
+            opts.remove("avro.include_schema")
                 .filter(|t| t == "true")
                 .is_some(),
-            into_unstructured_json: opts
-                .remove("avro.into_unstructured_json")
+            opts.remove("avro.into_unstructured_json")
                 .filter(|t| t == "true")
                 .is_some(),
-        })
+        ))
+    }
+
+    pub fn add_reader_schema(&mut self, schema: apache_avro::Schema) {
+        self.reader_schema = Some(SerializableAvroSchema(schema));
     }
 }
 
