@@ -1,0 +1,69 @@
+{
+    "type": "object",
+    "title": "RedisTable",
+    "properties": {
+        "connectorType": {
+            "type": "object",
+            "title": "Table Type",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Sink",
+                    "properties": {
+                        "target": {
+                            "type": "object",
+                            "title": "Target",
+                            "description": "Configures how data is written to Redis",
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "title": "String Table",
+                                    "description": "Stores values in Redis using the String data type",
+                                    "properties": {
+                                        "prefix": {
+                                            "type": "string",
+                                            "title": "Key Prefix",
+                                            "description": "The prefix to use for keys in this table"
+                                        },
+                                        "keyField": {
+                                            "type": "string",
+                                            "title": "Key Field",
+                                            "description": "The field to use as the key for this table; if not specified, all writes will be to the same key"
+                                        },
+                                        "valueType": {
+                                            "type": "string",
+                                            "title": "Value Mode",
+                                            "description": "How should the value be stored in Redis",
+                                            "enum": [
+                                                "Value per field",
+                                                "Single value",
+                                                "Single field"
+                                            ]
+                                        }
+                                    }
+                                },
+                                {
+                                    "type": "object",
+                                    "title": "Stream",
+                                    "description": "Writes values to a redis stream",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "title": "Key Prefix",
+                                            "description": "The prefix to use for keys in this table"
+                                        }
+                                    }
+                                }
+
+                            ]
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            ]
+        }
+    },
+    "required": [
+        "type"
+    ]
+}

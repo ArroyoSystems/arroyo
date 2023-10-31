@@ -34,6 +34,8 @@ pub mod single_file;
 pub mod sse;
 pub mod webhook;
 pub mod websocket;
+pub mod redis;
+
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
     m.insert("blackhole", Box::new(BlackholeConnector {}));
@@ -48,6 +50,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         "polling_http",
         Box::new(polling_http::PollingHTTPConnector {}),
     );
+    m.insert("redis", Box::new(redis::RedisConnector {}));
     m.insert("single_file", Box::new(single_file::SingleFileConnector {}));
     m.insert("sse", Box::new(SSEConnector {}));
     m.insert("webhook", Box::new(webhook::WebhookConnector {}));
