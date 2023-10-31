@@ -11,8 +11,8 @@ pub trait SchemaResolver: Send {
     async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String>;
 }
 
-/// A schema resolver that return errors when schemas are requests; this is intended
-/// to be used when schemas as embedded into the message and we do not expect to
+/// A schema resolver that return errors when schemas are requested; this is intended
+/// to be used when schemas are embedded into the message and we do not expect to
 /// dynamically resolve them.
 pub struct FailingSchemaResolver {}
 
