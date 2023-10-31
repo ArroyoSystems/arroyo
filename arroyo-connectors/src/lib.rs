@@ -22,6 +22,7 @@ use websocket::WebsocketConnector;
 use self::kafka::KafkaConnector;
 
 pub mod blackhole;
+pub mod delta;
 pub mod filesystem;
 pub mod fluvio;
 pub mod impulse;
@@ -36,6 +37,7 @@ pub mod websocket;
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
     m.insert("blackhole", Box::new(BlackholeConnector {}));
+    m.insert("delta", Box::new(delta::DeltaLakeConnector {}));
     m.insert("filesystem", Box::new(filesystem::FileSystemConnector {}));
     m.insert("fluvio", Box::new(FluvioConnector {}));
     m.insert("impulse", Box::new(ImpulseConnector {}));

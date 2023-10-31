@@ -1,7 +1,9 @@
 use std::{
-    collections::HashMap, fs::create_dir_all, marker::PhantomData, path::Path, time::SystemTime,
+    collections::HashMap, fs::create_dir_all, marker::PhantomData, path::Path, sync::Arc,
+    time::SystemTime,
 };
 
+use arroyo_storage::StorageProvider;
 use arroyo_types::{Data, Key, Record, TaskInfo};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -9,11 +11,17 @@ use serde::Serialize;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::info;
 
-use crate::connectors::two_phase_committer::TwoPhaseCommitter;
+use crate::{
+    connectors::{filesystem::FinishedFile, two_phase_committer::TwoPhaseCommitter},
+    SchemaData,
+};
 
 use anyhow::{bail, Result};
 
-use super::{get_partitioner_from_table, FileSystemTable, MultiPartWriterStats, RollingPolicy};
+use super::{
+    delta, get_partitioner_from_table, CommitState, CommitStyle, FileSystemTable,
+    MultiPartWriterStats, RollingPolicy,
+};
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     // writer to a local tmp file
@@ -26,6 +34,7 @@ pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     finished_files: Vec<FilePreCommit>,
     rolling_policy: RollingPolicy,
     table_properties: FileSystemTable,
+    commit_state: CommitState,
     phantom: PhantomData<(K, D)>,
 }
 
@@ -35,6 +44,17 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
         let tmp_dir = format!("{}/__in_progress", final_dir);
         // make sure final_dir and tmp_dir exists
         create_dir_all(&tmp_dir).unwrap();
+
+        let commit_state = match table_properties
+            .file_settings
+            .as_ref()
+            .unwrap()
+            .commit_style
+            .unwrap()
+        {
+            CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
+            CommitStyle::Direct => CommitState::VanillaParquet,
+        };
 
         Self {
             writers: HashMap::new(),
@@ -48,6 +68,7 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
                 table_properties.file_settings.as_ref().unwrap(),
             ),
             table_properties,
+            commit_state,
             phantom: PhantomData,
         }
     }
@@ -120,8 +141,8 @@ pub struct FilePreCommit {
 }
 
 #[async_trait]
-impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D> + Send + 'static> TwoPhaseCommitter<K, D>
-    for LocalFileSystemWriter<K, D, V>
+impl<K: Key, D: Data + Sync + SchemaData + Serialize, V: LocalWriter<D> + Send + 'static>
+    TwoPhaseCommitter<K, D> for LocalFileSystemWriter<K, D, V>
 {
     type DataRecovery = LocalFileDataRecovery;
     type PreCommit = FilePreCommit;
@@ -192,6 +213,10 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D> + Send + 'static> Two
         _task_info: &TaskInfo,
         pre_commit: Vec<Self::PreCommit>,
     ) -> Result<()> {
+        if pre_commit.is_empty() {
+            return Ok(());
+        }
+        let mut finished_files = vec![];
         for FilePreCommit {
             tmp_file,
             destination,
@@ -210,6 +235,31 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D> + Send + 'static> Two
                 destination.to_string_lossy()
             );
             tokio::fs::rename(tmp_file, destination).await?;
+            finished_files.push(FinishedFile {
+                filename: object_store::path::Path::parse(
+                    destination.to_string_lossy().to_string(),
+                )?
+                .to_string(),
+                partition: None,
+                size: destination.metadata()?.len() as usize,
+            });
+        }
+        if let CommitState::DeltaLake { last_version } = self.commit_state {
+            let schema = D::schema();
+            let storage_provider = Arc::new(StorageProvider::for_url("/").await?);
+            if let Some(version) = delta::commit_files_to_delta(
+                finished_files,
+                object_store::path::Path::parse(&self.final_dir)?,
+                storage_provider,
+                last_version,
+                schema,
+            )
+            .await?
+            {
+                self.commit_state = CommitState::DeltaLake {
+                    last_version: version,
+                };
+            }
         }
         Ok(())
     }

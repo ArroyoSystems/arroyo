@@ -2,8 +2,8 @@ use crate::committing_state::CommittingState;
 use crate::subtask_state::SubtaskState;
 use crate::{BackingStore, StateBackend};
 use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
+use arroyo_rpc::grpc::{self, OperatorCommitData, TableCommitData};
 use arroyo_rpc::grpc::{
     api, backend_data, BackendData, CheckpointMetadata, OperatorCheckpointMetadata,
     TableDescriptor, TableWriteBehavior, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
@@ -23,6 +23,7 @@ pub struct CheckpointState {
     tasks: HashMap<String, BTreeMap<u32, SubtaskState>>,
     completed_operators: HashSet<String>,
     subtasks_to_commit: HashSet<(String, u32)>,
+    committing_backend_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
 
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
@@ -47,6 +48,7 @@ impl CheckpointState {
             tasks: HashMap::new(),
             completed_operators: HashSet::new(),
             subtasks_to_commit: HashSet::new(),
+            committing_backend_data: HashMap::new(),
             operator_details: HashMap::new(),
         }
     }
@@ -174,6 +176,14 @@ impl CheckpointState {
             });
         detail.bytes = Some(metadata.bytes);
         detail.finish_time = Some(metadata.finish_time);
+        for (table, committing_data) in &metadata.committing_data {
+            self.committing_backend_data
+                .entry(c.operator_id.clone())
+                .or_default()
+                .entry(table.to_string())
+                .or_default()
+                .insert(metadata.subtask_index, committing_data.clone());
+        }
 
         // this is for the actual checkpoint management
 
@@ -281,6 +291,27 @@ impl CheckpointState {
             tables: tables.into_values().collect(),
             backend_data: backend_data.into_values().collect(),
             bytes: size,
+            commit_data: self
+                .committing_backend_data
+                .get(&operator_id)
+                .map(|commit_data| OperatorCommitData {
+                    committing_data: commit_data
+                        .iter()
+                        .map(|(table_name, subtask_to_commit_data)| {
+                            (
+                                table_name.clone(),
+                                TableCommitData {
+                                    commit_data_by_subtask: subtask_to_commit_data
+                                        .iter()
+                                        .map(|(subtask_index, commit_data)| {
+                                            (*subtask_index, commit_data.clone())
+                                        })
+                                        .collect(),
+                                },
+                            )
+                        })
+                        .collect(),
+                }),
         })
         .await;
 
@@ -307,7 +338,11 @@ impl CheckpointState {
     }
 
     pub fn committing_state(&self) -> CommittingState {
-        CommittingState::new(self.checkpoint_id, self.subtasks_to_commit.clone())
+        CommittingState::new(
+            self.checkpoint_id,
+            self.subtasks_to_commit.clone(),
+            self.committing_backend_data.clone(),
+        )
     }
 
     pub async fn save_state(&self) -> anyhow::Result<()> {

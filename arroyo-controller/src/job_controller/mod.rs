@@ -8,8 +8,8 @@ use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
 use arroyo_datastream::Program;
 use arroyo_rpc::grpc::{
-    worker_grpc_client::WorkerGrpcClient, CheckpointReq, JobFinishedReq, LoadCompactedDataReq,
-    StopExecutionReq, StopMode, TaskCheckpointEventType,
+    worker_grpc_client::WorkerGrpcClient, CheckpointReq, CommitReq, JobFinishedReq,
+    LoadCompactedDataReq, StopExecutionReq, StopMode, TaskCheckpointEventType,
 };
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{to_micros, WorkerId};
@@ -433,6 +433,7 @@ impl RunningJobModel {
                             DbCheckpointState::committing,
                         )
                         .await?;
+                        let committing_data = committing_state.committing_data();
                         self.checkpoint_state =
                             Some(CheckpointingOrCommittingState::Committing(committing_state));
                         info!(
@@ -443,12 +444,9 @@ impl RunningJobModel {
                         for worker in self.workers.values_mut() {
                             worker
                                 .connect
-                                .checkpoint(Request::new(CheckpointReq {
-                                    timestamp: to_micros(SystemTime::now()),
-                                    min_epoch: self.min_epoch,
+                                .commit(Request::new(CommitReq {
                                     epoch: self.epoch,
-                                    then_stop: false,
-                                    is_commit: true,
+                                    committing_data: committing_data.clone(),
                                 }))
                                 .await?;
                         }
@@ -707,7 +705,7 @@ impl JobController {
     }
 
     pub async fn send_commit_messages(&mut self) -> anyhow::Result<()> {
-        let Some(CheckpointingOrCommittingState::Committing(_committing)) =
+        let Some(CheckpointingOrCommittingState::Committing(committing)) =
             &self.model.checkpoint_state
         else {
             bail!("should be committing")
@@ -715,13 +713,10 @@ impl JobController {
         for worker in self.model.workers.values_mut() {
             worker
                 .connect
-                .checkpoint(Request::new(CheckpointReq {
-                    timestamp: to_micros(SystemTime::now()),
-                    min_epoch: self.model.min_epoch,
+                .commit(CommitReq {
                     epoch: self.model.epoch,
-                    then_stop: false,
-                    is_commit: true,
-                }))
+                    committing_data: committing.committing_data(),
+                })
                 .await?;
         }
         Ok(())

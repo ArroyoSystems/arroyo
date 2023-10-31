@@ -3616,6 +3616,7 @@ pub struct RustUdafExpression {
     args: Vec<(TypeDef, Expression)>,
     ret_type: TypeDef,
 }
+
 impl RustUdafExpression {
     fn try_from_aggregate_udf(
         ctx: &mut ExpressionContext<'_>,

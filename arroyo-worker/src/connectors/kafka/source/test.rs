@@ -252,6 +252,7 @@ async fn test_kafka() {
         tables: source::tables(),
         backend_data: checkpoint_completed.subtask_metadata.backend_data,
         bytes: checkpoint_completed.subtask_metadata.bytes,
+        commit_data: None,
     })
     .await;
 

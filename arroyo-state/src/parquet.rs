@@ -4,7 +4,7 @@ use crate::{
     hash_key, BackingStore, DataOperation, DeleteKeyOperation, DeleteTimeKeyOperation,
     DeleteTimeRangeOperation, DeleteValueOperation, StateStore, BINCODE_CONFIG,
 };
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use arrow_array::RecordBatch;
 use arroyo_rpc::grpc::backend_data::BackendData;
 use arroyo_rpc::grpc::{
@@ -482,6 +482,18 @@ impl BackingStore for ParquetBackend {
 
     async fn load_compacted(&mut self, compaction: CompactionResult) {
         self.writer.load_compacted_data(compaction).await;
+    }
+
+    async fn insert_committing_data(&mut self, epoch: u32, table: char, committing_data: Vec<u8>) {
+        self.writer
+            .sender
+            .send(ParquetQueueItem::CommitData {
+                epoch,
+                table,
+                data: committing_data,
+            })
+            .await
+            .unwrap();
     }
 }
 
@@ -1017,6 +1029,7 @@ impl ParquetWriter {
                 .map(|table| (table.name.chars().next().unwrap(), table.clone()))
                 .collect(),
             builders: HashMap::new(),
+            commit_data: HashMap::new(),
             current_files,
             load_compacted_tx,
             new_compacted: vec![],
@@ -1085,6 +1098,11 @@ impl ParquetWriter {
 enum ParquetQueueItem {
     Write(ParquetWrite),
     Checkpoint(ParquetCheckpoint),
+    CommitData {
+        epoch: u32,
+        table: char,
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Debug)]
@@ -1225,6 +1243,7 @@ struct ParquetFlusher {
     task_info: TaskInfo,
     table_descriptors: HashMap<char, TableDescriptor>,
     builders: HashMap<char, RecordBatchBuilder>,
+    commit_data: HashMap<char, Vec<u8>>,
     current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>, // table -> epoch -> file
     load_compacted_tx: Receiver<CompactionResult>,
     new_compacted: Vec<ParquetStoreData>,
@@ -1308,6 +1327,7 @@ impl ParquetFlusher {
 
     async fn flush_iteration(&mut self) -> Result<bool> {
         let mut checkpoint_epoch = None;
+        let mut commit_epoch = None;
 
         // accumulate writes in the RecordBatchBuilders until we get a checkpoint
         while checkpoint_epoch.is_none() {
@@ -1329,6 +1349,17 @@ impl ParquetFlusher {
                         Some(ParquetQueueItem::Checkpoint(epoch)) => {
                             checkpoint_epoch = Some(epoch);
                         },
+                        Some(ParquetQueueItem::CommitData{epoch, table, data}) => {
+                            // confirm that epoch isn't different than prior ones
+                            if let Some(commit_epoch) = commit_epoch {
+                                if commit_epoch != epoch {
+                                    bail!("prior commit epoch {} does not match new commit epoch {}", commit_epoch, epoch);
+                                }
+                            } else {
+                                commit_epoch = Some(epoch);
+                            }
+                            self.commit_data.insert(table, data);
+                        }
                         None => {
                             debug!("Parquet flusher closed");
                             return Ok(false);
@@ -1337,122 +1368,137 @@ impl ParquetFlusher {
                 }
             }
         }
+        let Some(cp) = checkpoint_epoch else {
+            bail!("somehow exited loop without checkpoint_epoch being set");
+        };
+        if let Some(commit_epoch) = commit_epoch {
+            if commit_epoch != cp.epoch {
+                bail!(
+                    "commit epoch {} does not match checkpoint epoch {}",
+                    commit_epoch,
+                    cp.epoch
+                );
+            }
+        }
 
-        if let Some(cp) = checkpoint_epoch {
-            let mut bytes = 0;
-            let mut to_write = vec![];
-            for (table, builder) in self.builders.drain() {
-                let Some((record_batch, stats)) = builder.flush() else {
+        let mut bytes = 0;
+        let mut to_write = vec![];
+        for (table, builder) in self.builders.drain() {
+            let Some((record_batch, stats)) = builder.flush() else {
+                continue;
+            };
+            let s3_key = table_checkpoint_path(&self.task_info, table, cp.epoch, false);
+            to_write.push((record_batch, s3_key, table, stats));
+        }
+
+        // write the files and update current_files
+        for (record_batch, s3_key, table, stats) in to_write {
+            bytes += self.upload_record_batch(&s3_key, record_batch).await?;
+            self.current_files
+                .entry(table)
+                .or_default()
+                .entry(cp.epoch)
+                .or_default()
+                .push(ParquetStoreData {
+                    epoch: cp.epoch,
+                    file: s3_key,
+                    table: table.to_string(),
+                    min_routing_key: stats.min_routing_key,
+                    max_routing_key: stats.max_routing_key,
+                    max_timestamp_micros: arroyo_types::to_micros(stats.max_timestamp) + 1,
+                    min_required_timestamp_micros: None,
+                    generation: 0,
+                });
+        }
+
+        // build backend_data (to send to controller in SubtaskCheckpointMetadata)
+        // and new current_files
+        let mut checkpoint_backend_data = vec![];
+        let mut new_current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> =
+            HashMap::new();
+
+        for (table, epoch_files) in self.current_files.drain() {
+            let table_descriptor = self.table_descriptors.get(&table).unwrap();
+            for (epoch, files) in epoch_files {
+                if table_descriptor.table_type() == TableType::Global && epoch < cp.epoch {
                     continue;
-                };
-                let s3_key = table_checkpoint_path(&self.task_info, table, cp.epoch, false);
-                to_write.push((record_batch, s3_key, table, stats));
-            }
-
-            // write the files and update current_files
-            for (record_batch, s3_key, table, stats) in to_write {
-                bytes += self.upload_record_batch(&s3_key, record_batch).await?;
-                self.current_files
-                    .entry(table)
-                    .or_default()
-                    .entry(cp.epoch)
-                    .or_default()
-                    .push(ParquetStoreData {
-                        epoch: cp.epoch,
-                        file: s3_key,
-                        table: table.to_string(),
-                        min_routing_key: stats.min_routing_key,
-                        max_routing_key: stats.max_routing_key,
-                        max_timestamp_micros: arroyo_types::to_micros(stats.max_timestamp) + 1,
-                        min_required_timestamp_micros: None,
-                        generation: 0,
-                    });
-            }
-
-            // build backend_data (to send to controller in SubtaskCheckpointMetadata)
-            // and new current_files
-            let mut checkpoint_backend_data = vec![];
-            let mut new_current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> =
-                HashMap::new();
-
-            for (table, epoch_files) in self.current_files.drain() {
-                let table_descriptor = self.table_descriptors.get(&table).unwrap();
-                for (epoch, files) in epoch_files {
-                    if table_descriptor.table_type() == TableType::Global && epoch < cp.epoch {
-                        continue;
-                    }
-                    for file in files {
-                        if table_descriptor.delete_behavior()
-                            == TableDeleteBehavior::NoReadsBeforeWatermark
-                        {
-                            if let Some(checkpoint_watermark) = cp.watermark {
-                                if file.max_timestamp_micros
-                                    < to_micros(checkpoint_watermark)
-                                        - table_descriptor.retention_micros
-                                    && !self.new_compacted.iter().any(|f| f.file == file.file)
-                                {
-                                    // this file is not needed by the new checkpoint
-                                    // because its data is older than the watermark
-                                    continue;
-                                }
+                }
+                for file in files {
+                    if table_descriptor.delete_behavior()
+                        == TableDeleteBehavior::NoReadsBeforeWatermark
+                    {
+                        if let Some(checkpoint_watermark) = cp.watermark {
+                            if file.max_timestamp_micros
+                                < to_micros(checkpoint_watermark)
+                                    - table_descriptor.retention_micros
+                                && !self.new_compacted.iter().any(|f| f.file == file.file)
+                            {
+                                // this file is not needed by the new checkpoint
+                                // because its data is older than the watermark
+                                continue;
                             }
                         }
-                        checkpoint_backend_data.push(grpc::BackendData {
-                            backend_data: Some(BackendData::ParquetStore(file.clone())),
-                        });
-                        new_current_files
-                            .entry(table)
-                            .or_default()
-                            .entry(epoch)
-                            .or_default()
-                            .push(file);
                     }
+                    checkpoint_backend_data.push(grpc::BackendData {
+                        backend_data: Some(BackendData::ParquetStore(file.clone())),
+                    });
+                    new_current_files
+                        .entry(table)
+                        .or_default()
+                        .entry(epoch)
+                        .or_default()
+                        .push(file);
                 }
             }
-            self.current_files = new_current_files;
-            self.new_compacted = vec![];
+        }
+        self.current_files = new_current_files;
+        self.new_compacted = vec![];
 
-            // compute total number of files in this checkpoint
-            let mut total_files = 0;
-            let mut max_timestamp: u64 = 0;
-            for (_table, epoch_files) in self.current_files.iter() {
-                for (_epoch, files) in epoch_files.iter() {
-                    total_files += files.len();
-                    for file in files {
-                        max_timestamp = max_timestamp.max(file.max_timestamp_micros);
-                    }
+        // compute total number of files in this checkpoint
+        let mut total_files = 0;
+        let mut max_timestamp: u64 = 0;
+        for (_table, epoch_files) in self.current_files.iter() {
+            for (_epoch, files) in epoch_files.iter() {
+                total_files += files.len();
+                for file in files {
+                    max_timestamp = max_timestamp.max(file.max_timestamp_micros);
                 }
             }
+        }
 
-            let task_index = self.task_info.task_index.to_string();
-            let label_values = [self.task_info.operator_id.as_str(), task_index.as_str()];
-            CURRENT_FILES_GAUGE
-                .with_label_values(&label_values)
-                .set(total_files as f64);
+        let task_index = self.task_info.task_index.to_string();
+        let label_values = [self.task_info.operator_id.as_str(), task_index.as_str()];
+        CURRENT_FILES_GAUGE
+            .with_label_values(&label_values)
+            .set(total_files as f64);
 
-            // send controller the subtask metadata
-            let subtask_metadata = SubtaskCheckpointMetadata {
-                subtask_index: self.task_info.task_index as u32,
-                start_time: to_micros(cp.time),
-                finish_time: to_micros(SystemTime::now()),
-                has_state: !checkpoint_backend_data.is_empty(),
-                tables: self.table_descriptors.values().cloned().collect(),
-                watermark: cp.watermark.map(to_micros),
-                backend_data: checkpoint_backend_data,
-                bytes: bytes as u64,
-            };
-            self.control_tx
-                .send(ControlResp::CheckpointCompleted(CheckpointCompleted {
-                    checkpoint_epoch: cp.epoch,
-                    operator_id: self.task_info.operator_id.clone(),
-                    subtask_metadata,
-                }))
-                .await
-                .unwrap();
-            if cp.then_stop {
-                self.finish_tx.take().unwrap().send(()).unwrap();
-                return Ok(false);
-            }
+        // send controller the subtask metadata
+        let subtask_metadata = SubtaskCheckpointMetadata {
+            subtask_index: self.task_info.task_index as u32,
+            start_time: to_micros(cp.time),
+            finish_time: to_micros(SystemTime::now()),
+            has_state: !checkpoint_backend_data.is_empty(),
+            tables: self.table_descriptors.values().cloned().collect(),
+            watermark: cp.watermark.map(to_micros),
+            backend_data: checkpoint_backend_data,
+            bytes: bytes as u64,
+            committing_data: self
+                .commit_data
+                .drain()
+                .map(|(table, data)| (table.to_string(), data))
+                .collect(),
+        };
+        self.control_tx
+            .send(ControlResp::CheckpointCompleted(CheckpointCompleted {
+                checkpoint_epoch: cp.epoch,
+                operator_id: self.task_info.operator_id.clone(),
+                subtask_metadata,
+            }))
+            .await
+            .unwrap();
+        if cp.then_stop {
+            self.finish_tx.take().unwrap().send(()).unwrap();
+            return Ok(false);
         }
         Ok(true)
     }

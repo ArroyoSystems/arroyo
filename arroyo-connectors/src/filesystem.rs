@@ -77,6 +77,18 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
+        // confirm commit style is Direct
+        if let Some(CommitStyle::Direct) = table
+            .file_settings
+            .as_ref()
+            .ok_or_else(|| anyhow!("no file_settings"))?
+            .commit_style
+        {
+            // ok
+        } else {
+            bail!("commit_style must be Direct");
+        }
+
         let backend_config = BackendConfig::parse_url(&table.write_target.path, true)?;
         let is_local = match &backend_config {
             BackendConfig::Local { .. } => true,
@@ -137,88 +149,92 @@ impl Connector for FileSystemConnector {
         opts: &mut std::collections::HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let storage_options: std::collections::HashMap<String, String> = opts
-            .iter()
-            .filter(|(k, _)| k.starts_with("storage."))
-            .map(|(k, v)| (k.trim_start_matches("storage.").to_string(), v.to_string()))
-            .collect();
-        opts.retain(|k, _| !k.starts_with("storage."));
+        let table = file_system_table_from_options(opts, schema, CommitStyle::Direct)?;
 
-        let storage_url = pull_opt("path", opts)?;
-        BackendConfig::parse_url(&storage_url, true)?;
-
-        let inactivity_rollover_seconds = pull_option_to_i64("inactivity_rollover_seconds", opts)?;
-        let max_parts = pull_option_to_i64("max_parts", opts)?;
-        let rollover_seconds = pull_option_to_i64("rollover_seconds", opts)?;
-        let target_file_size = pull_option_to_i64("target_file_size", opts)?;
-        let target_part_size = pull_option_to_i64("target_part_size", opts)?;
-
-        let partition_fields: Vec<_> = opts
-            .remove("partition_fields")
-            .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
-            .unwrap_or_default();
-
-        let time_partition_pattern = opts.remove("time_partition_pattern");
-
-        let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
-            Some(Partitioning {
-                time_partition_pattern,
-                partition_fields,
-            })
-        } else {
-            None
-        };
-
-        let file_settings = Some(FileSettings {
-            inactivity_rollover_seconds,
-            max_parts,
-            rollover_seconds,
-            target_file_size,
-            target_part_size,
-            partitioning,
-        });
-
-        let format_settings = match schema
-            .ok_or(anyhow!("require schema"))?
-            .format
-            .as_ref()
-            .ok_or(anyhow!(
-                "filesystem sink requires a format, such as json or parquet"
-            ))? {
-            Format::Parquet(..) => {
-                let compression = opts
-                    .remove("parquet_compression")
-                    .map(|value| {
-                        Compression::try_from(&value).map_err(|_err| {
-                            anyhow!("{} is not a valid parquet_compression argument", value)
-                        })
-                    })
-                    .transpose()?;
-                let row_batch_size = pull_option_to_i64("parquet_row_batch_size", opts)?;
-                let row_group_size = pull_option_to_i64("parquet_row_group_size", opts)?;
-                Some(FormatSettings::Parquet {
-                    compression,
-                    row_batch_size,
-                    row_group_size,
-                })
-            }
-            Format::Json(..) => Some(FormatSettings::Json {}),
-            other => bail!("Unsupported format: {:?}", other),
-        };
-
-        self.from_config(
-            None,
-            name,
-            EmptyConfig {},
-            FileSystemTable {
-                write_target: FolderUrl {
-                    path: storage_url,
-                    storage_options,
-                },
-                file_settings,
-                format_settings,
-            },
-            schema,
-        )
+        self.from_config(None, name, EmptyConfig {}, table, schema)
     }
+}
+
+pub fn file_system_table_from_options(
+    opts: &mut std::collections::HashMap<String, String>,
+    schema: Option<&ConnectionSchema>,
+    commit_style: CommitStyle,
+) -> Result<FileSystemTable> {
+    let storage_options: std::collections::HashMap<String, String> = opts
+        .iter()
+        .filter(|(k, _)| k.starts_with("storage."))
+        .map(|(k, v)| (k.trim_start_matches("storage.").to_string(), v.to_string()))
+        .collect();
+    opts.retain(|k, _| !k.starts_with("storage."));
+
+    let storage_url = pull_opt("path", opts)?;
+    BackendConfig::parse_url(&storage_url, true)?;
+
+    let inactivity_rollover_seconds = pull_option_to_i64("inactivity_rollover_seconds", opts)?;
+    let max_parts = pull_option_to_i64("max_parts", opts)?;
+    let rollover_seconds = pull_option_to_i64("rollover_seconds", opts)?;
+    let target_file_size = pull_option_to_i64("target_file_size", opts)?;
+    let target_part_size = pull_option_to_i64("target_part_size", opts)?;
+
+    let partition_fields: Vec<_> = opts
+        .remove("partition_fields")
+        .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
+        .unwrap_or_default();
+
+    let time_partition_pattern = opts.remove("time_partition_pattern");
+
+    let partitioning = if time_partition_pattern.is_some() || !partition_fields.is_empty() {
+        Some(Partitioning {
+            time_partition_pattern,
+            partition_fields,
+        })
+    } else {
+        None
+    };
+
+    let file_settings = Some(FileSettings {
+        inactivity_rollover_seconds,
+        max_parts,
+        rollover_seconds,
+        target_file_size,
+        target_part_size,
+        partitioning,
+        commit_style: Some(commit_style),
+    });
+
+    let format_settings = match schema
+        .ok_or(anyhow!("require schema"))?
+        .format
+        .as_ref()
+        .ok_or(anyhow!(
+            "filesystem sink requires a format, such as json or parquet"
+        ))? {
+        Format::Parquet(..) => {
+            let compression = opts
+                .remove("parquet_compression")
+                .map(|value| {
+                    Compression::try_from(&value).map_err(|_err| {
+                        anyhow!("{} is not a valid parquet_compression argument", value)
+                    })
+                })
+                .transpose()?;
+            let row_batch_size = pull_option_to_i64("parquet_row_batch_size", opts)?;
+            let row_group_size = pull_option_to_i64("parquet_row_group_size", opts)?;
+            Some(FormatSettings::Parquet {
+                compression,
+                row_batch_size,
+                row_group_size,
+            })
+        }
+        Format::Json(..) => Some(FormatSettings::Json {}),
+        other => bail!("Unsupported format: {:?}", other),
+    };
+    Ok(FileSystemTable {
+        write_target: FolderUrl {
+            path: storage_url,
+            storage_options,
+        },
+        file_settings,
+        format_settings,
+    })
 }
