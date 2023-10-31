@@ -277,6 +277,14 @@ export function FormInner({
     }
   }, [schema]);
 
+  function traversePath(values: any, typeKey: string): any {
+    let value = values;
+    typeKey.split('.').forEach(key => {
+      value = value && value[key];
+    });
+    return value;
+  }
+
   return (
     <Stack spacing={6}>
       {Object.keys(schema.properties || {})
@@ -287,13 +295,14 @@ export function FormInner({
         })
         .map(key => {
           const property = schema.properties![key];
+          const nextPath = (path ? `${path}.` : '') + key;
           if (typeof property == 'object') {
             switch (property.type) {
               case 'string':
                 if (property.enum) {
                   return (
                     <SelectWidget
-                      path={(path ? `${path}.` : '') + key}
+                      path={nextPath}
                       key={key}
                       title={property.title || key}
                       description={property.description}
@@ -303,14 +312,14 @@ export function FormInner({
                         value: value!.toString(),
                         label: value!.toString(),
                       }))}
-                      value={values[key]}
+                      value={traversePath(values, nextPath)}
                       onChange={onChange}
                     />
                   );
                 } else {
                   return (
                     <StringWidget
-                      path={(path ? `${path}.` : '') + key}
+                      path={nextPath}
                       key={key}
                       title={property.title || key}
                       description={property.description}
@@ -318,7 +327,7 @@ export function FormInner({
                       maxLength={property.maxLength}
                       // @ts-ignore
                       placeholder={property.examples ? (property.examples[0] as string) : undefined}
-                      value={values[key]}
+                      value={traversePath(values, nextPath)}
                       errors={errors}
                       onChange={onChange}
                     />
@@ -328,7 +337,7 @@ export function FormInner({
               case 'integer': {
                 return (
                   <NumberWidget
-                    path={(path ? `${path}.` : '') + key}
+                    path={nextPath}
                     key={key}
                     title={property.title || key}
                     description={property.description}
@@ -340,7 +349,7 @@ export function FormInner({
                     }
                     min={property.minimum}
                     max={property.maximum}
-                    value={values[key]}
+                    value={traversePath(values, nextPath)}
                     errors={errors}
                     onChange={onChange}
                   />
@@ -349,10 +358,10 @@ export function FormInner({
               case 'array': {
                 return (
                   <ArrayWidget
-                    path={(path ? `${path}.` : '') + key}
+                    path={nextPath}
                     key={key}
                     schema={property}
-                    values={values[key]}
+                    values={traversePath(values, nextPath)}
                     errors={errors}
                     onChange={onChange}
                   />
@@ -360,8 +369,9 @@ export function FormInner({
               }
               case 'object': {
                 if (property.oneOf) {
-                  const typeKey = '__meta.' + key + '.type';
-                  const value = ((values.__meta || {})[key] || {}).type;
+                  const typeKey = '__meta.' + nextPath + '.type';
+                  let value = traversePath(values, typeKey);
+
                   // @ts-ignore
                   const inSchema = property.oneOf.find(x => x.title == value) || property.oneOf[0];
                   return (
@@ -381,7 +391,11 @@ export function FormInner({
                             // @ts-ignore
                             value: oneOf.title!,
                             // @ts-ignore
-                            label: oneOf.title!,
+                            label:
+                              // @ts-ignore
+                              oneOf.title! +
+                              // @ts-ignore
+                              (oneOf.description ? ` — ${oneOf.description.toLowerCase()}` : ''),
                           }))}
                           value={value}
                           onChange={onChange}
@@ -389,12 +403,13 @@ export function FormInner({
                         {value != undefined && (
                           <Box p={4}>
                             <FormInner
-                              path={key}
+                              path={nextPath}
+                              key={key}
                               // @ts-ignore
                               schema={inSchema}
                               errors={errors}
                               onChange={onChange}
-                              values={values[key] || {}}
+                              values={values}
                             />
                           </Box>
                         )}
@@ -416,7 +431,7 @@ export function FormInner({
                           schema={property}
                           errors={errors}
                           onChange={onChange}
-                          values={values[key] || {}}
+                          values={values}
                         />
                       </Box>
                     </fieldset>
