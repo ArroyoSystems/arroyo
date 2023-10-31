@@ -76,21 +76,21 @@ pub(crate) async fn authenticate(
     cloud::authenticate(client, bearer_auth).await
 }
 
-pub(crate) fn bad_request(message: String) -> ErrorResp {
+pub(crate) fn bad_request(message: impl Into<String>) -> ErrorResp {
     ErrorResp {
         status_code: StatusCode::BAD_REQUEST,
-        message: message.to_string(),
+        message: message.into(),
     }
 }
 
-pub(crate) fn unauthorized(message: String) -> ErrorResp {
+pub(crate) fn unauthorized(message: impl Into<String>) -> ErrorResp {
     ErrorResp {
         status_code: StatusCode::UNAUTHORIZED,
-        message: message.to_string(),
+        message: message.into(),
     }
 }
 
-pub(crate) fn not_found(object: String) -> ErrorResp {
+pub(crate) fn not_found(object: &str) -> ErrorResp {
     ErrorResp {
         status_code: StatusCode::NOT_FOUND,
         message: format!("{} not found", object),

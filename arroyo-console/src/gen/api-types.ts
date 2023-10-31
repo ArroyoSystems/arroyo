@@ -34,13 +34,6 @@ export interface paths {
      */
     post: operations["create_connection_table"];
   };
-  "/v1/connection_tables/schemas/confluent": {
-    /**
-     * Get a Confluent Schema 
-     * @description Get a Confluent Schema
-     */
-    get: operations["get_confluent_schema"];
-  };
   "/v1/connection_tables/schemas/test": {
     /**
      * Test a Connection Schema 
@@ -183,7 +176,10 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
-    AvroFormat: Record<string, never>;
+    AvroFormat: {
+      confluentSchemaRegistry: boolean;
+      embeddedSchema: boolean;
+    };
     Checkpoint: {
       backend: string;
       /** Format: int32 */
@@ -206,9 +202,6 @@ export interface components {
     };
     /** @enum {string} */
     CheckpointSpanType: "alignment" | "sync" | "async" | "committing";
-    ConfluentSchema: {
-      schema: string;
-    };
     ConnectionProfile: {
       config: unknown;
       connector: string;
@@ -584,28 +577,6 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["ConnectionTable"];
-        };
-      };
-    };
-  };
-  /**
-   * Get a Confluent Schema 
-   * @description Get a Confluent Schema
-   */
-  get_confluent_schema: {
-    parameters: {
-      query: {
-        /** @description Confluent topic name */
-        topic: string;
-        /** @description Confluent schema registry endpoint */
-        endpoint: string;
-      };
-    };
-    responses: {
-      /** @description Got Confluent Schema */
-      200: {
-        content: {
-          "application/json": components["schemas"]["ConfluentSchema"];
         };
       };
     };

@@ -1,6 +1,7 @@
 pub mod api_types;
 pub mod formats;
 pub mod public_ids;
+pub mod schema_resolver;
 
 use std::{fs, time::SystemTime};
 

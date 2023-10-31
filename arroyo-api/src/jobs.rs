@@ -416,7 +416,7 @@ pub async fn get_checkpoint_details(
         .await
         .map_err(log_and_map)?
         .ok_or_else(|| {
-            not_found(format!(
+            not_found(&format!(
                 "Checkpoint with epoch {} for job '{}'",
                 epoch, job_pub_id
             ))

@@ -298,6 +298,7 @@ pub struct Record<K: Key, T: Data> {
     pub value: T,
 }
 
+#[derive(Debug, Clone)]
 pub struct UserError {
     pub name: String,
     pub details: String,

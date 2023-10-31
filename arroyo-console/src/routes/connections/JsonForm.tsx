@@ -140,7 +140,7 @@ function SelectWidget({
   onChange: (e: React.ChangeEvent<any>) => void;
 }) {
   return (
-    <FormControl>
+    <FormControl isRequired={required}>
       {title && <FormLabel>{title}</FormLabel>}
       <Select
         placeholder={placeholder}
@@ -298,6 +298,7 @@ export function FormInner({
                       title={property.title || key}
                       description={property.description}
                       placeholder="Select an option"
+                      required={schema.required?.includes(key)}
                       options={property.enum.map(value => ({
                         value: value!.toString(),
                         label: value!.toString(),
@@ -344,7 +345,6 @@ export function FormInner({
                     onChange={onChange}
                   />
                 );
-                342;
               }
               case 'array': {
                 return (
@@ -401,7 +401,7 @@ export function FormInner({
                       </Stack>
                     </fieldset>
                   );
-                } else if ((values[key].properties?.length || 0) > 0) {
+                } else if (property.properties != undefined) {
                   return (
                     <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
                       <legend

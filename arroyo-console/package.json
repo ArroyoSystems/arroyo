@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "format": "npx prettier --write src/ && npx eslint --fix --ext .js,.jsx,.ts,.tsx src",
     "check": "npx prettier --check src/ && npx eslint --ext .js,.jsx,.ts,.tsx src",
-    "openapi": "cargo build && npx openapi-typescript $(pwd)/../arroyo-openapi/api-spec.json --output $(pwd)/src/gen/api-types.ts"
+    "openapi": "cargo build --package arroyo-openapi  && npx openapi-typescript $(pwd)/../arroyo-openapi/api-spec.json --output $(pwd)/src/gen/api-types.ts"
   },
   "dependencies": {
     "@babel/core": "^7.22.5",

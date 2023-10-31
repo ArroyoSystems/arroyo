@@ -35,7 +35,6 @@ tonic-build = { version = "0.9" }
 tonic-web = { version = "0.9" }
 tonic-reflection = { version = "0.9" }
 arrow = { version = "46.0.0" }
-arrow-buffer = { version = "46.0.0" }
 arrow-array = { version = "46.0.0" }
 arrow-schema = { version = "46.0.0" }
 object_store = { version = "0.7.1" }
@@ -43,11 +42,6 @@ parquet = { version = "46.0.0" }
 
 [profile.release]
 debug = 1
-
-[profile.release.package.copy-artifacts]
-# optimize for small binary size
-strip = true
-opt-level = "z"
 
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }

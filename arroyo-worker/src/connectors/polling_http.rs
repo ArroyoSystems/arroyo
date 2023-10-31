@@ -259,7 +259,7 @@ where
                                     }
                                 }
 
-                                let iter = self.deserializer.deserialize_slice(&buf);
+                                let iter = self.deserializer.deserialize_slice(&buf).await;
 
                                 for record in iter {
                                     match record {

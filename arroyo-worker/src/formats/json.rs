@@ -1,15 +1,10 @@
-use std::sync::Arc;
-use std::{collections::HashMap, marker::PhantomData};
-
 use arrow::datatypes::{Field, Fields};
-use arroyo_rpc::formats::{Format, Framing, FramingMethod, JsonFormat};
-use arroyo_types::UserError;
+use arroyo_rpc::formats::JsonFormat;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
-use crate::SchemaData;
-
-fn deserialize_slice_json<T: DeserializeOwned>(
+pub fn deserialize_slice_json<T: DeserializeOwned>(
     format: &JsonFormat,
     msg: &[u8],
 ) -> Result<T, String> {
@@ -44,152 +39,6 @@ fn deserialize_slice_json<T: DeserializeOwned>(
     } else {
         serde_json::from_slice(msg)
             .map_err(|e| format!("Failed to deserialize JSON into schema: {:?}", e))
-    }
-}
-
-fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> {
-    let json = json! {
-        { "value": String::from_utf8_lossy(msg) }
-    };
-    Ok(serde_json::from_value(json).unwrap())
-}
-
-pub struct FramingIterator<'a> {
-    framing: Option<Arc<Framing>>,
-    buf: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> FramingIterator<'a> {
-    pub fn new(framing: Option<Arc<Framing>>, buf: &'a [u8]) -> Self {
-        Self {
-            framing,
-            buf,
-            offset: 0,
-        }
-    }
-}
-
-impl<'a> Iterator for FramingIterator<'a> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.offset >= self.buf.len() {
-            return None;
-        }
-
-        match &self.framing {
-            Some(framing) => {
-                match &framing.method {
-                    FramingMethod::Newline(newline) => {
-                        let end = memchr::memchr('\n' as u8, &self.buf[self.offset..])
-                            .map(|i| self.offset + i)
-                            .unwrap_or(self.buf.len());
-
-                        let prev = self.offset;
-                        self.offset = end + 1;
-
-                        // enforce max len if set
-                        let length =
-                            (end - prev).min(newline.max_line_length.unwrap_or(u64::MAX) as usize);
-
-                        Some(&self.buf[prev..(prev + length)])
-                    }
-                }
-            }
-            None => {
-                self.offset = self.buf.len();
-                Some(self.buf)
-            }
-        }
-    }
-}
-
-pub struct DataDeserializer<T: SchemaData> {
-    format: Arc<Format>,
-    framing: Option<Arc<Framing>>,
-    _t: PhantomData<T>,
-}
-
-impl<T: SchemaData> DataDeserializer<T> {
-    pub fn new(format: Format, framing: Option<Framing>) -> Self {
-        Self {
-            format: Arc::new(format),
-            framing: framing.map(|f| Arc::new(f)),
-            _t: PhantomData,
-        }
-    }
-    pub fn deserialize_slice<'a>(
-        &self,
-        msg: &'a [u8],
-    ) -> impl Iterator<Item = Result<T, UserError>> + 'a {
-        let format = self.format.clone();
-        FramingIterator::new(self.framing.clone(), msg)
-            .map(move |t| Self::deserialize_single(format.clone(), t))
-    }
-
-    fn deserialize_single(format: Arc<Format>, msg: &[u8]) -> Result<T, UserError> {
-        match &*format {
-            Format::Json(json) => deserialize_slice_json(json, msg),
-            Format::Avro(_) => todo!(),
-            Format::Parquet(_) => todo!(),
-            Format::RawString(_) => deserialize_raw_string(msg),
-        }
-        .map_err(|e| {
-            UserError::new(
-                "Deserialization failed",
-                format!(
-                    "Failed to deserialize: '{}': {}",
-                    String::from_utf8_lossy(&msg),
-                    e
-                ),
-            )
-        })
-    }
-}
-
-pub struct DataSerializer<T: SchemaData> {
-    kafka_schema: Value,
-    #[allow(unused)]
-    json_schema: Value,
-    format: Format,
-    _t: PhantomData<T>,
-}
-
-impl<T: SchemaData> DataSerializer<T> {
-    pub fn new(format: Format) -> Self {
-        Self {
-            kafka_schema: arrow_to_kafka_json(T::name(), T::schema().fields()),
-            json_schema: arrow_to_json_schema(T::schema().fields()),
-            format,
-            _t: PhantomData,
-        }
-    }
-
-    pub fn to_vec(&self, record: &T) -> Option<Vec<u8>> {
-        match &self.format {
-            Format::Json(json) => {
-                let v = if json.include_schema {
-                    let record = json! {{
-                        "schema": self.kafka_schema,
-                        "payload": record
-                    }};
-
-                    serde_json::to_vec(&record).unwrap()
-                } else {
-                    serde_json::to_vec(record).unwrap()
-                };
-
-                if json.confluent_schema_registry {
-                    todo!("Serializing to confluent schema registry is not yet supported");
-                }
-
-                Some(v)
-            }
-            Format::Avro(_) => todo!(),
-            Format::Parquet(_) => todo!(),
-            Format::RawString(_) => record.to_raw_string(),
-        }
     }
 }
 
@@ -327,7 +176,10 @@ pub mod timestamp_as_rfc3339 {
         D: Deserializer<'de>,
     {
         let raw: chrono::DateTime<Utc> = DateTime::deserialize(deserializer)?;
-        Ok(from_nanos(raw.timestamp_nanos() as u128))
+        Ok(from_nanos(
+            raw.timestamp_nanos_opt()
+                .expect("could not represent time as a number of nanoseconds") as u128,
+        ))
     }
 }
 
@@ -355,11 +207,17 @@ pub mod opt_timestamp_as_rfc3339 {
         D: Deserializer<'de>,
     {
         let raw = Option::<DateTime<Utc>>::deserialize(deserializer)?;
-        Ok(raw.map(|raw| from_nanos(raw.timestamp_nanos() as u128)))
+        Ok(raw.map(|raw| {
+            from_nanos(
+                raw.timestamp_nanos_opt()
+                    .expect("could not represent time as a number of nanoseconds")
+                    as u128,
+            )
+        }))
     }
 }
 
-fn field_to_json_schema(field: &Field) -> Value {
+pub fn field_to_json_schema(field: &Field) -> Value {
     match field.data_type() {
         arrow::datatypes::DataType::Null => {
             json! {{ "type": "null" }}
@@ -417,7 +275,7 @@ fn field_to_json_schema(field: &Field) -> Value {
     }
 }
 
-fn arrow_to_json_schema(fields: &Fields) -> Value {
+pub fn arrow_to_json_schema(fields: &Fields) -> Value {
     let props: HashMap<String, Value> = fields
         .iter()
         .map(|f| (f.name().clone(), field_to_json_schema(f)))
@@ -435,7 +293,7 @@ fn arrow_to_json_schema(fields: &Fields) -> Value {
     }}
 }
 
-fn field_to_kafka_json(field: &Field) -> Value {
+pub fn field_to_kafka_json(field: &Field) -> Value {
     use arrow::datatypes::DataType::*;
 
     let typ = match field.data_type() {
@@ -503,7 +361,7 @@ fn field_to_kafka_json(field: &Field) -> Value {
 
 // For some reason Kafka uses it's own bespoke almost-but-not-quite JSON schema format
 // https://www.confluent.io/blog/kafka-connect-deep-dive-converters-serialization-explained/#json-schemas
-fn arrow_to_kafka_json(name: &str, fields: &Fields) -> Value {
+pub fn arrow_to_kafka_json(name: &str, fields: &Fields) -> Value {
     let fields: Vec<_> = fields.iter().map(|f| field_to_kafka_json(&*f)).collect();
     json! {{
         "type": "struct",
@@ -511,81 +369,4 @@ fn arrow_to_kafka_json(name: &str, fields: &Fields) -> Value {
         "fields": fields,
         "optional": false,
     }}
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::formats::FramingIterator;
-    use arroyo_rpc::formats::{Framing, FramingMethod, NewlineDelimitedFraming};
-    use std::sync::Arc;
-
-    #[test]
-    fn test_line_framing() {
-        let framing = Some(Arc::new(Framing {
-            method: FramingMethod::Newline(NewlineDelimitedFraming {
-                max_line_length: None,
-            }),
-        }));
-
-        let result: Vec<_> = FramingIterator::new(framing.clone(), "one block".as_bytes())
-            .map(|t| String::from_utf8(t.to_vec()).unwrap())
-            .collect();
-
-        assert_eq!(vec!["one block".to_string()], result);
-
-        let result: Vec<_> = FramingIterator::new(
-            framing.clone(),
-            "one block\ntwo block\nthree block".as_bytes(),
-        )
-        .map(|t| String::from_utf8(t.to_vec()).unwrap())
-        .collect();
-
-        assert_eq!(
-            vec![
-                "one block".to_string(),
-                "two block".to_string(),
-                "three block".to_string()
-            ],
-            result
-        );
-
-        let result: Vec<_> = FramingIterator::new(
-            framing.clone(),
-            "one block\ntwo block\nthree block\n".as_bytes(),
-        )
-        .map(|t| String::from_utf8(t.to_vec()).unwrap())
-        .collect();
-
-        assert_eq!(
-            vec![
-                "one block".to_string(),
-                "two block".to_string(),
-                "three block".to_string()
-            ],
-            result
-        );
-    }
-
-    #[test]
-    fn test_max_line_length() {
-        let framing = Some(Arc::new(Framing {
-            method: FramingMethod::Newline(NewlineDelimitedFraming {
-                max_line_length: Some(5),
-            }),
-        }));
-
-        let result: Vec<_> =
-            FramingIterator::new(framing, "one block\ntwo block\nwhole".as_bytes())
-                .map(|t| String::from_utf8(t.to_vec()).unwrap())
-                .collect();
-
-        assert_eq!(
-            vec![
-                "one b".to_string(),
-                "two b".to_string(),
-                "whole".to_string()
-            ],
-            result
-        );
-    }
 }

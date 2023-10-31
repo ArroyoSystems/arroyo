@@ -2,17 +2,19 @@ import { Dispatch, useEffect, useRef, useState } from 'react';
 import { CreateConnectionState } from './CreateConnection';
 import { Alert, AlertIcon, Box, Button, List, ListItem, Stack } from '@chakra-ui/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { post } from '../../lib/data_fetching';
+import { ConnectionSchema, post } from '../../lib/data_fetching';
 import { formatError } from '../../lib/util';
 
-export function JsonSchemaEditor({
+export function SchemaEditor({
   state,
   setState,
   next,
+  format,
 }: {
   state: CreateConnectionState;
   setState: Dispatch<CreateConnectionState>;
   next: () => void;
+  format: 'avro' | 'json';
 }) {
   const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoEl = useRef(null);
@@ -24,7 +26,6 @@ export function JsonSchemaEditor({
   const valid = tested == editor?.getValue() && errors?.length == 0;
 
   const testSchema = async () => {
-    console.log('testing schema');
     setTesting(true);
     setErrors(null);
     const { error } = await post('/v1/connection_tables/schemas/test', {
@@ -75,7 +76,6 @@ export function JsonSchemaEditor({
       state.schema?.format?.json?.unstructured === false
     ) {
       let e = monaco.editor.create(monacoEl.current!, {
-        // value: state.schema?.definition,
         language: 'json',
         theme: 'vs-dark',
         minimap: {
@@ -84,14 +84,23 @@ export function JsonSchemaEditor({
       });
 
       e?.getModel()?.onDidChangeContent(_ => {
+        let schema: ConnectionSchema = {
+          ...state.schema,
+          fields: [],
+          // @ts-ignore
+          format: {},
+          // @ts-ignore
+          definition: {},
+        };
+
+        // @ts-ignore
+        schema.format![format] = {};
+        // @ts-ignore
+        schema.definition![format + '_schema'] = e.getValue();
+
         setState({
           ...state,
-          schema: {
-            ...state.schema,
-            definition: { json_schema: e.getValue() },
-            fields: [],
-            format: { json: { confluentSchemaRegistry: false } },
-          },
+          schema: schema,
         });
       });
 

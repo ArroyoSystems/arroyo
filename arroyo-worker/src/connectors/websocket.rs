@@ -149,7 +149,7 @@ where
         msg: &[u8],
         ctx: &mut Context<(), T>,
     ) -> Result<(), UserError> {
-        let iter = self.deserializer.deserialize_slice(msg);
+        let iter = self.deserializer.deserialize_slice(msg).await;
         for value in iter {
             ctx.collector
                 .collect(Record {

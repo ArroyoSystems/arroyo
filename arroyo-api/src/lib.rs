@@ -8,8 +8,8 @@ use crate::connection_profiles::{
     __path_create_connection_profile, __path_get_connection_profiles,
 };
 use crate::connection_tables::{
-    __path_create_connection_table, __path_delete_connection_table, __path_get_confluent_schema,
-    __path_get_connection_tables, __path_test_connection_table, __path_test_schema,
+    __path_create_connection_table, __path_delete_connection_table, __path_get_connection_tables,
+    __path_test_connection_table, __path_test_schema,
 };
 use crate::connectors::__path_get_connectors;
 use crate::jobs::{
@@ -148,7 +148,6 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         delete_connection_table,
         test_connection_table,
         test_schema,
-        get_confluent_schema,
         get_checkpoint_details,
     ),
     components(schemas(
@@ -193,7 +192,6 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         PrimitiveType,
         SchemaDefinition,
         TestSourceMessage,
-        ConfluentSchema,
         JsonFormat,
         AvroFormat,
         ParquetFormat,

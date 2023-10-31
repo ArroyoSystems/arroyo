@@ -5,6 +5,7 @@ use crate::SourceFinishType;
 use arroyo_macro::source_fn;
 use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
+use arroyo_rpc::schema_resolver::{ConfluentSchemaResolver, FailingSchemaResolver, SchemaResolver};
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
@@ -17,6 +18,7 @@ use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tracing::{debug, error, info, warn};
@@ -103,14 +105,25 @@ where
             client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
         }
 
+        let schema_resolver: Arc<dyn SchemaResolver + Sync> =
+            if let Some(schema_registry) = &connection.schema_registry {
+                Arc::new(
+                    ConfluentSchemaResolver::new(&schema_registry.endpoint, &table.topic)
+                        .expect("failed to construct confluent schema resolver"),
+                )
+            } else {
+                Arc::new(FailingSchemaResolver::new())
+            };
+
         Self {
             topic: table.topic,
             bootstrap_servers: connection.bootstrap_servers.to_string(),
             group_id: group_id.clone(),
             offset_mode: *offset,
-            deserializer: DataDeserializer::new(
+            deserializer: DataDeserializer::with_schema_resolver(
                 config.format.expect("Format must be set for Kafka source"),
                 config.framing,
+                schema_resolver,
             ),
             client_configs,
             messages_per_second: NonZeroU32::new(
@@ -247,7 +260,7 @@ where
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                let iter = self.deserializer.deserialize_slice(v);
+                                let iter = self.deserializer.deserialize_slice(v).await;
 
                                 for value in iter {
                                     ctx.collector.collect(Record {
