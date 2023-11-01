@@ -120,30 +120,31 @@ impl<K: Data, T: Data> NexmarkSourceFunc<K, T> {
     async fn on_start(&mut self, ctx: &mut Context<(), Event>) {
         // load state
         self.state = Some({
-            let ss = ctx
+            let mut ss = ctx
                 .state
                 .get_global_keyed_state::<usize, NexmarkSourceState>('s')
                 .await;
-            ss.get(&ctx.task_info.task_index)
-                .cloned()
-                .unwrap_or_else(|| {
-                    let config = GeneratorConfig::new(
-                        NexmarkConfig::new(
-                            self.first_event_rate,
-                            self.num_events,
-                            ctx.task_info.parallelism,
-                        ),
-                        SystemTime::now(),
-                        1,
+            let saved_states = ss.get_all().len();
+            if saved_states != ctx.task_info.parallelism {
+                let config = GeneratorConfig::new(
+                    NexmarkConfig::new(
+                        self.first_event_rate,
                         self.num_events,
-                        1,
-                    );
-                    let splits = config.split(ctx.task_info.parallelism as u64);
-                    NexmarkSourceState {
-                        config: splits[ctx.task_info.task_index].clone(),
-                        event_count: 0,
-                    }
-                })
+                        ctx.task_info.parallelism,
+                    ),
+                    SystemTime::now(),
+                    1,
+                    self.num_events,
+                    1,
+                );
+                let splits = config.split(ctx.task_info.parallelism as u64);
+                NexmarkSourceState {
+                    config: splits[ctx.task_info.task_index].clone(),
+                    event_count: 0,
+                }
+            } else {
+                ss.get(&ctx.task_info.task_index).unwrap().clone()
+            }
         });
     }
 
