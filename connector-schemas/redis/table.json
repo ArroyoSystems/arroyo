@@ -28,19 +28,23 @@
                                         "keyField": {
                                             "type": "string",
                                             "title": "Key Field",
-                                            "description": "The field to use as the key for this table; if not specified, all writes will be to the same key"
+                                            "description": "If set, the value of this field in each row will be used as the key in Redis"
                                         },
                                         "valueType": {
                                             "type": "string",
                                             "title": "Value Mode",
                                             "description": "How should the value be stored in Redis",
                                             "enum": [
-                                                "Value per field",
-                                                "Single value",
-                                                "Single field"
+                                                "value_per_field",
+                                                "single_value",
+                                                "single_field"
                                             ]
                                         }
-                                    }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                        "valueType"
+                                    ]
                                 },
                                 {
                                     "type": "object",
@@ -52,18 +56,24 @@
                                             "title": "Key Prefix",
                                             "description": "The prefix to use for keys in this table"
                                         }
-                                    }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                        "name"
+                                    ]
                                 }
-
                             ]
                         }
                     },
+                    "required": [
+                        "target"
+                    ],
                     "additionalProperties": false
                 }
             ]
         }
     },
     "required": [
-        "type"
+        "connectorType"
     ]
 }

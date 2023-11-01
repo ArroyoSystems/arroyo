@@ -396,13 +396,13 @@ impl<K: Key, T: Data> Context<K, T> {
         self.collector.broadcast(message).await;
     }
 
-    pub async fn report_error(&mut self, message: String, details: String) {
+    pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
         self.control_tx
             .send(ControlResp::Error {
                 operator_id: self.task_info.operator_id.clone(),
                 task_index: self.task_info.task_index,
-                message,
-                details,
+                message: message.into(),
+                details: details.into(),
             })
             .await
             .unwrap();

@@ -485,6 +485,8 @@ export function JsonForm({
         });
       }
 
+      console.log(errors);
+
       return errors;
     },
   });
