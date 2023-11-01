@@ -8,6 +8,7 @@ use std::{
 use arroyo_types::{S3_ENDPOINT_ENV, S3_REGION_ENV};
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use object_store::aws::{AmazonS3ConfigKey, AwsCredential};
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::PartId;
@@ -423,6 +424,39 @@ impl StorageProvider {
         })
     }
 
+    pub async fn list<P: Into<String>>(&self, path: P) -> Result<Vec<Path>, StorageError> {
+        let path: String = path.into();
+
+        let list = self
+            .object_store
+            .list(Some(&path.into()))
+            .await
+            .map_err(|e| Into::<StorageError>::into(e))?;
+
+        list.map(|meta| meta.map(|x| x.location))
+            .collect::<Vec<Result<Path, object_store::Error>>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<Path>, object_store::Error>>()
+            .map_err(|e| Into::<StorageError>::into(e))
+    }
+
+    pub async fn list_as_stream<P: Into<String>>(
+        &self,
+        path: P,
+    ) -> Result<impl Stream<Item = Result<Path, object_store::Error>> + '_, StorageError> {
+        let path: String = path.into();
+
+        let list = self
+            .object_store
+            .list(Some(&path.into()))
+            .await
+            .map_err(|e| Into::<StorageError>::into(e))?
+            .map(|meta| meta.map(|x| x.location));
+
+        Ok(list)
+    }
+
     pub async fn get<P: Into<String>>(&self, path: P) -> Result<Bytes, StorageError> {
         let path: String = path.into();
         let bytes = self
@@ -434,6 +468,21 @@ impl StorageProvider {
             .await?;
 
         Ok(bytes)
+    }
+
+    pub async fn get_as_stream<P: Into<String>>(
+        &self,
+        path: P,
+    ) -> Result<impl tokio::io::AsyncRead, StorageError> {
+        let path: String = path.into();
+        let bytes = self
+            .object_store
+            .get(&path.into())
+            .await
+            .map_err(|e| Into::<StorageError>::into(e))?
+            .into_stream();
+
+        Ok(tokio_util::io::StreamReader::new(bytes))
     }
 
     pub async fn put<P: Into<String>>(

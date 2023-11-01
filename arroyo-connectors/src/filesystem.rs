@@ -31,14 +31,14 @@ impl Connector for FileSystemConnector {
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
         arroyo_rpc::api_types::connections::Connector {
             id: "filesystem".to_string(),
-            name: "FileSystem Sink".to_string(),
+            name: "FileSystem".to_string(),
             icon: "".to_string(),
-            description: "Write to a filesystem (like S3)".to_string(),
+            description: "Read (S3 only) or write to a filesystem (like S3)".to_string(),
             enabled: true,
-            source: false,
+            source: true,
             sink: true,
             testing: false,
-            hidden: true,
+            hidden: false,
             custom_schemas: true,
             connection_config: None,
             table_config: TABLE_SCHEMA.to_owned(),
@@ -65,8 +65,11 @@ impl Connector for FileSystemConnector {
         });
     }
 
-    fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+    fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
+        match table.type_ {
+            TableType::Source { .. } => ConnectionType::Source,
+            TableType::Sink { .. } => ConnectionType::Sink,
+        }
     }
 
     fn from_config(
@@ -77,41 +80,54 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        // confirm commit style is Direct
-        if let Some(CommitStyle::Direct) = table
-            .file_settings
-            .as_ref()
-            .ok_or_else(|| anyhow!("no file_settings"))?
-            .commit_style
-        {
-            // ok
-        } else {
-            bail!("commit_style must be Direct");
-        }
-
-        let backend_config = BackendConfig::parse_url(&table.write_target.path, true)?;
-        let is_local = match &backend_config {
-            BackendConfig::Local { .. } => true,
-            _ => false,
-        };
-        let (description, operator) = match (&table.format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) => (
-                "LocalFileSystem<Parquet>".to_string(),
-                "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
+        let (description, operator, connection_type) = match table.type_ {
+            TableType::Source { .. } => (
+                "FileSystem".to_string(),
+                "connectors::filesystem::source::FileSystemSourceFunc",
+                ConnectionType::Source,
             ),
-            (Some(FormatSettings::Parquet { .. }), false) => (
-                "FileSystem<Parquet>".to_string(),
-                "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
-            ),
-            (Some(FormatSettings::Json {  }), true) => (
-                "LocalFileSystem<JSON>".to_string(),
-                "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>"
-            ),
-            (Some(FormatSettings::Json {  }), false) => (
-                "FileSystem<JSON>".to_string(),
-                "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"
-            ),
-            (None, _) => bail!("have to have some format settings"),
+            TableType::Sink {
+                ref format_settings,
+                ref write_target,
+                ref file_settings,
+                ..
+            } => {
+                // confirm commit style is Direct
+                if let Some(CommitStyle::Direct) = file_settings
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("no file_settings"))?
+                    .commit_style
+                {
+                    // ok
+                } else {
+                    bail!("commit_style must be Direct");
+                }
+                let backend_config = BackendConfig::parse_url(&write_target.path, true)?;
+                let is_local = match &backend_config {
+                    BackendConfig::Local { .. } => true,
+                    _ => false,
+                };
+                let (description, operator) = match (format_settings, is_local) {
+                    (Some(FormatSettings::Parquet { .. }), true) => (
+                        "LocalFileSystem<Parquet>".to_string(),
+                        "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
+                    ),
+                    (Some(FormatSettings::Parquet { .. }), false) => (
+                        "FileSystem<Parquet>".to_string(),
+                        "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
+                    ),
+                    (Some(FormatSettings::Json {  }), true) => (
+                        "LocalFileSystem<JSON>".to_string(),
+                        "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>"
+                    ),
+                    (Some(FormatSettings::Json {  }), false) => (
+                        "FileSystem<JSON>".to_string(),
+                        "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"
+                    ),
+                    (None, _) => bail!("have to have some format settings"),
+                };
+                (description, operator, ConnectionType::Sink)
+            }
         };
 
         let schema = schema
@@ -135,7 +151,7 @@ impl Connector for FileSystemConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
-            connection_type: ConnectionType::Sink,
+            connection_type,
             schema,
             operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
@@ -149,9 +165,50 @@ impl Connector for FileSystemConnector {
         opts: &mut std::collections::HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let table = file_system_table_from_options(opts, schema, CommitStyle::Direct)?;
+        match opts.remove("type") {
+            Some(t) if t == "source" => {
+                if let (Some(bucket), Some(prefix), Some(region), Some(compression_format)) = (
+                    opts.remove("bucket"),
+                    opts.remove("prefix"),
+                    opts.remove("region"),
+                    opts.remove("compression_format"),
+                ) {
+                    self.from_config(
+                        None,
+                        name,
+                        EmptyConfig {},
+                        FileSystemTable {
+                            type_: TableType::Source {
+                                read_source: S3 {
+                                    bucket,
+                                    compression_format: compression_format
+                                        .as_str()
+                                        .try_into()
+                                        .map_err(|_| {
+                                            anyhow::anyhow!(
+                                                "unsupported compression format: {}",
+                                                compression_format
+                                            )
+                                        })?,
+                                    prefix,
+                                    region,
+                                },
+                            },
+                        },
+                        schema,
+                    )
+                } else {
+                    bail!("Source S3 must have bucket, prefix, region, and compression_format set")
+                }
+            }
+            Some(t) if t == "sink" => {
+                let table = file_system_table_from_options(opts, schema, CommitStyle::Direct)?;
 
-        self.from_config(None, name, EmptyConfig {}, table, schema)
+                self.from_config(None, name, EmptyConfig {}, table, schema)
+            }
+            Some(t) => bail!("unknown type: {}", t),
+            None => bail!("must have type set"),
+        }
     }
 }
 
@@ -230,11 +287,13 @@ pub fn file_system_table_from_options(
         other => bail!("Unsupported format: {:?}", other),
     };
     Ok(FileSystemTable {
-        write_target: FolderUrl {
-            path: storage_url,
-            storage_options,
+        type_: TableType::Sink {
+            file_settings,
+            format_settings,
+            write_target: FolderUrl {
+                path: storage_url,
+                storage_options,
+            },
         },
-        file_settings,
-        format_settings,
     })
 }
