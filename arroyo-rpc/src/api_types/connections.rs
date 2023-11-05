@@ -209,7 +209,7 @@ impl TestSourceMessage {
         Self {
             error: false,
             done: false,
-            message: message.into()
+            message: message.into(),
         }
     }
 
@@ -217,7 +217,7 @@ impl TestSourceMessage {
         Self {
             error: true,
             done: false,
-            message: message.into()
+            message: message.into(),
         }
     }
 
@@ -225,7 +225,7 @@ impl TestSourceMessage {
         Self {
             error: false,
             done: true,
-            message: message.into()
+            message: message.into(),
         }
     }
 
@@ -233,7 +233,7 @@ impl TestSourceMessage {
         Self {
             error: true,
             done: true,
-            message: message.into()
+            message: message.into(),
         }
     }
 }

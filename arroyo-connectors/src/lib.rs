@@ -30,11 +30,11 @@ pub mod kafka;
 pub mod kinesis;
 pub mod nexmark;
 pub mod polling_http;
+pub mod redis;
 pub mod single_file;
 pub mod sse;
 pub mod webhook;
 pub mod websocket;
-pub mod redis;
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
@@ -292,13 +292,15 @@ pub(crate) fn pull_option_to_u64(
     opts: &mut HashMap<String, String>,
 ) -> anyhow::Result<Option<u64>> {
     pull_option_to_i64(name, opts)?
-        .map(|x| if x < 0 {
-            bail!("invalid valid for {}, must be greater than 0", name);
-        } else {
-            Ok(x as u64)
-        }).transpose()
+        .map(|x| {
+            if x < 0 {
+                bail!("invalid valid for {}, must be greater than 0", name);
+            } else {
+                Ok(x as u64)
+            }
+        })
+        .transpose()
 }
-
 
 pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
     connectors().remove(t)

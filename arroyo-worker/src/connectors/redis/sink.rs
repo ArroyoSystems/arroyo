@@ -1,34 +1,33 @@
-use std::collections::HashSet;
-use std::marker::PhantomData;
-use std::time::{Duration, Instant};
-use redis::{Client, Cmd, Pipeline, RedisFuture};
-use redis::aio::{ConnectionLike, ConnectionManager};
-use redis::cluster::ClusterClient;
-use redis::cluster_async::ClusterConnection;
-use serde::Serialize;
-use serde_json::Value;
-use tokio::select;
-use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::info;
-use arroyo_macro::process_fn;
-use arroyo_rpc::OperatorConfig;
-use arroyo_types::{CheckpointBarrier, Key, Record};
 use crate::connectors::redis::{RedisConfig, RedisConfigConnection, RedisTable, TableType, Target};
 use crate::engine::{Context, ErrorReporter, StreamNode};
 use crate::formats::DataSerializer;
 use crate::SchemaData;
+use arroyo_macro::process_fn;
+use arroyo_rpc::OperatorConfig;
+use arroyo_types::{CheckpointBarrier, Key, Record};
+use redis::aio::{ConnectionLike, ConnectionManager};
+use redis::cluster::ClusterClient;
+use redis::cluster_async::ClusterConnection;
+use redis::{Client, Cmd, Pipeline, RedisFuture};
+use serde::Serialize;
+use serde_json::Value;
+use std::collections::HashSet;
+use std::marker::PhantomData;
+use std::time::{Duration, Instant};
+use tokio::select;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::info;
 
 use super::ListOperation;
 
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(100);
 const FLUSH_BYTES: usize = 10 * 1024 * 1024;
 
-
 #[derive(StreamNode)]
 pub struct RedisSinkFunc<K, T>
-    where
-        K: Key,
-        T: Serialize + SchemaData,
+where
+    K: Key,
+    T: Serialize + SchemaData,
 {
     serializer: DataSerializer<T>,
     table: RedisTable,
@@ -42,13 +41,8 @@ pub struct RedisSinkFunc<K, T>
 
 #[derive(Copy, Clone, Debug)]
 enum RedisBehavior {
-    Set {
-        ttl: Option<usize>,
-    },
-    Push {
-        append: bool,
-        max: Option<usize>,
-    },
+    Set { ttl: Option<usize> },
+    Push { append: bool, max: Option<usize> },
     Hash,
 }
 
@@ -61,7 +55,7 @@ enum RedisCmd {
     HData {
         key: String,
         field: String,
-        value: Vec<u8>
+        value: Vec<u8>,
     },
 
     Flush(u32),
@@ -78,9 +72,7 @@ impl Clients {
             Clients::Standard(c) => {
                 GeneralConnection::Standard(ConnectionManager::new(c.clone()).await?)
             }
-            Clients::Clustered(c) => {
-                GeneralConnection::Clustered(c.get_async_connection().await?)
-            }
+            Clients::Clustered(c) => GeneralConnection::Clustered(c.get_async_connection().await?),
         })
     }
 }
@@ -98,7 +90,12 @@ impl ConnectionLike for GeneralConnection {
         }
     }
 
-    fn req_packed_commands<'a>(&'a mut self, cmd: &'a Pipeline, offset: usize, count: usize) -> RedisFuture<'a, Vec<redis::Value>> {
+    fn req_packed_commands<'a>(
+        &'a mut self,
+        cmd: &'a Pipeline,
+        offset: usize,
+        count: usize,
+    ) -> RedisFuture<'a, Vec<redis::Value>> {
         match self {
             GeneralConnection::Standard(c) => c.req_packed_commands(cmd, offset, count),
             GeneralConnection::Clustered(c) => c.req_packed_commands(cmd, offset, count),
@@ -108,7 +105,7 @@ impl ConnectionLike for GeneralConnection {
     fn get_db(&self) -> i64 {
         match self {
             GeneralConnection::Standard(c) => c.get_db(),
-            GeneralConnection::Clustered(c) => c.get_db()
+            GeneralConnection::Clustered(c) => c.get_db(),
         }
     }
 }
@@ -201,7 +198,10 @@ impl RedisWriter {
         let mut attempts = 0;
 
         match self.behavior {
-            RedisBehavior::Push { max: Some(max), append } => {
+            RedisBehavior::Push {
+                max: Some(max),
+                append,
+            } => {
                 for k in self.max_push_keys.drain().into_iter() {
                     if append {
                         self.pipeline.ltrim(k, -(max as isize), -1);
@@ -214,7 +214,11 @@ impl RedisWriter {
         }
 
         while attempts < 20 {
-            match self.pipeline.query_async::<_, ()>(&mut self.connection).await {
+            match self
+                .pipeline
+                .query_async::<_, ()>(&mut self.connection)
+                .await
+            {
                 Ok(_) => {
                     self.pipeline.clear();
                     self.size_estimate = 0;
@@ -222,13 +226,16 @@ impl RedisWriter {
                     return;
                 }
                 Err(e) => {
-                    self.error_reporter.report_error("Redis error",
-                                                     format!("Failed to write data to redis: {:?}", e)).await;
+                    self.error_reporter
+                        .report_error(
+                            "Redis error",
+                            format!("Failed to write data to redis: {:?}", e),
+                        )
+                        .await;
                 }
             }
 
-            tokio::time::sleep(Duration::from_millis((50 * (1 << attempts)).min(5_000)))
-                .await;
+            tokio::time::sleep(Duration::from_millis((50 * (1 << attempts)).min(5_000))).await;
             attempts -= 1;
         }
 
@@ -238,26 +245,26 @@ impl RedisWriter {
 
 #[process_fn(in_k = K, in_t = T)]
 impl<K, T> RedisSinkFunc<K, T>
-    where
-        K: Key,
-        T: Serialize + SchemaData,
+where
+    K: Key,
+    T: Serialize + SchemaData,
 {
     pub fn from_config(config: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config).expect("Invalid config for RedisSink");
-        let profile: RedisConfig = serde_json::from_value(config.connection).expect("Invalid connection profile for RedisSink");
-        let table: RedisTable = serde_json::from_value(config.table).expect("Invalid table config for Redis");
+        let profile: RedisConfig = serde_json::from_value(config.connection)
+            .expect("Invalid connection profile for RedisSink");
+        let table: RedisTable =
+            serde_json::from_value(config.table).expect("Invalid table config for Redis");
 
         let client = match profile.connection {
             RedisConfigConnection::Address(address) => {
                 Clients::Standard(Client::open(address.0).expect("invalid address"))
             }
-            RedisConfigConnection::Addresses(addresses) => {
-                Clients::Clustered(ClusterClient::new(addresses.into_iter()
-                    .map(|e| e.0)
-                    .collect())
-                    .expect("failed to construct cluster client"))
-            }
+            RedisConfigConnection::Addresses(addresses) => Clients::Clustered(
+                ClusterClient::new(addresses.into_iter().map(|e| e.0).collect())
+                    .expect("failed to construct cluster client"),
+            ),
         };
 
         let (tx, cmd_rx) = tokio::sync::mpsc::channel(128);
@@ -295,24 +302,29 @@ impl<K, T> RedisSinkFunc<K, T>
                         max_push_keys: HashSet::new(),
                         behavior: match self.table.connector_type {
                             TableType::Target(Target::StringTable { ttl_secs, .. }) => {
-                                RedisBehavior::Set { ttl: ttl_secs.map(|t| t.get() as usize) }
+                                RedisBehavior::Set {
+                                    ttl: ttl_secs.map(|t| t.get() as usize),
+                                }
                             }
-                            TableType::Target(Target::ListTable { max_length, operation, .. }) => {
+                            TableType::Target(Target::ListTable {
+                                max_length,
+                                operation,
+                                ..
+                            }) => {
                                 let max = max_length.map(|x| x.get() as usize);
                                 match operation {
                                     ListOperation::Append => {
-                                        RedisBehavior::Push { append: true, max  }
+                                        RedisBehavior::Push { append: true, max }
                                     }
                                     ListOperation::Prepend => {
-                                        RedisBehavior::Push { append: false, max  }
+                                        RedisBehavior::Push { append: false, max }
                                     }
                                 }
                             }
-                            TableType::Target(Target::HashTable { .. }) => {
-                                RedisBehavior::Hash
-                            }
+                            TableType::Target(Target::HashTable { .. }) => RedisBehavior::Hash,
                         },
-                    }.start();
+                    }
+                    .start();
                     return;
                 }
                 Err(e) => {
@@ -320,8 +332,7 @@ impl<K, T> RedisSinkFunc<K, T>
                 }
             }
 
-            tokio::time::sleep(Duration::from_millis((50 * (1 << attempts)).min(5_000)))
-                .await;
+            tokio::time::sleep(Duration::from_millis((50 * (1 << attempts)).min(5_000))).await;
             attempts -= 1;
         }
 
@@ -332,10 +343,12 @@ impl<K, T> RedisSinkFunc<K, T>
         let mut key = prefix.to_string();
 
         if let Some(key_field) = &column {
-            key.push_str(&v.get(key_field)
-                .expect("key field not found in data")
-                .as_str()
-                .expect("key field is not a string"));
+            key.push_str(
+                &v.get(key_field)
+                    .expect("key field not found in data")
+                    .as_str()
+                    .expect("key field is not a string"),
+            );
         };
 
         key
@@ -345,44 +358,65 @@ impl<K, T> RedisSinkFunc<K, T>
         let value = serde_json::to_value(&record.value).unwrap();
         let data = self.serializer.to_vec(&record.value).unwrap();
         match &self.table.connector_type {
-            TableType::Target(target) => {
-                match &target {
-                    Target::StringTable { key_column, key_prefix, .. } => {
-                        let key = Self::make_key(key_prefix, key_column, &value);
-                        self.tx.send(RedisCmd::Data {
-                            key,
-                            value: data,
-                        }).await.expect("Redis writer panicked");
-                    }
-                    Target::ListTable { list_key_column, list_prefix, .. } => {
-                        let key = Self::make_key(list_prefix, list_key_column, &value);
+            TableType::Target(target) => match &target {
+                Target::StringTable {
+                    key_column,
+                    key_prefix,
+                    ..
+                } => {
+                    let key = Self::make_key(key_prefix, key_column, &value);
+                    self.tx
+                        .send(RedisCmd::Data { key, value: data })
+                        .await
+                        .expect("Redis writer panicked");
+                }
+                Target::ListTable {
+                    list_key_column,
+                    list_prefix,
+                    ..
+                } => {
+                    let key = Self::make_key(list_prefix, list_key_column, &value);
 
-                        self.tx.send(RedisCmd::Data {
-                            key,
-                            value: data,
-                        }).await.expect("Redis writer panicked");
-                    }
-                    Target::HashTable { hash_field_column, hash_key_column, hash_key_prefix } => {
-                        let key = Self::make_key(hash_key_prefix, hash_key_column, &value);
-                        let field = value.get(hash_field_column)
-                            .expect("hash field column not found in data")
-                            .as_str()
-                            .expect("hash field is not a string")
-                            .to_string();
+                    self.tx
+                        .send(RedisCmd::Data { key, value: data })
+                        .await
+                        .expect("Redis writer panicked");
+                }
+                Target::HashTable {
+                    hash_field_column,
+                    hash_key_column,
+                    hash_key_prefix,
+                } => {
+                    let key = Self::make_key(hash_key_prefix, hash_key_column, &value);
+                    let field = value
+                        .get(hash_field_column)
+                        .expect("hash field column not found in data")
+                        .as_str()
+                        .expect("hash field is not a string")
+                        .to_string();
 
-                        self.tx.send(RedisCmd::HData {
+                    self.tx
+                        .send(RedisCmd::HData {
                             key,
                             field,
-                            value: data
-                        }).await.expect("Redis writer panicked");
-                    }
+                            value: data,
+                        })
+                        .await
+                        .expect("Redis writer panicked");
                 }
-            }
+            },
         };
     }
 
-    async fn handle_checkpoint(&mut self, checkpoint: &CheckpointBarrier, _ctx: &mut Context<(), ()>) {
-        self.tx.send(RedisCmd::Flush(checkpoint.epoch)).await.expect("writer has panicked");
+    async fn handle_checkpoint(
+        &mut self,
+        checkpoint: &CheckpointBarrier,
+        _ctx: &mut Context<(), ()>,
+    ) {
+        self.tx
+            .send(RedisCmd::Flush(checkpoint.epoch))
+            .await
+            .expect("writer has panicked");
 
         loop {
             match tokio::time::timeout(Duration::from_secs(30), self.rx.recv()).await {

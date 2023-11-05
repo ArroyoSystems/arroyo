@@ -5,8 +5,8 @@ use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::{mem, thread};
 
-use std::time::SystemTime;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use bincode::{config, Decode, Encode};
@@ -188,8 +188,6 @@ impl ErrorReporter {
             .unwrap();
     }
 }
-
-
 
 #[derive(Clone)]
 pub struct Collector<K: Key, T: Data> {

@@ -1,13 +1,15 @@
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage, FieldType, PrimitiveType};
+use anyhow::{anyhow, bail};
+use arroyo_rpc::api_types::connections::{
+    ConnectionSchema, ConnectionType, FieldType, PrimitiveType, TestSourceMessage,
+};
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
-use std::convert::Infallible;
-use anyhow::{anyhow, bail};
 use redis::cluster::ClusterClient;
-use typify::import_types;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
+use typify::import_types;
 
-use crate::{Connection, Connector, pull_opt, pull_option_to_u64};
+use crate::{pull_opt, pull_option_to_u64, Connection, Connector};
 
 pub struct RedisConnector {}
 
@@ -18,59 +20,94 @@ const ICON: &str = include_str!("../resources/kafka.svg");
 import_types!(schema = "../connector-schemas/redis/connection.json",);
 import_types!(schema = "../connector-schemas/redis/table.json");
 
-
-fn validate_column(schema: &ConnectionSchema, column: String, path: &str) -> anyhow::Result<String> {
-    if schema.fields.iter()
-        .find(|f| f.field_name == column && f.field_type.r#type == FieldType::Primitive(PrimitiveType::String)).is_none() {
-            bail!("invalid value '{}' for {}, must be the name of a TEXT column on the table", column, path);
+fn validate_column(
+    schema: &ConnectionSchema,
+    column: String,
+    path: &str,
+) -> anyhow::Result<String> {
+    if schema
+        .fields
+        .iter()
+        .find(|f| {
+            f.field_name == column
+                && f.field_type.r#type == FieldType::Primitive(PrimitiveType::String)
+        })
+        .is_none()
+    {
+        bail!(
+            "invalid value '{}' for {}, must be the name of a TEXT column on the table",
+            column,
+            path
+        );
     }
 
     Ok(column)
 }
 
-async fn test_inner(c: RedisConfig, tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>) -> anyhow::Result<String> {
-    tx.send(Ok(Event::default().json_data(TestSourceMessage::info("Connecting to Redis")).unwrap()))
+async fn test_inner(
+    c: RedisConfig,
+    tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+) -> anyhow::Result<String> {
+    tx.send(Ok(Event::default()
+        .json_data(TestSourceMessage::info("Connecting to Redis"))
+        .unwrap()))
         .await
         .unwrap();
 
     match c.connection {
         RedisConfigConnection::Address(address) => {
-            let client = redis::Client::open(address.0.clone()).map_err(|e|
-                anyhow!("Failed to construct Redis client for {}: {:?}", address.0, e))?;
+            let client = redis::Client::open(address.0.clone()).map_err(|e| {
+                anyhow!(
+                    "Failed to construct Redis client for {}: {:?}",
+                    address.0,
+                    e
+                )
+            })?;
 
-            let mut connection = client.get_async_connection().await.map_err(|e|
-                anyhow!("Failed to connect to Redis at {}: {:?}", address.0, e))?;
+            let mut connection = client
+                .get_async_connection()
+                .await
+                .map_err(|e| anyhow!("Failed to connect to Redis at {}: {:?}", address.0, e))?;
 
-            tx.send(Ok(Event::default().json_data(TestSourceMessage::info("Connected successfully, sending PING")).unwrap()))
+            tx.send(Ok(Event::default()
+                .json_data(TestSourceMessage::info(
+                    "Connected successfully, sending PING",
+                ))
+                .unwrap()))
                 .await
                 .unwrap();
 
-            redis::cmd("PING").query_async(&mut connection).await
+            redis::cmd("PING")
+                .query_async(&mut connection)
+                .await
                 .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
-
-        },
+        }
         RedisConfigConnection::Addresses(addresses) => {
             let client = ClusterClient::new(addresses.into_iter().map(|a| a.0).collect())
                 .map_err(|e| anyhow!("Failed to construct Redis Cluster client: {:?}", e))?;
 
-            let mut connection = client.get_async_connection()
+            let mut connection = client
+                .get_async_connection()
                 .await
                 .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
 
-            tx.send(Ok(Event::default().json_data(TestSourceMessage::info("Connected successfully, sending PING")).unwrap()))
+            tx.send(Ok(Event::default()
+                .json_data(TestSourceMessage::info(
+                    "Connected successfully, sending PING",
+                ))
+                .unwrap()))
                 .await
                 .unwrap();
 
-            redis::cmd("PING").query_async(&mut connection).await
+            redis::cmd("PING")
+                .query_async(&mut connection)
+                .await
                 .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
-        },
+        }
     };
 
-
     Ok("Received PING response successfully".to_string())
-
 }
-
 
 impl Connector for RedisConnector {
     type ProfileT = RedisConfig;
@@ -120,12 +157,8 @@ impl Connector for RedisConnector {
     ) {
         tokio::task::spawn(async move {
             let resp = match test_inner(c, tx.clone()).await {
-                Ok(c) => {
-                    TestSourceMessage::done(c)
-                }
-                Err(e) => {
-                    TestSourceMessage::fail(e.to_string())
-                }
+                Ok(c) => TestSourceMessage::done(c),
+                Err(e) => TestSourceMessage::fail(e.to_string()),
             };
 
             tx.send(Ok(Event::default().json_data(resp).unwrap()))
@@ -148,12 +181,12 @@ impl Connector for RedisConnector {
             (Some(address), None) => {
                 RedisConfigConnection::Address(RedisConfigConnectionAddress(address))
             }
-            (None, Some(cluster_addresses)) => {
-                RedisConfigConnection::Addresses(cluster_addresses
+            (None, Some(cluster_addresses)) => RedisConfigConnection::Addresses(
+                cluster_addresses
                     .split(",")
                     .map(|s| Address(s.to_string()))
-                    .collect())
-            }
+                    .collect(),
+            ),
             (Some(_), Some(_)) => {
                 bail!("only one of `address` or `cluster.addresses` may be set");
             }
@@ -168,67 +201,74 @@ impl Connector for RedisConnector {
             .as_ref()
             .ok_or_else(|| anyhow!("No schema defined for Redis connection"))?;
 
-        fn validate_column(schema: &ConnectionSchema, column: String, sql: &str) -> anyhow::Result<String> {
-            if schema.fields.iter()
-                .find(|f| f.field_name == column &&
-                    f.field_type.r#type == FieldType::Primitive(PrimitiveType::String) &&
-                    !f.nullable
-                ).is_none() {
-                    bail!("invalid value '{}' for {}, must be the name of a non-nullable TEXT column on the table", column, sql);
-                };
+        fn validate_column(
+            schema: &ConnectionSchema,
+            column: String,
+            sql: &str,
+        ) -> anyhow::Result<String> {
+            if schema
+                .fields
+                .iter()
+                .find(|f| {
+                    f.field_name == column
+                        && f.field_type.r#type == FieldType::Primitive(PrimitiveType::String)
+                        && !f.nullable
+                })
+                .is_none()
+            {
+                bail!("invalid value '{}' for {}, must be the name of a non-nullable TEXT column on the table", column, sql);
+            };
 
             Ok(column)
         }
 
-        let sink = match typ.as_str()  {
-            "sink" => {
-                TableType::Target(match pull_opt("target", opts)?.as_str() {
-                    "string" => {
-                        Target::StringTable {
-                            key_prefix: pull_opt("target.key_prefix", opts)?,
-                            key_column: opts.remove("target.key_column")
-                                .map(|name| validate_column(schema, name, "target.key_column")).transpose()?,
-                            ttl_secs: pull_option_to_u64("target.ttl_secs", opts)?
-                                .map(|t| t.try_into())
-                                .transpose()
-                                .map_err(|_| anyhow!("target.ttl_secs must be greater than 0"))?,
+        let sink = match typ.as_str() {
+            "sink" => TableType::Target(match pull_opt("target", opts)?.as_str() {
+                "string" => Target::StringTable {
+                    key_prefix: pull_opt("target.key_prefix", opts)?,
+                    key_column: opts
+                        .remove("target.key_column")
+                        .map(|name| validate_column(schema, name, "target.key_column"))
+                        .transpose()?,
+                    ttl_secs: pull_option_to_u64("target.ttl_secs", opts)?
+                        .map(|t| t.try_into())
+                        .transpose()
+                        .map_err(|_| anyhow!("target.ttl_secs must be greater than 0"))?,
+                },
+                "list" => Target::ListTable {
+                    list_prefix: pull_opt("target.key_prefix", opts)?,
+                    list_key_column: opts
+                        .remove("target.key_column")
+                        .map(|name| validate_column(schema, name, "target.key_column"))
+                        .transpose()?,
+                    max_length: pull_option_to_u64("target.max_length", opts)?
+                        .map(|t| t.try_into())
+                        .transpose()
+                        .map_err(|_| anyhow!("target.max_length must be greater than 0"))?,
+                    operation: match opts.remove("target.operation").as_ref().map(|s| s.as_str()) {
+                        Some("append") | None => ListOperation::Append,
+                        Some("prepend") => ListOperation::Prepend,
+                        Some(op) => {
+                            bail!("'{}' is not a valid value for target.operation; must be one of 'append' or 'prepend'", op);
                         }
                     },
-                    "list" => {
-                        Target::ListTable {
-                            list_prefix: pull_opt("target.key_prefix", opts)?,
-                            list_key_column: opts.remove("target.key_column")
-                                .map(|name| validate_column(schema, name, "target.key_column")).transpose()?,
-                            max_length: pull_option_to_u64("target.max_length", opts)?
-                                .map(|t| t.try_into())
-                                .transpose()
-                                .map_err(|_| anyhow!("target.max_length must be greater than 0"))?,
-                            operation: match opts.remove("target.operation").as_ref().map(|s| s.as_str()) {
-                                Some("append") | None => {
-                                    ListOperation::Append
-                                }
-                                Some("prepend") => {
-                                    ListOperation::Prepend
-                                }
-                                Some(op) => {
-                                    bail!("'{}' is not a valid value for target.operation; must be one of 'append' or 'prepend'", op);
-                                }
-                            }
-                        }
-                    },
-                    "hash" => {
-                        Target::HashTable {
-                            hash_field_column: validate_column(schema, pull_opt("target.field_column", opts)?, "targets.field_column")?,
-                            hash_key_column: opts.remove("target.key_column")
-                                .map(|name| validate_column(schema, name, "target.key_column")).transpose()?,
-                            hash_key_prefix: pull_opt("target.key_prefix", opts)?,
-                        }
-                    }
-                    s => {
-                        bail!("'{}' is not a valid redis target", s);
-                    }
-                })
-            }
+                },
+                "hash" => Target::HashTable {
+                    hash_field_column: validate_column(
+                        schema,
+                        pull_opt("target.field_column", opts)?,
+                        "targets.field_column",
+                    )?,
+                    hash_key_column: opts
+                        .remove("target.key_column")
+                        .map(|name| validate_column(schema, name, "target.key_column"))
+                        .transpose()?,
+                    hash_key_prefix: pull_opt("target.key_prefix", opts)?,
+                },
+                s => {
+                    bail!("'{}' is not a valid redis target", s);
+                }
+            }),
             s => {
                 bail!("'{}' is not a valid type; must be `sink`", s);
             }
@@ -241,9 +281,9 @@ impl Connector for RedisConnector {
                 connection: connection_config,
             },
             RedisTable {
-                connector_type: sink
+                connector_type: sink,
             },
-            s
+            s,
         )
     }
 
@@ -267,8 +307,13 @@ impl Connector for RedisConnector {
 
         match &config.connection {
             RedisConfigConnection::Address(address) => {
-                let _ = redis::Client::open(address.0.clone()).map_err(|e|
-                    anyhow!("Failed to construct Redis client for {}: {:?}", address.0, e))?;
+                let _ = redis::Client::open(address.0.clone()).map_err(|e| {
+                    anyhow!(
+                        "Failed to construct Redis client for {}: {:?}",
+                        address.0,
+                        e
+                    )
+                })?;
             }
             RedisConfigConnection::Addresses(addresses) => {
                 let _ = ClusterClient::new(addresses.into_iter().map(|a| a.0.clone()).collect())
@@ -281,21 +326,30 @@ impl Connector for RedisConnector {
                 if let Some(key_column) = key_column {
                     validate_column(&schema, key_column.clone(), "connector_type.key_column")?;
                 }
-            },
-            TableType::Target(Target::ListTable { list_key_column, .. }) => {
+            }
+            TableType::Target(Target::ListTable {
+                list_key_column, ..
+            }) => {
                 if let Some(n) = list_key_column {
                     validate_column(&schema, n.clone(), "connector_type.list_key_column")?;
                 }
-            },
-            TableType::Target(Target::HashTable { hash_key_column, hash_field_column, .. }) => {
+            }
+            TableType::Target(Target::HashTable {
+                hash_key_column,
+                hash_field_column,
+                ..
+            }) => {
                 if let Some(n) = hash_key_column {
                     validate_column(&schema, n.clone(), "connector_type.hash_key_column")?;
                 }
 
-                validate_column(&schema, hash_field_column.clone(), "connector_type.hash_field_column")?;
-             }
+                validate_column(
+                    &schema,
+                    hash_field_column.clone(),
+                    "connector_type.hash_field_column",
+                )?;
+            }
         };
-
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -314,6 +368,5 @@ impl Connector for RedisConnector {
             config: serde_json::to_string(&config).unwrap(),
             description: "RedisSink".to_string(),
         })
-
     }
 }
