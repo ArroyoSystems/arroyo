@@ -15,7 +15,7 @@ pub struct RedisConnector {}
 
 const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/redis/connection.json");
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/redis/table.json");
-const ICON: &str = include_str!("../resources/kafka.svg");
+const ICON: &str = include_str!("../resources/redis.svg");
 
 import_types!(schema = "../connector-schemas/redis/connection.json",);
 import_types!(schema = "../connector-schemas/redis/table.json");
