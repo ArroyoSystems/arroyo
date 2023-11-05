@@ -287,6 +287,19 @@ pub(crate) fn pull_option_to_i64(
         .transpose()
 }
 
+pub(crate) fn pull_option_to_u64(
+    name: &str,
+    opts: &mut HashMap<String, String>,
+) -> anyhow::Result<Option<u64>> {
+    pull_option_to_i64(name, opts)?
+        .map(|x| if x < 0 {
+            bail!("invalid valid for {}, must be greater than 0", name);
+        } else {
+            Ok(x as u64)
+        }).transpose()
+}
+
+
 pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
     connectors().remove(t)
 }
