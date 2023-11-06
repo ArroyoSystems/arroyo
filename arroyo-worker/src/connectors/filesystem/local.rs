@@ -91,6 +91,25 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
     }
 
     fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut V {
+        let file_suffix = if self.filenaming.filename_suffix.is_some() {
+            self.filenaming.filename_suffix.as_ref().unwrap()
+        } else {
+            V::file_suffix()
+        };
+        let filename_strategy = if self.filename_strategy == FilenameStrategy::Uuid {
+            Uuid::new_v4().to_string()
+        } else {
+            format!("{:>05}-{:>03}", self.next_file_index, self.subtask_id)
+        };
+        let core_filename = if self.filenaming.filename_prefix.is_some() {
+            format!(
+                "{}-{}",
+                self.filenaming.filename_prefix.as_ref().unwrap(),
+                filename_strategy
+            )
+        } else {
+            filename_strategy
+        };
         if !self.writers.contains_key(partition) {
             let file_name = match partition {
                 Some(partition) => {
@@ -98,28 +117,12 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
                     create_dir_all(&format!("{}/{}", self.tmp_dir, partition)).unwrap();
                     create_dir_all(&format!("{}/{}", self.final_dir, partition)).unwrap();
                     if self.filename_strategy == FilenameStrategy::Uuid {
-                        format!(
-                            "{}/{}.{}",
-                            partition,
-                            Uuid::new_v4().to_string(),
-                            V::file_suffix()
-                        )
+                        format!("{}/{}.{}", partition, core_filename, file_suffix)
                     } else {
-                        format!(
-                            "{}/{:>05}-{:>03}.{}",
-                            partition,
-                            self.next_file_index,
-                            self.subtask_id,
-                            V::file_suffix()
-                        )
+                        format!("{}/{}.{}", partition, core_filename, file_suffix)
                     }
                 }
-                None => format!(
-                    "{:>05}-{:>03}.{}",
-                    self.next_file_index,
-                    self.subtask_id,
-                    V::file_suffix()
-                ),
+                None => format!("{}.{}", core_filename, V::file_suffix()),
             };
             self.writers.insert(
                 partition.clone(),
