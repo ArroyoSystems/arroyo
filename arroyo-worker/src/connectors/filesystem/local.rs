@@ -10,6 +10,7 @@ use bincode::{Decode, Encode};
 use serde::Serialize;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::info;
+use uuid::Uuid;
 
 use crate::{
     connectors::{filesystem::FinishedFile, two_phase_committer::TwoPhaseCommitter},
@@ -19,8 +20,8 @@ use crate::{
 use anyhow::{bail, Result};
 
 use super::{
-    delta, get_partitioner_from_table, CommitState, CommitStyle, FileSystemTable,
-    MultiPartWriterStats, RollingPolicy,
+    delta, get_partitioner_from_table, CommitState, CommitStyle, FileSystemTable, FilenameStrategy,
+    Filenaming, MultiPartWriterStats, RollingPolicy,
 };
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
@@ -36,6 +37,8 @@ pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     table_properties: FileSystemTable,
     commit_state: CommitState,
     phantom: PhantomData<(K, D)>,
+    filenaming: Filenaming,
+    filename_strategy: FilenameStrategy,
 }
 
 impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
@@ -56,6 +59,18 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
 
+        let filenaming = table_properties
+            .file_settings
+            .clone()
+            .unwrap()
+            .filenaming
+            .unwrap();
+
+        let filename_strategy = match filenaming.filename_strategy {
+            Some(FilenameStrategy::Uuid) => FilenameStrategy::Uuid,
+            Some(FilenameStrategy::Serial) => FilenameStrategy::Serial,
+            None => FilenameStrategy::Serial,
+        };
         Self {
             writers: HashMap::new(),
             tmp_dir,
@@ -70,6 +85,8 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             table_properties,
             commit_state,
             phantom: PhantomData,
+            filenaming,
+            filename_strategy,
         }
     }
 
@@ -80,13 +97,22 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
                     // make sure the partition directory exists in tmp and final
                     create_dir_all(&format!("{}/{}", self.tmp_dir, partition)).unwrap();
                     create_dir_all(&format!("{}/{}", self.final_dir, partition)).unwrap();
-                    format!(
-                        "{}/{:>05}-{:>03}.{}",
-                        partition,
-                        self.next_file_index,
-                        self.subtask_id,
-                        V::file_suffix()
-                    )
+                    if self.filename_strategy == FilenameStrategy::Uuid {
+                        format!(
+                            "{}/{}.{}",
+                            partition,
+                            Uuid::new_v4().to_string(),
+                            V::file_suffix()
+                        )
+                    } else {
+                        format!(
+                            "{}/{:>05}-{:>03}.{}",
+                            partition,
+                            self.next_file_index,
+                            self.subtask_id,
+                            V::file_suffix()
+                        )
+                    }
                 }
                 None => format!(
                     "{:>05}-{:>03}.{}",
