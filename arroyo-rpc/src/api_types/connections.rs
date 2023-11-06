@@ -204,6 +204,39 @@ pub struct TestSourceMessage {
     pub done: bool,
     pub message: String,
 }
+impl TestSourceMessage {
+    pub fn info(message: impl Into<String>) -> Self {
+        Self {
+            error: false,
+            done: false,
+            message: message.into(),
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            error: true,
+            done: false,
+            message: message.into(),
+        }
+    }
+
+    pub fn done(message: impl Into<String>) -> Self {
+        Self {
+            error: false,
+            done: true,
+            message: message.into(),
+        }
+    }
+
+    pub fn fail(message: impl Into<String>) -> Self {
+        Self {
+            error: true,
+            done: true,
+            message: message.into(),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "camelCase")]

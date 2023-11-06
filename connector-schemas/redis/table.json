@@ -1,0 +1,124 @@
+{
+    "type": "object",
+    "title": "RedisTable",
+    "properties": {
+        "connectorType": {
+            "type": "object",
+            "title": "Table Type",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Sink",
+                    "properties": {
+                        "target": {
+                            "type": "object",
+                            "title": "Target",
+                            "description": "Configures how data is written to Redis",
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "title": "String Table",
+                                    "description": "Stores values in Redis using the String data type",
+                                    "properties": {
+                                        "keyPrefix": {
+                                            "type": "string",
+                                            "title": "Key Prefix",
+                                            "description": "The prefix to use for keys in this table"
+                                        },
+                                        "keyColumn": {
+                                            "type": "string",
+                                            "title": "Key Column",
+                                            "description": "If set, the value of this column in each row will be appended to the prefix and used as the key in Redis"
+                                        },
+                                        "ttlSecs": {
+                                            "type": "integer",
+                                            "title": "Time To Live",
+                                            "description": "If set, the value will expire after this many seconds",
+                                            "minimum": 1
+                                        }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                        "keyPrefix"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "title": "List Table",
+                                    "description": "Stores values in Redis using the List data type",
+                                    "properties": {
+                                        "listPrefix": {
+                                            "type": "string",
+                                            "title": "Key Prefix",
+                                            "description": "The prefix to use for keys in this table"
+                                        },
+                                        "listKeyColumn": {
+                                            "type": "string",
+                                            "title": "Key Column",
+                                            "description": "If set, the value of this column in each row will be appended to the prefix and used as the key in Redis"
+                                        },
+                                        "maxLength": {
+                                            "type": "integer",
+                                            "title": "Max Length",
+                                            "description": "If set, the list will be trimmed to this length after each write",
+                                            "minimum": 1
+                                        },
+                                        "operation": {
+                                            "type": "string",
+                                            "title": "List Operation",
+                                            "description": "How values are pushed onto the list",
+                                            "enum": [
+                                                "Prepend",
+                                                "Append"
+                                            ]
+                                        }
+                                    },
+                                    "required":  [
+                                        "listPrefix",
+                                        "operation"
+                                    ],
+                                    "additionalProperties": false
+                                },
+                                {
+                                    "type": "object",
+                                    "title": "Hash Table",
+                                    "description": "Stores values in Redis using the Hash data type",
+                                    "properties": {
+                                        "hashKeyPrefix": {
+                                            "type": "string",
+                                            "title": "Key Prefix",
+                                            "description": "The prefix to use for keys in this table"
+                                        },
+                                        "hashKeyColumn": {
+                                            "type": "string",
+                                            "title": "Key Column",
+                                            "description": "If set, the value of this column in each row will be appended to the prefix and used as the key in Redis"
+                                        },
+                                        "hashFieldColumn": {
+                                            "type": "string",
+                                            "title": "Hash Field Column",
+                                            "description": "The value of this column in each row will be used as the field name in the hash map"
+                                        }
+                                    },
+                                    "required":  [
+                                        "hashKeyPrefix",
+                                        "hashFieldColumn"
+                                    ],
+                                    "additionalProperties": false
+                                }
+
+                            ]
+                        }
+                    },
+                    "required": [
+                        "target"
+                    ],
+                    "additionalProperties": false
+                }
+            ]
+        }
+    },
+    "required": [
+        "connectorType"
+    ]
+}

@@ -5,6 +5,7 @@ use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::{mem, thread};
 
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use arroyo_state::tables::time_key_map::TimeKeyMap;
@@ -126,9 +127,10 @@ impl WatermarkHolder {
 }
 
 pub struct Context<K: Key, T: Data, S: BackingStore = StateBackend> {
-    pub task_info: TaskInfo,
+    pub task_info: Arc<TaskInfo>,
     pub control_rx: Receiver<ControlMessage>,
     pub control_tx: Sender<ControlResp>,
+    pub error_reporter: ErrorReporter,
     pub watermarks: WatermarkHolder,
     pub state: StateStore<S>,
     pub collector: Collector<K, T>,
@@ -168,8 +170,28 @@ impl OutQueue {
 }
 
 #[derive(Clone)]
+pub struct ErrorReporter {
+    tx: Sender<ControlResp>,
+    task_info: Arc<TaskInfo>,
+}
+
+impl ErrorReporter {
+    pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
+        self.tx
+            .send(ControlResp::Error {
+                operator_id: self.task_info.operator_id.clone(),
+                task_index: self.task_info.task_index,
+                message: message.into(),
+                details: details.into(),
+            })
+            .await
+            .unwrap();
+    }
+}
+
+#[derive(Clone)]
 pub struct Collector<K: Key, T: Data> {
-    task_info: TaskInfo,
+    task_info: Arc<TaskInfo>,
     out_qs: Vec<Vec<OutQueue>>,
     _ts: PhantomData<(K, T)>,
     tx_queue_rem_gauges: QueueGauges,
@@ -286,20 +308,25 @@ impl<K: Key, T: Data> Context<K, T> {
         let (tx_queue_size_gauges, tx_queue_rem_gauges) =
             register_queue_gauges(&task_info, &out_qs);
 
+        let task_info = Arc::new(task_info);
         Context {
             task_info: task_info.clone(),
             control_rx,
-            control_tx,
+            control_tx: control_tx.clone(),
             watermarks: WatermarkHolder::new(vec![
                 watermark.map(Watermark::EventTime);
                 input_partitions
             ]),
             collector: Collector::<K, T> {
-                task_info,
+                task_info: task_info.clone(),
                 out_qs,
                 tx_queue_rem_gauges,
                 tx_queue_size_gauges,
                 _ts: PhantomData,
+            },
+            error_reporter: ErrorReporter {
+                tx: control_tx,
+                task_info,
             },
             state,
             _ts: PhantomData,
@@ -396,16 +423,8 @@ impl<K: Key, T: Data> Context<K, T> {
         self.collector.broadcast(message).await;
     }
 
-    pub async fn report_error(&mut self, message: String, details: String) {
-        self.control_tx
-            .send(ControlResp::Error {
-                operator_id: self.task_info.operator_id.clone(),
-                task_index: self.task_info.task_index,
-                message,
-                details,
-            })
-            .await
-            .unwrap();
+    pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
+        self.error_reporter.report_error(message, details).await;
     }
 
     pub async fn report_user_error(&mut self, error: UserError) {
