@@ -1,5 +1,6 @@
 #![allow(clippy::comparison_chain)]
 use std::collections::HashMap;
+use std::iter::once;
 
 use std::time::Duration;
 use std::unreachable;
@@ -70,6 +71,31 @@ impl SourceOperator {
 }
 
 impl RecordTransform {
+    pub fn expressions(&mut self) -> impl Iterator<Item = &mut Expression> {
+        match self {
+            RecordTransform::ValueProjection(projection) => {
+                Box::new(projection.expressions()) as Box<dyn Iterator<Item = &mut Expression>>
+            }
+            RecordTransform::KeyProjection(projection) => {
+                Box::new(projection.expressions()) as Box<dyn Iterator<Item = &mut Expression>>
+            }
+            RecordTransform::UnnestProjection(projection) => Box::new(
+                projection
+                    .fields
+                    .iter_mut()
+                    .map(|(_, expression, _)| expression)
+                    .chain(once(&mut projection.unnest_inner)),
+            )
+                as Box<dyn Iterator<Item = &mut Expression>>,
+            RecordTransform::TimestampAssignment(expression) => {
+                Box::new(once(expression)) as Box<dyn Iterator<Item = &mut Expression>>
+            }
+            RecordTransform::Filter(expression) => {
+                Box::new(once(expression)) as Box<dyn Iterator<Item = &mut Expression>>
+            }
+        }
+    }
+
     pub fn output_struct(&self, input_struct: StructDef) -> StructDef {
         match self {
             RecordTransform::ValueProjection(projection) => {

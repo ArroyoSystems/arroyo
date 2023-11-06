@@ -169,7 +169,7 @@ message WorkerErrorRes {
 }
 
 message CheckUdfsReq {
-  string udfs_rs = 1;
+  string definition = 1;
 }
 
 service ControllerGrpc {
@@ -453,18 +453,16 @@ message CompileQueryResp {
   string wasm_fns_path = 2;
 }
 
-
-enum ValidationResult {
-  Ok = 0;
-  Error = 1;
+message CheckUdfsResp {
+  repeated string errors = 1;
+  optional string udf_name = 2;
 }
 
-message CheckUdfsResp {
-  ValidationResult result = 1;
-  repeated string errors = 2;
+message CheckUdfsCompilerResp {
+  repeated string errors = 1;
 }
 
 service CompilerGrpc {
   rpc CompileQuery(CompileQueryReq) returns (CompileQueryResp);
-  rpc CheckUdfs(CheckUdfsReq) returns (CheckUdfsResp);
+  rpc CheckUdfs(CheckUdfsReq) returns (CheckUdfsCompilerResp);
 }

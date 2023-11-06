@@ -14,6 +14,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
 
+use crate::expressions::AggregateComputation;
 use crate::{
     code_gen::{
         BinAggregatingContext, CodeGenerator, CombiningContext, JoinListsContext, JoinPairContext,
@@ -1160,6 +1161,113 @@ impl PlanGraph {
         }
     }
 
+    pub fn find_used_udfs(&mut self, used_udfs: &mut HashSet<String>) {
+        let accumulate_udfs = |ctx: &mut HashSet<String>, e: &mut Expression| match e {
+            Expression::RustUdf(r) => {
+                ctx.insert(r.name());
+            }
+            _ => {}
+        };
+
+        for node in self.graph.node_weights_mut() {
+            match &mut node.operator {
+                PlanOperator::Source(_, _) => {}
+                PlanOperator::Watermark(_) => {}
+                PlanOperator::RecordTransform(ref mut r) => {
+                    r.expressions()
+                        .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs));
+                }
+                PlanOperator::FusedRecordTransform(ref mut f) => {
+                    f.expressions.iter_mut().for_each(|e| {
+                        e.expressions()
+                            .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs))
+                    });
+                }
+                PlanOperator::Unkey => {}
+                PlanOperator::WindowAggregate {
+                    ref mut projection, ..
+                } => {
+                    projection.aggregates.iter_mut().for_each(|a| match a {
+                        AggregateComputation::Builtin {
+                            ref mut computation,
+                            ..
+                        } => {
+                            computation
+                                .producing_expression
+                                .traverse_mut(used_udfs, &accumulate_udfs);
+                        }
+                        AggregateComputation::UDAF {
+                            ref mut computation,
+                            ..
+                        } => {
+                            used_udfs.insert(computation.name());
+                            computation
+                                .expressions()
+                                .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs));
+                        }
+                    });
+                }
+                PlanOperator::NonWindowAggregate {
+                    ref mut projection, ..
+                } => projection
+                    .expressions()
+                    .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs)),
+                PlanOperator::TumblingWindowTwoPhaseAggregator {
+                    ref mut projection, ..
+                } => projection
+                    .expressions()
+                    .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs)),
+                PlanOperator::SlidingWindowTwoPhaseAggregator {
+                    ref mut projection, ..
+                } => projection
+                    .expressions()
+                    .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs)),
+                PlanOperator::InstantJoin => {}
+                PlanOperator::JoinWithExpiration { .. } => {}
+                PlanOperator::JoinListMerge(_, _) => {}
+                PlanOperator::JoinPairMerge(_, _) => {}
+                PlanOperator::Flatten => {}
+                PlanOperator::WindowFunction(w) => {
+                    w.order_by
+                        .iter_mut()
+                        .map(|o| o.expression())
+                        .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs));
+                }
+                PlanOperator::TumblingLocalAggregator {
+                    ref mut projection, ..
+                } => projection
+                    .expressions()
+                    .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs)),
+                PlanOperator::SlidingAggregatingTopN {
+                    ref mut aggregating_projection,
+                    ref mut order_by,
+                    ref mut partition_projection,
+                    ref mut converting_projection,
+                    ..
+                } => {
+                    aggregating_projection
+                        .expressions()
+                        .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs));
+                    order_by
+                        .iter_mut()
+                        .for_each(|e| e.expression().traverse_mut(used_udfs, &accumulate_udfs));
+                    partition_projection
+                        .expressions()
+                        .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs));
+                    converting_projection
+                        .expressions()
+                        .for_each(|e| e.traverse_mut(used_udfs, &accumulate_udfs));
+                }
+                PlanOperator::TumblingTopN { .. } => {}
+                PlanOperator::StreamOperator(_, _) => {}
+                PlanOperator::ToDebezium => {}
+                PlanOperator::FromDebezium => {}
+                PlanOperator::FromUpdating => {}
+                PlanOperator::Sink(_, _) => {}
+            }
+        }
+    }
+
     pub fn add_sql_operator(&mut self, operator: SqlOperator) -> NodeIndex {
         match operator {
             SqlOperator::Source(source_operator) => self.add_sql_source(source_operator),
@@ -1861,6 +1969,9 @@ pub fn get_program(
         key_structs.extend(key_names);
     });
 
+    let mut used_udfs = HashSet::new();
+    plan_graph.find_used_udfs(&mut used_udfs);
+
     // find all types that are produced by a source or consumed by a sink
     let connector_types: HashSet<_> = plan_graph
         .graph
@@ -1911,15 +2022,11 @@ pub fn get_program(
             .map(|(_, v)| v),
     );
 
-    let mut udfs = vec![];
-    udfs.push(
-        schema_provider
-            .udf_defs
-            .values()
-            .map(|u| u.def.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-    );
+    // add only the used udfs to the program
+    let udfs = used_udfs
+        .iter()
+        .map(|u| schema_provider.udf_defs.get(u).unwrap().def.clone())
+        .collect();
 
     let graph: DiGraph<StreamNode, StreamEdge> = plan_graph.into();
 

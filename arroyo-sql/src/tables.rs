@@ -111,7 +111,9 @@ fn produce_optimized_plan(
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<LogicalPlan> {
     let sql_to_rel = SqlToRel::new(schema_provider);
-    let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
+    let plan = sql_to_rel
+        .sql_statement_to_plan(statement.clone())
+        .map_err(|e| anyhow!(e.strip_backtrace()))?;
 
     let optimizer_config = OptimizerContext::default();
     let analyzer = Analyzer::default();

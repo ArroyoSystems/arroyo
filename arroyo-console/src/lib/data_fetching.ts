@@ -4,6 +4,8 @@ import useSWRInfinite from 'swr/infinite';
 import { components, paths } from '../gen/api-types';
 import createClient from 'openapi-fetch';
 
+import { LocalUdf } from '../udf_state';
+
 type schemas = components['schemas'];
 
 export type Pipeline = schemas['Pipeline'];
@@ -28,6 +30,9 @@ export type SourceField = schemas['SourceField'];
 export type OperatorCheckpointGroup = schemas['OperatorCheckpointGroup'];
 export type SubtaskCheckpointGroup = schemas['SubtaskCheckpointGroup'];
 export type CheckpointSpanType = schemas['CheckpointSpanType'];
+export type GlobalUdf = schemas['GlobalUdf'];
+export type PipelineLocalUdf = schemas['Udf'];
+export type UdfValidationResult = schemas['UdfValidationResult'];
 
 const BASE_URL = '/api';
 export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
@@ -115,12 +120,12 @@ const operatorErrorsKey = (pipelineId?: string, jobId?: string) => {
   };
 };
 
-const queryValidationKey = (query?: string, udfsInput?: string) => {
-  return query ? { key: 'PipelineGraph', query, udfsInput } : null;
+const queryValidationKey = (query?: string, localUdfs?: LocalUdf[]) => {
+  return query ? { key: 'PipelineGraph', query, localUdfs } : null;
 };
 
-const udfsValidationKey = (udfsInput?: string) => {
-  return udfsInput ? { key: 'UdfsValidation', udfsInput } : null;
+const udfValidationKey = (definition: string) => {
+  return { key: 'UdfValidation', definition };
 };
 
 const pipelineKey = (pipelineId?: string) => {
@@ -334,20 +339,27 @@ export const useCheckpointDetails = (pipelineId?: string, jobId?: string, epoch?
 };
 
 const queryValidationFetcher = () => {
-  return async (params: { key: string; query?: string; udfsInput: string }) => {
+  return async (params: { key: string; query?: string; localUdfs?: LocalUdf[] }) => {
+    let udfs: PipelineLocalUdf[] = [];
+    if (params.localUdfs) {
+      udfs = params.localUdfs.map(udf => {
+        return { language: 'rust', definition: udf.definition };
+      });
+    }
+
     const { data, error } = await post('/v1/pipelines/validate_query', {
       body: {
         query: params.query ?? '',
-        udfs: [{ language: 'rust', definition: params.udfsInput }],
+        udfs: udfs,
       },
     });
     return processResponse(data, error);
   };
 };
 
-export const useQueryValidation = (query?: string, udfsInput?: string) => {
+export const useQueryValidation = (query?: string, localUdfs?: LocalUdf[]) => {
   const { data, error, isLoading } = useSWR<schemas['QueryValidationResult']>(
-    queryValidationKey(query, udfsInput),
+    queryValidationKey(query, localUdfs),
     queryValidationFetcher(),
     { revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false }
   );
@@ -359,28 +371,31 @@ export const useQueryValidation = (query?: string, udfsInput?: string) => {
   };
 };
 
-const udfsValidationFetcher = () => {
-  return async (params: { key: string; udfsInput: string }) => {
-    const { data, error } = await post('/v1/pipelines/validate_udfs', {
+const udfValidationFetcher = () => {
+  return async (params: { key: string; definition: string }) => {
+    const { data, error } = await post('/v1/udfs/validate', {
       body: {
-        udfsRs: params.udfsInput,
+        definition: params.definition,
       },
     });
     return processResponse(data, error);
   };
 };
 
-export const useUdfsValidation = (udfsInput?: string) => {
+export const useUdfValidation = (
+  onSuccess: (data: UdfValidationResult, key: any, config: any) => void,
+  definition: string
+) => {
   const { data, error, isLoading } = useSWR<schemas['UdfValidationResult']>(
-    udfsValidationKey(udfsInput),
-    udfsValidationFetcher(),
-    { revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false }
+    udfValidationKey(definition),
+    udfValidationFetcher(),
+    { revalidateOnFocus: false, revalidateIfStale: false, shouldRetryOnError: false, onSuccess }
   );
 
   return {
-    udfsValidation: data,
-    udfsValidationError: error,
-    udfsValidationLoading: isLoading,
+    udfValidation: data,
+    udfValidationError: error,
+    udfValidationLoading: isLoading,
   };
 };
 
@@ -418,8 +433,12 @@ export const usePipelines = () => {
 
 const pipelineFetcher = () => {
   return async (params: { key: string; pipelineId?: string }) => {
+    if (!params.pipelineId) {
+      return;
+    }
+
     const { data, error } = await get(`/v1/pipelines/{id}`, {
-      params: { path: { id: params.pipelineId! } },
+      params: { path: { id: params.pipelineId } },
     });
     return processResponse(data, error);
   };
@@ -434,24 +453,36 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
   );
 
   const updatePipeline = async (params: { stop?: StopType; parallelism?: number }) => {
+    if (!pipelineId) {
+      return;
+    }
+
     await patch('/v1/pipelines/{id}', {
-      params: { path: { id: pipelineId! } },
+      params: { path: { id: pipelineId } },
       body: { stop: params.stop, parallelism: params.parallelism },
     });
     await mutate();
   };
 
   const restartPipeline = async () => {
+    if (!pipelineId) {
+      return;
+    }
+
     await post('/v1/pipelines/{id}/restart', {
-      params: { path: { id: pipelineId! } },
+      params: { path: { id: pipelineId } },
       body: {},
     });
     await mutate();
   };
 
   const deletePipeline = async () => {
+    if (!pipelineId) {
+      return { error: undefined };
+    }
+
     const { error } = await del('/v1/pipelines/{id}', {
-      params: { path: { id: pipelineId! } },
+      params: { path: { id: pipelineId } },
     });
     await globalMutate(pipelinesKey(1, undefined));
     return { error };
@@ -469,8 +500,12 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
 
 const pipelineJobsFetcher = () => {
   return async (params: { key: string; pipelineId?: string }) => {
+    if (!params.pipelineId) {
+      return;
+    }
+
     const { data, error } = await get(`/v1/pipelines/{id}/jobs`, {
-      params: { path: { id: params.pipelineId! } },
+      params: { path: { id: params.pipelineId } },
     });
     return processResponse(data, error);
   };
@@ -595,10 +630,48 @@ export const useConnectionTableTest = async (
         try {
           const parsed = JSON.parse(value) as TestSourceMessage;
           handler(parsed);
-        } catch {
-          console.log('Failed to parse event');
-        }
+        } catch {}
       }
     }
   }
+};
+
+const udfsFetcher = async () => {
+  const { data, error } = await get('/v1/udfs', {});
+  return processResponse(data, error);
+};
+
+export const useGlobalUdfs = () => {
+  const { data, isLoading, error, mutate } = useSWR<schemas['GlobalUdfCollection']>(
+    'udfs',
+    udfsFetcher
+  );
+
+  const createGlobalUdf = async (prefix: string, definition: string, description: string) => {
+    const { data, error } = await post('/v1/udfs', {
+      body: {
+        prefix,
+        definition,
+        description,
+      },
+    });
+    await mutate();
+    return { data, error };
+  };
+
+  const deleteGlobalUdf = async (udf: GlobalUdf) => {
+    const { error } = await del('/v1/udfs/{id}', {
+      params: { path: { id: udf.id } },
+    });
+    await mutate();
+    return { error };
+  };
+
+  return {
+    globalUdfs: data?.data,
+    udfsLoading: isLoading,
+    udfError: error,
+    createGlobalUdf,
+    deleteGlobalUdf,
+  };
 };

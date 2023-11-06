@@ -29,9 +29,10 @@ use crate::jobs::{
 use crate::metrics::get_operator_metric_groups;
 use crate::pipelines::{
     delete_pipeline, get_pipeline, get_pipeline_jobs, get_pipelines, patch_pipeline, post_pipeline,
-    restart_pipeline, validate_query, validate_udfs,
+    restart_pipeline, validate_query,
 };
 use crate::rest_utils::not_found;
+use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
 use crate::ApiDoc;
 use arroyo_types::{telemetry_enabled, API_ENDPOINT_ENV, ASSET_DIR_ENV};
 
@@ -113,11 +114,14 @@ pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
         .route("/connection_tables/test", post(test_connection_table))
         .route("/connection_tables/schemas/test", post(test_schema))
         .route("/connection_tables/:id", delete(delete_connection_table))
+        .route("/udfs", post(create_udf))
+        .route("/udfs", get(get_udfs))
+        .route("/udfs/validate", post(validate_udf))
+        .route("/udfs/:id", delete(delete_udf))
         .route("/pipelines", post(post_pipeline))
         .route("/pipelines", get(get_pipelines))
         .route("/jobs", get(get_jobs))
         .route("/pipelines/validate_query", post(validate_query))
-        .route("/pipelines/validate_udfs", post(validate_udfs))
         .route("/pipelines/:id", patch(patch_pipeline))
         .route("/pipelines/:id", get(get_pipeline))
         .route("/pipelines/:id/restart", post(restart_pipeline))

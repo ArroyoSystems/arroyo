@@ -97,13 +97,6 @@ export interface paths {
      */
     post: operations["validate_query"];
   };
-  "/v1/pipelines/validate_udfs": {
-    /**
-     * Validate UDFs 
-     * @description Validate UDFs
-     */
-    post: operations["validate_udfs"];
-  };
   "/v1/pipelines/{id}": {
     /**
      * Get a single pipeline 
@@ -170,6 +163,32 @@ export interface paths {
      */
     get: operations["get_job_output"];
   };
+  "/v1/udfs": {
+    /**
+     * Get Global UDFs 
+     * @description Get Global UDFs
+     */
+    get: operations["get_udfs"];
+    /**
+     * Create a global UDF 
+     * @description Create a global UDF
+     */
+    post: operations["create_udf"];
+  };
+  "/v1/udfs/validate": {
+    /**
+     * Validate UDFs 
+     * @description Validate UDFs
+     */
+    post: operations["validate_udf"];
+  };
+  "/v1/udfs/{id}": {
+    /**
+     * Delete UDF 
+     * @description Delete UDF
+     */
+    delete: operations["delete_udf"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -177,8 +196,10 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     AvroFormat: {
-      confluentSchemaRegistry: boolean;
-      embeddedSchema: boolean;
+      confluentSchemaRegistry?: boolean;
+      embeddedSchema?: boolean;
+      intoUnstructuredJson?: boolean;
+      readerSchema?: string;
     };
     Checkpoint: {
       backend: string;
@@ -286,6 +307,21 @@ export interface components {
     };
     FramingMethod: {
       newline: components["schemas"]["NewlineDelimitedFraming"];
+    };
+    GlobalUdf: {
+      /** Format: int64 */
+      createdAt: number;
+      definition: string;
+      description?: string | null;
+      id: string;
+      language: components["schemas"]["UdfLanguage"];
+      name: string;
+      prefix: string;
+      /** Format: int64 */
+      updatedAt: number;
+    };
+    GlobalUdfCollection: {
+      data: (components["schemas"]["GlobalUdf"])[];
     };
     Job: {
       /** Format: int64 */
@@ -486,16 +522,21 @@ export interface components {
     };
     /** @enum {string} */
     UdfLanguage: "rust";
+    UdfPost: {
+      definition: string;
+      description?: string | null;
+      prefix: string;
+    };
     UdfValidationResult: {
-      errors?: (string)[] | null;
-      udfsRs?: string | null;
+      errors: (string)[];
+      udfName?: string | null;
     };
     ValidateQueryPost: {
       query: string;
       udfs?: (components["schemas"]["Udf"])[] | null;
     };
-    ValidateUdfsPost: {
-      udfsRs: string;
+    ValidateUdfPost: {
+      definition: string;
     };
   };
   responses: never;
@@ -726,25 +767,6 @@ export interface operations {
     };
   };
   /**
-   * Validate UDFs 
-   * @description Validate UDFs
-   */
-  validate_udfs: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ValidateUdfsPost"];
-      };
-    };
-    responses: {
-      /** @description Validated query */
-      200: {
-        content: {
-          "application/json": components["schemas"]["UdfValidationResult"];
-        };
-      };
-    };
-  };
-  /**
    * Get a single pipeline 
    * @description Get a single pipeline
    */
@@ -961,6 +983,74 @@ export interface operations {
     };
     responses: {
       /** @description Job output as 'text/event-stream' */
+      200: never;
+    };
+  };
+  /**
+   * Get Global UDFs 
+   * @description Get Global UDFs
+   */
+  get_udfs: {
+    responses: {
+      /** @description List of UDFs */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GlobalUdfCollection"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a global UDF 
+   * @description Create a global UDF
+   */
+  create_udf: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UdfPost"];
+      };
+    };
+    responses: {
+      /** @description Created UDF */
+      200: {
+        content: {
+          "application/json": components["schemas"]["Udf"];
+        };
+      };
+    };
+  };
+  /**
+   * Validate UDFs 
+   * @description Validate UDFs
+   */
+  validate_udf: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ValidateUdfPost"];
+      };
+    };
+    responses: {
+      /** @description Validated query */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UdfValidationResult"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete UDF 
+   * @description Delete UDF
+   */
+  delete_udf: {
+    parameters: {
+      path: {
+        /** @description UDF id */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Deleted UDF */
       200: never;
     };
   };

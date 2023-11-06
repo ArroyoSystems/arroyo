@@ -21,12 +21,14 @@ use crate::pipelines::__path_get_pipelines;
 use crate::pipelines::__path_post_pipeline;
 use crate::pipelines::{
     __path_delete_pipeline, __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline,
-    __path_restart_pipeline, __path_validate_query, __path_validate_udfs,
+    __path_restart_pipeline, __path_validate_query,
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::{bad_request, log_and_map, ErrorResp};
+use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::formats::*;
+
 mod cloud;
 mod connection_profiles;
 mod connection_tables;
@@ -37,6 +39,7 @@ mod optimizations;
 mod pipelines;
 pub mod rest;
 mod rest_utils;
+mod udfs;
 
 include!(concat!(env!("OUT_DIR"), "/api-sql.rs"));
 
@@ -127,7 +130,7 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
     paths(
         ping,
         validate_query,
-        validate_udfs,
+        validate_udf,
         post_pipeline,
         patch_pipeline,
         restart_pipeline,
@@ -149,6 +152,9 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         test_connection_table,
         test_schema,
         get_checkpoint_details,
+        create_udf,
+        get_udfs,
+        delete_udf
     ),
     components(schemas(
         PipelinePost,
@@ -208,9 +214,12 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         OperatorCheckpointGroup,
         ValidateQueryPost,
         QueryValidationResult,
-        ValidateUdfsPost,
+        ValidateUdfPost,
         UdfValidationResult,
         Udf,
+        UdfPost,
+        GlobalUdf,
+        GlobalUdfCollection,
     )),
     tags(
         (name = "ping", description = "Ping endpoint"),

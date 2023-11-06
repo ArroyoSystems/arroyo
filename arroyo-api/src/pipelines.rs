@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -14,17 +14,15 @@ use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch, PipelinePost,
     PipelineRestart, QueryValidationResult, StopType, ValidateQueryPost,
 };
-use arroyo_rpc::api_types::udfs::{UdfValidationResult, ValidateUdfsPost};
+use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfLanguage};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
 use arroyo_rpc::grpc::api::{
     create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, CreateUdf, PipelineProgram,
-    Udf, UdfLanguage,
+    Udf,
 };
-use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::{CheckUdfsReq, ValidationResult};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::log_event;
-use arroyo_sql::{ArroyoSchemaProvider, SqlConfig};
+use arroyo_sql::{has_duplicate_udf_names, ArroyoSchemaProvider, SqlConfig};
 use petgraph::visit::EdgeRef;
 use prost::Message;
 use serde_json::json;
@@ -47,7 +45,9 @@ use create_pipeline_req::Config::Sql;
 const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
 
 async fn compile_sql<'e, E>(
-    sql: &CreateSqlJob,
+    query: String,
+    local_udf_defs: Vec<String>,
+    parallelism: usize,
     auth_data: &AuthData,
     tx: &E,
 ) -> anyhow::Result<(Program, Vec<i64>)>
@@ -56,17 +56,49 @@ where
 {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
-    for udf in sql.udfs.iter() {
-        match UdfLanguage::from_i32(udf.language) {
-            Some(UdfLanguage::Rust) => {
-                schema_provider
-                    .add_rust_udf(&udf.definition)
-                    .map_err(|e| anyhow!(format!("Could not process UDF: {:?}", e)))?;
-            }
-            None => {
-                return Err(anyhow!("Unsupported UDF language."));
+    let global_udfs = api_queries::get_udfs()
+        .bind(tx, &auth_data.organization_id)
+        .all()
+        .await
+        .map_err(|e| anyhow!("Error global global UDFs: {}", e))?
+        .into_iter()
+        .map(|u| u.into())
+        .collect::<Vec<GlobalUdf>>();
+
+    // error if there are duplicate local or duplicate global UDF names,
+    // but allow global UDFs to override local ones
+
+    if has_duplicate_udf_names(
+        &global_udfs
+            .iter()
+            .map(|u| u.definition.clone())
+            .collect::<Vec<String>>(),
+    ) {
+        bail!("Global UDFs have duplicate function names");
+    }
+
+    if has_duplicate_udf_names(&local_udf_defs) {
+        bail!("Local UDFs have duplicate function names");
+    }
+
+    for udf in global_udfs {
+        match udf.language {
+            UdfLanguage::Rust => {
+                let _ = schema_provider.add_rust_udf(&udf.definition).map_err(|e| {
+                    warn!(
+                        "Could not process global UDF {}: {:?}",
+                        udf.name,
+                        e.root_cause()
+                    );
+                });
             }
         }
+    }
+
+    for udf_def in local_udf_defs.iter() {
+        schema_provider
+            .add_rust_udf(&udf_def)
+            .map_err(|e| anyhow!(format!("Could not process local UDF: {:?}", e.root_cause())))?;
     }
 
     let tables = connection_tables::get_all_connection_tables(auth_data, tx)
@@ -97,10 +129,10 @@ where
     }
 
     let (program, connections) = arroyo_sql::parse_and_get_program(
-        &sql.query,
+        &query,
         schema_provider,
         SqlConfig {
-            default_parallelism: sql.parallelism as usize,
+            default_parallelism: parallelism,
         },
     )
     .await
@@ -158,10 +190,18 @@ pub(crate) async fn create_pipeline<'a>(
                 )));
             }
 
+            let udf_defs = sql.udfs.iter().map(|t| t.definition.to_string()).collect();
+
             pipeline_type = PipelineType::sql;
-            (program, connections) = compile_sql(&sql, &auth, tx)
-                .await
-                .map_err(|e| bad_request(e.to_string()))?;
+            (program, connections) = compile_sql(
+                sql.query.clone(),
+                udf_defs,
+                sql.parallelism as usize,
+                &auth,
+                tx,
+            )
+            .await
+            .map_err(|e| bad_request(e.to_string()))?;
             text = Some(sql.query);
             udfs = Some(
                 sql.udfs
@@ -329,127 +369,56 @@ pub async fn validate_query(
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    let sql = CreateSqlJob {
-        query: validate_query_post.query,
-        parallelism: 1,
-        udfs: validate_query_post
-            .udfs
-            .clone()
-            .unwrap_or(vec![])
-            .into_iter()
-            .map(|u| CreateUdf {
-                language: 0,
-                definition: u.definition.to_string(),
-            })
-            .collect(),
-        preview: false,
-    };
+    let udf_defs = validate_query_post
+        .udfs
+        .clone()
+        .unwrap_or(vec![])
+        .into_iter()
+        .map(|u| u.definition.to_string())
+        .collect();
 
-    let pipeline_graph_validation_result = match compile_sql(&sql, &auth_data, &client).await {
-        Ok((mut program, _)) => {
-            optimizations::optimize(&mut program.graph);
-            let nodes = program
-                .graph
-                .node_weights()
-                .map(|node| PipelineNode {
-                    node_id: node.operator_id.to_string(),
-                    operator: format!("{:?}", node),
-                    parallelism: node.clone().parallelism as u32,
-                })
-                .collect();
+    let pipeline_graph_validation_result =
+        match compile_sql(validate_query_post.query, udf_defs, 1, &auth_data, &client).await {
+            Ok((mut program, _)) => {
+                optimizations::optimize(&mut program.graph);
+                let nodes = program
+                    .graph
+                    .node_weights()
+                    .map(|node| PipelineNode {
+                        node_id: node.operator_id.to_string(),
+                        operator: format!("{:?}", node),
+                        parallelism: node.clone().parallelism as u32,
+                    })
+                    .collect();
 
-            let edges = program
-                .graph
-                .edge_references()
-                .map(|edge| {
-                    let src = program.graph.node_weight(edge.source()).unwrap();
-                    let target = program.graph.node_weight(edge.target()).unwrap();
-                    PipelineEdge {
-                        src_id: src.operator_id.to_string(),
-                        dest_id: target.operator_id.to_string(),
-                        key_type: edge.weight().key.to_string(),
-                        value_type: edge.weight().value.to_string(),
-                        edge_type: format!("{:?}", edge.weight().typ),
-                    }
-                })
-                .collect();
+                let edges = program
+                    .graph
+                    .edge_references()
+                    .map(|edge| {
+                        let src = program.graph.node_weight(edge.source()).unwrap();
+                        let target = program.graph.node_weight(edge.target()).unwrap();
+                        PipelineEdge {
+                            src_id: src.operator_id.to_string(),
+                            dest_id: target.operator_id.to_string(),
+                            key_type: edge.weight().key.to_string(),
+                            value_type: edge.weight().value.to_string(),
+                            edge_type: format!("{:?}", edge.weight().typ),
+                        }
+                    })
+                    .collect();
 
-            QueryValidationResult {
-                graph: Some(PipelineGraph { nodes, edges }),
-                errors: None,
+                QueryValidationResult {
+                    graph: Some(PipelineGraph { nodes, edges }),
+                    errors: None,
+                }
             }
-        }
-        Err(e) => QueryValidationResult {
-            graph: None,
-            errors: Some(vec![e.to_string()]),
-        },
-    };
+            Err(e) => QueryValidationResult {
+                graph: None,
+                errors: Some(vec![e.to_string()]),
+            },
+        };
 
     Ok(Json(pipeline_graph_validation_result))
-}
-
-/// Validate UDFs
-#[utoipa::path(
-    post,
-    path = "/v1/pipelines/validate_udfs",
-    tag = "pipelines",
-    request_body = ValidateUdfsPost,
-    responses(
-        (status = 200, description = "Validated query", body = UdfValidationResult),
-    ),
-)]
-pub async fn validate_udfs(
-    State(state): State<AppState>,
-    bearer_auth: BearerAuth,
-    WithRejection(Json(validate_udfs_post), _): WithRejection<Json<ValidateUdfsPost>, ApiError>,
-) -> Result<Json<UdfValidationResult>, ErrorResp> {
-    let _auth_data = authenticate(&state.pool, bearer_auth).await?;
-
-    // Return an ok (valid) if the controller is not available or if it fails to validate the UDFs
-
-    let mut controller = match ControllerGrpcClient::connect(state.controller_addr.clone()).await {
-        Ok(controller) => controller,
-        Err(e) => {
-            warn!(
-                "Failed to connect to controller, skipping UDF validation: {}",
-                e
-            );
-            return Ok(Json(UdfValidationResult {
-                udfs_rs: Some(validate_udfs_post.udfs_rs),
-                errors: None,
-            }));
-        }
-    };
-
-    let check_udfs_resp = match controller
-        .check_udfs(CheckUdfsReq {
-            udfs_rs: validate_udfs_post.udfs_rs.clone(),
-        })
-        .await
-    {
-        Ok(resp) => resp.into_inner(),
-        Err(e) => {
-            warn!("Controller failed to validate UDF: {}", e);
-            return Ok(Json(UdfValidationResult {
-                udfs_rs: Some(validate_udfs_post.udfs_rs),
-                errors: None,
-            }));
-        }
-    };
-
-    let udf_validation_result = if check_udfs_resp.result == ValidationResult::Error as i32 {
-        UdfValidationResult {
-            udfs_rs: None,
-            errors: Some(check_udfs_resp.errors),
-        }
-    } else {
-        UdfValidationResult {
-            udfs_rs: Some(validate_udfs_post.udfs_rs),
-            errors: None,
-        }
-    };
-
-    Ok(Json(udf_validation_result))
 }
 
 /// Create a new pipeline

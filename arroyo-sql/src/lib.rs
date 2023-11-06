@@ -46,9 +46,11 @@ use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType};
 use arroyo_rpc::formats::{Format, JsonFormat};
 use datafusion_common::DataFusionError;
 use quote::ToTokens;
+use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
+use tracing::warn;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
@@ -241,23 +243,34 @@ impl ArroyoSchemaProvider {
                 continue;
             };
 
+            let name = function.sig.ident.to_string();
             let mut args: Vec<TypeDef> = vec![];
             let mut vec_arguments = 0;
             for (i, arg) in function.sig.inputs.iter().enumerate() {
                 match arg {
-                    FnArg::Receiver(_) => bail!("self types are not allowed in UDFs"),
+                    FnArg::Receiver(_) => {
+                        bail!(
+                            "Function {} has a 'self' argument, which is not allowed",
+                            name
+                        )
+                    }
                     FnArg::Typed(t) => {
                         if let Some(vec_type) = Self::vec_inner_type(&*t.ty) {
                             vec_arguments += 1;
                             args.push((&vec_type).try_into().map_err(|_| {
                                 anyhow!(
-                                    "Could not convert inner vector arg {} into a SQL data type",
+                                    "Could not convert function {} inner vector arg {} into a SQL data type",
+                                    name,
                                     i
                                 )
                             })?);
                         } else {
                             args.push((&*t.ty).try_into().map_err(|_| {
-                                anyhow!("Could not convert arg {} into a SQL data type", i)
+                                anyhow!(
+                                    "Could not convert function {} arg {} into a SQL data type",
+                                    name,
+                                    i
+                                )
                             })?);
                         }
                     }
@@ -265,13 +278,16 @@ impl ArroyoSchemaProvider {
             }
 
             let ret: TypeDef = match &function.sig.output {
-                ReturnType::Default => bail!("return type must be specified in UDF"),
-                ReturnType::Type(_, t) => (&**t)
-                    .try_into()
-                    .map_err(|_| anyhow!("Could not convert return type into a SQL data type"))?,
+                ReturnType::Default => bail!("Function {} return type must be specified", name),
+                ReturnType::Type(_, t) => (&**t).try_into().map_err(|_| {
+                    anyhow!(
+                        "Could not convert function {} return type into a SQL data type",
+                        name
+                    )
+                })?,
             };
             if vec_arguments > 0 && vec_arguments != args.len() {
-                bail!("all arguments must be vectors or none");
+                bail!("Function {} arguments must be vectors or none", name);
             }
             if vec_arguments > 0 {
                 let return_type = Arc::new(ret.as_datatype().unwrap().clone());
@@ -308,8 +324,10 @@ impl ArroyoSchemaProvider {
                     )
                     .is_some()
                 {
-                    bail!("Could not register UDF '{}', as there is already a built-in function with that name",
-                        function.sig.ident.to_string());
+                    warn!(
+                        "Global UDF '{}' is being overwritten",
+                        function.sig.ident.to_string()
+                    );
                 };
             }
 
@@ -687,4 +705,27 @@ pub fn get_test_expression(
         input_value,
         expected_result,
     )
+}
+
+pub fn has_duplicate_udf_names(udf_defs: &Vec<String>) -> bool {
+    let mut udf_names = HashSet::new();
+    for udf_def in udf_defs {
+        let Ok(file) = syn::parse_file(udf_def) else {
+            warn!("Could not parse UDF definition: {}", udf_def);
+            continue;
+        };
+
+        for item in file.items {
+            let Item::Fn(function) = item else {
+                continue;
+            };
+
+            if udf_names.contains(&function.sig.ident.to_string()) {
+                return true;
+            }
+
+            udf_names.insert(function.sig.ident.to_string());
+        }
+    }
+    false
 }
