@@ -9,7 +9,7 @@ use arroyo_rpc::grpc::{
     HeartbeatReq, HeartbeatResp, OutputData, RegisterNodeReq, RegisterNodeResp, RegisterWorkerReq,
     RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp, TaskFailedReq,
     TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, TaskStartedResp,
-    ValidationResult, WorkerFinishedReq, WorkerFinishedResp,
+    WorkerFinishedReq, WorkerFinishedResp,
 };
 use arroyo_rpc::grpc::{
     SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
@@ -447,35 +447,61 @@ impl ControllerGrpc for ControllerServer {
             Status::unavailable(format!("Failed to connect to compiler service: {}", e))
         })?;
 
-        let udfs_rs = request.into_inner().udfs_rs.clone();
+        let definition = request.into_inner().definition.clone();
 
+        let mut function = None;
         {
-            let result = match parse_file(udfs_rs.as_str()) {
+            let result = match parse_file(definition.as_str()) {
                 Ok(result) => result,
                 Err(e) => {
                     return Ok(Response::new(CheckUdfsResp {
-                        result: ValidationResult::Error as i32,
                         errors: vec![e.to_string()],
+                        udf_name: None,
                     }));
                 }
             };
 
             for item in result.items {
                 match item {
-                    Item::Fn(_) | Item::Use(_) => {}
+                    Item::Fn(f) => {
+                        if function.is_some() {
+                            return Ok(Response::new(CheckUdfsResp {
+                                errors: vec!["Only one function is allowed in UDFs".to_string()],
+                                udf_name: None,
+                            }));
+                        }
+                        function = Some(f.sig.ident.to_string());
+                    }
+                    Item::Use(_) => {}
                     _ => {
                         return Ok(Response::new(CheckUdfsResp {
-                            result: ValidationResult::Error as i32,
                             errors: vec![
                                 "Only functions and use statements are allowed in UDFs".to_string()
                             ],
+                            udf_name: None,
                         }))
                     }
                 }
             }
         }
 
-        client.check_udfs(CheckUdfsReq { udfs_rs }).await
+        // unwrap function or return error
+        let Some(function) = function else {
+            return Ok(Response::new(CheckUdfsResp {
+                errors: vec!["No function found in UDF".to_string()],
+                udf_name: None,
+            }));
+        };
+
+        let compiler_res = client
+            .check_udfs(CheckUdfsReq { definition })
+            .await?
+            .into_inner();
+
+        Ok(Response::new(CheckUdfsResp {
+            errors: compiler_res.errors,
+            udf_name: Some(function),
+        }))
     }
 }
 

@@ -6,7 +6,7 @@ use std::{io, path::PathBuf, str::FromStr, sync::Arc};
 
 use arroyo_rpc::grpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
-    CheckUdfsReq, CheckUdfsResp, CompileQueryReq, CompileQueryResp, ValidationResult,
+    CheckUdfsCompilerResp, CheckUdfsReq, CompileQueryReq, CompileQueryResp,
 };
 
 use arroyo_server_common::start_admin_server;
@@ -269,7 +269,10 @@ impl CompilerGrpc for CompileService {
     async fn check_udfs(
         &self,
         request: Request<CheckUdfsReq>,
-    ) -> Result<Response<CheckUdfsResp>, Status> {
+    ) -> Result<Response<CheckUdfsCompilerResp>, Status> {
+        // only allow one request to be active at a given time
+        let _guard = self.lock.lock().await;
+
         info!("Checking UDFs");
         let start = Instant::now();
 
@@ -277,7 +280,7 @@ impl CompilerGrpc for CompileService {
         let build_dir = &self.build_dir;
         tokio::fs::write(
             build_dir.join("udfs/src/lib.rs"),
-            &request.into_inner().udfs_rs,
+            &request.into_inner().definition,
         )
         .await
         .unwrap();
@@ -297,10 +300,7 @@ impl CompilerGrpc for CompileService {
         );
 
         if output.status.success() {
-            return Ok(Response::new(CheckUdfsResp {
-                result: ValidationResult::Ok as i32,
-                errors: vec![],
-            }));
+            return Ok(Response::new(CheckUdfsCompilerResp { errors: vec![] }));
         }
 
         let stdout = from_utf8(&output.stdout)
@@ -331,9 +331,6 @@ impl CompilerGrpc for CompileService {
 
         info!("Cargo check on udfs crate found {} errors", errors.len());
 
-        return Ok(Response::new(CheckUdfsResp {
-            result: ValidationResult::Error as i32,
-            errors,
-        }));
+        return Ok(Response::new(CheckUdfsCompilerResp { errors }));
     }
 }

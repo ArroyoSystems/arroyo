@@ -23,6 +23,7 @@ use datafusion_expr::{
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use regex::Regex;
+use std::hash::Hash;
 use std::{fmt::Debug, sync::Arc, time::Duration};
 use syn::{parse_quote, parse_str, Ident, Path};
 
@@ -2058,6 +2059,10 @@ pub struct SortExpression {
 }
 
 impl SortExpression {
+    pub fn expression(&mut self) -> &mut Expression {
+        &mut self.value
+    }
+
     pub fn from_expression(ctx: &mut ExpressionContext, sort: &Sort) -> Result<Self> {
         let value = ctx.compile_expr(&sort.expr)?;
 
@@ -3558,6 +3563,12 @@ pub struct RustUdfExpression {
     ret_type: TypeDef,
 }
 
+impl RustUdfExpression {
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+}
+
 impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for RustUdfExpression {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let name = format_ident!("{}", &self.name);
@@ -3618,6 +3629,14 @@ pub struct RustUdafExpression {
 }
 
 impl RustUdafExpression {
+    pub(crate) fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn expressions(&mut self) -> impl Iterator<Item = &mut Expression> {
+        self.args.iter_mut().map(|(_, e)| e)
+    }
+
     fn try_from_aggregate_udf(
         ctx: &mut ExpressionContext<'_>,
         aggregate_udf: &AggregateUDF,

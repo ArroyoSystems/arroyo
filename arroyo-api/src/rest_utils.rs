@@ -83,6 +83,20 @@ pub(crate) fn bad_request(message: impl Into<String>) -> ErrorResp {
     }
 }
 
+pub(crate) fn service_unavailable(object: &str) -> ErrorResp {
+    ErrorResp {
+        status_code: StatusCode::SERVICE_UNAVAILABLE,
+        message: format!("{} not available", object),
+    }
+}
+
+pub(crate) fn internal_server_error(message: impl Into<String>) -> ErrorResp {
+    ErrorResp {
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        message: message.into(),
+    }
+}
+
 pub(crate) fn unauthorized(message: impl Into<String>) -> ErrorResp {
     ErrorResp {
         status_code: StatusCode::UNAUTHORIZED,

@@ -8,7 +8,6 @@ import {
   Flex,
   HStack,
   Icon,
-  IconButton,
   Popover,
   PopoverArrow,
   PopoverBody,
@@ -16,9 +15,7 @@ import {
   PopoverContent,
   PopoverHeader,
   PopoverTrigger,
-  Spacer,
   Spinner,
-  Stack,
   Tab,
   TabList,
   TabPanel,
@@ -28,15 +25,13 @@ import {
   useDisclosure,
 } from '@chakra-ui/react';
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Catalog } from './Catalog';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PipelineGraphViewer } from './PipelineGraph';
-import { CodeEditor } from './SqlEditor';
 import { SqlOptions } from '../../lib/types';
 import {
-  ConnectionTable,
   JobLogMessage,
   OutputData,
+  PipelineLocalUdf,
   post,
   useConnectionTables,
   useJobMetrics,
@@ -45,7 +40,6 @@ import {
   usePipeline,
   usePipelineJobs,
   useQueryValidation,
-  useUdfsValidation,
 } from '../../lib/data_fetching';
 import Loading from '../../components/Loading';
 import OperatorErrors from '../../components/OperatorErrors';
@@ -56,13 +50,17 @@ import PaginatedContent from '../../components/PaginatedContent';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { MdDragHandle } from 'react-icons/md';
 import { PipelineOutputs } from './PipelineOutputs';
-import ExampleQueries from '../../components/ExampleQueries';
-import { HiOutlineBookOpen } from 'react-icons/hi';
 import { TourContext, TourSteps } from '../../tour';
 import CreatePipelineTourModal from '../../components/CreatePipelineTourModal';
 import TourCompleteModal from '../../components/TourCompleteModal';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+import PipelineEditorTabs from './PipelineEditorTabs';
+import ResourcePanel from './ResourcePanel';
+import useLocalStorage from 'use-local-storage';
+import { LocalUdf, LocalUdfsContext } from '../../udf_state';
+import UdfLabel from '../udfs/UdfLabel';
+import { PiFileSqlDuotone } from 'react-icons/pi';
 
 function useQuery() {
   const { search } = useLocation();
@@ -72,7 +70,7 @@ function useQuery() {
 
 export function CreatePipeline() {
   const [pipelineId, setPipelineId] = useState<string | undefined>(undefined);
-  const { pipeline, updatePipeline } = usePipeline(pipelineId);
+  const { updatePipeline } = usePipeline(pipelineId);
   const { jobs } = usePipelineJobs(pipelineId, true);
   const job = jobs?.length ? jobs[0] : undefined;
   const { operatorErrorsPages, operatorErrorsTotalPages, setOperatorErrorsMaxPages } =
@@ -80,16 +78,7 @@ export function CreatePipeline() {
   const [operatorErrors, setOperatorErrors] = useState<JobLogMessage[]>([]);
   const [queryInput, setQueryInput] = useState<string>('');
   const [queryInputToCheck, setQueryInputToCheck] = useState<string>('');
-  const [udfsInput, setUdfsInput] = useState<string>('');
-  const [udfsInputToCheck, setUdfsInputToCheck] = useState<string>('');
-  const { queryValidation, queryValidationError, queryValidationLoading } = useQueryValidation(
-    queryInputToCheck,
-    udfsInputToCheck
-  );
-  const { udfsValidation, udfsValidationError, udfsValidationLoading } =
-    useUdfsValidation(udfsInputToCheck);
   const { operatorMetricGroups } = useJobMetrics(pipelineId, job?.id);
-
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [options, setOptions] = useState<SqlOptions>({ parallelism: 4, checkpointMS: 5000 });
   const navigate = useNavigate();
@@ -97,21 +86,25 @@ export function CreatePipeline() {
   const [tabIndex, setTabIndex] = useState<number>(0);
   const [outputSource, setOutputSource] = useState<EventSource | undefined>(undefined);
   const [outputs, setOutputs] = useState<Array<{ id: number; data: OutputData }>>([]);
-  const { connectionTablePages, connectionTablesLoading } = useConnectionTables(50);
+  const { connectionTablesLoading } = useConnectionTables(50);
   const queryParams = useQuery();
   const { pipeline: copyFrom, pipelineLoading: copyFromLoading } = usePipeline(
     queryParams.get('from') ?? undefined
   );
-  const hasValidationErrors = queryValidation?.errors?.length || udfsValidation?.errors?.length;
   const hasOperatorErrors = operatorErrorsPages?.length && operatorErrorsPages[0].data.length > 0;
+  const { localUdfs, setLocalUdfs, openTab } = useContext(LocalUdfsContext);
+  const [localUdfsToCheck, setLocalUdfsToCheck] = useState<LocalUdf[]>([]);
+  const { queryValidation, queryValidationError, queryValidationLoading } = useQueryValidation(
+    queryInputToCheck,
+    localUdfsToCheck
+  );
+  const hasUdfValidationErrors = localUdfs.some(u => u.errors?.length);
+  const hasValidationErrors = queryValidation?.errors?.length || hasUdfValidationErrors;
+  const [resourcePanelTab, setResourcePanelTab] = useLocalStorage('resourcePanelTabIndex', 0);
+  const [udfValidationApiError, setUdfValidationApiError] = useState<any | undefined>(undefined);
+  const [validationInProgress, setValidationInProgress] = useState<boolean>(false);
 
   const { tourActive, tourStep, setTourStep, disableTour } = useContext(TourContext);
-
-  const {
-    isOpen: exampleQueriesIsOpen,
-    onOpen: openExampleQueries,
-    onClose: onExampleQueriesClose,
-  } = useDisclosure();
 
   useEffect(() => {
     if (tourActive) {
@@ -119,44 +112,67 @@ export function CreatePipeline() {
     }
   }, []);
 
-  let connectionTables: ConnectionTable[] = [];
-  let catalogTruncated = false;
-  if (connectionTablePages?.length) {
-    connectionTables = connectionTablePages[0].data;
-    catalogTruncated = connectionTablePages[0].hasMore;
-  }
-
   const updateQuery = (query: string) => {
     window.localStorage.setItem('query', query);
     setQueryInput(query);
   };
 
-  const updateUdf = (udf: string) => {
-    window.localStorage.setItem('udf', udf);
-    setUdfsInput(udf);
-  };
-
   useEffect(() => {
-    let savedQuery = window.localStorage.getItem('query');
-    let savedUdfs = window.localStorage.getItem('udf');
-    if (copyFrom != null) {
-      setQueryInput(copyFrom.query || '');
-      if (copyFrom.udfs.length) {
-        setUdfsInput(copyFrom.udfs[0].definition || '');
+    const copyFromPipeline = async () => {
+      let savedQuery = window.localStorage.getItem('query');
+      if (copyFrom != null) {
+        setQueryInput(copyFrom.query || '');
+        if (copyFrom.udfs.length) {
+          const udfs: LocalUdf[] = copyFrom.udfs.map(u => {
+            const name = randomUdfName();
+            return {
+              id: name,
+              name, // this gets updated after validation
+              definition: u.definition,
+              open: false,
+              errors: [],
+            };
+          });
+
+          // merge with local udfs
+          let merged = localUdfs;
+          for (const udf of udfs) {
+            const { data: udfValiation } = await post('/v1/udfs/validate', {
+              body: {
+                definition: udf.definition,
+              },
+            });
+
+            if (udfValiation) {
+              udf.name = udfValiation.udfName ?? udf.name;
+              udf.errors = udfValiation.errors ?? [];
+            }
+
+            if (!merged.some(u => u.name == udf.name)) {
+              merged.push(udf);
+            }
+          }
+
+          setLocalUdfs(merged);
+        }
+        setOptions({
+          ...options,
+          name: copyFrom.name + '-copy',
+        });
+      } else {
+        if (savedQuery != null) {
+          setQueryInput(savedQuery);
+        }
       }
-      setOptions({
-        ...options,
-        name: copyFrom.name + '-copy',
-      });
-    } else {
-      if (savedQuery != null) {
-        setQueryInput(savedQuery);
-      }
-      if (savedUdfs != null) {
-        setUdfsInput(savedUdfs);
-      }
-    }
+    };
+
+    copyFromPipeline();
   }, [copyFrom]);
+
+  const randomUdfName = () => {
+    const id = Math.random().toString(36).substring(7);
+    return `udf_${id}`;
+  };
 
   const sseHandler = (event: MessageEvent) => {
     const parsed = JSON.parse(event.data) as OutputData;
@@ -177,47 +193,75 @@ export function CreatePipeline() {
     }
   }, [job?.id]);
 
-  useEffect(() => {
-    if (hasValidationErrors) {
-      setTabIndex(2);
-    }
-  }, [hasValidationErrors]);
-
   // Top-level loading state
-  if (copyFromLoading || connectionTablesLoading) {
+  if (copyFromLoading || connectionTablesLoading || !localUdfs) {
     return <Loading />;
   }
 
-  const check = () => {
-    // Setting this state triggers the uswSWR calls
-    setQueryInputToCheck(queryInput);
-    setUdfsInputToCheck(udfsInput);
-    setOutputs([]);
+  const udfsValid = async () => {
+    let valid = true;
+    let newUdfs = [];
+    for (const udf of localUdfs) {
+      const { data: udfsValiation, error: udfsValiationError } = await post('/v1/udfs/validate', {
+        body: {
+          definition: udf.definition,
+        },
+      });
+
+      if (udfsValiation) {
+        newUdfs.push({
+          ...udf,
+          name: udfsValiation.udfName ?? udf.name,
+          errors: udfsValiation.errors ?? [],
+        });
+      } else {
+        valid = false;
+        newUdfs.push(udf);
+        setUdfValidationApiError(udfsValiationError);
+      }
+    }
+    setLocalUdfs(newUdfs);
+    return valid;
   };
 
-  const pipelineIsValid = async () => {
-    check();
-    const { data: queryValidation, error: queryValidationError } = await post(
-      '/v1/pipelines/validate_query',
-      {
-        body: { query: queryInput, udfs: [{ language: 'rust', definition: udfsInput }] },
-      }
-    );
-    const { data: udfsValiation, error: udfsValiationError } = await post(
-      '/v1/pipelines/validate_udfs',
-      {
-        body: {
-          udfsRs: udfsInput,
-        },
-      }
-    );
+  const queryValid = async () => {
+    const udfs: PipelineLocalUdf[] = localUdfs.map(u => ({
+      language: 'rust',
+      definition: u.definition,
+    }));
+    const { data: queryValidation } = await post('/v1/pipelines/validate_query', {
+      body: {
+        query: queryInput,
+        udfs,
+      },
+    });
 
-    return (
-      queryValidation?.graph &&
-      !udfsValiation?.errors?.length &&
-      queryValidationError == undefined &&
-      udfsValiationError == undefined
-    );
+    if (queryValidation?.graph) {
+      return true;
+    }
+    return false;
+  };
+
+  const pipelineIsValid = async (successTab?: number) => {
+    // Setting this state triggers the uswSWR calls
+    setQueryInputToCheck(queryInput);
+    setLocalUdfsToCheck(localUdfs);
+    setOutputs([]);
+    setUdfValidationApiError(undefined);
+    await stopPreview();
+
+    // do synchronous api calls here
+    setValidationInProgress(true);
+    const valid = (await udfsValid()) && (await queryValid());
+    if (valid) {
+      if (successTab != undefined) {
+        setTabIndex(successTab);
+      }
+    } else {
+      setTabIndex(2);
+    }
+    setValidationInProgress(false);
+    return valid;
   };
 
   const preview = async () => {
@@ -225,9 +269,14 @@ export function CreatePipeline() {
     setQueryInputToCheck('');
     setPipelineId(undefined);
 
-    if (!(await pipelineIsValid())) {
+    if (!(await pipelineIsValid(1))) {
       return;
     }
+
+    const udfs: PipelineLocalUdf[] = localUdfs.map(u => ({
+      language: 'rust',
+      definition: u.definition,
+    }));
 
     const { data: newPipeline, error } = await post('/v1/pipelines', {
       body: {
@@ -235,7 +284,7 @@ export function CreatePipeline() {
         parallelism: 1,
         preview: true,
         query: queryInput,
-        udfs: [{ language: 'rust', definition: udfsInput }],
+        udfs,
       },
     });
 
@@ -245,7 +294,6 @@ export function CreatePipeline() {
 
     // Setting the pipeline id will trigger fetching the job and subscribing to the output
     setPipelineId(newPipeline?.id);
-    setTabIndex(1);
   };
 
   const stopPreview = async () => {
@@ -257,7 +305,6 @@ export function CreatePipeline() {
   };
 
   const run = async () => {
-    check();
     if (!(await pipelineIsValid())) {
       return;
     }
@@ -265,17 +312,18 @@ export function CreatePipeline() {
   };
 
   const start = async () => {
+    console.log('starting');
+    const udfs: PipelineLocalUdf[] = localUdfs.map(u => ({
+      language: 'rust',
+      definition: u.definition,
+    }));
+
     const { data, error } = await post('/v1/pipelines', {
       body: {
         name: options.name!,
         parallelism: options.parallelism!,
         query: queryInput,
-        udfs: [
-          {
-            language: 'rust',
-            definition: udfsInput,
-          },
-        ],
+        udfs,
       },
     });
 
@@ -289,9 +337,6 @@ export function CreatePipeline() {
     }
   };
 
-  const sources = connectionTables.filter(s => s.tableType == 'source');
-  const sinks = connectionTables.filter(s => s.tableType == 'sink');
-
   const startPipelineModal = (
     <StartPipelineModal
       isOpen={isOpen}
@@ -301,70 +346,6 @@ export function CreatePipeline() {
       setOptions={setOptions}
       start={start}
     />
-  );
-
-  const catalogType = (name: string, tables: Array<ConnectionTable>) => {
-    return (
-      <Stack p={4}>
-        <Text fontSize={'md'} pt={2} pb={4} fontWeight={'bold'}>
-          {name.toUpperCase()}S
-        </Text>
-        <Stack spacing={4}>
-          {tables.length == 0 ? (
-            <Box overflowY="auto" overflowX="hidden">
-              <Text>
-                No {name}s have been created. Create one <Link to="/connections/new">here</Link>.
-              </Text>
-            </Box>
-          ) : (
-            <Box overflowY="auto" overflowX="hidden">
-              <Catalog tables={tables} />
-            </Box>
-          )}
-        </Stack>
-      </Stack>
-    );
-  };
-
-  // Since we only fetch the first page of connection tables,
-  // display a warning if there are too many to be shown.
-  let catalogTruncatedWarning = <></>;
-  if (catalogTruncated) {
-    catalogTruncatedWarning = (
-      <Alert flexShrink={0} status="warning">
-        <AlertIcon />
-        <AlertDescription>
-          The catalogue is too large to be shown in its entirety. Please see the Connections tab for
-          the complete listing.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
-  let catalog = (
-    <Stack
-      width={300}
-      background="gray.900"
-      p={2}
-      spacing={2}
-      pt={4}
-      borderRight={'1px solid'}
-      borderColor={'gray.500'}
-      overflow={'auto'}
-    >
-      {catalogTruncatedWarning}
-      {catalogType('Source', sources)}
-      {catalogType('Sink', sinks)}
-
-      <Spacer />
-      <Box p={4} borderTop={'1px solid'} borderColor={'gray.500'}>
-        Write SQL to create a streaming pipeline. See the{' '}
-        <Link to={'http://doc.arroyo.dev/sql'} target="_blank">
-          SQL docs
-        </Link>{' '}
-        for details on Arroyo SQL.
-      </Box>
-    </Stack>
   );
 
   const previewing = job?.runningDesired && job?.state != 'Failed' && !job?.finishTime;
@@ -402,10 +383,7 @@ export function CreatePipeline() {
     <Button
       size="md"
       colorScheme="blue"
-      onClick={() => {
-        check();
-        setTabIndex(0);
-      }}
+      onClick={() => pipelineIsValid(0)}
       title="Check that the SQL is valid"
       borderRadius={2}
     >
@@ -449,35 +427,27 @@ export function CreatePipeline() {
     </TabPanel>
   );
 
-  if (queryValidationLoading || udfsValidationLoading) {
+  if (queryValidation?.graph) {
     previewPipelineTab = (
       <TabPanel height="100%" position="relative">
-        <Loading />
+        <Box
+          style={{
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            position: 'absolute',
+          }}
+          overflow="auto"
+        >
+          <PipelineGraphViewer
+            graph={queryValidation.graph}
+            operatorMetricGroups={operatorMetricGroups}
+            setActiveOperator={() => {}}
+          />
+        </Box>
       </TabPanel>
     );
-  } else {
-    if (queryValidation?.graph) {
-      previewPipelineTab = (
-        <TabPanel height="100%" position="relative">
-          <Box
-            style={{
-              top: 0,
-              bottom: 0,
-              left: 0,
-              right: 0,
-              position: 'absolute',
-            }}
-            overflow="auto"
-          >
-            <PipelineGraphViewer
-              graph={queryValidation.graph}
-              operatorMetricGroups={operatorMetricGroups}
-              setActiveOperator={() => {}}
-            />
-          </Box>
-        </TabPanel>
-      );
-    }
   }
 
   let previewResultsTabContent = <Text>Preview your SQL to see outputs.</Text>;
@@ -509,7 +479,7 @@ export function CreatePipeline() {
     }
   }
 
-  const previewResultsTab = (
+  let previewResultsTab = (
     <TabPanel overflowX="auto" flex={1} position="relative">
       {previewResultsTabContent}
     </TabPanel>
@@ -524,29 +494,53 @@ export function CreatePipeline() {
     </Alert>
   );
 
-  let errorsTab = <></>;
+  let errorsTab;
   if (hasValidationErrors) {
+    let queryErrors = <></>;
+    let udfErrors = <></>;
+
     if (queryValidation?.errors) {
-      errorsTab = (
-        <TabPanel overflow="auto" height={'100%'}>
-          <Box overflow={'auto'}>
-            {validationErrorAlert}
-            <SyntaxHighlighter language="text" style={vs2015} customStyle={{ borderRadius: '5px' }}>
-              {queryValidation.errors[0]}
-            </SyntaxHighlighter>
-          </Box>
-        </TabPanel>
-      );
-    } else if (udfsValidation?.errors) {
-      errorsTab = (
-        <TabPanel overflowX="auto" height="100%" position="relative">
-          {validationErrorAlert}
+      queryErrors = (
+        <Flex flexDirection={'column'} py={3} gap={2}>
+          <Flex gap={1} onClick={() => openTab('query')} cursor={'pointer'} w={'min-content'}>
+            <Icon as={PiFileSqlDuotone} boxSize={5} />
+            <Text>Query</Text>
+          </Flex>
           <SyntaxHighlighter language="text" style={vs2015} customStyle={{ borderRadius: '5px' }}>
-            {JSON.parse(`"${udfsValidation.errors.join('\\n')}"`)}
+            {queryValidation.errors[0]}
           </SyntaxHighlighter>
-        </TabPanel>
+        </Flex>
       );
     }
+
+    if (hasUdfValidationErrors) {
+      udfErrors = (
+        <Box>
+          {localUdfs
+            .filter(u => u.errors?.length)
+            .map(u => (
+              <Flex key={u.id} flexDirection={'column'} py={3} gap={2}>
+                <UdfLabel udf={u} />
+                <SyntaxHighlighter
+                  language="text"
+                  style={vs2015}
+                  customStyle={{ borderRadius: '5px' }}
+                >
+                  {JSON.parse(`"${u.errors!.join('\\n')}"`)}
+                </SyntaxHighlighter>
+              </Flex>
+            ))}
+        </Box>
+      );
+    }
+
+    errorsTab = (
+      <TabPanel overflowX="auto" height="100%" position="relative">
+        {validationErrorAlert}
+        {queryErrors}
+        {udfErrors}
+      </TabPanel>
+    );
   } else if (hasOperatorErrors) {
     errorsTab = (
       <TabPanel overflowX="auto" height="100%" position="relative">
@@ -578,6 +572,18 @@ export function CreatePipeline() {
     );
   }
 
+  const loadingTab = (
+    <TabPanel overflowX="auto" height="100%" position="relative">
+      <Loading />
+    </TabPanel>
+  );
+
+  if (validationInProgress || queryValidationLoading) {
+    previewPipelineTab = loadingTab;
+    previewResultsTab = loadingTab;
+    errorsTab = loadingTab;
+  }
+
   const previewTabsContent = (
     <TabPanels display={'flex'} flexDirection={'column'} flex={1} minHeight={0}>
       {previewPipelineTab}
@@ -586,73 +592,13 @@ export function CreatePipeline() {
     </TabPanels>
   );
 
-  const exampleQueries = (
-    <ExampleQueries
-      isOpen={exampleQueriesIsOpen}
-      onClose={onExampleQueriesClose}
-      setQuery={s => {
-        updateQuery(s);
-        onExampleQueriesClose();
-      }}
-    />
-  );
+  const editorTabs = <PipelineEditorTabs queryInput={queryInput} updateQuery={updateQuery} />;
 
-  const exampleQueriesButton = (
-    <Popover
-      isOpen={tourStep == TourSteps.ExampleQueriesButton}
-      placement={'bottom-start'}
-      closeOnBlur={false}
-      variant={'tour'}
-    >
-      <PopoverTrigger>
-        <IconButton
-          icon={<HiOutlineBookOpen />}
-          aria-label="Example queries"
-          onClick={() => {
-            openExampleQueries();
-            setTourStep(TourSteps.ExampleQuery);
-          }}
-        />
-      </PopoverTrigger>
-      <PopoverContent>
-        <PopoverArrow />
-        <PopoverCloseButton onClick={disableTour} />
-        <PopoverHeader>Example Queries</PopoverHeader>
-        <PopoverBody>Open for some example queries</PopoverBody>
-      </PopoverContent>
-    </Popover>
-  );
-
-  const editorTabs = (
-    <Flex direction={'column'} backgroundColor="#1e1e1e" height="100%">
-      <Tabs display={'flex'} flexDirection={'column'} flex={1}>
-        <TabList>
-          <Flex justifyContent={'space-between'} width={'100%'}>
-            <Flex>
-              <Tab>query.sql</Tab>
-              <Tab>udfs.rs</Tab>
-            </Flex>
-            <HStack p={4}>{exampleQueriesButton}</HStack>
-          </Flex>
-        </TabList>
-        <TabPanels flex={1}>
-          <TabPanel height={'100%'}>
-            <CodeEditor query={queryInput} setQuery={updateQuery} />
-          </TabPanel>
-          <TabPanel height={'100%'}>
-            <CodeEditor query={udfsInput} setQuery={updateUdf} language="rust" />
-          </TabPanel>
-        </TabPanels>
-      </Tabs>
-    </Flex>
-  );
-
-  // TODO: design UI to show all errors
   let errorMessage;
   if (queryValidationError) {
     errorMessage = formatError(queryValidationError);
-  } else if (udfsValidationError) {
-    errorMessage = formatError(udfsValidationError);
+  } else if (udfValidationApiError) {
+    errorMessage = formatError(udfValidationApiError);
   } else if (job?.state == 'Failed') {
     errorMessage = 'Job failed. See "Errors" tab for more details.';
   } else {
@@ -735,7 +681,9 @@ export function CreatePipeline() {
 
   return (
     <Flex height={'100vh'}>
-      <Flex>{catalog}</Flex>
+      <Flex>
+        <ResourcePanel tabIndex={resourcePanelTab} handleTabChange={setResourcePanelTab} />
+      </Flex>
       <Flex direction={'column'} flex={1} minWidth={0}>
         <PanelGroup autoSaveId={'create-pipeline-panels'} direction="vertical">
           <Panel minSize={20}>{editorTabs}</Panel>
@@ -751,7 +699,6 @@ export function CreatePipeline() {
       </Flex>
       <CreatePipelineTourModal />
       <TourCompleteModal />
-      {exampleQueries}
       {startPipelineModal}
     </Flex>
   );

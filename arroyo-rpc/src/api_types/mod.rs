@@ -1,10 +1,9 @@
-use crate::api_types::checkpoints::Checkpoint;
-use crate::api_types::checkpoints::OperatorCheckpointGroup;
-use crate::api_types::connections::ConnectionProfile;
-use crate::api_types::connections::ConnectionTable;
-use crate::api_types::connections::Connector;
-use crate::api_types::metrics::OperatorMetricGroup;
-use crate::api_types::pipelines::{Job, JobLogMessage, Pipeline};
+use checkpoints::*;
+use connections::*;
+use metrics::*;
+use pipelines::*;
+use udfs::*;
+
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -35,6 +34,7 @@ pub struct PaginatedCollection<T> {
     OperatorMetricGroupCollection = NonPaginatedCollection<OperatorMetricGroup>,
     ConnectorCollection = NonPaginatedCollection<Connector>,
     ConnectionProfileCollection = NonPaginatedCollection<ConnectionProfile>,
+    GlobalUdfCollection = NonPaginatedCollection<GlobalUdf>,
 )]
 pub struct NonPaginatedCollection<T> {
     pub data: Vec<T>,
