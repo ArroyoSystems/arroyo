@@ -37,7 +37,7 @@ petgraph = {version = "0.6", features = ["serde-1"]}
 
 http = "0.2"
 tower-http = {version = "0.4", features = ["trace", "fs", "cors", "validate-request", "auth"]}
-axum = {version = "0.6.12", features = ["headers", "tokio"]}
+axum = {version = "0.6.12", features = ["headers", "tokio", "macros"]}
 axum-extra = "0.7.4"
 thiserror = "1.0.40"
 utoipa = "3"
@@ -77,6 +77,7 @@ cornucopia_async = { version = "0.4", features = ["with-serde_json-1"] }
 jwt-simple = "0.11.4"
 uuid = "1.3.3"
 regress = "0.6.0"
+apache-avro = "0.16.0"
 
 [build-dependencies]
 cornucopia = { version = "0.9" }

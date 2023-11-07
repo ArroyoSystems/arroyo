@@ -1,0 +1,52 @@
+{
+    "type": "object",
+    "title": "RedisConfig",
+    "properties": {
+        "connection": {
+            "type": "object",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Standard",
+                    "properties": {
+                        "address": {
+                            "type": "string",
+                            "description": "The address of your Redis server",
+                            "examples": ["redis://localhost:6379"],
+                            "pattern": "^redis://[a-zA-Z0-9.]+:[0-9]+$"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "address"
+                    ]
+                },
+                {
+                    "type": "object",
+                    "title": "Clustered",
+                    "required": [
+                        "addresses"
+                    ],
+                    "properties": {
+                        "addresses": {
+                            "type": "array",
+                            "title": "Addresses",
+                            "description": "The addresses of your Redis cluster",
+                            "items": {
+                                "type": "string",
+                                "title": "Address",
+                                "examples": ["redis://localhost:6379"],
+                                "pattern": "^redis://[a-zA-Z0-9.]+:[0-9]+$"
+                            }
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            ]
+        }
+    },
+    "required": [
+        "connection"
+    ]
+}
+

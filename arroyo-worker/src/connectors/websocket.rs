@@ -133,7 +133,7 @@ where
                     }
                 }
             }
-            ControlMessage::Commit { epoch: _ } => {
+            ControlMessage::Commit { .. } => {
                 unreachable!("sources shouldn't receive commit messages");
             }
             ControlMessage::LoadCompacted { compacted } => {
@@ -149,7 +149,7 @@ where
         msg: &[u8],
         ctx: &mut Context<(), T>,
     ) -> Result<(), UserError> {
-        let iter = self.deserializer.deserialize_slice(msg);
+        let iter = self.deserializer.deserialize_slice(msg).await;
         for value in iter {
             ctx.collector
                 .collect(Record {

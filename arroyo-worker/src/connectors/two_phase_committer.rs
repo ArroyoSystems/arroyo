@@ -10,6 +10,7 @@ use arroyo_rpc::{
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{Data, Key, Record, TaskInfo, Watermark};
 use async_trait::async_trait;
+use bincode::config;
 use tracing::warn;
 
 #[derive(StreamNode)]
@@ -59,6 +60,17 @@ pub trait TwoPhaseCommitter<K: Key, T: Data + Sync>: Send + 'static {
         watermark: Option<SystemTime>,
         stopping: bool,
     ) -> Result<(Self::DataRecovery, HashMap<String, Self::PreCommit>)>;
+    fn commit_strategy(&self) -> CommitStrategy {
+        CommitStrategy::PerSubtask
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CommitStrategy {
+    // Per subtask uses the subtask itself as the committer, writing the pre-commit messages to state for restoration.
+    PerSubtask,
+    // Per operator uses subtask 0 as the committer, passing all PreCommit data through the control system/checkpoint metadata.
+    PerOperator,
 }
 
 #[process_fn(in_k = K, in_t = T)]
@@ -129,11 +141,19 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
     }
 
     async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>) {
-        if let Some(ControlMessage::Commit { epoch }) = ctx.control_rx.recv().await {
-            self.handle_commit(epoch, ctx).await;
+        if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
+            self.handle_commit(epoch, commit_data, ctx).await;
         } else {
             warn!("no commit message received, not committing")
         }
+    }
+
+    fn map_from_serialized_data(serialized_data: Vec<u8>) -> Vec<TPC::PreCommit> {
+        let map: HashMap<String, TPC::PreCommit> =
+            bincode::decode_from_slice(&serialized_data, config::standard())
+                .unwrap()
+                .0;
+        map.into_values().collect()
     }
 
     async fn handle_checkpoint(
@@ -155,22 +175,58 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             )
             .await
             .unwrap();
+
         let mut recovery_data_state: GlobalKeyedState<usize, _, _> =
             ctx.state.get_global_keyed_state('r').await;
         recovery_data_state
             .insert(ctx.task_info.task_index, recovery_data)
             .await;
-        let mut pre_commit_state: GlobalKeyedState<String, _, _> =
-            ctx.state.get_global_keyed_state('p').await;
         self.pre_commits.clear();
-        for (key, value) in pre_commits {
-            self.pre_commits.push(value.clone());
-            pre_commit_state.insert(key, value).await;
+        if pre_commits.is_empty() {
+            return;
+        }
+        let commit_strategy = self.committer.commit_strategy();
+        match commit_strategy {
+            CommitStrategy::PerSubtask => {
+                let mut pre_commit_state: GlobalKeyedState<String, _, _> =
+                    ctx.state.get_global_keyed_state('p').await;
+                for (key, value) in pre_commits {
+                    self.pre_commits.push(value.clone());
+                    pre_commit_state.insert(key, value).await;
+                }
+            }
+            CommitStrategy::PerOperator => {
+                let serialized_pre_commits =
+                    bincode::encode_to_vec(&pre_commits, config::standard()).unwrap();
+                ctx.state
+                    .insert_committing_data(checkpoint_barrier.epoch, 'p', serialized_pre_commits)
+                    .await;
+            }
         }
     }
-    async fn handle_commit(&mut self, epoch: u32, ctx: &mut crate::engine::Context<(), ()>) {
-        let pre_commits = self.pre_commits.clone();
-        self.pre_commits.clear();
+    async fn handle_commit(
+        &mut self,
+        epoch: u32,
+        mut commit_data: HashMap<char, HashMap<u32, Vec<u8>>>,
+        ctx: &mut crate::engine::Context<(), ()>,
+    ) {
+        let pre_commits = match self.committer.commit_strategy() {
+            CommitStrategy::PerSubtask => std::mem::take(&mut self.pre_commits),
+            CommitStrategy::PerOperator => {
+                // only subtask 0 should be committing
+                if ctx.task_info.task_index == 0 {
+                    commit_data
+                        .remove(&'p')
+                        .unwrap_or_default()
+                        .into_values()
+                        .flat_map(|serialized_data| Self::map_from_serialized_data(serialized_data))
+                        .collect()
+                } else {
+                    vec![]
+                }
+            }
+        };
+
         self.committer
             .commit(&ctx.task_info, pre_commits)
             .await

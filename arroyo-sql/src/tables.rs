@@ -24,7 +24,7 @@ use datafusion_expr::{
 use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::expressions::CastExpression;
 use crate::external::SinkUpdateType;
-use crate::DEFAULT_IDLE_TIME;
+use crate::{avro, DEFAULT_IDLE_TIME};
 use crate::{
     expressions::{Column, ColumnExpression, Expression, ExpressionContext},
     external::{ProcessingMode, SqlSink, SqlSource},
@@ -89,7 +89,7 @@ fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
                 Some(format!("{}::{}", name, json_schema::ROOT_NAME))
             }
             SchemaDefinition::ProtobufSchema(_) => todo!(),
-            SchemaDefinition::AvroSchema(_) => todo!(),
+            SchemaDefinition::AvroSchema(_) => Some(format!("{}::{}", name, avro::ROOT_NAME)),
             SchemaDefinition::RawSchema(_) => Some("arroyo_types::RawJson".to_string()),
         }
     })
@@ -101,7 +101,7 @@ pub fn schema_defs(name: &str, schema: &ConnectionSchema) -> Option<String> {
     match def {
         SchemaDefinition::JsonSchema(s) => Some(json_schema::get_defs(&name, &s).unwrap()),
         SchemaDefinition::ProtobufSchema(_) => todo!(),
-        SchemaDefinition::AvroSchema(_) => todo!(),
+        SchemaDefinition::AvroSchema(s) => Some(avro::get_defs(&name, &s).unwrap()),
         SchemaDefinition::RawSchema(_) => None,
     }
 }
@@ -111,7 +111,9 @@ fn produce_optimized_plan(
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<LogicalPlan> {
     let sql_to_rel = SqlToRel::new(schema_provider);
-    let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
+    let plan = sql_to_rel
+        .sql_statement_to_plan(statement.clone())
+        .map_err(|e| anyhow!(e.strip_backtrace()))?;
 
     let optimizer_config = OptimizerContext::default();
     let analyzer = Analyzer::default();
@@ -714,7 +716,7 @@ impl Insert {
         match &logical_plan {
             LogicalPlan::Dml(DmlStatement {
                 table_name,
-                op: WriteOp::Insert,
+                op: WriteOp::InsertInto,
                 input,
                 ..
             }) => {

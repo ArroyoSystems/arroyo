@@ -93,7 +93,6 @@ export function Home() {
           onClick={() => {
             navigate('/pipelines/new');
             setTourStep(TourSteps.CreatePipelineModal);
-            console.log('clicked');
           }}
         >
           Create Pipeline

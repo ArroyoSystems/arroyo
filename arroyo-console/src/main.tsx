@@ -4,8 +4,8 @@ import { extendTheme, ThemeConfig } from '@chakra-ui/react';
 import { theme as proTheme } from '@chakra-ui/pro-theme';
 import '@fontsource/inter/variable.css';
 
+import { modalTheme, popoverTheme, tabsTheme } from './theming';
 import { createRoot } from './lib/CloudComponents';
-import { modalTheme, popoverTheme } from './theming';
 
 const config: ThemeConfig = {
   initialColorMode: 'dark',
@@ -15,7 +15,7 @@ const config: ThemeConfig = {
 const theme = extendTheme(proTheme, {
   colors: { ...proTheme.colors, brand: proTheme.colors.blue },
   config: config,
-  components: { Modal: modalTheme, Popover: popoverTheme },
+  components: { Modal: modalTheme, Popover: popoverTheme, Tabs: tabsTheme },
 });
 
 const rootElement = document.getElementById('root');

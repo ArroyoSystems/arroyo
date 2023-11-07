@@ -1,5 +1,6 @@
 #![allow(clippy::comparison_chain)]
 use std::collections::HashMap;
+use std::iter::once;
 
 use std::time::Duration;
 use std::unreachable;
@@ -70,6 +71,31 @@ impl SourceOperator {
 }
 
 impl RecordTransform {
+    pub fn expressions(&mut self) -> impl Iterator<Item = &mut Expression> {
+        match self {
+            RecordTransform::ValueProjection(projection) => {
+                Box::new(projection.expressions()) as Box<dyn Iterator<Item = &mut Expression>>
+            }
+            RecordTransform::KeyProjection(projection) => {
+                Box::new(projection.expressions()) as Box<dyn Iterator<Item = &mut Expression>>
+            }
+            RecordTransform::UnnestProjection(projection) => Box::new(
+                projection
+                    .fields
+                    .iter_mut()
+                    .map(|(_, expression, _)| expression)
+                    .chain(once(&mut projection.unnest_inner)),
+            )
+                as Box<dyn Iterator<Item = &mut Expression>>,
+            RecordTransform::TimestampAssignment(expression) => {
+                Box::new(once(expression)) as Box<dyn Iterator<Item = &mut Expression>>
+            }
+            RecordTransform::Filter(expression) => {
+                Box::new(once(expression)) as Box<dyn Iterator<Item = &mut Expression>>
+            }
+        }
+    }
+
     pub fn output_struct(&self, input_struct: StructDef) -> StructDef {
         match self {
             RecordTransform::ValueProjection(projection) => {
@@ -427,9 +453,8 @@ impl<'a> SqlPipelineBuilder<'a> {
                 }
                 datafusion_expr::DdlStatement::CreateMemoryTable(create_memory_table) => {
                     bail!(
-                        "creating memory tables is not currently supported: {:?}, {:?}",
+                        "creating memory tables is not currently supported: {:?}",
                         create_memory_table.input,
-                        create_memory_table.primary_key
                     )
                 }
                 datafusion_expr::DdlStatement::CreateView(_) => {
@@ -462,6 +487,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             LogicalPlan::DescribeTable(_) => bail!("describe table not currently supported"),
             LogicalPlan::Unnest(_) => bail!("unnest not currently supported"),
             LogicalPlan::Statement(_) => bail!("statements not currently supported"),
+            LogicalPlan::Copy(_) => bail!("copy not currently supported"),
         }
     }
 
@@ -469,7 +495,7 @@ impl<'a> SqlPipelineBuilder<'a> {
         &mut self,
         dml_statement: &datafusion_expr::logical_plan::DmlStatement,
     ) -> Result<SqlOperator> {
-        if !matches!(dml_statement.op, WriteOp::Insert) {
+        if !matches!(dml_statement.op, WriteOp::InsertInto) {
             bail!("only insert statements are currently supported")
         }
         let input = self.insert_sql_plan(&dml_statement.input)?;

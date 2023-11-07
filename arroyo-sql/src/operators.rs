@@ -34,6 +34,10 @@ impl Projection {
     pub fn output_struct(&self) -> StructDef {
         self.expression_type(&ValuePointerContext::new())
     }
+
+    pub fn expressions(&mut self) -> impl Iterator<Item = &mut Expression> {
+        self.fields.iter_mut().map(|(_, expression)| expression)
+    }
 }
 
 impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for Projection {
@@ -223,6 +227,14 @@ impl CodeGenerator<VecAggregationContext, StructDef, syn::Expr> for AggregatePro
 pub struct TwoPhaseAggregateProjection {
     pub aggregates: Vec<(Column, TwoPhaseAggregation)>,
     pub group_bys: Vec<(StructField, AggregateResultExtraction)>,
+}
+
+impl TwoPhaseAggregateProjection {
+    pub fn expressions(&mut self) -> impl Iterator<Item = &mut Expression> {
+        self.aggregates
+            .iter_mut()
+            .map(|(_, computation)| &mut computation.incoming_expression)
+    }
 }
 
 impl TryFrom<AggregateProjection> for TwoPhaseAggregateProjection {

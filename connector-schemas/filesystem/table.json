@@ -168,7 +168,15 @@
                       "description": "fields to partition the data by"
                     }
                   },
-                  "additionalProperties": false
+                    "additionalProperties": false
+                },
+                "commit_style": {
+                    "title": "Commit Style",
+                    "type": "string",
+                    "enum": [
+                        "direct",
+                        "delta_lake"
+                    ]
                 }
               },
               "additionalProperties": false

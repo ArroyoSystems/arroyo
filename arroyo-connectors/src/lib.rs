@@ -22,6 +22,7 @@ use websocket::WebsocketConnector;
 use self::kafka::KafkaConnector;
 
 pub mod blackhole;
+pub mod delta;
 pub mod filesystem;
 pub mod fluvio;
 pub mod impulse;
@@ -29,13 +30,16 @@ pub mod kafka;
 pub mod kinesis;
 pub mod nexmark;
 pub mod polling_http;
+pub mod redis;
 pub mod single_file;
 pub mod sse;
 pub mod webhook;
 pub mod websocket;
+
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
     m.insert("blackhole", Box::new(BlackholeConnector {}));
+    m.insert("delta", Box::new(delta::DeltaLakeConnector {}));
     m.insert("filesystem", Box::new(filesystem::FileSystemConnector {}));
     m.insert("fluvio", Box::new(FluvioConnector {}));
     m.insert("impulse", Box::new(ImpulseConnector {}));
@@ -46,6 +50,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         "polling_http",
         Box::new(polling_http::PollingHTTPConnector {}),
     );
+    m.insert("redis", Box::new(redis::RedisConnector {}));
     m.insert("single_file", Box::new(single_file::SingleFileConnector {}));
     m.insert("sse", Box::new(SSEConnector {}));
     m.insert("webhook", Box::new(webhook::WebhookConnector {}));
@@ -278,6 +283,21 @@ pub(crate) fn pull_option_to_i64(
                 "failed to parse {} as a number for option {}",
                 value, name
             ))
+        })
+        .transpose()
+}
+
+pub(crate) fn pull_option_to_u64(
+    name: &str,
+    opts: &mut HashMap<String, String>,
+) -> anyhow::Result<Option<u64>> {
+    pull_option_to_i64(name, opts)?
+        .map(|x| {
+            if x < 0 {
+                bail!("invalid valid for {}, must be greater than 0", name);
+            } else {
+                Ok(x as u64)
+            }
         })
         .transpose()
 }

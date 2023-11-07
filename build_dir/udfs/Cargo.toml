@@ -3,16 +3,8 @@ name = "udfs"
 version = "1.0.0"
 edition = "2021"
 
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
-types = { path = "../types" }
 chrono = "0.4"
 serde = "1.0"
 serde_json = "1.0"
-arroyo-types = { path = "../../arroyo-types" }
 regex = "1"
-
-[package.metadata.wasm-pack.profile.release]
-wasm-opt = false

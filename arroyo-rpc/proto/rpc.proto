@@ -169,7 +169,7 @@ message WorkerErrorRes {
 }
 
 message CheckUdfsReq {
-  string udfs_rs = 1;
+  string definition = 1;
 }
 
 service ControllerGrpc {
@@ -224,6 +224,9 @@ message SubtaskCheckpointMetadata {
   uint64 bytes = 7;
 
   repeated BackendData backend_data = 8;
+  // this is data that should be sent along with the commit message
+  // to all subtask. The key is the table name.
+  map<string,bytes> committing_data = 9;
 }
 
 message BackendData {
@@ -246,6 +249,7 @@ message OperatorCheckpointMetadata {
 
   repeated BackendData backend_data = 10;
   uint64 bytes = 11;
+  OperatorCommitData commit_data = 12;
 }
 
 enum TableType {
@@ -315,6 +319,23 @@ message CheckpointReq {
 message CheckpointResp {
 }
 
+message CommitReq {
+  uint32 epoch = 1;
+  map<string, OperatorCommitData> committing_data = 2;
+}
+
+message CommitResp {
+}
+
+message OperatorCommitData {
+  // map from table name to commit data for that table.
+  map<string, TableCommitData> committing_data = 1;
+}
+
+message TableCommitData {
+  map<uint32, bytes> commit_data_by_subtask = 1;  
+}
+
 message LoadCompactedDataReq {
   string operator_id = 1;
   repeated BackendData backend_data_to_drop = 2; // this data got compressed...
@@ -347,6 +368,7 @@ message JobFinishedResp {
 service WorkerGrpc {
   rpc StartExecution(StartExecutionReq) returns (StartExecutionResp);
   rpc Checkpoint(CheckpointReq) returns (CheckpointResp);
+  rpc Commit(CommitReq) returns (CommitResp);
   rpc LoadCompactedData(LoadCompactedDataReq) returns (LoadCompactedDataRes);
   rpc StopExecution(StopExecutionReq) returns (StopExecutionResp);
   rpc JobFinished(JobFinishedReq) returns (JobFinishedResp);
@@ -423,6 +445,7 @@ message CompileQueryReq {
   string types = 2;
   string pipeline = 3;
   string wasm_fns = 4;
+  string udfs = 5;
 }
 
 message CompileQueryResp {
@@ -430,18 +453,16 @@ message CompileQueryResp {
   string wasm_fns_path = 2;
 }
 
-
-enum ValidationResult {
-  Ok = 0;
-  Error = 1;
+message CheckUdfsResp {
+  repeated string errors = 1;
+  optional string udf_name = 2;
 }
 
-message CheckUdfsResp {
-  ValidationResult result = 1;
-  repeated string errors = 2;
+message CheckUdfsCompilerResp {
+  repeated string errors = 1;
 }
 
 service CompilerGrpc {
   rpc CompileQuery(CompileQueryReq) returns (CompileQueryResp);
-  rpc CheckUdfs(CheckUdfsReq) returns (CheckUdfsResp);
+  rpc CheckUdfs(CheckUdfsReq) returns (CheckUdfsCompilerResp);
 }

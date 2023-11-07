@@ -136,7 +136,7 @@ where
                     }
                 }
             }
-            ControlMessage::Commit { epoch: _ } => {
+            ControlMessage::Commit { .. } => {
                 unreachable!("sources shouldn't receive commit messages");
             }
             ControlMessage::LoadCompacted { compacted } => {
@@ -178,7 +178,7 @@ where
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            let iter = self.deserializer.deserialize_slice(&event.data.as_bytes());
+                                            let iter = self.deserializer.deserialize_slice(&event.data.as_bytes()).await;
 
                                             for v in iter {
                                                 match v {

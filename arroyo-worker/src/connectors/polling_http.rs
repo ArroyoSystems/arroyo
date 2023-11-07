@@ -157,7 +157,7 @@ where
                     }
                 }
             }
-            ControlMessage::Commit { epoch: _ } => {
+            ControlMessage::Commit { .. } => {
                 unreachable!("sources shouldn't receive commit messages");
             }
             ControlMessage::LoadCompacted { compacted } => {
@@ -259,7 +259,7 @@ where
                                     }
                                 }
 
-                                let iter = self.deserializer.deserialize_slice(&buf);
+                                let iter = self.deserializer.deserialize_slice(&buf).await;
 
                                 for record in iter {
                                     match record {

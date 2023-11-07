@@ -9,21 +9,23 @@ use arroyo_types::{S3_ENDPOINT_ENV, S3_REGION_ENV};
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use object_store::aws::AmazonS3ConfigKey;
+use object_store::aws::{AmazonS3ConfigKey, AwsCredential};
 use object_store::gcp::GoogleCloudStorageBuilder;
+use object_store::multipart::PartId;
 use object_store::path::Path;
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
-use object_store::{MultipartId, UploadPart};
+use object_store::{CredentialProvider, MultipartId};
 use regex::{Captures, Regex};
 use thiserror::Error;
 
 mod aws;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StorageProvider {
     config: BackendConfig,
     object_store: Arc<dyn ObjectStore>,
     canonical_url: String,
+    storage_options: HashMap<String, String>,
 }
 
 #[derive(Error, Debug)]
@@ -263,6 +265,12 @@ fn last<I: Sized, const COUNT: usize>(opts: [Option<I>; COUNT]) -> Option<I> {
     opts.into_iter().flatten().last()
 }
 
+pub async fn get_current_credentials() -> Result<Arc<AwsCredential>, StorageError> {
+    let provider = ArroyoCredentialProvider::try_new()?;
+    let credentials = provider.get_credential().await?;
+    Ok(credentials)
+}
+
 impl StorageProvider {
     pub async fn for_url(url: &str) -> Result<Self, StorageError> {
         Self::for_url_with_options(url, HashMap::new()).await
@@ -279,6 +287,7 @@ impl StorageProvider {
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }
     }
+
     pub async fn get_url(url: &str) -> Result<Bytes, StorageError> {
         Self::get_url_with_options(url, HashMap::new()).await
     }
@@ -324,6 +333,7 @@ impl StorageProvider {
     ) -> Result<Self, StorageError> {
         let mut builder = AmazonS3Builder::from_env().with_bucket_name(&config.bucket);
         let mut aws_key_manually_set = false;
+        let mut s3_options = HashMap::new();
         for (key, value) in options {
             let s3_config_key = key.parse().map_err(|_| {
                 StorageError::CredentialsError(format!("invalid S3 config key: {}", key))
@@ -331,10 +341,13 @@ impl StorageProvider {
             if AmazonS3ConfigKey::AccessKeyId == s3_config_key {
                 aws_key_manually_set = true;
             }
+            s3_options.insert(s3_config_key.clone(), value.clone());
             builder = builder.with_config(s3_config_key, value);
         }
+
         if !aws_key_manually_set {
-            let credentials = Arc::new(ArroyoCredentialProvider::try_new()?);
+            let credentials: Arc<ArroyoCredentialProvider> =
+                Arc::new(ArroyoCredentialProvider::try_new()?);
             builder = builder.with_credentials(credentials);
         }
 
@@ -342,6 +355,7 @@ impl StorageProvider {
         config.region = config.region.or(default_region);
         if let Some(region) = &config.region {
             builder = builder.with_region(region);
+            s3_options.insert(AmazonS3ConfigKey::Region, region.clone());
         }
 
         if let Some(endpoint) = &config.endpoint {
@@ -349,24 +363,27 @@ impl StorageProvider {
                 .with_endpoint(endpoint)
                 .with_virtual_hosted_style_request(false)
                 .with_allow_http(true);
+            s3_options.insert(AmazonS3ConfigKey::Endpoint, endpoint.clone());
+            s3_options.insert(
+                AmazonS3ConfigKey::VirtualHostedStyleRequest,
+                "false".to_string(),
+            );
+            s3_options.insert(
+                AmazonS3ConfigKey::Client(object_store::ClientConfigKey::AllowHttp),
+                "true".to_string(),
+            );
         }
 
-        let canonical_url = match (&config.region, &config.endpoint) {
-            (_, Some(endpoint)) => {
-                format!("s3::{}/{}", endpoint, config.bucket)
-            }
-            (Some(region), _) => {
-                format!("https://s3.{}.amazonaws.com/{}", region, config.bucket)
-            }
-            _ => {
-                format!("https://s3.amazonaws.com/{}", config.bucket)
-            }
-        };
+        let canonical_url = format!("s3://{}", config.bucket);
 
         Ok(Self {
             config: BackendConfig::S3(config),
             object_store: Arc::new(builder.build().map_err(|e| Into::<StorageError>::into(e))?),
             canonical_url,
+            storage_options: s3_options
+                .into_iter()
+                .map(|(k, v)| (k.as_ref().to_string(), v))
+                .collect(),
         })
     }
 
@@ -381,6 +398,7 @@ impl StorageProvider {
             config: BackendConfig::GCS(config),
             object_store: Arc::new(gcs),
             canonical_url,
+            storage_options: HashMap::new(),
         })
     }
 
@@ -402,6 +420,7 @@ impl StorageProvider {
             config: BackendConfig::Local(config),
             object_store,
             canonical_url,
+            storage_options: HashMap::new(),
         })
     }
 
@@ -489,9 +508,10 @@ impl StorageProvider {
     pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
         Ok(self
             .object_store
-            .start_multipart(path)
+            .initiate_multipart_upload(path)
             .await
-            .map_err(|e| Into::<StorageError>::into(e))?)
+            .map_err(|e| Into::<StorageError>::into(e))?
+            .0)
     }
 
     pub async fn add_multipart(
@@ -500,10 +520,12 @@ impl StorageProvider {
         multipart_id: &MultipartId,
         part_number: usize,
         bytes: Bytes,
-    ) -> Result<UploadPart, StorageError> {
+    ) -> Result<PartId, StorageError> {
         Ok(self
             .object_store
-            .add_multipart(path, multipart_id, part_number, bytes)
+            .get_put_part(path, multipart_id)
+            .await?
+            .put_part(bytes, part_number)
             .await
             .map_err(|e| Into::<StorageError>::into(e))?)
     }
@@ -512,11 +534,13 @@ impl StorageProvider {
         &self,
         path: &Path,
         multipart_id: &MultipartId,
-        parts: Vec<UploadPart>,
+        parts: Vec<PartId>,
     ) -> Result<(), StorageError> {
         Ok(self
             .object_store
-            .close_multipart(path, multipart_id, parts)
+            .get_put_part(path, multipart_id)
+            .await?
+            .complete(parts)
             .await
             .map_err(|e| Into::<StorageError>::into(e))?)
     }
@@ -526,9 +550,16 @@ impl StorageProvider {
     pub fn canonical_url(&self) -> &str {
         &self.canonical_url
     }
+    pub fn storage_options(&self) -> &HashMap<String, String> {
+        &self.storage_options
+    }
 
     pub fn config(&self) -> &BackendConfig {
         &self.config
+    }
+
+    pub fn get_backing_store(&self) -> Arc<dyn ObjectStore> {
+        self.object_store.clone()
     }
 }
 

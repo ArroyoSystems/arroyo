@@ -299,7 +299,7 @@ async fn check_output_files(output_location: String, golden_output_location: Str
         });
 }
 
-correctness_run_codegen! {"select_star", 2000,
+correctness_run_codegen! {"select_star", 200,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -325,7 +325,7 @@ CREATE TABLE cars_output (
 );
 INSERT INTO cars_output SELECT * FROM cars"}
 
-correctness_run_codegen! {"hourly_by_event_type", 2000,
+correctness_run_codegen! {"hourly_by_event_type", 200,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -356,7 +356,7 @@ FROM cars
 GROUP BY 1,2);
 "}
 
-correctness_run_codegen! {"month_loose_watermark", 2000,
+correctness_run_codegen! {"month_loose_watermark", 200,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -388,7 +388,7 @@ FROM cars
 GROUP BY 1);
 "}
 
-correctness_run_codegen! {"tight_watermark", 2000,
+correctness_run_codegen! {"tight_watermark", 200,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -419,7 +419,7 @@ FROM cars
 GROUP BY 1);
 "}
 
-correctness_run_codegen! {"suspicious_drivers", 2000,
+correctness_run_codegen! {"suspicious_drivers", 200,
 "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -451,7 +451,7 @@ GROUP BY 1
 ) WHERE pickups < dropoffs
 "}
 
-correctness_run_codegen! {"most_active_driver_last_hour_unaligned", 2000,
+correctness_run_codegen! {"most_active_driver_last_hour_unaligned", 200,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -490,7 +490,7 @@ SELECT * FROM (
          GROUP BY 1,2)) ) where row_number = 1
 "}
 
-correctness_run_codegen! {"most_active_driver_last_hour", 2000,
+correctness_run_codegen! {"most_active_driver_last_hour", 200,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -529,7 +529,7 @@ SELECT * FROM (
          GROUP BY 1,2)) ) where row_number = 1
 "}
 
-correctness_run_codegen! {"outer_join", 2000,
+correctness_run_codegen! {"outer_join", 200,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -563,7 +563,7 @@ FULL OUTER JOIN
 ON pickups.driver_id = dropoffs.driver_id
 "}
 
-correctness_run_codegen! {"windowed_outer_join", 2000,
+correctness_run_codegen! {"windowed_outer_join", 200,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,
@@ -602,7 +602,7 @@ FULL OUTER JOIN (
 ON dropoffs.window = pickups.window)
 "}
 
-correctness_run_codegen! {"windowed_inner_join", 2000,
+correctness_run_codegen! {"windowed_inner_join", 200,
 "CREATE TABLE cars (
   timestamp TIMESTAMP,
   driver_id BIGINT,

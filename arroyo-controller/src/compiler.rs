@@ -59,6 +59,7 @@ impl ProgramCompiler {
             job_id: self.job_id.clone(),
             types: self.compile_types().to_string(),
             pipeline: self.compile_pipeline_main(&self.name, &self.program.get_hash()),
+            udfs: self.compile_udf_lib(),
             wasm_fns: self.compile_wasm_lib().to_string(),
         };
 
@@ -110,6 +111,7 @@ impl ProgramCompiler {
         let types = self.compile_types().to_string();
         let main = self.compile_pipeline_main(&self.name, &self.program.get_hash());
         let wasm = self.compile_wasm_lib().to_string();
+        let udfs = self.compile_udf_lib();
 
         let workspace_toml = r#"
 [workspace]
@@ -122,19 +124,19 @@ exclude = [
   "wasm-fns",
 ]
 [workspace.dependencies]
-arrow = { version = "43.0.0" }
-arrow-buffer = { version = "43.0.0" }
-arrow-array = { version = "43.0.0" }
-arrow-schema = { version = "43.0.0" }
-parquet = { version = "43.0.0" }
+arrow = { version = "46.0.0" }
+arrow-buffer = { version = "46.0.0" }
+arrow-array = { version = "46.0.0" }
+arrow-schema = { version = "46.0.0" }
+parquet = { version = "46.0.0" }
 
 [patch.crates-io]
-parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
-arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
-arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
-arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
-arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '43.0.0/arroyo_patches'}
-object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'multipart_gcp' }
+parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
+arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
+arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
+arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
+arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'object_store/put_part_api' }
 "#;
 
         // NOTE: These must be kept in sync with the Cargo configs in docker/build_base and build_dir/Cargo.toml
@@ -166,13 +168,13 @@ edition = "2021"
 
 [dependencies]
 types = {{ path = "../types" }}
+udfs = {{ path = "../udfs" }}
 petgraph = "0.6"
 chrono = "0.4"
 bincode = "=2.0.0-rc.3"
 bincode_derive = "=2.0.0-rc.3"
 serde = "1.0"
 serde_json = "1.0"
-regex = "1"
 arrow = {{ workspace = true }}
 parquet = {{ workspace = true }}
 arrow-array = {{ workspace = true }}
@@ -189,6 +191,21 @@ arroyo-worker = {{ path = "{}/arroyo-worker"{}}}
             }
         );
         Self::create_subproject(&dir, "pipeline", &pipeline_toml, "main.rs", main).await?;
+
+        let udfs_toml = r#"
+[package]
+name = "udfs"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4"
+serde = "1.0"
+serde_json = "1.0"
+regex = "1"
+        "#;
+
+        Self::create_subproject(&dir, "udfs", &udfs_toml, "lib.rs", udfs).await?;
 
         let wasmfns_toml = format!(
             r#"
@@ -320,13 +337,6 @@ wasm-opt = false
         };
         info!("{}", self.program.dot());
 
-        let udfs: Vec<TokenStream> = self
-            .program
-            .udfs
-            .iter()
-            .map(|t| parse_str(t).unwrap())
-            .collect();
-
         let other_defs: Vec<TokenStream> = self
             .program
             .other_defs
@@ -336,7 +346,6 @@ wasm-opt = false
 
         let make_graph_function = self.program.make_graph_function();
 
-        // TODO: move udfs to udfs crate
         prettyplease::unparse(&parse_quote! {
             #imports
 
@@ -348,9 +357,23 @@ wasm-opt = false
                 arroyo_worker::WorkerServer::new(#name, #hash, graph).start().unwrap();
             }
 
-            #(#udfs )*
-
             #(#other_defs )*
+        })
+    }
+
+    fn compile_udf_lib(&self) -> String {
+        let udfs: Vec<TokenStream> = self
+            .program
+            .udfs
+            .iter()
+            .map(|t| parse_str(t).unwrap())
+            .collect();
+
+        prettyplease::unparse(&parse_quote! {
+            use std::time::{SystemTime, Duration};
+            use std::str::FromStr;
+
+            #(#udfs )*
         })
     }
 

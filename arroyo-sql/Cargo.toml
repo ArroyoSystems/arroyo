@@ -10,9 +10,9 @@ arroyo-rpc = {path = "../arroyo-rpc"}
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 
-datafusion = "28.0"
-datafusion-expr = "28.0"
-datafusion-common = "28.0"
+datafusion = "31.0"
+datafusion-expr = "31.0"
+datafusion-common = "31.0"
 arrow-schema = {workspace = true }
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"
@@ -32,3 +32,4 @@ tracing = "0.1.37"
 typify = "0.0.13"
 schemars = "0.8"
 serde_json_path = "0.6.3"
+apache-avro = "0.16.0"

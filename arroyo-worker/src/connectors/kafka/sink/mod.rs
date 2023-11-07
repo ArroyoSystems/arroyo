@@ -251,7 +251,12 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         }
     }
 
-    async fn handle_commit(&mut self, epoch: u32, ctx: &mut crate::engine::Context<(), ()>) {
+    async fn handle_commit(
+        &mut self,
+        epoch: u32,
+        _commit_data: HashMap<char, HashMap<u32, Vec<u8>>>,
+        ctx: &mut crate::engine::Context<(), ()>,
+    ) {
         let ConsistencyMode::ExactlyOnce {
             next_transaction_index: _,
             producer_to_complete,
@@ -295,8 +300,8 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         if !self.is_committing() {
             return;
         }
-        if let Some(ControlMessage::Commit { epoch }) = ctx.control_rx.recv().await {
-            self.handle_commit(epoch, ctx).await;
+        if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
+            self.handle_commit(epoch, commit_data, ctx).await;
         } else {
             warn!("no commit message received, not committing")
         }

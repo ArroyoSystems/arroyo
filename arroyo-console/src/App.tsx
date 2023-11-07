@@ -21,6 +21,7 @@ import ApiUnavailable from './routes/not_found/ApiUnavailable';
 import Loading from './components/Loading';
 import React from 'react';
 import { getTourContextValue, TourContext } from './tour';
+import { getLocalUdfsContextValue, LocalUdfsContext } from './udf_state';
 
 function logout() {
   // TODO: also send a request to the server to delete the session
@@ -99,6 +100,7 @@ function Sidebar() {
 function App() {
   const { ping, pingLoading, pingError } = usePing();
   const tourContextValue = getTourContextValue();
+  const localUdfsContextValue = getLocalUdfsContextValue();
 
   let content = (
     <GridItem className="main" area={'main'}>
@@ -116,10 +118,12 @@ function App() {
 
   return (
     <TourContext.Provider value={tourContextValue}>
-      <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px minmax(0, 1fr)'} h="100vh">
-        <Sidebar />
-        {content}
-      </Grid>
+      <LocalUdfsContext.Provider value={localUdfsContextValue}>
+        <Grid templateAreas={'"nav main"'} gridTemplateColumns={'200px minmax(0, 1fr)'} h="100vh">
+          <Sidebar />
+          {content}
+        </Grid>
+      </LocalUdfsContext.Provider>
     </TourContext.Provider>
   );
 }

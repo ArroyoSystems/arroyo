@@ -13,7 +13,6 @@ import {
   Stack,
   Table,
   Tbody,
-  Text,
   Th,
   Thead,
   Tr,
@@ -27,10 +26,12 @@ import PaginatedContent from './PaginatedContent';
 
 export interface JobsTableProps {}
 
-const columns = ['Created at', 'Job'];
-
 const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
-  const { isOpen, onOpen, onClose } = useDisclosure();
+  const {
+    isOpen: deletePipelineModalIsOpen,
+    onOpen: deletePipelineModalOnOpen,
+    onClose: deletePipelineModalOnClose,
+  } = useDisclosure();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [pipelineIdToBeDeleted, setPipelineIdToBeDeleted] = useState<string | undefined>(undefined);
@@ -60,7 +61,7 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
   }
 
   const handleDeletePipeline = async () => {
-    onClose();
+    deletePipelineModalOnClose();
     const { error } = await deletePipeline();
 
     if (error) {
@@ -74,7 +75,11 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
   };
 
   const alert = (
-    <AlertDialog isOpen={isOpen} leastDestructiveRef={cancelRef} onClose={onClose}>
+    <AlertDialog
+      isOpen={deletePipelineModalIsOpen}
+      leastDestructiveRef={cancelRef}
+      onClose={deletePipelineModalOnClose}
+    >
       <AlertDialogOverlay>
         <AlertDialogContent>
           <AlertDialogHeader fontSize="lg" fontWeight="bold">
@@ -87,7 +92,7 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
           </AlertDialogBody>
 
           <AlertDialogFooter>
-            <Button ref={cancelRef} onClick={onClose}>
+            <Button ref={cancelRef} onClick={deletePipelineModalOnClose}>
               Cancel
             </Button>
             <Button colorScheme="red" onClick={() => handleDeletePipeline()} ml={3}>
@@ -103,13 +108,8 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
     <Thead>
       <Tr>
         <Th>Name / ID</Th>
-        {columns.map(c => {
-          return (
-            <Th key={c}>
-              <Text>{c}</Text>
-            </Th>
-          );
-        })}
+        <Th>Created at</Th>
+        <Th>Job</Th>
         <Th></Th>
       </Tr>
     </Thead>
@@ -122,7 +122,7 @@ const PipelinesTable: React.FC<JobsTableProps> = ({}) => {
           key={pipeline.id}
           pipeline={pipeline}
           setPipelineIdToBeDeleted={setPipelineIdToBeDeleted}
-          onOpen={onOpen}
+          onOpen={deletePipelineModalOnOpen}
         />
       ))}
     </Tbody>

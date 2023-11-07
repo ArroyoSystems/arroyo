@@ -200,7 +200,7 @@ where
                     match message {
                         Some((_, Ok(msg))) => {
                             let timestamp = from_millis(msg.timestamp().max(0) as u64);
-                            let iter = self.deserializer.deserialize_slice(msg.value());
+                            let iter = self.deserializer.deserialize_slice(msg.value()).await;
                             for value in iter {
                                 ctx.collector.collect(Record {
                                     timestamp,

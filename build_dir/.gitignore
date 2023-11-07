@@ -1,2 +1,4 @@
 Cargo.lock
 wasm-fns/Cargo.lock
+udfs/src/lib.rs
+pipeline/src/main.rs

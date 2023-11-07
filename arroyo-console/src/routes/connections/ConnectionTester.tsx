@@ -78,7 +78,6 @@ export function ConnectionTester({
   const onClickTest = async () => {
     setTesting(true);
     setError(null);
-    console.log('config', state);
 
     if (!testing) {
       await useConnectionTableTest(sseHandler, createRequest);
@@ -89,9 +88,10 @@ export function ConnectionTester({
   const submit = async () => {
     setError(null);
     const { error } = await post('/v1/connection_tables', { body: createRequest });
-    navigate('/connections');
     if (error) {
       setError({ title: 'Failed to create connection', body: formatError(error) });
+    } else {
+      navigate('/connections');
     }
   };
 

@@ -21,6 +21,7 @@ pub enum IdTypes {
     JobLogMessage,
     ConnectionTable,
     ConnectionTablePipeline,
+    Udf,
 }
 
 pub fn generate_id(id_type: IdTypes) -> String {
@@ -36,6 +37,7 @@ pub fn generate_id(id_type: IdTypes) -> String {
         IdTypes::JobLogMessage => "jlm",
         IdTypes::ConnectionTable => "ct",
         IdTypes::ConnectionTablePipeline => "ctp",
+        IdTypes::Udf => "udf",
     };
     let id = nanoid!(ID_LENGTH, &ALPHABET);
     format!("{}_{}", prefix, id)
