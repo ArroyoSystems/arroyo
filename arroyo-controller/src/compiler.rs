@@ -346,8 +346,6 @@ wasm-opt = false
 
         let make_graph_function = self.program.make_graph_function();
 
-        info!("{}", quote!(#(#other_defs )*).to_string());
-
         prettyplease::unparse(&parse_quote! {
             #imports
 
