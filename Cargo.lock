@@ -2739,9 +2739,8 @@ dependencies = [
 
 [[package]]
 name = "deltalake"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72f889be5851e2633239a5329f57eac565ef4fc37b5d283d1532ca1aaa8d74c9"
+version = "0.16.3"
+source = "git+https://github.com/ArroyoSystems/delta-rs?branch=dynamo_pin_0_16#93665fe50abf0bd7f526836597c9f7c9e6f2fe65"
 dependencies = [
  "arrow",
  "arrow-array",
