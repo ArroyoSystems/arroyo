@@ -40,7 +40,7 @@ md-5 = "0.10"
 hex = "0.4"
 url = "2.4.0"
 ordered-float = "3"
-deltalake = {version = "0.16.0", features = ["s3", "arrow"] }
+deltalake = {version = "0.16", features = ["s3", "arrow"] }
 arrow = { workspace = true }
 parquet = { workspace = true, features = ["async"]}
 arrow-array = { workspace = true}
