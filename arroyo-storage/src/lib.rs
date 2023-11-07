@@ -133,10 +133,6 @@ impl S3Config {
             key: Some(key),
         }
     }
-
-    pub fn canonical_url(&self) -> String {
-        todo!()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,6 +254,14 @@ impl BackendConfig {
             path: path.to_str().unwrap().to_string(),
             key,
         }))
+    }
+
+    fn key(&self) -> Option<String> {
+        match self {
+            BackendConfig::S3(s3_config) => s3_config.key.clone(),
+            BackendConfig::GCS(gcs_config) => gcs_config.key.clone(),
+            BackendConfig::Local(local_config) => local_config.key.clone(),
+        }
     }
 }
 
@@ -441,15 +445,14 @@ impl StorageProvider {
             .map_err(|e| Into::<StorageError>::into(e))
     }
 
-    pub async fn list_as_stream<P: Into<String>>(
+    pub async fn list_as_stream<P: Into<Path>>(
         &self,
-        path: P,
+        path: Option<P>,
     ) -> Result<impl Stream<Item = Result<Path, object_store::Error>> + '_, StorageError> {
-        let path: String = path.into();
-
+        let key_path = self.config.key().map(|key| key.into());
         let list = self
             .object_store
-            .list(Some(&path.into()))
+            .list(path.map(|p| p.into()).or(key_path).as_ref())
             .await
             .map_err(|e| Into::<StorageError>::into(e))?
             .map(|meta| meta.map(|x| x.location));

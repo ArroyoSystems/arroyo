@@ -148,9 +148,7 @@ full_pipeline_codegen! {"create_filesystem_s3_source",
 ) WITH (
   connector ='filesystem',
   type = 'source',
-  bucket = 'demo',
-  prefix = 's3-uri',
-  region = 'us-west-2',
+  path = 's3://demo/s3-uri',
   compression_format = 'gzip',
   format = 'json'
 );

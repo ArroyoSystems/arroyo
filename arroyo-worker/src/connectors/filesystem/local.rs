@@ -19,8 +19,8 @@ use crate::{
 use anyhow::{bail, Result};
 
 use super::{
-    get_partitioner_from_table, FileSystemTable, MultiPartWriterStats, RollingPolicy, TableType,
-    delta, CommitState, CommitStyle, FileSystemTable,
+    delta, get_partitioner_from_file_settings, CommitState, CommitStyle, FileSystemTable,
+    MultiPartWriterStats, RollingPolicy, TableType,
 };
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
@@ -51,12 +51,7 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
         else {
             unreachable!("LocalFileSystemWriter can only be used as a sink")
         };
-        let commit_state = match file_settings
-            .as_ref()
-            .unwrap()
-            .commit_style
-            .unwrap()
-        {
+        let commit_state = match file_settings.as_ref().unwrap().commit_style.unwrap() {
             CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
@@ -67,7 +62,9 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             final_dir,
             next_file_index: 0,
             subtask_id: 0,
-            partitioner: get_partitioner_from_table(&table_properties),
+            partitioner: get_partitioner_from_file_settings(
+                file_settings.as_ref().unwrap().clone(),
+            ),
             finished_files: Vec::new(),
             rolling_policy: RollingPolicy::from_file_settings(file_settings.as_ref().unwrap()),
             table_properties,

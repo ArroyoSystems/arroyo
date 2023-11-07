@@ -1,7 +1,9 @@
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
 use axum::response::sse::Event;
+use std::collections::HashMap;
 use std::convert::Infallible;
+use tracing::info;
 use typify::import_types;
 
 use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
@@ -89,8 +91,19 @@ impl Connector for FileSystemConnector {
             TableType::Sink {
                 ref format_settings,
                 ref write_target,
+                ref file_settings,
                 ..
             } => {
+                // confirm commit style is Direct
+                if let Some(CommitStyle::Direct) = file_settings
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("no file_settings"))?
+                    .commit_style
+                {
+                    // ok
+                } else {
+                    bail!("commit_style must be Direct");
+                }
                 let backend_config = BackendConfig::parse_url(&write_target.path, true)?;
                 let is_local = match &backend_config {
                     BackendConfig::Local { .. } => true,
@@ -156,128 +169,36 @@ impl Connector for FileSystemConnector {
     ) -> anyhow::Result<crate::Connection> {
         match opts.remove("type") {
             Some(t) if t == "source" => {
-                if let (Some(bucket), Some(prefix), Some(region), Some(compression_format)) = (
-                    opts.remove("bucket"),
-                    opts.remove("prefix"),
-                    opts.remove("region"),
-                    opts.remove("compression_format"),
-                ) {
-                    self.from_config(
-                        None,
-                        name,
-                        EmptyConfig {},
-                        FileSystemTable {
-                            type_: TableType::Source {
-                                read_source: S3 {
-                                    bucket,
-                                    compression_format: compression_format
-                                        .as_str()
-                                        .try_into()
-                                        .map_err(|_| {
-                                            anyhow::anyhow!(
-                                                "unsupported compression format: {}",
-                                                compression_format
-                                            )
-                                        })?,
-                                    prefix,
-                                    region,
-                                },
-                            },
-                        },
-                        schema,
-                    )
-                } else {
-                    bail!("Source S3 must have bucket, prefix, region, and compression_format set")
-                }
-            }
-            Some(t) if t == "sink" => {
-                let storage_options: std::collections::HashMap<String, String> = opts
-                    .iter()
-                    .filter(|(k, _)| k.starts_with("storage."))
-                    .map(|(k, v)| (k.trim_start_matches("storage.").to_string(), v.to_string()))
-                    .collect();
-                opts.retain(|k, _| !k.starts_with("storage."));
-
-                let storage_url = pull_opt("path", opts)?;
-                BackendConfig::parse_url(&storage_url, true)?;
-
-                let inactivity_rollover_seconds =
-                    pull_option_to_i64("inactivity_rollover_seconds", opts)?;
-                let max_parts = pull_option_to_i64("max_parts", opts)?;
-                let rollover_seconds = pull_option_to_i64("rollover_seconds", opts)?;
-                let target_file_size = pull_option_to_i64("target_file_size", opts)?;
-                let target_part_size = pull_option_to_i64("target_part_size", opts)?;
-
-                let partition_fields: Vec<_> = opts
-                    .remove("partition_fields")
-                    .map(|fields| fields.split(',').map(|f| f.to_string()).collect())
-                    .unwrap_or_default();
-
-                let time_partition_pattern = opts.remove("time_partition_pattern");
-
-                let partitioning =
-                    if time_partition_pattern.is_some() || !partition_fields.is_empty() {
-                        Some(Partitioning {
-                            time_partition_pattern,
-                            partition_fields,
-                        })
-                    } else {
-                        None
-                    };
-
-                let file_settings = Some(FileSettings {
-                    inactivity_rollover_seconds,
-                    max_parts,
-                    rollover_seconds,
-                    target_file_size,
-                    target_part_size,
-                    partitioning,
-                });
-
-                let format_settings = match schema
-                    .ok_or(anyhow!("require schema"))?
-                    .format
-                    .as_ref()
-                    .ok_or(anyhow!(
-                        "filesystem sink requires a format, such as json or parquet"
-                    ))? {
-                    Format::Parquet(..) => {
-                        let compression = opts
-                            .remove("parquet_compression")
-                            .map(|value| {
-                                Compression::try_from(&value).map_err(|_err| {
-                                    anyhow!("{} is not a valid parquet_compression argument", value)
-                                })
-                            })
-                            .transpose()?;
-                        let row_batch_size = pull_option_to_i64("parquet_row_batch_size", opts)?;
-                        let row_group_size = pull_option_to_i64("parquet_row_group_size", opts)?;
-                        Some(FormatSettings::Parquet {
-                            compression,
-                            row_batch_size,
-                            row_group_size,
-                        })
-                    }
-                    Format::Json(..) => Some(FormatSettings::Json {}),
-                    other => bail!("Unsupported format: {:?}", other),
-                };
-
+                let (storage_url, storage_options) = get_storage_url_and_options(opts)?;
+                info!(
+                    "storage_url: {}, storage_options: {:?}",
+                    storage_url, storage_options
+                );
+                let compression_format = opts
+                    .remove("compression_format")
+                    .map(|format| format.as_str().try_into().map_err(|err: &str| anyhow!(err)))
+                    .transpose()?
+                    .unwrap_or(CompressionFormat::None);
                 self.from_config(
                     None,
                     name,
                     EmptyConfig {},
                     FileSystemTable {
-                        type_: TableType::Sink {
-                            write_target: FolderUrl {
+                        type_: TableType::Source {
+                            read_source: Source {
                                 path: storage_url,
                                 storage_options,
                             },
-                            file_settings,
-                            format_settings,
+                            compression_format: Some(compression_format),
                         },
                     },
                     schema,
                 )
+            }
+            Some(t) if t == "sink" => {
+                let table = file_system_table_from_options(opts, schema, CommitStyle::Direct)?;
+
+                self.from_config(None, name, EmptyConfig {}, table, schema)
             }
             Some(t) => bail!("unknown type: {}", t),
             None => bail!("must have type set"),
@@ -285,20 +206,26 @@ impl Connector for FileSystemConnector {
     }
 }
 
-pub fn file_system_table_from_options(
-    opts: &mut std::collections::HashMap<String, String>,
-    schema: Option<&ConnectionSchema>,
-    commit_style: CommitStyle,
-) -> Result<FileSystemTable> {
-    let storage_options: std::collections::HashMap<String, String> = opts
+fn get_storage_url_and_options(
+    opts: &mut HashMap<String, String>,
+) -> Result<(String, HashMap<String, String>)> {
+    let storage_url = pull_opt("path", opts)?;
+    let storage_options: HashMap<String, String> = opts
         .iter()
         .filter(|(k, _)| k.starts_with("storage."))
         .map(|(k, v)| (k.trim_start_matches("storage.").to_string(), v.to_string()))
         .collect();
     opts.retain(|k, _| !k.starts_with("storage."));
-
-    let storage_url = pull_opt("path", opts)?;
     BackendConfig::parse_url(&storage_url, true)?;
+    Ok((storage_url, storage_options))
+}
+
+pub fn file_system_table_from_options(
+    opts: &mut std::collections::HashMap<String, String>,
+    schema: Option<&ConnectionSchema>,
+    commit_style: CommitStyle,
+) -> Result<FileSystemTable> {
+    let (storage_url, storage_options) = get_storage_url_and_options(opts)?;
 
     let inactivity_rollover_seconds = pull_option_to_i64("inactivity_rollover_seconds", opts)?;
     let max_parts = pull_option_to_i64("max_parts", opts)?;
@@ -360,11 +287,13 @@ pub fn file_system_table_from_options(
         other => bail!("Unsupported format: {:?}", other),
     };
     Ok(FileSystemTable {
-        write_target: FolderUrl {
-            path: storage_url,
-            storage_options,
+        type_: TableType::Sink {
+            file_settings,
+            format_settings,
+            write_target: FolderUrl {
+                path: storage_url,
+                storage_options,
+            },
         },
-        file_settings,
-        format_settings,
     })
 }

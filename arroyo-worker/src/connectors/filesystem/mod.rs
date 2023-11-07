@@ -24,6 +24,7 @@ use typify::import_types;
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 
 use arroyo_types::*;
+pub mod arrow;
 mod delta;
 pub mod json;
 pub mod local;
@@ -93,30 +94,22 @@ impl<
         R: MultiPartWriter<InputType = T> + Send + 'static,
     > FileSystemSink<K, T, R>
 {
-    pub fn from_config(config_str: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
-        let config: OperatorConfig =
-            serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
-        let table: FileSystemTable =
-            serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
-
-        let write_target = match table.type_ {
-            TableType::Sink {
-                ref write_target, ..
-            } => write_target.clone(),
-            TableType::Source { .. } => {
-                unreachable!("multi-part writer can only be used as sink");
-            }
-        };
-    }
-
     pub fn create_and_start(table: FileSystemTable) -> TwoPhaseCommitterOperator<K, T, Self> {
+        let TableType::Sink {
+            write_target,
+            file_settings,
+            format_settings: _,
+        } = table.clone().type_
+        else {
+            unreachable!("multi-part writer can only be used as sink");
+        };
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
-        let partition_func = get_partitioner_from_table(&table);
-        let commit_strategy = match table.file_settings.as_ref().unwrap().commit_style.unwrap() {
+        let commit_strategy = match file_settings.as_ref().unwrap().commit_style.unwrap() {
             CommitStyle::Direct => CommitStrategy::PerSubtask,
             CommitStyle::DeltaLake => CommitStrategy::PerOperator,
         };
+        let partition_func = get_partitioner_from_file_settings(file_settings.unwrap());
         tokio::spawn(async move {
             let path: Path = StorageProvider::get_key(&write_target.path).unwrap().into();
             let provider = StorageProvider::for_url_with_options(
@@ -130,7 +123,7 @@ impl<
                 Arc::new(provider),
                 receiver,
                 checkpoint_sender,
-                table.clone(),
+                table,
             );
             writer.run().await.unwrap();
         });
@@ -153,19 +146,11 @@ impl<
     }
 }
 
-fn get_partitioner_from_table<K: Key, T: Data + Serialize>(
-    table: &FileSystemTable,
+fn get_partitioner_from_file_settings<K: Key, T: Data + Serialize>(
+    file_settings: FileSettings,
 ) -> Option<Box<dyn Fn(&Record<K, T>) -> String + Send>> {
-    let partitions = match table.type_ {
-        TableType::Sink {
-            file_settings:
-                Some(FileSettings {
-                    partitioning: Some(ref partitions),
-                    ..
-                }),
-            ..
-        } => partitions.clone(),
-        _ => return None,
+    let Some(partitions) = file_settings.partitioning else {
+        return None;
     };
     match (
         partitions.time_partition_pattern,
@@ -662,13 +647,9 @@ where
             file_settings.as_ref().unwrap()
         } else {
             unreachable!("AsyncMultipartFileSystemWriter can only be used as a sink");
-        let commit_state = match writer_properties
-            .file_settings
-            .as_ref()
-            .unwrap()
-            .commit_style
-            .unwrap()
-        {
+        };
+
+        let commit_state = match file_settings.commit_style.unwrap() {
             CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };

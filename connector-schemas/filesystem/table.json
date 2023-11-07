@@ -13,47 +13,37 @@
             "read_source": {
               "type": "object",
               "title": "Source",
-              "oneOf": [
-                {
+              "properties": {
+                "Path": {
+                  "title": "Path",
+                  "type": "string",
+                  "description": "URI of the folder to write to"
+                },
+                "Storage options": {
                   "type": "object",
-                  "title": "S3",
-                  "properties": {
-                    "bucket": {
-                      "title": "Bucket Name",
-                      "type": "string",
-                      "description": "bucket to read from"
-                    },
-                    "prefix": {
-                      "title": "Prefix",
-                      "type": "string",
-                      "description": "S3 prefix to read from"
-                    },
-                    "region": {
-                      "title": "AWS Region",
-                      "type": "string",
-                      "description": "AWS region to read from"
-                    },
-                    "compression_format": {
-                      "title": "Compression format",
-                      "type": "string",
-                      "description": "Compression format of the files in S3",
-                      "enum": [
-                        "none",
-                        "zstd",
-                        "gzip"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "bucket",
-                    "prefix",
-                    "region",
-                    "compression_format"
-                  ]
+                  "title": "Storage Options",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
                 }
-              ]
+              },
+              "required": [
+                "Path"
+              ],
+              "additionalProperties": false
+            },
+
+            "compression_format": {
+                "title": "Compression format",
+                "type": "string",
+                "description": "Compression format of the files in S3",
+                "enum": [
+                  "none",
+                  "zstd",
+                  "gzip"
+                  ]     
             }
-          },
+            },
           "required": [
             "read_source"
           ]
@@ -168,7 +158,7 @@
                       "description": "fields to partition the data by"
                     }
                   },
-                    "additionalProperties": false
+                  "additionalProperties": false
                 },
                 "commit_style": {
                     "title": "Commit Style",
