@@ -3,7 +3,6 @@
 members = [
   "pipeline",
   "types",
-  "udfs",
 ]
 
 exclude = [

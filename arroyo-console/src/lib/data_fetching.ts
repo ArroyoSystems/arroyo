@@ -343,7 +343,7 @@ const queryValidationFetcher = () => {
     let udfs: PipelineLocalUdf[] = [];
     if (params.localUdfs) {
       udfs = params.localUdfs.map(udf => {
-        return { language: 'rust', definition: udf.definition };
+        return { definition: udf.definition };
       });
     }
 

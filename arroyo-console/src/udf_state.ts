@@ -135,9 +135,12 @@ export const getLocalUdfsContextValue = () => {
     const id = generate_udf_id();
     const functionName = `new_udf`;
     const definition =
+      `/*\n` +
+      `[dependencies]\n\n` +
+      `*/\n\n` +
       `pub fn ${functionName}(x: i64) -> i64 {\n` +
       '    // Write your function here\n' +
-      '    // Tip: rename the function to something descriptive\n' +
+      '    // Tip: rename the function to something descriptive\n\n' +
       '}';
 
     const newUdf = { name: functionName, definition, id, open: true };

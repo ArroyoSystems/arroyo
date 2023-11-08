@@ -66,7 +66,7 @@ const UdfEditTab: React.FC<UdfEditTabProps> = ({ udf }) => {
   const handleShare = async () => {
     // synchronously validate udf
     setLoading(true);
-    const { data: udfValiation, error: udfValiationError } = await post('/v1/udfs/validate', {
+    const { data: udfValiation } = await post('/v1/udfs/validate', {
       body: {
         definition: udf.definition,
       },

@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 types = { path = "../types" }
-udfs = { path = "../udfs" }
+udfs = { path = "../udfs_dir/udfs" }
 petgraph = "0.6"
 bincode = "=2.0.0-rc.3"
 bincode_derive = "=2.0.0-rc.3"
