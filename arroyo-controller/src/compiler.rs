@@ -136,8 +136,7 @@ arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/par
 arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
 arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
 arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'object_store/put_part_api'}
-deltalake = {git = "https://github.com/ArroyoSystems/delta-rs", branch = "dynamo_pin_0_16"}
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'object_store/put_part_api' }
 "#;
 
         // NOTE: These must be kept in sync with the Cargo configs in docker/build_base and build_dir/Cargo.toml
