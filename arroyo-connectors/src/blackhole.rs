@@ -97,6 +97,7 @@ impl Connector for BlackholeConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: ConnectionType::Sink,
             schema: s.cloned().unwrap_or_else(|| ConnectionSchema {
                 format: None,

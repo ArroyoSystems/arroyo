@@ -362,6 +362,7 @@ impl Connector for RedisConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: ConnectionType::Sink,
             schema,
             operator: "connectors::redis::sink::RedisSinkFunc::<#in_k, #in_t>".to_string(),

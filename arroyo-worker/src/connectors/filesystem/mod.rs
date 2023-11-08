@@ -43,31 +43,47 @@ use super::two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseComm
 pub struct FileSystemSink<
     K: Key,
     T: Data + Sync,
+    P: PartitionProducer<K, T>,
     R: MultiPartWriter<InputType = T> + Send + 'static,
 > {
     sender: Sender<FileSystemMessages<T>>,
     partitioner: Option<Box<dyn Fn(&Record<K, T>) -> String + Send>>,
     checkpoint_receiver: Receiver<CheckpointData<T>>,
     commit_strategy: CommitStrategy,
-    _ts: PhantomData<(K, R)>,
+    _ts: PhantomData<(K, R, P)>,
 }
 
-pub type ParquetFileSystemSink<K, T, R> = FileSystemSink<
+pub type ParquetFileSystemSink<K, T, P, R> = FileSystemSink<
     K,
     T,
+    P,
     BatchMultipartWriter<FixedSizeRecordBatchBuilder<R>, RecordBatchBufferingWriter<R>>,
 >;
 
-pub type JsonFileSystemSink<K, T> =
-    FileSystemSink<K, T, BatchMultipartWriter<PassThrough<T>, JsonWriter<T>>>;
+pub type JsonFileSystemSink<K, T> = FileSystemSink<
+    K,
+    T,
+    DefaultPartitionProducer,
+    BatchMultipartWriter<PassThrough<T>, JsonWriter<T>>,
+>;
 
 pub type LocalParquetFileSystemSink<K, T, R> = LocalFileSystemWriter<K, T, ParquetLocalWriter<R>>;
 
 pub type LocalJsonFileSystemSink<K, T> = LocalFileSystemWriter<K, T, JsonLocalWriter>;
 
-impl<K: Key, T: Data + Sync + SchemaData + Serialize, V: LocalWriter<T>>
-    LocalFileSystemWriter<K, T, V>
-{
+pub trait PartitionProducer<K: Key, T: Data>: Send + 'static {
+    fn partitioner(table: &FileSystemTable) -> Option<Box<dyn Fn(&Record<K, T>) -> String + Send>>;
+}
+
+pub struct DefaultPartitionProducer;
+
+impl<K: Key, T: Data + Serialize> PartitionProducer<K, T> for DefaultPartitionProducer {
+    fn partitioner(table: &FileSystemTable) -> Option<Box<dyn Fn(&Record<K, T>) -> String + Send>> {
+        get_partitioner_from_table(table)
+    }
+}
+
+impl<K: Key, T: Sync + SchemaData + Serialize, V: LocalWriter<T>> LocalFileSystemWriter<K, T, V> {
     pub fn from_config(config_str: &str) -> TwoPhaseCommitterOperator<K, T, Self> {
         let config: OperatorConfig =
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
@@ -82,17 +98,19 @@ impl<K: Key, T: Data + Sync + SchemaData + Serialize, V: LocalWriter<T>>
 impl<
         K: Key,
         T: Data + Sync + SchemaData + Serialize,
+        P: PartitionProducer<K, T>,
         R: MultiPartWriter<InputType = T> + Send + 'static,
-    > FileSystemSink<K, T, R>
+    > FileSystemSink<K, T, P, R>
 {
     pub fn create_and_start(table: FileSystemTable) -> TwoPhaseCommitterOperator<K, T, Self> {
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
-        let partition_func = get_partitioner_from_table(&table);
+        let partition_func = P::partitioner(&table);
         let commit_strategy = match table.file_settings.as_ref().unwrap().commit_style.unwrap() {
             CommitStyle::Direct => CommitStrategy::PerSubtask,
             CommitStyle::DeltaLake => CommitStrategy::PerOperator,
         };
+
         tokio::spawn(async move {
             let path: Path = StorageProvider::get_key(&table.write_target.path)
                 .unwrap()
@@ -1461,8 +1479,12 @@ pub struct FileSystemDataRecovery<T: Data> {
 }
 
 #[async_trait]
-impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
-    TwoPhaseCommitter<K, T> for FileSystemSink<K, T, R>
+impl<
+        K: Key,
+        T: Data + Sync,
+        P: PartitionProducer<K, T>,
+        R: MultiPartWriter<InputType = T> + Send + 'static,
+    > TwoPhaseCommitter<K, T> for FileSystemSink<K, T, P, R>
 {
     type DataRecovery = FileSystemDataRecovery<T>;
 

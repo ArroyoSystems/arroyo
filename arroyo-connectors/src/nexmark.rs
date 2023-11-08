@@ -197,6 +197,7 @@ impl Connector for NexmarkConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: ConnectionType::Source,
             schema: nexmark_schema(),
             operator: "connectors::nexmark::NexmarkSourceFunc".to_string(),

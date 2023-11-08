@@ -106,6 +106,11 @@
                                 "type": "string"
                             },
                             "description": "fields to partition the data by"
+                        },
+                        "partitioner_name": {
+                            "title": "Partitioner Name",
+                            "type": "string",
+                            "description": "name of the partitioner to use"
                         }
                     },
                     "additionalProperties": false

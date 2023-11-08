@@ -280,7 +280,7 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-#[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq)]
 pub struct ConnectorOp {
     // path of the operator that this will compile into (like `crate::sources::kafka::KafkaSource`)
     pub operator: String,

@@ -66,6 +66,7 @@ pub struct EmptyConfig {}
 pub struct Connection {
     pub id: Option<i64>,
     pub name: String,
+    pub connector_name: String,
     pub connection_type: ConnectionType,
     pub schema: ConnectionSchema,
     pub operator: String,

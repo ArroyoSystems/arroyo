@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use arroyo_datastream::Operator;
 
@@ -25,6 +25,7 @@ pub struct SqlSink {
     pub struct_def: StructDef,
     pub operator: Operator,
     pub updating_type: SinkUpdateType,
+    pub named_code_blocks: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

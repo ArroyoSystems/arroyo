@@ -241,6 +241,7 @@ impl Connector for WebsocketConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: ConnectionType::Source,
             schema,
             operator: "connectors::websocket::WebsocketSourceFunc".to_string(),

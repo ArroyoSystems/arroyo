@@ -17,6 +17,7 @@ arrow = { workspace = true}
 arrow-array = { workspace = true}
 arroyo-types = { path = "../../arroyo-types" }
 arroyo-worker = { path = "../../arroyo-worker" }
+dynamodb_lock = "=0.4.3"
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

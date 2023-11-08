@@ -1,7 +1,9 @@
+use anyhow::{bail, Result};
 use arrow_schema::DataType;
+use proc_macro2::TokenStream;
 use quote::ToTokens;
 use quote::{format_ident, quote};
-use syn::parse_quote;
+use syn::{parse_quote, parse_str};
 
 use crate::types::{data_type_as_syn_type, StructDef, TypeDef};
 
@@ -600,5 +602,70 @@ impl MemoryAggregatingContext {
         let key_ident = self.key_ident();
         let mem_ident = self.bin_name();
         parse_quote!(|#key_ident, #mem_ident| { #expr })
+    }
+}
+
+pub(crate) fn generate_partitioning_code(
+    partitioning: &arroyo_connectors::filesystem::Partitioning,
+    input: StructDef,
+) -> Result<Option<(String, TokenStream)>> {
+    if partitioning.partition_fields.is_empty() {
+        return Ok(None);
+    }
+    match partitioning.time_partition_pattern.as_ref() {
+        Some(_) => {
+            return Ok(None);
+        }
+        None => {
+            let partition_field_defs = partitioning
+                .partition_fields
+                .iter()
+                .map(|field| input.get_field(None, field))
+                .collect::<Result<Vec<_>>>()?;
+            let partitioning_struct = StructDef::for_fields(partition_field_defs);
+            let partition_name: syn::Ident = parse_str(&format!(
+                "{}_{}_partitioner",
+                input.struct_name(),
+                partitioning_struct.struct_name()
+            ))?;
+
+            let formatting_string = partitioning
+                .partition_fields
+                .iter()
+                .map(|field_name| format!("{}={{}}", field_name))
+                .collect::<Vec<_>>()
+                .join("/");
+            let arguments = partitioning
+                .partition_fields
+                .iter()
+                .map(|field_name| {
+                    let field = input.get_field(None, field_name)?;
+                    let field_ident = field.field_ident();
+                    let TypeDef::DataType(_, nullable) = &field.data_type else {
+                        bail!("can't partition by a struct field");
+                    };
+                    let null_unwrap = if *nullable {
+                        Some(quote!(.unwrap_or_else(|| "null".to_string())))
+                    } else {
+                        None
+                    };
+                    Ok(quote!(value.#field_ident.map(|val| val.to_string())#null_unwrap))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let input_type = input.get_type();
+            let tokens = quote!(
+                struct #partition_name;
+
+                impl <K: arroyo_types::Key>  arroyo_worker::connectors::filesystem::PartitionProducer<K, #input_type> for #partition_name {
+                    fn partitioner(table: &arroyo_worker::connectors::filesystem::FileSystemTable) -> Option<Box<dyn Fn(&arroyo_types::Record<K, #input_type>) -> String + Send>> {
+                        Some(Box::new(|record| {
+                            let value = &record.value;
+                            format!(#formatting_string, #(#arguments),*)
+                        }))
+                    }
+                }
+            );
+            Ok(Some((quote!(#partition_name).to_string(), tokens)))
+        }
     }
 }

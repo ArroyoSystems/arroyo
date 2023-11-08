@@ -467,6 +467,7 @@ pub fn parse_and_get_program_sync(
         let sink = Table::ConnectorTable(ConnectorTable {
             id: None,
             name: "web".to_string(),
+            connector_name: "grpc".to_string(),
             connection_type: ConnectionType::Sink,
             fields: struct_def.fields.into_iter().map(|f| f.into()).collect(),
             type_name: None,

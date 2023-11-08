@@ -9,6 +9,7 @@ use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
 };
 use arroyo_rpc::formats::{Format, Framing};
+use arroyo_rpc::OperatorConfig;
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -20,6 +21,7 @@ use datafusion_common::{config::ConfigOptions, DFField, DFSchema};
 use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
 };
+use tracing::{info, warn};
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::expressions::CastExpression;
@@ -39,6 +41,7 @@ use crate::{
 pub struct ConnectorTable {
     pub id: Option<i64>,
     pub name: String,
+    pub connector_name: String,
     pub connection_type: ConnectionType,
     pub fields: Vec<FieldSpec>,
     pub type_name: Option<String>,
@@ -129,6 +132,7 @@ impl From<Connection> for ConnectorTable {
         ConnectorTable {
             id: value.id,
             name: value.name.clone(),
+            connector_name: value.connector_name.clone(),
             connection_type: value.connection_type,
             fields: value
                 .schema
@@ -154,12 +158,12 @@ impl From<Connection> for ConnectorTable {
 impl ConnectorTable {
     fn from_options(
         name: &str,
-        connector: &str,
+        connector_name: &str,
         fields: Vec<FieldSpec>,
         options: &mut HashMap<String, String>,
     ) -> Result<Self> {
-        let connector = connector_for_type(connector)
-            .ok_or_else(|| anyhow!("Unknown connector '{}'", connector))?;
+        let connector = connector_for_type(connector_name)
+            .ok_or_else(|| anyhow!("Unknown connector '{}'", connector_name))?;
 
         let format = Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
 
@@ -227,7 +231,8 @@ impl ConnectorTable {
                 .iter()
                 .map(|field| {
                     match field {
-                        FieldSpec::StructField(struct_field) => Ok((Column{relation: None, name: struct_field.name.clone()}, Expression::Column(ColumnExpression::new(struct_field.clone())))),
+                        FieldSpec::StructField(struct_field) => Ok((Column{relation: None, name: struct_field.name.clone()},
+                        Expression::Column(ColumnExpression::new(struct_field.clone())))),
                         FieldSpec::VirtualField { field, expression } => {
                             let expression_type_def = expression.expression_type(&ValuePointerContext::new());
                             let expression_return_type = expression_type_def.as_datatype().expect("virtual fields shouldn't return structs");
@@ -247,7 +252,9 @@ impl ConnectorTable {
                                 ))
                             } else {
                                 let force_nullability = field_nullability && !expression_nullability;
-                                let cast_expr = CastExpression::new(Box::new(expression.clone()), field_return_type, &crate::code_gen::ValuePointerContext::new(), force_nullability)?;
+                                let cast_expr = CastExpression::new(Box::new(expression.clone()),
+                                field_return_type, &crate::code_gen::ValuePointerContext::new(),
+                                force_nullability)?;
                                 Ok((
                                     Column {
                                         relation: None,
@@ -436,6 +443,37 @@ impl ConnectorTable {
                 crate::pipeline::RecordTransform::ValueProjection(projection),
             );
         }
+        let mut connector_op = self.connector_op();
+        let mut named_code_blocks = HashMap::new();
+
+        info!("converting {:?} with {:#?}", self, connector_op);
+
+        if self.connector_name.as_str() == "filesystem" {
+            let mut config: OperatorConfig =
+                serde_json::from_str(&self.config).expect("Invalid config for FileSystemSink");
+            let mut table: arroyo_connectors::filesystem::FileSystemTable =
+                serde_json::from_value(config.table)
+                    .expect("Invalid table config for FileSystemSink");
+            info!("table: {:#?}", table);
+            if let Some(file_settings) = table.file_settings.as_mut() {
+                if let Some(partitioning) = file_settings.partitioning.as_mut() {
+                    warn!("generating partitioner");
+                    if let Some((partitioner_name, partition_code)) =
+                        crate::code_gen::generate_partitioning_code(
+                            &partitioning,
+                            input.return_type(),
+                        )?
+                    {
+                        partitioning.partitioner_name = Some(partitioner_name.clone());
+                        named_code_blocks.insert(partitioner_name, partition_code.to_string());
+                        config.table = serde_json::to_value(table)
+                            .expect("Failed to serialize table config for FileSystemSink");
+                        connector_op.config = serde_json::to_string(&config)
+                            .expect("Failed to serialize config for FileSystemSink");
+                    };
+                }
+            }
+        }
 
         Ok(SqlOperator::Sink(
             self.name.clone(),
@@ -443,7 +481,8 @@ impl ConnectorTable {
                 id: self.id,
                 struct_def: input.return_type(),
                 updating_type,
-                operator: Operator::ConnectorSink(self.connector_op()),
+                operator: Operator::ConnectorSink(connector_op),
+                named_code_blocks,
             },
             Box::new(input),
         ))

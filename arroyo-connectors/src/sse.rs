@@ -105,6 +105,7 @@ impl Connector for SSEConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: ConnectionType::Source,
             schema,
             operator: "connectors::sse::SSESourceFunc".to_string(),

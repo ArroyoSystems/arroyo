@@ -156,6 +156,7 @@ impl Connector for WebhookConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: ConnectionType::Sink,
             schema,
             operator: "connectors::webhook::WebhookSinkFunc::<#in_k, #in_t>".to_string(),

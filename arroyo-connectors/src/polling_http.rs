@@ -212,6 +212,7 @@ impl Connector for PollingHTTPConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: ConnectionType::Source,
             schema,
             operator: "connectors::polling_http::PollingHttpSourceFunc".to_string(),

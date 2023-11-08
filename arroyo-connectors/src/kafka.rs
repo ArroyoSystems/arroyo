@@ -101,6 +101,7 @@ impl Connector for KafkaConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: typ,
             schema,
             operator: operator.to_string(),

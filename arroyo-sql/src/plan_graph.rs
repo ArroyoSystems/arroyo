@@ -881,6 +881,14 @@ impl PlanNode {
         }
         output_types
     }
+
+    fn get_named_code_blocks(&self) -> HashMap<String, String> {
+        if let PlanOperator::Sink(_, sql_sink) = &self.operator {
+            sql_sink.named_code_blocks.clone()
+        } else {
+            HashMap::new()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1964,9 +1972,12 @@ pub fn get_program(
 
     let mut key_structs = HashSet::new();
     let sources = plan_graph.saved_sources_used.clone();
+    let mut named_code_blocks: HashMap<String, String> = HashMap::new();
     plan_graph.graph.node_weights().for_each(|node| {
         let key_names = node.output_type.get_key_struct_names();
         key_structs.extend(key_names);
+        let x = node.get_named_code_blocks().into_iter();
+        named_code_blocks.extend(x);
     });
 
     let mut used_udfs = HashSet::new();
@@ -2021,6 +2032,7 @@ pub fn get_program(
             .filter(|(k, _)| plan_graph.sources.contains_key(k))
             .map(|(_, v)| v),
     );
+    other_defs.extend(named_code_blocks.into_values());
 
     // add only the used udfs to the program
     let mut udfs: HashMap<String, ProgramUdf> = HashMap::new();

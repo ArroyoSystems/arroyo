@@ -97,19 +97,25 @@ impl Connector for FileSystemConnector {
         let (description, operator) = match (&table.format_settings, is_local) {
             (Some(FormatSettings::Parquet { .. }), true) => (
                 "LocalFileSystem<Parquet>".to_string(),
-                "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
+                "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>".to_string(),
             ),
-            (Some(FormatSettings::Parquet { .. }), false) => (
+            (Some(FormatSettings::Parquet { .. }), false) => {
+                let partitioner = table.file_settings.as_ref().map(|file_settings|{
+                    file_settings.partitioning.as_ref().map(|partitioning|{
+                        partitioning.partitioner_name.clone()
+                    })}).flatten().flatten().unwrap_or_else(|| "arroyo_worker::connectors::filesystem::DefaultPartitionProducer".to_string() );
+                    let operator = format!("connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, {}, #in_tRecordBatchBuilder>", partitioner);
+                (
                 "FileSystem<Parquet>".to_string(),
-                "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
-            ),
+                operator
+            )},
             (Some(FormatSettings::Json {  }), true) => (
                 "LocalFileSystem<JSON>".to_string(),
-                "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>"
+                "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>".to_string()
             ),
             (Some(FormatSettings::Json {  }), false) => (
                 "FileSystem<JSON>".to_string(),
-                "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"
+                "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>".to_string()
             ),
             (None, _) => bail!("have to have some format settings"),
         };
@@ -135,6 +141,7 @@ impl Connector for FileSystemConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: ConnectionType::Sink,
             schema,
             operator: operator.to_string(),
@@ -187,6 +194,7 @@ pub fn file_system_table_from_options(
         Some(Partitioning {
             time_partition_pattern,
             partition_fields,
+            partitioner_name: None,
         })
     } else {
         None

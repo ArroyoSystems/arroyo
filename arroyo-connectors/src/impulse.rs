@@ -164,6 +164,7 @@ impl Connector for ImpulseConnector {
         Ok(Connection {
             id,
             name: name.to_string(),
+            connector_name: self.name().to_string(),
             connection_type: ConnectionType::Source,
             schema: impulse_schema(),
             operator: "connectors::impulse::ImpulseSourceFunc".to_string(),
