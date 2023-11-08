@@ -14,14 +14,12 @@ impl State for Rescaling {
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         let job_controller = ctx.job_controller.as_mut().unwrap();
 
-        if let Err(e) = job_controller.checkpoint(true).await {
-            return Err(ctx.retryable(self, "failed to initiate final checkpoint", e, 10));
-        }
+        let mut final_checkpoint_started = false;
 
         loop {
             match job_controller.checkpoint_finished().await {
                 Ok(done) => {
-                    if done && job_controller.finished() {
+                    if done && job_controller.finished() && final_checkpoint_started {
                         return Ok(Transition::next(*self, Scheduling {}));
                     }
                 }
@@ -32,6 +30,20 @@ impl State for Rescaling {
                         e,
                         10,
                     ));
+                }
+            }
+
+            if !final_checkpoint_started {
+                match job_controller.checkpoint(true).await {
+                    Ok(started) => final_checkpoint_started = started,
+                    Err(e) => {
+                        return Err(ctx.retryable(
+                            self,
+                            "failed to initiate final checkpoint",
+                            e,
+                            10,
+                        ));
+                    }
                 }
             }
 
