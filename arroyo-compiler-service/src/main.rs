@@ -6,7 +6,7 @@ use std::{io, path::PathBuf, str::FromStr, sync::Arc};
 
 use arroyo_rpc::grpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
-    CheckUdfsCompilerResp, CheckUdfsReq, CompileQueryReq, CompileQueryResp,
+    CheckUdfsCompilerReq, CheckUdfsCompilerResp, CompileQueryReq, CompileQueryResp, UdfCrate,
 };
 
 use arroyo_server_common::start_admin_server;
@@ -177,7 +177,7 @@ impl CompileService {
 
         tokio::fs::write(build_dir.join("wasm-fns/src/lib.rs"), &req.wasm_fns).await?;
 
-        tokio::fs::write(build_dir.join("udfs/src/lib.rs"), &req.udfs).await?;
+        self.write_udf_crates(&req.udf_crates).await?;
 
         let result = self.get_output().await?;
 
@@ -243,6 +243,58 @@ impl CompileService {
             wasm_fns_path: format!("{}/wasm_fns_bg.wasm", full_path),
         })
     }
+
+    async fn write_udf_crates(&self, udf_crates: &Vec<UdfCrate>) -> anyhow::Result<()> {
+        let build_dir = &self.build_dir;
+
+        // start with a clean build bir
+        let _ = tokio::fs::remove_dir_all(&self.build_dir.join("udfs_dir")).await;
+
+        // write individual udf crates
+        for udf_crate in udf_crates {
+            let udf_build_dir = self.build_dir.join("udfs_dir").join(&udf_crate.name);
+
+            tokio::fs::create_dir_all(&udf_build_dir.join("src")).await?;
+
+            tokio::fs::write(udf_build_dir.join("src/lib.rs"), &udf_crate.definition).await?;
+
+            tokio::fs::write(udf_build_dir.join("Cargo.toml"), &udf_crate.cargo_toml).await?;
+        }
+
+        // write udfs crate that re-exports all individual udfs
+        tokio::fs::create_dir_all(build_dir.join("udfs_dir/udfs/src")).await?;
+        let cargo_toml = format!(
+            r#"
+[package]
+name = "udfs"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+{}
+            "#,
+            udf_crates
+                .iter()
+                .map(|udf_crate| format!(
+                    "{} = {{ path = \"../{}\" }}",
+                    udf_crate.name, udf_crate.name
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+
+        tokio::fs::write(build_dir.join("udfs_dir/udfs/Cargo.toml"), cargo_toml).await?;
+
+        let udfs_lib_rs = udf_crates
+            .iter()
+            .map(|udf_crate| format!("pub use {}::*;", udf_crate.name))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        tokio::fs::write(build_dir.join("udfs_dir/udfs/src/lib.rs"), udfs_lib_rs).await?;
+
+        Ok(())
+    }
 }
 
 #[tonic::async_trait]
@@ -268,33 +320,40 @@ impl CompilerGrpc for CompileService {
 
     async fn check_udfs(
         &self,
-        request: Request<CheckUdfsReq>,
+        request: Request<CheckUdfsCompilerReq>,
     ) -> Result<Response<CheckUdfsCompilerResp>, Status> {
         // only allow one request to be active at a given time
         let _guard = self.lock.lock().await;
 
+        let req = request.into_inner();
+
         info!("Checking UDFs");
         let start = Instant::now();
 
-        // write udf to build_dir udfs module
-        let build_dir = &self.build_dir;
-        tokio::fs::write(
-            build_dir.join("udfs/src/lib.rs"),
-            &request.into_inner().definition,
-        )
-        .await
-        .unwrap();
+        // start with a clean build bir
+        let _ = tokio::fs::remove_dir_all(&self.build_dir.join("udfs_dir")).await;
+
+        let Some(udf_crate) = req.udf_crate else {
+            return Err(Status::internal("No UDF crate provided"));
+        };
+
+        let name = udf_crate.name.clone();
+        let udf_build_dir = self.build_dir.join("udfs_dir").join(&name);
+        self.write_udf_crates(&vec![udf_crate])
+            .await
+            .map_err(|e| Status::internal(format!("Writing UDFs failed: {}", e)))?;
 
         let output = Command::new("cargo")
-            .current_dir(&self.build_dir)
+            .current_dir(&udf_build_dir)
             .arg("check")
-            .arg("--package=udfs")
+            .arg(format!("--package={}", &name))
             .arg("--message-format=json")
             .output()
             .await?;
 
         info!(
-            "Finished running cargo check on udfs crate after {:.2}s, exit code: {:?}",
+            "Finished running cargo check on udfs crate {} after {:.2}s, exit code: {:?}",
+            &name,
             start.elapsed().as_secs_f32(),
             output.status.code()
         );
@@ -326,6 +385,8 @@ impl CompilerGrpc for CompileService {
                             .to_string(),
                     );
                 }
+            } else {
+                errors.push(line.to_string());
             }
         }
 

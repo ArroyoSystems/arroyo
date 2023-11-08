@@ -27,7 +27,8 @@ use anyhow::{anyhow, bail, Result};
 
 use crate::Operator::FusedWasmUDFs;
 use arroyo_rpc::grpc::api::{
-    Aggregator, JobEdge, JobGraph, JobNode, PipelineProgram, ProgramNode, WasmFunction,
+    Aggregator, JobEdge, JobGraph, JobNode, PipelineProgram, PipelineProgramUdf, ProgramNode,
+    WasmFunction,
 };
 use petgraph::{Direction, Graph};
 use rand::distributions::Alphanumeric;
@@ -1077,9 +1078,15 @@ impl<K: Key, T1: Data, T2: Data, F: Fn(&Option<K>, &T1) -> T2> BiFunc<K, T1, T2>
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
+pub struct ProgramUdf {
+    pub name: String,
+    pub definition: String,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
 pub struct Program {
     pub types: Vec<String>,
-    pub udfs: Vec<String>,
+    pub udfs: Vec<ProgramUdf>,
     pub other_defs: Vec<String>,
     #[bincode(with_serde)]
     pub graph: DiGraph<StreamNode, StreamEdge>,
@@ -1920,6 +1927,24 @@ impl Program {
     }
 }
 
+impl Into<PipelineProgramUdf> for ProgramUdf {
+    fn into(self) -> PipelineProgramUdf {
+        PipelineProgramUdf {
+            name: self.name,
+            definition: self.definition,
+        }
+    }
+}
+
+impl Into<ProgramUdf> for PipelineProgramUdf {
+    fn into(self) -> ProgramUdf {
+        ProgramUdf {
+            name: self.name,
+            definition: self.definition,
+        }
+    }
+}
+
 impl TryFrom<Program> for PipelineProgram {
     type Error = anyhow::Error;
 
@@ -1966,7 +1991,7 @@ impl TryFrom<Program> for PipelineProgram {
         Ok(PipelineProgram {
             types: program.types,
             other_defs: program.other_defs,
-            udfs: program.udfs,
+            udfs: program.udfs.into_iter().map(|udf| udf.into()).collect(),
             nodes,
             edges,
         })
@@ -2273,7 +2298,7 @@ impl TryFrom<PipelineProgram> for Program {
         Ok(Program {
             types,
             other_defs,
-            udfs,
+            udfs: udfs.into_iter().map(|udf| udf.into()).collect(),
             graph,
         })
     }

@@ -166,7 +166,6 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         PipelineEdge,
         Job,
         StopType,
-        UdfLanguage,
         PipelineCollection,
         JobCollection,
         JobLogMessage,

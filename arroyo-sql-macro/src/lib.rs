@@ -4,7 +4,7 @@ use arroyo_sql::{
     get_test_expression, parse_and_get_program_sync, ArroyoSchemaProvider, SqlConfig,
 };
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::parse::{Parse, ParseStream};
 use syn::{parse_str, Expr, LitInt, LitStr, Token};
 
@@ -154,8 +154,18 @@ fn get_pipeline_module(
 
     schema_provider.add_connector_table(nexmark);
 
-    if let Some(udfs) = udfs {
-        schema_provider.add_rust_udf(udfs.as_str()).unwrap();
+    let file = syn::parse_file(&udfs.unwrap_or_default()).unwrap();
+    for item in file.items.into_iter() {
+        match item {
+            syn::Item::Fn(_) => {
+                schema_provider
+                    .add_rust_udf(&item.to_token_stream().to_string())
+                    .unwrap();
+            }
+            _ => {
+                panic!("Expected only functions.")
+            }
+        }
     }
 
     // TODO: test with higher parallelism
@@ -170,8 +180,11 @@ fn get_pipeline_module(
 
     let function = program.make_graph_function();
 
-    let udfs: Vec<proc_macro2::TokenStream> =
-        program.udfs.iter().map(|t| parse_str(t).unwrap()).collect();
+    let udfs: Vec<proc_macro2::TokenStream> = program
+        .udfs
+        .iter()
+        .map(|t| parse_str(&t.definition).unwrap())
+        .collect();
 
     let other_defs: Vec<proc_macro2::TokenStream> = program
         .other_defs

@@ -6,8 +6,8 @@ use std::{
 use arrow_schema::DataType;
 use arroyo_datastream::{
     EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program,
-    SlidingAggregatingTopN, SlidingWindowAggregator, StreamEdge, StreamNode, TumblingTopN,
-    TumblingWindowAggregator, WindowAgg, WindowType,
+    ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator, StreamEdge, StreamNode,
+    TumblingTopN, TumblingWindowAggregator, WindowAgg, WindowType,
 };
 
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -2023,10 +2023,16 @@ pub fn get_program(
     );
 
     // add only the used udfs to the program
-    let udfs = used_udfs
-        .iter()
-        .map(|u| schema_provider.udf_defs.get(u).unwrap().def.clone())
-        .collect();
+    let mut udfs: HashMap<String, ProgramUdf> = HashMap::new();
+    used_udfs.iter().for_each(|u| {
+        udfs.insert(
+            u.clone(),
+            ProgramUdf {
+                name: u.clone(),
+                definition: schema_provider.udf_defs.get(u).unwrap().def.clone(),
+            },
+        );
+    });
 
     let graph: DiGraph<StreamNode, StreamEdge> = plan_graph.into();
 
@@ -2036,7 +2042,7 @@ pub fn get_program(
             // in wasm
             types: vec![],
             other_defs,
-            udfs,
+            udfs: udfs.values().cloned().collect(),
             graph,
         },
         sources,
