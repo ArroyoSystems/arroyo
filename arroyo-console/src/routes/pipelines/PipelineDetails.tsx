@@ -28,7 +28,6 @@ import {
 import React, { useState } from 'react';
 import 'reactflow/dist/style.css';
 import 'metrics-graphics/dist/mg.css';
-import { CodeEditor } from './CodeEditor';
 import PipelineConfigModal from './PipelineConfigModal';
 import {
   OutputData,
@@ -195,8 +194,14 @@ export function PipelineDetails() {
   );
 
   const queryTab = (
-    <TabPanel flex={1}>
-      <CodeEditor code={pipeline.query} readOnly={true} />
+    <TabPanel flex={1} display={'flex'} flexDirection={'column'}>
+      <SyntaxHighlighter
+        language="sql"
+        style={vs2015}
+        customStyle={{ borderRadius: '5px', flex: '1' }}
+      >
+        {pipeline.query}
+      </SyntaxHighlighter>
     </TabPanel>
   );
 
@@ -204,7 +209,11 @@ export function PipelineDetails() {
     <TabPanel flex={1} display={'flex'} flexDirection={'column'} gap={3}>
       {pipeline.udfs.map(udf => {
         return (
-          <SyntaxHighlighter language="rust" style={vs2015} customStyle={{ borderRadius: '5px' }}>
+          <SyntaxHighlighter
+            language="rust"
+            style={vs2015}
+            customStyle={{ borderRadius: '5px', flex: '1' }}
+          >
             {udf.definition}
           </SyntaxHighlighter>
         );
