@@ -247,6 +247,7 @@ export function CreatePipeline() {
 
   const pipelineIsValid = async (successTab?: number) => {
     // Setting this state triggers the uswSWR calls
+    setPipelineId(undefined);
     setQueryInputToCheck(queryInput);
     setLocalUdfsToCheck(localUdfs);
     setOutputs([]);
@@ -270,7 +271,6 @@ export function CreatePipeline() {
   const preview = async () => {
     setTourStep(undefined);
     setQueryInputToCheck('');
-    setPipelineId(undefined);
 
     if (!(await pipelineIsValid(1))) {
       return;
