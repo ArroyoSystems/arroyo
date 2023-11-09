@@ -38,7 +38,6 @@ pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     commit_state: CommitState,
     phantom: PhantomData<(K, D)>,
     filenaming: Filenaming,
-    filename_strategy: FilenameStrategy,
 }
 
 impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
@@ -66,11 +65,6 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             .filenaming
             .unwrap();
 
-        let filename_strategy = match filenaming.filename_strategy {
-            Some(FilenameStrategy::Uuid) => FilenameStrategy::Uuid,
-            Some(FilenameStrategy::Serial) => FilenameStrategy::Serial,
-            None => FilenameStrategy::Serial,
-        };
         Self {
             writers: HashMap::new(),
             tmp_dir,
@@ -86,29 +80,39 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             commit_state,
             phantom: PhantomData,
             filenaming,
-            filename_strategy,
         }
     }
 
     fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut V {
-        let file_suffix = if self.filenaming.filename_suffix.is_some() {
-            self.filenaming.filename_suffix.as_ref().unwrap()
+        let filename_strategy = match self.filenaming.strategy {
+            Some(FilenameStrategy::Uuid) => FilenameStrategy::Uuid,
+            Some(FilenameStrategy::Serial) => FilenameStrategy::Serial,
+            None => FilenameStrategy::Serial,
+        };
+
+        // This allows us to override the file suffix (extension)
+        let file_suffix = if self.filenaming.suffix.is_some() {
+            self.filenaming.suffix.as_ref().unwrap()
         } else {
             V::file_suffix()
         };
-        let filename_strategy = if self.filename_strategy == FilenameStrategy::Uuid {
+
+        // This forms the base for naming files depending on strategy
+        let filename_base = if filename_strategy == FilenameStrategy::Uuid {
             Uuid::new_v4().to_string()
         } else {
             format!("{:>05}-{:>03}", self.next_file_index, self.subtask_id)
         };
-        let core_filename = if self.filenaming.filename_prefix.is_some() {
+
+        // This allows us to manipulate the filename_base
+        let filename_core = if self.filenaming.prefix.is_some() {
             format!(
                 "{}-{}",
-                self.filenaming.filename_prefix.as_ref().unwrap(),
-                filename_strategy
+                self.filenaming.prefix.as_ref().unwrap(),
+                filename_base
             )
         } else {
-            filename_strategy
+            filename_base
         };
         if !self.writers.contains_key(partition) {
             let file_name = match partition {
@@ -116,13 +120,13 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
                     // make sure the partition directory exists in tmp and final
                     create_dir_all(&format!("{}/{}", self.tmp_dir, partition)).unwrap();
                     create_dir_all(&format!("{}/{}", self.final_dir, partition)).unwrap();
-                    if self.filename_strategy == FilenameStrategy::Uuid {
-                        format!("{}/{}.{}", partition, core_filename, file_suffix)
+                    if filename_strategy == FilenameStrategy::Uuid {
+                        format!("{}/{}.{}", partition, filename_core, file_suffix)
                     } else {
-                        format!("{}/{}.{}", partition, core_filename, file_suffix)
+                        format!("{}/{}.{}", partition, filename_core, file_suffix)
                     }
                 }
-                None => format!("{}.{}", core_filename, V::file_suffix()),
+                None => format!("{}.{}", filename_core, V::file_suffix()),
             };
             self.writers.insert(
                 partition.clone(),

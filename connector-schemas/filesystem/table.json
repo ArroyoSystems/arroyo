@@ -122,17 +122,17 @@
                     "title": "Filenaming",
                     "type": "object",
                     "properties": {
-                        "filename_prefix": {
+                        "prefix": {
                             "title": "Filename Prefix",
                             "type": "string",
                             "description": "The prefix to use in file name. i.e prefix-<uuid>.parquet"
                         },
-                        "filename_suffix": {
+                        "suffix": {
                             "title": "Filename Suffix",
                             "type": "string",
                             "description": "This will overwrite the default file suffix. i.e .parquet, use with caution"
                         },
-                        "filename_strategy":{
+                        "strategy":{
                             "title": "Filename Strategy",
                             "type": "string",
                             "enum": [

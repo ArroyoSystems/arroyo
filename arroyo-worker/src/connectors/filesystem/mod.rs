@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::warn;
 use typify::import_types;
+use uuid::Uuid;
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 
@@ -355,6 +356,7 @@ struct AsyncMultipartFileSystemWriter<T: Data + SchemaData + Sync, R: MultiPartW
     properties: FileSystemTable,
     rolling_policy: RollingPolicy,
     commit_state: CommitState,
+    filenaming: Filenaming,
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
@@ -635,6 +637,13 @@ where
             CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
+        let filenaming = writer_properties
+            .file_settings
+            .as_ref()
+            .unwrap()
+            .filenaming
+            .clone()
+            .unwrap();
         Self {
             path,
             active_writers: HashMap::new(),
@@ -652,6 +661,7 @@ where
             ),
             properties: writer_properties,
             commit_state,
+            filenaming,
         }
     }
 
@@ -752,15 +762,35 @@ where
     }
 
     fn new_writer(&mut self, partition: &Option<String>) -> R {
+        let filename_strategy = match self.filenaming.strategy {
+            Some(FilenameStrategy::Uuid) => FilenameStrategy::Uuid,
+            Some(FilenameStrategy::Serial) => FilenameStrategy::Serial,
+            None => FilenameStrategy::Serial,
+        };
+
+        // TODO: File suffix
+
+        // This forms the base for naming files depending on strategy
+        let filename_base = if filename_strategy == FilenameStrategy::Uuid {
+            Uuid::new_v4().to_string()
+        } else {
+            format!("{:>05}-{:>03}", self.max_file_index, self.subtask_id)
+        };
+
+        // This allows us to manipulate the filename_base
+        let filename_core = if self.filenaming.prefix.is_some() {
+            format!(
+                "{}-{}",
+                self.filenaming.prefix.as_ref().unwrap(),
+                filename_base
+            )
+        } else {
+            filename_base
+        };
+
         let path = match partition {
-            Some(sub_bucket) => format!(
-                "{}/{}/{:0>5}-{:0>3}",
-                self.path, sub_bucket, self.max_file_index, self.subtask_id
-            ),
-            None => format!(
-                "{}/{:0>5}-{:0>3}",
-                self.path, self.max_file_index, self.subtask_id
-            ),
+            Some(sub_bucket) => format!("{}/{}/{}", self.path, sub_bucket, filename_core),
+            None => format!("{}/{}", self.path, filename_core),
         };
         R::new(
             self.object_store.clone(),
