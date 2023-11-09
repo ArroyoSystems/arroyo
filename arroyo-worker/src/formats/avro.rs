@@ -159,9 +159,8 @@ mod tests {
     use crate::SchemaData;
     use apache_avro::Schema;
     use arroyo_rpc::formats::{AvroFormat, Format};
-    use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
+    use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver};
     use arroyo_types::RawJson;
-    use async_trait::async_trait;
     use serde_json::json;
     use std::sync::Arc;
 

@@ -4,20 +4,12 @@ package arroyo_api;
 
 // Job management
 
-enum UdfLanguage {
-  Rust = 0;
-}
-
-message CreateUdf {
-  UdfLanguage language = 1;
-  string definition = 2;
-}
 
 message CreateSqlJob {
   string query = 1;
   uint64 parallelism = 2;
 
-  repeated CreateUdf udfs = 5;
+  repeated Udf udfs = 5;
 
   bool preview = 6;
 }
@@ -31,7 +23,6 @@ message CreatePipelineReq {
 }
 
 message Udf {
-  UdfLanguage language = 1;
   string definition = 2;
 }
 
@@ -43,10 +34,15 @@ message CreateJobReq {
 
 // Program
 
+message PipelineProgramUdf {
+  string name = 1;
+  string definition = 2;
+}
+
 message PipelineProgram {
   repeated string types = 1;
   repeated string other_defs = 2;
-  repeated string udfs = 5;
+  repeated PipelineProgramUdf udfs = 5;
   repeated ProgramNode nodes = 3;
   repeated ProgramEdge edges = 4;
 }

@@ -11,6 +11,7 @@ import {
   Button,
   ButtonGroup,
   Flex,
+  Grid,
   Heading,
   Icon,
   Spacer,
@@ -27,7 +28,6 @@ import {
 import React, { useState } from 'react';
 import 'reactflow/dist/style.css';
 import 'metrics-graphics/dist/mg.css';
-import { CodeEditor } from './SqlEditor';
 import PipelineConfigModal from './PipelineConfigModal';
 import {
   OutputData,
@@ -50,6 +50,8 @@ import { QuestionOutlineIcon, WarningIcon } from '@chakra-ui/icons';
 import { formatError } from '../../lib/util';
 import { PipelineOutputs } from './PipelineOutputs';
 import PaginatedContent from '../../components/PaginatedContent';
+import SyntaxHighlighter from 'react-syntax-highlighter';
+import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
 export function PipelineDetails() {
   const [activeOperator, setActiveOperator] = useState<string | undefined>(undefined);
@@ -192,14 +194,30 @@ export function PipelineDetails() {
   );
 
   const queryTab = (
-    <TabPanel flex={1}>
-      <CodeEditor query={pipeline.query} readOnly={true} />
+    <TabPanel flex={1} display={'flex'} flexDirection={'column'}>
+      <SyntaxHighlighter
+        language="sql"
+        style={vs2015}
+        customStyle={{ borderRadius: '5px', flex: '1' }}
+      >
+        {pipeline.query}
+      </SyntaxHighlighter>
     </TabPanel>
   );
 
   const udfsTab = (
-    <TabPanel flex={1}>
-      <CodeEditor query={pipeline.udfs[0]?.definition || ''} language="rust" readOnly={true} />
+    <TabPanel flex={1} display={'flex'} flexDirection={'column'} gap={3}>
+      {pipeline.udfs.map(udf => {
+        return (
+          <SyntaxHighlighter
+            language="rust"
+            style={vs2015}
+            customStyle={{ borderRadius: '5px', flex: '1' }}
+          >
+            {udf.definition}
+          </SyntaxHighlighter>
+        );
+      })}
     </TabPanel>
   );
 
@@ -225,16 +243,14 @@ export function PipelineDetails() {
         <Tab>UDFs</Tab>
         <Tab>Errors {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}</Tab>
       </TabList>
-      <Flex minH={0} flex={1}>
-        <TabPanels display={'flex'} flexDirection={'column'}>
-          {operatorsTab}
-          {outputsTab}
-          {checkpointsTab}
-          {queryTab}
-          {udfsTab}
-          {errorsTab}
-        </TabPanels>
-      </Flex>
+      <TabPanels display={'flex'} flexDirection={'column'} overflow={'auto'} flex={1}>
+        {operatorsTab}
+        {outputsTab}
+        {checkpointsTab}
+        {queryTab}
+        {udfsTab}
+        {errorsTab}
+      </TabPanels>
     </Tabs>
   );
 
@@ -299,12 +315,12 @@ export function PipelineDetails() {
   );
 
   return (
-    <Flex height={'100vh'} flexDirection={'column'}>
-      {headerArea}
-      <Flex flexGrow={1} minHeight={'0'}>
+    <>
+      <Grid templateRows={'min-content minmax(0, 1fr)'} height={'100vh'}>
+        {headerArea}
         {inner}
-      </Flex>
+      </Grid>
       {configModal}
-    </Flex>
+    </>
   );
 }

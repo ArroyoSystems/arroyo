@@ -30,6 +30,7 @@
     "@types/d3": "^7.4.0",
     "@types/dagre": "^0.7.48",
     "@types/json-schema": "^7.0.12",
+    "@types/lodash": "^4.14.200",
     "@types/react-syntax-highlighter": "^15.5.7",
     "ajv": "^8.12.0",
     "ajv-formats": "^2.1.1",
@@ -37,6 +38,7 @@
     "dagre": "^0.8.5",
     "formik": "^2.4.2",
     "framer-motion": "^6.5.1",
+    "lodash": "^4.17.21",
     "metrics-graphics": "3.0.0-beta1",
     "monaco-editor": "^0.34.1",
     "monaco-sql-languages": "^0.9.5",
@@ -45,13 +47,14 @@
     "prop-types": "^15.8.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-icons": "^4.9.0",
+    "react-icons": "^4.11.0",
     "react-resizable-panels": "^0.0.55",
     "react-router-dom": "^6.13.0",
     "react-syntax-highlighter": "^15.5.0",
     "react-test-renderer": "^18.2.0",
     "reactflow": "^11.7.2",
-    "swr": "^2.2.1"
+    "swr": "^2.2.1",
+    "use-local-storage": "^3.0.0"
   },
   "devDependencies": {
     "@chakra-ui/cli": "^2.4.1",

@@ -283,3 +283,30 @@ WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_i
 ) OR :starting_after = '')
 ORDER BY jlm.created_at DESC
 LIMIT :limit::integer;
+
+----------- udfs -----------------------
+
+--: DbUdf (description?)
+
+--! create_udf
+INSERT INTO udfs (pub_id, organization_id, created_by, prefix, name, definition, description)
+VALUES (:pub_id, :organization_id, :created_by, :prefix, :name, :definition, :description);
+
+--! get_udf: DbUdf
+SELECT pub_id, prefix, name, definition, created_at, updated_at, description
+FROM udfs
+WHERE organization_id = :organization_id AND pub_id = :pub_id;
+
+--! get_udf_by_name: DbUdf
+SELECT pub_id, prefix, name, definition, created_at, updated_at, description
+FROM udfs
+WHERE organization_id = :organization_id AND name = :name;
+
+--! get_udfs: DbUdf
+SELECT pub_id, prefix, name, definition, created_at, updated_at, description
+FROM udfs
+WHERE organization_id = :organization_id;
+
+--! delete_udf
+DELETE FROM udfs
+WHERE organization_id = :organization_id AND pub_id = :pub_id;
