@@ -28,7 +28,6 @@ use quote::quote;
 use regex::Regex;
 use syn::PathArguments::AngleBracketed;
 use syn::{parse_quote, parse_str, GenericArgument, Type};
-use tracing::info;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructDef {
@@ -378,7 +377,6 @@ impl StructDef {
     }
 
     pub fn generate_parquet_reader_items(&self) -> TokenStream {
-        info!("generating parquet reader items for {}", self.struct_name());
         let reader_type = self.parquet_reader_type();
         let nullable_reader_type = self.parquet_nullable_reader_type();
         let struct_type = self.get_type();

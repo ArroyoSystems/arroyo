@@ -203,7 +203,6 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                     .map_err(|err| {
                         UserError::new("could not get object metadata", err.to_string())
                     })?;
-                info!("object meta: {:?}", object_meta);
                 let object_reader =
                     ParquetObjectReader::new(storage_provider.get_backing_store(), object_meta);
                 let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
