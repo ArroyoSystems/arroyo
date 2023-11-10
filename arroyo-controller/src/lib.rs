@@ -2,18 +2,19 @@
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 
+use anyhow::bail;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
-    CheckUdfsReq, CheckUdfsResp, GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp,
-    HeartbeatReq, HeartbeatResp, OutputData, RegisterNodeReq, RegisterNodeResp, RegisterWorkerReq,
-    RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp, TaskFailedReq,
-    TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, TaskStartedResp,
-    WorkerFinishedReq, WorkerFinishedResp,
+    CheckUdfsCompilerReq, CheckUdfsReq, CheckUdfsResp, GrpcOutputSubscription, HeartbeatNodeReq,
+    HeartbeatNodeResp, HeartbeatReq, HeartbeatResp, OutputData, RegisterNodeReq, RegisterNodeResp,
+    RegisterWorkerReq, RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
+    TaskFailedReq, TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq,
+    TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
 };
 use arroyo_rpc::grpc::{
-    SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
-    WorkerErrorRes,
+    SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, UdfCrate,
+    WorkerErrorReq, WorkerErrorRes,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::log_event;
@@ -23,6 +24,7 @@ use arroyo_types::{
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
+use regex::Regex;
 use serde_json::json;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
@@ -447,30 +449,35 @@ impl ControllerGrpc for ControllerServer {
             Status::unavailable(format!("Failed to connect to compiler service: {}", e))
         })?;
 
-        let definition = request.into_inner().definition.clone();
+        let req = request.into_inner();
+        let definition = req.definition.clone();
 
-        let mut function = None;
+        let dependencies = match parse_dependencies(&definition) {
+            Ok(dependencies) => dependencies,
+            Err(e) => {
+                return Ok(udf_error_resp(e));
+            }
+        };
+
+        let mut function_name = None;
         {
             let result = match parse_file(definition.as_str()) {
                 Ok(result) => result,
                 Err(e) => {
-                    return Ok(Response::new(CheckUdfsResp {
-                        errors: vec![e.to_string()],
-                        udf_name: None,
-                    }));
+                    return Ok(udf_error_resp(e));
                 }
             };
 
             for item in result.items {
                 match item {
                     Item::Fn(f) => {
-                        if function.is_some() {
+                        if function_name.is_some() {
                             return Ok(Response::new(CheckUdfsResp {
                                 errors: vec!["Only one function is allowed in UDFs".to_string()],
                                 udf_name: None,
                             }));
                         }
-                        function = Some(f.sig.ident.to_string());
+                        function_name = Some(f.sig.ident.to_string());
                     }
                     Item::Use(_) => {}
                     _ => {
@@ -486,21 +493,31 @@ impl ControllerGrpc for ControllerServer {
         }
 
         // unwrap function or return error
-        let Some(function) = function else {
+        let Some(function_name) = function_name else {
             return Ok(Response::new(CheckUdfsResp {
                 errors: vec!["No function found in UDF".to_string()],
                 udf_name: None,
             }));
         };
 
+        // build cargo.toml
+        let cargo_toml = cargo_toml(&function_name, &dependencies);
+
+        // send to compiler
         let compiler_res = client
-            .check_udfs(CheckUdfsReq { definition })
+            .check_udfs(CheckUdfsCompilerReq {
+                udf_crate: Some(UdfCrate {
+                    name: function_name.clone(),
+                    definition: req.definition,
+                    cargo_toml,
+                }),
+            })
             .await?
             .into_inner();
 
         Ok(Response::new(CheckUdfsResp {
             errors: compiler_res.errors,
-            udf_name: Some(function),
+            udf_name: Some(function_name),
         }))
     }
 }
@@ -702,5 +719,108 @@ impl ControllerServer {
 
         shutdown_tx.send(0).unwrap();
         Ok(())
+    }
+}
+
+fn cargo_toml(name: &str, dependencies: &str) -> String {
+    format!(
+        r#"
+[package]
+name = "{}"
+version = "1.0.0"
+edition = "2021"
+
+{}
+        "#,
+        name, dependencies
+    )
+}
+
+fn udf_error_resp<E>(e: E) -> Response<CheckUdfsResp>
+where
+    E: core::fmt::Display,
+{
+    Response::new(CheckUdfsResp {
+        errors: vec![e.to_string()],
+        udf_name: None,
+    })
+}
+
+fn parse_dependencies(definition: &str) -> anyhow::Result<String> {
+    // get content of dependencies comment using regex
+    let re = Regex::new(r"\/\*\n(\[dependencies\]\n[\s\S]*?)\*\/").unwrap();
+    if re.find_iter(&definition).count() > 1 {
+        bail!("Only one dependencies definition is allowed in a UDF");
+    }
+
+    return if let Some(captures) = re.captures(&definition) {
+        if captures.len() != 2 {
+            bail!("Error parsing dependencies");
+        }
+        Ok(captures.get(1).unwrap().as_str().to_string())
+    } else {
+        Ok("[dependencies]\n# none defined\n".to_string())
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_dependencies_valid() {
+        let definition = r#"
+/*
+[dependencies]
+serde = "1.0"
+*/
+
+pub fn my_udf() -> i64 {
+    1
+}
+        "#;
+
+        assert_eq!(
+            parse_dependencies(definition).unwrap(),
+            r#"[dependencies]
+serde = "1.0"
+"#
+        );
+    }
+
+    #[test]
+    fn test_parse_dependencies_none() {
+        let definition = r#"
+pub fn my_udf() -> i64 {
+    1
+}
+        "#;
+
+        assert_eq!(
+            parse_dependencies(definition).unwrap(),
+            r#"[dependencies]
+# none defined
+"#
+        );
+    }
+
+    #[test]
+    fn test_parse_dependencies_multiple() {
+        let definition = r#"
+/*
+[dependencies]
+serde = "1.0"
+*/
+
+/*
+[dependencies]
+serde = "1.0"
+*/
+
+pub fn my_udf() -> i64 {
+    1
+
+        "#;
+        assert!(parse_dependencies(definition).is_err());
     }
 }

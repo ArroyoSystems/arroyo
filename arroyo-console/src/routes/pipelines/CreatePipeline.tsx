@@ -208,6 +208,10 @@ export function CreatePipeline() {
         },
       });
 
+      if (udfsValiation?.errors?.length) {
+        valid = false;
+      }
+
       if (udfsValiation) {
         newUdfs.push({
           ...udf,
@@ -226,7 +230,6 @@ export function CreatePipeline() {
 
   const queryValid = async () => {
     const udfs: PipelineLocalUdf[] = localUdfs.map(u => ({
-      language: 'rust',
       definition: u.definition,
     }));
     const { data: queryValidation } = await post('/v1/pipelines/validate_query', {
@@ -244,6 +247,7 @@ export function CreatePipeline() {
 
   const pipelineIsValid = async (successTab?: number) => {
     // Setting this state triggers the uswSWR calls
+    setPipelineId(undefined);
     setQueryInputToCheck(queryInput);
     setLocalUdfsToCheck(localUdfs);
     setOutputs([]);
@@ -267,14 +271,12 @@ export function CreatePipeline() {
   const preview = async () => {
     setTourStep(undefined);
     setQueryInputToCheck('');
-    setPipelineId(undefined);
 
     if (!(await pipelineIsValid(1))) {
       return;
     }
 
     const udfs: PipelineLocalUdf[] = localUdfs.map(u => ({
-      language: 'rust',
       definition: u.definition,
     }));
 
@@ -314,7 +316,6 @@ export function CreatePipeline() {
   const start = async () => {
     console.log('starting');
     const udfs: PipelineLocalUdf[] = localUdfs.map(u => ({
-      language: 'rust',
       definition: u.definition,
     }));
 
@@ -518,18 +519,25 @@ export function CreatePipeline() {
         <Box>
           {localUdfs
             .filter(u => u.errors?.length)
-            .map(u => (
-              <Flex key={u.id} flexDirection={'column'} py={3} gap={2}>
-                <UdfLabel udf={u} />
-                <SyntaxHighlighter
-                  language="text"
-                  style={vs2015}
-                  customStyle={{ borderRadius: '5px' }}
-                >
-                  {JSON.parse(`"${u.errors!.join('\\n')}"`)}
-                </SyntaxHighlighter>
-              </Flex>
-            ))}
+            .map(u => {
+              const text = `"${u.errors!.join('\\n')}"`;
+              let content = text;
+              try {
+                content = JSON.parse(text);
+              } catch (e) {}
+              return (
+                <Flex key={u.id} flexDirection={'column'} py={3} gap={2}>
+                  <UdfLabel udf={u} />
+                  <SyntaxHighlighter
+                    language="text"
+                    style={vs2015}
+                    customStyle={{ borderRadius: '5px' }}
+                  >
+                    {content}
+                  </SyntaxHighlighter>
+                </Flex>
+              );
+            })}
         </Box>
       );
     }

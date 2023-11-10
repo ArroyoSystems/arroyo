@@ -333,7 +333,7 @@ message OperatorCommitData {
 }
 
 message TableCommitData {
-  map<uint32, bytes> commit_data_by_subtask = 1;  
+  map<uint32, bytes> commit_data_by_subtask = 1;
 }
 
 message LoadCompactedDataReq {
@@ -440,12 +440,18 @@ service NodeGrpc {
 }
 
 
+message UdfCrate {
+  string name = 1;
+  string definition = 2;
+  string cargo_toml = 3;
+}
+
 message CompileQueryReq {
   string job_id = 1;
   string types = 2;
   string pipeline = 3;
   string wasm_fns = 4;
-  string udfs = 5;
+  repeated UdfCrate udf_crates = 5;
 }
 
 message CompileQueryResp {
@@ -458,11 +464,15 @@ message CheckUdfsResp {
   optional string udf_name = 2;
 }
 
+message CheckUdfsCompilerReq {
+  UdfCrate udf_crate = 1;
+}
+
 message CheckUdfsCompilerResp {
   repeated string errors = 1;
 }
 
 service CompilerGrpc {
   rpc CompileQuery(CompileQueryReq) returns (CompileQueryResp);
-  rpc CheckUdfs(CheckUdfsReq) returns (CheckUdfsCompilerResp);
+  rpc CheckUdfs(CheckUdfsCompilerReq) returns (CheckUdfsCompilerResp);
 }

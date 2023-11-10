@@ -314,7 +314,6 @@ export interface components {
       definition: string;
       description?: string | null;
       id: string;
-      language: components["schemas"]["UdfLanguage"];
       name: string;
       prefix: string;
       /** Format: int64 */
@@ -518,10 +517,7 @@ export interface components {
     TimestampFormat: "rfc3339" | "unix_millis";
     Udf: {
       definition: string;
-      language: components["schemas"]["UdfLanguage"];
     };
-    /** @enum {string} */
-    UdfLanguage: "rust";
     UdfPost: {
       definition: string;
       description?: string | null;

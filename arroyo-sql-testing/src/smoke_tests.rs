@@ -688,7 +688,7 @@ CREATE TABLE double_negative_udf (
 );
 INSERT INTO double_negative_udf
 SELECT double_negative(counter) FROM impulse_source",
-"fn double_negative(x: u64) -> i64 {
+"pub fn double_negative(x: u64) -> i64 {
   -2 * (x as i64)
 }"}
 
@@ -719,7 +719,7 @@ INSERT INTO udaf SELECT median, none_value, max_product FROM (
   max_product(counter, subtask_index) as max_product
 FROM impulse_source
 GROUP BY 1)",
-"fn my_median(args: Vec<u64>) -> f64 {
+"pub fn my_median(args: Vec<u64>) -> f64 {
   let mut args = args;
   args.sort();
   let mid = args.len() / 2;
@@ -729,10 +729,10 @@ GROUP BY 1)",
       args[mid] as f64
   }
 }
-fn none_udf(args: Vec<u64>) -> Option<f64> {
+pub fn none_udf(args: Vec<u64>) -> Option<f64> {
   None
 }
-fn max_product(first_arg: Vec<u64>, second_arg: Vec<u64>) -> u64 {
+pub fn max_product(first_arg: Vec<u64>, second_arg: Vec<u64>) -> u64 {
   let pairs = first_arg.iter().zip(second_arg.iter());
   pairs.map(|(x, y)| x * y).max().unwrap()
 }"}
@@ -856,7 +856,7 @@ CREATE TABLE delayed_impulse_source (
 );
 CREATE TABLe offset_output (
   start timestamp,
-  counter bigint 
+  counter bigint
 ) WITH (
   connector = 'single_file',
   path = '$output_path',
@@ -864,7 +864,7 @@ CREATE TABLe offset_output (
   type = 'sink'
 );
 INSERT INTO offset_output
-SELECT window.start, a.counter as counter 
+SELECT window.start, a.counter as counter
 FROM (SELECT TUMBLE(interval '1 second'),  counter, count(*) FROM impulse_source GROUP BY 1,2) a
 
 JOIN (SELECT TUMBLE(interval '1 second') as window, counter , count(*) FROM delayed_impulse_source GROUP BY 1,2) b

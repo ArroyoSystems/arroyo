@@ -14,12 +14,13 @@ use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch, PipelinePost,
     PipelineRestart, QueryValidationResult, StopType, ValidateQueryPost,
 };
-use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfLanguage};
+use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
+use arroyo_rpc::grpc::api as api_proto;
 use arroyo_rpc::grpc::api::{
-    create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, CreateUdf, PipelineProgram,
-    Udf,
+    create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, PipelineProgram,
 };
+
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::log_event;
 use arroyo_sql::{has_duplicate_udf_names, ArroyoSchemaProvider, SqlConfig};
@@ -41,12 +42,11 @@ use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::{connection_tables, to_micros};
 use crate::{handle_db_error, optimizations, AuthData};
 use create_pipeline_req::Config::Sql;
-
 const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
 
 async fn compile_sql<'e, E>(
     query: String,
-    local_udf_defs: Vec<String>,
+    local_udfs: &Vec<Udf>,
     parallelism: usize,
     auth_data: &AuthData,
     tx: &E,
@@ -68,36 +68,27 @@ where
     // error if there are duplicate local or duplicate global UDF names,
     // but allow global UDFs to override local ones
 
-    if has_duplicate_udf_names(
-        &global_udfs
-            .iter()
-            .map(|u| u.definition.clone())
-            .collect::<Vec<String>>(),
-    ) {
+    if has_duplicate_udf_names(global_udfs.iter().map(|u| &u.definition)) {
         bail!("Global UDFs have duplicate function names");
     }
 
-    if has_duplicate_udf_names(&local_udf_defs) {
+    if has_duplicate_udf_names(local_udfs.iter().map(|u| &u.definition)) {
         bail!("Local UDFs have duplicate function names");
     }
 
     for udf in global_udfs {
-        match udf.language {
-            UdfLanguage::Rust => {
-                let _ = schema_provider.add_rust_udf(&udf.definition).map_err(|e| {
-                    warn!(
-                        "Could not process global UDF {}: {:?}",
-                        udf.name,
-                        e.root_cause()
-                    );
-                });
-            }
-        }
+        let _ = schema_provider.add_rust_udf(&udf.definition).map_err(|e| {
+            warn!(
+                "Could not process global UDF {}: {:?}",
+                udf.name,
+                e.root_cause()
+            );
+        });
     }
 
-    for udf_def in local_udf_defs.iter() {
+    for udf in local_udfs.iter() {
         schema_provider
-            .add_rust_udf(&udf_def)
+            .add_rust_udf(&udf.definition)
             .map_err(|e| anyhow!(format!("Could not process local UDF: {:?}", e.root_cause())))?;
     }
 
@@ -190,12 +181,12 @@ pub(crate) async fn create_pipeline<'a>(
                 )));
             }
 
-            let udf_defs = sql.udfs.iter().map(|t| t.definition.to_string()).collect();
+            let api_udfs = sql.udfs.into_iter().map(|t| t.into()).collect::<Vec<Udf>>();
 
             pipeline_type = PipelineType::sql;
             (program, connections) = compile_sql(
                 sql.query.clone(),
-                udf_defs,
+                &api_udfs,
                 sql.parallelism as usize,
                 &auth,
                 tx,
@@ -203,15 +194,7 @@ pub(crate) async fn create_pipeline<'a>(
             .await
             .map_err(|e| bad_request(e.to_string()))?;
             text = Some(sql.query);
-            udfs = Some(
-                sql.udfs
-                    .iter()
-                    .map(|t| Udf {
-                        language: t.language,
-                        definition: t.definition.clone(),
-                    })
-                    .collect(),
-            );
+            udfs = Some(api_udfs);
             is_preview = sql.preview;
         }
     };
@@ -290,7 +273,7 @@ impl TryInto<Pipeline> for DbPipeline {
     type Error = ErrorResp;
 
     fn try_into(self) -> Result<Pipeline, ErrorResp> {
-        let udfs: Vec<Udf> = serde_json::from_value(self.udfs).map_err(log_and_map)?;
+        let udfs: Vec<api_proto::Udf> = serde_json::from_value(self.udfs).map_err(log_and_map)?;
         let running_desired = self.stop == StopMode::none;
         let state = self.state.unwrap_or_else(|| "Created".to_string());
         let (action_text, action, action_in_progress) = get_action(&state, &running_desired);
@@ -369,16 +352,10 @@ pub async fn validate_query(
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
-    let udf_defs = validate_query_post
-        .udfs
-        .clone()
-        .unwrap_or(vec![])
-        .into_iter()
-        .map(|u| u.definition.to_string())
-        .collect();
+    let udfs = validate_query_post.udfs.unwrap_or(vec![]);
 
     let pipeline_graph_validation_result =
-        match compile_sql(validate_query_post.query, udf_defs, 1, &auth_data, &client).await {
+        match compile_sql(validate_query_post.query, &udfs, 1, &auth_data, &client).await {
             Ok((mut program, _)) => {
                 optimizations::optimize(&mut program.graph);
                 let nodes = program
@@ -453,10 +430,7 @@ pub async fn post_pipeline(
                 .clone()
                 .unwrap_or(vec![])
                 .into_iter()
-                .map(|u| CreateUdf {
-                    language: 0,
-                    definition: u.definition.to_string(),
-                })
+                .map(|u| u.into())
                 .collect(),
             preview,
         })),

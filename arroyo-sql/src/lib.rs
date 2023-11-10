@@ -6,8 +6,8 @@ use arrow_schema::TimeUnit;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaConnector, KafkaTable};
 use arroyo_connectors::{Connection, Connector};
 use arroyo_datastream::Program;
-use datafusion::physical_plan::functions::make_scalar_function;
 
+use datafusion::physical_plan::functions::make_scalar_function;
 pub mod avro;
 pub(crate) mod code_gen;
 pub mod expressions;
@@ -45,7 +45,6 @@ use crate::types::{StructDef, StructField, TypeDef};
 use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType};
 use arroyo_rpc::formats::{Format, JsonFormat};
 use datafusion_common::DataFusionError;
-use quote::ToTokens;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
@@ -238,6 +237,16 @@ impl ArroyoSchemaProvider {
     pub fn add_rust_udf(&mut self, body: &str) -> Result<()> {
         let file = syn::parse_file(body)?;
 
+        if file
+            .items
+            .iter()
+            .filter(|item| matches!(item, Item::Fn(..)))
+            .count()
+            != 1
+        {
+            bail!("UDF definition must contain exactly 1 function.");
+        };
+
         for item in file.items {
             let Item::Fn(mut function) = item else {
                 continue;
@@ -338,7 +347,7 @@ impl ArroyoSchemaProvider {
                 UdfDef {
                     args,
                     ret,
-                    def: function.to_token_stream().to_string(),
+                    def: body.to_string(),
                 },
             );
         }
@@ -707,11 +716,11 @@ pub fn get_test_expression(
     )
 }
 
-pub fn has_duplicate_udf_names(udf_defs: &Vec<String>) -> bool {
+pub fn has_duplicate_udf_names<'a>(definitions: impl Iterator<Item = &'a String>) -> bool {
     let mut udf_names = HashSet::new();
-    for udf_def in udf_defs {
-        let Ok(file) = syn::parse_file(udf_def) else {
-            warn!("Could not parse UDF definition: {}", udf_def);
+    for definition in definitions {
+        let Ok(file) = syn::parse_file(definition) else {
+            warn!("Could not parse UDF definition: {}", definition);
             continue;
         };
 

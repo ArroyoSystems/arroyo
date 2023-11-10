@@ -8,9 +8,7 @@ use crate::rest_utils::{
     service_unavailable, ApiError, BearerAuth, ErrorResp,
 };
 use crate::to_micros;
-use arroyo_rpc::api_types::udfs::{
-    GlobalUdf, UdfLanguage, UdfPost, UdfValidationResult, ValidateUdfPost,
-};
+use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfPost, UdfValidationResult, ValidateUdfPost};
 use arroyo_rpc::api_types::GlobalUdfCollection;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{CheckUdfsReq, CheckUdfsResp};
@@ -28,7 +26,6 @@ impl Into<GlobalUdf> for DbUdf {
             prefix: self.prefix,
             name: self.name,
             created_at: to_micros(self.created_at),
-            language: self.language.into(),
             definition: self.definition,
             updated_at: to_micros(self.updated_at),
             description: self.description,
@@ -103,7 +100,6 @@ pub async fn create_udf(
                 organization_id: &auth_data.organization_id,
                 prefix: &req.prefix,
                 name: &udf_name,
-                language: UdfLanguage::Rust.to_string(),
                 definition: &req.definition,
                 description: &req.description.unwrap_or_default(),
             },
@@ -215,7 +211,10 @@ async fn validate_udf_with_controller(
         Ok(resp) => resp.into_inner(),
         Err(e) => {
             error!("Controller failed to validate UDF: {}", e);
-            return Err(internal_server_error("Failed to validate UDF"));
+            return Err(internal_server_error(format!(
+                "Failed to validate UDF: {}",
+                e.message()
+            )));
         }
     };
 
