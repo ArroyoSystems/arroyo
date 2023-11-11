@@ -72,8 +72,7 @@ export function SchemaEditor({
     if (
       monacoEl &&
       !editor &&
-      !created.current &&
-      state.schema?.format?.json?.unstructured === false
+      !created.current
     ) {
       let e = monaco.editor.create(monacoEl.current!, {
         language: 'json',

@@ -1,4 +1,5 @@
 import {
+  Box,
   Button,
   Code,
   FormControl,
@@ -245,14 +246,15 @@ export const DefineSchema = ({
       name: 'JSON',
       value: 'json',
       el: (
-        <SchemaFormatEditor
-          connector={connector}
-          connectionProfiles={connectionProfiles!}
-          state={state}
-          setState={setState}
-          next={next}
-          format={'json'}
-        />
+          <SchemaFormatEditor
+              key = 'jsoneditor'
+              connector={connector}
+              connectionProfiles={connectionProfiles!}
+              state={state}
+              setState={setState}
+              next={next}
+              format={'json'}
+          />
       ),
     },
     {
@@ -260,6 +262,7 @@ export const DefineSchema = ({
       value: 'avro',
       el: (
         <SchemaFormatEditor
+          key = 'avroeditor'
           connector={connector}
           connectionProfiles={connectionProfiles!}
           state={state}
