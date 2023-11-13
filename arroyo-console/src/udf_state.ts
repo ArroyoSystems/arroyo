@@ -99,7 +99,6 @@ export const getLocalUdfsContextValue = () => {
   };
 
   const deleteGlobalUdf = async (udf: GlobalUdf) => {
-    console.log('deleting global');
     await apiDeleteGlobalUdf(udf);
     setOpenedGlobalUdfs(openedGlobalUdfs.filter(u => u.id !== udf.id));
   };
