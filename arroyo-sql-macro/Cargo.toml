@@ -10,10 +10,14 @@ proc-macro = true
 arroyo-sql = { path = "../arroyo-sql" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-connectors = { path = "../arroyo-connectors" }
+arroyo-rpc = { path = "../arroyo-rpc" }
+
+anyhow = "1"
 
 syn = {version = "2", features = ["full"]}
 quote = "1.0"
 proc-macro2 = "1"
 serde_json = "1"
+apache-avro = "0.16.0"
 
 runtime-macros-derive = "0.6.0"

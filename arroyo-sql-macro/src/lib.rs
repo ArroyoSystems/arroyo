@@ -8,6 +8,8 @@ use quote::{quote, ToTokens};
 use syn::parse::{Parse, ParseStream};
 use syn::{parse_str, Expr, LitInt, LitStr, Token};
 
+mod connectors;
+
 /// This macro is used to generate a test function for a single test case.
 /// Used in the `arroyo-sql-testing` crate.
 ///
@@ -153,6 +155,8 @@ fn get_pipeline_module(
         .unwrap();
 
     schema_provider.add_connector_table(nexmark);
+    schema_provider.add_connector_table(connectors::get_json_schema_source().unwrap());
+    schema_provider.add_connector_table(connectors::get_avro_source().unwrap());
 
     let file = syn::parse_file(&udfs.unwrap_or_default()).unwrap();
     for item in file.items.into_iter() {

@@ -85,11 +85,11 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
                     if *nullable {
                         Some(quote!{
                             #[serde(default)]
-                            #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime_opt")]
+                            #[serde(with = "arroyo_worker::formats::json::opt_timestamp_as_rfc3339")]
                         })
                     } else {
                         Some(quote! {
-                            #[serde(deserialize_with = "arroyo_worker::deserialize_rfc3339_datetime")]
+                            #[serde(with = "arroyo_worker::formats::json::timestamp_as_rfc3339")]
                         })
                     }
 
@@ -150,7 +150,7 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
     add_defs(source_name, ROOT_NAME, &fields, &mut defs);
 
     Ok(format!(
-        "mod {} {{\nuse crate::*;\n{}\n}}",
+        "mod {} {{\nuse super::*;\n{}\n}}",
         source_name,
         defs.join("\n")
     ))
