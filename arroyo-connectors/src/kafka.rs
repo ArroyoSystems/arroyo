@@ -90,6 +90,18 @@ impl Connector for KafkaConnector {
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for Kafka connection"))?;
 
+        match &format {
+            arroyo_rpc::formats::Format::Avro(_) => {
+                if let ConnectionType::Sink = &typ {
+                    bail!("Kafka connections don't support Avro sinks")
+                }
+            }
+            arroyo_rpc::formats::Format::Parquet(_) => {
+                bail!("Kafka connections don't support Parquet")
+            }
+            arroyo_rpc::formats::Format::Json(_) | arroyo_rpc::formats::Format::RawString(_) => {}
+        }
+
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
