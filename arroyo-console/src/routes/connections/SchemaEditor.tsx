@@ -69,12 +69,7 @@ export function SchemaEditor({
   }
 
   useEffect(() => {
-    if (
-      monacoEl &&
-      !editor &&
-      !created.current &&
-      state.schema?.format?.json?.unstructured === false
-    ) {
+    if (monacoEl && !editor && !created.current) {
       let e = monaco.editor.create(monacoEl.current!, {
         language: 'json',
         theme: 'vs-dark',

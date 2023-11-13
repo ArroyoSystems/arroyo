@@ -246,6 +246,7 @@ export const DefineSchema = ({
       value: 'json',
       el: (
         <SchemaFormatEditor
+          key="jsoneditor"
           connector={connector}
           connectionProfiles={connectionProfiles!}
           state={state}
@@ -260,6 +261,7 @@ export const DefineSchema = ({
       value: 'avro',
       el: (
         <SchemaFormatEditor
+          key="avroeditor"
           connector={connector}
           connectionProfiles={connectionProfiles!}
           state={state}
