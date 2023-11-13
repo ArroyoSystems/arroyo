@@ -5,6 +5,7 @@ import { components, paths } from '../gen/api-types';
 import createClient from 'openapi-fetch';
 
 import { LocalUdf } from '../udf_state';
+import { useRef } from 'react';
 
 type schemas = components['schemas'];
 
@@ -121,7 +122,7 @@ const operatorErrorsKey = (pipelineId?: string, jobId?: string) => {
 };
 
 const queryValidationKey = (query?: string, localUdfs?: LocalUdf[]) => {
-  return query ? { key: 'PipelineGraph', query, localUdfs } : null;
+  return query != undefined ? { key: 'PipelineGraph', query, localUdfs } : null;
 };
 
 const udfValidationKey = (definition: string) => {
@@ -372,11 +373,15 @@ export const useQueryValidation = (query?: string, localUdfs?: LocalUdf[]) => {
 };
 
 const udfValidationFetcher = () => {
+  const controller = useRef<AbortController>();
   return async (params: { key: string; definition: string }) => {
+    controller.current?.abort();
+    controller.current = new AbortController();
     const { data, error } = await post('/v1/udfs/validate', {
       body: {
         definition: params.definition,
       },
+      signal: controller.current?.signal,
     });
     return processResponse(data, error);
   };
