@@ -1081,6 +1081,7 @@ impl<K: Key, T1: Data, T2: Data, F: Fn(&Option<K>, &T1) -> T2> BiFunc<K, T1, T2>
 pub struct ProgramUdf {
     pub name: String,
     pub definition: String,
+    pub dependencies: String,
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -1932,6 +1933,7 @@ impl Into<PipelineProgramUdf> for ProgramUdf {
         PipelineProgramUdf {
             name: self.name,
             definition: self.definition,
+            dependencies: self.dependencies,
         }
     }
 }
@@ -1941,6 +1943,7 @@ impl Into<ProgramUdf> for PipelineProgramUdf {
         ProgramUdf {
             name: self.name,
             definition: self.definition,
+            dependencies: self.dependencies,
         }
     }
 }

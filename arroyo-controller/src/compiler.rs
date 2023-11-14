@@ -1,5 +1,5 @@
+use crate::cargo_toml;
 use crate::states::fatal;
-use crate::{cargo_toml, parse_dependencies};
 use anyhow::{anyhow, Result};
 use arroyo_datastream::{parse_type, Operator, Program, WasmBehavior};
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
@@ -145,11 +145,10 @@ impl ProgramCompiler {
             .udfs
             .iter()
             .map(|udf| {
-                let dependencies = parse_dependencies(&udf.definition)?;
                 Ok(UdfCrate {
                     name: udf.name.to_string(),
                     definition: udf.definition.to_string(),
-                    cargo_toml: cargo_toml(&udf.name, &dependencies),
+                    cargo_toml: cargo_toml(&udf.name, &udf.dependencies),
                 })
             })
             .collect()
