@@ -20,8 +20,8 @@ use crate::{
 use anyhow::{bail, Result};
 
 use super::{
-    delta, get_partitioner_from_table, CommitState, CommitStyle, FileSystemTable, FilenameStrategy,
-    Filenaming, MultiPartWriterStats, RollingPolicy,
+    add_suffix_prefix, delta, get_partitioner_from_table, CommitState, CommitStyle,
+    FileSystemTable, FilenameStrategy, Filenaming, MultiPartWriterStats, RollingPolicy,
 };
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
@@ -58,12 +58,15 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
 
-        let filenaming = table_properties
+        let mut filenaming = table_properties
             .file_settings
             .clone()
             .unwrap()
             .filenaming
             .unwrap();
+        if filenaming.suffix.is_none() {
+            filenaming.suffix = Some(V::file_suffix().to_string());
+        }
 
         Self {
             writers: HashMap::new(),
@@ -90,49 +93,33 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             None => FilenameStrategy::Serial,
         };
 
-        // This allows us to override the file suffix (extension)
-        let file_suffix = if self.filenaming.suffix.is_some() {
-            self.filenaming.suffix.as_ref().unwrap()
-        } else {
-            V::file_suffix()
-        };
-
-        // This forms the base for naming files depending on strategy
-        let filename_base = if filename_strategy == FilenameStrategy::Uuid {
-            Uuid::new_v4().to_string()
-        } else {
-            format!("{:>05}-{:>03}", self.next_file_index, self.subtask_id)
-        };
-
-        // This allows us to manipulate the filename_base
-        let filename_core = if self.filenaming.prefix.is_some() {
-            format!(
-                "{}-{}",
-                self.filenaming.prefix.as_ref().unwrap(),
-                filename_base
-            )
-        } else {
-            filename_base
-        };
         if !self.writers.contains_key(partition) {
-            let file_name = match partition {
+            // This forms the base for naming files depending on strategy
+            let filename_base = if filename_strategy == FilenameStrategy::Uuid {
+                Uuid::new_v4().to_string()
+            } else {
+                format!("{:>05}-{:>03}", self.next_file_index, self.subtask_id)
+            };
+            let filename = add_suffix_prefix(
+                filename_base,
+                self.filenaming.prefix.as_ref(),
+                self.filenaming.suffix.as_ref().unwrap(),
+            );
+
+            let filename = match partition {
                 Some(partition) => {
                     // make sure the partition directory exists in tmp and final
                     create_dir_all(&format!("{}/{}", self.tmp_dir, partition)).unwrap();
                     create_dir_all(&format!("{}/{}", self.final_dir, partition)).unwrap();
-                    if filename_strategy == FilenameStrategy::Uuid {
-                        format!("{}/{}.{}", partition, filename_core, file_suffix)
-                    } else {
-                        format!("{}/{}.{}", partition, filename_core, file_suffix)
-                    }
+                    format!("{}/{}", partition, filename)
                 }
-                None => format!("{}.{}", filename_core, V::file_suffix()),
+                None => filename,
             };
             self.writers.insert(
                 partition.clone(),
                 V::new(
-                    format!("{}/{}", self.tmp_dir, file_name),
-                    format!("{}/{}", self.final_dir, file_name),
+                    format!("{}/{}", self.tmp_dir, filename),
+                    format!("{}/{}", self.final_dir, filename),
                     &self.table_properties,
                 ),
             );

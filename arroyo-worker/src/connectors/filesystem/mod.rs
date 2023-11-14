@@ -377,6 +377,8 @@ pub trait MultiPartWriter {
 
     fn name(&self) -> String;
 
+    fn suffix() -> String;
+
     fn partition(&self) -> Option<String>;
 
     async fn insert_value(
@@ -637,13 +639,16 @@ where
             CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
-        let filenaming = writer_properties
+        let mut filenaming = writer_properties
             .file_settings
             .as_ref()
             .unwrap()
             .filenaming
             .clone()
             .unwrap();
+        if filenaming.suffix.is_none() {
+            filenaming.suffix = Some(R::suffix());
+        }
         Self {
             path,
             active_writers: HashMap::new(),
@@ -776,21 +781,15 @@ where
         } else {
             format!("{:>05}-{:>03}", self.max_file_index, self.subtask_id)
         };
-
-        // This allows us to manipulate the filename_base
-        let filename_core = if self.filenaming.prefix.is_some() {
-            format!(
-                "{}-{}",
-                self.filenaming.prefix.as_ref().unwrap(),
-                filename_base
-            )
-        } else {
-            filename_base
-        };
+        let filename = add_suffix_prefix(
+            filename_base,
+            self.filenaming.prefix.as_ref(),
+            self.filenaming.suffix.as_ref().unwrap(),
+        );
 
         let path = match partition {
-            Some(sub_bucket) => format!("{}/{}/{}", self.path, sub_bucket, filename_core),
-            None => format!("{}/{}", self.path, filename_core),
+            Some(sub_bucket) => format!("{}/{}/{}", self.path, sub_bucket, filename),
+            None => format!("{}/{}", self.path, filename),
         };
         R::new(
             self.object_store.clone(),
@@ -1319,7 +1318,6 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> Mul
     ) -> Self {
         let batch_builder = BB::new(config);
         let batch_buffering_writer = BBW::new(config);
-        let path = format!("{}.{}", path, BBW::suffix()).into();
         Self {
             batch_builder,
             batch_buffering_writer,
@@ -1330,6 +1328,10 @@ impl<BB: BatchBuilder, BBW: BatchBufferingWriter<BatchData = BB::BatchData>> Mul
 
     fn name(&self) -> String {
         self.multipart_manager.name()
+    }
+
+    fn suffix() -> String {
+        BBW::suffix()
     }
 
     fn partition(&self) -> Option<String> {
@@ -1639,5 +1641,16 @@ impl<K: Key, T: Data + Sync, R: MultiPartWriter<InputType = T> + Send + 'static>
             }
         }
         bail!("checkpoint receiver closed unexpectedly")
+    }
+}
+
+pub(crate) fn add_suffix_prefix(
+    filename: String,
+    prefix: Option<&String>,
+    suffix: &String,
+) -> String {
+    match prefix {
+        None => format!("{}.{}", filename, suffix),
+        Some(prefix) => format!("{}-{}.{}", prefix, filename, suffix),
     }
 }
