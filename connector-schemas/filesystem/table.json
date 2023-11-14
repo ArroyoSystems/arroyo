@@ -117,6 +117,30 @@
                         "direct",
                         "delta_lake"
                     ]
+                },
+                "filenaming": {
+                    "title": "Filenaming",
+                    "type": "object",
+                    "properties": {
+                        "prefix": {
+                            "title": "Filename Prefix",
+                            "type": "string",
+                            "description": "The prefix to use in file name. i.e prefix-<uuid>.parquet"
+                        },
+                        "suffix": {
+                            "title": "Filename Suffix",
+                            "type": "string",
+                            "description": "This will overwrite the default file suffix. i.e .parquet, use with caution"
+                        },
+                        "strategy":{
+                            "title": "Filename Strategy",
+                            "type": "string",
+                            "enum": [
+                                "serial",
+                                "uuid"
+                            ]
+                        }
+                    }
                 }
             },
             "additionalProperties": false

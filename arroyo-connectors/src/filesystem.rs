@@ -175,6 +175,15 @@ pub fn file_system_table_from_options(
     let rollover_seconds = pull_option_to_i64("rollover_seconds", opts)?;
     let target_file_size = pull_option_to_i64("target_file_size", opts)?;
     let target_part_size = pull_option_to_i64("target_part_size", opts)?;
+    let prefix = opts.remove("filename.prefix");
+    let suffix = opts.remove("filename.suffix");
+    let strategy = opts
+        .remove("filename.strategy")
+        .map(|value| {
+            FilenameStrategy::try_from(&value)
+                .map_err(|_err| anyhow!("{} is not a valid Filenaming Strategy", value))
+        })
+        .transpose()?;
 
     let partition_fields: Vec<_> = opts
         .remove("partition_fields")
@@ -192,6 +201,16 @@ pub fn file_system_table_from_options(
         None
     };
 
+    let filenaming = if prefix.is_some() || suffix.is_some() || strategy.is_some() {
+        Some(Filenaming {
+            prefix,
+            suffix,
+            strategy,
+        })
+    } else {
+        None
+    };
+
     let file_settings = Some(FileSettings {
         inactivity_rollover_seconds,
         max_parts,
@@ -200,6 +219,7 @@ pub fn file_system_table_from_options(
         target_part_size,
         partitioning,
         commit_style: Some(commit_style),
+        filenaming,
     });
 
     let format_settings = match schema

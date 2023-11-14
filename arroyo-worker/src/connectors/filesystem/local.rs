@@ -10,6 +10,7 @@ use bincode::{Decode, Encode};
 use serde::Serialize;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::info;
+use uuid::Uuid;
 
 use crate::{
     connectors::{filesystem::FinishedFile, two_phase_committer::TwoPhaseCommitter},
@@ -19,8 +20,8 @@ use crate::{
 use anyhow::{bail, Result};
 
 use super::{
-    delta, get_partitioner_from_table, CommitState, CommitStyle, FileSystemTable,
-    MultiPartWriterStats, RollingPolicy,
+    delta, get_partitioner_from_table, CommitState, CommitStyle, FileSystemTable, FilenameStrategy,
+    Filenaming, MultiPartWriterStats, RollingPolicy,
 };
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
@@ -36,6 +37,7 @@ pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     table_properties: FileSystemTable,
     commit_state: CommitState,
     phantom: PhantomData<(K, D)>,
+    filenaming: Filenaming,
 }
 
 impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
@@ -56,6 +58,13 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
 
+        let filenaming = table_properties
+            .file_settings
+            .clone()
+            .unwrap()
+            .filenaming
+            .unwrap();
+
         Self {
             writers: HashMap::new(),
             tmp_dir,
@@ -70,30 +79,54 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             table_properties,
             commit_state,
             phantom: PhantomData,
+            filenaming,
         }
     }
 
     fn get_or_insert_writer(&mut self, partition: &Option<String>) -> &mut V {
+        let filename_strategy = match self.filenaming.strategy {
+            Some(FilenameStrategy::Uuid) => FilenameStrategy::Uuid,
+            Some(FilenameStrategy::Serial) => FilenameStrategy::Serial,
+            None => FilenameStrategy::Serial,
+        };
+
+        // This allows us to override the file suffix (extension)
+        let file_suffix = if self.filenaming.suffix.is_some() {
+            self.filenaming.suffix.as_ref().unwrap()
+        } else {
+            V::file_suffix()
+        };
+
+        // This forms the base for naming files depending on strategy
+        let filename_base = if filename_strategy == FilenameStrategy::Uuid {
+            Uuid::new_v4().to_string()
+        } else {
+            format!("{:>05}-{:>03}", self.next_file_index, self.subtask_id)
+        };
+
+        // This allows us to manipulate the filename_base
+        let filename_core = if self.filenaming.prefix.is_some() {
+            format!(
+                "{}-{}",
+                self.filenaming.prefix.as_ref().unwrap(),
+                filename_base
+            )
+        } else {
+            filename_base
+        };
         if !self.writers.contains_key(partition) {
             let file_name = match partition {
                 Some(partition) => {
                     // make sure the partition directory exists in tmp and final
                     create_dir_all(&format!("{}/{}", self.tmp_dir, partition)).unwrap();
                     create_dir_all(&format!("{}/{}", self.final_dir, partition)).unwrap();
-                    format!(
-                        "{}/{:>05}-{:>03}.{}",
-                        partition,
-                        self.next_file_index,
-                        self.subtask_id,
-                        V::file_suffix()
-                    )
+                    if filename_strategy == FilenameStrategy::Uuid {
+                        format!("{}/{}.{}", partition, filename_core, file_suffix)
+                    } else {
+                        format!("{}/{}.{}", partition, filename_core, file_suffix)
+                    }
                 }
-                None => format!(
-                    "{:>05}-{:>03}.{}",
-                    self.next_file_index,
-                    self.subtask_id,
-                    V::file_suffix()
-                ),
+                None => format!("{}.{}", filename_core, V::file_suffix()),
             };
             self.writers.insert(
                 partition.clone(),
