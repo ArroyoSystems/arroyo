@@ -258,8 +258,8 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
             .file_states
             .entry(obj_key.to_string())
             .or_insert(FileReadState::RecordsRead(0));
-        let mut lines_read = match read_state {
-            FileReadState::RecordsRead(lines_read) => *lines_read,
+        let mut records_read = match read_state {
+            FileReadState::RecordsRead(records_read) => *records_read,
             FileReadState::Finished => {
                 return Err(UserError::new(
                     "reading finished file",
@@ -270,15 +270,15 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
         let mut reader = self
             .get_item_stream(storage_provider, obj_key.to_string())
             .await?;
-        if lines_read > 0 {
-            warn!("skipping {} items", lines_read);
-            for _ in 0..lines_read {
+        if records_read > 0 {
+            warn!("skipping {} items", records_read);
+            for _ in 0..records_read {
                 let _ = reader.next().await.ok_or_else(|| {
                     UserError::new(
                         "could not skip item",
                         format!(
                             "based on checkpoint expected {} to have at least {} lines",
-                            obj_key, lines_read
+                            obj_key, records_read
                         ),
                     )
                 })?;
@@ -297,7 +297,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                                     value: value,
                                 })
                                 .await;
-                            lines_read += 1;
+                            records_read += 1;
                         }
                         None => {
                             info!("finished reading file {}", obj_key);
@@ -308,7 +308,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                 },
                 msg_res = ctx.control_rx.recv() => {
                     if let Some(control_message) = msg_res {
-                        self.file_states.insert(obj_key.to_string(), FileReadState::RecordsRead(lines_read));
+                        self.file_states.insert(obj_key.to_string(), FileReadState::RecordsRead(records_read));
                         match self.process_control_message(ctx, control_message).await {
                             Some(finish_type) => return Ok(Some(finish_type)),
                             None => ()

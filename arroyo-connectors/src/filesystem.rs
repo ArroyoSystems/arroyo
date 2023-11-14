@@ -15,6 +15,7 @@ use crate::{pull_opt, pull_option_to_i64, Connection, EmptyConfig};
 use super::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/filesystem/table.json");
+const ICON: &str = include_str!("../resources/filesystem.svg");
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 
@@ -33,8 +34,8 @@ impl Connector for FileSystemConnector {
         arroyo_rpc::api_types::connections::Connector {
             id: "filesystem".to_string(),
             name: "FileSystem".to_string(),
-            icon: "".to_string(),
-            description: "Read (S3 only) or write to a filesystem (like S3)".to_string(),
+            icon: ICON.to_string(),
+            description: "Read or write to a filesystem (like S3)".to_string(),
             enabled: true,
             source: true,
             sink: true,
@@ -94,15 +95,14 @@ impl Connector for FileSystemConnector {
                 ..
             } => {
                 // confirm commit style is Direct
-                if let Some(CommitStyle::Direct) = file_settings
+                let Some(CommitStyle::Direct) = file_settings
                     .as_ref()
                     .ok_or_else(|| anyhow!("no file_settings"))?
                     .commit_style
-                {
-                    // ok
-                } else {
+                else {
                     bail!("commit_style must be Direct");
-                }
+                };
+
                 let backend_config = BackendConfig::parse_url(&write_target.path, true)?;
                 let is_local = match &backend_config {
                     BackendConfig::Local { .. } => true,
@@ -191,7 +191,7 @@ impl Connector for FileSystemConnector {
                 )
             }
             Some(t) if t == "sink" => {
-                let table = file_system_table_from_options(opts, schema, CommitStyle::Direct)?;
+                let table = file_system_sink_from_options(opts, schema, CommitStyle::Direct)?;
 
                 self.from_config(None, name, EmptyConfig {}, table, schema)
             }
@@ -215,7 +215,7 @@ fn get_storage_url_and_options(
     Ok((storage_url, storage_options))
 }
 
-pub fn file_system_table_from_options(
+pub fn file_system_sink_from_options(
     opts: &mut std::collections::HashMap<String, String>,
     schema: Option<&ConnectionSchema>,
     commit_style: CommitStyle,

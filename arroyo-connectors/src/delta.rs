@@ -7,7 +7,7 @@ use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestS
 use arroyo_rpc::OperatorConfig;
 
 use crate::filesystem::{
-    file_system_table_from_options, CommitStyle, FileSystemTable, FormatSettings, TableType,
+    file_system_sink_from_options, CommitStyle, FileSystemTable, FormatSettings, TableType,
 };
 use crate::{Connection, EmptyConfig};
 
@@ -81,7 +81,7 @@ impl Connector for DeltaLakeConnector {
             write_target,
         } = &table.type_
         else {
-            bail!("Delta Lake connector only supports source tables");
+            bail!("Delta Lake connector only supports sink tables");
         };
         // confirm commit style is DeltaLake
         if let Some(CommitStyle::DeltaLake) = file_settings
@@ -146,7 +146,7 @@ impl Connector for DeltaLakeConnector {
         opts: &mut std::collections::HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let table = file_system_table_from_options(opts, schema, CommitStyle::DeltaLake)?;
+        let table = file_system_sink_from_options(opts, schema, CommitStyle::DeltaLake)?;
 
         self.from_config(None, name, EmptyConfig {}, table, schema)
     }
