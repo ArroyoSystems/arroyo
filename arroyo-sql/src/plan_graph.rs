@@ -2025,11 +2025,13 @@ pub fn get_program(
     // add only the used udfs to the program
     let mut udfs: HashMap<String, ProgramUdf> = HashMap::new();
     used_udfs.iter().for_each(|u| {
+        let udf = schema_provider.udf_defs.get(u).unwrap();
         udfs.insert(
             u.clone(),
             ProgramUdf {
                 name: u.clone(),
-                definition: schema_provider.udf_defs.get(u).unwrap().def.clone(),
+                definition: udf.def.clone(),
+                dependencies: udf.dependencies.clone(),
             },
         );
     });
