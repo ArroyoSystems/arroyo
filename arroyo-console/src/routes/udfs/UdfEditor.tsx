@@ -11,6 +11,7 @@ export interface UdfEditorProps {
 const UdfEditor: React.FC<UdfEditorProps> = ({ udf }) => {
   const { updateLocalUdf, isGlobal } = useContext(LocalUdfsContext);
   const [definitionToCheck, setDefinitionToCheck] = useState<string>(udf.definition);
+  const [localDefinition, setLocalDefinition] = useState<string>(udf.definition);
 
   const debounceSetCheck = useMemo(
     () =>
@@ -30,10 +31,11 @@ const UdfEditor: React.FC<UdfEditorProps> = ({ udf }) => {
 
   return (
     <CodeEditor
-      code={udf.definition}
+      code={localDefinition}
       readOnly={isGlobal(udf)}
       setCode={s => {
         updateLocalUdf(udf as LocalUdf, { definition: s });
+        setLocalDefinition(s);
         debounceSetCheck(s);
       }}
       language="rust"

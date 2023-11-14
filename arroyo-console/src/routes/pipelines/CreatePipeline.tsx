@@ -77,7 +77,7 @@ export function CreatePipeline() {
     useOperatorErrors(pipelineId, job?.id);
   const [operatorErrors, setOperatorErrors] = useState<JobLogMessage[]>([]);
   const [queryInput, setQueryInput] = useState<string>('');
-  const [queryInputToCheck, setQueryInputToCheck] = useState<string>('');
+  const [queryInputToCheck, setQueryInputToCheck] = useState<string | undefined>(undefined);
   const { operatorMetricGroups } = useJobMetrics(pipelineId, job?.id);
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [options, setOptions] = useState<SqlOptions>({ parallelism: 4, checkpointMS: 5000 });
