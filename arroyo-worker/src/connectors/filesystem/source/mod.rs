@@ -141,12 +141,8 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
             .collect();
 
         while let Some(path) = file_paths.next().await {
-            let obj_key = path
-                .map(|p| p.to_string())
-                .map_err(|err| UserError::new("could not get next path", err.to_string()))?;
-            if obj_key.ends_with('/') {
-                continue;
-            }
+            let obj_key = path.map_err(|err| UserError::new("could not get next path", err.to_string()))?.to_string();
+
             if let Some(FileReadState::Finished) = self.file_states.get(&obj_key) {
                 // already finished
                 continue;
@@ -210,7 +206,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                     .map_err(|err| {
                         UserError::new(
                             "could not create parquet record batch stream builder",
-                            err.to_string(),
+                            format!("path:{}, err:{}", path, err),
                         )
                     })?;
                 let stream = reader_builder.build().map_err(|err| {

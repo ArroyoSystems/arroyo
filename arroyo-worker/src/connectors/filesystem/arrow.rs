@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime};
 
-use arrow::datatypes::TimeUnit;
+use arrow::datatypes::{DataType, TimeUnit};
 use arrow_array::{
     types::{
         ArrowPrimitiveType, TimestampMicrosecondType, TimestampMillisecondType,
@@ -38,50 +38,67 @@ pub fn extract_native_value_from_arrow_array<T: ArrowPrimitiveType>(
 }
 
 pub fn extract_timestamp_from_arrow_array_nullable(
-    grain: TimeUnit,
     array: &ArrayRef,
     index: usize,
 ) -> Option<SystemTime> {
-    match grain {
-        TimeUnit::Second => {
-            extract_native_value_from_arrow_array_nullable::<TimestampSecondType>(array, index)
-                .map(|seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds as u64))
-        }
-        TimeUnit::Millisecond => extract_native_value_from_arrow_array_nullable::<
-            TimestampMillisecondType,
-        >(array, index)
-        .map(|milliseconds| SystemTime::UNIX_EPOCH + Duration::from_millis(milliseconds as u64)),
-        TimeUnit::Microsecond => extract_native_value_from_arrow_array_nullable::<
-            TimestampMicrosecondType,
-        >(array, index)
-        .map(|microseconds| SystemTime::UNIX_EPOCH + Duration::from_micros(microseconds as u64)),
-        TimeUnit::Nanosecond => extract_native_value_from_arrow_array_nullable::<
-            TimestampNanosecondType,
-        >(array, index)
-        .map(|nanoseconds| SystemTime::UNIX_EPOCH + Duration::from_nanos(nanoseconds as u64)),
+    match array.data_type() {
+        DataType::Timestamp(grain, None) => match grain {
+            TimeUnit::Second => {
+                extract_native_value_from_arrow_array_nullable::<TimestampSecondType>(array, index)
+                    .map(|seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds as u64))
+            }
+            TimeUnit::Millisecond => extract_native_value_from_arrow_array_nullable::<
+                TimestampMillisecondType,
+            >(array, index)
+            .map(|milliseconds| {
+                SystemTime::UNIX_EPOCH + Duration::from_millis(milliseconds as u64)
+            }),
+            TimeUnit::Microsecond => extract_native_value_from_arrow_array_nullable::<
+                TimestampMicrosecondType,
+            >(array, index)
+            .map(|microseconds| {
+                SystemTime::UNIX_EPOCH + Duration::from_micros(microseconds as u64)
+            }),
+            TimeUnit::Nanosecond => extract_native_value_from_arrow_array_nullable::<
+                TimestampNanosecondType,
+            >(array, index)
+            .map(|nanoseconds| SystemTime::UNIX_EPOCH + Duration::from_nanos(nanoseconds as u64)),
+        },
+        other => unreachable!("data type {:?} can't be converted to a SystemTime", other),
     }
 }
 
-pub fn extract_timestamp_from_arrow_array(
-    grain: TimeUnit,
-    array: &ArrayRef,
-    index: usize,
-) -> SystemTime {
-    let duration = match grain {
-        TimeUnit::Second => Duration::from_secs(extract_native_value_from_arrow_array::<
-            TimestampSecondType,
-        >(array, index) as u64),
-        TimeUnit::Millisecond => Duration::from_millis(extract_native_value_from_arrow_array::<
-            TimestampMillisecondType,
-        >(array, index) as u64),
-        TimeUnit::Microsecond => Duration::from_micros(extract_native_value_from_arrow_array::<
-            TimestampMicrosecondType,
-        >(array, index) as u64),
-        TimeUnit::Nanosecond => Duration::from_nanos(extract_native_value_from_arrow_array::<
-            TimestampNanosecondType,
-        >(array, index) as u64),
-    };
-    SystemTime::UNIX_EPOCH + duration
+pub fn extract_timestamp_from_arrow_array(array: &ArrayRef, index: usize) -> SystemTime {
+    match array.data_type() {
+        DataType::Timestamp(grain, None) => match grain {
+            TimeUnit::Second => {
+                SystemTime::UNIX_EPOCH
+                    + Duration::from_secs(
+                        extract_native_value_from_arrow_array::<TimestampSecondType>(array, index)
+                            as u64,
+                    )
+            }
+            TimeUnit::Millisecond => {
+                SystemTime::UNIX_EPOCH
+                    + Duration::from_millis(extract_native_value_from_arrow_array::<
+                        TimestampMillisecondType,
+                    >(array, index) as u64)
+            }
+            TimeUnit::Microsecond => {
+                SystemTime::UNIX_EPOCH
+                    + Duration::from_micros(extract_native_value_from_arrow_array::<
+                        TimestampMicrosecondType,
+                    >(array, index) as u64)
+            }
+            TimeUnit::Nanosecond => {
+                SystemTime::UNIX_EPOCH
+                    + Duration::from_nanos(extract_native_value_from_arrow_array::<
+                        TimestampNanosecondType,
+                    >(array, index) as u64)
+            }
+        },
+        other => unreachable!("data type {:?} can't be converted to a SystemTime", other),
+    }
 }
 
 pub fn extract_string_from_arrow_array(array: &ArrayRef, index: usize) -> String {

@@ -642,14 +642,8 @@ impl StructField {
                 DataType::Utf8 => {
                     quote!(arroyo_worker::connectors::filesystem::arrow::extract_string_from_arrow_array_nullable(&self.#field_name, index))
                 }
-                DataType::Timestamp(time_unit, None) => {
-                    let time_unit_literal = match time_unit {
-                        TimeUnit::Second => quote!(arrow::datatypes::TimeUnit::Second),
-                        TimeUnit::Millisecond => quote!(arrow::datatypes::TimeUnit::Millisecond),
-                        TimeUnit::Microsecond => quote!(arrow::datatypes::TimeUnit::Microsecond),
-                        TimeUnit::Nanosecond => quote!(arrow::datatypes::TimeUnit::Nanosecond),
-                    };
-                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_timestamp_from_arrow_array_nullable(#time_unit_literal, &self.#field_name, index))
+                DataType::Timestamp(_, None) => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_timestamp_from_arrow_array_nullable(&self.#field_name, index))
                 }
                 _ => unimplemented!("parquet_read_assigmment for {:?}", data_type),
             },
@@ -694,14 +688,8 @@ impl StructField {
                 DataType::Utf8 => {
                     quote!(arroyo_worker::connectors::filesystem::arrow::extract_string_from_arrow_array(&self.#field_name, index))
                 }
-                DataType::Timestamp(time_unit, None) => {
-                    let time_unit_literal = match time_unit {
-                        TimeUnit::Second => quote!(arrow::datatypes::TimeUnit::Second),
-                        TimeUnit::Millisecond => quote!(arrow::datatypes::TimeUnit::Millisecond),
-                        TimeUnit::Microsecond => quote!(arrow::datatypes::TimeUnit::Microsecond),
-                        TimeUnit::Nanosecond => quote!(arrow::datatypes::TimeUnit::Nanosecond),
-                    };
-                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_timestamp_from_arrow_array(#time_unit_literal, &self.#field_name, index))
+                DataType::Timestamp(_, None) => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_timestamp_from_arrow_array(&self.#field_name, index))
                 }
                 _ => unimplemented!("parquet_read_assigmment for {:?}", data_type),
             },
