@@ -155,9 +155,31 @@ impl ConnectorTable {
     fn from_options(
         name: &str,
         connector: &str,
-        fields: Vec<FieldSpec>,
+        mut fields: Vec<FieldSpec>,
         options: &mut HashMap<String, String>,
     ) -> Result<Self> {
+        // TODO: a more principled way of letting connectors dictate types to use
+        if "delta" == connector {
+            fields = fields
+                .into_iter()
+                .map(|field_spec| match &field_spec {
+                    FieldSpec::StructField(struct_field) => match struct_field.data_type {
+                        TypeDef::DataType(DataType::Timestamp(_, None), nullable) => {
+                            let mut coerced = struct_field.clone();
+                            coerced.data_type = TypeDef::DataType(
+                                DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
+                                nullable,
+                            );
+                            FieldSpec::StructField(coerced)
+                        }
+                        _ => field_spec,
+                    },
+                    FieldSpec::VirtualField { .. } => {
+                        unreachable!("delta lake is only a sink, can't have virtual fields")
+                    }
+                })
+                .collect();
+        }
         let connector = connector_for_type(connector)
             .ok_or_else(|| anyhow!("Unknown connector '{}'", connector))?;
 
