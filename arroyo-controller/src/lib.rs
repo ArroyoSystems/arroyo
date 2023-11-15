@@ -2,7 +2,6 @@
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 
-use anyhow::bail;
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -18,13 +17,13 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::log_event;
+use arroyo_sql::{parse_dependencies, ArroyoSchemaProvider};
 use arroyo_types::{
     from_micros, ports, DatabaseConfig, NodeId, WorkerId, REMOTE_COMPILER_ENDPOINT_ENV,
 };
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
-use regex::Regex;
 use serde_json::json;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
@@ -32,7 +31,6 @@ use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use syn::{parse_file, Item};
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::error::TrySendError;
@@ -459,45 +457,10 @@ impl ControllerGrpc for ControllerServer {
             }
         };
 
-        let mut function_name = None;
-        {
-            let result = match parse_file(definition.as_str()) {
-                Ok(result) => result,
-                Err(e) => {
-                    return Ok(udf_error_resp(e));
-                }
-            };
-
-            for item in result.items {
-                match item {
-                    Item::Fn(f) => {
-                        if function_name.is_some() {
-                            return Ok(Response::new(CheckUdfsResp {
-                                errors: vec!["Only one function is allowed in UDFs".to_string()],
-                                udf_name: None,
-                            }));
-                        }
-                        function_name = Some(f.sig.ident.to_string());
-                    }
-                    Item::Use(_) => {}
-                    _ => {
-                        return Ok(Response::new(CheckUdfsResp {
-                            errors: vec![
-                                "Only functions and use statements are allowed in UDFs".to_string()
-                            ],
-                            udf_name: None,
-                        }))
-                    }
-                }
-            }
-        }
-
-        // unwrap function or return error
-        let Some(function_name) = function_name else {
-            return Ok(Response::new(CheckUdfsResp {
-                errors: vec!["No function found in UDF".to_string()],
-                udf_name: None,
-            }));
+        // use the ArroyoSchemaProvider to do some validation and to get the function name
+        let function_name = match ArroyoSchemaProvider::new().add_rust_udf(&definition) {
+            Ok(function_name) => function_name,
+            Err(e) => return Ok(udf_error_resp(e)),
         };
 
         // build cargo.toml
@@ -744,83 +707,4 @@ where
         errors: vec![e.to_string()],
         udf_name: None,
     })
-}
-
-fn parse_dependencies(definition: &str) -> anyhow::Result<String> {
-    // get content of dependencies comment using regex
-    let re = Regex::new(r"\/\*\n(\[dependencies\]\n[\s\S]*?)\*\/").unwrap();
-    if re.find_iter(&definition).count() > 1 {
-        bail!("Only one dependencies definition is allowed in a UDF");
-    }
-
-    return if let Some(captures) = re.captures(&definition) {
-        if captures.len() != 2 {
-            bail!("Error parsing dependencies");
-        }
-        Ok(captures.get(1).unwrap().as_str().to_string())
-    } else {
-        Ok("[dependencies]\n# none defined\n".to_string())
-    };
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_dependencies_valid() {
-        let definition = r#"
-/*
-[dependencies]
-serde = "1.0"
-*/
-
-pub fn my_udf() -> i64 {
-    1
-}
-        "#;
-
-        assert_eq!(
-            parse_dependencies(definition).unwrap(),
-            r#"[dependencies]
-serde = "1.0"
-"#
-        );
-    }
-
-    #[test]
-    fn test_parse_dependencies_none() {
-        let definition = r#"
-pub fn my_udf() -> i64 {
-    1
-}
-        "#;
-
-        assert_eq!(
-            parse_dependencies(definition).unwrap(),
-            r#"[dependencies]
-# none defined
-"#
-        );
-    }
-
-    #[test]
-    fn test_parse_dependencies_multiple() {
-        let definition = r#"
-/*
-[dependencies]
-serde = "1.0"
-*/
-
-/*
-[dependencies]
-serde = "1.0"
-*/
-
-pub fn my_udf() -> i64 {
-    1
-
-        "#;
-        assert!(parse_dependencies(definition).is_err());
-    }
 }

@@ -195,7 +195,7 @@ async fn commit_to_delta(table: deltalake::DeltaTable, add_actions: Vec<Action>)
 fn build_table_path(storage_provider: &StorageProvider, relative_table_path: &Path) -> String {
     format!(
         "{}/{}",
-        storage_provider.canonical_url(),
+        storage_provider.object_store_base_url(),
         relative_table_path
     )
 }

@@ -129,7 +129,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
 
         // TODO: sort by creation time
         let mut file_paths = storage_provider
-            .list_as_stream::<String>(None)
+            .list_as_stream()
             .await
             .map_err(|err| UserError::new("could not list files", err.to_string()))?;
         let mut state: GlobalKeyedState<String, (String, FileReadState), _> =

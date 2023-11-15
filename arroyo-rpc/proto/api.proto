@@ -37,6 +37,7 @@ message CreateJobReq {
 message PipelineProgramUdf {
   string name = 1;
   string definition = 2;
+  string dependencies = 3;
 }
 
 message PipelineProgram {

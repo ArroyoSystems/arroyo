@@ -25,6 +25,9 @@ pub struct StorageProvider {
     config: BackendConfig,
     object_store: Arc<dyn ObjectStore>,
     canonical_url: String,
+    // A URL that object_store can parse.
+    // May require storage_options to properly instantiate
+    object_store_base_url: String,
     storage_options: HashMap<String, String>,
 }
 
@@ -256,11 +259,11 @@ impl BackendConfig {
         }))
     }
 
-    fn key(&self) -> Option<String> {
+    fn key(&self) -> Option<&String> {
         match self {
-            BackendConfig::S3(s3_config) => s3_config.key.clone(),
-            BackendConfig::GCS(gcs_config) => gcs_config.key.clone(),
-            BackendConfig::Local(local_config) => local_config.key.clone(),
+            BackendConfig::S3(s3) => s3.key.as_ref(),
+            BackendConfig::GCS(gcs) => gcs.key.as_ref(),
+            BackendConfig::Local(local) => local.key.as_ref(),
         }
     }
 }
@@ -308,14 +311,7 @@ impl StorageProvider {
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }?;
 
-        let path = match &provider.config {
-            BackendConfig::S3(s3) => s3.key.as_ref(),
-            BackendConfig::GCS(gcs) => gcs.key.as_ref(),
-            BackendConfig::Local(local) => local.key.as_ref(),
-        }
-        .ok_or_else(|| StorageError::NoKeyInUrl)?;
-
-        let result = provider.get(path).await;
+        let result = provider.get("").await;
 
         result
     }
@@ -377,13 +373,26 @@ impl StorageProvider {
                 "true".to_string(),
             );
         }
-
-        let canonical_url = format!("s3://{}", config.bucket);
-
+        let mut canonical_url = match (&config.region, &config.endpoint) {
+            (_, Some(endpoint)) => {
+                format!("s3::{}/{}", endpoint, config.bucket)
+            }
+            (Some(region), _) => {
+                format!("https://s3.{}.amazonaws.com/{}", region, config.bucket)
+            }
+            _ => {
+                format!("https://s3.amazonaws.com/{}", config.bucket)
+            }
+        };
+        if let Some(key) = &config.key {
+            canonical_url = format!("{}/{}", canonical_url, key);
+        }
+        let object_store_base_url = format!("s3://{}", config.bucket);
         Ok(Self {
             config: BackendConfig::S3(config),
             object_store: Arc::new(builder.build().map_err(|e| Into::<StorageError>::into(e))?),
             canonical_url,
+            object_store_base_url,
             storage_options: s3_options
                 .into_iter()
                 .map(|(k, v)| (k.as_ref().to_string(), v))
@@ -396,11 +405,17 @@ impl StorageProvider {
             .with_bucket_name(&config.bucket)
             .build()?;
 
-        let canonical_url = format!("https://{}.storage.googleapis.com", config.bucket);
+        let mut canonical_url = format!("https://{}.storage.googleapis.com", config.bucket);
+        if let Some(key) = &config.key {
+            canonical_url = format!("{}/{}", canonical_url, key);
+        }
+
+        let object_store_base_url = format!("https://{}.storage.googleapis.com", config.bucket);
 
         Ok(Self {
             config: BackendConfig::GCS(config),
             object_store: Arc::new(gcs),
+            object_store_base_url,
             canonical_url,
             storage_options: HashMap::new(),
         })
@@ -420,10 +435,12 @@ impl StorageProvider {
         );
 
         let canonical_url = format!("file://{}", config.path);
+        let object_store_base_url = canonical_url.clone();
         Ok(Self {
             config: BackendConfig::Local(config),
             object_store,
             canonical_url,
+            object_store_base_url,
             storage_options: HashMap::new(),
         })
     }
@@ -445,14 +462,13 @@ impl StorageProvider {
             .map_err(|e| Into::<StorageError>::into(e))
     }
 
-    pub async fn list_as_stream<P: Into<Path>>(
+    pub async fn list_as_stream(
         &self,
-        path: Option<P>,
     ) -> Result<impl Stream<Item = Result<Path, object_store::Error>> + '_, StorageError> {
-        let key_path = self.config.key().map(|key| key.into());
+        let key_path = self.config.key().map(|key| key.to_string().into());
         let list = self
             .object_store
-            .list(path.map(|p| p.into()).or(key_path).as_ref())
+            .list(key_path.as_ref())
             .await
             .map_err(|e| Into::<StorageError>::into(e))?
             .map(|meta| meta.map(|x| x.location));
@@ -464,7 +480,7 @@ impl StorageProvider {
         let path: String = path.into();
         let bytes = self
             .object_store
-            .get(&path.into())
+            .get(&self.qualify_path(&path.into()))
             .await
             .map_err(|e| Into::<StorageError>::into(e))?
             .bytes()
@@ -493,10 +509,22 @@ impl StorageProvider {
         path: P,
         bytes: Vec<u8>,
     ) -> Result<String, StorageError> {
-        let path: Path = path.into().into();
-        self.object_store.put(&path, bytes.into()).await?;
+        let path = path.into().into();
+        self.object_store
+            .put(&self.qualify_path(&path), bytes.into())
+            .await?;
 
         Ok(format!("{}/{}", self.canonical_url, path))
+    }
+
+    fn qualify_path(&self, path: &Path) -> Path {
+        match self.config.key() {
+            Some(prefix) => {
+                let prefix_path: Path = prefix.to_string().into();
+                prefix_path.parts().chain(path.parts()).collect()
+            }
+            None => path.clone(),
+        }
     }
 
     pub async fn delete_if_present<P: Into<String>>(&self, path: P) -> Result<(), StorageError> {
@@ -553,6 +581,14 @@ impl StorageProvider {
     pub fn canonical_url(&self) -> &str {
         &self.canonical_url
     }
+
+    // Returns a url that will, combined with storage_options, parse to
+    // the same ObjectStore as self.object_store.
+    // Needed for systems that build their own ObjectStore, such as delta-rs
+    pub fn object_store_base_url(&self) -> &str {
+        &self.object_store_base_url
+    }
+
     pub fn storage_options(&self) -> &HashMap<String, String> {
         &self.storage_options
     }
