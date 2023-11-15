@@ -2740,9 +2740,9 @@ dependencies = [
 
 [[package]]
 name = "deltalake"
-version = "0.16.3"
+version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acf47a902e00dcc8af977c60319592d45040d56544e781afd440996d6c205f49"
+checksum = "7c06b048b0e20788c6f1e9f48a5b469bcb0d225c21fde8394de7081a3f866d23"
 dependencies = [
  "arrow",
  "arrow-array",
@@ -2977,9 +2977,9 @@ checksum = "bbfc4744c1b8f2a09adc0e55242f60b1af195d88596bd8700be74418c056c555"
 
 [[package]]
 name = "dynamodb_lock"
-version = "0.4.3"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fff628406c318f098017c78e203b5b6466e0610fc48be865ebb9ae0eb229b4c8"
+checksum = "9c4242838952a07117a4444cdf59fdcb47f181525f2dd6ae4ca6281954d09c77"
 dependencies = [
  "async-trait",
  "log",
