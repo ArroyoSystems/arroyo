@@ -129,7 +129,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
 
         // TODO: sort by creation time
         let mut file_paths = storage_provider
-            .list_as_stream()
+            .list(false)
             .await
             .map_err(|err| UserError::new("could not list files", err.to_string()))?;
         let mut state: GlobalKeyedState<String, (String, FileReadState), _> =
@@ -141,7 +141,9 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
             .collect();
 
         while let Some(path) = file_paths.next().await {
-            let obj_key = path.map_err(|err| UserError::new("could not get next path", err.to_string()))?.to_string();
+            let obj_key = path
+                .map_err(|err| UserError::new("could not get next path", err.to_string()))?
+                .to_string();
 
             if let Some(FileReadState::Finished) = self.file_states.get(&obj_key) {
                 // already finished

@@ -1,3 +1,4 @@
+use std::future::ready;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::{
@@ -445,33 +446,37 @@ impl StorageProvider {
         })
     }
 
-    pub async fn list<P: Into<String>>(&self, path: P) -> Result<Vec<Path>, StorageError> {
-        let path: String = path.into();
-
-        let list = self
-            .object_store
-            .list(Some(&path.into()))
-            .await
-            .map_err(|e| Into::<StorageError>::into(e))?;
-
-        list.map(|meta| meta.map(|x| x.location))
-            .collect::<Vec<Result<Path, object_store::Error>>>()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<Path>, object_store::Error>>()
-            .map_err(|e| Into::<StorageError>::into(e))
-    }
-
-    pub async fn list_as_stream(
+    pub async fn list(
         &self,
+        include_subdirectories: bool,
     ) -> Result<impl Stream<Item = Result<Path, object_store::Error>> + '_, StorageError> {
-        let key_path = self.config.key().map(|key| key.to_string().into());
+        let key_path: Option<Path> = self.config.key().map(|key| key.to_string().into());
+        let key_part_count = key_path
+            .as_ref()
+            .map(|key| key.parts().count())
+            .unwrap_or_default();
         let list = self
             .object_store
             .list(key_path.as_ref())
             .await
             .map_err(|e| Into::<StorageError>::into(e))?
-            .map(|meta| meta.map(|x| x.location));
+            .filter_map(move |meta| {
+                let result = {
+                    match meta {
+                        Ok(metadata) => {
+                            let path = metadata.location;
+                            if !include_subdirectories && path.parts().count() != key_part_count + 1
+                            {
+                                None
+                            } else {
+                                Some(Ok(path))
+                            }
+                        }
+                        Err(err) => Some(Err(err)),
+                    }
+                };
+                ready(result)
+            });
 
         Ok(list)
     }
