@@ -471,3 +471,13 @@ INSERT INTO non_updating_sink
 select distinct(bid.url)
 from nexmark;
 "}
+
+full_pipeline_codegen! {
+  "kafka_json_schemas",
+  "SELECT * FROM kafka_json_schema"
+}
+
+full_pipeline_codegen! {
+  "kafka_avro_source",
+  "SELECT * FROM kafka_avro_schema"
+}
