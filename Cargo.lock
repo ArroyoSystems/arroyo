@@ -755,8 +755,11 @@ dependencies = [
 name = "arroyo-sql-macro"
 version = "0.7.0"
 dependencies = [
+ "anyhow",
+ "apache-avro",
  "arroyo-connectors",
  "arroyo-datastream",
+ "arroyo-rpc",
  "arroyo-sql",
  "proc-macro2",
  "quote",

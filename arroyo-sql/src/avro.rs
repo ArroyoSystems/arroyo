@@ -39,7 +39,7 @@ pub fn get_defs(name: &str, schema: &str) -> anyhow::Result<String> {
     let mod_ident: Ident = syn::parse_str(name).unwrap();
     Ok(quote! {
         mod #mod_ident {
-            use crate::*;
+            use super::*;
             #(#defs)
             *
         }

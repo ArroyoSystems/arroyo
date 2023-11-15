@@ -4,6 +4,7 @@ version = "0.7.0"
 edition = "2021"
 
 [features]
+default = ["integration-tests"]
 integration-tests = []
 
 
