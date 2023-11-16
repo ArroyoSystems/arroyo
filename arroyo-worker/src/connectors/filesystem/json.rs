@@ -58,7 +58,7 @@ impl<D: Data + Serialize> BatchBufferingWriter for JsonWriter<D> {
                     ..
                 }),
             ..
-        } = config.type_
+        } = config.table_type
         {
             target_part_size as usize
         } else {

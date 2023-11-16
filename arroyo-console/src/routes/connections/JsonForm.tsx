@@ -12,6 +12,7 @@ import {
   Input,
   Select,
   Stack,
+  Text,
   Textarea,
 } from '@chakra-ui/react';
 import { JSONSchema7 } from 'json-schema';
@@ -21,6 +22,7 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import React, { useEffect, useMemo } from 'react';
 import { AddIcon, DeleteIcon } from '@chakra-ui/icons';
+import Markdown from 'react-markdown';
 
 function StringWidget({
   path,
@@ -69,7 +71,11 @@ function StringWidget({
       {errors[path] ? (
         <FormErrorMessage>{errors[path]}</FormErrorMessage>
       ) : (
-        description && <FormHelperText>{description}</FormHelperText>
+        description && (
+          <FormHelperText>
+            <Markdown>{description}</Markdown>
+          </FormHelperText>
+        )
       )}
     </FormControl>
   );
@@ -116,7 +122,11 @@ function NumberWidget({
       {errors[path] ? (
         <FormErrorMessage>{errors[path]}</FormErrorMessage>
       ) : (
-        description && <FormHelperText>{description}</FormHelperText>
+        description && (
+          <FormHelperText>
+            <Markdown>{description}</Markdown>
+          </FormHelperText>
+        )
       )}
     </FormControl>
   );
@@ -158,7 +168,11 @@ function SelectWidget({
           </option>
         ))}
       </Select>
-      {description && <FormHelperText>{description}</FormHelperText>}
+      {description && (
+        <FormHelperText>
+          <Markdown>{description}</Markdown>
+        </FormHelperText>
+      )}
     </FormControl>
   );
 }
@@ -251,6 +265,142 @@ export function ArrayWidget({
                 />
               </Flex>
             ))}
+            <IconButton mt={1} height={8} aria-label="Add item" onClick={add} icon={<AddIcon />} />
+          </Stack>
+        </FormControl>
+      </fieldset>
+    </Box>
+  );
+}
+
+export function MapWidget({
+  schema,
+  onChange,
+  path,
+  values,
+  errors,
+}: {
+  schema: JSONSchema7;
+  onChange: (e: React.ChangeEvent<any>) => void;
+  path: string;
+  values: any;
+  errors: any;
+}) {
+  interface KeyValuePair {
+    key: string;
+    value: any;
+    error: string | undefined;
+  }
+
+  const initial = values ? Object.entries(values).map(([key, value]) => ({ key, value })) : [];
+  // @ts-ignore
+  const [keyValues, setKeyValues] = React.useState<KeyValuePair[]>(initial);
+
+  const itemsSchema = schema.additionalProperties as JSONSchema7;
+
+  if (itemsSchema.type != 'string') {
+    console.warn('Unsupported map item type', itemsSchema.type);
+    return <></>;
+  }
+
+  const saveKeyValues = (keyValuePairs: KeyValuePair[]) => {
+    let newValues = {};
+    keyValuePairs.forEach(pair => {
+      if (pair.key) {
+        pair.error = undefined;
+        if (pair.key in newValues) {
+          pair.error = 'Must have unique key';
+          setKeyValues(keyValuePairs);
+        } else {
+          // @ts-ignore
+          newValues[pair.key] = pair.value;
+        }
+      }
+    });
+    // @ts-ignore
+    onChange({ target: { name: path, value: newValues } });
+  };
+
+  const deleteItem = (index: number) => {
+    const newKeyValues = keyValues.filter((pair, i) => i != index);
+    setKeyValues(newKeyValues);
+    saveKeyValues(newKeyValues);
+  };
+
+  const add = () => {
+    const newPair: KeyValuePair = { key: '', value: '', error: undefined };
+    const newKeyValues = [...keyValues, newPair];
+    setKeyValues(newKeyValues);
+    saveKeyValues(newKeyValues);
+  };
+
+  const updateKeyValue = (i: number, key: string, value: string, error?: string) => {
+    const newKeyValues = keyValues.map((pair, index) => {
+      if (index == i) {
+        return { key, value, error };
+      } else {
+        return pair;
+      }
+    });
+    setKeyValues(newKeyValues);
+    saveKeyValues(newKeyValues);
+  };
+
+  const mapItem = (pair: KeyValuePair, i: number) => {
+    return (
+      <FormControl isRequired={true} isInvalid={pair.error != undefined}>
+        <Flex gap={2} alignItems={'flex-end'}>
+          <Flex gap={2} flex={1} alignItems={'center'} key={i}>
+            <Input
+              id={i + '_key'}
+              value={pair.key}
+              onChange={e => updateKeyValue(i, e.target.value, pair.value)}
+            />
+            <Text>→</Text>
+            <Input
+              id={i + '_value'}
+              value={pair.value}
+              onChange={e => updateKeyValue(i, pair.key, e.target.value)}
+            />
+          </Flex>
+          <IconButton
+            width={8}
+            height={8}
+            minWidth={0}
+            aria-label="Delete item"
+            onClick={() => deleteItem(i)}
+            icon={<DeleteIcon width={3} />}
+          />
+        </Flex>
+        <FormErrorMessage>{pair.error}</FormErrorMessage>
+      </FormControl>
+    );
+  };
+
+  return (
+    <Box>
+      <fieldset key={schema.title} style={{ border: '1px solid #888', borderRadius: '8px' }}>
+        <legend
+          style={{
+            marginLeft: '8px',
+            paddingLeft: '16px',
+            paddingRight: '16px',
+          }}
+        >
+          {schema.title}
+        </legend>
+        <FormControl isInvalid={errors[path]}>
+          <Stack p={4} gap={2}>
+            {errors[path] ? (
+              <FormErrorMessage>{errors[path]}</FormErrorMessage>
+            ) : (
+              schema.description && (
+                <FormHelperText mt={0} pb={2}>
+                  <Markdown>{schema.description}</Markdown>
+                </FormHelperText>
+              )
+            )}
+            {keyValues.map((pair, index) => mapItem(pair, index))}
             <IconButton mt={1} height={8} aria-label="Add item" onClick={add} icon={<AddIcon />} />
           </Stack>
         </FormControl>
@@ -430,7 +580,7 @@ export function FormInner({
                       </legend>
                       <Box p={4}>
                         <FormInner
-                          path={key}
+                          path={nextPath}
                           // @ts-ignore
                           schema={property}
                           errors={errors}
@@ -440,6 +590,22 @@ export function FormInner({
                       </Box>
                     </fieldset>
                   );
+                } else if (property.additionalProperties) {
+                  return (
+                    <Box>
+                      <MapWidget
+                        path={nextPath}
+                        key={key}
+                        schema={property}
+                        values={traversePath(values, nextPath)}
+                        errors={errors}
+                        onChange={onChange}
+                      />
+                    </Box>
+                  );
+                } else {
+                  console.warn('Unsupported property', property);
+                  return <></>;
                 }
               }
               default: {

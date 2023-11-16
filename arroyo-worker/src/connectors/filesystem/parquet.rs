@@ -31,7 +31,7 @@ fn writer_properties_from_table(table: &FileSystemTable) -> WriterProperties {
                 row_group_size,
             }),
         ..
-    } = table.type_
+    } = table.table_type
     {
         if let Some(compression) = compression {
             let compression = match compression {
@@ -101,7 +101,7 @@ impl<B: RecordBatchBuilder> BatchBuilder for FixedSizeRecordBatchBuilder<B> {
                     row_group_size: _,
                 }),
             ..
-        } = config.type_
+        } = config.table_type
         {
             batch_size as usize
         } else {
@@ -153,7 +153,7 @@ impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<
                     ..
                 }),
             ..
-        } = config.type_
+        } = config.table_type
         {
             target_part_size as usize
         } else {

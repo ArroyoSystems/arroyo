@@ -68,7 +68,7 @@ impl Connector for FileSystemConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
-        match table.type_ {
+        match table.table_type {
             TableType::Source { .. } => ConnectionType::Source,
             TableType::Sink { .. } => ConnectionType::Sink,
         }
@@ -82,15 +82,15 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let (description, operator, connection_type) = match table.type_ {
+        let (description, operator, connection_type) = match table.table_type {
             TableType::Source { .. } => (
                 "FileSystem".to_string(),
                 "connectors::filesystem::source::FileSystemSourceFunc",
                 ConnectionType::Source,
             ),
             TableType::Sink {
+                ref write_path,
                 ref format_settings,
-                ref write_target,
                 ref file_settings,
                 ..
             } => {
@@ -103,7 +103,7 @@ impl Connector for FileSystemConnector {
                     bail!("commit_style must be Direct");
                 };
 
-                let backend_config = BackendConfig::parse_url(&write_target.path, true)?;
+                let backend_config = BackendConfig::parse_url(&write_path, true)?;
                 let is_local = match &backend_config {
                     BackendConfig::Local { .. } => true,
                     _ => false,
@@ -117,11 +117,11 @@ impl Connector for FileSystemConnector {
                         "FileSystem<Parquet>".to_string(),
                         "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
                     ),
-                    (Some(FormatSettings::Json {  }), true) => (
+                    (Some(FormatSettings::Json {  ..}), true) => (
                         "LocalFileSystem<JSON>".to_string(),
                         "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>"
                     ),
-                    (Some(FormatSettings::Json {  }), false) => (
+                    (Some(FormatSettings::Json {..  }), false) => (
                         "FileSystem<JSON>".to_string(),
                         "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"
                     ),
@@ -180,11 +180,9 @@ impl Connector for FileSystemConnector {
                     name,
                     EmptyConfig {},
                     FileSystemTable {
-                        type_: TableType::Source {
-                            read_source: Source {
-                                path: storage_url,
-                                storage_options,
-                            },
+                        table_type: TableType::Source {
+                            path: storage_url,
+                            storage_options,
                             compression_format: Some(compression_format),
                             regex_pattern: matching_pattern,
                         },
@@ -255,8 +253,8 @@ pub fn file_system_sink_from_options(
         None
     };
 
-    let filenaming = if prefix.is_some() || suffix.is_some() || strategy.is_some() {
-        Some(Filenaming {
+    let file_naming = if prefix.is_some() || suffix.is_some() || strategy.is_some() {
+        Some(FileNaming {
             prefix,
             suffix,
             strategy,
@@ -273,7 +271,7 @@ pub fn file_system_sink_from_options(
         target_part_size,
         partitioning,
         commit_style: Some(commit_style),
-        filenaming,
+        file_naming,
     });
 
     let format_settings = match schema
@@ -300,17 +298,17 @@ pub fn file_system_sink_from_options(
                 row_group_size,
             })
         }
-        Format::Json(..) => Some(FormatSettings::Json {}),
+        Format::Json(..) => Some(FormatSettings::Json {
+            json_format: JsonFormat::Json,
+        }),
         other => bail!("Unsupported format: {:?}", other),
     };
     Ok(FileSystemTable {
-        type_: TableType::Sink {
+        table_type: TableType::Sink {
             file_settings,
             format_settings,
-            write_target: FolderUrl {
-                path: storage_url,
-                storage_options,
-            },
+            write_path: storage_url,
+            storage_options,
         },
     })
 }
