@@ -76,9 +76,10 @@ impl Connector for DeltaLakeConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
         let TableType::Sink {
+            path,
             file_settings,
             format_settings,
-            write_target,
+            ..
         } = &table.type_
         else {
             bail!("Delta Lake connector only supports sink tables");
@@ -94,7 +95,7 @@ impl Connector for DeltaLakeConnector {
             bail!("commit_style must be DeltaLake");
         }
 
-        let backend_config = BackendConfig::parse_url(&write_target.path, true)?;
+        let backend_config = BackendConfig::parse_url(&path, true)?;
         let is_local = match &backend_config {
             BackendConfig::Local { .. } => true,
             _ => false,

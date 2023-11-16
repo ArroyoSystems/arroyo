@@ -77,9 +77,7 @@ impl<K: Key, T: Data + Sync + SchemaData + Serialize, V: LocalWriter<T>>
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
         let final_dir = match table.type_ {
-            TableType::Sink {
-                ref write_target, ..
-            } => write_target.path.clone(),
+            TableType::Sink { ref path, .. } => path.clone(),
             TableType::Source { .. } => {
                 unreachable!("shouldn't be using local writer for source");
             }
@@ -97,9 +95,10 @@ impl<
 {
     pub fn create_and_start(table: FileSystemTable) -> TwoPhaseCommitterOperator<K, T, Self> {
         let TableType::Sink {
-            write_target,
+            path,
             file_settings,
             format_settings: _,
+            storage_options,
         } = table.clone().type_
         else {
             unreachable!("multi-part writer can only be used as sink");
@@ -112,15 +111,12 @@ impl<
         };
         let partition_func = get_partitioner_from_file_settings(file_settings.unwrap());
         tokio::spawn(async move {
-            let path: Path = StorageProvider::get_key(&write_target.path).unwrap().into();
-            let provider = StorageProvider::for_url_with_options(
-                &write_target.path,
-                write_target.storage_options.clone(),
-            )
-            .await
-            .unwrap();
+            let storage_path: Path = StorageProvider::get_key(&path).unwrap().into();
+            let provider = StorageProvider::for_url_with_options(&path, storage_options.clone())
+                .await
+                .unwrap();
             let mut writer = AsyncMultipartFileSystemWriter::<T, R>::new(
-                path,
+                storage_path,
                 Arc::new(provider),
                 receiver,
                 checkpoint_sender,
@@ -371,7 +367,7 @@ struct AsyncMultipartFileSystemWriter<T: Data + SchemaData + Sync, R: MultiPartW
     properties: FileSystemTable,
     rolling_policy: RollingPolicy,
     commit_state: CommitState,
-    filenaming: Filenaming,
+    file_naming: FileNaming,
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
@@ -657,16 +653,16 @@ where
             CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
-        let mut filenaming = file_settings
-            .filenaming
+        let mut file_naming = file_settings
+            .file_naming
             .clone()
-            .unwrap_or_else(|| Filenaming {
+            .unwrap_or_else(|| FileNaming {
                 strategy: Some(FilenameStrategy::Serial),
                 prefix: None,
                 suffix: None,
             });
-        if filenaming.suffix.is_none() {
-            filenaming.suffix = Some(R::suffix());
+        if file_naming.suffix.is_none() {
+            file_naming.suffix = Some(R::suffix());
         }
 
         Self {
@@ -684,7 +680,7 @@ where
             rolling_policy: RollingPolicy::from_file_settings(file_settings),
             properties: writer_properties,
             commit_state,
-            filenaming,
+            file_naming,
         }
     }
 
@@ -785,7 +781,7 @@ where
     }
 
     fn new_writer(&mut self, partition: &Option<String>) -> R {
-        let filename_strategy = match self.filenaming.strategy {
+        let filename_strategy = match self.file_naming.strategy {
             Some(FilenameStrategy::Uuid) => FilenameStrategy::Uuid,
             Some(FilenameStrategy::Serial) => FilenameStrategy::Serial,
             None => FilenameStrategy::Serial,
@@ -801,8 +797,8 @@ where
         };
         let filename = add_suffix_prefix(
             filename_base,
-            self.filenaming.prefix.as_ref(),
-            self.filenaming.suffix.as_ref().unwrap(),
+            self.file_naming.prefix.as_ref(),
+            self.file_naming.suffix.as_ref().unwrap(),
         );
 
         let path = match partition {

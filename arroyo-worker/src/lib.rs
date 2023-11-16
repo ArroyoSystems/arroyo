@@ -7,7 +7,7 @@ use crate::network_manager::NetworkManager;
 use anyhow::{bail, Result};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow_array::cast::AsArray;
-use arrow_array::{Array, RecordBatch, StringArray};
+use arrow_array::{RecordBatch, StringArray};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{

@@ -10,76 +10,57 @@
           "type": "object",
           "title": "Source",
           "properties": {
-            "read_source": {
-              "type": "object",
-              "title": "Source",
-              "properties": {
-                "Path": {
-                  "title": "Path",
-                  "type": "string",
-                  "description": "URI of the folder to write to"
-                },
-                "Storage options": {
-                  "type": "object",
-                  "title": "Storage Options",
-                  "additionalProperties": {
-                    "type": "string"
-                  }
-                }
-              },
-              "required": [
-                "Path"
-              ],
-              "additionalProperties": false
+            "path": {
+              "title": "Path",
+              "type": "string",
+              "description": "URI of the folder to write to"
             },
-
-            "compression_format": {
-                "title": "Compression format",
-                "type": "string",
-                "description": "Compression format of the files in S3",
-                "enum": [
-                  "none",
-                  "zstd",
-                  "gzip"
-                  ]     
-              },
-            "regexPattern" : {
+            "compressionFormat": {
+              "title": "Compression format",
+              "type": "string",
+              "description": "Compression format of the files in S3",
+              "enum": [
+                "none",
+                "zstd",
+                "gzip"
+              ]
+            },
+            "regexPattern": {
               "title": "File Regex Pattern",
               "type": "string",
-              "description": "regex matching pattern for files to include in source. Will search everything under the source path."
-              }
+              "description": "Regex matching pattern for files to include in source. Will search everything under the source path."
             },
+            "storageOptions": {
+              "type": "object",
+              "title": "Storage Options",
+              "description": "See the [FileSystem connector docs](https://doc.arroyo.dev/connectors/filesystem) for the full list of options",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
           "required": [
-            "read_source"
+            "path"
           ]
         },
         {
           "type": "object",
           "title": "Sink",
           "properties": {
-            "write_target": {
-              "type": "object",
-              "title": "Folder URL",
-              "properties": {
-                "Path": {
-                  "title": "Path",
-                  "type": "string",
-                  "description": "URI of the folder to write to"
-                },
-                "Storage options": {
-                  "type": "object",
-                  "title": "Storage Options",
-                  "additionalProperties": {
-                    "type": "string"
-                  }
-                }
-              },
-              "required": [
-                "Path"
-              ],
-              "additionalProperties": false
+            "path": {
+              "title": "Path",
+              "type": "string",
+              "description": "URI of the folder to write to"
             },
-            "format_settings": {
+            "storageOptions": {
+              "type": "object",
+              "title": "Storage Options",
+              "description": "See the [FileSystem connector docs](https://doc.arroyo.dev/connectors/filesystem) for the full list of options",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "formatSettings": {
               "type": "object",
               "title": "Format Settings",
               "oneOf": [
@@ -98,11 +79,11 @@
                         "lz4"
                       ]
                     },
-                    "row_batch_size": {
+                    "rowBatchSize": {
                       "title": "Row Batch Size",
                       "type": "integer"
                     },
-                    "row_group_size": {
+                    "rowGroupSize": {
                       "title": "Row Group Size",
                       "type": "integer"
                     }
@@ -116,93 +97,94 @@
                 }
               ]
             },
-            "file_settings": {
+            "fileSettings": {
               "type": "object",
               "title": "File Settings",
               "properties": {
-                "target_part_size": {
+                "targetPartSize": {
                   "title": "Target Part Size",
                   "type": "integer",
-                  "description": "target size for each part of the multipart upload, in bytes"
+                  "description": "Target size for each part of the multipart upload, in bytes"
                 },
-                "max_parts": {
+                "maxParts": {
                   "title": "Max Parts",
                   "type": "integer",
-                  "description": "maximum number of parts to upload in a multipart upload"
+                  "description": "Maximum number of parts to upload in a multipart upload"
                 },
-                "target_file_size": {
+                "targetFileSize": {
                   "title": "Target File Size",
                   "type": "integer",
-                  "description": "target size for each file, in bytes"
+                  "description": "Target size for each file, in bytes"
                 },
-                "rollover_seconds": {
+                "rolloverSeconds": {
                   "title": "Rollover Seconds",
                   "type": "integer",
-                  "description": "number of seconds to wait before rolling over to a new file"
+                  "description": "Number of seconds to wait before rolling over to a new file"
                 },
-                "inactivity_rollover_seconds": {
+                "inactivityRolloverSeconds": {
                   "title": "Inactivity Rollover Seconds",
                   "type": "integer",
-                  "description": "number of seconds of inactivity to wait before rolling over to a new file"
+                  "description": "Number of seconds of inactivity to wait before rolling over to a new file"
                 },
                 "partitioning": {
                   "title": "Partitioning",
                   "type": "object",
                   "properties": {
-                    "time_partition_pattern": {
+                    "timePartitionPattern": {
                       "title": "Time Partition Pattern",
                       "type": "string",
                       "description": "The pattern of the date string"
                     },
-                    "partition_fields": {
+                    "partitionFields": {
                       "title": "Partition Fields",
                       "type": "array",
                       "items": {
+                        "title": "Partition Field",
                         "type": "string"
                       },
-                      "description": "fields to partition the data by"
+                      "description": "Fields to partition the data by"
                     }
                   },
                   "additionalProperties": false
                 },
-                "commit_style": {
-                    "title": "Commit Style",
-                    "type": "string",
-                    "enum": [
-                        "direct",
-                        "delta_lake"
-                    ]
+                "commitStyle": {
+                  "title": "Commit Style",
+                  "type": "string",
+                  "enum": [
+                    "direct",
+                    "delta_lake"
+                  ]
                 },
-                "filenaming": {
-                    "title": "Filenaming",
-                    "type": "object",
-                    "properties": {
-                        "prefix": {
-                            "title": "Filename Prefix",
-                            "type": "string",
-                            "description": "The prefix to use in file name. i.e prefix-<uuid>.parquet"
-                        },
-                        "suffix": {
-                            "title": "Filename Suffix",
-                            "type": "string",
-                            "description": "This will overwrite the default file suffix. i.e .parquet, use with caution"
-                        },
-                        "strategy":{
-                            "title": "Filename Strategy",
-                            "type": "string",
-                            "enum": [
-                                "serial",
-                                "uuid"
-                            ]
-                        }
+                "fileNaming": {
+                  "title": "File naming",
+                  "type": "object",
+                  "properties": {
+                    "prefix": {
+                      "title": "Filename Prefix",
+                      "type": "string",
+                      "description": "The prefix to use in file name. i.e prefix-<uuid>.parquet"
+                    },
+                    "suffix": {
+                      "title": "Filename Suffix",
+                      "type": "string",
+                      "description": "This will overwrite the default file suffix. i.e .parquet, use with caution"
+                    },
+                    "strategy": {
+                      "title": "Filename Strategy",
+                      "type": "string",
+                      "enum": [
+                        "serial",
+                        "uuid"
+                      ]
                     }
+                  }
                 }
               },
               "additionalProperties": false
             }
           },
           "required": [
-            "write_target"
+            "path"
           ]
         }
       ]

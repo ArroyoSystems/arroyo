@@ -89,8 +89,8 @@ impl Connector for FileSystemConnector {
                 ConnectionType::Source,
             ),
             TableType::Sink {
+                ref path,
                 ref format_settings,
-                ref write_target,
                 ref file_settings,
                 ..
             } => {
@@ -103,7 +103,7 @@ impl Connector for FileSystemConnector {
                     bail!("commit_style must be Direct");
                 };
 
-                let backend_config = BackendConfig::parse_url(&write_target.path, true)?;
+                let backend_config = BackendConfig::parse_url(&path, true)?;
                 let is_local = match &backend_config {
                     BackendConfig::Local { .. } => true,
                     _ => false,
@@ -181,10 +181,8 @@ impl Connector for FileSystemConnector {
                     EmptyConfig {},
                     FileSystemTable {
                         type_: TableType::Source {
-                            read_source: Source {
-                                path: storage_url,
-                                storage_options,
-                            },
+                            path: storage_url,
+                            storage_options,
                             compression_format: Some(compression_format),
                             regex_pattern: matching_pattern,
                         },
@@ -255,8 +253,8 @@ pub fn file_system_sink_from_options(
         None
     };
 
-    let filenaming = if prefix.is_some() || suffix.is_some() || strategy.is_some() {
-        Some(Filenaming {
+    let file_naming = if prefix.is_some() || suffix.is_some() || strategy.is_some() {
+        Some(FileNaming {
             prefix,
             suffix,
             strategy,
@@ -273,7 +271,7 @@ pub fn file_system_sink_from_options(
         target_part_size,
         partitioning,
         commit_style: Some(commit_style),
-        filenaming,
+        file_naming,
     });
 
     let format_settings = match schema
@@ -307,10 +305,8 @@ pub fn file_system_sink_from_options(
         type_: TableType::Sink {
             file_settings,
             format_settings,
-            write_target: FolderUrl {
-                path: storage_url,
-                storage_options,
-            },
+            path: storage_url,
+            storage_options,
         },
     })
 }

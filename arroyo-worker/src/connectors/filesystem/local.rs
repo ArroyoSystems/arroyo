@@ -21,7 +21,7 @@ use anyhow::{bail, Result};
 
 use super::{
     add_suffix_prefix, delta, get_partitioner_from_file_settings, CommitState, CommitStyle,
-    FileSystemTable, FilenameStrategy, Filenaming, MultiPartWriterStats, RollingPolicy, TableType,
+    FileNaming, FileSystemTable, FilenameStrategy, MultiPartWriterStats, RollingPolicy, TableType,
 };
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
@@ -37,7 +37,7 @@ pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     table_properties: FileSystemTable,
     commit_state: CommitState,
     phantom: PhantomData<(K, D)>,
-    filenaming: Filenaming,
+    filenaming: FileNaming,
 }
 
 impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWriter<K, D, V> {
@@ -61,8 +61,8 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
         let mut filenaming = file_settings
             .clone()
             .unwrap()
-            .filenaming
-            .unwrap_or_else(|| Filenaming {
+            .file_naming
+            .unwrap_or_else(|| FileNaming {
                 strategy: Some(FilenameStrategy::Serial),
                 prefix: None,
                 suffix: None,
