@@ -58,7 +58,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
             .expect("Format must be set for filesystem source");
 
         Self {
-            table: table.type_,
+            table: table.table_type,
             deserializer: DataDeserializer::new(format, config.framing),
             file_states: HashMap::new(),
             _t: PhantomData,
@@ -108,18 +108,17 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
 
         let (storage_provider, regex_pattern) = match &self.table {
             TableType::Source {
-                read_source,
+                path,
+                storage_options,
                 compression_format: _,
                 regex_pattern,
             } => {
-                let storage_provider = StorageProvider::for_url_with_options(
-                    &read_source.path,
-                    read_source.storage_options.clone(),
-                )
-                .await
-                .map_err(|err| {
-                    UserError::new("failed to create storage provider", err.to_string())
-                })?;
+                let storage_provider =
+                    StorageProvider::for_url_with_options(&path, storage_options.clone())
+                        .await
+                        .map_err(|err| {
+                            UserError::new("failed to create storage provider", err.to_string())
+                        })?;
                 let matcher = regex_pattern
                     .as_ref()
                     .map(|pattern| Regex::new(&pattern))
