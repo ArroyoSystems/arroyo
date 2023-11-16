@@ -18,7 +18,6 @@ use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
 use object_store::{CredentialProvider, MultipartId};
 use regex::{Captures, Regex};
 use thiserror::Error;
-
 mod aws;
 
 #[derive(Clone, Debug)]
@@ -359,7 +358,11 @@ impl StorageProvider {
             s3_options.insert(AmazonS3ConfigKey::Region, region.clone());
         }
 
-        if let Some(endpoint) = &config.endpoint {
+        if let Some(endpoint) = config
+            .endpoint
+            .as_ref()
+            .or(s3_options.get(&AmazonS3ConfigKey::Endpoint))
+        {
             builder = builder
                 .with_endpoint(endpoint)
                 .with_virtual_hosted_style_request(false)
@@ -374,6 +377,7 @@ impl StorageProvider {
                 "true".to_string(),
             );
         }
+
         let mut canonical_url = match (&config.region, &config.endpoint) {
             (_, Some(endpoint)) => {
                 format!("s3::{}/{}", endpoint, config.bucket)
