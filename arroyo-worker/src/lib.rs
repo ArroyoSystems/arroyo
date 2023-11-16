@@ -126,16 +126,6 @@ impl SchemaData for RawJson {
     fn iterator_from_record_batch(
         record_batch: RecordBatch,
     ) -> Result<Box<dyn Iterator<Item = RawJson> + Send>> {
-        let my_column = record_batch
-            .column_by_name("value")
-            .ok_or_else(|| anyhow::anyhow!("missing column value {}", "value"))?;
-        for entry in my_column
-            .as_any()
-            .downcast_ref::<arrow::array::StringArray>()
-            .unwrap()
-        {
-            println!("{:?}", entry);
-        }
         Ok(Box::new(RawJsonIterator {
             offset: 0,
             rows: record_batch.num_rows(),

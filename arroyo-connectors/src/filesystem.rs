@@ -35,7 +35,7 @@ impl Connector for FileSystemConnector {
             id: "filesystem".to_string(),
             name: "FileSystem".to_string(),
             icon: ICON.to_string(),
-            description: "Read or write to a filesystem (like S3)".to_string(),
+            description: "Read or write to a filesystem or object store like S3".to_string(),
             enabled: true,
             source: true,
             sink: true,

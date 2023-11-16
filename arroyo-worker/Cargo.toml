@@ -46,7 +46,6 @@ arrow = { workspace = true }
 parquet = { workspace = true, features = ["async"]}
 arrow-array = { workspace = true}
 aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = "0.21.0"
 aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
 uuid = {version = "1.4.1", features = ["v4"]}
 rusoto_core = "0.48.0"
