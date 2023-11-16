@@ -174,6 +174,7 @@ impl Connector for FileSystemConnector {
                     .map(|format| format.as_str().try_into().map_err(|err: &str| anyhow!(err)))
                     .transpose()?
                     .unwrap_or(CompressionFormat::None);
+                let matching_pattern = opts.remove("source.regex-pattern");
                 self.from_config(
                     None,
                     name,
@@ -185,6 +186,7 @@ impl Connector for FileSystemConnector {
                                 storage_options,
                             },
                             compression_format: Some(compression_format),
+                            regex_pattern: matching_pattern,
                         },
                     },
                     schema,

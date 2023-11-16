@@ -42,7 +42,12 @@
                   "zstd",
                   "gzip"
                   ]     
-            }
+              },
+            "regexPattern" : {
+              "title": "File Regex Pattern",
+              "type": "string",
+              "description": "regex matching pattern for files to include in source. Will search everything under the source path."
+              }
             },
           "required": [
             "read_source"

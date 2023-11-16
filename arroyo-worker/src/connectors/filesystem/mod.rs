@@ -657,7 +657,14 @@ where
             CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
-        let mut filenaming = file_settings.filenaming.clone().unwrap();
+        let mut filenaming = file_settings
+            .filenaming
+            .clone()
+            .unwrap_or_else(|| Filenaming {
+                strategy: Some(FilenameStrategy::Serial),
+                prefix: None,
+                suffix: None,
+            });
         if filenaming.suffix.is_none() {
             filenaming.suffix = Some(R::suffix());
         }

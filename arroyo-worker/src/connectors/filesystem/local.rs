@@ -58,7 +58,16 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
 
-        let mut filenaming = file_settings.clone().unwrap().filenaming.unwrap();
+        let mut filenaming = file_settings
+            .clone()
+            .unwrap()
+            .filenaming
+            .unwrap_or_else(|| Filenaming {
+                strategy: Some(FilenameStrategy::Serial),
+                prefix: None,
+                suffix: None,
+            });
+
         if filenaming.suffix.is_none() {
             filenaming.suffix = Some(V::file_suffix().to_string());
         }

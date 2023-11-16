@@ -1,4 +1,5 @@
 use core::panic;
+use std::future::ready;
 use std::pin::Pin;
 use std::time::SystemTime;
 use std::{collections::HashMap, marker::PhantomData};
@@ -10,6 +11,7 @@ use bincode::{Decode, Encode};
 use futures::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncRead;
 use tokio::{
@@ -104,10 +106,11 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
             return Ok(SourceFinishType::Final);
         }
 
-        let storage_provider = match &self.table {
+        let (storage_provider, regex_pattern) = match &self.table {
             TableType::Source {
                 read_source,
                 compression_format: _,
+                regex_pattern,
             } => {
                 let storage_provider = StorageProvider::for_url_with_options(
                     &read_source.path,
@@ -117,7 +120,17 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                 .map_err(|err| {
                     UserError::new("failed to create storage provider", err.to_string())
                 })?;
-                storage_provider
+                let matcher = regex_pattern
+                    .as_ref()
+                    .map(|pattern| Regex::new(&pattern))
+                    .transpose()
+                    .map_err(|err| {
+                        UserError::new(
+                            format!("invalid regex pattern {}", regex_pattern.as_ref().unwrap()),
+                            err.to_string(),
+                        )
+                    })?;
+                (storage_provider, matcher)
             }
             TableType::Sink { .. } => {
                 return Err(UserError::new(
@@ -129,9 +142,20 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
 
         // TODO: sort by creation time
         let mut file_paths = storage_provider
-            .list(false)
+            .list(regex_pattern.is_some())
             .await
-            .map_err(|err| UserError::new("could not list files", err.to_string()))?;
+            .map_err(|err| UserError::new("could not list files", err.to_string()))?
+            .filter(|path| {
+                let Ok(path) = path else {
+                    return ready(true);
+                };
+                if let Some(matcher) = &regex_pattern {
+                    ready(matcher.is_match(&path.to_string()))
+                } else {
+                    ready(true)
+                }
+            });
+
         let mut state: GlobalKeyedState<String, (String, FileReadState), _> =
             ctx.state.get_global_keyed_state('a').await;
         self.file_states = state
