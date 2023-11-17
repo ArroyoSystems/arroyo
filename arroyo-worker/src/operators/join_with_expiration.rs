@@ -13,6 +13,10 @@ use crate::engine::Context;
 #[derive(StreamNode)]
 pub struct JoinWithExpiration<
     K: Key,
+    InT1: Data,
+    InT2: Data,
+    P1: IncomingDataProcessor<InT1, T1>,
+    P2: IncomingDataProcessor<InT2, T2>,
     T1: Data,
     T2: Data,
     Output: Data,
@@ -20,9 +24,34 @@ pub struct JoinWithExpiration<
 > {
     left_expiration: Duration,
     right_expiration: Duration,
-    processor: P,
-    _t: PhantomData<(K, T1, T2, Output)>,
+    processor: P, 
+    _t: PhantomData<(K, P1, P2, InT1, InT2, T1, T2, Output)>,
 }
+
+pub trait IncomingDataProcessor<In: Data, Out: Data> : Send + 'static {
+    fn process_incoming(incoming: In) -> UpdatingData<Out>;
+ }
+
+ struct IdentityProcessor<T: Data> {
+     _t: PhantomData<T>,
+ }
+
+impl<T: Data> IncomingDataProcessor<UpdatingData<T>, T> for IdentityProcessor<T> {
+    fn process_incoming(incoming: UpdatingData<T>) -> UpdatingData<T> {
+        incoming
+    }
+}
+
+pub struct CoerceToUpdatingProcessor<T: Data> {
+    _t: PhantomData<T>,
+}
+
+impl<T: Data> IncomingDataProcessor<T, T> for CoerceToUpdatingProcessor<T> {
+    fn process_incoming(incoming: T) -> UpdatingData<T> {
+        UpdatingData::Append(incoming)
+    }
+}
+    
 
 pub trait JoinProcessor<K: Key, T1: Data, T2: Data, Output: Data>: Send + 'static {
     fn left_join(
@@ -261,7 +290,7 @@ impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, (T1, T2)>
 pub fn left_join<K: Key, T1: Data, T2: Data>(
     left_expiration: Duration,
     right_expiration: Duration,
-) -> JoinWithExpiration<K, T1, T2, UpdatingData<(T1, Option<T2>)>, LeftJoinProcessor<K, T1, T2>> {
+) -> JoinWithExpiration<K, T1, T2, CoerceToUpdatingProcessor<T1>, CoerceToUpdatingProcessor<T2>, T1, T2, UpdatingData<(T1, Option<T2>)>, LeftJoinProcessor<K, T1, T2>> {
     JoinWithExpiration::new(
         left_expiration,
         right_expiration,
@@ -273,7 +302,7 @@ pub fn left_join<K: Key, T1: Data, T2: Data>(
 pub fn right_join<K: Key, T1: Data, T2: Data>(
     left_expiration: Duration,
     right_expiration: Duration,
-) -> JoinWithExpiration<K, T1, T2, UpdatingData<(Option<T1>, T2)>, RightJoinProcessor<K, T1, T2>> {
+) -> JoinWithExpiration<K, T1, T2, CoerceToUpdatingProcessor<T1>, CoerceToUpdatingProcessor<T2>,  T1, T2, UpdatingData<(Option<T1>, T2)>, RightJoinProcessor<K, T1, T2>> {
     JoinWithExpiration::new(
         left_expiration,
         right_expiration,
@@ -286,7 +315,7 @@ pub fn full_join<K: Key, T1: Data, T2: Data>(
     left_expiration: Duration,
     right_expiration: Duration,
 ) -> JoinWithExpiration<
-    K,
+    K,  T1, T2, CoerceToUpdatingProcessor<T1>, CoerceToUpdatingProcessor<T2>, 
     T1,
     T2,
     UpdatingData<(Option<T1>, Option<T2>)>,
@@ -303,7 +332,7 @@ pub fn full_join<K: Key, T1: Data, T2: Data>(
 pub fn inner_join<K: Key, T1: Data, T2: Data>(
     left_expiration: Duration,
     right_expiration: Duration,
-) -> JoinWithExpiration<K, T1, T2, (T1, T2), InnerJoinProcessor<K, T1, T2>> {
+) -> JoinWithExpiration<K, T1, T2, CoerceToUpdatingProcessor<T1>, CoerceToUpdatingProcessor<T2>,  T1, T2, (T1, T2), InnerJoinProcessor<K, T1, T2>> {
     JoinWithExpiration::new(
         left_expiration,
         right_expiration,
@@ -311,9 +340,25 @@ pub fn inner_join<K: Key, T1: Data, T2: Data>(
     )
 }
 
-#[co_process_fn(in_k1=K, in_t1=T1, in_k2=K, in_t2=T2, out_k=K, out_t=Output)]
-impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Output>>
-    JoinWithExpiration<K, T1, T2, Output, P>
+pub fn inner_join_left_updating<K: Key, T1: Data, T2: Data> (
+    left_expiration: Duration,
+    right_expiration: Duration,
+) -> JoinWithExpiration<K, UpdatingData<T1>, T2, IdentityProcessor<T1>, CoerceToUpdatingProcessor<T2>, T1, T2, UpdatingData<(T1, T2)>, LeftJoinProcessor<K, T1, T2>> {
+    JoinWithExpiration::new(
+        left_expiration,
+        right_expiration,
+        LeftJoinProcessor { _t: PhantomData },
+    )
+}
+
+#[co_process_fn(in_k1=K, in_t1=InT1, in_k2=K, in_t2=InT2, out_k=K, out_t=Output)]
+impl<K: Key,
+InT1: Data,
+InT2: Data,
+P1: IncomingDataProcessor<InT1, T1>,
+P2: IncomingDataProcessor<InT2, T2>,
+ T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Output>>
+    JoinWithExpiration<K, InT1, InT2, P1, P2,  T1, T2, Output, P>
 {
     fn name(&self) -> String {
         "JoinWithExpiration".to_string()
@@ -349,14 +394,17 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
         ]
     }
 
-    async fn process_left(&mut self, record: &Record<K, T1>, ctx: &mut Context<K, Output>) {
+    async fn process_left(&mut self, record: &Record<K, InT1>, ctx: &mut Context<K, Output>) {
         if let Some(watermark) = ctx.last_present_watermark() {
             if record.timestamp < watermark {
                 return;
             }
         };
         let mut key = record.key.clone().unwrap();
-        let value = record.value.clone();
+        let value = P1::process_incoming(record.value.clone());
+        let UpdatingData::Append(value) = value else {
+            panic!()
+        };
 
         let mut left_state: KeyTimeMultiMap<K, T1, _> = ctx.state.get_key_time_multi_map('l').await;
         let first_left = left_state
