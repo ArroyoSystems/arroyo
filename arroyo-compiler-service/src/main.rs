@@ -6,7 +6,7 @@ use std::{io, path::PathBuf, str::FromStr, sync::Arc};
 
 use arroyo_rpc::grpc::{
     compiler_grpc_server::{CompilerGrpc, CompilerGrpcServer},
-    CheckUdfsCompilerReq, CheckUdfsCompilerResp, CompileQueryReq, CompileQueryResp, UdfCrate,
+    CheckUdfsReq, CheckUdfsResp, CompileQueryReq, CompileQueryResp, UdfCrate,
 };
 
 use arroyo_server_common::start_admin_server;
@@ -320,8 +320,8 @@ impl CompilerGrpc for CompileService {
 
     async fn check_udfs(
         &self,
-        request: Request<CheckUdfsCompilerReq>,
-    ) -> Result<Response<CheckUdfsCompilerResp>, Status> {
+        request: Request<CheckUdfsReq>,
+    ) -> Result<Response<CheckUdfsResp>, Status> {
         // only allow one request to be active at a given time
         let _guard = self.lock.lock().await;
 
@@ -359,7 +359,7 @@ impl CompilerGrpc for CompileService {
         );
 
         if output.status.success() {
-            return Ok(Response::new(CheckUdfsCompilerResp { errors: vec![] }));
+            return Ok(Response::new(CheckUdfsResp { errors: vec![] }));
         }
 
         let stdout = from_utf8(&output.stdout)
@@ -392,6 +392,6 @@ impl CompilerGrpc for CompileService {
 
         info!("Cargo check on udfs crate found {} errors", errors.len());
 
-        return Ok(Response::new(CheckUdfsCompilerResp { errors }));
+        return Ok(Response::new(CheckUdfsResp { errors }));
     }
 }
