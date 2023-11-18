@@ -48,7 +48,6 @@ aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-
 aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
 uuid = {version = "1.4.1", features = ["v4"]}
 rusoto_core = "0.48.0"
-rusoto_s3 = "0.48.0"
 
 tonic = { workspace = true }
 prost = "0.11"

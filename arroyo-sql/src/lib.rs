@@ -48,6 +48,7 @@ use datafusion_common::DataFusionError;
 use prettyplease::unparse;
 use regex::Regex;
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
@@ -354,9 +355,11 @@ impl ArroyoSchemaProvider {
     }
 }
 
-pub fn parse_dependencies(definition: &str) -> Result<String> {
+pub fn parse_dependencies(definition: &str) -> anyhow::Result<String> {
     // get content of dependencies comment using regex
-    let re = Regex::new(r"\/\*\n(\[dependencies\]\n[\s\S]*?)\*\/").unwrap();
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    let re = REGEX.get_or_init(|| Regex::new(r"\\*\n(\[dependencies\]\n[\s\S]*?)\*/").unwrap());
+
     if re.find_iter(&definition).count() > 1 {
         bail!("Only one dependencies definition is allowed in a UDF");
     }
