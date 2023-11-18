@@ -1,4 +1,4 @@
-{
+webui/package.json{
   "name": "arroyo-console",
   "private": true,
   "version": "0.0.0",
@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "format": "npx prettier --write src/ && npx eslint --fix --ext .js,.jsx,.ts,.tsx src",
     "check": "npx prettier --check src/ && npx eslint --ext .js,.jsx,.ts,.tsx src",
+<<<<<<< HEAD:webui/package.json
     "openapi": "cargo build --package arroyo-openapi  && npx openapi-typescript $(pwd)/../crates/arroyo-openapi/api-spec.json --output $(pwd)/src/gen/api-types.ts"
+=======
+    "openapi": "cargo build --package arroyo-openapi  && npx openapi-typescript $(pwd)/../target/api-spec.json --output $(pwd)/src/gen/api-types.ts"
+>>>>>>> 7cee44fd (Migrate open-api client):arroyo-console/package.json
   },
   "dependencies": {
     "@babel/core": "^7.22.5",

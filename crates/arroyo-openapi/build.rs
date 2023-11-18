@@ -1,31 +1,22 @@
 use arroyo_api::ApiDoc;
-use std::fs;
-use std::process::Command;
+use std::{env, fs};
+use std::path::PathBuf;
+use progenitor::{GenerationSettings, InterfaceStyle};
 use utoipa::OpenApi;
 
 fn main() {
-    // Generate the OpenAPI spec
+    let src = "../sample_openapi/keeper.json";
+    println!("cargo:rerun-if-changed={}", src);
+    let file = std::fs::File::open(src).unwrap();
+    let spec = serde_json::from_reader(file).unwrap();
+    let mut generator = progenitor::Generator::default();
 
-    let doc = ApiDoc::openapi().to_pretty_json().unwrap();
-    fs::write("./api-spec.json", doc).unwrap();
+    let tokens = generator.generate_tokens(&spec).unwrap();
+    let ast = syn::parse2(tokens).unwrap();
+    let content = prettyplease::unparse(&ast);
 
-    // Generate the API client
+    let mut out_file = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).to_path_buf();
+    out_file.push("codegen.rs");
 
-    let output = Command::new("openapi-generator-cli")
-        .arg("generate")
-        .arg("-g")
-        .arg("rust")
-        .arg("-i")
-        .arg("api-spec.json")
-        .arg("-c")
-        .arg("openapitools.json")
-        .arg("-o")
-        .arg("client")
-        .output()
-        .expect("Failed to run OpenAPI Generator, have you installed openapi-generator-cli?");
-
-    if !output.status.success() {
-        let error_message = String::from_utf8_lossy(&output.stderr);
-        panic!("OpenAPI Generator failed with error: {}", error_message);
-    }
+    std::fs::write(out_file, content).unwrap();
 }
