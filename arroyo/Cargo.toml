@@ -21,6 +21,8 @@ keywords = ["streaming", "data", "sql", "event-processing"]
 
 
 [dependencies]
+arroyo-openapi = { path = "../arroyo-openapi" }
+
 anyhow = {version = "1.0.75", features = ["backtrace"]}
 bollard = "0"
 clap = { version = "4", features = ["derive"] }

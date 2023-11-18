@@ -1,18 +1,14 @@
 use std::time::{Duration, Instant};
 
-use arroyo_openapi::apis::configuration::Configuration;
-use arroyo_openapi::apis::connection_tables_api::create_connection_table;
-use arroyo_openapi::apis::jobs_api::get_job_checkpoints;
-use arroyo_openapi::apis::pipelines_api::{get_pipeline_jobs, patch_pipeline, post_pipeline};
-use arroyo_openapi::models::{ConnectionTablePost, PipelinePatch, PipelinePost, StopType};
 
 use anyhow::Result;
-use arroyo_openapi::apis::ping_api::ping;
 use arroyo_types::DatabaseConfig;
 use rand::RngCore;
 use serde_json::json;
 use tokio_postgres::NoTls;
 use tracing::{info, warn};
+use arroyo_openapi::Client;
+use arroyo_openapi::types::{ConnectionTablePost, PipelinePatch, PipelinePost, StopType};
 
 mod embedded {
     use refinery::embed_migrations;
@@ -41,10 +37,12 @@ pub fn run_service(name: String, args: &[&str], env: Vec<(String, String)>) -> R
     Ok(())
 }
 
-async fn wait_for_state(api_conf: &Configuration, pipeline_id: &str, expected_state: &str) {
+async fn wait_for_state(client: &Client, pipeline_id: &str, expected_state: &str) {
     let mut last_state = "None".to_string();
     while last_state != expected_state {
-        let jobs = get_pipeline_jobs(&api_conf, &pipeline_id).await.unwrap();
+        let jobs = client.get_pipeline_jobs()
+            .id(pipeline_id)
+            .send().await.unwrap();
         let job = jobs.data.first().unwrap();
 
         let state = job.state.clone();
@@ -61,17 +59,10 @@ async fn wait_for_state(api_conf: &Configuration, pipeline_id: &str, expected_st
     }
 }
 
-async fn connect() {
+async fn connect() -> Client {
     let start = Instant::now();
-    let api_conf = Configuration {
-        base_path: "http://localhost:8000/api".to_string(),
-        user_agent: None,
-        client: Default::default(),
-        basic_auth: None,
-        oauth_access_token: None,
-        bearer_access_token: None,
-        api_key: None,
-    };
+
+    let client = Client::new("http://localhost:8000/api");
 
     loop {
         if start.elapsed() > CONNECT_TIMEOUT {
@@ -83,9 +74,9 @@ async fn connect() {
 
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        if ping(&api_conf).await.is_ok() {
+        if client.ping().send().await.is_ok() {
             info!("Connected to API server");
-            return;
+            return client;
         }
     }
 }
@@ -147,31 +138,18 @@ pub async fn main() {
     )
     .expect("Failed to run compiler service");
 
-    connect().await;
-    let api_conf = Configuration {
-        base_path: "http://localhost:8000/api".to_string(),
-        user_agent: None,
-        client: Default::default(),
-        basic_auth: None,
-        oauth_access_token: None,
-        bearer_access_token: None,
-        api_key: None,
-    };
+    let api_client = connect().await;
 
     // create a source
     let source_name = format!("source_{}", run_id);
     info!("Creating source {}", source_name);
 
-    let _ = create_connection_table(
-        &api_conf,
-        ConnectionTablePost {
-            config: Some(json!({"event_rate": 10})),
-            connection_profile_id: None,
-            connector: "nexmark".to_string(),
-            name: source_name.clone(),
-            schema: None,
-        },
-    )
+    let _ = api_client.create_connection_table()
+        .body(ConnectionTablePost::builder()
+            .config(json!({"event_rate": 10}))
+            .connector("nexmark")
+            .name(source_name.clone()))
+        .send()
     .await;
     // This generated client unfortunately does not support OpenAPI objects that use 'oneOf',
     // so the above call will always return an Err, even when the request succeeds.
@@ -182,37 +160,36 @@ pub async fn main() {
     let pipeline_name = format!("pipeline_{}", run_id);
     info!("Creating pipeline {}", pipeline_name);
 
-    let pipeline_id = post_pipeline(
-        &api_conf,
-        PipelinePost {
-            name: pipeline_name,
-            parallelism: 1,
-            preview: None,
-            query: format!(
-                "select count(*) from {} where auction is not null group \
-                by hop(interval '2 seconds', interval '10 seconds')",
-                source_name
-            ),
-            udfs: None,
-        },
-    )
-    .await
-    .unwrap()
-    .id;
+    let pipeline_id = api_client.post_pipeline()
+        .body(PipelinePost::builder()
+                  .name(pipeline_name)
+                  .parallelism(1)
+                  .query(format!(
+                      "select count(*) from {} where auction is not null group \
+                      by hop(interval '2 seconds', interval '10 seconds')",
+                      source_name))
+        )
+        .send()
+        .await
+        .unwrap()
+        .id.clone();
 
     info!("Created pipeline {}", pipeline_id);
 
     // wait for job to enter running phase
     info!("Waiting until running");
-    wait_for_state(&api_conf, &pipeline_id, "Running").await;
+    wait_for_state(&api_client, &pipeline_id, "Running").await;
 
-    let jobs = get_pipeline_jobs(&api_conf, &pipeline_id).await.unwrap();
+    let jobs = api_client.get_pipeline_jobs().id(&pipeline_id).send().await.unwrap();
     let job = jobs.data.first().unwrap();
 
     // wait for a checkpoint
     info!("Waiting for 10 successful checkpoints");
     loop {
-        let checkpoints = get_job_checkpoints(&api_conf, &pipeline_id, &job.id)
+        let checkpoints = api_client.get_job_checkpoints()
+            .pipeline_id(&pipeline_id)
+            .job_id(&job.id)
+            .send()
             .await
             .unwrap();
 
@@ -227,20 +204,16 @@ pub async fn main() {
 
     // stop job
     info!("Stopping job");
-    patch_pipeline(
-        &api_conf,
-        &pipeline_id,
-        PipelinePatch {
-            checkpoint_interval_micros: None,
-            parallelism: None,
-            stop: Some(Some(StopType::Checkpoint)),
-        },
-    )
+    api_client.patch_pipeline()
+        .id(&pipeline_id)
+        .body(PipelinePatch::builder()
+                  .stop(StopType::Checkpoint))
+        .send()
     .await
     .unwrap();
 
     info!("Waiting for stop");
-    wait_for_state(&api_conf, &pipeline_id, "Stopped").await;
+    wait_for_state(&api_client, &pipeline_id, "Stopped").await;
 
     info!("Test successful ✅")
 }

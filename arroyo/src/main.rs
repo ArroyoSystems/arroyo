@@ -11,8 +11,11 @@ use std::process::exit;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_stream::StreamExt;
+use crate::query::start_query;
 
 const CONTAINER_NAME: &str = "arroyo-cli-single";
+
+mod query;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -36,6 +39,10 @@ enum Commands {
 
     /// Stops a running Arroyo cluster
     Stop {},
+
+    Connect {
+        endpoint: Option<String>,
+    }
 }
 
 #[tokio::main]
@@ -45,6 +52,9 @@ pub async fn main() {
     let result = match &cli.command {
         Commands::Start { tag, daemon } => start(tag.clone(), *daemon).await,
         Commands::Stop {} => stop().await,
+        Commands::Connect { endpoint } => {
+            start_query(endpoint.clone()).await
+        }
     };
 
     if let Err(e) = result {

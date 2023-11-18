@@ -1,3 +1,3 @@
-// build.rs generates the OpenAPI spec and client
+// build.rs generates the OpenAPI spec
 
-include!("../client/src/lib.rs");
+include!(concat!(env!("OUT_DIR"), "/generated/api-client.rs"));
