@@ -7,7 +7,7 @@ use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestS
 use arroyo_rpc::OperatorConfig;
 
 use crate::filesystem::{
-    file_system_table_from_options, CommitStyle, FileSystemTable, FormatSettings,
+    file_system_sink_from_options, CommitStyle, FileSystemTable, FormatSettings, TableType,
 };
 use crate::{Connection, EmptyConfig};
 
@@ -75,9 +75,16 @@ impl Connector for DeltaLakeConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
+        let TableType::Sink {
+            file_settings,
+            format_settings,
+            write_target,
+        } = &table.type_
+        else {
+            bail!("Delta Lake connector only supports sink tables");
+        };
         // confirm commit style is DeltaLake
-        if let Some(CommitStyle::DeltaLake) = table
-            .file_settings
+        if let Some(CommitStyle::DeltaLake) = file_settings
             .as_ref()
             .ok_or_else(|| anyhow!("no file_settings"))?
             .commit_style
@@ -87,12 +94,12 @@ impl Connector for DeltaLakeConnector {
             bail!("commit_style must be DeltaLake");
         }
 
-        let backend_config = BackendConfig::parse_url(&table.write_target.path, true)?;
+        let backend_config = BackendConfig::parse_url(&write_target.path, true)?;
         let is_local = match &backend_config {
             BackendConfig::Local { .. } => true,
             _ => false,
         };
-        let (description, operator) = match (&table.format_settings, is_local) {
+        let (description, operator) = match (&format_settings, is_local) {
             (Some(FormatSettings::Parquet { .. }), true) => (
                 "LocalDeltaLake<Parquet>".to_string(),
                 "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
@@ -139,7 +146,7 @@ impl Connector for DeltaLakeConnector {
         opts: &mut std::collections::HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let table = file_system_table_from_options(opts, schema, CommitStyle::DeltaLake)?;
+        let table = file_system_sink_from_options(opts, schema, CommitStyle::DeltaLake)?;
 
         self.from_config(None, name, EmptyConfig {}, table, schema)
     }

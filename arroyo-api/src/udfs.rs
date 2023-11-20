@@ -11,10 +11,8 @@ use crate::to_micros;
 use arroyo_rpc::api_types::udfs::{GlobalUdf, UdfPost, UdfValidationResult, ValidateUdfPost};
 use arroyo_rpc::api_types::GlobalUdfCollection;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::{CheckUdfsReq, UdfCrate};
+use arroyo_rpc::grpc::{CheckUdfsReq, CheckUdfsResp};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_sql::{parse_dependencies, ArroyoSchemaProvider};
-use arroyo_types::cargo_toml;
 use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
@@ -60,14 +58,14 @@ pub async fn create_udf(
         .map_err(log_and_map)?;
 
     // validate udf
-    let (errors, name) =
+    let check_udfs_resp =
         validate_udf_with_controller(&state.controller_addr, &req.definition).await?;
 
-    if errors.len() > 0 {
+    if check_udfs_resp.errors.len() > 0 {
         return Err(bad_request(format!("UDF is invalid.",)));
     }
 
-    let Some(udf_name) = name else {
+    let Some(udf_name) = check_udfs_resp.udf_name else {
         // this should not be possible
         return Err(internal_server_error("UDF name not found"));
     };
@@ -195,7 +193,7 @@ pub async fn delete_udf(
 async fn validate_udf_with_controller(
     controller_addr: &str,
     udf_definition: &str,
-) -> Result<(Vec<String>, Option<String>), ErrorResp> {
+) -> Result<CheckUdfsResp, ErrorResp> {
     let mut controller = match ControllerGrpcClient::connect(controller_addr.to_string()).await {
         Ok(controller) => controller,
         Err(e) => {
@@ -204,29 +202,9 @@ async fn validate_udf_with_controller(
         }
     };
 
-    let dependencies = match parse_dependencies(&udf_definition) {
-        Ok(dependencies) => dependencies,
-        Err(e) => {
-            return Ok((vec![e.to_string()], None));
-        }
-    };
-
-    // use the ArroyoSchemaProvider to do some validation and to get the function name
-    let function_name = match ArroyoSchemaProvider::new().add_rust_udf(&udf_definition) {
-        Ok(function_name) => function_name,
-        Err(e) => return Ok((vec![e.to_string()], None)),
-    };
-
-    // build cargo.toml
-    let cargo_toml = cargo_toml(&function_name, &dependencies);
-
     let check_udfs_resp = match controller
         .check_udfs(CheckUdfsReq {
-            udf_crate: Some(UdfCrate {
-                name: function_name.clone(),
-                definition: udf_definition.to_string(),
-                cargo_toml,
-            }),
+            definition: udf_definition.to_string(),
         })
         .await
     {
@@ -240,7 +218,7 @@ async fn validate_udf_with_controller(
         }
     };
 
-    Ok((check_udfs_resp.errors, Some(function_name)))
+    Ok(check_udfs_resp)
 }
 
 /// Validate UDFs
@@ -257,8 +235,11 @@ pub async fn validate_udf(
     State(state): State<AppState>,
     WithRejection(Json(req), _): WithRejection<Json<ValidateUdfPost>, ApiError>,
 ) -> Result<Json<UdfValidationResult>, ErrorResp> {
-    let (errors, udf_name) =
+    let check_udfs_resp =
         validate_udf_with_controller(&state.controller_addr, &req.definition).await?;
 
-    Ok(Json(UdfValidationResult { udf_name, errors }))
+    Ok(Json(UdfValidationResult {
+        udf_name: check_udfs_resp.udf_name,
+        errors: check_udfs_resp.errors,
+    }))
 }

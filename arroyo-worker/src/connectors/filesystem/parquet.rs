@@ -17,16 +17,21 @@ use parquet::{
 use super::{
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
     BatchBufferingWriter, BatchBuilder, FileSettings, FileSystemTable, MultiPartWriterStats,
+    TableType,
 };
 use super::{Compression, FormatSettings};
 
 fn writer_properties_from_table(table: &FileSystemTable) -> WriterProperties {
     let mut parquet_writer_options = WriterProperties::builder();
-    if let Some(FormatSettings::Parquet {
-        compression,
-        row_batch_size: _,
-        row_group_size,
-    }) = table.format_settings
+    if let TableType::Sink {
+        format_settings:
+            Some(FormatSettings::Parquet {
+                compression,
+                row_batch_size: _,
+                row_group_size,
+            }),
+        ..
+    } = table.type_
     {
         if let Some(compression) = compression {
             let compression = match compression {
@@ -88,11 +93,15 @@ impl<B: RecordBatchBuilder> BatchBuilder for FixedSizeRecordBatchBuilder<B> {
 
     type BatchData = RecordBatch;
     fn new(config: &FileSystemTable) -> Self {
-        let batch_size = if let Some(FormatSettings::Parquet {
-            compression: _,
-            row_batch_size: Some(batch_size),
-            row_group_size: _,
-        }) = config.format_settings
+        let batch_size = if let TableType::Sink {
+            format_settings:
+                Some(FormatSettings::Parquet {
+                    compression: _,
+                    row_batch_size: Some(batch_size),
+                    row_group_size: _,
+                }),
+            ..
+        } = config.type_
         {
             batch_size as usize
         } else {
@@ -137,10 +146,14 @@ impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<
     type BatchData = RecordBatch;
 
     fn new(config: &FileSystemTable) -> Self {
-        let target_part_size = if let Some(FileSettings {
-            target_part_size: Some(target_part_size),
+        let target_part_size = if let TableType::Sink {
+            file_settings:
+                Some(FileSettings {
+                    target_part_size: Some(target_part_size),
+                    ..
+                }),
             ..
-        }) = config.file_settings
+        } = config.type_
         {
             target_part_size as usize
         } else {

@@ -1,3 +1,4 @@
+use std::future::ready;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::{
@@ -8,6 +9,7 @@ use std::{
 use arroyo_types::{S3_ENDPOINT_ENV, S3_REGION_ENV};
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use object_store::aws::{AmazonS3ConfigKey, AwsCredential};
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::PartId;
@@ -16,7 +18,6 @@ use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
 use object_store::{CredentialProvider, MultipartId};
 use regex::{Captures, Regex};
 use thiserror::Error;
-
 mod aws;
 
 #[derive(Clone, Debug)]
@@ -134,10 +135,6 @@ impl S3Config {
             bucket,
             key: Some(key),
         }
-    }
-
-    pub fn canonical_url(&self) -> String {
-        todo!()
     }
 }
 
@@ -314,13 +311,6 @@ impl StorageProvider {
             BackendConfig::Local(config) => Self::construct_local(config).await,
         }?;
 
-        let path = match &provider.config {
-            BackendConfig::S3(s3) => s3.key.as_ref(),
-            BackendConfig::GCS(gcs) => gcs.key.as_ref(),
-            BackendConfig::Local(local) => local.key.as_ref(),
-        }
-        .ok_or_else(|| StorageError::NoKeyInUrl)?;
-
         let result = provider.get("").await;
 
         result
@@ -368,7 +358,11 @@ impl StorageProvider {
             s3_options.insert(AmazonS3ConfigKey::Region, region.clone());
         }
 
-        if let Some(endpoint) = &config.endpoint {
+        if let Some(endpoint) = config
+            .endpoint
+            .as_ref()
+            .or(s3_options.get(&AmazonS3ConfigKey::Endpoint))
+        {
             builder = builder
                 .with_endpoint(endpoint)
                 .with_virtual_hosted_style_request(false)
@@ -383,6 +377,7 @@ impl StorageProvider {
                 "true".to_string(),
             );
         }
+
         let mut canonical_url = match (&config.region, &config.endpoint) {
             (_, Some(endpoint)) => {
                 format!("s3::{}/{}", endpoint, config.bucket)
@@ -455,6 +450,41 @@ impl StorageProvider {
         })
     }
 
+    pub async fn list(
+        &self,
+        include_subdirectories: bool,
+    ) -> Result<impl Stream<Item = Result<Path, object_store::Error>> + '_, StorageError> {
+        let key_path: Option<Path> = self.config.key().map(|key| key.to_string().into());
+        let key_part_count = key_path
+            .as_ref()
+            .map(|key| key.parts().count())
+            .unwrap_or_default();
+        let list = self
+            .object_store
+            .list(key_path.as_ref())
+            .await
+            .map_err(|e| Into::<StorageError>::into(e))?
+            .filter_map(move |meta| {
+                let result = {
+                    match meta {
+                        Ok(metadata) => {
+                            let path = metadata.location;
+                            if !include_subdirectories && path.parts().count() != key_part_count + 1
+                            {
+                                None
+                            } else {
+                                Some(Ok(path))
+                            }
+                        }
+                        Err(err) => Some(Err(err)),
+                    }
+                };
+                ready(result)
+            });
+
+        Ok(list)
+    }
+
     pub async fn get<P: Into<String>>(&self, path: P) -> Result<Bytes, StorageError> {
         let path: String = path.into();
         let bytes = self
@@ -466,6 +496,21 @@ impl StorageProvider {
             .await?;
 
         Ok(bytes)
+    }
+
+    pub async fn get_as_stream<P: Into<String>>(
+        &self,
+        path: P,
+    ) -> Result<impl tokio::io::AsyncRead, StorageError> {
+        let path: String = path.into();
+        let bytes = self
+            .object_store
+            .get(&path.into())
+            .await
+            .map_err(|e| Into::<StorageError>::into(e))?
+            .into_stream();
+
+        Ok(tokio_util::io::StreamReader::new(bytes))
     }
 
     pub async fn put<P: Into<String>>(

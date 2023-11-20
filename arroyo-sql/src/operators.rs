@@ -79,11 +79,15 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for Projection {
 }
 
 #[derive(Debug, Clone)]
+pub enum UnnestFieldType {
+    Default,
+    UnnestOuter,
+}
+
+#[derive(Debug, Clone)]
 pub struct UnnestProjection {
-    pub fields: Vec<(Column, Expression)>,
-    pub unnest_col: Column,
+    pub fields: Vec<(Column, Expression, UnnestFieldType)>,
     pub unnest_inner: Expression,
-    pub unnest_outer: Expression,
     pub format: Option<Format>,
 }
 
@@ -107,37 +111,34 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
             quote!()
         };
 
+        let unnest_context = ValuePointerContext::with_arg("___unnest");
+
         let assignments: Vec<_> = self
             .fields
             .iter()
-            .map(|(col, expr)| {
+            .map(|(col, expr, typ)| {
                 let name = &col.name;
                 let alias = &col.relation;
-                let data_type = expr.expression_type(input_context);
+                let ctx = match typ {
+                    UnnestFieldType::Default => input_context,
+                    UnnestFieldType::UnnestOuter => &unnest_context,
+                };
+
+                let data_type = expr.expression_type(ctx);
+
                 let field_ident =
                     StructField::new(name.clone(), alias.clone(), data_type).field_ident();
-                let expr = expr.generate(input_context);
+                let expr = expr.generate(ctx);
                 quote!(#field_ident : #expr)
             })
             .collect();
         let output_type = self.expression_type(input_context).get_type();
-
-        let unnest_ctx = ValuePointerContext::with_arg("___unnest");
-        let unnest_expr = self.unnest_outer.generate(&unnest_ctx);
-
-        let unnest_ident = StructField::new(
-            self.unnest_col.name.clone(),
-            self.unnest_col.relation.clone(),
-            self.unnest_outer.expression_type(&unnest_ctx),
-        )
-        .field_ident();
 
         parse_quote!(
             #array_creating_expr.into_iter()
                 #handle_optional
                 .map(|___unnest| {
                     #output_type {
-                        #unnest_ident: #unnest_expr,
                         #(#assignments),*
                     }
                 })
@@ -145,20 +146,14 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
     }
 
     fn expression_type(&self, input_context: &ValuePointerContext) -> StructDef {
-        let mut fields: Vec<_> = self
+        let fields: Vec<_> = self
             .fields
             .iter()
-            .map(|(col, computation)| {
+            .map(|(col, computation, _)| {
                 let field_type = computation.expression_type(&input_context);
                 StructField::new(col.name.clone(), col.relation.clone(), field_type)
             })
             .collect();
-
-        fields.push(StructField::new(
-            self.unnest_col.name.clone(),
-            self.unnest_col.relation.clone(),
-            self.unnest_outer.expression_type(input_context),
-        ));
 
         StructDef::new(None, true, fields, self.format.clone())
     }

@@ -139,7 +139,11 @@ impl<T: SchemaData> DataDeserializer<T> {
         }
     }
 
-    fn deserialize_single(&self, msg: &[u8]) -> Result<T, UserError> {
+    pub fn get_format(&self) -> Arc<Format> {
+        self.format.clone()
+    }
+
+    pub fn deserialize_single(&self, msg: &[u8]) -> Result<T, UserError> {
         match &*self.format {
             Format::Json(json) => json::deserialize_slice_json(json, msg),
             Format::Avro(_) => unreachable!("avro should be handled by here"),

@@ -11,6 +11,7 @@ kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-rpc = { path = "../arroyo-rpc" }
+arroyo-datastream = { path = "../arroyo-datastream" }
 
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }

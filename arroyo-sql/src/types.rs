@@ -201,10 +201,24 @@ impl StructDef {
         StructDef::for_fields(fields)
     }
 
-    pub fn generate_serializer_items(&self) -> TokenStream {
-        let struct_type = self.get_type();
+    pub fn builder_ident(&self) -> syn::Type {
         let builder_name = format!("{}RecordBatchBuilder", self.struct_name_ident());
-        let builder_ident: Ident = parse_str(&builder_name).expect(&builder_name);
+        parse_str(&builder_name).expect(&builder_name)
+    }
+
+    pub fn parquet_reader_type(&self) -> syn::Type {
+        let reader_name = format!("{}ParquetReader", self.struct_name_ident());
+        parse_str(&reader_name).expect(&reader_name)
+    }
+
+    pub fn parquet_nullable_reader_type(&self) -> syn::Type {
+        let reader_name = format!("{}ParquetNullableReader", self.struct_name_ident());
+        parse_str(&reader_name).expect(&reader_name)
+    }
+
+    pub fn generate_builder_items(&self) -> TokenStream {
+        let struct_type = self.get_type();
+        let builder_ident = self.builder_ident();
 
         let fields = &self.fields;
         let field_definitions: Vec<TokenStream> = fields
@@ -251,52 +265,7 @@ impl StructDef {
             })
             .collect();
 
-        let schema_data_impl = if self.generated {
-            // generate a SchemaData impl but only for generated types
-            let name = self.struct_name();
-
-            let to_raw_string = if self.fields.len() == 1
-                && matches!(
-                    self.fields[0].data_type,
-                    TypeDef::DataType(DataType::Utf8, _)
-                ) {
-                let field = &self.fields[0].field_ident();
-                if self.fields[0].nullable() {
-                    quote! {
-                        self.#field.as_ref().map(|v| v.as_bytes().to_vec())
-                    }
-                } else {
-                    quote! {
-                        Some(self.#field.as_bytes().to_vec())
-                    }
-                }
-            } else {
-                quote! { unimplemented!("to_raw_string is not implemented for this type") }
-            };
-
-            Some(quote! {
-                impl arroyo_worker::SchemaData for #struct_type {
-                    fn name() -> &'static str {
-                        #name
-                    }
-
-                    fn schema() -> arrow::datatypes::Schema {
-                        let fields: Vec<arrow::datatypes::Field> = vec![#(#schema_initializations,)*];
-                        arrow::datatypes::Schema::new(fields)
-                    }
-
-                    fn to_raw_string(&self) -> Option<Vec<u8>> {
-                        #to_raw_string
-                    }
-                }
-            })
-        } else {
-            None
-        };
-
         quote! {
-            #schema_data_impl
-
             #[derive(Debug)]
             pub struct #builder_ident {
                 schema: std::sync::Arc<arrow::datatypes::Schema>,
@@ -340,6 +309,219 @@ impl StructDef {
                     self.schema.clone()
                 }
             }
+        }
+    }
+
+    // generate a SchemaData impl but only for generated types
+    pub fn generate_schema_data(&self) -> Option<TokenStream> {
+        if !self.generated {
+            return None;
+        }
+        let struct_type = self.get_type();
+
+        let fields = &self.fields;
+
+        let schema_initializations: Vec<_> = fields
+            .iter()
+            .map(|field| {
+                let field: Field = field.clone().into();
+                StructField::get_field_literal(&field, field.is_nullable())
+            })
+            .collect();
+
+        let name = self.struct_name();
+
+        let to_raw_string = if self.fields.len() == 1
+            && matches!(
+                self.fields[0].data_type,
+                TypeDef::DataType(DataType::Utf8, _)
+            ) {
+            let field = &self.fields[0].field_ident();
+            if self.fields[0].nullable() {
+                quote! {
+                    self.#field.as_ref().map(|v| v.as_bytes().to_vec())
+                }
+            } else {
+                quote! {
+                    Some(self.#field.as_bytes().to_vec())
+                }
+            }
+        } else {
+            quote! { unimplemented!("to_raw_string is not implemented for this type") }
+        };
+
+        let reader_type = self.parquet_reader_type();
+
+        Some(quote! {
+            impl arroyo_worker::SchemaData for #struct_type {
+                fn name() -> &'static str {
+                    #name
+                }
+
+                fn schema() -> arrow::datatypes::Schema {
+                    let fields: Vec<arrow::datatypes::Field> = vec![#(#schema_initializations,)*];
+                    arrow::datatypes::Schema::new(fields)
+                }
+
+                fn to_raw_string(&self) -> Option<Vec<u8>> {
+                    #to_raw_string
+                }
+
+                fn iterator_from_record_batch(
+                    record_batch: arrow_array::RecordBatch,
+                ) -> anyhow::Result<Box<dyn Iterator<Item = Self> + Send>> {
+                    Ok(Box::new(#reader_type::new(record_batch)?))
+                }
+            }
+        })
+    }
+
+    pub fn generate_parquet_reader_items(&self) -> TokenStream {
+        let reader_type = self.parquet_reader_type();
+        let nullable_reader_type = self.parquet_nullable_reader_type();
+        let struct_type = self.get_type();
+        let fields = &self.fields;
+        let field_definitions: Vec<TokenStream> = fields
+            .iter()
+            .map(|field| {
+                let field_ident = field.field_ident();
+                match &field.data_type {
+                    TypeDef::StructDef(struct_field, true) => {
+                        let sub_type = struct_field.parquet_nullable_reader_type();
+                        quote! { #field_ident: #sub_type }
+                    }
+                    TypeDef::StructDef(struct_field, false) => {
+                        let sub_type = struct_field.parquet_reader_type();
+                        quote! { #field_ident: #sub_type }
+                    }
+                    TypeDef::DataType(_, _) => {
+                        quote! { #field_ident: std::sync::Arc<dyn arrow::array::Array> }
+                    }
+                }
+            })
+            .collect();
+
+        let array_initializations: Vec<TokenStream> = fields
+            .iter()
+            .map(|field| {
+                let field_string: String = field.name();
+                let field_ident = field.field_ident();
+                match &field.data_type {
+                    TypeDef::StructDef(struct_def, false) => {
+                        let sub_type = struct_def.parquet_reader_type();
+                        quote! { #field_ident:  #sub_type::new(arrow_array::cast::AsArray::as_struct(record_batch.column_by_name(#field_string).ok_or_else(|| anyhow::anyhow!("missing column '{}'", #field_string))?).try_into()?)? }
+                    },
+                    TypeDef::StructDef(struct_def, true) => {
+                        let sub_type = struct_def.parquet_nullable_reader_type();
+                        quote! { #field_ident:  #sub_type::new_from_array(record_batch.column_by_name(#field_string).ok_or_else(|| anyhow::anyhow!("missing column '{}'", #field_string))?.clone())? }
+                    }
+                    TypeDef::DataType(_, _) => {
+                        quote! { #field_ident: record_batch.column_by_name(#field_string).ok_or_else(|| anyhow::anyhow!("missing column '{}'", #field_string))?.clone() }
+                    },
+                }
+            })
+            .collect();
+
+        let field_assignments: Vec<TokenStream> = fields
+            .iter()
+            .map(|field| {
+                let field_ident = field.field_ident();
+                let field_read_assignment = field.parquet_read_assigmment();
+                quote!(let #field_ident = #field_read_assignment;)
+            })
+            .collect();
+        let field_idents: Vec<_> = fields.iter().map(|field| field.field_ident()).collect();
+
+        quote!(
+            struct #reader_type {
+                _offset: usize,
+                _rows: usize,
+                #(#field_definitions,)*
+            }
+
+            impl #reader_type {
+                fn new(record_batch: arrow_array::RecordBatch) -> anyhow::Result<Self> {
+                    Ok(Self {
+                        _offset: 0,
+                        _rows: record_batch.num_rows(),
+                        #(#array_initializations,)*
+                    })
+                }
+
+                fn get(&self, index: usize) -> #struct_type {
+                    #(#field_assignments;)*
+                    #struct_type {
+                        #(#field_idents),*
+                    }
+                }
+            }
+
+            impl Iterator for #reader_type {
+                type Item = #struct_type;
+
+                fn next(&mut self) -> Option<Self::Item> {
+                    if self._offset == self._rows {
+                        return None;
+                    }
+                    let result = self.get(self._offset);
+                    self._offset += 1;
+                    Some(result)
+                }
+            }
+            struct #nullable_reader_type {
+                reader: #reader_type,
+                null_buffer: arrow::buffer::NullBuffer,
+            }
+
+            impl #nullable_reader_type {
+                fn new_from_array(array : std::sync::Arc<dyn arrow::array::Array>) -> anyhow::Result<Self> {
+                    let struct_array = arrow_array::cast::AsArray::as_struct(&array);
+                    let (fields, arrays, null_buffer) = struct_array.clone().into_parts();
+                    let record_batch = arrow_array::RecordBatch::try_new(
+                        std::sync::Arc::new(arrow::datatypes::Schema::new(fields)),
+                        arrays,
+                    )?;
+
+                    let null_buffer =  null_buffer
+                    .unwrap_or_else(|| arrow::buffer::NullBuffer::new_null(
+                        record_batch.num_rows(),
+                    ));
+                    Ok(Self {
+                        reader: #reader_type::new(
+                            record_batch,
+                        )?,
+                        null_buffer,
+                    })
+                }
+
+                fn new(record_batch: arrow_array::RecordBatch, null_buffer: arrow::buffer::NullBuffer) -> anyhow::Result<Self> {
+                    Ok(Self {
+                        reader: #reader_type::new(record_batch)?,
+                        null_buffer,
+                    })
+                }
+                fn get(&self, index: usize) -> Option<#struct_type> {
+                    if self.null_buffer.is_null(index) {
+                        return None;
+                    }
+                    Some(self.reader.get(index))
+                }
+            }
+        )
+    }
+
+    pub fn generate_serializer_items(&self) -> TokenStream {
+        let schema_data_impl = self.generate_schema_data();
+        let builder_items = self.generate_builder_items();
+
+        let parquet_reader_items = self.generate_parquet_reader_items();
+
+        quote! {
+            #schema_data_impl
+
+            #builder_items
+
+            #parquet_reader_items
         }
     }
 
@@ -410,6 +592,107 @@ impl StructField {
             data_type,
             renamed_from,
             original_type,
+        }
+    }
+
+    fn parquet_read_assigmment(&self) -> TokenStream {
+        let field_name = self.field_ident();
+        match &self.data_type {
+            TypeDef::StructDef(_, _) => {
+                quote!(self.#field_name.get(index))
+            }
+            TypeDef::DataType(data_type, true) => match data_type {
+                DataType::Null => quote!(None),
+                DataType::Boolean => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_bool_from_arrow_array_nullable(&self.#field_name, index))
+                }
+                DataType::Int8 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::Int8Type>(&self.#field_name, index))
+                }
+                DataType::Int16 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::Int16Type>(&self.#field_name, index))
+                }
+                DataType::Int32 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::Int32Type>(&self.#field_name, index))
+                }
+                DataType::Int64 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::Int64Type>(&self.#field_name, index))
+                }
+                DataType::UInt8 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::UInt8Type>(&self.#field_name, index))
+                }
+                DataType::UInt16 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::UInt16Type>(&self.#field_name, index))
+                }
+                DataType::UInt32 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::UInt32Type>(&self.#field_name, index))
+                }
+                DataType::UInt64 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::UInt64Type>(&self.#field_name, index))
+                }
+                DataType::Float16 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::Float16Type>(&self.#field_name, index))
+                }
+                DataType::Float32 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::Float32Type>(&self.#field_name, index))
+                }
+                DataType::Float64 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array_nullable::<arrow::datatypes::Float64Type>(&self.#field_name, index))
+                }
+                DataType::Utf8 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_string_from_arrow_array_nullable(&self.#field_name, index))
+                }
+                DataType::Timestamp(_, None) => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_timestamp_from_arrow_array_nullable(&self.#field_name, index))
+                }
+                _ => unimplemented!("parquet_read_assigmment for {:?}", data_type),
+            },
+            TypeDef::DataType(data_type, false) => match data_type {
+                DataType::Null => quote!(None),
+                DataType::Boolean => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_bool_from_arrow_array(&self.#field_name, index))
+                }
+                DataType::Int8 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::Int8Type>(&self.#field_name, index))
+                }
+                DataType::Int16 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::Int16Type>(&self.#field_name, index))
+                }
+                DataType::Int32 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::Int32Type>(&self.#field_name, index))
+                }
+                DataType::Int64 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::Int64Type>(&self.#field_name, index))
+                }
+                DataType::UInt8 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::UInt8Type>(&self.#field_name, index))
+                }
+                DataType::UInt16 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::UInt16Type>(&self.#field_name, index))
+                }
+                DataType::UInt32 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::UInt32Type>(&self.#field_name, index))
+                }
+                DataType::UInt64 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::UInt64Type>(&self.#field_name, index))
+                }
+                DataType::Float16 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::Float16Type>(&self.#field_name, index))
+                }
+                DataType::Float32 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::Float32Type>(&self.#field_name, index))
+                }
+                DataType::Float64 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_native_value_from_arrow_array::<arrow::datatypes::Float64Type>(&self.#field_name, index))
+                }
+                DataType::Utf8 => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_string_from_arrow_array(&self.#field_name, index))
+                }
+                DataType::Timestamp(_, None) => {
+                    quote!(arroyo_worker::connectors::filesystem::arrow::extract_timestamp_from_arrow_array(&self.#field_name, index))
+                }
+                _ => unimplemented!("parquet_read_assigmment for {:?}", data_type),
+            },
         }
     }
 }

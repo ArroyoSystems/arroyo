@@ -4,8 +4,10 @@
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use arrow::datatypes::{DataType, Field, Schema};
+use arrow_array::cast::AsArray;
+use arrow_array::{RecordBatch, StringArray};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -64,6 +66,12 @@ pub trait SchemaData: Data + Serialize + DeserializeOwned {
     fn name() -> &'static str;
     fn schema() -> arrow::datatypes::Schema;
 
+    fn iterator_from_record_batch(
+        _record_batch: RecordBatch,
+    ) -> Result<Box<dyn Iterator<Item = Self> + Send>> {
+        bail!("unimplemented");
+    }
+
     /// Returns the raw string representation of this data, if available for the type
     ///
     /// Implementations should return None if the relevant field is Optional and has
@@ -113,6 +121,41 @@ impl SchemaData for RawJson {
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {
         Some(self.value.as_bytes().to_vec())
+    }
+
+    fn iterator_from_record_batch(
+        record_batch: RecordBatch,
+    ) -> Result<Box<dyn Iterator<Item = RawJson> + Send>> {
+        Ok(Box::new(RawJsonIterator {
+            offset: 0,
+            rows: record_batch.num_rows(),
+            column: record_batch
+                .column_by_name("value")
+                .ok_or_else(|| anyhow::anyhow!("missing column value {}", "value"))?
+                .as_string()
+                .clone(),
+        }))
+    }
+}
+
+struct RawJsonIterator {
+    offset: usize,
+    rows: usize,
+    column: StringArray,
+}
+
+impl Iterator for RawJsonIterator {
+    type Item = RawJson;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset == self.rows {
+            return None;
+        }
+        let val = self.column.value(self.offset);
+        self.offset += 1;
+        Some(RawJson {
+            value: val.to_string(),
+        })
     }
 }
 

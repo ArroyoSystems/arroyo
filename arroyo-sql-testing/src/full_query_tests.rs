@@ -141,6 +141,20 @@ GROUP BY 2
 )
 WHERE auction % 2 = 0"}
 
+full_pipeline_codegen! {"create_filesystem_s3_source",
+"CREATE TABLE events (
+  id bigint,
+  datetime timestamp
+) WITH (
+  connector ='filesystem',
+  type = 'source',
+  path = 's3://demo/s3-uri',
+  compression_format = 'gzip',
+  format = 'json'
+);
+
+SELECT * FROM events;"}
+
 full_pipeline_codegen! {"create_parquet_s3_source",
 "CREATE TABLE bids (
   auction bigint,
@@ -148,10 +162,10 @@ full_pipeline_codegen! {"create_parquet_s3_source",
   price bigint,
   datetime timestamp
 ) WITH (
-  connector ='filesystem',
+  connector ='single_file',
+  type = 'sink',
   path = 'https://s3.us-west-2.amazonaws.com/demo/s3-uri',
-  format = 'parquet',
-  rollover_seconds = '5'
+  format = 'parquet'
 );
 
 INSERT INTO Bids select bid.auction, bid.bidder, bid.price , bid.datetime FROM nexmark where bid is not null;"}

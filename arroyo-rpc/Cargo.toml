@@ -22,7 +22,6 @@ log = "0.4.20"
 tracing = "0.1.40"
 async-trait = "0.1.74"
 apache-avro = "0.16.0"
-regex = "1.10.2"
 
 [build-dependencies]
 tonic-build = { workspace = true }

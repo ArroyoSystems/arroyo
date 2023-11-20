@@ -4,6 +4,7 @@ version = "0.7.0"
 edition = "2021"
 
 [dependencies]
+arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-types = { path = "../arroyo-types" }
 arroyo-openapi = { path = "../arroyo-openapi" }
 
@@ -12,6 +13,7 @@ tokio = { version = "1.16.1", features = ["full"] }
 rand = "0.8.5"
 tracing = "0.1.37"
 tracing-subscriber = "0.3.17"
+tonic = { workspace = true }
 refinery = { version = "0.8.9", features = ["tokio-postgres"] }
 tokio-postgres = "0.7.8"
 serde_json = "1"
