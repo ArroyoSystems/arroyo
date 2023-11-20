@@ -14,6 +14,7 @@ use tokio_stream::StreamExt;
 use crate::query::start_query;
 
 const CONTAINER_NAME: &str = "arroyo-cli-single";
+pub static VERSION: &str = "0.7.0";
 
 mod query;
 

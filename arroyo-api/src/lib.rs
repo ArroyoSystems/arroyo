@@ -24,7 +24,7 @@ use crate::pipelines::{
     __path_restart_pipeline, __path_validate_query,
 };
 use crate::rest::__path_ping;
-use crate::rest_utils::{bad_request, log_and_map, ErrorResp};
+use crate::rest_utils::{bad_request, log_and_map, ErrorResp, ErrorJson};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::formats::*;
@@ -157,6 +157,7 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         delete_udf
     ),
     components(schemas(
+        ErrorJson,
         PipelinePost,
         PipelinePatch,
         PipelineRestart,

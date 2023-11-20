@@ -10,6 +10,8 @@ use thiserror::Error;
 use tracing::error;
 
 use axum::headers::authorization::{Authorization, Bearer};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 pub type BearerAuth = Option<TypedHeader<Authorization<Bearer>>>;
 
@@ -25,6 +27,11 @@ pub struct ErrorResp {
 pub enum ApiError {
     #[error(transparent)]
     JsonExtractorRejection(#[from] JsonRejection),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+pub struct ErrorJson {
+    error: String,
 }
 
 impl IntoResponse for ApiError {
@@ -57,9 +64,9 @@ where
 
 impl IntoResponse for ErrorResp {
     fn into_response(self) -> Response {
-        let body = Json(json!({
-            "error": self.message,
-        }));
+        let body = Json(ErrorJson {
+            error: self.message,
+        });
         (self.status_code, body).into_response()
     }
 }

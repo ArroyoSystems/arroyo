@@ -456,6 +456,9 @@ pub async fn get_checkpoint_details(
 }
 
 /// Subscribe to a job's output
+///
+/// This API returns a server-sent event stream that can be read using the javascript EventSource
+/// API, or another SSE client
 #[utoipa::path(
     get,
     path = "/v1/pipelines/{pipeline_id}/jobs/{job_id}/output",

@@ -521,6 +521,7 @@ pub async fn validate_query(
     request_body = PipelinePost,
     responses(
         (status = 200, description = "Created pipeline and job", body = Pipeline),
+        (status = 400, description = "Query was invalid", body = ErrorJson),
     ),
 )]
 pub async fn post_pipeline(
