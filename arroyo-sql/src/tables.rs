@@ -452,6 +452,7 @@ impl ConnectorTable {
             );
 
             projection.format = Some(format.clone());
+            projection.struct_name = self.type_name.clone();
 
             input = SqlOperator::RecordTransform(
                 Box::new(input),

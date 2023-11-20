@@ -151,9 +151,15 @@ impl Connector for KafkaConnector {
             Some(other) => bail!("unknown auth type '{}'", other),
         };
 
-        let schema_registry = opts
-            .remove("schema_registry.endpoint")
-            .map(|endpoint| SchemaRegistry { endpoint });
+        let schema_registry = opts.remove("schema_registry.endpoint").map(|endpoint| {
+            let api_key = opts.remove("schema_registry.api_key");
+            let api_secret = opts.remove("schema_registry.api_secret");
+            SchemaRegistry {
+                endpoint,
+                api_key,
+                api_secret,
+            }
+        });
 
         let connection = KafkaConfig {
             authentication: auth,

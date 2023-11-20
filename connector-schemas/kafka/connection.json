@@ -43,7 +43,8 @@
                         },
                         "password": {
                             "type": "string",
-                            "description": "The password to use for SASL authentication"
+                            "description": "The password to use for SASL authentication",
+                            "isSensitive": true
                         }
                     },
                     "additionalProperties": false
@@ -62,6 +63,23 @@
                         "http://localhost:8081"
                     ],
                     "format": "uri"
+                },
+                "apiKey": {
+                    "title": "API Key",
+                    "type": "string",
+                    "description": "The API key for your Confluent Schema Registry if you have one",
+                    "examples": [
+                        "ABCDEFGHIJK01234"
+                    ]
+                },
+                "apiSecret": {
+                    "title": "API Secret",
+                    "type": "string",
+                    "description": "Secret for your Confluent Schema Registry if you have one",
+                    "isSensitive": true,
+                    "examples": [
+                        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/="
+                    ]
                 }
             },
             "required": ["endpoint"]
