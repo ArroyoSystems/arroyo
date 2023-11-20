@@ -848,20 +848,6 @@ pub fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
     start..=end
 }
 
-pub fn cargo_toml(name: &str, dependencies: &str) -> String {
-    format!(
-        r#"
-[package]
-name = "{}"
-version = "1.0.0"
-edition = "2021"
-
-{}
-        "#,
-        name, dependencies
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

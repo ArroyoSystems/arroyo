@@ -168,6 +168,10 @@ message WorkerErrorReq {
 message WorkerErrorRes {
 }
 
+message CheckUdfsReq {
+  string definition = 1;
+}
+
 service ControllerGrpc {
   rpc RegisterNode(RegisterNodeReq) returns (RegisterNodeResp);
   rpc HeartbeatNode(HeartbeatNodeReq) returns (HeartbeatNodeResp);
@@ -455,15 +459,20 @@ message CompileQueryResp {
   string wasm_fns_path = 2;
 }
 
-message CheckUdfsReq {
+message CheckUdfsResp {
+  repeated string errors = 1;
+  optional string udf_name = 2;
+}
+
+message CheckUdfsCompilerReq {
   UdfCrate udf_crate = 1;
 }
 
-message CheckUdfsResp {
+message CheckUdfsCompilerResp {
   repeated string errors = 1;
 }
 
 service CompilerGrpc {
   rpc CompileQuery(CompileQueryReq) returns (CompileQueryResp);
-  rpc CheckUdfs(CheckUdfsReq) returns (CheckUdfsResp);
+  rpc CheckUdfs(CheckUdfsCompilerReq) returns (CheckUdfsCompilerResp);
 }

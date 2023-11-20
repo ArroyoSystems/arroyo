@@ -194,7 +194,7 @@ const RawStringEditor = ({
                 primitive: 'string',
               },
             },
-            nullable: false,
+            nullable: true,
           },
         ],
         format: { raw_string: {} },

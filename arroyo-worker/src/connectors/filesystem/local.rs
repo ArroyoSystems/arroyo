@@ -20,8 +20,8 @@ use crate::{
 use anyhow::{bail, Result};
 
 use super::{
-    add_suffix_prefix, delta, get_partitioner_from_table, CommitState, CommitStyle,
-    FileSystemTable, FilenameStrategy, Filenaming, MultiPartWriterStats, RollingPolicy,
+    add_suffix_prefix, delta, get_partitioner_from_file_settings, CommitState, CommitStyle,
+    FileSystemTable, FilenameStrategy, Filenaming, MultiPartWriterStats, RollingPolicy, TableType,
 };
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
@@ -47,23 +47,27 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
         // make sure final_dir and tmp_dir exists
         create_dir_all(&tmp_dir).unwrap();
 
-        let commit_state = match table_properties
-            .file_settings
-            .as_ref()
-            .unwrap()
-            .commit_style
-            .unwrap()
-        {
+        let TableType::Sink {
+            ref file_settings, ..
+        } = table_properties.type_
+        else {
+            unreachable!("LocalFileSystemWriter can only be used as a sink")
+        };
+        let commit_state = match file_settings.as_ref().unwrap().commit_style.unwrap() {
             CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
 
-        let mut filenaming = table_properties
-            .file_settings
+        let mut filenaming = file_settings
             .clone()
             .unwrap()
             .filenaming
-            .unwrap();
+            .unwrap_or_else(|| Filenaming {
+                strategy: Some(FilenameStrategy::Serial),
+                prefix: None,
+                suffix: None,
+            });
+
         if filenaming.suffix.is_none() {
             filenaming.suffix = Some(V::file_suffix().to_string());
         }
@@ -74,11 +78,11 @@ impl<K: Key, D: Data + Sync + Serialize, V: LocalWriter<D>> LocalFileSystemWrite
             final_dir,
             next_file_index: 0,
             subtask_id: 0,
-            partitioner: get_partitioner_from_table(&table_properties),
-            finished_files: Vec::new(),
-            rolling_policy: RollingPolicy::from_file_settings(
-                table_properties.file_settings.as_ref().unwrap(),
+            partitioner: get_partitioner_from_file_settings(
+                file_settings.as_ref().unwrap().clone(),
             ),
+            finished_files: Vec::new(),
+            rolling_policy: RollingPolicy::from_file_settings(file_settings.as_ref().unwrap()),
             table_properties,
             commit_state,
             phantom: PhantomData,

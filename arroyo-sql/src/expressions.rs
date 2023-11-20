@@ -257,7 +257,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
                     panic!("unnest appeared in a non-projection context");
                 } else {
                     let ident = input_context.variable_ident();
-                    parse_quote!(#ident)
+                    parse_quote!(#ident.clone())
                 }
             }
         }

@@ -25,12 +25,13 @@ use uuid::Uuid;
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 
 use arroyo_types::*;
+pub mod arrow;
 mod delta;
 pub mod json;
 pub mod local;
 pub mod parquet;
-pub mod s3;
 pub mod single_file;
+pub mod source;
 
 use crate::SchemaData;
 
@@ -75,7 +76,14 @@ impl<K: Key, T: Data + Sync + SchemaData + Serialize, V: LocalWriter<T>>
             serde_json::from_str(config_str).expect("Invalid config for FileSystemSink");
         let table: FileSystemTable =
             serde_json::from_value(config.table).expect("Invalid table config for FileSystemSink");
-        let final_dir = table.write_target.path.clone();
+        let final_dir = match table.type_ {
+            TableType::Sink {
+                ref write_target, ..
+            } => write_target.path.clone(),
+            TableType::Source { .. } => {
+                unreachable!("shouldn't be using local writer for source");
+            }
+        };
         let writer = LocalFileSystemWriter::new(final_dir, table);
         TwoPhaseCommitterOperator::new(writer)
     }
@@ -88,20 +96,26 @@ impl<
     > FileSystemSink<K, T, R>
 {
     pub fn create_and_start(table: FileSystemTable) -> TwoPhaseCommitterOperator<K, T, Self> {
+        let TableType::Sink {
+            write_target,
+            file_settings,
+            format_settings: _,
+        } = table.clone().type_
+        else {
+            unreachable!("multi-part writer can only be used as sink");
+        };
         let (sender, receiver) = tokio::sync::mpsc::channel(10000);
         let (checkpoint_sender, checkpoint_receiver) = tokio::sync::mpsc::channel(10000);
-        let partition_func = get_partitioner_from_table(&table);
-        let commit_strategy = match table.file_settings.as_ref().unwrap().commit_style.unwrap() {
+        let commit_strategy = match file_settings.as_ref().unwrap().commit_style.unwrap() {
             CommitStyle::Direct => CommitStrategy::PerSubtask,
             CommitStyle::DeltaLake => CommitStrategy::PerOperator,
         };
+        let partition_func = get_partitioner_from_file_settings(file_settings.unwrap());
         tokio::spawn(async move {
-            let path: Path = StorageProvider::get_key(&table.write_target.path)
-                .unwrap()
-                .into();
+            let path: Path = StorageProvider::get_key(&write_target.path).unwrap().into();
             let provider = StorageProvider::for_url_with_options(
-                &table.write_target.path,
-                table.write_target.storage_options.clone(),
+                &write_target.path,
+                write_target.storage_options.clone(),
             )
             .await
             .unwrap();
@@ -110,7 +124,7 @@ impl<
                 Arc::new(provider),
                 receiver,
                 checkpoint_sender,
-                table.clone(),
+                table,
             );
             writer.run().await.unwrap();
         });
@@ -133,10 +147,10 @@ impl<
     }
 }
 
-fn get_partitioner_from_table<K: Key, T: Data + Serialize>(
-    table: &FileSystemTable,
+fn get_partitioner_from_file_settings<K: Key, T: Data + Serialize>(
+    file_settings: FileSettings,
 ) -> Option<Box<dyn Fn(&Record<K, T>) -> String + Send>> {
-    let Some(partitions) = table.file_settings.as_ref().unwrap().partitioning.clone() else {
+    let Some(partitions) = file_settings.partitioning else {
         return None;
     };
     match (
@@ -630,26 +644,31 @@ where
         checkpoint_sender: Sender<CheckpointData<T>>,
         writer_properties: FileSystemTable,
     ) -> Self {
-        let commit_state = match writer_properties
-            .file_settings
-            .as_ref()
-            .unwrap()
-            .commit_style
-            .unwrap()
+        let file_settings = if let TableType::Sink {
+            ref file_settings, ..
+        } = writer_properties.type_
         {
+            file_settings.as_ref().unwrap()
+        } else {
+            unreachable!("AsyncMultipartFileSystemWriter can only be used as a sink");
+        };
+
+        let commit_state = match file_settings.commit_style.unwrap() {
             CommitStyle::DeltaLake => CommitState::DeltaLake { last_version: -1 },
             CommitStyle::Direct => CommitState::VanillaParquet,
         };
-        let mut filenaming = writer_properties
-            .file_settings
-            .as_ref()
-            .unwrap()
+        let mut filenaming = file_settings
             .filenaming
             .clone()
-            .unwrap();
+            .unwrap_or_else(|| Filenaming {
+                strategy: Some(FilenameStrategy::Serial),
+                prefix: None,
+                suffix: None,
+            });
         if filenaming.suffix.is_none() {
             filenaming.suffix = Some(R::suffix());
         }
+
         Self {
             path,
             active_writers: HashMap::new(),
@@ -662,9 +681,7 @@ where
             checkpoint_sender,
             futures: FuturesUnordered::new(),
             files_to_finish: Vec::new(),
-            rolling_policy: RollingPolicy::from_file_settings(
-                writer_properties.file_settings.as_ref().unwrap(),
-            ),
+            rolling_policy: RollingPolicy::from_file_settings(file_settings),
             properties: writer_properties,
             commit_state,
             filenaming,

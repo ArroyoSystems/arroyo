@@ -11,9 +11,9 @@ kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
 arroyo-types = { path = "../arroyo-types" }
 arroyo-macro = { path = "../arroyo-macro" }
 arroyo-state = { path = "../arroyo-state" }
-arroyo-storage = { path = "../arroyo-storage" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
+arroyo-storage = { path = "../arroyo-storage" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
 
 rand = "0.8"
@@ -25,7 +25,7 @@ chrono = "0.4"
 prometheus = {version = "0.13", features = ["process"] }
 futures = "0.3"
 tokio = { version = "1", features = ["full", "tracing"] }
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { version = "0.1", features = ["full"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 async-trait = "0.1.68"
 async-stream = "0.3.4"
@@ -46,10 +46,10 @@ arrow = { workspace = true }
 parquet = { workspace = true, features = ["async"]}
 arrow-array = { workspace = true}
 aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = "0.21.0"
 aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
 uuid = {version = "1.4.1", features = ["v4"]}
 rusoto_core = "0.48.0"
+rusoto_s3 = "0.48.0"
 
 tonic = { workspace = true }
 prost = "0.11"

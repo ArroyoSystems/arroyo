@@ -1,9 +1,10 @@
+use crate::cargo_toml;
 use crate::states::fatal;
 use anyhow::{anyhow, Result};
 use arroyo_datastream::{parse_type, Operator, Program, WasmBehavior};
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::{CompileQueryReq, UdfCrate};
-use arroyo_types::{cargo_toml, REMOTE_COMPILER_ENDPOINT_ENV};
+use arroyo_types::REMOTE_COMPILER_ENDPOINT_ENV;
 use petgraph::Direction;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};

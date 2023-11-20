@@ -1,114 +1,169 @@
 {
-    "type": "object",
-    "title": "FileSystemTable",
-    "properties": {
-        "write_target": {
-            "type": "object",
-            "title": "Folder URL",
-            "properties": {
+  "type": "object",
+  "title": "FileSystemTable",
+  "properties": {
+    "type": {
+      "type": "object",
+      "title": "Table Type",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "Source",
+          "properties": {
+            "read_source": {
+              "type": "object",
+              "title": "Source",
+              "properties": {
                 "Path": {
-                    "title": "Path",
-                    "type": "string",
-                    "description": "URI of the folder to write to"
+                  "title": "Path",
+                  "type": "string",
+                  "description": "URI of the folder to write to"
                 },
                 "Storage options": {
-                    "type": "object",
-                    "title": "Storage Options",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
+                  "type": "object",
+                  "title": "Storage Options",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
                 }
-            },
-            "required": [
+              },
+              "required": [
                 "Path"
-            ],
-            "additionalProperties": false
+              ],
+              "additionalProperties": false
+            },
+
+            "compression_format": {
+                "title": "Compression format",
+                "type": "string",
+                "description": "Compression format of the files in S3",
+                "enum": [
+                  "none",
+                  "zstd",
+                  "gzip"
+                  ]     
+              },
+            "regexPattern" : {
+              "title": "File Regex Pattern",
+              "type": "string",
+              "description": "regex matching pattern for files to include in source. Will search everything under the source path."
+              }
+            },
+          "required": [
+            "read_source"
+          ]
         },
-        "format_settings": {
-            "type": "object",
-            "title": "Format Settings",
-            "oneOf": [
-                {
-                    "type": "object",
-                    "title": "Parquet",
-                    "properties": {
-                        "compression": {
-                            "title": "Compression",
-                            "type": "string",
-                            "enum": [
-                                "none",
-                                "snappy",
-                                "gzip",
-                                "zstd",
-                                "lz4"
-                            ]
-                        },
-                        "row_batch_size": {
-                            "title": "Row Batch Size",
-                            "type": "integer"
-                        },
-                        "row_group_size": {
-                            "title": "Row Group Size",
-                            "type": "integer"
-                        }        
-                    },
-                    "additionalProperties": false
+        {
+          "type": "object",
+          "title": "Sink",
+          "properties": {
+            "write_target": {
+              "type": "object",
+              "title": "Folder URL",
+              "properties": {
+                "Path": {
+                  "title": "Path",
+                  "type": "string",
+                  "description": "URI of the folder to write to"
                 },
-                {"type": "object",
-                "title": "JSON",
-                "additionalProperties": false
+                "Storage options": {
+                  "type": "object",
+                  "title": "Storage Options",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
                 }
-            ]
-        },
-        "file_settings": {
-            "type": "object",
-            "title": "File Settings",
-            "properties": {
+              },
+              "required": [
+                "Path"
+              ],
+              "additionalProperties": false
+            },
+            "format_settings": {
+              "type": "object",
+              "title": "Format Settings",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "title": "Parquet",
+                  "properties": {
+                    "compression": {
+                      "title": "Compression",
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "snappy",
+                        "gzip",
+                        "zstd",
+                        "lz4"
+                      ]
+                    },
+                    "row_batch_size": {
+                      "title": "Row Batch Size",
+                      "type": "integer"
+                    },
+                    "row_group_size": {
+                      "title": "Row Group Size",
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "title": "JSON",
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "file_settings": {
+              "type": "object",
+              "title": "File Settings",
+              "properties": {
                 "target_part_size": {
-                    "title": "Target Part Size",
-                    "type": "integer",
-                    "description": "target size for each part of the multipart upload, in bytes"
+                  "title": "Target Part Size",
+                  "type": "integer",
+                  "description": "target size for each part of the multipart upload, in bytes"
                 },
                 "max_parts": {
-                    "title": "Max Parts",
-                    "type": "integer",
-                    "description": "maximum number of parts to upload in a multipart upload"
+                  "title": "Max Parts",
+                  "type": "integer",
+                  "description": "maximum number of parts to upload in a multipart upload"
                 },
                 "target_file_size": {
-                    "title": "Target File Size",
-                    "type": "integer",
-                    "description": "target size for each file, in bytes"
+                  "title": "Target File Size",
+                  "type": "integer",
+                  "description": "target size for each file, in bytes"
                 },
                 "rollover_seconds": {
-                    "title": "Rollover Seconds",
-                    "type": "integer",
-                    "description": "number of seconds to wait before rolling over to a new file"
+                  "title": "Rollover Seconds",
+                  "type": "integer",
+                  "description": "number of seconds to wait before rolling over to a new file"
                 },
                 "inactivity_rollover_seconds": {
-                    "title": "Inactivity Rollover Seconds",
-                    "type": "integer",
-                    "description": "number of seconds of inactivity to wait before rolling over to a new file"
+                  "title": "Inactivity Rollover Seconds",
+                  "type": "integer",
+                  "description": "number of seconds of inactivity to wait before rolling over to a new file"
                 },
                 "partitioning": {
-                    "title": "Partitioning",
-                    "type": "object",
-                    "properties": {
-                        "time_partition_pattern": {
-                            "title": "Time Partition Pattern",
-                            "type": "string",
-                            "description": "The pattern of the date string"
-                            
-                            },
-                        "partition_fields": {
-                            "title": "Partition Fields",
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            },
-                            "description": "fields to partition the data by"
-                        }
+                  "title": "Partitioning",
+                  "type": "object",
+                  "properties": {
+                    "time_partition_pattern": {
+                      "title": "Time Partition Pattern",
+                      "type": "string",
+                      "description": "The pattern of the date string"
                     },
-                    "additionalProperties": false
+                    "partition_fields": {
+                      "title": "Partition Fields",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "fields to partition the data by"
+                    }
+                  },
+                  "additionalProperties": false
                 },
                 "commit_style": {
                     "title": "Commit Style",
@@ -142,11 +197,18 @@
                         }
                     }
                 }
-            },
-            "additionalProperties": false
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "write_target"
+          ]
         }
-    },
-    "required": [
-        "write_target"
-    ]
+      ]
+    }
+  },
+  "required": [
+    "type"
+  ]
 }

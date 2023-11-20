@@ -5,18 +5,19 @@
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
-    CheckUdfsReq, CheckUdfsResp, GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp,
-    HeartbeatReq, HeartbeatResp, OutputData, RegisterNodeReq, RegisterNodeResp, RegisterWorkerReq,
-    RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp, TaskFailedReq,
-    TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, TaskStartedResp,
-    WorkerFinishedReq, WorkerFinishedResp,
+    CheckUdfsCompilerReq, CheckUdfsReq, CheckUdfsResp, GrpcOutputSubscription, HeartbeatNodeReq,
+    HeartbeatNodeResp, HeartbeatReq, HeartbeatResp, OutputData, RegisterNodeReq, RegisterNodeResp,
+    RegisterWorkerReq, RegisterWorkerResp, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
+    TaskFailedReq, TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq,
+    TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
 };
 use arroyo_rpc::grpc::{
-    SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, WorkerErrorReq,
-    WorkerErrorRes,
+    SinkDataReq, SinkDataResp, TaskCheckpointEventReq, TaskCheckpointEventResp, UdfCrate,
+    WorkerErrorReq, WorkerErrorRes,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::log_event;
+use arroyo_sql::{parse_dependencies, ArroyoSchemaProvider};
 use arroyo_types::{
     from_micros, ports, DatabaseConfig, NodeId, WorkerId, REMOTE_COMPILER_ENDPOINT_ENV,
 };
@@ -447,12 +448,39 @@ impl ControllerGrpc for ControllerServer {
         })?;
 
         let req = request.into_inner();
+        let definition = req.definition.clone();
+
+        let dependencies = match parse_dependencies(&definition) {
+            Ok(dependencies) => dependencies,
+            Err(e) => {
+                return Ok(udf_error_resp(e));
+            }
+        };
+
+        // use the ArroyoSchemaProvider to do some validation and to get the function name
+        let function_name = match ArroyoSchemaProvider::new().add_rust_udf(&definition) {
+            Ok(function_name) => function_name,
+            Err(e) => return Ok(udf_error_resp(e)),
+        };
+
+        // build cargo.toml
+        let cargo_toml = cargo_toml(&function_name, &dependencies);
 
         // send to compiler
-        let compiler_res = client.check_udfs(req).await?.into_inner();
+        let compiler_res = client
+            .check_udfs(CheckUdfsCompilerReq {
+                udf_crate: Some(UdfCrate {
+                    name: function_name.clone(),
+                    definition: req.definition,
+                    cargo_toml,
+                }),
+            })
+            .await?
+            .into_inner();
 
         Ok(Response::new(CheckUdfsResp {
             errors: compiler_res.errors,
+            udf_name: Some(function_name),
         }))
     }
 }
@@ -655,4 +683,28 @@ impl ControllerServer {
         shutdown_tx.send(0).unwrap();
         Ok(())
     }
+}
+
+fn cargo_toml(name: &str, dependencies: &str) -> String {
+    format!(
+        r#"
+[package]
+name = "{}"
+version = "1.0.0"
+edition = "2021"
+
+{}
+        "#,
+        name, dependencies
+    )
+}
+
+fn udf_error_resp<E>(e: E) -> Response<CheckUdfsResp>
+where
+    E: core::fmt::Display,
+{
+    Response::new(CheckUdfsResp {
+        errors: vec![e.to_string()],
+        udf_name: None,
+    })
 }

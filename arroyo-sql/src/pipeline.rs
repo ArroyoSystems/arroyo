@@ -20,7 +20,7 @@ use quote::quote;
 use crate::code_gen::{CodeGenerator, ValuePointerContext, VecAggregationContext};
 use crate::expressions::{AggregateComputation, AggregateResultExtraction, ExpressionContext};
 use crate::external::{ProcessingMode, SqlSink, SqlSource};
-use crate::operators::UnnestProjection;
+use crate::operators::{UnnestFieldType, UnnestProjection};
 use crate::schemas::window_type_def;
 use crate::tables::{Insert, Table};
 use crate::{
@@ -582,32 +582,38 @@ impl<'a> SqlPipelineBuilder<'a> {
             .iter()
             .map(|field| Column::convert(&field.qualified_column()));
 
-        let mut fields: Vec<_> = names.zip(functions).collect();
+        let fields: Vec<_> = names.zip(functions).collect();
 
         let mut unnest = None;
-        for (i, (_, expr)) in fields.iter_mut().enumerate() {
-            if let Some(e) = Self::split_unnest(expr)? {
-                if unnest.replace((i, e)).is_some() {
-                    bail!("multiple columns containing unnest functions, which is not currently supported");
-                }
-            }
-        }
+        let fields = fields
+            .into_iter()
+            .map(|(col, mut expr)| {
+                let typ = if let Some(e) = Self::split_unnest(&mut expr)? {
+                    if let Some(prev) = unnest.replace(e) {
+                        if &prev != unnest.as_ref().unwrap() {
+                            bail!("multiple unnested values, which is not currently supported");
+                        }
+                    }
+                    UnnestFieldType::UnnestOuter
+                } else {
+                    UnnestFieldType::Default
+                };
 
-        if let Some((i, unnest_inner)) = unnest {
-            let (unnest_col, unnest_outer) = fields.remove(i);
+                Ok((col, expr, typ))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
+        if let Some(unnest_inner) = unnest {
             Ok(SqlOperator::RecordTransform(
                 Box::new(input),
                 RecordTransform::UnnestProjection(UnnestProjection {
                     fields,
-                    unnest_col,
                     unnest_inner,
-                    unnest_outer,
                     format: None,
                 }),
             ))
         } else {
-            let projection = Projection::new(fields);
+            let projection = Projection::new(fields.into_iter().map(|(a, b, _)| (a, b)).collect());
 
             Ok(SqlOperator::RecordTransform(
                 Box::new(input),
