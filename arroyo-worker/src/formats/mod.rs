@@ -180,7 +180,7 @@ impl<T: SchemaData> DataSerializer<T> {
     pub fn to_vec(&self, record: &T) -> Option<Vec<u8>> {
         match &self.format {
             Format::Json(json) => {
-                let mut writer: Vec<u8> = vec![];
+                let mut writer: Vec<u8> = Vec::with_capacity(128);
                 if json.confluent_schema_registry {
                     writer.push(0);
                     writer.extend(json.confluent_schema_version.expect("must have computed schema version to write using confluent schema registry").to_be_bytes());
