@@ -495,3 +495,29 @@ full_pipeline_codegen! {
   "kafka_avro_source",
   "SELECT * FROM kafka_avro_schema"
 }
+
+full_pipeline_codegen! {
+  "source_inferred_schema",
+  "CREATE TABLE n WITH (
+     connector = 'nexmark',
+     event_rate = '10'
+   );
+
+   select * from n;
+  "
+}
+
+full_pipeline_codegen! {
+  "sink_inferred_schema",
+  "CREATE TABLE schemaless_sink WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'sink',
+  topic = 'outputs',
+  format = 'json'
+);
+
+INSERT INTO schemaless_sink
+select bid.url
+from nexmark;"
+}

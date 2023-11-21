@@ -1,5 +1,4 @@
 use std::str::FromStr;
-use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
@@ -207,7 +206,14 @@ impl ConnectorTable {
             })
             .collect();
 
-        let schema = ConnectionSchema::try_new(format, framing, None, schema_fields?, None)?;
+        let schema = ConnectionSchema::try_new(
+            format,
+            framing,
+            None,
+            schema_fields?,
+            None,
+            Some(fields.is_empty()),
+        )?;
 
         let connection = connector.from_options(name, options, Some(&schema))?;
 

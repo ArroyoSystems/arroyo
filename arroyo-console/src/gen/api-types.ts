@@ -243,6 +243,7 @@ export interface components {
       fields: (components["schemas"]["SourceField"])[];
       format?: components["schemas"]["Format"] | null;
       framing?: components["schemas"]["Framing"] | null;
+      inferred?: boolean | null;
       structName?: string | null;
     };
     ConnectionTable: {

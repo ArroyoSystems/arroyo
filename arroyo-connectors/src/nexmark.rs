@@ -84,6 +84,7 @@ pub fn nexmark_schema() -> ConnectionSchema {
             ),
         ],
         definition: None,
+        inferred: None,
     }
 }
 

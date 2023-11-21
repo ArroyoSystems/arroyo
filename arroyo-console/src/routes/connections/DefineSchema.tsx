@@ -20,6 +20,7 @@ import {
 } from '../../lib/data_fetching';
 import { ConfluentSchemaEditor } from './ConfluentSchemaEditor';
 import { components } from '../../gen/api-types';
+import { capitalize } from '../../lib/util';
 
 const SchemaFormatEditor = ({
   connector,
@@ -37,7 +38,10 @@ const SchemaFormatEditor = ({
   format: 'json' | 'avro';
 }) => {
   type SchemaTypeOption = { name: string; value: string };
-  let schemaTypeOptions: SchemaTypeOption[] = [{ name: format + ' schema', value: 'schema' }];
+  let schemaTypeOptions: SchemaTypeOption[] = [
+    { name: 'Infer schema', value: 'inferred' },
+    { name: capitalize(format) + ' schema', value: 'schema' },
+  ];
 
   if (format == 'json') {
     schemaTypeOptions.push({ name: 'Unstructured JSON', value: 'unstructured' });
@@ -91,6 +95,17 @@ const SchemaFormatEditor = ({
   } else if ((state.schema?.definition || {})[def_name] != undefined) {
     editor = <SchemaEditor state={state} setState={setState} next={next} format={format} />;
     value = 'schema';
+  } else if (state.schema?.inferred) {
+    editor = (
+      <Stack spacing={4} maxW={'lg'}>
+        <Text>
+          The schema for this connection will be inferred from context in the SQL query. This option
+          should generally just be used for sinks.
+        </Text>
+        <Button onClick={next}>Continue</Button>
+      </Stack>
+    );
+    value = 'inferred';
   } else {
     editor = null;
     value = undefined;
@@ -137,6 +152,19 @@ const SchemaFormatEditor = ({
           },
         });
         break;
+      case 'inferred':
+        setState({
+          ...state,
+          schema: {
+            ...state.schema,
+            definition: null,
+            fields: [],
+            format: { json: { unstructured: false, confluentSchemaRegistry: false } },
+            inferred: true,
+          },
+        });
+        break;
+
       default:
         setState({
           ...state,

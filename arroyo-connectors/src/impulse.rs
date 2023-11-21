@@ -25,6 +25,7 @@ pub fn impulse_schema() -> ConnectionSchema {
             source_field("subtask_index", Primitive(PrimitiveType::UInt64)),
         ],
         definition: None,
+        inferred: None,
     }
 }
 

@@ -85,6 +85,7 @@ pub fn get_json_schema_source() -> Result<Connection> {
             .map(|field| field.try_into().unwrap())
             .collect(),
         Some(definition),
+        None,
     )?;
     let config = KafkaConfig {
         authentication: arroyo_connectors::kafka::KafkaConfigAuthentication::None {},
@@ -189,6 +190,7 @@ pub fn get_avro_source() -> Result<Connection> {
             .map(|field| field.try_into().unwrap())
             .collect(),
         Some(definition),
+        None,
     )?;
     let config = KafkaConfig {
         authentication: arroyo_connectors::kafka::KafkaConfigAuthentication::None {},

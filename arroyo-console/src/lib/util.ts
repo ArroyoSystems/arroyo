@@ -189,3 +189,10 @@ export const generate_udf_id = () => {
   }
   return result;
 };
+
+export function capitalize(string: string): string {
+  if (string == 'json') {
+    return 'JSON';
+  }
+  return string.charAt(0).toUpperCase() + string.slice(1);
+}

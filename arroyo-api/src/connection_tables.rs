@@ -261,7 +261,7 @@ pub async fn create_connection_table(
         .to_string();
 
     if let Some(schema) = &schema {
-        if schema.definition.is_none() {
+        if schema.definition.is_none() && schema.inferred != Some(true) {
             return Err(required_field("schema.definition"));
         }
     }
