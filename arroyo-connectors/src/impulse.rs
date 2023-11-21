@@ -16,8 +16,6 @@ import_types!(schema = "../connector-schemas/impulse/table.json");
 const ICON: &str = include_str!("../resources/impulse.svg");
 
 pub fn impulse_schema() -> ConnectionSchema {
-    // use grpc::api::PrimitiveType::*;
-    // use source_field_type::Type::Primitive;
     ConnectionSchema {
         format: None,
         framing: None,
@@ -113,7 +111,7 @@ impl Connector for ImpulseConnector {
 
         // validate the schema
         if let Some(s) = s {
-            if s.fields != impulse_schema().fields {
+            if !s.fields.is_empty() && s.fields != impulse_schema().fields {
                 bail!("invalid schema for impulse source");
             }
         }

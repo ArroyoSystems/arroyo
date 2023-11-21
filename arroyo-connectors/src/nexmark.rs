@@ -1,4 +1,4 @@
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
 use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, FieldType, SourceFieldType, StructType, TestSourceMessage,
@@ -7,9 +7,10 @@ use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::str::FromStr;
 use typify::import_types;
 
-use crate::{nullable_field, source_field, Connection, Connector, EmptyConfig};
+use crate::{nullable_field, pull_opt, source_field, Connection, Connector, EmptyConfig};
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/nexmark/table.json");
 const ICON: &str = include_str!("../resources/nexmark.svg");
@@ -148,24 +149,35 @@ impl Connector for NexmarkConnector {
 
     fn from_options(
         &self,
-        _: &str,
-        _: &mut std::collections::HashMap<String, String>,
-        _: Option<&ConnectionSchema>,
+        name: &str,
+        options: &mut std::collections::HashMap<String, String>,
+        schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
-        // let event_rate =
-        //     f64::from_str(&pull_opt("event_rate", options)?)
-        //     .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;
+        let event_rate = f64::from_str(&pull_opt("event_rate", options)?)
+            .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;
 
-        // let runtime = options.remove("runtime")
-        //     .map(|t| f64::from_str(&t))
-        //     .transpose()
-        //     .map_err(|_| anyhow!("invalid value for runtime; expected float"))?;
+        let runtime = options
+            .remove("runtime")
+            .map(|t| f64::from_str(&t))
+            .transpose()
+            .map_err(|_| anyhow!("invalid value for runtime; expected float"))?;
 
-        // self.from_config(None, name, EmptyConfig {}, NexmarkTable {
-        //     event_rate,
-        //     runtime,
-        // }, None)
-        bail!("Nexmark sources cannot currently be created in SQL; create using the web ui instead")
+        if let Some(schema) = schema {
+            if !schema.fields.is_empty() && schema.fields != nexmark_schema().fields {
+                bail!("invalid schema for nexmark source; omit fields to rely on inference");
+            }
+        }
+
+        self.from_config(
+            None,
+            name,
+            EmptyConfig {},
+            NexmarkTable {
+                event_rate,
+                runtime,
+            },
+            None,
+        )
     }
 
     fn from_config(

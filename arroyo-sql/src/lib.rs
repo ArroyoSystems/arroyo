@@ -216,8 +216,12 @@ impl ArroyoSchemaProvider {
         self.tables.insert(table.name().to_string(), table);
     }
 
-    fn get_table(&self, table_name: &String) -> Option<&Table> {
+    pub fn get_table(&self, table_name: &str) -> Option<&Table> {
         self.tables.get(table_name)
+    }
+
+    pub fn get_table_mut(&mut self, table_name: &str) -> Option<&mut Table> {
+        self.tables.get_mut(table_name)
     }
 
     fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
@@ -385,12 +389,9 @@ impl ContextProvider for ArroyoSchemaProvider {
         let table = self.tables.get(&name.to_string()).ok_or_else(|| {
             datafusion::error::DataFusionError::Plan(format!("Table {} not found", name))
         })?;
-        let fields = table.get_fields().map_err(|err| {
-            datafusion::error::DataFusionError::Plan(format!(
-                "Table {} failed to get fields with {}",
-                name, err
-            ))
-        })?;
+
+        let fields = table.get_fields();
+
         Ok(create_table_source(fields))
     }
 
@@ -455,7 +456,10 @@ pub fn parse_and_get_program_sync(
         if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
             schema_provider.insert_table(table);
         } else {
-            inserts.push(Insert::try_from_statement(&statement, &schema_provider)?);
+            inserts.push(Insert::try_from_statement(
+                &statement,
+                &mut schema_provider,
+            )?);
         };
     }
 
@@ -495,6 +499,7 @@ pub fn parse_and_get_program_sync(
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
+            inferred_fields: None,
         });
 
         plan_graph.add_sql_operator(sink.as_sql_sink(insert)?);
@@ -706,7 +711,7 @@ pub fn get_test_expression(
         if let Some(table) = Table::try_from_statement(&statement, &schema_provider).unwrap() {
             schema_provider.insert_table(table);
         } else {
-            inserts.push(Insert::try_from_statement(&statement, &schema_provider).unwrap());
+            inserts.push(Insert::try_from_statement(&statement, &mut schema_provider).unwrap());
         };
     }
 
