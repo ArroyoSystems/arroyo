@@ -47,7 +47,7 @@ RUN cargo install refinery_cli
 # Install pnpm
 RUN  curl -fsSL https://deb.nodesource.com/setup_19.x | sudo -E bash - && \
     sudo apt-get install -y nodejs && \
-    curl -fsSL https://get.pnpm.io/install.sh | SHELL=$(which bash) bash -
+    curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=8.10.4 SHELL=$(which bash) bash -
 
 COPY arroyo-types arroyo-types
 COPY arroyo-worker arroyo-worker
