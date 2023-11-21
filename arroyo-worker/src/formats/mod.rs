@@ -182,6 +182,9 @@ impl<T: SchemaData> DataSerializer<T> {
             Format::Json(json) => {
                 let mut writer: Vec<u8> = Vec::with_capacity(128);
                 if json.confluent_schema_registry {
+                    if json.include_schema {
+                        unreachable!("can't include schema when writing to confluent schema registry, should've been caught when creating JsonFormat");
+                    }
                     writer.push(0);
                     writer.extend(json.confluent_schema_version.expect("must have computed schema version to write using confluent schema registry").to_be_bytes());
                 }

@@ -64,6 +64,10 @@ impl JsonFormat {
             .filter(|t| t == "true")
             .is_some();
 
+        if include_schema && confluent_schema_registry {
+            return Err("can't include schema in message if using schema registry".to_string());
+        }
+
         let unstructured = opts
             .remove("json.unstructured")
             .filter(|t| t == "true")
