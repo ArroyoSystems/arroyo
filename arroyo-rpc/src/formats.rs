@@ -37,6 +37,9 @@ pub struct JsonFormat {
     pub confluent_schema_registry: bool,
 
     #[serde(default)]
+    pub confluent_schema_version: Option<u32>,
+
+    #[serde(default)]
     pub include_schema: bool,
 
     #[serde(default)]
@@ -61,6 +64,10 @@ impl JsonFormat {
             .filter(|t| t == "true")
             .is_some();
 
+        if include_schema && confluent_schema_registry {
+            return Err("can't include schema in message if using schema registry".to_string());
+        }
+
         let unstructured = opts
             .remove("json.unstructured")
             .filter(|t| t == "true")
@@ -81,6 +88,7 @@ impl JsonFormat {
 
         Ok(Self {
             confluent_schema_registry,
+            confluent_schema_version: None,
             include_schema,
             debezium,
             unstructured,

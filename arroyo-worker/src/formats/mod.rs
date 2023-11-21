@@ -180,22 +180,25 @@ impl<T: SchemaData> DataSerializer<T> {
     pub fn to_vec(&self, record: &T) -> Option<Vec<u8>> {
         match &self.format {
             Format::Json(json) => {
-                let v = if json.include_schema {
+                let mut writer: Vec<u8> = Vec::with_capacity(128);
+                if json.confluent_schema_registry {
+                    if json.include_schema {
+                        unreachable!("can't include schema when writing to confluent schema registry, should've been caught when creating JsonFormat");
+                    }
+                    writer.push(0);
+                    writer.extend(json.confluent_schema_version.expect("must have computed schema version to write using confluent schema registry").to_be_bytes());
+                }
+                if json.include_schema {
                     let record = json! {{
                         "schema": self.kafka_schema,
                         "payload": record
                     }};
 
-                    serde_json::to_vec(&record).unwrap()
+                    serde_json::to_writer(&mut writer, &record).unwrap();
                 } else {
-                    serde_json::to_vec(record).unwrap()
+                    serde_json::to_writer(&mut writer, record).unwrap();
                 };
-
-                if json.confluent_schema_registry {
-                    todo!("Serializing to confluent schema registry is not yet supported");
-                }
-
-                Some(v)
+                Some(writer)
             }
             Format::Avro(_) => todo!(),
             Format::Parquet(_) => todo!(),

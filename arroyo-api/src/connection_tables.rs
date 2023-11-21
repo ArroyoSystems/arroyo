@@ -497,8 +497,9 @@ async fn expand_json_schema(
 ) -> Result<ConnectionSchema, ErrorResp> {
     if let Some(Format::Json(JsonFormat {
         confluent_schema_registry: true,
+        confluent_schema_version,
         ..
-    })) = &schema.format
+    })) = schema.format.as_mut()
     {
         let schema_response = get_schema(connector, table_config, profile_config).await?;
 
@@ -508,6 +509,7 @@ async fn expand_json_schema(
                 schema_response.schema_type
             )));
         }
+        confluent_schema_version.replace(schema_response.version);
 
         schema.definition = Some(SchemaDefinition::JsonSchema(schema_response.schema));
     }
@@ -555,13 +557,18 @@ async fn get_schema(
         bad_request("schema registry must be configured on the Kafka connection profile")
     })?;
 
-    let resolver =
-        ConfluentSchemaResolver::new(&schema_registry.endpoint, &table.topic).map_err(|e| {
-            bad_request(format!(
-                "failed to fetch schemas from schema repository: {}",
-                e
-            ))
-        })?;
+    let resolver = ConfluentSchemaResolver::new(
+        &schema_registry.endpoint,
+        &table.topic,
+        schema_registry.api_key.clone(),
+        schema_registry.api_secret.clone(),
+    )
+    .map_err(|e| {
+        bad_request(format!(
+            "failed to fetch schemas from schema repository: {}",
+            e
+        ))
+    })?;
 
     resolver.get_schema(None).await.map_err(|e| {
         bad_request(format!(

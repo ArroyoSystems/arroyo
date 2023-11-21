@@ -1142,10 +1142,10 @@ pub struct PlanGraph {
     pub graph: DiGraph<PlanNode, PlanEdge>,
     pub types: HashSet<StructDef>,
     pub key_structs: HashSet<String>,
-    pub sources: HashMap<String, NodeIndex>,
+    pub connections: HashMap<String, NodeIndex>,
     pub named_tables: HashMap<String, NodeIndex>,
     pub sql_config: SqlConfig,
-    pub saved_sources_used: Vec<i64>,
+    pub saved_connections_used: Vec<i64>,
 }
 
 impl PlanGraph {
@@ -1154,10 +1154,10 @@ impl PlanGraph {
             graph: DiGraph::new(),
             types: HashSet::new(),
             key_structs: HashSet::new(),
-            sources: HashMap::new(),
+            connections: HashMap::new(),
             named_tables: HashMap::new(),
             sql_config,
-            saved_sources_used: vec![],
+            saved_connections_used: vec![],
         }
     }
 
@@ -1327,11 +1327,11 @@ impl PlanGraph {
     }
 
     fn add_sql_source(&mut self, source_operator: SourceOperator) -> NodeIndex {
-        if let Some(node_index) = self.sources.get(&source_operator.name) {
+        if let Some(node_index) = self.connections.get(&source_operator.name) {
             return *node_index;
         }
         if let Some(source_id) = source_operator.source.id {
-            self.saved_sources_used.push(source_id);
+            self.saved_connections_used.push(source_id);
         }
         let mut current_index = match source_operator.source.processing_mode {
             ProcessingMode::Update => self.add_debezium_source(&source_operator),
@@ -1408,7 +1408,8 @@ impl PlanGraph {
         };
         self.graph
             .add_edge(current_index, watermark_index, watermark_edge);
-        self.sources.insert(source_operator.name, watermark_index);
+        self.connections
+            .insert(source_operator.name, watermark_index);
         watermark_index
     }
 
@@ -1756,64 +1757,58 @@ impl PlanGraph {
     ) -> NodeIndex {
         let input_index = self.add_sql_operator(*input);
         let input_node = self.get_plan_node(input_index);
-        if let PlanType::Updating(inner) = &input_node.output_type {
-            let value_type = inner.as_syn_type();
-            let debezium_type = PlanType::Debezium {
-                key: None,
-                value_type: quote!(#value_type).to_string(),
-                values: inner.value_structs(),
+        let (incoming_node_index, sink_node_type) =
+            if let PlanType::Updating(inner) = &input_node.output_type {
+                let value_type = inner.as_syn_type();
+                let debezium_type = PlanType::Debezium {
+                    key: None,
+                    value_type: quote!(#value_type).to_string(),
+                    values: inner.value_structs(),
+                };
+                let debezium_index =
+                    self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
+
+                let edge = PlanEdge {
+                    edge_type: EdgeType::Forward,
+                };
+                self.graph.add_edge(input_index, debezium_index, edge);
+
+                (debezium_index, debezium_type)
+            } else if matches!(sql_sink.updating_type, SinkUpdateType::Force) {
+                let value_type = input_node.output_type.as_syn_type();
+                let debezium_type = PlanType::Debezium {
+                    key: None,
+                    value_type: quote!(#value_type).to_string(),
+                    values: input_node.output_type.value_structs(),
+                };
+                let debezium_index =
+                    self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
+                let edge = PlanEdge {
+                    edge_type: EdgeType::Forward,
+                };
+                self.graph.add_edge(input_index, debezium_index, edge);
+
+                (debezium_index, debezium_type)
+            } else {
+                (input_index, input_node.output_type.clone())
             };
-            let debezium_index =
-                self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
-
-            let edge = PlanEdge {
-                edge_type: EdgeType::Forward,
-            };
-            self.graph.add_edge(input_index, debezium_index, edge);
-
-            let plan_node = PlanOperator::Sink(name, sql_sink);
-            let plan_node_index = self.insert_operator(plan_node, debezium_type);
-
-            let debezium_edge = PlanEdge {
-                edge_type: EdgeType::Forward,
-            };
-
-            self.graph
-                .add_edge(debezium_index, plan_node_index, debezium_edge);
+        let sink_node = self.connections.get(&name).cloned().unwrap_or_else(|| {
+            if let Some(connection_id) = sql_sink.id.clone() {
+                self.saved_connections_used.push(connection_id);
+            }
+            let plan_node = PlanOperator::Sink(name.clone(), sql_sink);
+            let plan_node_index = self.insert_operator(plan_node, sink_node_type);
+            self.connections.insert(name.clone(), plan_node_index);
             plan_node_index
-        } else if matches!(sql_sink.updating_type, SinkUpdateType::Force) {
-            let value_type = input_node.output_type.as_syn_type();
-            let debezium_type = PlanType::Debezium {
-                key: None,
-                value_type: quote!(#value_type).to_string(),
-                values: input_node.output_type.value_structs(),
-            };
-            let debezium_index =
-                self.insert_operator(PlanOperator::ToDebezium, debezium_type.clone());
-            let edge = PlanEdge {
+        });
+        self.graph.add_edge(
+            incoming_node_index,
+            sink_node,
+            PlanEdge {
                 edge_type: EdgeType::Forward,
-            };
-            self.graph.add_edge(input_index, debezium_index, edge);
-
-            let plan_node = PlanOperator::Sink(name, sql_sink);
-            let plan_node_index = self.insert_operator(plan_node, debezium_type);
-
-            let debezium_edge = PlanEdge {
-                edge_type: EdgeType::Forward,
-            };
-
-            self.graph
-                .add_edge(debezium_index, plan_node_index, debezium_edge);
-            plan_node_index
-        } else {
-            let plan_node = PlanOperator::Sink(name, sql_sink);
-            let plan_node_index = self.insert_operator(plan_node, input_node.output_type.clone());
-            let edge = PlanEdge {
-                edge_type: EdgeType::Forward,
-            };
-            self.graph.add_edge(input_index, plan_node_index, edge);
-            plan_node_index
-        }
+            },
+        );
+        sink_node
     }
 
     fn add_updating_aggregator(
@@ -1921,6 +1916,7 @@ impl PlanGraph {
                 let projection = RecordTransform::ValueProjection(Projection {
                     fields,
                     format: None,
+                    struct_name: None,
                 });
                 let input_node = self.get_plan_node(input_index);
                 let plan_node = PlanNode::from_record_transform(projection, input_node);
@@ -1963,7 +1959,7 @@ pub fn get_program(
     optimize(&mut plan_graph.graph);
 
     let mut key_structs = HashSet::new();
-    let sources = plan_graph.saved_sources_used.clone();
+    let sources = plan_graph.saved_connections_used.clone();
     plan_graph.graph.node_weights().for_each(|node| {
         let key_names = node.output_type.get_key_struct_names();
         key_structs.extend(key_names);
@@ -2018,7 +2014,7 @@ pub fn get_program(
         schema_provider
             .source_defs
             .into_iter()
-            .filter(|(k, _)| plan_graph.sources.contains_key(k))
+            .filter(|(k, _)| plan_graph.connections.contains_key(k))
             .map(|(_, v)| v),
     );
 

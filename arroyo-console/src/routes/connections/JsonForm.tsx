@@ -28,6 +28,7 @@ function StringWidget({
   description,
   placeholder,
   required,
+  password,
   maxLength,
   value,
   errors,
@@ -39,6 +40,7 @@ function StringWidget({
   placeholder?: string;
   maxLength?: number;
   required?: boolean;
+  password?: boolean;
   value: string;
   errors: any;
   onChange: (e: React.ChangeEvent<any>) => void;
@@ -49,7 +51,7 @@ function StringWidget({
       {maxLength == null || maxLength < 100 ? (
         <Input
           name={path}
-          type="text"
+          type={password ? 'password' : 'text'}
           placeholder={placeholder}
           value={value || ''}
           onChange={e => onChange(e)}
@@ -324,6 +326,8 @@ export function FormInner({
                       title={property.title || key}
                       description={property.description}
                       required={schema.required?.includes(key)}
+                      // @ts-ignore
+                      password={property.isSensitive || false}
                       maxLength={property.maxLength}
                       // @ts-ignore
                       placeholder={property.examples ? (property.examples[0] as string) : undefined}

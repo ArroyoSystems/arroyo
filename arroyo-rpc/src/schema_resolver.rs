@@ -80,10 +80,17 @@ pub struct ConfluentSchemaResolver {
     endpoint: Url,
     topic: String,
     client: Client,
+    api_key: Option<String>,
+    api_secret: Option<String>,
 }
 
 impl ConfluentSchemaResolver {
-    pub fn new(endpoint: &str, topic: &str) -> anyhow::Result<Self> {
+    pub fn new(
+        endpoint: &str,
+        topic: &str,
+        api_key: Option<String>,
+        api_secret: Option<String>,
+    ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(5))
             .build()
@@ -98,6 +105,8 @@ impl ConfluentSchemaResolver {
             client,
             topic: topic.to_string(),
             endpoint,
+            api_key,
+            api_secret,
         })
     }
 
@@ -114,13 +123,18 @@ impl ConfluentSchemaResolver {
             )
             .unwrap();
 
-        let resp = self.client.get(url.clone()).send().await.map_err(|e| {
+        let mut get_call = self.client.get(url.clone());
+
+        if let Some(api_key) = self.api_key.as_ref() {
+            get_call = get_call.basic_auth(api_key, self.api_secret.as_ref());
+        }
+
+        let resp = get_call.send().await.map_err(|e| {
             warn!("Got error response from schema registry: {:?}", e);
             match e.status() {
                 Some(StatusCode::NOT_FOUND) => {
                     anyhow!("Could not find value schema for topic '{}'", self.topic)
                 }
-
                 Some(code) => anyhow!("Schema registry returned error: {}", code),
                 None => {
                     warn!(

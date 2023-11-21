@@ -21,6 +21,7 @@ use syn::{parse_quote, parse_str};
 pub struct Projection {
     pub fields: Vec<(Column, Expression)>,
     pub format: Option<Format>,
+    pub struct_name: Option<String>,
 }
 
 impl Projection {
@@ -28,6 +29,7 @@ impl Projection {
         Self {
             fields,
             format: None,
+            struct_name: None,
         }
     }
 
@@ -72,7 +74,7 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for Projection {
                 StructField::new(col.name.clone(), col.relation.clone(), field_type)
             })
             .collect();
-        StructDef::new(None, true, fields, self.format.clone())
+        StructDef::new(self.struct_name.clone(), true, fields, self.format.clone())
     }
 }
 

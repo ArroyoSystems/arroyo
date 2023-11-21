@@ -108,8 +108,13 @@ where
         let schema_resolver: Arc<dyn SchemaResolver + Sync> =
             if let Some(schema_registry) = &connection.schema_registry {
                 Arc::new(
-                    ConfluentSchemaResolver::new(&schema_registry.endpoint, &table.topic)
-                        .expect("failed to construct confluent schema resolver"),
+                    ConfluentSchemaResolver::new(
+                        &schema_registry.endpoint,
+                        &table.topic,
+                        schema_registry.api_key.clone(),
+                        schema_registry.api_secret.clone(),
+                    )
+                    .expect("failed to construct confluent schema resolver"),
                 )
             } else {
                 Arc::new(FailingSchemaResolver::new())
