@@ -1,13 +1,14 @@
 use anyhow::{anyhow, bail};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
 
 use axum::response::sse::Event;
 use std::time::{Duration, Instant};
 
-use arroyo_rpc::api_types::connections::{ConnectionSchema, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     message::BorrowedMessage,
@@ -136,57 +137,66 @@ impl Connector for KafkaConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let auth = opts.remove("auth.type");
-        let auth = match auth.as_ref().map(|t| t.as_str()) {
-            Some("none") | None => KafkaConfigAuthentication::None {},
-            Some("sasl") => KafkaConfigAuthentication::Sasl {
-                mechanism: pull_opt("auth.mechanism", opts)?,
-                protocol: pull_opt("auth.protocol", opts)?,
-                username: pull_opt("auth.username", opts)?,
-                password: pull_opt("auth.password", opts)?,
-            },
-            Some(other) => bail!("unknown auth type '{}'", other),
-        };
+        let connection = match profile {
+            Some(connection_profile) => serde_json::from_value(connection_profile.config.clone())?,
+            None => {
+                let auth = options.remove("auth.type");
+                let auth = match auth.as_ref().map(|t| t.as_str()) {
+                    Some("none") | None => KafkaConfigAuthentication::None {},
+                    Some("sasl") => KafkaConfigAuthentication::Sasl {
+                        mechanism: pull_opt("auth.mechanism", options)?,
+                        protocol: pull_opt("auth.protocol", options)?,
+                        username: pull_opt("auth.username", options)?,
+                        password: pull_opt("auth.password", options)?,
+                    },
+                    Some(other) => bail!("unknown auth type '{}'", other),
+                };
 
-        let schema_registry = opts.remove("schema_registry.endpoint").map(|endpoint| {
-            let api_key = opts.remove("schema_registry.api_key");
-            let api_secret = opts.remove("schema_registry.api_secret");
-            SchemaRegistry {
-                endpoint,
-                api_key,
-                api_secret,
+                let schema_registry = options.remove("schema_registry.endpoint").map(|endpoint| {
+                    let api_key = options.remove("schema_registry.api_key");
+                    let api_secret = options.remove("schema_registry.api_secret");
+                    SchemaRegistry {
+                        endpoint,
+                        api_key,
+                        api_secret,
+                    }
+                });
+                KafkaConfig {
+                    authentication: auth,
+                    bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", options)?),
+                    schema_registry,
+                }
             }
-        });
-
-        let connection = KafkaConfig {
-            authentication: auth,
-            bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", opts)?),
-            schema_registry,
         };
 
-        let typ = pull_opt("type", opts)?;
+        let typ = pull_opt("type", options)?;
         let table_type = match typ.as_str() {
             "source" => {
-                let offset = opts.remove("source.offset");
+                let offset = options.remove("source.offset");
                 TableType::Source {
                     offset: match offset.as_ref().map(|f| f.as_str()) {
                         Some("earliest") => SourceOffset::Earliest,
                         None | Some("latest") => SourceOffset::Latest,
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
                     },
-                    read_mode: match opts.remove("source.read_mode").as_ref().map(|f| f.as_str()) {
+                    read_mode: match options
+                        .remove("source.read_mode")
+                        .as_ref()
+                        .map(|f| f.as_str())
+                    {
                         Some("read_committed") => Some(ReadMode::ReadCommitted),
                         Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
                         Some(other) => bail!("invalid value for source.read_mode '{}'", other),
                     },
-                    group_id: opts.remove("source.group_id"),
+                    group_id: options.remove("source.group_id"),
                 }
             }
             "sink" => {
-                let commit_mode = opts.remove("sink.commit_mode");
+                let commit_mode = options.remove("sink.commit_mode");
                 TableType::Sink {
                     commit_mode: match commit_mode.as_ref().map(|f| f.as_str()) {
                         Some("at_least_once") | None => Some(SinkCommitMode::AtLeastOnce),
@@ -201,7 +211,7 @@ impl Connector for KafkaConnector {
         };
 
         let table = KafkaTable {
-            topic: pull_opt("topic", opts)?,
+            topic: pull_opt("topic", options)?,
             type_: table_type,
         };
 

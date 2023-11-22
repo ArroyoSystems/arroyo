@@ -1,9 +1,12 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
@@ -252,18 +255,19 @@ impl Connector for WebsocketConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
-        let endpoint = pull_opt("endpoint", opts)?;
-        let headers = opts.remove("headers");
+        _profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
+        let endpoint = pull_opt("endpoint", options)?;
+        let headers = options.remove("headers");
         let mut subscription_messages = vec![];
 
         // add the single subscription message if it exists
-        if let Some(message) = opts.remove("subscription_message") {
+        if let Some(message) = options.remove("subscription_message") {
             subscription_messages.push(SubscriptionMessage(message));
 
-            if opts.contains_key("subscription_messages.0") {
+            if options.contains_key("subscription_messages.0") {
                 return Err(anyhow!(
                     "Cannot specify both 'subscription_message' and 'subscription_messages.0'"
                 ));
@@ -272,7 +276,9 @@ impl Connector for WebsocketConnector {
 
         // add the indexed subscription messages if they exist
         let mut message_index = 0;
-        while let Some(message) = opts.remove(&format!("subscription_messages.{}", message_index)) {
+        while let Some(message) =
+            options.remove(&format!("subscription_messages.{}", message_index))
+        {
             subscription_messages.push(SubscriptionMessage(message));
             message_index += 1;
         }

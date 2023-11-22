@@ -1,9 +1,12 @@
 use anyhow::{anyhow, bail, Result};
 use axum::response::sse::Event;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
 
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
 
@@ -119,11 +122,12 @@ impl Connector for SingleFileConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
-        let path = pull_opt("path", opts)?;
-        let Ok(table_type) = pull_opt("type", opts)?.try_into() else {
+        _profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
+        let path = pull_opt("path", options)?;
+        let Ok(table_type) = pull_opt("type", options)?.try_into() else {
             bail!("'type' must be 'source' or 'sink'");
         };
 

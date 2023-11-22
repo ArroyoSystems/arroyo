@@ -1,9 +1,12 @@
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
 use axum::response::sse::Event;
+use std::collections::HashMap;
 use std::convert::Infallible;
 
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use arroyo_rpc::OperatorConfig;
 
 use crate::filesystem::{
@@ -144,10 +147,11 @@ impl Connector for DeltaLakeConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
-        let table = file_system_sink_from_options(opts, schema, CommitStyle::DeltaLake)?;
+        _profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
+        let table = file_system_sink_from_options(options, schema, CommitStyle::DeltaLake)?;
 
         self.from_config(None, name, EmptyConfig {}, table, schema)
     }

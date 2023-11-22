@@ -1,11 +1,13 @@
 use anyhow::{anyhow, bail};
 use arroyo_rpc::api_types::connections::{
-    ConnectionSchema, ConnectionType, FieldType, PrimitiveType, TestSourceMessage,
+    ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, PrimitiveType,
+    TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
 use redis::cluster::ClusterClient;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
 
@@ -170,32 +172,45 @@ impl Connector for RedisConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         s: Option<&ConnectionSchema>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let address = opts.remove("address");
-
-        let cluster_addresses = opts.remove("cluster.addresses");
-
-        let connection_config = match (address, cluster_addresses) {
-            (Some(address), None) => {
-                RedisConfigConnection::Address(RedisConfigConnectionAddress(address))
+        let connection_config = match profile {
+            Some(connection_profile) => {
+                let config: RedisConfigConnection =
+                    serde_json::from_value(connection_profile.config.clone())
+                        .map_err(|e| anyhow!("Failed to parse connection config: {:?}", e))?;
+                RedisConfig { connection: config }
             }
-            (None, Some(cluster_addresses)) => RedisConfigConnection::Addresses(
-                cluster_addresses
-                    .split(",")
-                    .map(|s| Address(s.to_string()))
-                    .collect(),
-            ),
-            (Some(_), Some(_)) => {
-                bail!("only one of `address` or `cluster.addresses` may be set");
-            }
-            (None, None) => {
-                bail!("one of `address` or `cluster.addresses` must be set");
+            None => {
+                let address = options.remove("address");
+
+                let cluster_addresses = options.remove("cluster.addresses");
+                let connection_config = match (address, cluster_addresses) {
+                    (Some(address), None) => {
+                        RedisConfigConnection::Address(RedisConfigConnectionAddress(address))
+                    }
+                    (None, Some(cluster_addresses)) => RedisConfigConnection::Addresses(
+                        cluster_addresses
+                            .split(",")
+                            .map(|s| Address(s.to_string()))
+                            .collect(),
+                    ),
+                    (Some(_), Some(_)) => {
+                        bail!("only one of `address` or `cluster.addresses` may be set");
+                    }
+                    (None, None) => {
+                        bail!("one of `address` or `cluster.addresses` must be set");
+                    }
+                };
+                RedisConfig {
+                    connection: connection_config,
+                }
             }
         };
 
-        let typ = pull_opt("type", opts)?;
+        let typ = pull_opt("type", options)?;
 
         let schema = s
             .as_ref()
@@ -223,29 +238,33 @@ impl Connector for RedisConnector {
         }
 
         let sink = match typ.as_str() {
-            "sink" => TableType::Target(match pull_opt("target", opts)?.as_str() {
+            "sink" => TableType::Target(match pull_opt("target", options)?.as_str() {
                 "string" => Target::StringTable {
-                    key_prefix: pull_opt("target.key_prefix", opts)?,
-                    key_column: opts
+                    key_prefix: pull_opt("target.key_prefix", options)?,
+                    key_column: options
                         .remove("target.key_column")
                         .map(|name| validate_column(schema, name, "target.key_column"))
                         .transpose()?,
-                    ttl_secs: pull_option_to_u64("target.ttl_secs", opts)?
+                    ttl_secs: pull_option_to_u64("target.ttl_secs", options)?
                         .map(|t| t.try_into())
                         .transpose()
                         .map_err(|_| anyhow!("target.ttl_secs must be greater than 0"))?,
                 },
                 "list" => Target::ListTable {
-                    list_prefix: pull_opt("target.key_prefix", opts)?,
-                    list_key_column: opts
+                    list_prefix: pull_opt("target.key_prefix", options)?,
+                    list_key_column: options
                         .remove("target.key_column")
                         .map(|name| validate_column(schema, name, "target.key_column"))
                         .transpose()?,
-                    max_length: pull_option_to_u64("target.max_length", opts)?
+                    max_length: pull_option_to_u64("target.max_length", options)?
                         .map(|t| t.try_into())
                         .transpose()
                         .map_err(|_| anyhow!("target.max_length must be greater than 0"))?,
-                    operation: match opts.remove("target.operation").as_ref().map(|s| s.as_str()) {
+                    operation: match options
+                        .remove("target.operation")
+                        .as_ref()
+                        .map(|s| s.as_str())
+                    {
                         Some("append") | None => ListOperation::Append,
                         Some("prepend") => ListOperation::Prepend,
                         Some(op) => {
@@ -256,14 +275,14 @@ impl Connector for RedisConnector {
                 "hash" => Target::HashTable {
                     hash_field_column: validate_column(
                         schema,
-                        pull_opt("target.field_column", opts)?,
+                        pull_opt("target.field_column", options)?,
                         "targets.field_column",
                     )?,
-                    hash_key_column: opts
+                    hash_key_column: options
                         .remove("target.key_column")
                         .map(|name| validate_column(schema, name, "target.key_column"))
                         .transpose()?,
-                    hash_key_prefix: pull_opt("target.key_prefix", opts)?,
+                    hash_key_prefix: pull_opt("target.key_prefix", options)?,
                 },
                 s => {
                     bail!("'{}' is not a valid redis target", s);
@@ -277,9 +296,7 @@ impl Connector for RedisConnector {
         self.from_config(
             None,
             name,
-            RedisConfig {
-                connection: connection_config,
-            },
+            connection_config,
             RedisTable {
                 connector_type: sink,
             },

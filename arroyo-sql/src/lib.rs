@@ -42,7 +42,7 @@ use tables::{schema_defs, ConnectorTable, Insert, Table};
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::types::{StructDef, StructField, TypeDef};
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType};
+use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, ConnectionType};
 use arroyo_rpc::formats::{Format, JsonFormat};
 use datafusion_common::DataFusionError;
 use prettyplease::unparse;
@@ -75,6 +75,7 @@ pub struct ArroyoSchemaProvider {
     pub functions: HashMap<String, Arc<ScalarUDF>>,
     pub aggregate_functions: HashMap<String, Arc<AggregateUDF>>,
     pub connections: HashMap<String, Connection>,
+    profiles: HashMap<String, ConnectionProfile>,
     pub udf_defs: HashMap<String, UdfDef>,
     config_options: datafusion::config::ConfigOptions,
 }
@@ -198,6 +199,7 @@ impl ArroyoSchemaProvider {
             aggregate_functions: HashMap::new(),
             source_defs: HashMap::new(),
             connections: HashMap::new(),
+            profiles: HashMap::new(),
             udf_defs: HashMap::new(),
             config_options: datafusion::config::ConfigOptions::new(),
         }
@@ -212,6 +214,10 @@ impl ArroyoSchemaProvider {
             UniCase::new(connection.name.clone()),
             Table::ConnectorTable(connection.into()),
         );
+    }
+
+    pub fn add_connection_profile(&mut self, profile: ConnectionProfile) {
+        self.profiles.insert(profile.name.clone(), profile);
     }
 
     fn insert_table(&mut self, table: Table) {
