@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::Result;
 use anyhow::{anyhow, bail};
+use apache_avro::types::Value;
 use arrow::datatypes::{DataType, IntervalMonthDayNanoType};
 use arrow::{
     array::Decimal128Array,
@@ -24,10 +25,11 @@ use arroyo_rpc::api_types::connections::{
 };
 use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
-use quote::quote;
+use quote::{format_ident, quote};
 use regex::Regex;
 use syn::PathArguments::AngleBracketed;
 use syn::{parse_quote, parse_str, GenericArgument, Type};
+use crate::avro;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructDef {
@@ -312,6 +314,31 @@ impl StructDef {
         }
     }
 
+    fn generate_avro_writer(&self) -> TokenStream {
+        let record_ident = format_ident!("record");
+        let fields: Vec<_> = self.fields.iter()
+            .map(|f| {
+                let name = f.name();
+                let field_ident = f.field_ident();
+                let serializer = avro::generate_serializer_item(
+                    &record_ident, &field_ident, &f.data_type);
+                quote!{
+                    record.put(#name, #serializer);
+                }
+            })
+            .collect();
+
+        quote! {
+            fn write_avro<W: std::io::Write>(&self, writer: &mut apache_avro::Writer<W>, schema: &apache_avro::Schema) {
+                let mut record = apache_avro::types::Record::new(schema).unwrap();
+
+                #(#fields )*;
+
+                writer.append(record).unwrap();
+            }
+        }
+    }
+
     // generate a SchemaData impl but only for generated types
     pub fn generate_schema_data(&self) -> Option<TokenStream> {
         if !self.generated {
@@ -352,6 +379,8 @@ impl StructDef {
 
         let reader_type = self.parquet_reader_type();
 
+        let avro_writer = self.generate_avro_writer();
+
         Some(quote! {
             impl arroyo_worker::SchemaData for #struct_type {
                 fn name() -> &'static str {
@@ -366,6 +395,8 @@ impl StructDef {
                 fn to_raw_string(&self) -> Option<Vec<u8>> {
                     #to_raw_string
                 }
+
+                #avro_writer
 
                 fn iterator_from_record_batch(
                     record_batch: arrow_array::RecordBatch,

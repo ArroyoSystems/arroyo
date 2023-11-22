@@ -1,5 +1,5 @@
 use apache_avro::types::{Value as AvroValue, Value};
-use apache_avro::{from_avro_datum, Reader, Schema};
+use apache_avro::{from_avro_datum, Reader, Schema, Writer};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_types::UserError;
@@ -7,8 +7,11 @@ use serde::de::DeserializeOwned;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::Arc;
+use apache_avro::schema::{FixedSchema, Name, RecordField, RecordFieldOrder, RecordSchema, UnionSchema};
+use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
 use tokio::sync::Mutex;
 use tracing::info;
+use crate::SchemaData;
 
 pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
     format: &AvroFormat,
@@ -90,6 +93,19 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
         }
     }))
 }
+
+pub fn to_vec<T: SchemaData>(record: &T, format: &AvroFormat, schema: &Schema) -> Vec<u8> {
+    if format.embedded_schema {
+        let mut writer = Writer::new(schema, Vec::with_capacity(128));
+
+        let record = apache_avro::types::Record::new(schema).unwrap();
+    }
+
+    todo!()
+
+}
+
+
 
 fn convert_float(f: f64) -> JsonValue {
     match serde_json::Number::from_f64(f) {

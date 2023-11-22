@@ -30,10 +30,12 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
+use std::io::Write;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
+use apache_avro::Writer;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::sync::broadcast;
@@ -78,6 +80,8 @@ pub trait SchemaData: Data + Serialize + DeserializeOwned {
     /// a None value, and should panic if they do not support raw strings (which
     /// indicates a miscompilation).
     fn to_raw_string(&self) -> Option<Vec<u8>>;
+
+    fn write_avro<W: Write>(&self, writer: &mut apache_avro::Writer<W>, schema: &apache_avro::Schema);
 }
 
 impl<T: SchemaData> SchemaData for Debezium<T> {
@@ -108,6 +112,10 @@ impl<T: SchemaData> SchemaData for Debezium<T> {
     fn to_raw_string(&self) -> Option<Vec<u8>> {
         unimplemented!("debezium data cannot be written as a raw string");
     }
+
+    fn write_avro<W: Write>(&self, writer: &mut Writer<W>, schema: &apache_avro::Schema) {
+        todo!()
+    }
 }
 
 impl SchemaData for RawJson {
@@ -135,6 +143,10 @@ impl SchemaData for RawJson {
                 .as_string()
                 .clone(),
         }))
+    }
+
+    fn write_avro<W: Write>(&self, writer: &mut Writer<W>, schema: &apache_avro::Schema) {
+        todo!()
     }
 }
 
@@ -170,6 +182,10 @@ impl SchemaData for () {
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {
         None
+    }
+
+    fn write_avro<W: Write>(&self, _: &mut Writer<W>, _: &apache_avro::Schema) {
+        // no-op
     }
 }
 
