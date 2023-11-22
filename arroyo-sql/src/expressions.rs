@@ -16,7 +16,7 @@ use arroyo_types::{DatePart, DateTruncPrecision};
 use datafusion_common::ScalarValue;
 use datafusion_expr::{
     aggregate_function,
-    expr::{AggregateUDF, Alias, ScalarFunction, ScalarUDF, Sort},
+    expr::{AggregateUDF, Alias, InList, ScalarFunction, ScalarUDF, Sort},
     type_coercion::aggregates::{avg_return_type, sum_return_type},
     BinaryExpr, BuiltinScalarFunction, Expr, GetFieldAccess, TryCast,
 };
@@ -505,6 +505,12 @@ impl Expression {
                 } => {
                     (&mut *array_expression).traverse_mut(context, f);
                 }
+                DataStructureFunction::InList { expr, list } => {
+                    (&mut *expr).traverse_mut(context, f);
+                    for e in list {
+                        e.traverse_mut(context, f);
+                    }
+                }
             },
             Expression::Json(e) => {
                 (&mut *e.json_string).traverse_mut(context, f);
@@ -981,6 +987,30 @@ impl<'a> ExpressionContext<'a> {
                     }))
                 }
             },
+            Expr::InList(InList {
+                expr,
+                list,
+                negated,
+            }) => {
+                let in_list_expression = DataStructureFunction::InList {
+                    expr: Box::new(self.compile_expr(expr)?),
+                    list: list
+                        .iter()
+                        .map(|e| self.compile_expr(e))
+                        .collect::<Result<Vec<_>>>()?,
+                };
+                if *negated {
+                    Ok(BinaryComparisonExpression::new(
+                        Box::new(Expression::Literal(LiteralExpression {
+                            literal: ScalarValue::Boolean(Some(false)),
+                        })),
+                        datafusion_expr::Operator::Eq,
+                        Box::new(Expression::DataStructure(in_list_expression)),
+                    )?)
+                } else {
+                    Ok(Expression::DataStructure(in_list_expression))
+                }
+            }
             expression => {
                 bail!("expression {:?} not yet implemented", expression)
             }
@@ -3279,6 +3309,10 @@ pub enum DataStructureFunction {
         array_expression: Box<Expression>,
         index: usize,
     },
+    InList {
+        expr: Box<Expression>,
+        list: Vec<Expression>,
+    },
 }
 
 impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DataStructureFunction {
@@ -3414,6 +3448,45 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DataStructureFun
                     }),
                 }
             }
+            DataStructureFunction::InList { expr, list } => {
+                let comparison_expr = expr.generate(input_context);
+                let comparison_nullable = expr.expression_type(input_context).is_optional();
+
+                let list_exprs: Vec<syn::Expr> = list
+                    .iter()
+                    .map(|term| {
+                        let expr = term.generate(input_context);
+                        let nullable = term.expression_type(input_context).is_optional();
+                        let comparison_type = term.expression_type(input_context).return_type();
+                        if nullable {
+                            parse_quote!(
+                                ({let expr: #comparison_type = #expr; expr}
+                                    .map(|v| v == comparison_expr).unwrap_or(false))
+                            )
+                        } else {
+                            parse_quote!(
+                                (comparison_expr == #expr)
+                            )
+                        }
+                    })
+                    .collect();
+
+                if comparison_nullable {
+                    parse_quote!({
+                        match #comparison_expr{
+                            Some(comparison_expr) => {
+                                Some(#(#list_exprs)||*)
+                            }
+                            None => None,
+                        }
+                    })
+                } else {
+                    parse_quote!({
+                        let comparison_expr = #comparison_expr;
+                        (#(#list_exprs)||*)
+                    })
+                }
+            }
         }
     }
     fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
@@ -3457,6 +3530,10 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DataStructureFun
                 };
                 TypeDef::DataType(field.data_type().clone(), true)
             }
+            DataStructureFunction::InList { expr, list: _ } => TypeDef::DataType(
+                DataType::Boolean,
+                expr.expression_type(input_context).is_optional(),
+            ),
         }
     }
 }

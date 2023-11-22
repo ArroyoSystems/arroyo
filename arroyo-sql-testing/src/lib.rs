@@ -1246,4 +1246,66 @@ mod tests {
         },
         arroyo_types::from_millis(168565954000)
     );
+
+    // TEST InList
+    single_test_codegen!(
+        "in_list",
+        "non_nullable_i32 IN (1, 2, 3, 4, 5, 6)",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 2,
+            ..Default::default()
+        },
+        true
+    );
+
+    single_test_codegen!(
+        "in_list_false",
+        "non_nullable_i32 IN (1, 2, 3, 5, 6, 7)",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 4,
+            ..Default::default()
+        },
+        false
+    );
+
+    single_test_codegen!(
+        "in_list_nullable",
+        "nullable_i32 IN (1, 2, 3, 4, 5)",
+        arroyo_sql::TestStruct {
+            nullable_i32: Some(2),
+            ..Default::default()
+        },
+        Some(true)
+    );
+
+    single_test_codegen!(
+        "in_list_nullable_false",
+        "nullable_i32 IN (1, 2, 3, 4, 5)",
+        arroyo_sql::TestStruct {
+            nullable_i32: None,
+            ..Default::default()
+        },
+        None
+    );
+
+    // TEST NotInList
+    single_test_codegen!(
+        "not_in_list",
+        "non_nullable_i32 NOT IN (1, 2, 3, 5, 6)",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 4,
+            ..Default::default()
+        },
+        true
+    );
+
+    single_test_codegen!(
+        "not_in_list_nullable",
+        "nullable_i32 NOT IN (NULL, 2, 3, 4, 5)",
+        arroyo_sql::TestStruct {
+            nullable_i32: None,
+            ..Default::default()
+        },
+        None
+    );
 }
