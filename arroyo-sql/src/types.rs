@@ -20,16 +20,18 @@ use arroyo_rpc::{
 };
 use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
 
+use crate::avro;
 use arroyo_rpc::api_types::connections::{
     FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
+use arroyo_rpc::formats::AvroFormat;
+use arroyo_rpc::formats::Format::Avro;
 use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
 use syn::PathArguments::AngleBracketed;
 use syn::{parse_quote, parse_str, GenericArgument, Type};
-use crate::avro;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct StructDef {
@@ -315,26 +317,29 @@ impl StructDef {
     }
 
     fn generate_avro_writer(&self) -> TokenStream {
-        let record_ident = format_ident!("record");
-        let fields: Vec<_> = self.fields.iter()
+        let record_ident = format_ident!("self");
+        let fields: Vec<_> = self
+            .fields
+            .iter()
             .map(|f| {
-                let name = f.name();
+                let name = AvroFormat::sanitize_field(&f.name());
                 let field_ident = f.field_ident();
-                let serializer = avro::generate_serializer_item(
-                    &record_ident, &field_ident, &f.data_type);
-                quote!{
-                    record.put(#name, #serializer);
+                let serializer =
+                    avro::generate_serializer_item(&record_ident, &field_ident, &f.data_type);
+                quote! {
+                    __avro_record.put(#name, #serializer);
                 }
             })
             .collect();
 
-        quote! {
-            fn write_avro<W: std::io::Write>(&self, writer: &mut apache_avro::Writer<W>, schema: &apache_avro::Schema) {
-                let mut record = apache_avro::types::Record::new(schema).unwrap();
+        parse_quote! {
+            fn to_avro(&self, schema: &arroyo_worker::apache_avro::Schema) -> arroyo_worker::apache_avro::types::Value {
+                let mut __avro_record = arroyo_worker::apache_avro::types::Record::new(schema).unwrap();
+                use arroyo_worker::apache_avro::types::Value::*;
 
-                #(#fields )*;
+                #(#fields )*
 
-                writer.append(record).unwrap();
+                __avro_record.into()
             }
         }
     }

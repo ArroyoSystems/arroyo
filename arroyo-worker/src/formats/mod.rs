@@ -168,6 +168,7 @@ pub struct DataSerializer<T: SchemaData> {
     #[allow(unused)]
     json_schema: Value,
     avro_schema: apache_avro::schema::Schema,
+    schema_id: Option<i32>,
     format: Format,
     _t: PhantomData<T>,
 }
@@ -179,6 +180,7 @@ impl<T: SchemaData> DataSerializer<T> {
             json_schema: json::arrow_to_json_schema(T::schema().fields()),
             avro_schema: avro::arrow_to_avro_schema(T::name(), T::schema().fields()),
             format,
+            schema_id: Some(1),
             _t: PhantomData,
         }
     }
@@ -206,9 +208,7 @@ impl<T: SchemaData> DataSerializer<T> {
                 };
                 Some(writer)
             }
-            Format::Avro(f) => {
-                Some(avro::to_vec(record, f, &self.avro_schema))
-            },
+            Format::Avro(f) => Some(avro::to_vec(record, f, &self.avro_schema, self.schema_id)),
             Format::Parquet(_) => todo!(),
             Format::RawString(_) => record.to_raw_string(),
         }

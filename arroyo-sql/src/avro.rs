@@ -1,11 +1,13 @@
-use std::ptr::null;
 use crate::types::{StructDef, StructField, TypeDef};
 use anyhow::{anyhow, bail};
+use apache_avro::schema::{
+    FixedSchema, Name, RecordField, RecordFieldOrder, RecordSchema, UnionSchema,
+};
 use apache_avro::Schema;
-use apache_avro::schema::{FixedSchema, Name, RecordField, RecordFieldOrder, RecordSchema, UnionSchema};
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
+use std::ptr::null;
 
 pub const ROOT_NAME: &str = "ArroyoAvroRoot";
 
@@ -116,7 +118,8 @@ fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {
 
 /// Generates code that serializes an arroyo data struct into avro
 ///
-/// Note that this must align with the schemas described in arrow_to_avro below
+/// Note that this must align with the schemas constructed in
+/// `arroyo_worker::formats::avro::arrow_to_avro_schema`!
 pub fn generate_serializer_item(record: &Ident, field: &Ident, td: &TypeDef) -> TokenStream {
     use DataType::*;
     let value = quote!(#record.#field);
@@ -127,31 +130,36 @@ pub fn generate_serializer_item(record: &Ident, field: &Ident, td: &TypeDef) -> 
         TypeDef::DataType(dt, nullable) => {
             let inner = match dt {
                 Null => unreachable!("null fields are not supported"),
-                Boolean => quote!{ Boolean(v) },
-                Int8 | Int16 | Int32 | UInt8 | UInt16 => quote! { Int(v) },
-                Int64 | UInt32 => quote! { Long(v) },
-                UInt64 => quote! { Fixed(8, v.to_be_bytes().to_vec()) },
-                Float16 | Float32 => quote! { Float(v) },
-                Float64 => quote! { Double(v) },
-                Timestamp(t, tz) => {
-                    match (t, tz) {
-                        (TimeUnit::Microsecond | TimeUnit::Nanosecond, None) => quote!{ TimestampMicros(arroyo_types::to_micros(v) as i64) },
-                        (TimeUnit::Microsecond | TimeUnit::Nanosecond, Some(_)) => quote! { LocalTimestampMicros(arroyo_types::to_micros(v) as i64) },
-                        (TimeUnit::Millisecond | TimeUnit::Second, None) => quote!{ TimestampMillis(arroyo_types::to_millis(v) as i64) },
-                        (TimeUnit::Millisecond | TimeUnit::Second, Some(_)) => quote!{ LocalTimestampMillis(arroyo_types::to_millis(v) as i64) },
+                Boolean => quote! { Boolean(*v) },
+                Int8 | Int16 | Int32 | UInt8 | UInt16 => quote! { Int(*v as i32) },
+                Int64 | UInt32 | UInt64 => quote! { Long(*v as i64) },
+                Float16 | Float32 => quote! { Float(*v as f32) },
+                Float64 => quote! { Double(*v as f64) },
+                Timestamp(t, tz) => match (t, tz) {
+                    (TimeUnit::Microsecond | TimeUnit::Nanosecond, None) => {
+                        quote! { TimestampMicros(arroyo_types::to_micros(*v) as i64) }
                     }
-                }
-                Date32 | Date64 => quote! { Date(arroyo_types::days_since_epoch(v)) },
+                    (TimeUnit::Microsecond | TimeUnit::Nanosecond, Some(_)) => {
+                        quote! { LocalTimestampMicros(arroyo_types::to_micros(*v) as i64) }
+                    }
+                    (TimeUnit::Millisecond | TimeUnit::Second, None) => {
+                        quote! { TimestampMillis(arroyo_types::to_millis(*v) as i64) }
+                    }
+                    (TimeUnit::Millisecond | TimeUnit::Second, Some(_)) => {
+                        quote! { LocalTimestampMillis(arroyo_types::to_millis(*v) as i64) }
+                    }
+                },
+                Date32 | Date64 => quote! { Date(arroyo_types::days_since_epoch(*v)) },
                 Time32(_) => todo!("time32 is not supported"),
                 Time64(_) => todo!("time64 is not supported"),
                 Duration(_) => todo!("duration is not supported"),
                 Interval(_) => todo!("interval is not supported"),
-                Binary | FixedSizeBinary(_) | LargeBinary => quote!{ Bytes(v.clone()) },
-                Utf8 | LargeUtf8 => quote!{ String(v.clone()) },
-                List(t) | FixedSizeList(t, _) | LargeList(t) => {
+                Binary | FixedSizeBinary(_) | LargeBinary => quote! { Bytes(v.clone()) },
+                Utf8 | LargeUtf8 => quote! { String(v.clone()) },
+                List(_) | FixedSizeList(_, _) | LargeList(_) => {
                     todo!("lists are not supported")
                 }
-                Struct(fields) => unreachable!("typedefs should not contain structs"),
+                Struct(_) => unreachable!("typedefs should not contain structs"),
                 Union(_, _) => unimplemented!("unions are not supported"),
                 Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
                 Decimal128(_, _) => unimplemented!("decimal128 is not supported"),
@@ -161,92 +169,12 @@ pub fn generate_serializer_item(record: &Ident, field: &Ident, td: &TypeDef) -> 
             };
 
             if *nullable {
-                quote!{
-                    Union(#value.is_some() as u32, Box::new(#value.map(|v| #inner).unwrap_or_else(Null)))
+                quote! {
+                    Union(#value.is_some() as u32, Box::new(#value.as_ref().map(|v| #inner).unwrap_or(Null)))
                 }
             } else {
-                quote!{let v = #value; #inner}
+                quote! {{let v = &#value; #inner}}
             }
         }
     }
-}
-
-fn arrow_to_avro(name: &str, dt: &DataType) -> Schema {
-    match dt {
-        DataType::Null => unreachable!("null fields are not supported"),
-        DataType::Boolean => Schema::Boolean,
-        DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::UInt8 | DataType::UInt16 => Schema::Int,
-        DataType::Int64 | DataType::UInt32 => Schema::Long,
-        DataType::UInt64 => Schema::Fixed(FixedSchema {
-            name: Name::from("dev.arroyo.types.uint64"),
-            aliases: None,
-            doc: None,
-            size: 8,
-            attributes: Default::default(),
-        }),
-        DataType::Float16 | DataType::Float32 => Schema::Float,
-        DataType::Float64 => Schema::Double,
-        DataType::Timestamp(t, tz) => {
-            match (t, tz) {
-                (TimeUnit::Microsecond | TimeUnit::Nanosecond, None) => Schema::TimestampMicros,
-                (TimeUnit::Microsecond | TimeUnit::Nanosecond, Some(_)) => Schema::LocalTimestampMicros,
-                (TimeUnit::Millisecond | TimeUnit::Second, None) => Schema::TimestampMillis,
-                (TimeUnit::Millisecond | TimeUnit::Second, Some(_)) => Schema::LocalTimestampMillis,
-            }
-        }
-        DataType::Date32 | DataType::Date64 => Schema::Date,
-        DataType::Time64(_) | DataType::Time32(_) => { todo!("time is not supported") },
-        DataType::Duration(_) => todo!("duration is not supported"),
-        DataType::Interval(_) => todo!("interval is not supported"),
-        DataType::Binary | DataType::FixedSizeBinary(_) | DataType::LargeBinary => Schema::Bytes,
-        DataType::Utf8 | DataType::LargeUtf8 => Schema::String,
-        DataType::List(t) | DataType::FixedSizeList(t, _) | DataType::LargeList(t) => {
-            Schema::Array(Box::new(arrow_to_avro(name, t.data_type())))
-        }
-        DataType::Struct(fields) => {
-            arrow_to_avro_schema(name, fields)
-        }
-        DataType::Union(_, _) => unimplemented!("unions are not supported"),
-        DataType::Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
-        DataType::Decimal128(_, _) => unimplemented!("decimal128 is not supported"),
-        DataType::Decimal256(_, _) => unimplemented!("decimal256 is not supported"),
-        DataType::Map(_, _) => unimplemented!("maps are not supported"),
-        DataType::RunEndEncoded(_, _) => unimplemented!("run end encoded is not supported"),
-    }
-}
-
-fn field_to_avro(index: usize, name: &str, field: &Field) -> RecordField {
-    let mut schema = arrow_to_avro(&format!("{}_{}", name, &field.name()), field.data_type());
-
-    if field.is_nullable() {
-        schema = Schema::Union(UnionSchema::new(vec![Schema::Null, schema]).unwrap());
-    }
-
-    RecordField {
-        name:  field.name().clone(),
-        doc: None,
-        aliases: None,
-        default: None,
-        schema,
-        order: RecordFieldOrder::Ascending,
-        position: index,
-        custom_attributes: Default::default(),
-    }
-}
-
-pub fn arrow_to_avro_schema(name: &str, fields: &Fields) -> Schema {
-    let fields = fields
-        .iter()
-        .enumerate()
-        .map(|(i, f)| field_to_avro(i, name, &**f))
-        .collect();
-
-    Schema::Record(RecordSchema {
-        name: Name::from(name),
-        aliases: None,
-        doc: None,
-        fields,
-        lookup: Default::default(),
-        attributes: Default::default(),
-    })
 }

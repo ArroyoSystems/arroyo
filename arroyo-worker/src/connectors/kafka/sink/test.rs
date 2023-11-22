@@ -1,4 +1,7 @@
 #![allow(clippy::unnecessary_mut_passed)]
+
+use apache_avro::{Schema, Writer};
+use std::io::Write;
 use std::time::{Duration, SystemTime};
 
 use crate::engine::{Context, OutQueue};
@@ -141,6 +144,10 @@ impl SchemaData for TestOutStruct {
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {
         unimplemented!()
+    }
+
+    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+        todo!()
     }
 }
 

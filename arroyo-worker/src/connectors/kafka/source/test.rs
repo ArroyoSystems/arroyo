@@ -1,6 +1,8 @@
+use apache_avro::Writer;
 use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_state::{BackingStore, StateBackend};
 use rand::Rng;
+use std::io::Write;
 use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
@@ -34,6 +36,10 @@ impl SchemaData for TestData {
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {
         None
+    }
+
+    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+        todo!()
     }
 }
 

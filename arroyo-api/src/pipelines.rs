@@ -222,9 +222,9 @@ pub(crate) async fn create_pipeline<'a>(
     if is_preview {
         for node in program.graph.node_weights_mut() {
             // if it is a connector sink or switch to a web sink
-            if let Operator::ConnectorSink { .. } = node.operator {
-                node.operator = Operator::ConnectorSink(ConnectorOp::web_sink());
-            }
+            // if let Operator::ConnectorSink { .. } = node.operator {
+            //     node.operator = Operator::ConnectorSink(ConnectorOp::web_sink());
+            // }
         }
     }
 

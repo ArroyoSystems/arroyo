@@ -5,6 +5,7 @@
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use anyhow::{bail, Result};
+use apache_avro::Writer;
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow_array::cast::AsArray;
 use arrow_array::{RecordBatch, StringArray};
@@ -35,7 +36,6 @@ use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use apache_avro::Writer;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::sync::broadcast;
@@ -46,6 +46,10 @@ use tracing::{debug, error, info, warn};
 
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 pub use ordered_float::OrderedFloat;
+
+// re-export avro for use in generated code
+pub use apache_avro;
+use apache_avro::types::Value;
 
 pub mod connectors;
 pub mod engine;
@@ -81,7 +85,7 @@ pub trait SchemaData: Data + Serialize + DeserializeOwned {
     /// indicates a miscompilation).
     fn to_raw_string(&self) -> Option<Vec<u8>>;
 
-    fn write_avro<W: Write>(&self, writer: &mut apache_avro::Writer<W>, schema: &apache_avro::Schema);
+    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value;
 }
 
 impl<T: SchemaData> SchemaData for Debezium<T> {
@@ -113,7 +117,7 @@ impl<T: SchemaData> SchemaData for Debezium<T> {
         unimplemented!("debezium data cannot be written as a raw string");
     }
 
-    fn write_avro<W: Write>(&self, writer: &mut Writer<W>, schema: &apache_avro::Schema) {
+    fn to_avro(&self, schema: &apache_avro::Schema) -> Value {
         todo!()
     }
 }
@@ -145,7 +149,7 @@ impl SchemaData for RawJson {
         }))
     }
 
-    fn write_avro<W: Write>(&self, writer: &mut Writer<W>, schema: &apache_avro::Schema) {
+    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
         todo!()
     }
 }
@@ -184,8 +188,8 @@ impl SchemaData for () {
         None
     }
 
-    fn write_avro<W: Write>(&self, _: &mut Writer<W>, _: &apache_avro::Schema) {
-        // no-op
+    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+        Value::Record(vec![])
     }
 }
 

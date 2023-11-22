@@ -165,7 +165,7 @@ pub struct AvroFormat {
     pub confluent_schema_registry: bool,
 
     #[serde(default)]
-    pub embedded_schema: bool,
+    pub raw_datums: bool,
 
     #[serde(default)]
     pub into_unstructured_json: bool,
@@ -178,12 +178,12 @@ pub struct AvroFormat {
 impl AvroFormat {
     pub fn new(
         confluent_schema_registry: bool,
-        embedded_schema: bool,
+        raw_datums: bool,
         into_unstructured_json: bool,
     ) -> Self {
         Self {
             confluent_schema_registry,
-            embedded_schema,
+            raw_datums,
             into_unstructured_json,
             reader_schema: None,
         }
@@ -194,7 +194,7 @@ impl AvroFormat {
             opts.remove("avro.confluent_schema_registry")
                 .filter(|t| t == "true")
                 .is_some(),
-            opts.remove("avro.include_schema")
+            opts.remove("avro.raw_datums")
                 .filter(|t| t == "true")
                 .is_some(),
             opts.remove("avro.into_unstructured_json")
@@ -205,6 +205,10 @@ impl AvroFormat {
 
     pub fn add_reader_schema(&mut self, schema: apache_avro::Schema) {
         self.reader_schema = Some(SerializableAvroSchema(schema));
+    }
+
+    pub fn sanitize_field(s: &str) -> String {
+        s.replace(".", "__")
     }
 }
 
