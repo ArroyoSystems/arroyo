@@ -9,6 +9,7 @@ use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
 };
 use arroyo_rpc::formats::{Format, Framing};
+use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{
@@ -49,6 +50,8 @@ pub struct ConnectorTable {
     pub event_time_field: Option<String>,
     pub watermark_field: Option<String>,
     pub idle_time: Option<Duration>,
+
+    pub inferred_fields: Option<Vec<DFField>>,
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +150,7 @@ impl From<Connection> for ConnectorTable {
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
+            inferred_fields: None,
         }
     }
 }
@@ -202,12 +206,21 @@ impl ConnectorTable {
             })
             .collect();
 
-        let schema = ConnectionSchema::try_new(format, framing, None, schema_fields?, None)?;
+        let schema = ConnectionSchema::try_new(
+            format,
+            framing,
+            None,
+            schema_fields?,
+            None,
+            Some(fields.is_empty()),
+        )?;
 
         let connection = connector.from_options(name, options, Some(&schema))?;
 
         let mut table: ConnectorTable = connection.into();
-        table.fields = fields;
+        if !fields.is_empty() {
+            table.fields = fields;
+        }
         table.event_time_field = options.remove("event_time_field");
         table.watermark_field = options.remove("watermark_field");
 
@@ -495,6 +508,10 @@ fn value_to_inner_string(value: &Value) -> Result<String> {
     }
 }
 
+fn qualified_field(f: &DFField) -> Field {
+    Field::new(f.qualified_name(), f.data_type().clone(), f.is_nullable())
+}
+
 impl Table {
     fn schema_from_columns(
         columns: &Vec<ColumnDef>,
@@ -635,14 +652,16 @@ impl Table {
                 ))),
             }
         } else {
-            match &produce_optimized_plan(statement, schema_provider)? {
+            match &produce_optimized_plan(statement, schema_provider) {
                 // views and memory tables are the same now.
-                LogicalPlan::Ddl(DdlStatement::CreateView(CreateView { name, input, .. }))
-                | LogicalPlan::Ddl(DdlStatement::CreateMemoryTable(CreateMemoryTable {
+                Ok(LogicalPlan::Ddl(DdlStatement::CreateView(CreateView {
+                    name, input, ..
+                })))
+                | Ok(LogicalPlan::Ddl(DdlStatement::CreateMemoryTable(CreateMemoryTable {
                     name,
                     input,
                     ..
-                })) => {
+                }))) => {
                     // Return a TableFromQuery
                     Ok(Some(Table::TableFromQuery {
                         name: name.to_string(),
@@ -661,31 +680,56 @@ impl Table {
         }
     }
 
-    pub fn get_fields(&self) -> Result<Vec<Field>> {
+    pub fn set_inferred_fields(&mut self, fields: Vec<DFField>) -> Result<()> {
+        let Table::ConnectorTable(t) = self else {
+            bail!("can only infer schema for connector tables");
+        };
+
+        if !t.fields.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(existing) = &t.inferred_fields {
+            let matches = existing.len() == fields.len()
+                && existing
+                    .iter()
+                    .zip(&fields)
+                    .all(|(a, b)| a.name() == b.name() && a.data_type() == b.data_type());
+
+            if !matches {
+                bail!("all inserts into a table must share the same schema");
+            }
+        }
+
+        t.inferred_fields.replace(fields);
+
+        Ok(())
+    }
+
+    pub fn get_fields(&self) -> Vec<Field> {
         match self {
-            Table::MemoryTable { fields, .. } => fields
-                .iter()
-                .map(|field| {
-                    let field: Field = field.clone().into();
-                    Ok(field)
-                })
-                .collect::<Result<Vec<_>>>(),
-            Table::ConnectorTable(ConnectorTable { fields, .. }) => fields
-                .iter()
-                .map(|field| {
-                    let field: Field = field.struct_field().clone().into();
-                    Ok(field)
-                })
-                .collect::<Result<Vec<_>>>(),
+            Table::MemoryTable { fields, .. } => {
+                fields.iter().map(|field| field.clone().into()).collect()
+            }
+            Table::ConnectorTable(ConnectorTable {
+                fields,
+                inferred_fields,
+                ..
+            }) => inferred_fields
+                .as_ref()
+                .map(|fs| fs.iter().map(|f| qualified_field(&*f)).collect())
+                .unwrap_or_else(|| {
+                    fields
+                        .iter()
+                        .map(|field| field.struct_field().clone().into())
+                        .collect()
+                }),
             Table::TableFromQuery { logical_plan, .. } => logical_plan
                 .schema()
                 .fields()
                 .iter()
-                .map(|field| {
-                    let field: Field = (**field.field()).clone();
-                    Ok(field)
-                })
-                .collect::<Result<Vec<_>>>(),
+                .map(qualified_field)
+                .collect(),
         }
     }
 
@@ -729,11 +773,38 @@ pub enum Insert {
     },
 }
 
+fn infer_sink_schema(
+    source: &Box<Query>,
+    table_name: String,
+    schema_provider: &mut ArroyoSchemaProvider,
+) -> Result<()> {
+    let plan = produce_optimized_plan(&Statement::Query(source.clone()), schema_provider)?;
+    let table = schema_provider
+        .get_table_mut(&table_name)
+        .ok_or_else(|| anyhow!("table {} not found", table_name))?;
+
+    table.set_inferred_fields(plan.schema().fields().iter().map(|f| f.clone()).collect())?;
+
+    Ok(())
+}
+
 impl Insert {
     pub fn try_from_statement(
         statement: &Statement,
-        schema_provider: &ArroyoSchemaProvider,
+        schema_provider: &mut ArroyoSchemaProvider,
     ) -> Result<Insert> {
+        if let Statement::Insert {
+            source,
+            into,
+            table_name,
+            ..
+        } = statement
+        {
+            if *into {
+                infer_sink_schema(source, table_name.to_string(), schema_provider)?;
+            }
+        }
+
         let logical_plan = produce_optimized_plan(statement, schema_provider)?;
 
         match &logical_plan {

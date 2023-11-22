@@ -48,10 +48,12 @@ use datafusion_common::DataFusionError;
 use prettyplease::unparse;
 use regex::Regex;
 use std::collections::HashSet;
+
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
 use tracing::warn;
+use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
@@ -69,7 +71,7 @@ pub struct UdfDef {
 #[derive(Debug, Clone, Default)]
 pub struct ArroyoSchemaProvider {
     pub source_defs: HashMap<String, String>,
-    tables: HashMap<String, Table>,
+    tables: HashMap<UniCase<String>, Table>,
     pub functions: HashMap<String, Arc<ScalarUDF>>,
     pub aggregate_functions: HashMap<String, Arc<AggregateUDF>>,
     pub connections: HashMap<String, Connection>,
@@ -207,17 +209,22 @@ impl ArroyoSchemaProvider {
         }
 
         self.tables.insert(
-            connection.name.clone(),
+            UniCase::new(connection.name.clone()),
             Table::ConnectorTable(connection.into()),
         );
     }
 
     fn insert_table(&mut self, table: Table) {
-        self.tables.insert(table.name().to_string(), table);
+        self.tables
+            .insert(UniCase::new(table.name().to_string()), table);
     }
 
-    fn get_table(&self, table_name: &String) -> Option<&Table> {
-        self.tables.get(table_name)
+    pub fn get_table(&self, table_name: impl Into<String>) -> Option<&Table> {
+        self.tables.get(&UniCase::new(table_name.into()))
+    }
+
+    pub fn get_table_mut(&mut self, table_name: impl Into<String>) -> Option<&mut Table> {
+        self.tables.get_mut(&UniCase::new(table_name.into()))
     }
 
     fn vec_inner_type(ty: &syn::Type) -> Option<syn::Type> {
@@ -382,15 +389,12 @@ impl ContextProvider for ArroyoSchemaProvider {
         &self,
         name: TableReference,
     ) -> datafusion_common::Result<Arc<dyn TableSource>> {
-        let table = self.tables.get(&name.to_string()).ok_or_else(|| {
+        let table = self.get_table(name.to_string()).ok_or_else(|| {
             datafusion::error::DataFusionError::Plan(format!("Table {} not found", name))
         })?;
-        let fields = table.get_fields().map_err(|err| {
-            datafusion::error::DataFusionError::Plan(format!(
-                "Table {} failed to get fields with {}",
-                name, err
-            ))
-        })?;
+
+        let fields = table.get_fields();
+
         Ok(create_table_source(fields))
     }
 
@@ -455,7 +459,10 @@ pub fn parse_and_get_program_sync(
         if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
             schema_provider.insert_table(table);
         } else {
-            inserts.push(Insert::try_from_statement(&statement, &schema_provider)?);
+            inserts.push(Insert::try_from_statement(
+                &statement,
+                &mut schema_provider,
+            )?);
         };
     }
 
@@ -495,6 +502,7 @@ pub fn parse_and_get_program_sync(
             event_time_field: None,
             watermark_field: None,
             idle_time: DEFAULT_IDLE_TIME,
+            inferred_fields: None,
         });
 
         plan_graph.add_sql_operator(sink.as_sql_sink(insert)?);
@@ -670,6 +678,7 @@ pub fn get_test_expression(
             .map(|s| s.clone().try_into().unwrap())
             .collect(),
         definition: None,
+        inferred: None,
     };
 
     let mut schema_provider = ArroyoSchemaProvider::new();
@@ -706,7 +715,7 @@ pub fn get_test_expression(
         if let Some(table) = Table::try_from_statement(&statement, &schema_provider).unwrap() {
             schema_provider.insert_table(table);
         } else {
-            inserts.push(Insert::try_from_statement(&statement, &schema_provider).unwrap());
+            inserts.push(Insert::try_from_statement(&statement, &mut schema_provider).unwrap());
         };
     }
 

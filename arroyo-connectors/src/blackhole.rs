@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
@@ -35,7 +36,7 @@ impl Connector for BlackholeConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+        return ConnectionType::Sink;
     }
 
     fn get_schema(
@@ -98,13 +99,9 @@ impl Connector for BlackholeConnector {
             id,
             name: name.to_string(),
             connection_type: ConnectionType::Sink,
-            schema: s.cloned().unwrap_or_else(|| ConnectionSchema {
-                format: None,
-                framing: None,
-                struct_name: None,
-                fields: vec![],
-                definition: None,
-            }),
+            schema: s
+                .cloned()
+                .ok_or_else(|| anyhow!("no schema for blackhole sink"))?,
             operator: "connectors::blackhole::BlackholeSinkFunc::<#in_k, #in_t>".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,

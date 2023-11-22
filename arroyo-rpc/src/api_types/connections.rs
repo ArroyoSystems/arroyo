@@ -132,6 +132,7 @@ pub struct ConnectionSchema {
     pub struct_name: Option<String>,
     pub fields: Vec<SourceField>,
     pub definition: Option<SchemaDefinition>,
+    pub inferred: Option<bool>,
 }
 
 impl ConnectionSchema {
@@ -141,6 +142,7 @@ impl ConnectionSchema {
         struct_name: Option<String>,
         fields: Vec<SourceField>,
         definition: Option<SchemaDefinition>,
+        inferred: Option<bool>,
     ) -> anyhow::Result<Self> {
         let s = ConnectionSchema {
             format,
@@ -148,6 +150,7 @@ impl ConnectionSchema {
             struct_name,
             fields,
             definition,
+            inferred,
         };
 
         s.validate()
