@@ -36,7 +36,7 @@ impl Connector for BlackholeConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+        return ConnectionType::Sink;
     }
 
     fn get_schema(

@@ -48,7 +48,6 @@ use datafusion_common::DataFusionError;
 use prettyplease::unparse;
 use regex::Regex;
 use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
 
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
