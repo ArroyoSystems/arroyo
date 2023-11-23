@@ -138,7 +138,7 @@ fn convert_float(f: f64) -> JsonValue {
             } else {
                 "NaN"
             })
-            .to_string(),
+                .to_string(),
         ),
     }
 }
@@ -287,18 +287,16 @@ pub fn arrow_to_avro_schema(name: &str, fields: &Fields) -> Schema {
     Schema::parse_str(&schema.to_string()).unwrap()
 }
 
+
 #[cfg(test)]
 mod tests {
-    use crate::formats::avro::{arrow_to_avro_schema, to_vec};
-    use crate::formats::DataDeserializer;
-    use crate::SchemaData;
-    use apache_avro::types::Value;
-    use apache_avro::{Schema, Writer};
+    use super::{arrow_to_avro_schema, to_vec};
+    use crate::{DataDeserializer, SchemaData};
+    use apache_avro::{Schema};
     use arroyo_rpc::formats::{AvroFormat, Format};
     use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver};
     use arroyo_types::RawJson;
     use serde_json::json;
-    use std::io::Write;
     use std::sync::Arc;
 
     const SCHEMA: &str = r#"
@@ -372,14 +370,14 @@ mod tests {
     #[tokio::test]
     async fn test_avro_deserialization() {
         #[derive(
-            Clone,
-            Debug,
-            bincode::Encode,
-            bincode::Decode,
-            PartialEq,
-            PartialOrd,
-            serde::Serialize,
-            serde::Deserialize,
+        Clone,
+        Debug,
+        bincode::Encode,
+        bincode::Decode,
+        PartialEq,
+        PartialOrd,
+        serde::Serialize,
+        serde::Deserialize,
         )]
         pub struct ArroyoAvroRoot {
             pub store_id: i32,
@@ -477,14 +475,14 @@ mod tests {
     #[tokio::test]
     async fn test_backwards_compatible() {
         #[derive(
-            Clone,
-            Debug,
-            bincode::Encode,
-            bincode::Decode,
-            PartialEq,
-            PartialOrd,
-            serde::Serialize,
-            serde::Deserialize,
+        Clone,
+        Debug,
+        bincode::Encode,
+        bincode::Decode,
+        PartialEq,
+        PartialOrd,
+        serde::Serialize,
+        serde::Deserialize,
         )]
         pub struct ArroyoAvroRoot {
             pub name: String,
@@ -574,7 +572,7 @@ mod tests {
         ];
 
         let mut deserializer = DataDeserializer::with_schema_resolver(
-            Format::Avro(AvroFormat::new(false, true, true)),
+            Format::Avro(AvroFormat::new(false, false, true)),
             None,
             Arc::new(FailingSchemaResolver::new()),
         );
@@ -609,7 +607,7 @@ mod tests {
             ]
         }"#;
 
-        let mut format = AvroFormat::new(false, false, true);
+        let mut format = AvroFormat::new(false, true, true);
         format.add_reader_schema(Schema::parse_str(&schema_str).unwrap());
         let mut deserializer = DataDeserializer::new(Format::Avro(format), None);
 
@@ -626,14 +624,14 @@ mod tests {
     #[tokio::test]
     async fn test_writing() {
         #[derive(
-            Clone,
-            Debug,
-            bincode::Encode,
-            bincode::Decode,
-            PartialEq,
-            PartialOrd,
-            serde::Serialize,
-            serde::Deserialize,
+        Clone,
+        Debug,
+        bincode::Encode,
+        bincode::Decode,
+        PartialEq,
+        PartialOrd,
+        serde::Serialize,
+        serde::Deserialize,
         )]
         pub struct ArroyoAvroRoot {
             pub name: String,
@@ -714,6 +712,7 @@ mod tests {
             raw_datums: false,
             into_unstructured_json: false,
             reader_schema: None,
+            schema_version: None,
         };
 
         let schema = arrow_to_avro_schema("ArroyoAvroRoot", &ArroyoAvroRoot::schema().fields());

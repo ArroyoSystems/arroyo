@@ -73,11 +73,11 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
                     if *nullable {
                         Some(quote!{
                             #[serde(default)]
-                            #[serde(deserialize_with = "arroyo_worker::deserialize_raw_json_opt")]
+                            #[serde(deserialize_with = "arroyo_formats::deserialize_raw_json_opt")]
                         })
                     } else {
                         Some(quote! {
-                            #[serde(deserialize_with = "arroyo_worker::deserialize_raw_json")]
+                            #[serde(deserialize_with = "arroyo_formats::deserialize_raw_json")]
                         })
                     }
                 },
@@ -85,11 +85,11 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
                     if *nullable {
                         Some(quote!{
                             #[serde(default)]
-                            #[serde(with = "arroyo_worker::formats::json::opt_timestamp_as_rfc3339")]
+                            #[serde(with = "arroyo_formats::json::opt_timestamp_as_rfc3339")]
                         })
                     } else {
                         Some(quote! {
-                            #[serde(with = "arroyo_worker::formats::json::timestamp_as_rfc3339")]
+                            #[serde(with = "arroyo_formats::json::timestamp_as_rfc3339")]
                         })
                     }
 

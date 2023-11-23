@@ -15,8 +15,9 @@ use aws_sdk_kinesis::{
 use serde::Serialize;
 use tracing::warn;
 use uuid::Uuid;
+use arroyo_formats::{DataSerializer, SchemaData};
 
-use crate::{engine::Context, formats::DataSerializer, SchemaData};
+use crate::{engine::Context};
 
 use super::{KinesisTable, TableType};
 

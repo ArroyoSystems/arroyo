@@ -119,7 +119,7 @@ fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {
 /// Generates code that serializes an arroyo data struct into avro
 ///
 /// Note that this must align with the schemas constructed in
-/// `arroyo_worker::formats::avro::arrow_to_avro_schema`!
+/// `arroyo-formats::avro::arrow_to_avro_schema`!
 pub fn generate_serializer_item(record: &Ident, field: &Ident, td: &TypeDef) -> TokenStream {
     use DataType::*;
     let value = quote!(#record.#field);

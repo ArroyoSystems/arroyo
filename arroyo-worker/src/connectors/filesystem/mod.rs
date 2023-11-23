@@ -33,7 +33,7 @@ pub mod parquet;
 pub mod single_file;
 pub mod source;
 
-use crate::SchemaData;
+use arroyo_formats::SchemaData;
 
 use self::{
     json::{JsonLocalWriter, JsonWriter, PassThrough},

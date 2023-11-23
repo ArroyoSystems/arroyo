@@ -387,7 +387,7 @@ impl StructDef {
         let avro_writer = self.generate_avro_writer();
 
         Some(quote! {
-            impl arroyo_worker::SchemaData for #struct_type {
+            impl arroyo_formats::SchemaData for #struct_type {
                 fn name() -> &'static str {
                     #name
                 }
@@ -1046,11 +1046,11 @@ impl StructField {
                     if nullable {
                         attributes.push(quote! {
                             #[serde(default)]
-                            #[serde(with = "arroyo_worker::formats::json::opt_timestamp_as_millis")]
+                            #[serde(with = "arroyo_formats::json::opt_timestamp_as_millis")]
                         });
                     } else {
                         attributes.push(quote! {
-                            #[serde(with = "arroyo_worker::formats::json::timestamp_as_millis")]
+                            #[serde(with = "arroyo_formats::json::timestamp_as_millis")]
                         });
                     }
                 }
@@ -1058,11 +1058,11 @@ impl StructField {
                     if nullable {
                         attributes.push(quote! {
                             #[serde(default)]
-                            #[serde(with = "arroyo_worker::formats::json::opt_timestamp_as_rfc3339")]
+                            #[serde(with = "arroyo_formats::json::opt_timestamp_as_rfc3339")]
                         });
                     } else {
                         attributes.push(quote!(
-                            #[serde(with = "arroyo_worker::formats::json::timestamp_as_rfc3339")]
+                            #[serde(with = "arroyo_formats::json::timestamp_as_rfc3339")]
                         ));
                     }
                 }
@@ -1071,11 +1071,11 @@ impl StructField {
             if self.nullable() {
                 attributes.push(quote!(
                     #[serde(default)]
-                    #[serde(deserialize_with = "arroyo_worker::deserialize_raw_json_opt")]
+                    #[serde(deserialize_with = "arroyo_formats::deserialize_raw_json_opt")]
                 ))
             } else {
                 attributes.push(quote! {
-                    #[serde(deserialize_with = "arroyo_worker::deserialize_raw_json")]
+                    #[serde(deserialize_with = "arroyo_formats::deserialize_raw_json")]
                 })
             }
         }

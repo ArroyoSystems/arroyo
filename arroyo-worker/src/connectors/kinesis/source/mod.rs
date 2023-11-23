@@ -31,9 +31,9 @@ use tokio::{
     time::{Duration, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
+use arroyo_formats::{DataDeserializer, SchemaData};
 
-use crate::formats::DataDeserializer;
-use crate::{engine::Context, SchemaData, SourceFinishType};
+use crate::{engine::Context, SourceFinishType};
 
 use super::{KinesisTable, SourceOffset, TableType};
 

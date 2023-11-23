@@ -1,18 +1,166 @@
-mod avro;
-pub mod json;
+extern crate core;
 
-use apache_avro::Schema;
+use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
-use std::{collections::HashMap, marker::PhantomData};
-
-use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
-use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_types::UserError;
+use anyhow::bail;
+use arrow::datatypes::{DataType, Field, Schema};
+use arrow_array::cast::AsArray;
+use arrow_array::{RecordBatch, StringArray};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
+use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
+use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
+use arroyo_types::{Data, Debezium, RawJson, UserError};
 
-use crate::SchemaData;
+pub mod avro;
+pub mod json;
+
+pub trait SchemaData: Data + Serialize + DeserializeOwned {
+    fn name() -> &'static str;
+    fn schema() -> arrow::datatypes::Schema;
+
+    fn iterator_from_record_batch(
+        _record_batch: RecordBatch,
+    ) -> anyhow::Result<Box<dyn Iterator<Item = Self> + Send>> {
+        bail!("unimplemented");
+    }
+
+    /// Returns the raw string representation of this data, if available for the type
+    ///
+    /// Implementations should return None if the relevant field is Optional and has
+    /// a None value, and should panic if they do not support raw strings (which
+    /// indicates a miscompilation).
+    fn to_raw_string(&self) -> Option<Vec<u8>>;
+
+    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value;
+}
+
+impl<T: SchemaData> SchemaData for Debezium<T> {
+    fn name() -> &'static str {
+        "debezium"
+    }
+
+    fn schema() -> arrow::datatypes::Schema {
+        let subschema = T::schema();
+
+        let fields = vec![
+            Field::new(
+                "before",
+                arrow::datatypes::DataType::Struct(subschema.fields.clone()),
+                true,
+            ),
+            Field::new(
+                "after",
+                arrow::datatypes::DataType::Struct(subschema.fields),
+                true,
+            ),
+            Field::new("op", arrow::datatypes::DataType::Utf8, false),
+        ];
+
+        arrow::datatypes::Schema::new(fields)
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        unimplemented!("debezium data cannot be written as a raw string");
+    }
+
+    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+        todo!()
+    }
+}
+
+impl SchemaData for RawJson {
+    fn name() -> &'static str {
+        "raw_json"
+    }
+
+    fn schema() -> Schema {
+        Schema::new(vec![Field::new("value", DataType::Utf8, false)])
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        Some(self.value.as_bytes().to_vec())
+    }
+
+    fn iterator_from_record_batch(
+        record_batch: RecordBatch,
+    ) -> anyhow::Result<Box<dyn Iterator<Item = RawJson> + Send>> {
+        Ok(Box::new(RawJsonIterator {
+            offset: 0,
+            rows: record_batch.num_rows(),
+            column: record_batch
+                .column_by_name("value")
+                .ok_or_else(|| anyhow::anyhow!("missing column value {}", "value"))?
+                .as_string()
+                .clone(),
+        }))
+    }
+
+    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+        todo!()
+    }
+}
+
+struct RawJsonIterator {
+    offset: usize,
+    rows: usize,
+    column: StringArray,
+}
+
+impl Iterator for RawJsonIterator {
+    type Item = RawJson;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset == self.rows {
+            return None;
+        }
+        let val = self.column.value(self.offset);
+        self.offset += 1;
+        Some(RawJson {
+            value: val.to_string(),
+        })
+    }
+}
+
+impl SchemaData for () {
+    fn name() -> &'static str {
+        "empty"
+    }
+
+    fn schema() -> Schema {
+        Schema::empty()
+    }
+
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+        apache_avro::types::Value::Record(vec![])
+    }
+}
+
+// A custom deserializer for json, that takes a json::Value and reserializes it as a string
+// where it can then be accessed using SQL JSON functions -- this is currently a bit inefficient
+// since we need an owned string.
+pub fn deserialize_raw_json<'de, D>(f: D) -> Result<String, D::Error>
+    where
+        D: Deserializer<'de>,
+{
+    let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
+    Ok(raw.to_string())
+}
+
+pub fn deserialize_raw_json_opt<'de, D>(f: D) -> Result<Option<String>, D::Error>
+    where
+        D: Deserializer<'de>,
+{
+    let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
+    Ok(Some(raw.to_string()))
+}
 
 fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> {
     let json = json! {
@@ -76,7 +224,7 @@ impl<'a> Iterator for FramingIterator<'a> {
 pub struct DataDeserializer<T: SchemaData> {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
-    schema_registry: Arc<Mutex<HashMap<u32, Schema>>>,
+    schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
     _t: PhantomData<T>,
 }
@@ -84,9 +232,9 @@ pub struct DataDeserializer<T: SchemaData> {
 impl<T: SchemaData> DataDeserializer<T> {
     pub fn new(format: Format, framing: Option<Framing>) -> Self {
         let resolver = if let Format::Avro(AvroFormat {
-            reader_schema: Some(schema),
-            ..
-        }) = &format
+                                               reader_schema: Some(schema),
+                                               ..
+                                           }) = &format
         {
             Arc::new(FixedSchemaResolver::new(0, schema.clone().into()))
                 as Arc<dyn SchemaResolver + Sync>
@@ -150,16 +298,16 @@ impl<T: SchemaData> DataDeserializer<T> {
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
             Format::RawString(_) => deserialize_raw_string(msg),
         }
-        .map_err(|e| {
-            UserError::new(
-                "Deserialization failed",
-                format!(
-                    "Failed to deserialize: '{}': {}",
-                    String::from_utf8_lossy(&msg),
-                    e
-                ),
-            )
-        })
+            .map_err(|e| {
+                UserError::new(
+                    "Deserialization failed",
+                    format!(
+                        "Failed to deserialize: '{}': {}",
+                        String::from_utf8_lossy(&msg),
+                        e
+                    ),
+                )
+            })
     }
 }
 
@@ -217,7 +365,7 @@ impl<T: SchemaData> DataSerializer<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::FramingIterator;
+    use crate::FramingIterator;
     use arroyo_rpc::formats::{Framing, FramingMethod, NewlineDelimitedFraming};
     use std::sync::Arc;
 
@@ -239,8 +387,8 @@ mod tests {
             framing.clone(),
             "one block\ntwo block\nthree block".as_bytes(),
         )
-        .map(|t| String::from_utf8(t.to_vec()).unwrap())
-        .collect();
+            .map(|t| String::from_utf8(t.to_vec()).unwrap())
+            .collect();
 
         assert_eq!(
             vec![
@@ -255,8 +403,8 @@ mod tests {
             framing.clone(),
             "one block\ntwo block\nthree block\n".as_bytes(),
         )
-        .map(|t| String::from_utf8(t.to_vec()).unwrap())
-        .collect();
+            .map(|t| String::from_utf8(t.to_vec()).unwrap())
+            .collect();
 
         assert_eq!(
             vec![

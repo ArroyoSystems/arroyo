@@ -15,6 +15,7 @@ arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-sql = { path = "../arroyo-sql" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-state = { path = "../arroyo-state" }
+arroyo-formats = { path = "../arroyo-formats" }
 
 tonic = { workspace = true }
 tonic-reflection = { workspace = true }

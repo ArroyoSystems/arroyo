@@ -1,6 +1,6 @@
 use crate::engine::{Context, StreamNode};
-use crate::formats::DataSerializer;
-use crate::SchemaData;
+use arroyo_formats::DataSerializer;
+use arroyo_formats::SchemaData;
 use anyhow::Result;
 use arroyo_macro::process_fn;
 use arroyo_rpc::formats::Format;

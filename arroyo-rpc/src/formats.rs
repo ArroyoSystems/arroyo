@@ -173,7 +173,7 @@ pub struct AvroFormat {
     #[serde(default)]
     #[schema(read_only, value_type = String)]
     pub reader_schema: Option<SerializableAvroSchema>,
-    
+
     #[serde(default)]
     #[schema(read_only)]
     pub schema_version: Option<u32>,

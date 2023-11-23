@@ -27,8 +27,9 @@ use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{Data, Record, UserError};
 use typify::import_types;
+use arroyo_formats::{DataDeserializer, SchemaData};
 
-use crate::{engine::Context, formats::DataDeserializer, SchemaData, SourceFinishType};
+use crate::{engine::Context, SourceFinishType};
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 

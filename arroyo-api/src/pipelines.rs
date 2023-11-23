@@ -7,9 +7,11 @@ use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};
 use std::collections::HashMap;
 use std::time::Duration;
+use jwt_simple::prelude::coarsetime::clock_gettime_nsec_np;
+use petgraph::Direction;
 
 use crate::{jobs, pipelines, types};
-use arroyo_datastream::{ConnectorOp, Operator, Program};
+use arroyo_datastream::{ConnectorOp, Operator, Program, StreamNode};
 use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch, PipelinePost,
     PipelineRestart, QueryValidationResult, StopType, ValidateQueryPost,
@@ -29,6 +31,11 @@ use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
 use tracing::warn;
+use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
+use arroyo_formats::avro::arrow_to_avro_schema;
+use arroyo_rpc::formats::Format;
+use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::schema_resolver::ConfluentSchemaRegistry;
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
@@ -140,6 +147,48 @@ fn set_parallelism(program: &mut Program, parallelism: usize) {
     for node in program.graph.node_weights_mut() {
         node.parallelism = parallelism;
     }
+}
+
+fn try_register_confluent_schema(value:  sink: &mut ConnectorOp) -> anyhow::Result<()> {
+    let config: OperatorConfig = serde_json::from_str(&sink.config).unwrap();
+
+    let Ok(profile) = serde_json::from_value::<KafkaConfig>(config.connection.clone()) else {
+        return Ok(());
+    };
+
+    let Ok(table) = serde_json::from_value::<KafkaTable>(config.table.clone()) else {
+        return Ok(());
+    };
+
+    let Some(registry_config) = profile.schema_registry else {
+        return Ok(())
+    };
+
+    let schema_registry = ConfluentSchemaRegistry::new(&registry_config.endpoint,
+                                                       &table.topic,
+                                                       registry_config.api_key,
+                                                       registry_config.api_secret)?;
+
+    match config.format {
+        Some(Format::Avro(avro)) => {
+            if avro.confluent_schema_registry {
+
+                let schema = arrow_to_avro_schema()
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn register_schemas(program: &mut Program) -> anyhow::Result<()> {
+    for node in program.graph.node_indices() {
+        if let Operator::ConnectorSink(connector) = &node.operator {
+            program.graph.edges_directed()
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) async fn create_pipeline<'a>(

@@ -8,8 +8,9 @@ use tokio::{
     fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
 };
+use arroyo_formats::{DataSerializer, SchemaData};
 
-use crate::{engine::Context, formats::DataSerializer, SchemaData};
+use crate::{engine::Context};
 
 use super::SingleFileTable;
 

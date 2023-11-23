@@ -1,6 +1,5 @@
 use crate::engine::Context;
-use crate::formats::DataDeserializer;
-use crate::{SchemaData, SourceFinishType};
+use crate::{SourceFinishType};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
@@ -18,6 +17,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::select;
 use tracing::{debug, info};
 use typify::import_types;
+use arroyo_formats::{DataDeserializer, SchemaData};
 
 import_types!(schema = "../connector-schemas/sse/table.json");
 

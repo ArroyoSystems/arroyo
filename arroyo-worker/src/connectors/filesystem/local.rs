@@ -14,10 +14,10 @@ use uuid::Uuid;
 
 use crate::{
     connectors::{filesystem::FinishedFile, two_phase_committer::TwoPhaseCommitter},
-    SchemaData,
 };
 
 use anyhow::{bail, Result};
+use arroyo_formats::SchemaData;
 
 use super::{
     add_suffix_prefix, delta, get_partitioner_from_file_settings, CommitState, CommitStyle,

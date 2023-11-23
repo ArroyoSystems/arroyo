@@ -14,11 +14,10 @@ use tokio::sync::{Mutex, Semaphore};
 
 use tracing::warn;
 use typify::import_types;
+use arroyo_formats::{DataSerializer, SchemaData};
 
 use crate::{
     engine::{Context, StreamNode},
-    formats::DataSerializer,
-    SchemaData,
 };
 
 import_types!(schema = "../connector-schemas/webhook/table.json");

@@ -22,11 +22,11 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::{debug, info};
 use tungstenite::http::Request;
 use typify::import_types;
+use arroyo_formats::{DataDeserializer, SchemaData};
 
-use crate::formats::DataDeserializer;
 use crate::{
     engine::{Context, StreamNode},
-    SchemaData, SourceFinishType,
+    SourceFinishType,
 };
 
 import_types!(schema = "../connector-schemas/websocket/table.json");

@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
 use crate::engine::{Context, OutQueue, QueueItem};
-use crate::SchemaData;
+use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};

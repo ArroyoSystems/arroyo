@@ -451,6 +451,7 @@ dependencies = [
  "arrow-schema",
  "arroyo-connectors",
  "arroyo-datastream",
+ "arroyo-formats",
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-sql",
@@ -621,6 +622,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-formats"
+version = "0.7.1"
+dependencies = [
+ "anyhow",
+ "apache-avro",
+ "arrow",
+ "arrow-array",
+ "arroyo-rpc",
+ "arroyo-types",
+ "bincode 2.0.0-rc.3",
+ "chrono",
+ "memchr",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "utoipa",
+]
+
+[[package]]
 name = "arroyo-macro"
 version = "0.7.0"
 dependencies = [
@@ -730,6 +751,7 @@ dependencies = [
  "arrow-schema",
  "arroyo-connectors",
  "arroyo-datastream",
+ "arroyo-formats",
  "arroyo-rpc",
  "arroyo-types",
  "bincode 2.0.0-rc.3",
@@ -760,6 +782,7 @@ dependencies = [
  "apache-avro",
  "arroyo-connectors",
  "arroyo-datastream",
+ "arroyo-formats",
  "arroyo-rpc",
  "arroyo-sql",
  "proc-macro2",
@@ -777,6 +800,7 @@ dependencies = [
  "arrow",
  "arrow-array",
  "arrow-schema",
+ "arroyo-formats",
  "arroyo-rpc",
  "arroyo-sql",
  "arroyo-sql-macro",
@@ -864,6 +888,7 @@ dependencies = [
  "apache-avro",
  "arrow",
  "arrow-array",
+ "arroyo-formats",
  "arroyo-macro",
  "arroyo-metrics",
  "arroyo-rpc",
