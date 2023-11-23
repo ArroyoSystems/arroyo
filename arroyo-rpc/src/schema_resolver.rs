@@ -76,7 +76,20 @@ pub struct ConfluentSchemaResponse {
     pub version: u32,
 }
 
-pub struct ConfluentSchemaResolver {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostSchemaRequest {
+    pub schema: String,
+    pub schema_type: ConfluentSchemaType,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostSchemaResponse {
+    pub id: i32,
+}
+
+pub struct ConfluentSchemaRegistry {
     endpoint: Url,
     topic: String,
     client: Client,
@@ -84,7 +97,7 @@ pub struct ConfluentSchemaResolver {
     api_secret: Option<String>,
 }
 
-impl ConfluentSchemaResolver {
+impl ConfluentSchemaRegistry {
     pub fn new(
         endpoint: &str,
         topic: &str,
@@ -108,6 +121,46 @@ impl ConfluentSchemaResolver {
             api_key,
             api_secret,
         })
+    }
+
+    pub async fn write_schema(
+        &self,
+        schema: impl Into<String>,
+        schema_type: ConfluentSchemaType,
+    ) -> anyhow::Result<i32> {
+        let req = PostSchemaRequest {
+            schema: schema.into(),
+            schema_type,
+        };
+
+        let resp: PostSchemaResponse = self.client.post(self.endpoint.clone())
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| {
+                warn!("Got error response writing to schema registry: {:?}", e);
+                match e.status() {
+                    Some(StatusCode::CONFLICT) => {
+                        anyhow!("Schema already registered for topic '{}'", self.topic)
+                    }
+                    Some(StatusCode::UNPROCESSABLE_ENTITY) => {
+                        anyhow!("Invalid schema for topic '{}'", self.topic)
+                    }
+                    Some(StatusCode::UNAUTHORIZED) => {
+                        anyhow!("Invalid credentials for schema registry")
+                    }
+                    Some(code) => anyhow!("Schema registry returned error: {}", code),
+                    None => {
+                        anyhow!(
+                            "Could not connect to Schema Registry at {}: unknown error",
+                            self.endpoint
+                        )
+                    }
+                }
+            })?.json()
+            .await.map_err(|e| anyhow!("could not parse response from schema registry: {}", e))?;
+
+        Ok(resp.id)
     }
 
     pub async fn get_schema(
@@ -171,7 +224,7 @@ impl ConfluentSchemaResolver {
 }
 
 #[async_trait]
-impl SchemaResolver for ConfluentSchemaResolver {
+impl SchemaResolver for ConfluentSchemaRegistry {
     async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String> {
         self.get_schema(Some(id))
             .await

@@ -101,12 +101,7 @@ pub fn to_vec<T: SchemaData>(
 ) -> Vec<u8> {
     let v = record.to_avro(schema);
 
-    if !format.raw_datums {
-        let mut buf = Vec::with_capacity(128);
-        let mut writer = Writer::new(schema, &mut buf);
-        writer.append(v).unwrap();
-        buf
-    } else {
+    if format.raw_datums || format.confluent_schema_registry {
         let record = apache_avro::to_avro_datum(schema, v).unwrap();
 
         if format.confluent_schema_registry {
@@ -124,6 +119,11 @@ pub fn to_vec<T: SchemaData>(
         } else {
             record
         }
+    } else {
+        let mut buf = Vec::with_capacity(128);
+        let mut writer = Writer::new(schema, &mut buf);
+        writer.append(v).unwrap();
+        buf
     }
 }
 

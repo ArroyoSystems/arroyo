@@ -202,7 +202,7 @@ impl Scheduling {
                     ctx.status.pipeline_path = None;
                     ctx.status.wasm_path = None;
 
-                    // TODO: this introduces the possiblility of an infinite loop, if compiling succeeds but for some
+                    // TODO: this introduces the possibility of an infinite loop, if compiling succeeds but for some
                     //   reason we are not able to read the pipeline binary that it produces (e.g., we may have perms
                     //   to write to S3, but not read). Addressing that will take a more sophisticated error handling
                     //   system that is able to track errors across multiple states.
