@@ -6,8 +6,9 @@ use apache_avro::schema::{
 use apache_avro::Schema;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use proc_macro2::{Ident, TokenStream};
-use quote::quote;
+use quote::{format_ident, quote};
 use std::ptr::null;
+use arroyo_rpc::formats::AvroFormat;
 
 pub const ROOT_NAME: &str = "ArroyoAvroRoot";
 
@@ -120,15 +121,72 @@ fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {
 ///
 /// Note that this must align with the schemas constructed in
 /// `arroyo-formats::avro::arrow_to_avro_schema`!
-pub fn generate_serializer_item(record: &Ident, field: &Ident, td: &TypeDef) -> TokenStream {
+pub fn generate_serializer_item(record: &Ident, field: Option<&Ident>, name: Option<String>, td: &TypeDef) -> TokenStream {
     use DataType::*;
-    let value = quote!(#record.#field);
-    match td {
-        TypeDef::StructDef(_, _) => {
-            quote!(todo!("structs"))
+    let value = match field {
+        Some(ident) => quote!(#record.#ident),
+        None => quote!(#record),
+    };
+
+    let (inner, nullable) = match td {
+        TypeDef::StructDef(def, nullable) => {
+            let fields: Vec<_> = def
+                .fields
+                .iter()
+                .map(|f| {
+                    let name = AvroFormat::sanitize_field(&match f.alias.as_ref() {
+                        Some(alias) => format!("{}.{}", alias, f.name),
+                        None => f.name()
+                    });
+                    let field_ident = f.field_ident();
+                    let serializer =
+                        generate_serializer_item(&format_ident!("v"), Some(&field_ident), Some(name.clone()), &f.data_type);
+
+                    quote! {
+                        __avro_record.put(#name, #serializer);
+                    }
+                })
+                .collect();
+
+            let schema_extractor = name.map(|name| {
+                let nullable_handler = if *nullable {
+                    Some(quote! {
+                        let arroyo_worker::apache_avro::Schema::Union(__union_schema) = schema else {
+                            panic!("invalid avro schema -- struct field {} is nullable and should be represented by a union", #name);
+                        };
+
+                        let schema = __union_schema.variants().get(1)
+                          .expect("invalid avro schema -- struct field {} should be a union with two variants");
+                    })
+                } else {
+                    None
+                };
+
+                quote! {
+                    let arroyo_worker::apache_avro::Schema::Record(__record_schema) = schema else {
+                        panic!("invalid avro schema -- struct field {} should correspond to record schema", #name);
+                    };
+
+                    let __record_field_number = __record_schema.lookup.get(#name).unwrap();
+                    let schema = &__record_schema.fields[*__record_field_number].schema;
+
+                    #nullable_handler
+                    println!("Serializing {} -- {:?}", #name, schema);
+                }
+            });
+
+            (quote!({
+                #schema_extractor
+
+                let mut __avro_record = arroyo_worker::apache_avro::types::Record::new(schema).unwrap();
+
+                #(#fields )*
+
+                __avro_record.into()
+            }), *nullable)
         }
         TypeDef::DataType(dt, nullable) => {
-            let inner = match dt {
+            (match dt {
                 Null => unreachable!("null fields are not supported"),
                 Boolean => quote! { Boolean(*v) },
                 Int8 | Int16 | Int32 | UInt8 | UInt16 => quote! { Int(*v as i32) },
@@ -143,7 +201,7 @@ pub fn generate_serializer_item(record: &Ident, field: &Ident, td: &TypeDef) -> 
                         quote! { LocalTimestampMicros(arroyo_types::to_micros(*v) as i64) }
                     }
                     (TimeUnit::Millisecond | TimeUnit::Second, None) => {
-                        quote! { TimestampMillis(arroyo_types::to_millis(*v) as i64) }
+                        quote! { Long(arroyo_types::to_millis(*v) as i64) }
                     }
                     (TimeUnit::Millisecond | TimeUnit::Second, Some(_)) => {
                         quote! { LocalTimestampMillis(arroyo_types::to_millis(*v) as i64) }
@@ -166,15 +224,15 @@ pub fn generate_serializer_item(record: &Ident, field: &Ident, td: &TypeDef) -> 
                 Decimal256(_, _) => unimplemented!("decimal256 is not supported"),
                 Map(_, _) => unimplemented!("maps are not supported"),
                 RunEndEncoded(_, _) => unimplemented!("run end encoded is not supported"),
-            };
-
-            if *nullable {
-                quote! {
-                    Union(#value.is_some() as u32, Box::new(#value.as_ref().map(|v| #inner).unwrap_or(Null)))
-                }
-            } else {
-                quote! {{let v = &#value; #inner}}
-            }
+            }, *nullable)
         }
+    };
+
+    if nullable {
+        quote! {
+            Union(#value.is_some() as u32, Box::new(#value.as_ref().map(|v| #inner).unwrap_or(Null)))
+        }
+    } else {
+        quote! {{let v = &#value; #inner}}
     }
 }

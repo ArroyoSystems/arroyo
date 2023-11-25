@@ -452,7 +452,7 @@ async fn expand_avro_schema(
     if let Some(Format::Avro(AvroFormat {
         confluent_schema_registry: true,
         ..
-    })) = &schema.format
+    })) = &mut schema.format
     {
         let schema_response = get_schema(connector, table_config, profile_config).await?;
 

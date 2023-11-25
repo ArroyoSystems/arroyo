@@ -173,14 +173,14 @@ fn get_pipeline_module(
     }
 
     // TODO: test with higher parallelism
-    let (program, _) = parse_and_get_program_sync(
+    let program = parse_and_get_program_sync(
         query_string,
         schema_provider,
         SqlConfig {
             default_parallelism: 1,
         },
     )
-    .unwrap();
+    .unwrap().program;
 
     let function = program.make_graph_function();
 

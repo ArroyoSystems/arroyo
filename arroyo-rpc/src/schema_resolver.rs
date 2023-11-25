@@ -133,32 +133,45 @@ impl ConfluentSchemaRegistry {
             schema_type,
         };
 
-        let resp: PostSchemaResponse = self.client.post(self.endpoint.clone())
+        let resp = self.client.post(self.endpoint.clone())
             .json(&req)
             .send()
             .await
             .map_err(|e| {
                 warn!("Got error response writing to schema registry: {:?}", e);
-                match e.status() {
-                    Some(StatusCode::CONFLICT) => {
-                        anyhow!("Schema already registered for topic '{}'", self.topic)
-                    }
-                    Some(StatusCode::UNPROCESSABLE_ENTITY) => {
-                        anyhow!("Invalid schema for topic '{}'", self.topic)
-                    }
-                    Some(StatusCode::UNAUTHORIZED) => {
-                        anyhow!("Invalid credentials for schema registry")
-                    }
-                    Some(code) => anyhow!("Schema registry returned error: {}", code),
-                    None => {
-                        anyhow!(
-                            "Could not connect to Schema Registry at {}: unknown error",
-                            self.endpoint
-                        )
-                    }
+                anyhow!(
+                    "Could not connect to Schema Registry at {}: unknown error",
+                    self.endpoint
+                )
+            })?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+
+            let body = body.pointer("/message")
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| body.to_string());
+
+            match status {
+                StatusCode::CONFLICT => {
+                    bail!("Failed to register new schema for topic '{}': {}", self.topic, body)
                 }
-            })?.json()
-            .await.map_err(|e| anyhow!("could not parse response from schema registry: {}", e))?;
+                StatusCode::UNPROCESSABLE_ENTITY => {
+                    bail!("Invalid schema for topic '{}': {}", self.topic, body);
+                }
+                StatusCode::UNAUTHORIZED => {
+                    bail!("Invalid credentials for schema registry");
+                }
+                code => {
+                    bail!("Schema registry returned error {}: {}", code.as_u16(), body);
+                }
+            }
+        }
+
+        let resp: PostSchemaResponse = resp.json()
+            .await
+            .map_err(|e| anyhow!("could not parse response from schema registry: {}", e))?;
 
         Ok(resp.id)
     }

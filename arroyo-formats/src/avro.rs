@@ -102,7 +102,10 @@ pub fn to_vec<T: SchemaData>(
     let v = record.to_avro(schema);
 
     if format.raw_datums || format.confluent_schema_registry {
-        let record = apache_avro::to_avro_datum(schema, v).unwrap();
+        let record = apache_avro::to_avro_datum(schema, v.clone()).unwrap_or_else(|e| {
+            println!("{:#?}", v);
+            panic!("{:?}", e);
+        });
 
         if format.confluent_schema_registry {
             // TODO: this would be more efficient if we could use the internal write_avro_datum to avoid
@@ -233,8 +236,8 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
             });
         }
         DataType::Struct(fields) => {
-            todo!()
-            //arrow_to_avro_schema(name, fields)
+            let schema = arrow_to_avro_schema(name, fields).canonical_form();
+            return serde_json::from_str(&schema).unwrap();
         }
         DataType::Union(_, _) => unimplemented!("unions are not supported"),
         DataType::Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
@@ -250,7 +253,8 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
 }
 
 fn field_to_avro(index: usize, name: &str, field: &Field) -> serde_json::value::Value {
-    let mut schema = arrow_to_avro(&format!("{}_{}", name, &field.name()), field.data_type());
+    let next_name = format!("{}_{}", name, &field.name());
+    let mut schema = arrow_to_avro(&AvroFormat::sanitize_field(&next_name), field.data_type());
 
     if field.is_nullable() {
         schema = json!({
@@ -279,10 +283,7 @@ pub fn arrow_to_avro_schema(name: &str, fields: &Fields) -> Schema {
         "type": "record",
         "name": name,
         "fields": fields,
-
     });
-
-    println!("SCHEMA = {:?}", schema.to_string());
 
     Schema::parse_str(&schema.to_string()).unwrap()
 }

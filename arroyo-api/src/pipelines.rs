@@ -6,7 +6,10 @@ use axum_extra::extract::WithRejection;
 use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
+use arrow_schema::{Field, Fields};
+use http::StatusCode;
 use jwt_simple::prelude::coarsetime::clock_gettime_nsec_np;
 use petgraph::Direction;
 
@@ -25,17 +28,18 @@ use arroyo_rpc::grpc::api::{
 
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::log_event;
-use arroyo_sql::{has_duplicate_udf_names, ArroyoSchemaProvider, SqlConfig};
+use arroyo_sql::{has_duplicate_udf_names, ArroyoSchemaProvider, SqlConfig, CompiledSql};
 use petgraph::visit::EdgeRef;
 use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
 use tracing::warn;
-use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
+use arroyo_connectors::kafka::{KafkaConfig, KafkaTable};
 use arroyo_formats::avro::arrow_to_avro_schema;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::OperatorConfig;
-use arroyo_rpc::schema_resolver::ConfluentSchemaRegistry;
+use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
+use arroyo_sql::types::StructDef;
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
@@ -57,7 +61,7 @@ async fn compile_sql<'e, E>(
     parallelism: usize,
     auth_data: &AuthData,
     tx: &E,
-) -> anyhow::Result<(Program, Vec<i64>)>
+) -> anyhow::Result<CompiledSql>
 where
     E: GenericClient,
 {
@@ -126,7 +130,7 @@ where
         schema_provider.add_connector_table(connection);
     }
 
-    let (program, connections) = arroyo_sql::parse_and_get_program(
+    arroyo_sql::parse_and_get_program(
         &query,
         schema_provider,
         SqlConfig {
@@ -138,9 +142,7 @@ where
     .map_err(|err| {
         warn!("{:?}", err);
         anyhow!(format!("{}", err.root_cause()))
-    })?;
-
-    Ok((program, connections))
+    })
 }
 
 fn set_parallelism(program: &mut Program, parallelism: usize) {
@@ -149,8 +151,8 @@ fn set_parallelism(program: &mut Program, parallelism: usize) {
     }
 }
 
-fn try_register_confluent_schema(value:  sink: &mut ConnectorOp) -> anyhow::Result<()> {
-    let config: OperatorConfig = serde_json::from_str(&sink.config).unwrap();
+async fn try_register_confluent_schema(sink: &mut ConnectorOp, schema: &StructDef) -> anyhow::Result<()> {
+    let mut config: OperatorConfig = serde_json::from_str(&sink.config).unwrap();
 
     let Ok(profile) = serde_json::from_value::<KafkaConfig>(config.connection.clone()) else {
         return Ok(());
@@ -169,22 +171,54 @@ fn try_register_confluent_schema(value:  sink: &mut ConnectorOp) -> anyhow::Resu
                                                        registry_config.api_key,
                                                        registry_config.api_secret)?;
 
-    match config.format {
-        Some(Format::Avro(avro)) => {
-            if avro.confluent_schema_registry {
+    match config.format.clone() {
+        Some(Format::Avro(mut avro)) => {
+            if avro.confluent_schema_registry && avro.schema_version.is_none() {
+                let fields: Vec<Field> = schema.fields.iter().map(|f|
+                    f.clone().into()
+                ).collect();
 
-                let schema = arrow_to_avro_schema()
+                let schema = arrow_to_avro_schema(&schema.struct_name_ident(),
+                                                  &fields.into());
+
+                println!("Schema: {}", schema.canonical_form());
+
+                let version = schema_registry.write_schema(schema.canonical_form(), ConfluentSchemaType::Avro)
+                    .await
+                    .map_err(|e| anyhow!("Failed to write schema to schema registry: {}", e))?;
+
+                avro.schema_version = Some(version as u32);
+                config.format = Some(Format::Avro(avro))
             }
         }
+        Some(Format::Json(_)) => {
+            // TODO: add json schema support
+        }
+        _ => {
+            // unsupported for schema registry
+        }
     }
+
+    sink.config = serde_json::to_string(&config).unwrap();
 
     Ok(())
 }
 
-fn register_schemas(program: &mut Program) -> anyhow::Result<()> {
-    for node in program.graph.node_indices() {
-        if let Operator::ConnectorSink(connector) = &node.operator {
-            program.graph.edges_directed()
+async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> {
+    for node in compiled_sql.program.graph.node_indices() {
+        let Some(input) = compiled_sql.program.graph.edges_directed(node, Direction::Incoming)
+            .next() else {
+            continue;
+        };
+
+        let Some(value_schema) = compiled_sql.schemas.get(&input.weight().value) else {
+            continue;
+        };
+
+        let node = compiled_sql.program.graph.node_weight_mut(node).unwrap();
+
+        if let Operator::ConnectorSink(connector) = &mut node.operator {
+            try_register_confluent_schema(connector, value_schema).await?;
         }
     }
 
@@ -198,8 +232,7 @@ pub(crate) async fn create_pipeline<'a>(
     tx: &Transaction<'a>,
 ) -> Result<(i64, Program), ErrorResp> {
     let pipeline_type;
-    let mut program;
-    let connections;
+    let mut compiled;
     let text;
     let udfs: Option<Vec<Udf>>;
     let is_preview;
@@ -212,11 +245,14 @@ pub(crate) async fn create_pipeline<'a>(
                 ));
             }
             pipeline_type = PipelineType::rust;
-            program = PipelineProgram::decode(&bytes[..])
-                .map_err(log_and_map)?
-                .try_into()
-                .map_err(log_and_map)?;
-            connections = vec![];
+            compiled = CompiledSql {
+                program: PipelineProgram::decode(&bytes[..])
+                    .map_err(log_and_map)?
+                    .try_into()
+                    .map_err(log_and_map)?,
+                connection_ids: vec![],
+                schemas: HashMap::new(),
+            };
             text = None;
             udfs = None;
             is_preview = false;
@@ -233,7 +269,7 @@ pub(crate) async fn create_pipeline<'a>(
             let api_udfs = sql.udfs.into_iter().map(|t| t.into()).collect::<Vec<Udf>>();
 
             pipeline_type = PipelineType::sql;
-            (program, connections) = compile_sql(
+            compiled = compile_sql(
                 sql.query.clone(),
                 &api_udfs,
                 sql.parallelism as usize,
@@ -248,15 +284,15 @@ pub(crate) async fn create_pipeline<'a>(
         }
     };
 
-    optimizations::optimize(&mut program.graph);
+    optimizations::optimize(&mut compiled.program.graph);
 
-    if program.graph.node_count() > auth.org_metadata.max_operators as usize {
+    if compiled.program.graph.node_count() > auth.org_metadata.max_operators as usize {
         return Err(bad_request(
             format!("This pipeline is too large to create under your plan, which only allows pipelines up to {} nodes;
                 contact support@arroyo.systems for an increase", auth.org_metadata.max_operators)));
     }
 
-    let errors = program.validate_graph();
+    let errors = compiled.program.validate_graph();
     if !errors.is_empty() {
         let errs: Vec<String> = errors.iter().map(|s| format!("  * {}\n", s)).collect();
 
@@ -266,18 +302,25 @@ pub(crate) async fn create_pipeline<'a>(
         )));
     }
 
-    set_parallelism(&mut program, 1);
+    set_parallelism(&mut compiled.program, 1);
 
     if is_preview {
-        for node in program.graph.node_weights_mut() {
-            // if it is a connector sink or switch to a web sink
-            // if let Operator::ConnectorSink { .. } = node.operator {
-            //     node.operator = Operator::ConnectorSink(ConnectorOp::web_sink());
-            // }
+        for node in compiled.program.graph.node_weights_mut() {
+            // replace all sink connectors with websink for preview
+            if let Operator::ConnectorSink { .. } = node.operator {
+                node.operator = Operator::ConnectorSink(ConnectorOp::web_sink());
+            }
         }
     }
 
-    let proto_program: PipelineProgram = program.clone().try_into().map_err(log_and_map)?;
+    register_schemas(&mut compiled).await
+        .map_err(|e| ErrorResp {
+            status_code: StatusCode::BAD_REQUEST,
+            message: format!("Failed to register schemas with the schema registry. Make sure \
+            that the schema_registry is configured correctly and running.\nDetails: {}", e)
+        })?;
+
+    let proto_program: PipelineProgram = compiled.program.clone().try_into().map_err(log_and_map)?;
 
     let program_bytes = proto_program.encode_to_vec();
 
@@ -302,7 +345,7 @@ pub(crate) async fn create_pipeline<'a>(
         .map_err(|e| handle_db_error("pipeline", e))?;
 
     if !is_preview {
-        for connection in connections {
+        for connection in compiled.connection_ids {
             api_queries::add_pipeline_connection_table()
                 .bind(
                     tx,
@@ -315,7 +358,7 @@ pub(crate) async fn create_pipeline<'a>(
         }
     }
 
-    Ok((pipeline_id, program))
+    Ok((pipeline_id, compiled.program))
 }
 
 impl TryInto<Pipeline> for DbPipeline {
@@ -405,7 +448,7 @@ pub async fn validate_query(
 
     let pipeline_graph_validation_result =
         match compile_sql(validate_query_post.query, &udfs, 1, &auth_data, &client).await {
-            Ok((mut program, _)) => {
+            Ok(CompiledSql{ mut program, ..}) => {
                 optimizations::optimize(&mut program.graph);
                 let nodes = program
                     .graph

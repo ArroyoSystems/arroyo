@@ -318,28 +318,13 @@ impl StructDef {
 
     fn generate_avro_writer(&self) -> TokenStream {
         let record_ident = format_ident!("self");
-        let fields: Vec<_> = self
-            .fields
-            .iter()
-            .map(|f| {
-                let name = AvroFormat::sanitize_field(&f.name());
-                let field_ident = f.field_ident();
-                let serializer =
-                    avro::generate_serializer_item(&record_ident, &field_ident, &f.data_type);
-                quote! {
-                    __avro_record.put(#name, #serializer);
-                }
-            })
-            .collect();
-
+        let body = avro::generate_serializer_item(&record_ident, None, None,
+                                                  &TypeDef::StructDef(self.clone(), false));
         parse_quote! {
             fn to_avro(&self, schema: &arroyo_worker::apache_avro::Schema) -> arroyo_worker::apache_avro::types::Value {
-                let mut __avro_record = arroyo_worker::apache_avro::types::Record::new(schema).unwrap();
                 use arroyo_worker::apache_avro::types::Value::*;
 
-                #(#fields )*
-
-                __avro_record.into()
+                #body
             }
         }
     }

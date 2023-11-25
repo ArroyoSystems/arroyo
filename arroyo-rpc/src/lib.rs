@@ -167,3 +167,15 @@ pub struct OperatorConfig {
     pub framing: Option<Framing>,
     pub rate_limit: Option<RateLimit>,
 }
+
+impl Default for OperatorConfig {
+    fn default() -> Self {
+        Self {
+            connection: serde_json::from_str("{}").unwrap(),
+            table: serde_json::from_str("{}").unwrap(),
+            format: None,
+            framing: None,
+            rate_limit: None,
+        }
+    }
+}
