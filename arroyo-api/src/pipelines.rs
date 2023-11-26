@@ -1,17 +1,17 @@
 use anyhow::{anyhow, bail, Context};
+use arrow_schema::{Field, Fields};
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
 use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-use arrow_schema::{Field, Fields};
 use http::StatusCode;
 use jwt_simple::prelude::coarsetime::clock_gettime_nsec_np;
 use petgraph::Direction;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 
 use crate::{jobs, pipelines, types};
 use arroyo_datastream::{ConnectorOp, Operator, Program, StreamNode};
@@ -26,20 +26,20 @@ use arroyo_rpc::grpc::api::{
     create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, PipelineProgram,
 };
 
+use arroyo_connectors::kafka::{KafkaConfig, KafkaTable};
+use arroyo_formats::avro::arrow_to_avro_schema;
+use arroyo_rpc::formats::Format;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
+use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
+use arroyo_rpc::OperatorConfig;
 use arroyo_server_common::log_event;
-use arroyo_sql::{has_duplicate_udf_names, ArroyoSchemaProvider, SqlConfig, CompiledSql};
+use arroyo_sql::types::StructDef;
+use arroyo_sql::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use petgraph::visit::EdgeRef;
 use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
 use tracing::warn;
-use arroyo_connectors::kafka::{KafkaConfig, KafkaTable};
-use arroyo_formats::avro::arrow_to_avro_schema;
-use arroyo_rpc::formats::Format;
-use arroyo_rpc::OperatorConfig;
-use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
-use arroyo_sql::types::StructDef;
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
@@ -151,7 +151,10 @@ fn set_parallelism(program: &mut Program, parallelism: usize) {
     }
 }
 
-async fn try_register_confluent_schema(sink: &mut ConnectorOp, schema: &StructDef) -> anyhow::Result<()> {
+async fn try_register_confluent_schema(
+    sink: &mut ConnectorOp,
+    schema: &StructDef,
+) -> anyhow::Result<()> {
     let mut config: OperatorConfig = serde_json::from_str(&sink.config).unwrap();
 
     let Ok(profile) = serde_json::from_value::<KafkaConfig>(config.connection.clone()) else {
@@ -163,27 +166,27 @@ async fn try_register_confluent_schema(sink: &mut ConnectorOp, schema: &StructDe
     };
 
     let Some(registry_config) = profile.schema_registry else {
-        return Ok(())
+        return Ok(());
     };
 
-    let schema_registry = ConfluentSchemaRegistry::new(&registry_config.endpoint,
-                                                       &table.topic,
-                                                       registry_config.api_key,
-                                                       registry_config.api_secret)?;
+    let schema_registry = ConfluentSchemaRegistry::new(
+        &registry_config.endpoint,
+        &table.topic,
+        registry_config.api_key,
+        registry_config.api_secret,
+    )?;
 
     match config.format.clone() {
         Some(Format::Avro(mut avro)) => {
             if avro.confluent_schema_registry && avro.schema_version.is_none() {
-                let fields: Vec<Field> = schema.fields.iter().map(|f|
-                    f.clone().into()
-                ).collect();
+                let fields: Vec<Field> = schema.fields.iter().map(|f| f.clone().into()).collect();
 
-                let schema = arrow_to_avro_schema(&schema.struct_name_ident(),
-                                                  &fields.into());
+                let schema = arrow_to_avro_schema(&schema.struct_name_ident(), &fields.into());
 
                 println!("Schema: {}", schema.canonical_form());
 
-                let version = schema_registry.write_schema(schema.canonical_form(), ConfluentSchemaType::Avro)
+                let version = schema_registry
+                    .write_schema(schema.canonical_form(), ConfluentSchemaType::Avro)
                     .await
                     .map_err(|e| anyhow!("Failed to write schema to schema registry: {}", e))?;
 
@@ -206,8 +209,12 @@ async fn try_register_confluent_schema(sink: &mut ConnectorOp, schema: &StructDe
 
 async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> {
     for node in compiled_sql.program.graph.node_indices() {
-        let Some(input) = compiled_sql.program.graph.edges_directed(node, Direction::Incoming)
-            .next() else {
+        let Some(input) = compiled_sql
+            .program
+            .graph
+            .edges_directed(node, Direction::Incoming)
+            .next()
+        else {
             continue;
         };
 
@@ -313,14 +320,19 @@ pub(crate) async fn create_pipeline<'a>(
         }
     }
 
-    register_schemas(&mut compiled).await
+    register_schemas(&mut compiled)
+        .await
         .map_err(|e| ErrorResp {
             status_code: StatusCode::BAD_REQUEST,
-            message: format!("Failed to register schemas with the schema registry. Make sure \
-            that the schema_registry is configured correctly and running.\nDetails: {}", e)
+            message: format!(
+                "Failed to register schemas with the schema registry. Make sure \
+            that the schema_registry is configured correctly and running.\nDetails: {}",
+                e
+            ),
         })?;
 
-    let proto_program: PipelineProgram = compiled.program.clone().try_into().map_err(log_and_map)?;
+    let proto_program: PipelineProgram =
+        compiled.program.clone().try_into().map_err(log_and_map)?;
 
     let program_bytes = proto_program.encode_to_vec();
 
@@ -448,7 +460,7 @@ pub async fn validate_query(
 
     let pipeline_graph_validation_result =
         match compile_sql(validate_query_post.query, &udfs, 1, &auth_data, &client).await {
-            Ok(CompiledSql{ mut program, ..}) => {
+            Ok(CompiledSql { mut program, .. }) => {
                 optimizations::optimize(&mut program.graph);
                 let nodes = program
                     .graph

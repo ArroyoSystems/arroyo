@@ -1,19 +1,19 @@
 extern crate core;
 
-use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::sync::Arc;
 use anyhow::bail;
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow_array::cast::AsArray;
 use arrow_array::{RecordBatch, StringArray};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{json, Value};
-use tokio::sync::Mutex;
 use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_types::{Data, Debezium, RawJson, UserError};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub mod avro;
 pub mod json;
@@ -147,16 +147,16 @@ impl SchemaData for () {
 // where it can then be accessed using SQL JSON functions -- this is currently a bit inefficient
 // since we need an owned string.
 pub fn deserialize_raw_json<'de, D>(f: D) -> Result<String, D::Error>
-    where
-        D: Deserializer<'de>,
+where
+    D: Deserializer<'de>,
 {
     let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
     Ok(raw.to_string())
 }
 
 pub fn deserialize_raw_json_opt<'de, D>(f: D) -> Result<Option<String>, D::Error>
-    where
-        D: Deserializer<'de>,
+where
+    D: Deserializer<'de>,
 {
     let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
     Ok(Some(raw.to_string()))
@@ -232,9 +232,9 @@ pub struct DataDeserializer<T: SchemaData> {
 impl<T: SchemaData> DataDeserializer<T> {
     pub fn new(format: Format, framing: Option<Framing>) -> Self {
         let resolver = if let Format::Avro(AvroFormat {
-                                               reader_schema: Some(schema),
-                                               ..
-                                           }) = &format
+            reader_schema: Some(schema),
+            ..
+        }) = &format
         {
             Arc::new(FixedSchemaResolver::new(0, schema.clone().into()))
                 as Arc<dyn SchemaResolver + Sync>
@@ -298,16 +298,16 @@ impl<T: SchemaData> DataDeserializer<T> {
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
             Format::RawString(_) => deserialize_raw_string(msg),
         }
-            .map_err(|e| {
-                UserError::new(
-                    "Deserialization failed",
-                    format!(
-                        "Failed to deserialize: '{}': {}",
-                        String::from_utf8_lossy(&msg),
-                        e
-                    ),
-                )
-            })
+        .map_err(|e| {
+            UserError::new(
+                "Deserialization failed",
+                format!(
+                    "Failed to deserialize: '{}': {}",
+                    String::from_utf8_lossy(&msg),
+                    e
+                ),
+            )
+        })
     }
 }
 
@@ -387,8 +387,8 @@ mod tests {
             framing.clone(),
             "one block\ntwo block\nthree block".as_bytes(),
         )
-            .map(|t| String::from_utf8(t.to_vec()).unwrap())
-            .collect();
+        .map(|t| String::from_utf8(t.to_vec()).unwrap())
+        .collect();
 
         assert_eq!(
             vec![
@@ -403,8 +403,8 @@ mod tests {
             framing.clone(),
             "one block\ntwo block\nthree block\n".as_bytes(),
         )
-            .map(|t| String::from_utf8(t.to_vec()).unwrap())
-            .collect();
+        .map(|t| String::from_utf8(t.to_vec()).unwrap())
+        .collect();
 
         assert_eq!(
             vec![

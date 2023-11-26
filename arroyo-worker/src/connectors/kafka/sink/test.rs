@@ -5,8 +5,8 @@ use std::io::Write;
 use std::time::{Duration, SystemTime};
 
 use crate::engine::{Context, OutQueue};
-use arroyo_formats::SchemaData;
 use arrow::datatypes::Field;
+use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_types::CheckpointBarrier;
 use arroyo_types::*;

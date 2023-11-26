@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
@@ -31,7 +32,6 @@ use tokio::{
     time::{Duration, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
-use arroyo_formats::{DataDeserializer, SchemaData};
 
 use crate::{engine::Context, SourceFinishType};
 

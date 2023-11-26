@@ -133,7 +133,9 @@ impl ConfluentSchemaRegistry {
             schema_type,
         };
 
-        let resp = self.client.post(self.endpoint.clone())
+        let resp = self
+            .client
+            .post(self.endpoint.clone())
             .json(&req)
             .send()
             .await
@@ -149,13 +151,18 @@ impl ConfluentSchemaRegistry {
             let status = resp.status();
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
 
-            let body = body.pointer("/message")
+            let body = body
+                .pointer("/message")
                 .map(|m| m.to_string())
                 .unwrap_or_else(|| body.to_string());
 
             match status {
                 StatusCode::CONFLICT => {
-                    bail!("Failed to register new schema for topic '{}': {}", self.topic, body)
+                    bail!(
+                        "Failed to register new schema for topic '{}': {}",
+                        self.topic,
+                        body
+                    )
                 }
                 StatusCode::UNPROCESSABLE_ENTITY => {
                     bail!("Invalid schema for topic '{}': {}", self.topic, body);
@@ -169,7 +176,8 @@ impl ConfluentSchemaRegistry {
             }
         }
 
-        let resp: PostSchemaResponse = resp.json()
+        let resp: PostSchemaResponse = resp
+            .json()
             .await
             .map_err(|e| anyhow!("could not parse response from schema registry: {}", e))?;
 

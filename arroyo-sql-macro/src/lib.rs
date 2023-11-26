@@ -180,7 +180,8 @@ fn get_pipeline_module(
             default_parallelism: 1,
         },
     )
-    .unwrap().program;
+    .unwrap()
+    .program;
 
     let function = program.make_graph_function();
 

@@ -15,11 +15,11 @@ use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_rpc::grpc::StopMode;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use tracing::{debug, info, warn};
 use typify::import_types;
-use arroyo_formats::{DataDeserializer, SchemaData};
 
 use crate::{
     engine::{Context, StreamNode},

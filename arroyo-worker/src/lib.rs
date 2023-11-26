@@ -4,7 +4,7 @@
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
-use anyhow::{Result};
+use anyhow::Result;
 use arrow_array::cast::AsArray;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
@@ -62,8 +62,6 @@ lazy_static! {
     pub static ref LOCAL_CONTROLLER_ADDR: String =
         format!("http://localhost:{}", ports::CONTROLLER_GRPC);
 }
-
-
 
 pub static TIMER_TABLE: char = '[';
 

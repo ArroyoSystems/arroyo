@@ -15,13 +15,22 @@ use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
 
 use crate::expressions::AggregateComputation;
-use crate::{code_gen::{
-    BinAggregatingContext, CodeGenerator, CombiningContext, JoinListsContext, JoinPairContext,
-    MemoryAddingContext, MemoryAggregatingContext, MemoryRemovingContext,
-    ValueBinMergingContext, ValuePointerContext, VecAggregationContext,
-}, expressions::{Column, ColumnExpression, Expression, SortExpression}, external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource}, operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection}, optimizations::optimize, pipeline::{
-    JoinType, MethodCompiler, RecordTransform, SourceOperator, SqlOperator, WindowFunction,
-}, types::{StructDef, StructField, StructPair, TypeDef}, ArroyoSchemaProvider, SqlConfig, CompiledSql};
+use crate::{
+    code_gen::{
+        BinAggregatingContext, CodeGenerator, CombiningContext, JoinListsContext, JoinPairContext,
+        MemoryAddingContext, MemoryAggregatingContext, MemoryRemovingContext,
+        ValueBinMergingContext, ValuePointerContext, VecAggregationContext,
+    },
+    expressions::{Column, ColumnExpression, Expression, SortExpression},
+    external::{ProcessingMode, SinkUpdateType, SqlSink, SqlSource},
+    operators::{AggregateProjection, Projection, TwoPhaseAggregateProjection},
+    optimizations::optimize,
+    pipeline::{
+        JoinType, MethodCompiler, RecordTransform, SourceOperator, SqlOperator, WindowFunction,
+    },
+    types::{StructDef, StructField, StructPair, TypeDef},
+    ArroyoSchemaProvider, CompiledSql, SqlConfig,
+};
 use anyhow::Result;
 use petgraph::Direction;
 
@@ -2024,8 +2033,9 @@ pub fn get_program(
     });
 
     let graph: DiGraph<StreamNode, StreamEdge> = plan_graph.into();
-    
-    let schemas = all_types.into_iter()
+
+    let schemas = all_types
+        .into_iter()
         .map(|t| (t.struct_name_ident(), t))
         .collect();
 

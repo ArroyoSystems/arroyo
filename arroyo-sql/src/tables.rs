@@ -221,6 +221,7 @@ impl ConnectorTable {
         if !fields.is_empty() {
             table.fields = fields;
         }
+
         table.event_time_field = options.remove("event_time_field");
         table.watermark_field = options.remove("watermark_field");
 

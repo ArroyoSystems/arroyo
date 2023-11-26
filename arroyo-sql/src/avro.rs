@@ -1,14 +1,10 @@
 use crate::types::{StructDef, StructField, TypeDef};
 use anyhow::{anyhow, bail};
-use apache_avro::schema::{
-    FixedSchema, Name, RecordField, RecordFieldOrder, RecordSchema, UnionSchema,
-};
 use apache_avro::Schema;
-use arrow_schema::{DataType, Field, Fields, TimeUnit};
+use arrow_schema::{DataType, TimeUnit};
+use arroyo_rpc::formats::AvroFormat;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
-use std::ptr::null;
-use arroyo_rpc::formats::AvroFormat;
 
 pub const ROOT_NAME: &str = "ArroyoAvroRoot";
 
@@ -121,7 +117,12 @@ fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {
 ///
 /// Note that this must align with the schemas constructed in
 /// `arroyo-formats::avro::arrow_to_avro_schema`!
-pub fn generate_serializer_item(record: &Ident, field: Option<&Ident>, name: Option<String>, td: &TypeDef) -> TokenStream {
+pub fn generate_serializer_item(
+    record: &Ident,
+    field: Option<&Ident>,
+    name: Option<String>,
+    td: &TypeDef,
+) -> TokenStream {
     use DataType::*;
     let value = match field {
         Some(ident) => quote!(#record.#ident),
@@ -136,11 +137,15 @@ pub fn generate_serializer_item(record: &Ident, field: Option<&Ident>, name: Opt
                 .map(|f| {
                     let name = AvroFormat::sanitize_field(&match f.alias.as_ref() {
                         Some(alias) => format!("{}.{}", alias, f.name),
-                        None => f.name()
+                        None => f.name(),
                     });
                     let field_ident = f.field_ident();
-                    let serializer =
-                        generate_serializer_item(&format_ident!("v"), Some(&field_ident), Some(name.clone()), &f.data_type);
+                    let serializer = generate_serializer_item(
+                        &format_ident!("v"),
+                        Some(&field_ident),
+                        Some(name.clone()),
+                        &f.data_type,
+                    );
 
                     quote! {
                         __avro_record.put(#name, #serializer);
@@ -171,22 +176,24 @@ pub fn generate_serializer_item(record: &Ident, field: Option<&Ident>, name: Opt
                     let schema = &__record_schema.fields[*__record_field_number].schema;
 
                     #nullable_handler
-                    println!("Serializing {} -- {:?}", #name, schema);
                 }
             });
 
-            (quote!({
-                #schema_extractor
+            (
+                quote!({
+                    #schema_extractor
 
-                let mut __avro_record = arroyo_worker::apache_avro::types::Record::new(schema).unwrap();
+                    let mut __avro_record = arroyo_worker::apache_avro::types::Record::new(schema).unwrap();
 
-                #(#fields )*
+                    #(#fields )*
 
-                __avro_record.into()
-            }), *nullable)
+                    Into::<arroyo_worker::apache_avro::types::Value>::into(__avro_record)
+                }),
+                *nullable,
+            )
         }
-        TypeDef::DataType(dt, nullable) => {
-            (match dt {
+        TypeDef::DataType(dt, nullable) => (
+            match dt {
                 Null => unreachable!("null fields are not supported"),
                 Boolean => quote! { Boolean(*v) },
                 Int8 | Int16 | Int32 | UInt8 | UInt16 => quote! { Int(*v as i32) },
@@ -224,8 +231,9 @@ pub fn generate_serializer_item(record: &Ident, field: Option<&Ident>, name: Opt
                 Decimal256(_, _) => unimplemented!("decimal256 is not supported"),
                 Map(_, _) => unimplemented!("maps are not supported"),
                 RunEndEncoded(_, _) => unimplemented!("run end encoded is not supported"),
-            }, *nullable)
-        }
+            },
+            *nullable,
+        ),
     };
 
     if nullable {

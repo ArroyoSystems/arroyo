@@ -49,12 +49,12 @@ use prettyplease::unparse;
 use regex::Regex;
 use std::collections::HashSet;
 
+use arroyo_rpc::OperatorConfig;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
 use tracing::warn;
 use unicase::UniCase;
-use arroyo_rpc::OperatorConfig;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 

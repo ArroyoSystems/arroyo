@@ -1,5 +1,6 @@
 use crate::engine::{Context, StreamNode};
 use crate::SourceFinishType;
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
 use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
@@ -20,7 +21,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tracing::{debug, error, info, warn};
-use arroyo_formats::{DataDeserializer, SchemaData};
 
 use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, TableType};
 

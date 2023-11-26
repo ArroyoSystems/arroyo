@@ -1,6 +1,7 @@
 use crate::engine::{Context, StreamNode};
-use crate::{SourceFinishType};
+use crate::SourceFinishType;
 use anyhow::anyhow;
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
 use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
@@ -19,7 +20,6 @@ use std::marker::PhantomData;
 use tokio::select;
 use tokio_stream::{Stream, StreamExt, StreamMap};
 use tracing::{debug, error, info, warn};
-use arroyo_formats::{DataDeserializer, SchemaData};
 
 use super::{FluvioTable, SourceOffset, TableType};
 

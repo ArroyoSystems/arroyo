@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
@@ -22,7 +23,6 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::{debug, info};
 use tungstenite::http::Request;
 use typify::import_types;
-use arroyo_formats::{DataDeserializer, SchemaData};
 
 use crate::{
     engine::{Context, StreamNode},

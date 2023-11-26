@@ -7,7 +7,6 @@ use std::{
 
 use anyhow::Result;
 use anyhow::{anyhow, bail};
-use apache_avro::types::Value;
 use arrow::datatypes::{DataType, IntervalMonthDayNanoType};
 use arrow::{
     array::Decimal128Array,
@@ -24,8 +23,6 @@ use crate::avro;
 use arroyo_rpc::api_types::connections::{
     FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
-use arroyo_rpc::formats::AvroFormat;
-use arroyo_rpc::formats::Format::Avro;
 use datafusion_common::ScalarValue;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
@@ -318,8 +315,12 @@ impl StructDef {
 
     fn generate_avro_writer(&self) -> TokenStream {
         let record_ident = format_ident!("self");
-        let body = avro::generate_serializer_item(&record_ident, None, None,
-                                                  &TypeDef::StructDef(self.clone(), false));
+        let body = avro::generate_serializer_item(
+            &record_ident,
+            None,
+            None,
+            &TypeDef::StructDef(self.clone(), false),
+        );
         parse_quote! {
             fn to_avro(&self, schema: &arroyo_worker::apache_avro::Schema) -> arroyo_worker::apache_avro::types::Value {
                 use arroyo_worker::apache_avro::types::Value::*;
@@ -1088,7 +1089,7 @@ impl StructField {
     fn get_field_literal(field: &Field, parent_nullable: bool) -> TokenStream {
         let name = field.name();
         let data_type = Self::get_data_type_literal(field.data_type(), parent_nullable);
-        let nullable = field.is_nullable() || parent_nullable;
+        let nullable = field.is_nullable();
         quote!(arrow::datatypes::Field::new(#name, #data_type, #nullable))
     }
 

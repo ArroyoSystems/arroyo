@@ -1,7 +1,7 @@
 use crate::engine::{Context, StreamNode};
+use anyhow::Result;
 use arroyo_formats::DataSerializer;
 use arroyo_formats::SchemaData;
-use anyhow::Result;
 use arroyo_macro::process_fn;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};

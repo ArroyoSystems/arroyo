@@ -22,12 +22,12 @@ use tokio_stream::wrappers::LinesStream;
 use tokio_stream::Stream;
 use tracing::{info, warn};
 
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{Data, Record, UserError};
 use typify::import_types;
-use arroyo_formats::{DataDeserializer, SchemaData};
 
 use crate::{engine::Context, SourceFinishType};
 
