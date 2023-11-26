@@ -521,3 +521,39 @@ INSERT INTO schemaless_sink
 select bid.url
 from nexmark;"
 }
+
+full_pipeline_codegen! {
+  "avro_writes_nexmark",
+  "CREATE TABLE avro_writes WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'sink',
+  topic = 'outputs',
+  format = 'avro'
+);
+
+INSERT INTO avro_writes
+select *
+from nexmark;"
+}
+
+full_pipeline_codegen! {
+  "avro_writes",
+  "CREATE TABLE avro_writes (
+    date DATETIME,
+    u64 BIGINT UNSIGNED,
+    i64 BIGINT,
+    string TEXT
+  )
+  WITH (
+  connector = 'kafka',
+  bootstrap_servers = 'localhost:9092',
+  type = 'sink',
+  topic = 'outputs',
+  format = 'avro'
+);
+
+INSERT INTO avro_writes
+select cast(bid.datetime as TIMESTAMP), bid.auction as u64, bid.auction as i64, bid.extra
+from nexmark;"
+}

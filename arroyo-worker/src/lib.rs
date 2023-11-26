@@ -5,7 +5,7 @@
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use anyhow::Result;
-use arrow_array::cast::AsArray;
+
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -17,17 +17,16 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, Data, Debezium, NodeId, RawJson,
-    WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV,
+    RUN_ID_ENV,
 };
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
 use rand::Rng;
-use serde::{Deserialize, Deserializer, Serialize};
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
-use std::io::Write;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -45,7 +44,6 @@ pub use ordered_float::OrderedFloat;
 
 // re-export avro for use in generated code
 pub use apache_avro;
-use apache_avro::types::Value;
 
 pub mod connectors;
 pub mod engine;

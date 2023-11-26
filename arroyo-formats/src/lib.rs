@@ -124,7 +124,10 @@ impl SchemaData for RawJson {
 
     fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
         let mut record = apache_avro::types::Record::new(schema).unwrap();
-        record.put("value", apache_avro::types::Value::String(self.value.clone()));
+        record.put(
+            "value",
+            apache_avro::types::Value::String(self.value.clone()),
+        );
         record.into()
     }
 }

@@ -102,11 +102,7 @@ pub fn to_vec<T: SchemaData>(
     let v = record.to_avro(schema);
 
     if format.raw_datums || format.confluent_schema_registry {
-        let record = apache_avro::to_avro_datum(schema, v.clone()).unwrap_or_else(|e| {
-            println!("{:#?}", v);
-            panic!("{:?}", e);
-        });
-
+        let record = apache_avro::to_avro_datum(schema, v.clone()).expect("avro serialization failed");
         if format.confluent_schema_registry {
             // TODO: this would be more efficient if we could use the internal write_avro_datum to avoid
             // allocating the buffer twice
@@ -420,7 +416,7 @@ mod tests {
                 unimplemented!("to_raw_string is not implemented for this type")
             }
 
-            fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+            fn to_avro(&self, _schema: &apache_avro::Schema) -> apache_avro::types::Value {
                 todo!()
             }
         }
@@ -497,7 +493,7 @@ mod tests {
                 unimplemented!("to_raw_string is not implemented for this type")
             }
 
-            fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+            fn to_avro(&self, _schema: &apache_avro::Schema) -> apache_avro::types::Value {
                 todo!()
             }
         }
@@ -720,6 +716,6 @@ mod tests {
             new_field: "hello!".to_string(),
         };
 
-        let data = to_vec(&record, &format, &schema, None);
+        let _data = to_vec(&record, &format, &schema, None);
     }
 }

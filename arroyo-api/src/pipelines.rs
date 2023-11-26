@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context};
-use arrow_schema::{Field, Fields};
+use arrow_schema::Field;
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -7,14 +7,14 @@ use axum_extra::extract::WithRejection;
 use cornucopia_async::{GenericClient, Params};
 use deadpool_postgres::{Object, Transaction};
 use http::StatusCode;
-use jwt_simple::prelude::coarsetime::clock_gettime_nsec_np;
+
 use petgraph::Direction;
 use std::collections::HashMap;
-use std::sync::Arc;
+
 use std::time::Duration;
 
 use crate::{jobs, pipelines, types};
-use arroyo_datastream::{ConnectorOp, Operator, Program, StreamNode};
+use arroyo_datastream::{ConnectorOp, Operator, Program};
 use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch, PipelinePost,
     PipelineRestart, QueryValidationResult, StopType, ValidateQueryPost,
@@ -182,8 +182,6 @@ async fn try_register_confluent_schema(
                 let fields: Vec<Field> = schema.fields.iter().map(|f| f.clone().into()).collect();
 
                 let schema = arrow_to_avro_schema(&schema.struct_name_ident(), &fields.into());
-
-                println!("Schema: {}", schema.canonical_form());
 
                 let version = schema_registry
                     .write_schema(schema.canonical_form(), ConfluentSchemaType::Avro)

@@ -1,6 +1,5 @@
 #![allow(clippy::unnecessary_mut_passed)]
 
-use apache_avro::{Schema, Writer};
 use std::io::Write;
 use std::time::{Duration, SystemTime};
 
@@ -146,7 +145,7 @@ impl SchemaData for TestOutStruct {
         unimplemented!()
     }
 
-    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+    fn to_avro(&self, _schema: &apache_avro::Schema) -> apache_avro::types::Value {
         todo!()
     }
 }

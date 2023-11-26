@@ -396,8 +396,9 @@ impl ToString for DebeziumOp {
         match self {
             DebeziumOp::Create => "c",
             DebeziumOp::Update => "u",
-            DebeziumOp::Delete => "d"
-        }.to_string()
+            DebeziumOp::Delete => "d",
+        }
+        .to_string()
     }
 }
 
