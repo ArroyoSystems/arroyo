@@ -343,9 +343,9 @@ impl<T: Data> UpdatingData<T> {
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(try_from = "DebeziumShadow<T>")]
 pub struct Debezium<T: Data> {
-    before: Option<T>,
-    after: Option<T>,
-    op: DebeziumOp,
+    pub before: Option<T>,
+    pub after: Option<T>,
+    pub op: DebeziumOp,
 }
 
 // Use a shadow type to perform post-deserialization validation that the expected fields
@@ -389,6 +389,16 @@ pub enum DebeziumOp {
     Create,
     Update,
     Delete,
+}
+
+impl ToString for DebeziumOp {
+    fn to_string(&self) -> String {
+        match self {
+            DebeziumOp::Create => "c",
+            DebeziumOp::Update => "u",
+            DebeziumOp::Delete => "d"
+        }.to_string()
+    }
 }
 
 impl<'de> Deserialize<'de> for DebeziumOp {

@@ -38,6 +38,18 @@ pub trait SchemaData: Data + Serialize + DeserializeOwned {
     fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value;
 }
 
+fn get_subschema<'a>(schema: &'a apache_avro::Schema, field: &str) -> &'a apache_avro::Schema {
+    let apache_avro::schema::Schema::Record(record_schmema) = schema else {
+        unreachable!();
+    };
+
+    let Some(idx) = record_schmema.lookup.get("before") else {
+        panic!("field {} not found in avro schema", field);
+    };
+
+    &record_schmema.fields[*idx].schema
+}
+
 impl<T: SchemaData> SchemaData for Debezium<T> {
     fn name() -> &'static str {
         "debezium"
@@ -68,7 +80,18 @@ impl<T: SchemaData> SchemaData for Debezium<T> {
     }
 
     fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
-        todo!()
+        let mut record = apache_avro::types::Record::new(schema).unwrap();
+        if let Some(before) = &self.before {
+            record.put("before", before.to_avro(get_subschema(schema, "before")));
+        }
+
+        if let Some(after) = &self.after {
+            record.put("after", after.to_avro(get_subschema(schema, "after")));
+        }
+
+        record.put("op", apache_avro::types::Value::String(self.op.to_string()));
+
+        record.into()
     }
 }
 
@@ -79,10 +102,6 @@ impl SchemaData for RawJson {
 
     fn schema() -> Schema {
         Schema::new(vec![Field::new("value", DataType::Utf8, false)])
-    }
-
-    fn to_raw_string(&self) -> Option<Vec<u8>> {
-        Some(self.value.as_bytes().to_vec())
     }
 
     fn iterator_from_record_batch(
@@ -99,8 +118,14 @@ impl SchemaData for RawJson {
         }))
     }
 
+    fn to_raw_string(&self) -> Option<Vec<u8>> {
+        Some(self.value.as_bytes().to_vec())
+    }
+
     fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
-        todo!()
+        let mut record = apache_avro::types::Record::new(schema).unwrap();
+        record.put("value", apache_avro::types::Value::String(self.value.clone()));
+        record.into()
     }
 }
 
@@ -138,7 +163,7 @@ impl SchemaData for () {
         None
     }
 
-    fn to_avro(&self, schema: &apache_avro::Schema) -> apache_avro::types::Value {
+    fn to_avro(&self, _: &apache_avro::Schema) -> apache_avro::types::Value {
         apache_avro::types::Value::Record(vec![])
     }
 }
