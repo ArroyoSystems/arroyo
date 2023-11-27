@@ -102,7 +102,8 @@ pub fn to_vec<T: SchemaData>(
     let v = record.to_avro(schema);
 
     if format.raw_datums || format.confluent_schema_registry {
-        let record = apache_avro::to_avro_datum(schema, v.clone()).expect("avro serialization failed");
+        let record =
+            apache_avro::to_avro_datum(schema, v.clone()).expect("avro serialization failed");
         if format.confluent_schema_registry {
             // TODO: this would be more efficient if we could use the internal write_avro_datum to avoid
             // allocating the buffer twice

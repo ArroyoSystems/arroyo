@@ -43,6 +43,7 @@ COPY arroyo-sql-testing src/arroyo-sql-testing
 COPY arroyo-controller src/arroyo-controller
 COPY arroyo-console src/arroyo-console
 COPY arroyo-storage src/arroyo-storage
+COPY arroyo-formats src/arroyo-formats
 COPY connector-schemas src/connector-schemas
 COPY arroyo src/arroyo
 

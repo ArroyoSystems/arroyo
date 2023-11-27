@@ -21,6 +21,7 @@ COPY Cargo.lock Cargo.lock
 COPY arroyo-types arroyo-types
 COPY arroyo-worker arroyo-worker
 COPY arroyo-rpc arroyo-rpc
+COPY arroyo-formats arroyo-formats
 COPY arroyo-macro arroyo-macro
 COPY arroyo-server-common arroyo-server-common
 COPY arroyo-state arroyo-state
