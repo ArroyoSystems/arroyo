@@ -705,6 +705,7 @@ dependencies = [
  "log",
  "nanoid",
  "prost",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

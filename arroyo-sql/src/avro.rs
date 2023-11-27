@@ -97,10 +97,7 @@ fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {
 
             (
                 TypeDef::StructDef(
-                    StructDef::for_name(
-                        Some(format!("{}::{}", source_name, record.name.name)),
-                        fields,
-                    ),
+                    StructDef::for_name(Some(record.name.name.clone()), fields),
                     false,
                 ),
                 None,

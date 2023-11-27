@@ -1,8 +1,10 @@
+use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
+use std::sync::OnceLock;
 use utoipa::ToSchema;
 
 #[derive(
@@ -213,7 +215,10 @@ impl AvroFormat {
     }
 
     pub fn sanitize_field(s: &str) -> String {
-        s.replace(".", "__")
+        static RE: OnceLock<Regex> = OnceLock::new();
+        let re = RE.get_or_init(|| Regex::new(r"[^a-zA-Z0-9_.]").unwrap());
+
+        re.replace_all(&s, "_").replace('.', "__")
     }
 }
 
