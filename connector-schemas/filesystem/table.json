@@ -13,7 +13,7 @@
             "path": {
               "title": "Path",
               "type": "string",
-              "description": "URI of the folder to write to"
+              "description": "URI of the folder to read from"
             },
             "compressionFormat": {
               "title": "Compression format",
