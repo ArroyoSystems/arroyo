@@ -1,9 +1,10 @@
 use anyhow::{anyhow, bail, Result};
 use axum::response::sse::Event;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
 
-use arroyo_rpc::api_types::connections::TestSourceMessage;
+use arroyo_rpc::api_types::connections::{ConnectionProfile, TestSourceMessage};
 use arroyo_rpc::{api_types, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
@@ -125,13 +126,14 @@ impl Connector for KinesisConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
-        let typ = pull_opt("type", opts)?;
+        _profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
+        let typ = pull_opt("type", options)?;
         let table_type = match typ.as_str() {
             "source" => {
-                let offset: Option<String> = opts.remove("source.offset");
+                let offset: Option<String> = options.remove("source.offset");
                 TableType::Source {
                     offset: match offset.as_ref().map(|f| f.as_str()) {
                         Some("earliest") => SourceOffset::Earliest,
@@ -142,9 +144,10 @@ impl Connector for KinesisConnector {
             }
             "sink" => {
                 let batch_flush_interval_millis =
-                    pull_option_to_i64("sink.flush_interval_millis", opts)?;
-                let batch_max_buffer_size = pull_option_to_i64("sink.max_bytes_per_batch", opts)?;
-                let records_per_batch = pull_option_to_i64("sink.max_records_per_batch", opts)?;
+                    pull_option_to_i64("sink.flush_interval_millis", options)?;
+                let batch_max_buffer_size =
+                    pull_option_to_i64("sink.max_bytes_per_batch", options)?;
+                let records_per_batch = pull_option_to_i64("sink.max_records_per_batch", options)?;
                 TableType::Sink {
                     batch_flush_interval_millis,
                     batch_max_buffer_size,
@@ -157,9 +160,9 @@ impl Connector for KinesisConnector {
         };
 
         let table = KinesisTable {
-            stream_name: pull_opt("stream_name", opts)?,
+            stream_name: pull_opt("stream_name", options)?,
             type_: table_type,
-            aws_region: opts.remove("aws_region").map(|s| s.to_string()),
+            aws_region: options.remove("aws_region").map(|s| s.to_string()),
         };
 
         Self::from_config(&self, None, name, EmptyConfig {}, table, schema)
