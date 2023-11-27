@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 
 use anyhow::anyhow;
@@ -8,7 +9,9 @@ use reqwest::{Client, Request};
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{construct_http_client, pull_opt, pull_option_to_i64, Connection, EmptyConfig};
@@ -136,21 +139,22 @@ impl Connector for PollingHTTPConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
-        let endpoint = pull_opt("endpoint", opts)?;
-        let headers = opts.remove("headers");
-        let method: Option<Method> = opts
+        _profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
+        let endpoint = pull_opt("endpoint", options)?;
+        let headers = options.remove("headers");
+        let method: Option<Method> = options
             .remove("method")
             .map(|s| s.try_into())
             .transpose()
             .map_err(|_| anyhow!("invalid value for 'method'"))?;
 
-        let body = opts.remove("body");
+        let body = options.remove("body");
 
-        let interval = pull_option_to_i64("poll_interval_ms", opts)?;
-        let emit_behavior: Option<EmitBehavior> = opts
+        let interval = pull_option_to_i64("poll_interval_ms", options)?;
+        let emit_behavior: Option<EmitBehavior> = options
             .remove("emit_behavior")
             .map(|s| s.try_into())
             .transpose()

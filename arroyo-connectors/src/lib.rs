@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Context};
 use arroyo_rpc::api_types::connections::{
-    ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType,
+    ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType,
 };
 use arroyo_rpc::primitive_to_sql;
 use arroyo_types::string_to_map;
@@ -120,6 +120,7 @@ pub trait Connector: Send {
         name: &str,
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection>;
 
     fn from_config(
@@ -170,6 +171,7 @@ pub trait ErasedConnector: Send {
         name: &str,
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection>;
 
     fn from_config(
@@ -246,8 +248,9 @@ impl<C: Connector> ErasedConnector for C {
         name: &str,
         options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
+        profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        self.from_options(name, options, schema)
+        self.from_options(name, options, schema, profile)
     }
 
     fn from_config(

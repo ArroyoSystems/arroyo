@@ -5,17 +5,18 @@ use axum_extra::extract::WithRejection;
 use arroyo_connectors::connector_for_type;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionProfilePost};
 use arroyo_rpc::api_types::ConnectionProfileCollection;
+use cornucopia_async::GenericClient;
 use tracing::warn;
 
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 
-use crate::handle_db_error;
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnectionProfile;
 use crate::rest::AppState;
 use crate::rest_utils::{
     authenticate, bad_request, client, log_and_map, ApiError, BearerAuth, ErrorResp,
 };
+use crate::{handle_db_error, AuthData};
 
 impl TryFrom<DbConnectionProfile> for ConnectionProfile {
     type Error = String;
@@ -107,8 +108,17 @@ pub async fn get_connection_profiles(
     let client = client(&state.pool).await?;
     let auth_data = authenticate(&state.pool, bearer_auth).await?;
 
+    let data = get_all_connection_profiles(&auth_data, &client).await?;
+
+    Ok(Json(ConnectionProfileCollection { data }))
+}
+
+pub(crate) async fn get_all_connection_profiles<C: GenericClient>(
+    auth: &AuthData,
+    client: &C,
+) -> Result<Vec<ConnectionProfile>, ErrorResp> {
     let res: Vec<DbConnectionProfile> = api_queries::get_connection_profiles()
-        .bind(&client, &auth_data.organization_id)
+        .bind(client, &auth.organization_id)
         .all()
         .await
         .map_err(log_and_map)?;
@@ -127,5 +137,5 @@ pub async fn get_connection_profiles(
         })
         .collect();
 
-    Ok(Json(ConnectionProfileCollection { data }))
+    Ok(data)
 }

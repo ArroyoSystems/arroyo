@@ -1,7 +1,10 @@
 use anyhow::anyhow;
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
+use std::collections::HashMap;
 use std::convert::Infallible;
 
 use crate::{Connection, Connector, EmptyConfig};
@@ -71,10 +74,11 @@ impl Connector for BlackholeConnector {
     fn from_options(
         &self,
         name: &str,
-        _: &mut std::collections::HashMap<String, String>,
-        s: Option<&ConnectionSchema>,
+        _options: &mut HashMap<String, String>,
+        schema: Option<&ConnectionSchema>,
+        _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        self.from_config(None, name, EmptyConfig {}, EmptyConfig {}, s)
+        self.from_config(None, name, EmptyConfig {}, EmptyConfig {}, schema)
     }
 
     fn from_config(

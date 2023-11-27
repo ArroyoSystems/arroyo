@@ -1,8 +1,9 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::api_types::connections::{ConnectionSchema, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
 
@@ -79,8 +80,9 @@ impl Connector for FluvioConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
+        _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let endpoint = options.remove("endpoint");
         let topic = pull_opt("topic", options)?;

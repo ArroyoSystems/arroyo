@@ -58,7 +58,7 @@ impl JsonFormat {
     fn from_opts(debezium: bool, opts: &mut HashMap<String, String>) -> Result<Self, String> {
         let confluent_schema_registry = opts
             .remove("json.confluent_schema_registry")
-            .filter(|t| t == "true")
+            .filter(|t: &String| t == "true")
             .is_some();
 
         let include_schema = opts

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
 
@@ -10,7 +11,9 @@ use futures::StreamExt;
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{pull_opt, Connection, EmptyConfig};
@@ -116,12 +119,13 @@ impl Connector for SSEConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
-        let endpoint = pull_opt("endpoint", opts)?;
-        let headers = opts.remove("headers");
-        let events = opts.remove("events");
+        _profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
+        let endpoint = pull_opt("endpoint", options)?;
+        let headers = options.remove("headers");
+        let events = options.remove("events");
 
         self.from_config(
             None,

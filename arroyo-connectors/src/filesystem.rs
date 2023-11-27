@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
 
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
@@ -163,18 +165,19 @@ impl Connector for FileSystemConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
-        match opts.remove("type") {
+        _profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
+        match options.remove("type") {
             Some(t) if t == "source" => {
-                let (storage_url, storage_options) = get_storage_url_and_options(opts)?;
-                let compression_format = opts
+                let (storage_url, storage_options) = get_storage_url_and_options(options)?;
+                let compression_format = options
                     .remove("compression_format")
                     .map(|format| format.as_str().try_into().map_err(|err: &str| anyhow!(err)))
                     .transpose()?
                     .unwrap_or(CompressionFormat::None);
-                let matching_pattern = opts.remove("source.regex-pattern");
+                let matching_pattern = options.remove("source.regex-pattern");
                 self.from_config(
                     None,
                     name,
@@ -191,7 +194,7 @@ impl Connector for FileSystemConnector {
                 )
             }
             Some(t) if t == "sink" => {
-                let table = file_system_sink_from_options(opts, schema, CommitStyle::Direct)?;
+                let table = file_system_sink_from_options(options, schema, CommitStyle::Direct)?;
 
                 self.from_config(None, name, EmptyConfig {}, table, schema)
             }

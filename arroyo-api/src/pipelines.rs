@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use std::time::Duration;
 
-use crate::{jobs, pipelines, types};
+use crate::{connection_profiles, jobs, pipelines, types};
 use arroyo_datastream::{ConnectorOp, Operator, Program};
 use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch, PipelinePost,
@@ -128,6 +128,13 @@ where
         )?;
 
         schema_provider.add_connector_table(connection);
+    }
+    let profiles = connection_profiles::get_all_connection_profiles(auth_data, tx)
+        .await
+        .map_err(|e| anyhow!(e.message))?;
+
+    for profile in profiles {
+        schema_provider.add_connection_profile(profile);
     }
 
     arroyo_sql::parse_and_get_program(

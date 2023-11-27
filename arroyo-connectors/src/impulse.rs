@@ -1,9 +1,12 @@
 use anyhow::{anyhow, bail};
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
-use arroyo_rpc::api_types::connections::{ConnectionSchema, PrimitiveType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, PrimitiveType, TestSourceMessage,
+};
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use typify::import_types;
@@ -92,8 +95,9 @@ impl Connector for ImpulseConnector {
     fn from_options(
         &self,
         name: &str,
-        options: &mut std::collections::HashMap<String, String>,
-        s: Option<&ConnectionSchema>,
+        options: &mut HashMap<String, String>,
+        schema: Option<&ConnectionSchema>,
+        _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
         let event_rate = f64::from_str(&pull_opt("event_rate", options)?)
             .map_err(|_| anyhow!("invalid value for event_rate; expected float"))?;
@@ -111,7 +115,7 @@ impl Connector for ImpulseConnector {
             .map_err(|_| anyhow!("invalid value for event_time_interval; expected float"))?;
 
         // validate the schema
-        if let Some(s) = s {
+        if let Some(s) = schema {
             if !s.fields.is_empty() && s.fields != impulse_schema().fields {
                 bail!("invalid schema for impulse source");
             }

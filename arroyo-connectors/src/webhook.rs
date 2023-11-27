@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 
 use anyhow::anyhow;
@@ -9,7 +10,9 @@ use serde_json::json;
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{construct_http_client, pull_opt, Connection, EmptyConfig};
@@ -167,12 +170,13 @@ impl Connector for WebhookConnector {
     fn from_options(
         &self,
         name: &str,
-        opts: &mut std::collections::HashMap<String, String>,
+        options: &mut HashMap<String, String>,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
-        let endpoint = pull_opt("endpoint", opts)?;
+        _profile: Option<&ConnectionProfile>,
+    ) -> anyhow::Result<Connection> {
+        let endpoint = pull_opt("endpoint", options)?;
 
-        let headers = opts
+        let headers = options
             .remove("headers")
             .map(|s| s.try_into())
             .transpose()

@@ -6,7 +6,7 @@ use arrow_schema::{DataType, Field};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::{ConnectorOp, Operator};
 use arroyo_rpc::api_types::connections::{
-    ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
+    ConnectionProfile, ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
 };
 use arroyo_rpc::formats::{Format, Framing};
 use datafusion::sql::sqlparser::ast::Query;
@@ -161,6 +161,7 @@ impl ConnectorTable {
         connector: &str,
         mut fields: Vec<FieldSpec>,
         options: &mut HashMap<String, String>,
+        connection_profile: Option<&ConnectionProfile>,
     ) -> Result<Self> {
         // TODO: a more principled way of letting connectors dictate types to use
         if "delta" == connector {
@@ -215,7 +216,8 @@ impl ConnectorTable {
             Some(fields.is_empty()),
         )?;
 
-        let connection = connector.from_options(name, options, Some(&schema))?;
+        let connection =
+            connector.from_options(name, options, Some(&schema), connection_profile)?;
 
         let mut table: ConnectorTable = connection.into();
         if !fields.is_empty() {
@@ -647,10 +649,32 @@ impl Table {
                             .collect(),
                     }))
                 }
-                Some(connector) => Ok(Some(Table::ConnectorTable(
-                    ConnectorTable::from_options(&name, connector, fields, &mut with_map)
+                Some(connector) => {
+                    let connection_profile = match with_map.remove("connection_profile") {
+                        Some(connection_profile_name) => Some(
+                            schema_provider
+                                .profiles
+                                .get(&connection_profile_name)
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "connection profile '{}' not found",
+                                        connection_profile_name
+                                    )
+                                })?,
+                        ),
+                        None => None,
+                    };
+                    Ok(Some(Table::ConnectorTable(
+                        ConnectorTable::from_options(
+                            &name,
+                            connector,
+                            fields,
+                            &mut with_map,
+                            connection_profile,
+                        )
                         .map_err(|e| anyhow!("Failed to construct table '{}': {:?}", name, e))?,
-                ))),
+                    )))
+                }
             }
         } else {
             match &produce_optimized_plan(statement, schema_provider) {
