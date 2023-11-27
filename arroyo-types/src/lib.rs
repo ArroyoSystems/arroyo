@@ -251,6 +251,14 @@ pub fn from_nanos(ts: u128) -> SystemTime {
         + Duration::from_nanos((ts % 1_000_000_000) as u64)
 }
 
+// used for avro serialization -- returns the number of days since the UNIX EPOCH
+pub fn days_since_epoch(time: SystemTime) -> i32 {
+    time.duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .div_euclid(86400) as i32
+}
+
 pub fn string_to_map(s: &str) -> Option<HashMap<String, String>> {
     if s.trim().is_empty() {
         return Some(HashMap::new());
@@ -335,9 +343,9 @@ impl<T: Data> UpdatingData<T> {
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(try_from = "DebeziumShadow<T>")]
 pub struct Debezium<T: Data> {
-    before: Option<T>,
-    after: Option<T>,
-    op: DebeziumOp,
+    pub before: Option<T>,
+    pub after: Option<T>,
+    pub op: DebeziumOp,
 }
 
 // Use a shadow type to perform post-deserialization validation that the expected fields
@@ -381,6 +389,17 @@ pub enum DebeziumOp {
     Create,
     Update,
     Delete,
+}
+
+impl ToString for DebeziumOp {
+    fn to_string(&self) -> String {
+        match self {
+            DebeziumOp::Create => "c",
+            DebeziumOp::Update => "u",
+            DebeziumOp::Delete => "d",
+        }
+        .to_string()
+    }
 }
 
 impl<'de> Deserialize<'de> for DebeziumOp {

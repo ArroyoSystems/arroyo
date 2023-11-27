@@ -294,7 +294,7 @@ impl ConnectorOp {
     pub fn web_sink() -> Self {
         ConnectorOp {
             operator: "GrpcSink::<#in_k, #in_t>".to_string(),
-            config: "{}".to_string(),
+            config: "{\"connection\": {}, \"table\": {}}".to_string(),
             description: "WebSink".to_string(),
         }
     }

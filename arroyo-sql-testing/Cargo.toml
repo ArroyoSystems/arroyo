@@ -23,6 +23,7 @@ arroyo-types = { path = "../arroyo-types" }
 arroyo-sql = { path = "../arroyo-sql" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-worker = { path = "../arroyo-worker" }
+arroyo-formats = { path = "../arroyo-formats" }
 arroyo-sql-macro = { path = "../arroyo-sql-macro" }
 tokio = { version = "1.16", features = ["full"] }
 arroyo-state = { path = "../arroyo-state" }

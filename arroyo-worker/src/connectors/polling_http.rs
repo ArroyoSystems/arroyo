@@ -15,15 +15,15 @@ use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_rpc::grpc::StopMode;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use tracing::{debug, info, warn};
 use typify::import_types;
 
-use crate::formats::DataDeserializer;
 use crate::{
     engine::{Context, StreamNode},
-    SchemaData, SourceFinishType,
+    SourceFinishType,
 };
 
 import_types!(schema = "../connector-schemas/polling_http/table.json");

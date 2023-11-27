@@ -29,7 +29,7 @@ use crate::{
         JoinType, MethodCompiler, RecordTransform, SourceOperator, SqlOperator, WindowFunction,
     },
     types::{StructDef, StructField, StructPair, TypeDef},
-    ArroyoSchemaProvider, SqlConfig,
+    ArroyoSchemaProvider, CompiledSql, SqlConfig,
 };
 use anyhow::Result;
 use petgraph::Direction;
@@ -1955,11 +1955,11 @@ impl From<PlanGraph> for DiGraph<StreamNode, StreamEdge> {
 pub fn get_program(
     mut plan_graph: PlanGraph,
     schema_provider: ArroyoSchemaProvider,
-) -> Result<(Program, Vec<i64>)> {
+) -> Result<CompiledSql> {
     optimize(&mut plan_graph.graph);
 
     let mut key_structs = HashSet::new();
-    let sources = plan_graph.saved_connections_used.clone();
+    let connection_ids = plan_graph.saved_connections_used.clone();
     plan_graph.graph.node_weights().for_each(|node| {
         let key_names = node.output_type.get_key_struct_names();
         key_structs.extend(key_names);
@@ -2034,8 +2034,13 @@ pub fn get_program(
 
     let graph: DiGraph<StreamNode, StreamEdge> = plan_graph.into();
 
-    Ok((
-        Program {
+    let schemas = all_types
+        .into_iter()
+        .map(|t| (t.struct_name_ident(), t))
+        .collect();
+
+    Ok(CompiledSql {
+        program: Program {
             // For now, we don't export any types from SQL into WASM, as there is a problem with doing serde
             // in wasm
             types: vec![],
@@ -2043,6 +2048,7 @@ pub fn get_program(
             udfs: udfs.values().cloned().collect(),
             graph,
         },
-        sources,
-    ))
+        connection_ids,
+        schemas,
+    })
 }

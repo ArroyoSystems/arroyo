@@ -76,7 +76,20 @@ pub struct ConfluentSchemaResponse {
     pub version: u32,
 }
 
-pub struct ConfluentSchemaResolver {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostSchemaRequest {
+    pub schema: String,
+    pub schema_type: ConfluentSchemaType,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostSchemaResponse {
+    pub id: i32,
+}
+
+pub struct ConfluentSchemaRegistry {
     endpoint: Url,
     topic: String,
     client: Client,
@@ -84,7 +97,7 @@ pub struct ConfluentSchemaResolver {
     api_secret: Option<String>,
 }
 
-impl ConfluentSchemaResolver {
+impl ConfluentSchemaRegistry {
     pub fn new(
         endpoint: &str,
         topic: &str,
@@ -108,6 +121,67 @@ impl ConfluentSchemaResolver {
             api_key,
             api_secret,
         })
+    }
+
+    pub async fn write_schema(
+        &self,
+        schema: impl Into<String>,
+        schema_type: ConfluentSchemaType,
+    ) -> anyhow::Result<i32> {
+        let req = PostSchemaRequest {
+            schema: schema.into(),
+            schema_type,
+        };
+
+        let resp = self
+            .client
+            .post(self.endpoint.clone())
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| {
+                warn!("Got error response writing to schema registry: {:?}", e);
+                anyhow!(
+                    "Could not connect to Schema Registry at {}: unknown error",
+                    self.endpoint
+                )
+            })?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+
+            let body = body
+                .pointer("/message")
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| body.to_string());
+
+            match status {
+                StatusCode::CONFLICT => {
+                    bail!(
+                        "Failed to register new schema for topic '{}': {}",
+                        self.topic,
+                        body
+                    )
+                }
+                StatusCode::UNPROCESSABLE_ENTITY => {
+                    bail!("Invalid schema for topic '{}': {}", self.topic, body);
+                }
+                StatusCode::UNAUTHORIZED => {
+                    bail!("Invalid credentials for schema registry");
+                }
+                code => {
+                    bail!("Schema registry returned error {}: {}", code.as_u16(), body);
+                }
+            }
+        }
+
+        let resp: PostSchemaResponse = resp
+            .json()
+            .await
+            .map_err(|e| anyhow!("could not parse response from schema registry: {}", e))?;
+
+        Ok(resp.id)
     }
 
     pub async fn get_schema(
@@ -171,7 +245,7 @@ impl ConfluentSchemaResolver {
 }
 
 #[async_trait]
-impl SchemaResolver for ConfluentSchemaResolver {
+impl SchemaResolver for ConfluentSchemaRegistry {
     async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String> {
         self.get_schema(Some(id))
             .await

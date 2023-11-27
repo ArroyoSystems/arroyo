@@ -6,6 +6,7 @@ members = [
     "arroyo-controller",
     "arroyo-connectors",
     "arroyo-datastream",
+    "arroyo-formats",
     "arroyo-macro",
     "arroyo-metrics",
     "arroyo-node",

@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::Result;
+use arroyo_formats::{DataSerializer, SchemaData};
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::{CheckpointBarrier, Key, Record};
@@ -16,7 +17,7 @@ use serde::Serialize;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::{engine::Context, formats::DataSerializer, SchemaData};
+use crate::engine::Context;
 
 use super::{KinesisTable, TableType};
 

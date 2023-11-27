@@ -1,5 +1,7 @@
+use crate::SchemaData;
 use apache_avro::types::{Value as AvroValue, Value};
-use apache_avro::{from_avro_datum, Reader, Schema};
+use apache_avro::{from_avro_datum, Reader, Schema, Writer};
+use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_types::UserError;
@@ -33,11 +35,7 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
 
     let mut registry = schema_registry.lock().await;
 
-    let messages = if format.embedded_schema {
-        Reader::new(&msg[..])
-            .map_err(|e| format!("invalid Avro schema in message: {:?}", e))?
-            .collect()
-    } else {
+    let messages = if format.raw_datums || format.confluent_schema_registry {
         let schema = if registry.contains_key(&id) {
             registry.get(&id).unwrap()
         } else {
@@ -65,6 +63,10 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
             &mut buf,
             format.reader_schema.as_ref().map(|t| t.into()),
         )]
+    } else {
+        Reader::new(&msg[..])
+            .map_err(|e| format!("invalid Avro schema in message: {:?}", e))?
+            .collect()
     };
 
     let into_json = format.into_unstructured_json;
@@ -89,6 +91,40 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
             })
         }
     }))
+}
+
+pub fn to_vec<T: SchemaData>(
+    record: &T,
+    format: &AvroFormat,
+    schema: &Schema,
+    version: Option<i32>,
+) -> Vec<u8> {
+    let v = record.to_avro(schema);
+
+    if format.raw_datums || format.confluent_schema_registry {
+        let record =
+            apache_avro::to_avro_datum(schema, v.clone()).expect("avro serialization failed");
+        if format.confluent_schema_registry {
+            // TODO: this would be more efficient if we could use the internal write_avro_datum to avoid
+            // allocating the buffer twice
+            let mut buf = Vec::with_capacity(record.len() + 5);
+            buf.push(0);
+            buf.extend(
+                version
+                    .expect("no schema version for confluent schema avro")
+                    .to_be_bytes(),
+            );
+            buf.extend(record);
+            buf
+        } else {
+            record
+        }
+    } else {
+        let mut buf = Vec::with_capacity(128);
+        let mut writer = Writer::new(schema, &mut buf);
+        writer.append(v).unwrap();
+        buf
+    }
 }
 
 fn convert_float(f: f64) -> JsonValue {
@@ -153,10 +189,102 @@ fn avro_to_json(value: AvroValue) -> JsonValue {
     }
 }
 
+fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
+    let typ = match dt {
+        DataType::Null => unreachable!("null fields are not supported"),
+        DataType::Boolean => "boolean",
+        DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::UInt8 | DataType::UInt16 => {
+            "int"
+        }
+        // TODO: not all values of u64 can be represented as a long in avro
+        DataType::Int64 | DataType::UInt32 | DataType::UInt64 => "long",
+        DataType::Float16 | DataType::Float32 => "float",
+        DataType::Float64 => "double",
+        DataType::Timestamp(t, tz) => {
+            let logical = match (t, tz) {
+                (TimeUnit::Microsecond | TimeUnit::Nanosecond, None) => "timestamp-micros",
+                (TimeUnit::Microsecond | TimeUnit::Nanosecond, Some(_)) => "local-timestamp-micros",
+                (TimeUnit::Millisecond | TimeUnit::Second, None) => "timestamp-millis",
+                (TimeUnit::Millisecond | TimeUnit::Second, Some(_)) => "local-timestamp-millis",
+            };
+
+            return json!({
+                "type": "long",
+                "logicalType": logical
+            });
+        }
+        DataType::Date32 | DataType::Date64 => {
+            return json!({
+                "type": "int",
+                "logicalType": "date"
+            });
+        }
+        DataType::Time64(_) | DataType::Time32(_) => {
+            todo!("time is not supported")
+        }
+        DataType::Duration(_) => todo!("duration is not supported"),
+        DataType::Interval(_) => todo!("interval is not supported"),
+        DataType::Binary | DataType::FixedSizeBinary(_) | DataType::LargeBinary => "bytes",
+        DataType::Utf8 | DataType::LargeUtf8 => "string",
+        DataType::List(t) | DataType::FixedSizeList(t, _) | DataType::LargeList(t) => {
+            return json!({
+                "type": "array",
+                "items": arrow_to_avro(name, t.data_type())
+            });
+        }
+        DataType::Struct(fields) => {
+            let schema = arrow_to_avro_schema(name, fields).canonical_form();
+            return serde_json::from_str(&schema).unwrap();
+        }
+        DataType::Union(_, _) => unimplemented!("unions are not supported"),
+        DataType::Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
+        DataType::Decimal128(_, _) => unimplemented!("decimal128 is not supported"),
+        DataType::Decimal256(_, _) => unimplemented!("decimal256 is not supported"),
+        DataType::Map(_, _) => unimplemented!("maps are not supported"),
+        DataType::RunEndEncoded(_, _) => unimplemented!("run end encoded is not supported"),
+    };
+
+    json!({
+        "type": typ
+    })
+}
+
+fn field_to_avro(name: &str, field: &Field) -> serde_json::value::Value {
+    let next_name = format!("{}_{}", name, &field.name());
+    let mut schema = arrow_to_avro(&AvroFormat::sanitize_field(&next_name), field.data_type());
+
+    if field.is_nullable() {
+        schema = json!({
+            "type": ["null", schema]
+        })
+    }
+
+    json!({
+        "name": AvroFormat::sanitize_field(field.name()),
+        "type": schema
+    })
+}
+
+/// Computes an avro schema from an arrow schema
+///
+/// Note this must align with the generated code created in
+/// `arroyo_sql::avro::generate_serializer_items`!
+pub fn arrow_to_avro_schema(name: &str, fields: &Fields) -> Schema {
+    let fields: Vec<_> = fields.iter().map(|f| field_to_avro(name, &**f)).collect();
+
+    let schema = json!({
+        "type": "record",
+        "name": name,
+        "fields": fields,
+    });
+
+    Schema::parse_str(&schema.to_string()).unwrap()
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::formats::DataDeserializer;
-    use crate::SchemaData;
+    use super::{arrow_to_avro_schema, to_vec};
+    use crate::{DataDeserializer, SchemaData};
     use apache_avro::Schema;
     use arroyo_rpc::formats::{AvroFormat, Format};
     use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver};
@@ -164,65 +292,7 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
 
-    #[tokio::test]
-    async fn test_avro_deserialization() {
-        #[derive(
-            Clone,
-            Debug,
-            bincode::Encode,
-            bincode::Decode,
-            PartialEq,
-            PartialOrd,
-            serde::Serialize,
-            serde::Deserialize,
-        )]
-        pub struct ArroyoAvroRoot {
-            pub store_id: i32,
-            pub store_order_id: i32,
-            pub coupon_code: i32,
-            #[serde(deserialize_with = "crate::deserialize_raw_json")]
-            pub date: String,
-            pub status: String,
-            #[serde(deserialize_with = "crate::deserialize_raw_json")]
-            pub order_lines: String,
-        }
-        impl SchemaData for ArroyoAvroRoot {
-            fn name() -> &'static str {
-                "ArroyoAvroRoot"
-            }
-            fn schema() -> arrow::datatypes::Schema {
-                let fields: Vec<arrow::datatypes::Field> = vec![
-                    arrow::datatypes::Field::new(
-                        "store_id",
-                        arrow::datatypes::DataType::Int32,
-                        false,
-                    ),
-                    arrow::datatypes::Field::new(
-                        "store_order_id",
-                        arrow::datatypes::DataType::Int32,
-                        false,
-                    ),
-                    arrow::datatypes::Field::new(
-                        "coupon_code",
-                        arrow::datatypes::DataType::Int32,
-                        false,
-                    ),
-                    arrow::datatypes::Field::new("date", arrow::datatypes::DataType::Utf8, false),
-                    arrow::datatypes::Field::new("status", arrow::datatypes::DataType::Utf8, false),
-                    arrow::datatypes::Field::new(
-                        "order_lines",
-                        arrow::datatypes::DataType::Utf8,
-                        false,
-                    ),
-                ];
-                arrow::datatypes::Schema::new(fields)
-            }
-            fn to_raw_string(&self) -> Option<Vec<u8>> {
-                unimplemented!("to_raw_string is not implemented for this type")
-            }
-        }
-
-        let schema = r#"
+    const SCHEMA: &str = r#"
         {
   "connect.name": "pizza_orders.pizza_orders",
   "fields": [
@@ -290,6 +360,68 @@ mod tests {
   "type": "record"
 }"#;
 
+    #[tokio::test]
+    async fn test_avro_deserialization() {
+        #[derive(
+            Clone,
+            Debug,
+            bincode::Encode,
+            bincode::Decode,
+            PartialEq,
+            PartialOrd,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
+        pub struct ArroyoAvroRoot {
+            pub store_id: i32,
+            pub store_order_id: i32,
+            pub coupon_code: i32,
+            #[serde(deserialize_with = "crate::deserialize_raw_json")]
+            pub date: String,
+            pub status: String,
+            #[serde(deserialize_with = "crate::deserialize_raw_json")]
+            pub order_lines: String,
+        }
+        impl SchemaData for ArroyoAvroRoot {
+            fn name() -> &'static str {
+                "ArroyoAvroRoot"
+            }
+            fn schema() -> arrow::datatypes::Schema {
+                let fields: Vec<arrow::datatypes::Field> = vec![
+                    arrow::datatypes::Field::new(
+                        "store_id",
+                        arrow::datatypes::DataType::Int32,
+                        false,
+                    ),
+                    arrow::datatypes::Field::new(
+                        "store_order_id",
+                        arrow::datatypes::DataType::Int32,
+                        false,
+                    ),
+                    arrow::datatypes::Field::new(
+                        "coupon_code",
+                        arrow::datatypes::DataType::Int32,
+                        false,
+                    ),
+                    arrow::datatypes::Field::new("date", arrow::datatypes::DataType::Utf8, false),
+                    arrow::datatypes::Field::new("status", arrow::datatypes::DataType::Utf8, false),
+                    arrow::datatypes::Field::new(
+                        "order_lines",
+                        arrow::datatypes::DataType::Utf8,
+                        false,
+                    ),
+                ];
+                arrow::datatypes::Schema::new(fields)
+            }
+            fn to_raw_string(&self) -> Option<Vec<u8>> {
+                unimplemented!("to_raw_string is not implemented for this type")
+            }
+
+            fn to_avro(&self, _schema: &apache_avro::Schema) -> apache_avro::types::Value {
+                todo!()
+            }
+        }
+
         let message = [
             0u8, 0, 0, 0, 1, 8, 200, 223, 1, 144, 31, 186, 159, 2, 16, 97, 99, 99, 101, 112, 116,
             101, 100, 4, 156, 1, 10, 112, 105, 122, 122, 97, 4, 102, 102, 102, 102, 102, 230, 38,
@@ -302,7 +434,7 @@ mod tests {
             None,
             Arc::new(FixedSchemaResolver::new(
                 1,
-                Schema::parse_str(schema).unwrap(),
+                Schema::parse_str(SCHEMA).unwrap(),
             )),
         );
 
@@ -360,6 +492,10 @@ mod tests {
             }
             fn to_raw_string(&self) -> Option<Vec<u8>> {
                 unimplemented!("to_raw_string is not implemented for this type")
+            }
+
+            fn to_avro(&self, _schema: &apache_avro::Schema) -> apache_avro::types::Value {
+                todo!()
             }
         }
 
@@ -429,7 +565,7 @@ mod tests {
         ];
 
         let mut deserializer = DataDeserializer::with_schema_resolver(
-            Format::Avro(AvroFormat::new(false, true, true)),
+            Format::Avro(AvroFormat::new(false, false, true)),
             None,
             Arc::new(FailingSchemaResolver::new()),
         );
@@ -464,7 +600,7 @@ mod tests {
             ]
         }"#;
 
-        let mut format = AvroFormat::new(false, false, true);
+        let mut format = AvroFormat::new(false, true, true);
         format.add_reader_schema(Schema::parse_str(&schema_str).unwrap());
         let mut deserializer = DataDeserializer::new(Format::Avro(format), None);
 
@@ -476,5 +612,111 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&v.unwrap()[0].value).unwrap(),
             expected
         );
+    }
+
+    #[tokio::test]
+    async fn test_writing() {
+        #[derive(
+            Clone,
+            Debug,
+            bincode::Encode,
+            bincode::Decode,
+            PartialEq,
+            PartialOrd,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
+        pub struct ArroyoAvroRoot {
+            pub name: String,
+            pub favorite_number: Option<u64>,
+            pub favorite_color: Option<String>,
+            pub new_field: String,
+        }
+        impl SchemaData for ArroyoAvroRoot {
+            fn name() -> &'static str {
+                "ArroyoAvroRoot"
+            }
+            fn schema() -> arrow::datatypes::Schema {
+                arrow::datatypes::Schema::new(vec![
+                    arrow::datatypes::Field::new("name", arrow::datatypes::DataType::Utf8, false),
+                    arrow::datatypes::Field::new(
+                        "favorite_number",
+                        arrow::datatypes::DataType::UInt64,
+                        true,
+                    ),
+                    arrow::datatypes::Field::new(
+                        "favorite_color",
+                        arrow::datatypes::DataType::Utf8,
+                        true,
+                    ),
+                    arrow::datatypes::Field::new(
+                        "new_field",
+                        arrow::datatypes::DataType::Utf8,
+                        false,
+                    ),
+                ])
+            }
+            fn to_raw_string(&self) -> Option<Vec<u8>> {
+                unimplemented!("to_raw_string is not implemented for this type")
+            }
+
+            fn to_avro(&self, schema: &Schema) -> apache_avro::types::Value {
+                let mut __avro_record = apache_avro::types::Record::new(schema).unwrap();
+                use apache_avro::types::Value::*;
+                __avro_record.put("name", {
+                    let v = &self.name;
+                    String(v.clone())
+                });
+                __avro_record.put(
+                    "favorite_number",
+                    Union(
+                        self.favorite_number.is_some() as u32,
+                        Box::new(
+                            self.favorite_number
+                                .as_ref()
+                                .map(|v| Long(*v as i64))
+                                .unwrap_or(Null),
+                        ),
+                    ),
+                );
+                __avro_record.put(
+                    "favorite_color",
+                    Union(
+                        self.favorite_color.is_some() as u32,
+                        Box::new(
+                            self.favorite_color
+                                .as_ref()
+                                .map(|v| String(v.clone()))
+                                .unwrap_or(Null),
+                        ),
+                    ),
+                );
+                __avro_record.put("new_field", {
+                    let v = &self.new_field;
+                    String(v.clone())
+                });
+
+                __avro_record.into()
+            }
+        }
+
+        let format = AvroFormat {
+            confluent_schema_registry: false,
+            raw_datums: false,
+            into_unstructured_json: false,
+            reader_schema: None,
+            schema_version: None,
+        };
+
+        let schema = arrow_to_avro_schema("ArroyoAvroRoot", &ArroyoAvroRoot::schema().fields());
+
+        let record = ArroyoAvroRoot {
+            name: "Alyssa".to_string(),
+            favorite_number: Some(256),
+            favorite_color: None,
+            new_field: "hello!".to_string(),
+        };
+
+        let _data = to_vec(&record, &format, &schema, None);
     }
 }

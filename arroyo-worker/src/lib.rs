@@ -4,10 +4,8 @@
 
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
-use anyhow::{bail, Result};
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow_array::cast::AsArray;
-use arrow_array::{RecordBatch, StringArray};
+use anyhow::Result;
+
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -19,15 +17,14 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, Data, Debezium, NodeId, RawJson,
-    WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV,
+    RUN_ID_ENV,
 };
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
 use rand::Rng;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize};
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::process::exit;
@@ -45,9 +42,11 @@ use tracing::{debug, error, info, warn};
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 pub use ordered_float::OrderedFloat;
 
+// re-export avro for use in generated code
+pub use apache_avro;
+
 pub mod connectors;
 pub mod engine;
-pub mod formats;
 mod inq_reader;
 mod metrics;
 mod network_manager;
@@ -60,136 +59,6 @@ pub const METRICS_PUSH_INTERVAL: Duration = Duration::from_secs(1);
 lazy_static! {
     pub static ref LOCAL_CONTROLLER_ADDR: String =
         format!("http://localhost:{}", ports::CONTROLLER_GRPC);
-}
-
-pub trait SchemaData: Data + Serialize + DeserializeOwned {
-    fn name() -> &'static str;
-    fn schema() -> arrow::datatypes::Schema;
-
-    fn iterator_from_record_batch(
-        _record_batch: RecordBatch,
-    ) -> Result<Box<dyn Iterator<Item = Self> + Send>> {
-        bail!("unimplemented");
-    }
-
-    /// Returns the raw string representation of this data, if available for the type
-    ///
-    /// Implementations should return None if the relevant field is Optional and has
-    /// a None value, and should panic if they do not support raw strings (which
-    /// indicates a miscompilation).
-    fn to_raw_string(&self) -> Option<Vec<u8>>;
-}
-
-impl<T: SchemaData> SchemaData for Debezium<T> {
-    fn name() -> &'static str {
-        "debezium"
-    }
-
-    fn schema() -> arrow::datatypes::Schema {
-        let subschema = T::schema();
-
-        let fields = vec![
-            Field::new(
-                "before",
-                arrow::datatypes::DataType::Struct(subschema.fields.clone()),
-                true,
-            ),
-            Field::new(
-                "after",
-                arrow::datatypes::DataType::Struct(subschema.fields),
-                true,
-            ),
-            Field::new("op", arrow::datatypes::DataType::Utf8, false),
-        ];
-
-        arrow::datatypes::Schema::new(fields)
-    }
-
-    fn to_raw_string(&self) -> Option<Vec<u8>> {
-        unimplemented!("debezium data cannot be written as a raw string");
-    }
-}
-
-impl SchemaData for RawJson {
-    fn name() -> &'static str {
-        "raw_json"
-    }
-
-    fn schema() -> Schema {
-        Schema::new(vec![Field::new("value", DataType::Utf8, false)])
-    }
-
-    fn to_raw_string(&self) -> Option<Vec<u8>> {
-        Some(self.value.as_bytes().to_vec())
-    }
-
-    fn iterator_from_record_batch(
-        record_batch: RecordBatch,
-    ) -> Result<Box<dyn Iterator<Item = RawJson> + Send>> {
-        Ok(Box::new(RawJsonIterator {
-            offset: 0,
-            rows: record_batch.num_rows(),
-            column: record_batch
-                .column_by_name("value")
-                .ok_or_else(|| anyhow::anyhow!("missing column value {}", "value"))?
-                .as_string()
-                .clone(),
-        }))
-    }
-}
-
-struct RawJsonIterator {
-    offset: usize,
-    rows: usize,
-    column: StringArray,
-}
-
-impl Iterator for RawJsonIterator {
-    type Item = RawJson;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.offset == self.rows {
-            return None;
-        }
-        let val = self.column.value(self.offset);
-        self.offset += 1;
-        Some(RawJson {
-            value: val.to_string(),
-        })
-    }
-}
-
-impl SchemaData for () {
-    fn name() -> &'static str {
-        "empty"
-    }
-
-    fn schema() -> Schema {
-        Schema::empty()
-    }
-
-    fn to_raw_string(&self) -> Option<Vec<u8>> {
-        None
-    }
-}
-
-// A custom deserializer for json, that takes a json::Value and reserializes it as a string
-// where it can then be accessed using SQL JSON functions -- this is currently a bit inefficient
-// since we need an owned string.
-pub fn deserialize_raw_json<'de, D>(f: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
-    Ok(raw.to_string())
-}
-
-pub fn deserialize_raw_json_opt<'de, D>(f: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
-    Ok(Some(raw.to_string()))
 }
 
 pub static TIMER_TABLE: char = '[';

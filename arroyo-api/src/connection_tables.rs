@@ -24,7 +24,7 @@ use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
 use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{
-    ConfluentSchemaResolver, ConfluentSchemaResponse, ConfluentSchemaType,
+    ConfluentSchemaRegistry, ConfluentSchemaResponse, ConfluentSchemaType,
 };
 use arroyo_sql::avro;
 use arroyo_sql::json_schema::convert_json_schema;
@@ -452,7 +452,7 @@ async fn expand_avro_schema(
     if let Some(Format::Avro(AvroFormat {
         confluent_schema_registry: true,
         ..
-    })) = &schema.format
+    })) = &mut schema.format
     {
         let schema_response = get_schema(connector, table_config, profile_config).await?;
 
@@ -557,7 +557,7 @@ async fn get_schema(
         bad_request("schema registry must be configured on the Kafka connection profile")
     })?;
 
-    let resolver = ConfluentSchemaResolver::new(
+    let resolver = ConfluentSchemaRegistry::new(
         &schema_registry.endpoint,
         &table.topic,
         schema_registry.api_key.clone(),

@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
@@ -32,8 +33,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::formats::DataDeserializer;
-use crate::{engine::Context, SchemaData, SourceFinishType};
+use crate::{engine::Context, SourceFinishType};
 
 use super::{KinesisTable, SourceOffset, TableType};
 

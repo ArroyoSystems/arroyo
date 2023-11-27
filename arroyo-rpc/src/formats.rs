@@ -1,8 +1,10 @@
+use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
+use std::sync::OnceLock;
 use utoipa::ToSchema;
 
 #[derive(
@@ -165,7 +167,7 @@ pub struct AvroFormat {
     pub confluent_schema_registry: bool,
 
     #[serde(default)]
-    pub embedded_schema: bool,
+    pub raw_datums: bool,
 
     #[serde(default)]
     pub into_unstructured_json: bool,
@@ -173,19 +175,24 @@ pub struct AvroFormat {
     #[serde(default)]
     #[schema(read_only, value_type = String)]
     pub reader_schema: Option<SerializableAvroSchema>,
+
+    #[serde(default)]
+    #[schema(read_only)]
+    pub schema_version: Option<u32>,
 }
 
 impl AvroFormat {
     pub fn new(
         confluent_schema_registry: bool,
-        embedded_schema: bool,
+        raw_datums: bool,
         into_unstructured_json: bool,
     ) -> Self {
         Self {
             confluent_schema_registry,
-            embedded_schema,
+            raw_datums,
             into_unstructured_json,
             reader_schema: None,
+            schema_version: None,
         }
     }
 
@@ -194,7 +201,7 @@ impl AvroFormat {
             opts.remove("avro.confluent_schema_registry")
                 .filter(|t| t == "true")
                 .is_some(),
-            opts.remove("avro.include_schema")
+            opts.remove("avro.raw_datums")
                 .filter(|t| t == "true")
                 .is_some(),
             opts.remove("avro.into_unstructured_json")
@@ -205,6 +212,13 @@ impl AvroFormat {
 
     pub fn add_reader_schema(&mut self, schema: apache_avro::Schema) {
         self.reader_schema = Some(SerializableAvroSchema(schema));
+    }
+
+    pub fn sanitize_field(s: &str) -> String {
+        static RE: OnceLock<Regex> = OnceLock::new();
+        let re = RE.get_or_init(|| Regex::new(r"[^a-zA-Z0-9_.]").unwrap());
+
+        re.replace_all(&s, "_").replace('.', "__")
     }
 }
 

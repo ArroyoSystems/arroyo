@@ -11,6 +11,7 @@ arroyo-sql = { path = "../arroyo-sql" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-rpc = { path = "../arroyo-rpc" }
+arroyo-formats = { path = "../arroyo-formats" }
 
 anyhow = "1"
 

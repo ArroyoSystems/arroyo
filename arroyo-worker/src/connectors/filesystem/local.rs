@@ -12,12 +12,10 @@ use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::{
-    connectors::{filesystem::FinishedFile, two_phase_committer::TwoPhaseCommitter},
-    SchemaData,
-};
+use crate::connectors::{filesystem::FinishedFile, two_phase_committer::TwoPhaseCommitter};
 
 use anyhow::{bail, Result};
+use arroyo_formats::SchemaData;
 
 use super::{
     add_suffix_prefix, delta, get_partitioner_from_file_settings, CommitState, CommitStyle,

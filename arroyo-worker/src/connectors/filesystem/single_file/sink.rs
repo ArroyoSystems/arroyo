@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, path::Path};
 
+use arroyo_formats::{DataSerializer, SchemaData};
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::{Key, Record};
@@ -9,7 +10,7 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use crate::{engine::Context, formats::DataSerializer, SchemaData};
+use crate::engine::Context;
 
 use super::SingleFileTable;
 

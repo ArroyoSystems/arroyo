@@ -1,9 +1,11 @@
 #![allow(clippy::unnecessary_mut_passed)]
+
+use std::io::Write;
 use std::time::{Duration, SystemTime};
 
 use crate::engine::{Context, OutQueue};
-use crate::SchemaData;
 use arrow::datatypes::Field;
+use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_types::CheckpointBarrier;
 use arroyo_types::*;
@@ -141,6 +143,10 @@ impl SchemaData for TestOutStruct {
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {
         unimplemented!()
+    }
+
+    fn to_avro(&self, _schema: &apache_avro::Schema) -> apache_avro::types::Value {
+        todo!()
     }
 }
 

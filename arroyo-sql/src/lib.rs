@@ -49,6 +49,7 @@ use prettyplease::unparse;
 use regex::Regex;
 use std::collections::HashSet;
 
+use arroyo_rpc::OperatorConfig;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
@@ -66,6 +67,13 @@ pub struct UdfDef {
     ret: TypeDef,
     def: String,
     dependencies: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct CompiledSql {
+    pub program: Program,
+    pub connection_ids: Vec<i64>,
+    pub schemas: HashMap<String, StructDef>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -442,7 +450,7 @@ pub async fn parse_and_get_program(
     query: &str,
     schema_provider: ArroyoSchemaProvider,
     config: SqlConfig,
-) -> Result<(Program, Vec<i64>)> {
+) -> Result<CompiledSql> {
     let query = query.to_string();
 
     if query.trim().is_empty() {
@@ -458,7 +466,7 @@ pub fn parse_and_get_program_sync(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,
     config: SqlConfig,
-) -> Result<(Program, Vec<i64>)> {
+) -> Result<CompiledSql> {
     let dialect = PostgreSqlDialect {};
     let mut inserts = vec![];
     for statement in Parser::parse_sql(&dialect, &query)? {
@@ -499,7 +507,7 @@ pub fn parse_and_get_program_sync(
             fields: struct_def.fields.into_iter().map(|f| f.into()).collect(),
             type_name: None,
             operator: "GrpcSink::<#in_k, #in_t>".to_string(),
-            config: "{}".to_string(),
+            config: serde_json::to_string(&OperatorConfig::default()).unwrap(),
             description: "WebSink".to_string(),
             format: Some(Format::Json(JsonFormat {
                 debezium: insert.is_updating(),

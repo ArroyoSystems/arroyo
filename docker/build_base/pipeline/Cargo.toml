@@ -18,6 +18,7 @@ arrow = { workspace = true}
 arrow-array = { workspace = true}
 arroyo-types = { path = "/opt/arroyo/src/arroyo-types" }
 arroyo-worker = { path = "/opt/arroyo/src/arroyo-worker", features = ["kafka-sasl"] }
+arroyo-formats = { path = "/opt/arroyo/src/arroyo-formats" }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

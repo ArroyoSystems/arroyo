@@ -1,11 +1,10 @@
 use crate::engine::{Context, StreamNode};
-use crate::formats::DataDeserializer;
-use crate::SchemaData;
 use crate::SourceFinishType;
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
 use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
-use arroyo_rpc::schema_resolver::{ConfluentSchemaResolver, FailingSchemaResolver, SchemaResolver};
+use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, FailingSchemaResolver, SchemaResolver};
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
@@ -108,7 +107,7 @@ where
         let schema_resolver: Arc<dyn SchemaResolver + Sync> =
             if let Some(schema_registry) = &connection.schema_registry {
                 Arc::new(
-                    ConfluentSchemaResolver::new(
+                    ConfluentSchemaRegistry::new(
                         &schema_registry.endpoint,
                         &table.topic,
                         schema_registry.api_key.clone(),

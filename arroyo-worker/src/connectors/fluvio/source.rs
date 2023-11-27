@@ -1,7 +1,7 @@
 use crate::engine::{Context, StreamNode};
-use crate::formats::DataDeserializer;
-use crate::{SchemaData, SourceFinishType};
+use crate::SourceFinishType;
 use anyhow::anyhow;
+use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
 use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;

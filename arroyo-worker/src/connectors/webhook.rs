@@ -12,14 +12,11 @@ use arroyo_types::{string_to_map, CheckpointBarrier, Key, Record};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Semaphore};
 
+use arroyo_formats::{DataSerializer, SchemaData};
 use tracing::warn;
 use typify::import_types;
 
-use crate::{
-    engine::{Context, StreamNode},
-    formats::DataSerializer,
-    SchemaData,
-};
+use crate::engine::{Context, StreamNode};
 
 import_types!(schema = "../connector-schemas/webhook/table.json");
 

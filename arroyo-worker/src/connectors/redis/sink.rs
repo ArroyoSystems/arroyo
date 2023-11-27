@@ -1,7 +1,7 @@
 use crate::connectors::redis::{RedisConfig, RedisConfigConnection, RedisTable, TableType, Target};
 use crate::engine::{Context, ErrorReporter, StreamNode};
-use crate::formats::DataSerializer;
-use crate::SchemaData;
+use arroyo_formats::DataSerializer;
+use arroyo_formats::SchemaData;
 use arroyo_macro::process_fn;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::{CheckpointBarrier, Key, Record};
