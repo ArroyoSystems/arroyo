@@ -104,6 +104,9 @@ async fn update_s3_credentials(options: &mut HashMap<String, String>) -> Result<
             AmazonS3ConfigKey::SecretAccessKey.as_ref().to_string(),
             tmp_credentials.secret_key.clone(),
         );
+        if let Some(token) = tmp_credentials.token.as_ref() {
+            options.insert(AmazonS3ConfigKey::Token.as_ref().to_string(), token.clone());
+        }
     }
     options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
     Ok(())
