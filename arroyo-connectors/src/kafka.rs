@@ -5,15 +5,14 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
 
-use axum::response::sse::Event;
-use std::time::{Duration, Instant};
-
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
+use axum::response::sse::Event;
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     message::BorrowedMessage,
     ClientConfig, Offset, TopicPartitionList,
 };
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
@@ -159,7 +158,7 @@ impl Connector for KafkaConnector {
                 let schema_registry = options.remove("schema_registry.endpoint").map(|endpoint| {
                     let api_key = options.remove("schema_registry.api_key");
                     let api_secret = options.remove("schema_registry.api_secret");
-                    SchemaRegistry {
+                    SchemaRegistry::ConfluentSchemaRegistry {
                         endpoint,
                         api_key,
                         api_secret,
@@ -168,7 +167,7 @@ impl Connector for KafkaConnector {
                 KafkaConfig {
                     authentication: auth,
                     bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", options)?),
-                    schema_registry,
+                    schema_registry_enum: schema_registry,
                 }
             }
         };

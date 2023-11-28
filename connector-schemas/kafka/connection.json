@@ -6,7 +6,9 @@
             "type": "string",
             "title": "Bootstrap Servers",
             "description": "Comma-separated list of Kafka servers to connect to",
-            "examples": ["broker-1:9092,broker-2:9092"],
+            "examples": [
+                "broker-1:9092,broker-2:9092"
+            ],
             "pattern": "^(([\\w\\.\\-]+:\\d+),)*([\\w\\.\\-]+:\\d+)$"
         },
         "authentication": {
@@ -51,38 +53,53 @@
                 }
             ]
         },
-        "schemaRegistry": {
+        "schemaRegistryEnum": {
             "type": "object",
             "title": "Schema Registry",
-            "properties": {
-                "endpoint": {
-                    "title": "Endpoint",
-                    "type": "string",
-                    "description": "The endpoint for your Confluent Schema Registry if you have one",
-                    "examples": [
-                        "http://localhost:8081"
-                    ],
-                    "format": "uri"
-                },
-                "apiKey": {
-                    "title": "API Key",
-                    "type": "string",
-                    "description": "The API key for your Confluent Schema Registry if you have one",
-                    "examples": [
-                        "ABCDEFGHIJK01234"
+            "oneOf": [
+                {
+                    "type": "object",
+                    "title": "Confluent Schema Registry",
+                    "properties": {
+                        "endpoint": {
+                            "title": "Endpoint",
+                            "type": "string",
+                            "description": "The endpoint for your Confluent Schema Registry",
+                            "examples": [
+                                "http://localhost:8081"
+                            ],
+                            "format": "uri"
+                        },
+                        "apiKey": {
+                            "title": "API Key",
+                            "type": "string",
+                            "description": "The API key for your Confluent Schema Registry",
+                            "examples": [
+                                "ABCDEFGHIJK01234"
+                            ]
+                        },
+                        "apiSecret": {
+                            "title": "API Secret",
+                            "type": "string",
+                            "description": "Secret for your Confluent Schema Registry",
+                            "isSensitive": true,
+                            "examples": [
+                                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/="
+                            ]
+                        }
+                    },
+                    "required": [
+                        "endpoint"
                     ]
                 },
-                "apiSecret": {
-                    "title": "API Secret",
-                    "type": "string",
-                    "description": "Secret for your Confluent Schema Registry if you have one",
-                    "isSensitive": true,
-                    "examples": [
-                        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/="
-                    ]
+                {
+                    "type": "object",
+                    "title": "None",
+                    "properties": {
+                    },
+                    "additionalProperties": false
                 }
-            },
-            "required": ["endpoint"]
+            ]
         }
     },
     "required": [

@@ -90,7 +90,7 @@ pub fn get_json_schema_source() -> Result<Connection> {
     let config = KafkaConfig {
         authentication: arroyo_connectors::kafka::KafkaConfigAuthentication::None {},
         bootstrap_servers: "localhost:9092".try_into().unwrap(),
-        schema_registry: None,
+        schema_registry_enum: None,
     };
     let table = KafkaTable {
         topic: "test_topic".to_string(),
@@ -195,7 +195,7 @@ pub fn get_avro_source() -> Result<Connection> {
     let config = KafkaConfig {
         authentication: arroyo_connectors::kafka::KafkaConfigAuthentication::None {},
         bootstrap_servers: "localhost:9092".try_into().unwrap(),
-        schema_registry: None,
+        schema_registry_enum: None,
     };
     let table = KafkaTable {
         topic: "test_topic".to_string(),

@@ -15,7 +15,7 @@ use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use arroyo_connectors::kafka::{KafkaConfig, KafkaTable};
+use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, SchemaDefinition,
@@ -553,22 +553,25 @@ async fn get_schema(
     let table: KafkaTable =
         serde_json::from_value(table_config.clone()).expect("invalid kafka table");
 
-    let schema_registry = profile.schema_registry.as_ref().ok_or_else(|| {
-        bad_request("schema registry must be configured on the Kafka connection profile")
-    })?;
+    let Some(SchemaRegistry::ConfluentSchemaRegistry {
+        endpoint,
+        api_key,
+        api_secret,
+    }) = profile.schema_registry_enum
+    else {
+        return Err(bad_request(
+            "schema registry must be configured on the Kafka connection profile",
+        ));
+    };
 
-    let resolver = ConfluentSchemaRegistry::new(
-        &schema_registry.endpoint,
-        &table.topic,
-        schema_registry.api_key.clone(),
-        schema_registry.api_secret.clone(),
-    )
-    .map_err(|e| {
-        bad_request(format!(
-            "failed to fetch schemas from schema repository: {}",
-            e
-        ))
-    })?;
+    let resolver =
+        ConfluentSchemaRegistry::new(&endpoint, &table.topic, api_key.clone(), api_secret.clone())
+            .map_err(|e| {
+                bad_request(format!(
+                    "failed to fetch schemas from schema repository: {}",
+                    e
+                ))
+            })?;
 
     resolver.get_schema(None).await.map_err(|e| {
         bad_request(format!(
