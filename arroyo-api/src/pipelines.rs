@@ -186,17 +186,18 @@ async fn try_register_confluent_schema(
 
     match config.format.clone() {
         Some(Format::Avro(mut avro)) => {
-            if avro.confluent_schema_registry && avro.schema_version.is_none() {
+            if avro.confluent_schema_registry && avro.schema_id.is_none() {
                 let fields: Vec<Field> = schema.fields.iter().map(|f| f.clone().into()).collect();
 
                 let schema = arrow_to_avro_schema(&schema.struct_name_ident(), &fields.into());
 
-                let version = schema_registry
+                let id = schema_registry
                     .write_schema(schema.canonical_form(), ConfluentSchemaType::Avro)
                     .await
                     .map_err(|e| anyhow!("Failed to write schema to schema registry: {}", e))?;
 
-                avro.schema_version = Some(version as u32);
+                println!("Fetched id = {}", id);
+                avro.schema_id = Some(id as u32);
                 config.format = Some(Format::Avro(avro))
             }
         }
@@ -209,6 +210,8 @@ async fn try_register_confluent_schema(
     }
 
     sink.config = serde_json::to_string(&config).unwrap();
+
+    println!("config = {}", sink.config);
 
     Ok(())
 }

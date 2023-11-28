@@ -344,7 +344,7 @@ pub struct DataSerializer<T: SchemaData> {
     #[allow(unused)]
     json_schema: Value,
     avro_schema: apache_avro::schema::Schema,
-    schema_id: Option<i32>,
+    schema_id: Option<u32>,
     format: Format,
     _t: PhantomData<T>,
 }
@@ -355,8 +355,11 @@ impl<T: SchemaData> DataSerializer<T> {
             kafka_schema: json::arrow_to_kafka_json(T::name(), T::schema().fields()),
             json_schema: json::arrow_to_json_schema(T::schema().fields()),
             avro_schema: avro::arrow_to_avro_schema(T::name(), T::schema().fields()),
+            schema_id: match &format {
+                Format::Avro(avro) => avro.schema_id,
+                _ => None,
+            },
             format,
-            schema_id: Some(1),
             _t: PhantomData,
         }
     }
