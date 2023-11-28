@@ -29,6 +29,7 @@ pub mod tumbling_aggregating_window;
 pub mod tumbling_top_n_window;
 pub mod updating_aggregate;
 pub mod windows;
+pub mod async_map;
 
 #[cfg(test)]
 mod test {
@@ -554,6 +555,7 @@ pub struct MapOperator<InKey: Key, InT: Data, OutKey: Key, OutT: Data> {
     pub name: String,
     pub map_fn: Box<dyn Fn(&Record<InKey, InT>, &TaskInfo) -> Record<OutKey, OutT> + Send>,
 }
+
 
 #[process_fn(in_k = InKey, in_t = InT, out_k = OutKey, out_t = OutT)]
 impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> MapOperator<InKey, InT, OutKey, OutT> {
