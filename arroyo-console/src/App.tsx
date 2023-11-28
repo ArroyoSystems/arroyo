@@ -103,7 +103,7 @@ function App() {
   const localUdfsContextValue = getLocalUdfsContextValue();
 
   let content = (
-    <GridItem className="main" area={'main'}>
+    <GridItem className="main" area={'main'} overflow={'auto'}>
       {<Outlet />}
     </GridItem>
   );
