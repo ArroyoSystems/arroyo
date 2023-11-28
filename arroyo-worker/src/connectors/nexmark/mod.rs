@@ -437,8 +437,7 @@ impl GeneratorConfig {
 
         let category = FIRST_CATEGORY_ID + random.gen_range(0..NUM_CATEGORIES);
         let initial_bid = Self::next_price(random);
-        let expires =
-            timestamp + self.next_auction_length_ms(event_counts_so_far, random, timestamp);
+        let expires = timestamp + self.next_auction_length(event_counts_so_far, random, timestamp);
         let name = Self::random_string(random, 20);
         let desc = Self::random_string(random, 100);
         let reserve = initial_bid + Self::next_price(random);
@@ -518,7 +517,7 @@ impl GeneratorConfig {
         (f64::powf(10.0, random.gen_range(0.0..6.0)) * 100.0) as u64
     }
 
-    fn next_auction_length_ms(
+    fn next_auction_length(
         &self,
         events_counts_so_far: u64,
         random: &mut SmallRng,
@@ -537,7 +536,9 @@ impl GeneratorConfig {
         //     futureAuction - timestamp, numEventsForAuctions);
         // Choose a length with average horizonMs.
         let horizon = future_auction.duration_since(timestamp).unwrap();
-        Duration::from_millis(1 + u64::max(random.gen_range(0..horizon.as_millis() as u64 * 2), 1))
+        Duration::from_nanos(
+            1 + u64::max(random.gen_range(0..(1 + horizon.as_nanos() as u64 * 2)), 1),
+        )
     }
 
     fn next_person(
