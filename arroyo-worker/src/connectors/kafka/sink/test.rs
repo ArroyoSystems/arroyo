@@ -1,6 +1,5 @@
 #![allow(clippy::unnecessary_mut_passed)]
 
-use std::io::Write;
 use std::time::{Duration, SystemTime};
 
 use crate::engine::{Context, OutQueue};
