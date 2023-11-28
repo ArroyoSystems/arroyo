@@ -22,7 +22,7 @@ use std::time::Duration;
 use tokio::select;
 use tracing::{debug, error, info, warn};
 
-use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, TableType};
+use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, SchemaRegistry, TableType};
 
 #[cfg(test)]
 mod test;
@@ -105,13 +105,18 @@ where
         }
 
         let schema_resolver: Arc<dyn SchemaResolver + Sync> =
-            if let Some(schema_registry) = &connection.schema_registry {
+            if let Some(SchemaRegistry::ConfluentSchemaRegistry {
+                endpoint,
+                api_key,
+                api_secret,
+            }) = &connection.schema_registry_enum
+            {
                 Arc::new(
                     ConfluentSchemaRegistry::new(
-                        &schema_registry.endpoint,
+                        &endpoint,
                         &table.topic,
-                        schema_registry.api_key.clone(),
-                        schema_registry.api_secret.clone(),
+                        api_key.clone(),
+                        api_secret.clone(),
                     )
                     .expect("failed to construct confluent schema resolver"),
                 )

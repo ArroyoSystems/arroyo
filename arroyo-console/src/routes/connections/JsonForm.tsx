@@ -633,7 +633,9 @@ export function JsonForm({
   error: string | null;
   button?: string;
 }) {
-  const ajv = useMemo(() => addFormats(new Ajv()), [schema]);
+  let ajv = new Ajv();
+  ajv.addKeyword('isSensitive');
+  const memoAjv = useMemo(() => addFormats(ajv), [schema]);
 
   const formik = useFormik({
     initialValues: initial,
@@ -645,7 +647,7 @@ export function JsonForm({
         errors.name = 'Name is required';
       }
 
-      let validate = ajv.compile(schema);
+      let validate = memoAjv.compile(schema);
       let valid = validate(values);
 
       if (!valid) {

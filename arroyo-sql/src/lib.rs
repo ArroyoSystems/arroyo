@@ -703,7 +703,7 @@ pub fn get_test_expression(
             KafkaConfig {
                 authentication: arroyo_connectors::kafka::KafkaConfigAuthentication::None {},
                 bootstrap_servers: "localhost:9092".to_string().try_into().unwrap(),
-                schema_registry: None,
+                schema_registry_enum: None,
             },
             KafkaTable {
                 topic: "test_topic".to_string(),

@@ -26,7 +26,7 @@ use arroyo_rpc::grpc::api::{
     create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, PipelineProgram,
 };
 
-use arroyo_connectors::kafka::{KafkaConfig, KafkaTable};
+use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_formats::avro::arrow_to_avro_schema;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
@@ -172,16 +172,17 @@ async fn try_register_confluent_schema(
         return Ok(());
     };
 
-    let Some(registry_config) = profile.schema_registry else {
+    let Some(SchemaRegistry::ConfluentSchemaRegistry {
+        endpoint,
+        api_key,
+        api_secret,
+    }) = profile.schema_registry_enum
+    else {
         return Ok(());
     };
 
-    let schema_registry = ConfluentSchemaRegistry::new(
-        &registry_config.endpoint,
-        &table.topic,
-        registry_config.api_key,
-        registry_config.api_secret,
-    )?;
+    let schema_registry =
+        ConfluentSchemaRegistry::new(&endpoint, &table.topic, api_key, api_secret)?;
 
     match config.format.clone() {
         Some(Format::Avro(mut avro)) => {
