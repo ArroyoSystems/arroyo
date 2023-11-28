@@ -575,7 +575,7 @@ export function CreatePipeline() {
   } else {
     errorsTab = (
       <TabPanel overflowX="auto" height="100%" position="relative">
-        <Text>Compilation and job errors will appear here.</Text>
+        <Text>Job errors will appear here.</Text>
       </TabPanel>
     );
   }
@@ -608,7 +608,7 @@ export function CreatePipeline() {
   } else if (udfValidationApiError) {
     errorMessage = formatError(udfValidationApiError);
   } else if (job?.state == 'Failed') {
-    errorMessage = 'Job failed. See "Errors" tab for more details.';
+    errorMessage = job.failureMessage ?? 'Job failed.';
   } else {
     errorMessage = '';
   }

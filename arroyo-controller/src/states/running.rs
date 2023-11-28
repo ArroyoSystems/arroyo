@@ -113,7 +113,7 @@ impl State for Running {
                             error!(message = "error while running", error = format!("{:?}", err), job_id = ctx.config.id);
                             if ctx.status.restarts >= RESTARTS_ALLOWED as i32 {
                                 return Err(fatal(
-                                    "too many job failures",
+                                    "Job has restarted too many times",
                                     err
                                 ));
                             }
