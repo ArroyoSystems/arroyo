@@ -42,7 +42,7 @@ impl State for Compiling {
         });
         loop {
             tokio::select! {
-                val = &mut rx => match val.map_err(|err| fatal("could not compile", err.into()))? {
+                val = &mut rx => match val.map_err(|err| fatal("Could not compile", err.into()))? {
                     Ok(res) => {
                         ctx.status.pipeline_path = Some(res.pipeline_path);
                         ctx.status.wasm_path = Some(res.wasm_path);

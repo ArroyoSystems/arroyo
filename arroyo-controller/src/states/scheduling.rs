@@ -187,7 +187,7 @@ impl Scheduling {
                     );
                     if start.elapsed() > STARTUP_TIME {
                         return Err(fatal(
-                            "could not get enough slots",
+                            "Not enough slots to schedule job",
                             anyhow!("scheduler error -- needed {} slots", slots_needed),
                         ));
                     }
