@@ -97,7 +97,7 @@ pub fn to_vec<T: SchemaData>(
     record: &T,
     format: &AvroFormat,
     schema: &Schema,
-    version: Option<i32>,
+    version: Option<u32>,
 ) -> Vec<u8> {
     let v = record.to_avro(schema);
 
@@ -705,7 +705,7 @@ mod tests {
             raw_datums: false,
             into_unstructured_json: false,
             reader_schema: None,
-            schema_version: None,
+            schema_id: None,
         };
 
         let schema = arrow_to_avro_schema("ArroyoAvroRoot", &ArroyoAvroRoot::schema().fields());

@@ -178,7 +178,7 @@ pub struct AvroFormat {
 
     #[serde(default)]
     #[schema(read_only)]
-    pub schema_version: Option<u32>,
+    pub schema_id: Option<u32>,
 }
 
 impl AvroFormat {
@@ -192,7 +192,7 @@ impl AvroFormat {
             raw_datums,
             into_unstructured_json,
             reader_schema: None,
-            schema_version: None,
+            schema_id: None,
         }
     }
 

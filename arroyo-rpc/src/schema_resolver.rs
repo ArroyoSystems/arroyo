@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail};
 use apache_avro::Schema;
 use async_trait::async_trait;
 use reqwest::{Client, StatusCode, Url};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::warn;
@@ -67,13 +68,21 @@ pub enum ConfluentSchemaType {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ConfluentSchemaResponse {
+pub struct ConfluentSchemaSubjectResponse {
     pub id: u32,
     pub schema: String,
     #[serde(default)]
     pub schema_type: ConfluentSchemaType,
     pub subject: String,
     pub version: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfluentSchemaIdResponse {
+    pub schema: String,
+    #[serde(default)]
+    pub schema_type: ConfluentSchemaType,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -109,8 +118,7 @@ impl ConfluentSchemaRegistry {
             .build()
             .unwrap();
 
-        let endpoint: Url = format!("{}/subjects/{}-value/versions/", endpoint, topic)
-            .as_str()
+        let endpoint: Url = endpoint
             .try_into()
             .map_err(|_| anyhow!("{} is not a valid url", endpoint))?;
 
@@ -121,6 +129,12 @@ impl ConfluentSchemaRegistry {
             api_key,
             api_secret,
         })
+    }
+
+    fn topic_endpoint(&self) -> Url {
+        self.endpoint
+            .join(&format!("subjects/{}-value/versions/", self.topic))
+            .unwrap()
     }
 
     pub async fn write_schema(
@@ -135,7 +149,7 @@ impl ConfluentSchemaRegistry {
 
         let resp = self
             .client
-            .post(self.endpoint.clone())
+            .post(self.topic_endpoint())
             .json(&req)
             .send()
             .await
@@ -170,6 +184,9 @@ impl ConfluentSchemaRegistry {
                 StatusCode::UNAUTHORIZED => {
                     bail!("Invalid credentials for schema registry");
                 }
+                StatusCode::NOT_FOUND => {
+                    bail!("Schema registry returned 404 for topic {}. Make sure that the topic exists.", self.topic)
+                }
                 code => {
                     bail!("Schema registry returned error {}: {}", code.as_u16(), body);
                 }
@@ -184,12 +201,18 @@ impl ConfluentSchemaRegistry {
         Ok(resp.id)
     }
 
-    pub async fn get_schema(
+    pub async fn get_schema_for_id(&self, id: u32) -> anyhow::Result<ConfluentSchemaIdResponse> {
+        let url = self.endpoint.join(&format!("/schemas/ids/{}", id)).unwrap();
+
+        self.get_schema_for_url(url).await
+    }
+
+    pub async fn get_schema_for_version(
         &self,
         version: Option<u32>,
-    ) -> anyhow::Result<ConfluentSchemaResponse> {
+    ) -> anyhow::Result<ConfluentSchemaSubjectResponse> {
         let url = self
-            .endpoint
+            .topic_endpoint()
             .join(
                 &version
                     .map(|v| format!("{}", v))
@@ -197,6 +220,10 @@ impl ConfluentSchemaRegistry {
             )
             .unwrap();
 
+        self.get_schema_for_url(url).await
+    }
+
+    async fn get_schema_for_url<T: DeserializeOwned>(&self, url: Url) -> anyhow::Result<T> {
         let mut get_call = self.client.get(url.clone());
 
         if let Some(api_key) = self.api_key.as_ref() {
@@ -225,7 +252,8 @@ impl ConfluentSchemaRegistry {
 
         if !resp.status().is_success() {
             bail!(
-                "Received an error status code from the provided endpoint: {} {}",
+                "Received an error status code from the schema endpoint while fetching {}: {} {}",
+                url,
                 resp.status().as_u16(),
                 resp.bytes()
                     .await
@@ -247,7 +275,7 @@ impl ConfluentSchemaRegistry {
 #[async_trait]
 impl SchemaResolver for ConfluentSchemaRegistry {
     async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String> {
-        self.get_schema(Some(id))
+        self.get_schema_for_id(id)
             .await
             .map(|s| Some(s.schema))
             .map_err(|e| e.to_string())

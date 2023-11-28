@@ -24,7 +24,7 @@ use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
 use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat};
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{
-    ConfluentSchemaRegistry, ConfluentSchemaResponse, ConfluentSchemaType,
+    ConfluentSchemaRegistry, ConfluentSchemaSubjectResponse, ConfluentSchemaType,
 };
 use arroyo_sql::avro;
 use arroyo_sql::json_schema::convert_json_schema;
@@ -539,7 +539,7 @@ async fn get_schema(
     connector: &str,
     table_config: &Value,
     profile_config: &Value,
-) -> Result<ConfluentSchemaResponse, ErrorResp> {
+) -> Result<ConfluentSchemaSubjectResponse, ErrorResp> {
     if connector != "kafka" {
         return Err(bad_request(
             "confluent schema registry can only be used for Kafka connections",
@@ -573,7 +573,7 @@ async fn get_schema(
                 ))
             })?;
 
-    resolver.get_schema(None).await.map_err(|e| {
+    resolver.get_schema_for_version(None).await.map_err(|e| {
         bad_request(format!(
             "failed to fetch schemas from schema repository: {}",
             e
