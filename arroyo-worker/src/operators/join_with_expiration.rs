@@ -13,6 +13,10 @@ use crate::engine::Context;
 #[derive(StreamNode)]
 pub struct JoinWithExpiration<
     K: Key,
+    InT1: Data,
+    InT2: Data,
+    P1: IncomingDataProcessor<InT1, T1>,
+    P2: IncomingDataProcessor<InT2, T2>,
     T1: Data,
     T2: Data,
     Output: Data,
@@ -21,299 +25,530 @@ pub struct JoinWithExpiration<
     left_expiration: Duration,
     right_expiration: Duration,
     processor: P,
-    _t: PhantomData<(K, T1, T2, Output)>,
+    _t: PhantomData<(K, P1, P2, InT1, InT2, T1, T2, Output)>,
 }
 
 pub trait JoinProcessor<K: Key, T1: Data, T2: Data, Output: Data>: Send + 'static {
-    fn left_join(
+    fn process_left(
         &self,
-        key: K,
         left_timestamp: SystemTime,
-        left_value: T1,
+        left_update: UpdatingData<T1>,
         right: Option<(SystemTime, &T2)>,
-        first_left: bool,
+        left_count: usize,
     ) -> Option<(SystemTime, Output)>;
-    fn right_join(
+    fn process_right(
         &self,
-        key: K,
         right_timestamp: SystemTime,
-        right_value: T2,
+        right_update: UpdatingData<T2>,
         left: Option<(SystemTime, &T1)>,
-        first_right: bool,
+        right_count: usize,
     ) -> Option<(SystemTime, Output)>;
 }
 
+pub trait IncomingDataProcessor<In: Data, Out: Data>: Send + 'static {
+    fn ensure_updating(incoming: In) -> UpdatingData<Out>;
+}
+
+pub struct NoOpProcessor<T: Data> {
+    _t: PhantomData<T>,
+}
+
+impl<T: Data> IncomingDataProcessor<UpdatingData<T>, T> for NoOpProcessor<T> {
+    fn ensure_updating(incoming: UpdatingData<T>) -> UpdatingData<T> {
+        incoming
+    }
+}
+
+pub struct Coercer<T: Data> {
+    _t: PhantomData<T>,
+}
+
+impl<T: Data> IncomingDataProcessor<T, T> for Coercer<T> {
+    fn ensure_updating(incoming: T) -> UpdatingData<T> {
+        UpdatingData::Append(incoming)
+    }
+}
+
 pub struct LeftJoinProcessor<K: Key, T1: Data, T2: Data> {
-    _t: PhantomData<(K, T1, T2)>,
+    pub _t: PhantomData<(K, T1, T2)>,
+}
+
+impl<K: Key, T1: Data, T2: Data> LeftJoinProcessor<K, T1, T2> {
+    pub fn new() -> Self {
+        Self { _t: PhantomData }
+    }
 }
 
 impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(T1, Option<T2>)>>
     for LeftJoinProcessor<K, T1, T2>
 {
-    fn left_join(
+    fn process_left(
         &self,
-        _key: K,
         left_timestamp: SystemTime,
-        left_value: T1,
+        left_update: UpdatingData<T1>,
         right: Option<(SystemTime, &T2)>,
-        _first_left: bool,
+        _first_left: usize,
     ) -> Option<(SystemTime, UpdatingData<(T1, Option<T2>)>)> {
-        match right {
-            Some((right_timestamp, right_value)) => Some((
-                left_timestamp.max(right_timestamp),
-                UpdatingData::Append((left_value, Some(right_value.clone()))),
-            )),
-            None => Some((left_timestamp, UpdatingData::Append((left_value, None)))),
+        match left_update {
+            UpdatingData::Append(left) => match right {
+                Some((right_timestamp, right)) => Some((
+                    left_timestamp.max(right_timestamp).clone(),
+                    UpdatingData::Append((left.clone(), Some(right.clone()))),
+                )),
+                None => Some((left_timestamp, UpdatingData::Append((left.clone(), None)))),
+            },
+            UpdatingData::Update { old, new } => match right {
+                Some((right_timestamp, right)) => Some((
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Update {
+                        old: (old.clone(), Some(right.clone())),
+                        new: (new.clone(), Some(right.clone())),
+                    },
+                )),
+                None => Some((
+                    left_timestamp,
+                    UpdatingData::Update {
+                        old: (old.clone(), None),
+                        new: (new.clone(), None),
+                    },
+                )),
+            },
+            UpdatingData::Retract(left) => match right {
+                Some((right_timestamp, right)) => Some((
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Retract((left.clone(), Some(right.clone()))),
+                )),
+                None => Some((left_timestamp, UpdatingData::Retract((left.clone(), None)))),
+            },
         }
     }
 
-    fn right_join(
+    fn process_right(
         &self,
-        _key: K,
         right_timestamp: SystemTime,
-        right_value: T2,
+        right_update: UpdatingData<T2>,
         left: Option<(SystemTime, &T1)>,
-        first_right: bool,
+        right_count: usize,
     ) -> Option<(SystemTime, UpdatingData<(T1, Option<T2>)>)> {
-        left.map(|(left_timestamp, left_value)| {
-            if first_right {
-                (
-                    left_timestamp.max(right_timestamp),
-                    UpdatingData::Update {
-                        old: (left_value.clone(), None),
-                        new: (left_value.clone(), Some(right_value.clone())),
-                    },
-                )
-            } else {
-                (
-                    left_timestamp.max(right_timestamp),
-                    UpdatingData::Append((left_value.clone(), Some(right_value))),
-                )
+        let Some((left_timestamp, left)) = left else {
+            return None;
+        };
+
+        let timestamp = left_timestamp.max(right_timestamp);
+
+        match right_update {
+            UpdatingData::Append(right) => {
+                if right_count == 0 {
+                    Some((
+                        timestamp,
+                        UpdatingData::Update {
+                            old: (left.clone(), None),
+                            new: (left.clone(), Some(right)),
+                        },
+                    ))
+                } else {
+                    Some((timestamp, UpdatingData::Append((left.clone(), Some(right)))))
+                }
             }
-        })
+            UpdatingData::Update { old, new } => Some((
+                timestamp,
+                UpdatingData::Update {
+                    old: (left.clone(), Some(old)),
+                    new: (left.clone(), Some(new)),
+                },
+            )),
+            UpdatingData::Retract(right) => {
+                if right_count == 1 {
+                    Some((
+                        timestamp,
+                        UpdatingData::Update {
+                            old: (left.clone(), Some(right.clone())),
+                            new: (left.clone(), None),
+                        },
+                    ))
+                } else {
+                    Some((
+                        timestamp,
+                        UpdatingData::Retract((left.clone(), Some(right.clone()))),
+                    ))
+                }
+            }
+        }
     }
 }
 
 pub struct RightJoinProcessor<K: Key, T1: Data, T2: Data> {
-    _t: PhantomData<(K, T1, T2)>,
+    pub _t: PhantomData<(K, T1, T2)>,
+}
+
+impl<K: Key, T1: Data, T2: Data> RightJoinProcessor<K, T1, T2> {
+    pub fn new() -> Self {
+        Self { _t: PhantomData }
+    }
 }
 
 impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(Option<T1>, T2)>>
     for RightJoinProcessor<K, T1, T2>
 {
-    fn left_join(
+    fn process_left(
         &self,
-        _key: K,
         left_timestamp: SystemTime,
-        left_value: T1,
+        left_update: UpdatingData<T1>,
         right: Option<(SystemTime, &T2)>,
-        first_left: bool,
+        left_count: usize,
     ) -> Option<(SystemTime, UpdatingData<(Option<T1>, T2)>)> {
-        right.map(|(right_timestamp, right_value)| {
-            if first_left {
-                (
-                    left_timestamp.max(right_timestamp),
-                    UpdatingData::Update {
-                        old: (None, right_value.clone()),
-                        new: (Some(left_value.clone()), right_value.clone()),
-                    },
-                )
-            } else {
-                (
-                    left_timestamp.max(right_timestamp),
-                    UpdatingData::Append((Some(left_value), right_value.clone())),
-                )
+        let Some((right_timestamp, right)) = right else {
+            return None;
+        };
+
+        let timestamp = left_timestamp.max(right_timestamp);
+
+        match left_update {
+            UpdatingData::Append(left) => {
+                if left_count == 0 {
+                    Some((
+                        timestamp,
+                        UpdatingData::Update {
+                            old: (None, right.clone()),
+                            new: (Some(left), right.clone()),
+                        },
+                    ))
+                } else {
+                    Some((
+                        timestamp,
+                        UpdatingData::Append((Some(left.clone()), right.clone())),
+                    ))
+                }
             }
-        })
+            UpdatingData::Update { old, new } => Some((
+                timestamp,
+                UpdatingData::Update {
+                    old: (Some(old), right.clone()),
+                    new: (Some(new), right.clone()),
+                },
+            )),
+            UpdatingData::Retract(left) => {
+                if left_count == 1 {
+                    Some((
+                        timestamp,
+                        UpdatingData::Update {
+                            old: (Some(left.clone()), right.clone()),
+                            new: (None, right.clone()),
+                        },
+                    ))
+                } else {
+                    Some((
+                        timestamp,
+                        UpdatingData::Retract((Some(left.clone()), right.clone())),
+                    ))
+                }
+            }
+        }
     }
 
-    fn right_join(
+    fn process_right(
         &self,
-        _key: K,
         right_timestamp: SystemTime,
-        right_value: T2,
+        right_update: UpdatingData<T2>,
         left: Option<(SystemTime, &T1)>,
-        _first_right: bool,
+        _first_left: usize,
     ) -> Option<(SystemTime, UpdatingData<(Option<T1>, T2)>)> {
-        match left {
-            Some((left_timestamp, left_value)) => Some((
-                left_timestamp.max(right_timestamp),
-                UpdatingData::Append((Some(left_value.clone()), right_value)),
-            )),
-            None => Some((right_timestamp, UpdatingData::Append((None, right_value)))),
+        match right_update {
+            UpdatingData::Append(right) => match left {
+                Some((left_timestamp, left)) => Some((
+                    left_timestamp.max(right_timestamp).clone(),
+                    UpdatingData::Append((Some(left.clone()), right.clone())),
+                )),
+                None => Some((right_timestamp, UpdatingData::Append((None, right.clone())))),
+            },
+            UpdatingData::Update { old, new } => match left {
+                Some((left_timestamp, left)) => Some((
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Update {
+                        old: (Some(left.clone()), old.clone()),
+                        new: (Some(left.clone()), new.clone()),
+                    },
+                )),
+                None => Some((
+                    right_timestamp,
+                    UpdatingData::Update {
+                        old: (None, old.clone()),
+                        new: (None, new.clone()),
+                    },
+                )),
+            },
+            UpdatingData::Retract(right) => match left {
+                Some((left_timestamp, left)) => Some((
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Retract((Some(left.clone()), right.clone())),
+                )),
+                None => Some((
+                    right_timestamp,
+                    UpdatingData::Retract((None, right.clone())),
+                )),
+            },
         }
     }
 }
 
 pub struct FullJoinProcessor<K: Key, T1: Data, T2: Data> {
-    _t: PhantomData<(K, T1, T2)>,
+    pub(crate) _t: PhantomData<(K, T1, T2)>,
+}
+
+impl<K: Key, T1: Data, T2: Data> FullJoinProcessor<K, T1, T2> {
+    pub fn new() -> Self {
+        Self { _t: PhantomData }
+    }
 }
 
 impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(Option<T1>, Option<T2>)>>
     for FullJoinProcessor<K, T1, T2>
 {
-    fn left_join(
+    fn process_left(
         &self,
-        _key: K,
         left_timestamp: SystemTime,
-        left_value: T1,
+        left_update: UpdatingData<T1>,
         right: Option<(SystemTime, &T2)>,
-        first_left: bool,
+        left_count: usize,
     ) -> Option<(SystemTime, UpdatingData<(Option<T1>, Option<T2>)>)> {
-        match right {
-            Some((right_timestamp, right_value)) => {
-                if first_left {
-                    Some((
-                        left_timestamp.max(right_timestamp),
-                        UpdatingData::Update {
-                            old: (None, Some(right_value.clone())),
-                            new: (Some(left_value), Some(right_value.clone())),
-                        },
-                    ))
-                } else {
-                    Some((
-                        left_timestamp.max(right_timestamp),
-                        UpdatingData::Append((Some(left_value), Some(right_value.clone()))),
-                    ))
+        match left_update {
+            UpdatingData::Append(left) => match right {
+                Some((right_timestamp, right)) => {
+                    if left_count == 0 {
+                        Some((
+                            left_timestamp.max(right_timestamp),
+                            UpdatingData::Update {
+                                old: (None, Some(right.clone())),
+                                new: (Some(left.clone()), Some(right.clone())),
+                            },
+                        ))
+                    } else {
+                        Some((
+                            left_timestamp.max(right_timestamp),
+                            UpdatingData::Append((Some(left.clone()), Some(right.clone()))),
+                        ))
+                    }
                 }
-            }
-            None => Some((
-                left_timestamp,
-                UpdatingData::Append((Some(left_value), None)),
-            )),
+                None => Some((
+                    left_timestamp,
+                    UpdatingData::Append((Some(left.clone()), None)),
+                )),
+            },
+            UpdatingData::Update { old, new } => match right {
+                Some((right_timestamp, right)) => Some((
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Update {
+                        old: (Some(old.clone()), Some(right.clone())),
+                        new: (Some(new.clone()), Some(right.clone())),
+                    },
+                )),
+                None => Some((
+                    left_timestamp,
+                    UpdatingData::Update {
+                        old: (Some(old.clone()), None),
+                        new: (Some(new.clone()), None),
+                    },
+                )),
+            },
+            UpdatingData::Retract(left) => match right {
+                Some((right_timestamp, right)) => {
+                    if left_count == 1 {
+                        Some((
+                            left_timestamp.max(right_timestamp),
+                            UpdatingData::Update {
+                                old: (Some(left.clone()), Some(right.clone())),
+                                new: (None, Some(right.clone())),
+                            },
+                        ))
+                    } else {
+                        Some((
+                            left_timestamp.max(right_timestamp),
+                            UpdatingData::Retract((Some(left.clone()), Some(right.clone()))),
+                        ))
+                    }
+                }
+                None => {
+                    if left_count == 1 {
+                        Some((
+                            left_timestamp,
+                            UpdatingData::Update {
+                                old: (Some(left.clone()), None),
+                                new: (None, None),
+                            },
+                        ))
+                    } else {
+                        Some((
+                            left_timestamp,
+                            UpdatingData::Retract((Some(left.clone()), None)),
+                        ))
+                    }
+                }
+            },
         }
     }
 
-    fn right_join(
+    fn process_right(
         &self,
-        _key: K,
         right_timestamp: SystemTime,
-        right_value: T2,
+        right_update: UpdatingData<T2>,
         left: Option<(SystemTime, &T1)>,
-        first_right: bool,
+        right_count: usize,
     ) -> Option<(SystemTime, UpdatingData<(Option<T1>, Option<T2>)>)> {
-        match left {
-            Some((left_timestamp, left_value)) => {
-                if first_right {
-                    Some((
-                        left_timestamp.max(right_timestamp),
-                        UpdatingData::Update {
-                            old: (Some(left_value.clone()), None),
-                            new: (Some(left_value.clone()), Some(right_value)),
-                        },
-                    ))
-                } else {
-                    Some((
-                        left_timestamp.max(right_timestamp),
-                        UpdatingData::Append((Some(left_value.clone()), Some(right_value))),
-                    ))
+        match right_update {
+            UpdatingData::Append(right) => match left {
+                Some((left_timestamp, left)) => {
+                    if right_count == 0 {
+                        Some((
+                            right_timestamp.max(left_timestamp),
+                            UpdatingData::Update {
+                                old: (Some(left.clone()), None),
+                                new: (Some(left.clone()), Some(right.clone())),
+                            },
+                        ))
+                    } else {
+                        Some((
+                            right_timestamp.max(left_timestamp),
+                            UpdatingData::Append((Some(left.clone()), Some(right.clone()))),
+                        ))
+                    }
                 }
-            }
-            None => Some((
-                right_timestamp,
-                UpdatingData::Append((None, Some(right_value))),
-            )),
+                None => Some((
+                    right_timestamp,
+                    UpdatingData::Append((None, Some(right.clone()))),
+                )),
+            },
+            UpdatingData::Update { old, new } => match left {
+                Some((left_timestamp, left)) => Some((
+                    left_timestamp.max(right_timestamp),
+                    UpdatingData::Update {
+                        old: (Some(left.clone()), Some(old.clone())),
+                        new: (Some(left.clone()), Some(new.clone())),
+                    },
+                )),
+                None => Some((
+                    right_timestamp,
+                    UpdatingData::Update {
+                        old: (None, Some(old.clone())),
+                        new: (None, Some(new.clone())),
+                    },
+                )),
+            },
+            UpdatingData::Retract(right) => match left {
+                Some((left_timestamp, left)) => {
+                    if right_count == 1 {
+                        Some((
+                            left_timestamp.max(right_timestamp),
+                            UpdatingData::Update {
+                                old: (Some(left.clone()), Some(right.clone())),
+                                new: (Some(left.clone()), None),
+                            },
+                        ))
+                    } else {
+                        Some((
+                            left_timestamp.max(right_timestamp),
+                            UpdatingData::Retract((Some(left.clone()), Some(right.clone()))),
+                        ))
+                    }
+                }
+                None => {
+                    if right_count == 1 {
+                        Some((
+                            right_timestamp,
+                            UpdatingData::Update {
+                                old: (None, Some(right.clone())),
+                                new: (None, None),
+                            },
+                        ))
+                    } else {
+                        Some((
+                            right_timestamp,
+                            UpdatingData::Retract((None, Some(right.clone()))),
+                        ))
+                    }
+                }
+            },
         }
     }
 }
 
 pub struct InnerJoinProcessor<K: Key, T1: Data, T2: Data> {
-    _t: PhantomData<(K, T1, T2)>,
+    pub(crate) _t: PhantomData<(K, T1, T2)>,
 }
 
-impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, (T1, T2)>
+impl<K: Key, T1: Data, T2: Data> InnerJoinProcessor<K, T1, T2> {
+    pub fn new() -> Self {
+        Self { _t: PhantomData }
+    }
+}
+
+impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(T1, T2)>>
     for InnerJoinProcessor<K, T1, T2>
 {
-    fn left_join(
+    fn process_left(
         &self,
-        _key: K,
         left_timestamp: SystemTime,
-        left_value: T1,
+        left_update: UpdatingData<T1>,
         right: Option<(SystemTime, &T2)>,
-        _evict_prior: bool,
-    ) -> Option<(SystemTime, (T1, T2))> {
-        right.map(|(right_timestamp, right_value)| {
-            (
+        _left_count: usize,
+    ) -> Option<(SystemTime, UpdatingData<(T1, T2)>)> {
+        right.map(|(right_timestamp, right)| match left_update {
+            UpdatingData::Append(left) => (
                 left_timestamp.max(right_timestamp),
-                (left_value, right_value.clone()),
-            )
+                UpdatingData::Append((left.clone(), right.clone())),
+            ),
+            UpdatingData::Update { old, new } => (
+                left_timestamp.max(right_timestamp),
+                UpdatingData::Update {
+                    old: (old.clone(), right.clone()),
+                    new: (new.clone(), right.clone()),
+                },
+            ),
+            UpdatingData::Retract(left) => (
+                left_timestamp.max(right_timestamp),
+                UpdatingData::Retract((left.clone(), right.clone())),
+            ),
         })
     }
 
-    fn right_join(
+    fn process_right(
         &self,
-        _key: K,
         right_timestamp: SystemTime,
-        right_value: T2,
+        right_update: UpdatingData<T2>,
         left: Option<(SystemTime, &T1)>,
-        _evict_prior: bool,
-    ) -> Option<(SystemTime, (T1, T2))> {
-        left.map(|(left_timestamp, left_value)| {
-            (
+        _right_count: usize,
+    ) -> Option<(SystemTime, UpdatingData<(T1, T2)>)> {
+        left.map(|(left_timestamp, left)| match right_update {
+            UpdatingData::Append(right) => (
                 left_timestamp.max(right_timestamp),
-                (left_value.clone(), right_value),
-            )
+                UpdatingData::Append((left.clone(), right.clone())),
+            ),
+            UpdatingData::Update { old, new } => (
+                left_timestamp.max(right_timestamp),
+                UpdatingData::Update {
+                    old: (left.clone(), old.clone()),
+                    new: (left.clone(), new.clone()),
+                },
+            ),
+            UpdatingData::Retract(right) => (
+                left_timestamp.max(right_timestamp),
+                UpdatingData::Retract((left.clone(), right.clone())),
+            ),
         })
     }
 }
 
-// Return left JoinWithExpiration
-pub fn left_join<K: Key, T1: Data, T2: Data>(
-    left_expiration: Duration,
-    right_expiration: Duration,
-) -> JoinWithExpiration<K, T1, T2, UpdatingData<(T1, Option<T2>)>, LeftJoinProcessor<K, T1, T2>> {
-    JoinWithExpiration::new(
-        left_expiration,
-        right_expiration,
-        LeftJoinProcessor { _t: PhantomData },
-    )
-}
-
-// Return right JoinWithExpiration
-pub fn right_join<K: Key, T1: Data, T2: Data>(
-    left_expiration: Duration,
-    right_expiration: Duration,
-) -> JoinWithExpiration<K, T1, T2, UpdatingData<(Option<T1>, T2)>, RightJoinProcessor<K, T1, T2>> {
-    JoinWithExpiration::new(
-        left_expiration,
-        right_expiration,
-        RightJoinProcessor { _t: PhantomData },
-    )
-}
-
-// Return full JoinWithExpiration
-pub fn full_join<K: Key, T1: Data, T2: Data>(
-    left_expiration: Duration,
-    right_expiration: Duration,
-) -> JoinWithExpiration<
-    K,
-    T1,
-    T2,
-    UpdatingData<(Option<T1>, Option<T2>)>,
-    FullJoinProcessor<K, T1, T2>,
-> {
-    JoinWithExpiration::new(
-        left_expiration,
-        right_expiration,
-        FullJoinProcessor { _t: PhantomData },
-    )
-}
-
-// return inner JoinWithExpiration
-pub fn inner_join<K: Key, T1: Data, T2: Data>(
-    left_expiration: Duration,
-    right_expiration: Duration,
-) -> JoinWithExpiration<K, T1, T2, (T1, T2), InnerJoinProcessor<K, T1, T2>> {
-    JoinWithExpiration::new(
-        left_expiration,
-        right_expiration,
-        InnerJoinProcessor { _t: PhantomData },
-    )
-}
-
-#[co_process_fn(in_k1=K, in_t1=T1, in_k2=K, in_t2=T2, out_k=K, out_t=Output)]
-impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Output>>
-    JoinWithExpiration<K, T1, T2, Output, P>
+#[co_process_fn(in_k1=K, in_t1=InT1, in_k2=K, in_t2=InT2, out_k=K, out_t=Output)]
+impl<
+        K: Key,
+        InT1: Data,
+        InT2: Data,
+        P1: IncomingDataProcessor<InT1, T1>,
+        P2: IncomingDataProcessor<InT2, T2>,
+        T1: Data,
+        T2: Data,
+        Output: Data,
+        P: JoinProcessor<K, T1, T2, Output>,
+    > JoinWithExpiration<K, InT1, InT2, P1, P2, T1, T2, Output, P>
 {
     fn name(&self) -> String {
         "JoinWithExpiration".to_string()
@@ -349,118 +584,150 @@ impl<K: Key, T1: Data, T2: Data, Output: Data, P: JoinProcessor<K, T1, T2, Outpu
         ]
     }
 
-    async fn process_left(&mut self, record: &Record<K, T1>, ctx: &mut Context<K, Output>) {
-        if let Some(watermark) = ctx.last_present_watermark() {
-            if record.timestamp < watermark {
-                return;
+    async fn update_state<T: Data>(
+        &mut self,
+        ctx: &mut Context<K, Output>,
+        key: K,
+        timestamp: SystemTime,
+        updating_data: UpdatingData<T>,
+        table: char,
+    ) {
+        let mut state = ctx.state.get_key_time_multi_map(table).await;
+        match updating_data {
+            UpdatingData::Append(value) => {
+                state.insert(timestamp, key, value).await;
             }
-        };
-        let mut key = record.key.clone().unwrap();
-        let value = record.value.clone();
-
-        let mut left_state: KeyTimeMultiMap<K, T1, _> = ctx.state.get_key_time_multi_map('l').await;
-        let first_left = left_state
-            .get_all_values_with_timestamps(&mut key)
-            .await
-            .is_none();
-        let mut right_state: KeyTimeMultiMap<K, T2, _> =
-            ctx.state.get_key_time_multi_map('r').await;
-        let records = {
-            let mut records = vec![];
-            if let Some(right_rows) = right_state.get_all_values_with_timestamps(&mut key).await {
-                for right in right_rows {
-                    if let Some((timestamp, value)) = self.processor.left_join(
-                        key.clone(),
-                        record.timestamp,
-                        value.clone(),
-                        Some(right),
-                        first_left,
-                    ) {
-                        records.push(Record {
-                            timestamp,
-                            key: Some(key.clone()),
-                            value,
-                        });
-                    }
-                }
-            } else if let Some((timestamp, value)) = self.processor.left_join(
-                key.clone(),
-                record.timestamp,
-                value.clone(),
-                None,
-                first_left,
-            ) {
-                records.push(Record {
-                    timestamp,
-                    key: Some(key.clone()),
-                    value,
-                });
+            UpdatingData::Update { old, new } => {
+                let k = key.clone();
+                state.delete_value(timestamp, k, old).await;
+                state.insert(timestamp, key, new).await;
             }
-            records
-        };
-        for record in records {
-            ctx.collect(record).await;
+            UpdatingData::Retract(value) => {
+                state.delete_value(timestamp, key, value).await;
+            }
         }
-        let mut left_state = ctx.state.get_key_time_multi_map('l').await;
-        left_state.insert(record.timestamp, key, value).await;
     }
 
-    async fn process_right(&mut self, record: &Record<K, T2>, ctx: &mut Context<K, Output>) {
+    async fn process_left(&mut self, left_record: &Record<K, InT1>, ctx: &mut Context<K, Output>) {
         if let Some(watermark) = ctx.last_present_watermark() {
-            if record.timestamp < watermark {
+            if left_record.timestamp < watermark {
                 return;
             }
         };
-        let mut key = record.key.clone().unwrap();
-        let value = record.value.clone();
-        let mut right_state = ctx.state.get_key_time_multi_map('r').await;
-        let first_right = right_state
-            .get_all_values_with_timestamps(&mut key)
-            .await
-            .is_none();
-        let key_to_insert = key.clone();
-        let value_to_insert = value.clone();
-        right_state
-            .insert(record.timestamp, key_to_insert, value_to_insert)
-            .await;
+        let mut key = left_record.key.clone().unwrap();
+        let left_update = P1::ensure_updating(left_record.value.clone());
 
         let mut left_state: KeyTimeMultiMap<K, T1, _> = ctx.state.get_key_time_multi_map('l').await;
-        let records = {
-            let mut records = vec![];
-            if let Some(left_rows) = left_state.get_all_values_with_timestamps(&mut key).await {
-                for left in left_rows {
-                    if let Some((timestamp, value)) = self.processor.right_join(
-                        key.clone(),
-                        record.timestamp,
-                        value.clone(),
-                        Some(left),
-                        first_right,
-                    ) {
-                        records.push(Record {
-                            timestamp,
-                            key: Some(key.clone()),
-                            value,
-                        });
-                    }
-                }
-            } else if let Some((timestamp, value)) = self.processor.right_join(
-                key.clone(),
-                record.timestamp,
-                value.clone(),
-                None,
-                first_right,
-            ) {
-                records.push(Record {
-                    timestamp,
-                    key: Some(key.clone()),
-                    value,
+        let left_count = left_state
+            .get_all_values_with_timestamps(&mut key)
+            .await
+            .map_or(0, |values| values.count());
+
+        let mut right_state: KeyTimeMultiMap<K, T2, _> =
+            ctx.state.get_key_time_multi_map('r').await;
+
+        let mut out_records = vec![];
+        if let Some(right_rows) = right_state.get_all_values_with_timestamps(&mut key).await {
+            out_records.extend(
+                right_rows
+                    .filter_map(|(timestamp, value)| {
+                        self.processor.process_left(
+                            left_record.timestamp.clone(),
+                            left_update.clone(),
+                            Some((timestamp.clone(), value)),
+                            left_count,
+                        )
+                    })
+                    .map(|(timestamp, value)| Record {
+                        timestamp,
+                        key: Some(key.clone()),
+                        value,
+                    }),
+            );
+        } else {
+            self.processor
+                .process_left(left_record.timestamp, left_update.clone(), None, left_count)
+                .map(|(timestamp, value)| {
+                    out_records.push(Record {
+                        timestamp,
+                        key: Some(key.clone()),
+                        value,
+                    });
                 });
-            }
-            records
-        };
-        for record in records {
+        }
+
+        for record in out_records {
             ctx.collect(record).await;
         }
+
+        self.update_state(ctx, key, left_record.timestamp, left_update, 'l')
+            .await;
+    }
+
+    async fn process_right(
+        &mut self,
+        right_record: &Record<K, InT2>,
+        ctx: &mut Context<K, Output>,
+    ) {
+        if let Some(watermark) = ctx.last_present_watermark() {
+            if right_record.timestamp < watermark {
+                return;
+            }
+        };
+
+        let mut key = right_record.key.clone().unwrap();
+        let right_update = P2::ensure_updating(right_record.value.clone());
+
+        let mut right_state: KeyTimeMultiMap<K, T2, _> =
+            ctx.state.get_key_time_multi_map('r').await;
+        let right_count = right_state
+            .get_all_values_with_timestamps(&mut key)
+            .await
+            .map_or(0, |values| values.count());
+
+        let mut left_state: KeyTimeMultiMap<K, T1, _> = ctx.state.get_key_time_multi_map('l').await;
+
+        let mut out_records = vec![];
+        if let Some(left_rows) = left_state.get_all_values_with_timestamps(&mut key).await {
+            out_records.extend(
+                left_rows
+                    .filter_map(|(timestamp, value)| {
+                        self.processor.process_right(
+                            right_record.timestamp.clone(),
+                            right_update.clone(),
+                            Some((timestamp.clone(), value)),
+                            right_count,
+                        )
+                    })
+                    .map(|(timestamp, value)| Record {
+                        timestamp,
+                        key: Some(key.clone()),
+                        value,
+                    }),
+            );
+        } else {
+            self.processor
+                .process_right(
+                    right_record.timestamp,
+                    right_update.clone(),
+                    None,
+                    right_count,
+                )
+                .map(|(timestamp, value)| {
+                    out_records.push(Record {
+                        timestamp,
+                        key: Some(key.clone()),
+                        value,
+                    });
+                });
+        }
+
+        for record in out_records {
+            ctx.collect(record).await;
+        }
+
+        self.update_state(ctx, key, right_record.timestamp, right_update, 'r')
+            .await;
     }
 
     async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut Context<K, Output>) {

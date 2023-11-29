@@ -227,9 +227,10 @@ impl JoinPairContext {
         let merge_expr = code_generator.generate(self);
         let left_ident = self.left_ident();
         let right_ident = self.right_ident();
+
         parse_quote!({
-            let #left_ident = &record.value.0;
-            let #right_ident = &record.value.1;
+            let (#left_ident, #right_ident) = &record.value.unwrap_append().clone();
+
             arroyo_types::Record {
                 timestamp: record.timestamp.clone(),
                 key: None,
