@@ -12,8 +12,8 @@ use crate::ControlOutcome;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor};
 use arroyo_types::{
-    from_millis, to_millis, CheckpointBarrier, Data, GlobalKey, Key, Message, Record, TaskInfo,
-    UpdatingData, Watermark, Window,
+    from_millis, to_millis, CheckpointBarrier, Data, GlobalKey, Key, Message, Record,
+    RecordBatchData, TaskInfo, UpdatingData, Watermark, Window,
 };
 use bincode::{config, Decode, Encode};
 use std::time::{Duration, SystemTime};
@@ -23,6 +23,7 @@ use wasmtime::{
     TypedFunc,
 };
 pub mod aggregating_window;
+pub mod arrow;
 pub mod functions;
 pub mod join_with_expiration;
 pub mod joins;
@@ -575,6 +576,14 @@ impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> ProcessFuncTrait
     ) {
         let record = (self.map_fn)(record, &ctx.task_info);
         ctx.collector.collect(record).await;
+    }
+
+    async fn process_record_batch(
+        &mut self,
+        record_batch: &RecordBatchData,
+        ctx: &mut Context<OutKey, OutT>,
+    ) {
+        unreachable!("process_record_batch not implemented for MapOperator")
     }
 }
 

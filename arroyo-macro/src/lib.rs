@@ -632,9 +632,10 @@ fn impl_stream_node_type(
                 use tracing::info;
                 use tracing::trace;
                 match message {
-                    Message::Record(record) => {
+                    Message::Record(_) |
+                    Message::RecordBatch(_) => {
                         unreachable!();
-                    }
+                    },
                     Message::Barrier(t) => {
                         tracing::debug!(
                             "received barrier in {}-{}-{}-{}",

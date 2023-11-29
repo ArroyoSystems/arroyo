@@ -905,6 +905,11 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "bytes",
  "chrono",
+ "datafusion-common",
+ "datafusion-execution",
+ "datafusion-expr",
+ "datafusion-physical-expr",
+ "datafusion-proto",
  "deltalake",
  "eventsource-client",
  "fluvio",
@@ -2713,6 +2718,21 @@ dependencies = [
  "sha2 0.10.7",
  "unicode-segmentation",
  "uuid",
+]
+
+[[package]]
+name = "datafusion-proto"
+version = "31.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "440553913695dd8db587b43f54fdc7bbd8649326172d16a4904bb41e792b7297"
+dependencies = [
+ "arrow",
+ "chrono",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "object_store",
+ "prost",
 ]
 
 [[package]]

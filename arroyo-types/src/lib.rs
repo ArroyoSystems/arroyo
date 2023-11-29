@@ -1,6 +1,6 @@
 use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
-use bincode::{config, Decode, Encode};
+use bincode::{config, BorrowDecode, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -287,10 +287,40 @@ pub enum Watermark {
 #[derive(Debug, Clone, Encode, Decode)]
 pub enum Message<K: Key, T: Data> {
     Record(Record<K, T>),
+    RecordBatch(RecordBatchData),
     Barrier(CheckpointBarrier),
     Watermark(Watermark),
     Stop,
     EndOfData,
+}
+#[derive(Debug, Clone)]
+pub struct RecordBatchData(pub RecordBatch);
+
+impl<'de> BorrowDecode<'de> for RecordBatchData {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Err(bincode::error::DecodeError::Other(
+            "borrow decode unsupported",
+        ))
+    }
+}
+
+impl Encode for RecordBatchData {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        Err(bincode::error::EncodeError::Other("encoding unsupported"))
+    }
+}
+
+impl Decode for RecordBatchData {
+    fn decode<D: bincode::de::Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Err(bincode::error::DecodeError::Other("decoding unsupported"))
+    }
 }
 
 impl<K: Key, T: Data> Message<K, T> {
