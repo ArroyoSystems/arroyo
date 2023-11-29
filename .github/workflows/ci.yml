@@ -35,7 +35,7 @@ jobs:
         run: ruby docker/check_dockerfiles.rb
 
   build-rust:
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ubicloud-standard-16
     env:
       DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
       DATABASE_USER: arroyo
