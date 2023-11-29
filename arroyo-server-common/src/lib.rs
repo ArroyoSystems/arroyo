@@ -38,7 +38,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 
 pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
-pub const VERSION: &str = "0.8.0";
+pub const VERSION: &str = "0.9.0-dev";
 
 #[cfg(not(target_os = "freebsd"))]
 const PYROSCOPE_SERVER_ADDRESS_ENV: &str = "PYROSCOPE_SERVER_ADDRESS";
