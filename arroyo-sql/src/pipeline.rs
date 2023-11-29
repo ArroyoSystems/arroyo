@@ -223,6 +223,12 @@ pub struct JoinOperator {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputsUpdating {
+    pub left: bool,
+    pub right: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JoinType {
     /// Inner Join
     Inner,
@@ -805,9 +811,6 @@ impl<'a> SqlPipelineBuilder<'a> {
     fn insert_join(&mut self, join: &datafusion_expr::logical_plan::Join) -> Result<SqlOperator> {
         let left_input = self.insert_sql_plan(&join.left)?;
         let right_input = self.insert_sql_plan(&join.right)?;
-        if left_input.is_updating() || right_input.is_updating() {
-            bail!("don't support joins with updating inputs");
-        }
         match join.join_constraint {
             JoinConstraint::On => {}
             JoinConstraint::Using => bail!("don't support 'using' in joins"),

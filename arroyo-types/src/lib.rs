@@ -338,6 +338,13 @@ impl<T: Data> UpdatingData<T> {
             UpdatingData::Append(t) => t.clone(),
         }
     }
+
+    pub fn unwrap_append(&self) -> &T {
+        match self {
+            UpdatingData::Append(t) => t,
+            _ => panic!("UpdatingData is not an append"),
+        }
+    }
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq)]

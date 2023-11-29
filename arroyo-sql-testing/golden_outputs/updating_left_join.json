@@ -1,0 +1,7 @@
+{"before":null,"after":{"left_counter":0,"counter_mod_2":null,"right_count":null},"op":"c"}
+{"before":null,"after":{"left_counter":1,"counter_mod_2":null,"right_count":null},"op":"c"}
+{"before":null,"after":{"left_counter":2,"counter_mod_2":null,"right_count":null},"op":"c"}
+{"before":{"left_counter":1,"counter_mod_2":null,"right_count":null},"after":{"left_counter":1,"counter_mod_2":0,"right_count":1},"op":"u"}
+{"before":null,"after":{"left_counter":1,"counter_mod_2":1,"right_count":1},"op":"c"}
+{"before":{"left_counter":2,"counter_mod_2":null,"right_count":null},"after":{"left_counter":2,"counter_mod_2":0,"right_count":2},"op":"u"}
+{"before":{"left_counter":1,"counter_mod_2":0,"right_count":1},"after":null,"op":"d"}

@@ -22,6 +22,7 @@ use wasmtime::{
 pub mod aggregating_window;
 pub mod functions;
 pub mod join_with_expiration;
+pub mod joiners;
 pub mod joins;
 pub mod sinks;
 pub mod sliding_top_n_aggregating_window;

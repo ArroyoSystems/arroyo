@@ -869,3 +869,123 @@ FROM (SELECT TUMBLE(interval '1 second'),  counter, count(*) FROM impulse_source
 
 JOIN (SELECT TUMBLE(interval '1 second') as window, counter , count(*) FROM delayed_impulse_source GROUP BY 1,2) b
 ON a.counter = b.counter;"}
+
+correctness_run_codegen! {"updating_left_join", 10,
+"CREATE TABLE impulse (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source',
+  event_time_field = 'timestamp'
+);
+
+
+CREATE TABLE output (
+  left_counter bigint,
+  counter_mod_2 bigint,
+  right_count bigint
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'debezium_json',
+  type = 'sink'
+);
+
+INSERT INTO output
+select counter as left_counter, counter_mod_2, right_count from impulse left join
+     (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
+    on counter = right_count where counter < 3;"}
+
+correctness_run_codegen! {"updating_right_join", 10,
+"CREATE TABLE impulse (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source',
+  event_time_field = 'timestamp'
+);
+
+
+CREATE TABLE output (
+  left_counter bigint,
+  counter_mod_2 bigint,
+  right_count bigint
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'debezium_json',
+  type = 'sink'
+);
+
+INSERT INTO output
+select counter as left_counter, counter_mod_2, right_count from impulse right join
+     (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
+    on counter = right_count where counter < 3;"}
+
+correctness_run_codegen! {"updating_inner_join", 10,
+"CREATE TABLE impulse (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source',
+  event_time_field = 'timestamp'
+);
+
+
+CREATE TABLE output (
+  left_counter bigint,
+  counter_mod_2 bigint,
+  right_count bigint
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'debezium_json',
+  type = 'sink'
+);
+
+INSERT INTO output
+select counter as left_counter, counter_mod_2, right_count from impulse inner join
+     (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
+    on counter = right_count where counter < 3;"}
+
+correctness_run_codegen! {"updating_full_join", 10,
+"CREATE TABLE impulse (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'single_file',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source',
+  event_time_field = 'timestamp'
+);
+
+
+CREATE TABLE output (
+  left_counter bigint,
+  counter_mod_2 bigint,
+  right_count bigint
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'debezium_json',
+  type = 'sink'
+);
+
+INSERT INTO output
+select counter as left_counter, counter_mod_2, right_count from impulse full outer join
+     (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
+    on counter = right_count where counter < 3;"}

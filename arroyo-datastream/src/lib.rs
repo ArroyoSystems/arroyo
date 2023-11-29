@@ -1789,27 +1789,43 @@ impl Program {
 
                     let in_k = parse_type(&inputs[0].weight().key);
                     let in_t1 = parse_type(&inputs[0].weight().value);
+
+                    let (t1_updating, in_t1_inner) = match extract_container_type("UpdatingData", &in_t1) {
+                        Some(t) => (true, t),
+                        None => (false, in_t1.clone()),
+                    };
+
                     let in_t2 = parse_type(&inputs[1].weight().value);
+
+                    let (t2_updating, in_t2_inner) = match extract_container_type("UpdatingData", &in_t2) {
+                        Some(t) => (true, t),
+                        None => (false, in_t2.clone()),
+                    };
+
                     let left_expiration = duration_to_syn_expr(*left_expiration);
                     let right_expiration = duration_to_syn_expr(*right_expiration);
-                    match join_type {
-                        arroyo_types::JoinType::Inner => quote!{
-                            Box::new(arroyo_worker::operators::join_with_expiration::
-                                inner_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
-                        },
-                        arroyo_types::JoinType::Left => quote!{
-                            Box::new(arroyo_worker::operators::join_with_expiration::
-                                left_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
-                        },
-                        arroyo_types::JoinType::Right => quote!{
-                            Box::new(arroyo_worker::operators::join_with_expiration::
-                                right_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
-                        },
-                        arroyo_types::JoinType::Full => quote!{
-                            Box::new(arroyo_worker::operators::join_with_expiration::
-                                full_join::<#in_k, #in_t1, #in_t2>(#left_expiration, #right_expiration))
-                        },
+
+                    let join_fn_head: String = match join_type {
+                        JoinType::Inner => "inner_join",
+                        JoinType::Left => "left_join",
+                        JoinType::Right => "right_join",
+                        JoinType::Full => "full_join",
+                    }.to_string();
+
+                    let join_fn_tail: String = match (t1_updating, t2_updating) {
+                        (false, false) => "",
+                        (true, false) => "_left_updating",
+                        (false, true) => "_right_updating",
+                        (true, true) => "_both_updating",
+                    }.to_string();
+
+                    let join_fn_name = format_ident!("{}{}", join_fn_head, join_fn_tail);
+
+                    quote!{
+                        Box::new(arroyo_worker::operators::joiners::
+                            #join_fn_name::<#in_k, #in_t1_inner, #in_t2_inner>(#left_expiration, #right_expiration))
                     }
+
                 },
                 Operator::UpdatingOperator { name, expression } => {
                     let expr : syn::Expr = parse_str(expression).expect(expression);

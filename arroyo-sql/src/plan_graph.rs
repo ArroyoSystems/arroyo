@@ -15,6 +15,7 @@ use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
 
 use crate::expressions::AggregateComputation;
+use crate::pipeline::InputsUpdating;
 use crate::{
     code_gen::{
         BinAggregatingContext, CodeGenerator, CombiningContext, JoinListsContext, JoinPairContext,
@@ -66,7 +67,7 @@ pub enum PlanOperator {
         join_type: JoinType,
     },
     JoinListMerge(JoinType, StructPair),
-    JoinPairMerge(JoinType, StructPair),
+    JoinPairMerge(JoinType, StructPair, InputsUpdating),
     Flatten,
     // TODO: figure out naming of various things called 'window'
     WindowFunction(WindowFunctionOperator),
@@ -327,7 +328,7 @@ impl PlanNode {
             PlanOperator::InstantJoin => "instant_join".to_string(),
             PlanOperator::JoinWithExpiration { .. } => "join_with_expiration".to_string(),
             PlanOperator::JoinListMerge(_, _) => "join_list_merge".to_string(),
-            PlanOperator::JoinPairMerge(_, _) => "join_pair_merge".to_string(),
+            PlanOperator::JoinPairMerge(_, _, _) => "join_pair_merge".to_string(),
             PlanOperator::Flatten => "flatten".to_string(),
             PlanOperator::WindowFunction { .. } => "window_function".to_string(),
             PlanOperator::StreamOperator(name, _) => name.to_string(),
@@ -455,23 +456,20 @@ impl PlanNode {
                 let record_expression = context.compile_list_merge_record_expression(join_type);
                 MethodCompiler::record_expression_operator("join_list_merge", record_expression)
             }
-            PlanOperator::JoinPairMerge(join_type, struct_pair) => {
+            PlanOperator::JoinPairMerge(join_type, struct_pair, inputs_updating) => {
                 let context =
                     JoinPairContext::new(struct_pair.left.clone(), struct_pair.right.clone());
-                match join_type {
-                    JoinType::Inner => {
-                        let record_expression =
-                            context.compile_pair_merge_record_expression(join_type);
-                        MethodCompiler::record_expression_operator("join_merge", record_expression)
-                    }
-                    JoinType::Left | JoinType::Right | JoinType::Full => {
-                        let value_expression =
-                            context.compile_updating_pair_merge_value_expression(join_type);
-                        MethodCompiler::value_updating_operator(
-                            "updating_join_merge",
-                            value_expression,
-                        )
-                    }
+
+                if !matches!(join_type, JoinType::Inner)
+                    || inputs_updating.left
+                    || inputs_updating.right
+                {
+                    let value_expression =
+                        context.compile_updating_pair_merge_value_expression(join_type);
+                    MethodCompiler::value_updating_operator("updating_join_merge", value_expression)
+                } else {
+                    let record_expression = context.compile_pair_merge_record_expression(join_type);
+                    MethodCompiler::record_expression_operator("join_merge", record_expression)
                 }
             }
 
@@ -848,7 +846,7 @@ impl PlanNode {
         output_types.extend(self.output_type.get_all_types());
         // TODO: populate types only created within operators.
         match &self.operator {
-            PlanOperator::JoinPairMerge(join_type, StructPair { left, right })
+            PlanOperator::JoinPairMerge(join_type, StructPair { left, right }, ..)
             | PlanOperator::JoinListMerge(join_type, StructPair { left, right }) => {
                 output_types.insert(join_type.join_struct_type(left, right));
             }
@@ -932,7 +930,9 @@ impl PlanType {
                 let left_type = left_value.get_type();
                 let right_type = right_value.get_type();
                 match join_type {
-                    JoinType::Inner => parse_quote!((#left_type,#right_type)),
+                    JoinType::Inner => {
+                        parse_quote!(arroyo_types::UpdatingData<(#left_type,#right_type)>)
+                    }
                     JoinType::Left => {
                         parse_quote!(arroyo_types::UpdatingData<(#left_type,Option<#right_type>)>)
                     }
@@ -1135,6 +1135,20 @@ impl PlanType {
     pub(crate) fn is_updating(&self) -> bool {
         matches!(self, PlanType::Updating(_))
     }
+
+    fn for_defs(key_struct: StructDef, value_struct: StructDef, updating: bool) -> PlanType {
+        if updating {
+            PlanType::Updating(Box::new(PlanType::Keyed {
+                key: key_struct.clone(),
+                value: value_struct.clone(),
+            }))
+        } else {
+            PlanType::Keyed {
+                key: key_struct.clone(),
+                value: value_struct.clone(),
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1225,7 +1239,7 @@ impl PlanGraph {
                 PlanOperator::InstantJoin => {}
                 PlanOperator::JoinWithExpiration { .. } => {}
                 PlanOperator::JoinListMerge(_, _) => {}
-                PlanOperator::JoinPairMerge(_, _) => {}
+                PlanOperator::JoinPairMerge(_, _, _) => {}
                 PlanOperator::Flatten => {}
                 PlanOperator::WindowFunction(w) => {
                     w.order_by
@@ -1483,10 +1497,17 @@ impl PlanGraph {
         // right now left and right either both have or don't have windows.
         let has_window = left.has_window();
         let join_type = join_operator.join_type;
+        let left_updating = left.is_updating();
+        let right_updating = right.is_updating();
         let left_index = self.add_sql_operator(*left);
         let right_index = self.add_sql_operator(*right);
 
         let key_struct = join_operator.left_key.output_struct();
+
+        let inputs_updating = InputsUpdating {
+            left: left_updating,
+            right: right_updating,
+        };
 
         let left_key_operator =
             PlanOperator::RecordTransform(RecordTransform::KeyProjection(join_operator.left_key));
@@ -1495,17 +1516,12 @@ impl PlanGraph {
 
         let left_key_index = self.insert_operator(
             left_key_operator,
-            PlanType::Keyed {
-                key: key_struct.clone(),
-                value: left_type.clone(),
-            },
+            PlanType::for_defs(key_struct.clone(), left_type.clone(), left_updating),
         );
+
         let right_key_index = self.insert_operator(
             right_key_operator,
-            PlanType::Keyed {
-                key: key_struct.clone(),
-                value: right_type.clone(),
-            },
+            PlanType::for_defs(key_struct.clone(), right_type.clone(), right_updating),
         );
 
         let left_key_edge = PlanEdge {
@@ -1536,6 +1552,7 @@ impl PlanGraph {
                 left_type,
                 right_type,
                 join_type,
+                inputs_updating,
             )
         }
     }
@@ -1596,6 +1613,7 @@ impl PlanGraph {
 
         flatten_index
     }
+
     fn add_join_with_expiration(
         &mut self,
         left_index: NodeIndex,
@@ -1604,6 +1622,7 @@ impl PlanGraph {
         left_struct: StructDef,
         right_struct: StructDef,
         join_type: JoinType,
+        inputs_updating: InputsUpdating,
     ) -> NodeIndex {
         let join_node = PlanOperator::JoinWithExpiration {
             left_expiration: Duration::from_secs(24 * 60 * 60),
@@ -1636,16 +1655,18 @@ impl PlanGraph {
                 left: left_struct,
                 right: right_struct,
             },
+            inputs_updating.clone(),
         );
-        let merge_output_type = match join_type {
-            JoinType::Inner => PlanType::Unkeyed(merge_type),
-            JoinType::Left | JoinType::Right | JoinType::Full => {
-                PlanType::Updating(Box::new(PlanType::Keyed {
-                    key: key_struct,
-                    value: merge_type,
-                }))
-            }
+
+        let updating = inputs_updating.left || inputs_updating.right;
+        let merge_output_type = match (join_type, updating) {
+            (JoinType::Inner, false) => PlanType::Unkeyed(merge_type),
+            _ => PlanType::Updating(Box::new(PlanType::Keyed {
+                key: key_struct,
+                value: merge_type,
+            })),
         };
+
         let merge_index = self.insert_operator(merge_operator, merge_output_type);
 
         let merge_edge = PlanEdge {
