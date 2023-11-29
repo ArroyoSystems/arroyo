@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::str::FromStr;
 use std::{fmt::Debug, path::PathBuf};
@@ -5,9 +6,11 @@ use std::{fmt::Debug, path::PathBuf};
 use std::marker::PhantomData;
 use std::ops::Add;
 
-use crate::engine::{Collector, Context, StreamNode};
+use crate::engine::{CheckpointCounter, Collector, Context, StreamNode};
+use crate::stream_node::ProcessFuncTrait;
+use crate::ControlOutcome;
 use arroyo_macro::process_fn;
-use arroyo_rpc::grpc::TableDescriptor;
+use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor};
 use arroyo_types::{
     from_millis, to_millis, CheckpointBarrier, Data, GlobalKey, Key, Message, Record, TaskInfo,
     UpdatingData, Watermark, Window,
@@ -548,15 +551,19 @@ impl<K: Key, V: Data> FlattenOperator<K, V> {
         }
     }
 }
-
-#[derive(StreamNode)]
 pub struct MapOperator<InKey: Key, InT: Data, OutKey: Key, OutT: Data> {
     pub name: String,
     pub map_fn: Box<dyn Fn(&Record<InKey, InT>, &TaskInfo) -> Record<OutKey, OutT> + Send>,
 }
 
-#[process_fn(in_k = InKey, in_t = InT, out_k = OutKey, out_t = OutT)]
-impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> MapOperator<InKey, InT, OutKey, OutT> {
+#[async_trait::async_trait]
+impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> ProcessFuncTrait
+    for MapOperator<InKey, InT, OutKey, OutT>
+{
+    type InKey = InKey;
+    type InT = InT;
+    type OutKey = OutKey;
+    type OutT = OutT;
     fn name(&self) -> String {
         self.name.clone()
     }

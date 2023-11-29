@@ -52,6 +52,7 @@ mod metrics;
 mod network_manager;
 pub mod operators;
 mod process_fn;
+pub mod stream_node;
 
 pub const PROMETHEUS_PUSH_GATEWAY: &str = "localhost:9091";
 pub const METRICS_PUSH_INTERVAL: Duration = Duration::from_secs(1);
