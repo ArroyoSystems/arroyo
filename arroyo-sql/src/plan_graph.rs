@@ -94,6 +94,8 @@ pub enum PlanOperator {
     FromDebezium,
     FromUpdating,
     Sink(String, SqlSink),
+    StructToRecordBatch,
+    RecordBatchToStruct,
 }
 
 #[derive(Debug, Clone)]
@@ -339,6 +341,8 @@ impl PlanNode {
             PlanOperator::FromDebezium => "from_debezium".to_string(),
             PlanOperator::FromUpdating => "from_updating".to_string(),
             PlanOperator::NonWindowAggregate { .. } => "non_window_aggregate".to_string(),
+            PlanOperator::StructToRecordBatch => "struct_to_record_batch".to_string(),
+            PlanOperator::RecordBatchToStruct => "record_batch_to_struct".to_string(),
         }
     }
 
@@ -840,6 +844,8 @@ impl PlanNode {
                     })
                 }
             }
+            PlanOperator::StructToRecordBatch => Operator::StructToRecordBatch { name: "struct_to_record_batch".to_string() },
+            PlanOperator::RecordBatchToStruct => Operator::RecordBatchToStruct { name: "record_batch_to_struct".to_string() },
         }
     }
 
@@ -917,6 +923,7 @@ pub enum PlanType {
         values: Vec<StructDef>,
     },
     Updating(Box<PlanType>),
+    RecordBatch,
 }
 
 impl PlanType {
@@ -966,6 +973,7 @@ impl PlanType {
                 let inner_type = inner_type.as_syn_type();
                 parse_quote!(arroyo_types::UpdatingData<#inner_type>)
             }
+            PlanType::RecordBatch => parse_quote!(()),
         }
     }
 
@@ -981,6 +989,7 @@ impl PlanType {
             | PlanType::KeyedListPair { key, .. }
             | PlanType::Debezium { key: Some(key), .. } => key.get_type(),
             PlanType::Updating(inner) => inner.key_type(),
+            PlanType::RecordBatch => parse_quote!(()),
         }
     }
 
@@ -999,6 +1008,7 @@ impl PlanType {
                 right_value,
                 ..
             } => vec![left_value.clone(), right_value.clone()],
+            PlanType::RecordBatch |
             PlanType::KeyedLiteralTypeValue { .. } => vec![],
             PlanType::Debezium { values, .. } => values.clone(),
             PlanType::Updating(v) => v.value_structs(),
@@ -1016,7 +1026,8 @@ impl PlanType {
             PlanType::Unkeyed(_)
             | PlanType::UnkeyedList(_)
             | PlanType::KeyedLiteralTypeValue { key: None, .. }
-            | PlanType::Debezium { key: None, .. } => vec![],
+            | PlanType::Debezium { key: None, .. } 
+            | PlanType::RecordBatch => vec![],
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
             | PlanType::KeyedLiteralTypeValue { key: Some(key), .. }
@@ -1062,6 +1073,7 @@ impl PlanType {
                 .chain(values.iter().flat_map(|value| value.all_structs()))
                 .collect(),
             PlanType::Updating(inner) => inner.get_all_types(),
+            PlanType::RecordBatch => HashSet::new(),
         }
     }
 
@@ -1116,6 +1128,7 @@ impl PlanType {
                 values: values.clone(),
             },
             PlanType::Updating(inner) => PlanType::Updating(Box::new(inner.with_key(key))),
+            PlanType::RecordBatch => unreachable!(),
         }
     }
 
@@ -1129,6 +1142,7 @@ impl PlanType {
             PlanType::KeyedLiteralTypeValue { .. } => unreachable!(),
             PlanType::Debezium { .. } => unreachable!(),
             PlanType::Updating(inner) => PlanType::Updating(Box::new(inner.with_value(value))),
+            PlanType::RecordBatch => unreachable!(),
         }
     }
 
@@ -1264,6 +1278,8 @@ impl PlanGraph {
                 PlanOperator::FromDebezium => {}
                 PlanOperator::FromUpdating => {}
                 PlanOperator::Sink(_, _) => {}
+                PlanOperator::StructToRecordBatch => {},
+                PlanOperator::RecordBatchToStruct => {},
             }
         }
     }
@@ -1735,6 +1751,7 @@ impl PlanGraph {
     ) -> NodeIndex {
         let input_index = self.add_sql_operator(*input);
 
+
         let plan_node = PlanNode::from_record_transform(transform, self.get_plan_node(input_index));
 
         let plan_node_index = self.graph.add_node(plan_node);
@@ -1742,7 +1759,25 @@ impl PlanGraph {
             edge_type: EdgeType::Forward,
         };
         self.graph.add_edge(input_index, plan_node_index, edge);
-        plan_node_index
+
+
+        let to_record_batch_operator = PlanOperator::StructToRecordBatch;
+        let to_record_batch_index = self.insert_operator(
+            to_record_batch_operator,
+            PlanType::RecordBatch,
+        );
+        self.graph.add_edge(plan_node_index, to_record_batch_index,  PlanEdge {
+            edge_type: EdgeType::Forward,
+        });
+        let to_struct_operator = PlanOperator::RecordBatchToStruct;
+        let to_struct_index = self.insert_operator(
+            to_struct_operator,
+            self.get_plan_node(plan_node_index).output_type.clone(),
+        );
+        self.connections.insert(format!("tmp_value{}", self.graph.node_count()), to_struct_index);
+
+        self.graph.add_edge(to_record_batch_index, to_struct_index, PlanEdge { edge_type: EdgeType::Forward });
+        to_struct_index
     }
 
     fn get_plan_node(&self, node_index: NodeIndex) -> &PlanNode {
@@ -1969,7 +2004,7 @@ pub fn get_program(
     plan_graph.find_used_udfs(&mut used_udfs);
 
     // find all types that are produced by a source or consumed by a sink
-    let connector_types: HashSet<_> = plan_graph
+    let mut connector_types: HashSet<_> = plan_graph
         .graph
         .externals(Direction::Incoming)
         .chain(
@@ -1986,6 +2021,17 @@ pub fn get_program(
         .flat_map(|s| s.all_structs_including_named())
         .map(|t| t.struct_name())
         .collect();
+    connector_types.extend(plan_graph.connections.values().map(|idx| {
+        plan_graph
+            .graph
+            .node_weight(*idx)
+            .unwrap()
+            .output_type
+            .get_all_types()
+            .into_iter()
+            .map(|s| s.struct_name())
+            .collect::<Vec<_>>()
+    }).flatten());
 
     let types: HashSet<_> = plan_graph
         .graph

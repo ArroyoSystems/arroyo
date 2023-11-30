@@ -270,6 +270,7 @@ impl StructDef {
             #[derive(Debug)]
             pub struct #builder_ident {
                 schema: std::sync::Arc<arrow::datatypes::Schema>,
+                _null_buffer_builder: Option<arrow::array::BooleanBufferBuilder>,
                 #(#field_definitions,)*
             }
 
@@ -278,6 +279,7 @@ impl StructDef {
                     let fields: Vec<arrow::datatypes::Field> = vec![#(#schema_initializations,)*];
                     #builder_ident {
                         schema: std::sync::Arc::new(arrow::datatypes::Schema::new(fields)),
+                        _null_buffer_builder: None,
                         #(#field_initializations,)*
                     }
                 }
@@ -288,14 +290,26 @@ impl StructDef {
                     let fields :Vec<arrow::datatypes::Field> = vec![#(#nullable_schema_initializations,)*];
                     #builder_ident {
                         schema: std::sync::Arc::new(arrow::datatypes::Schema::new(fields)),
+                        _null_buffer_builder: Some(arrow::array::BooleanBufferBuilder::new(0)),
                         #(#field_initializations,)*
                     }
+                }
+                fn as_struct_array(&mut self) -> arrow_array::StructArray {
+                    
+                    arrow_array::StructArray::new(
+                        self.schema.fields().clone(),
+                        vec![#(#field_flushes,)*],
+                        self._null_buffer_builder.take().as_mut().map(|builder| builder.finish().into()),
+                    )
                 }
             }
 
             impl arroyo_types::RecordBatchBuilder for #builder_ident {
                 type Data = #struct_type;
                 fn add_data(&mut self, data: Option<#struct_type>) {
+                    if let Some(buffer) = self._null_buffer_builder.as_mut() {
+                        buffer.append(data.is_some());
+                    }
                     match data {
                         Some(data) => {#(#field_appends;)*},
                         None => {#(#field_nulls;)*},
@@ -426,7 +440,7 @@ impl StructDef {
         let array_initializations: Vec<TokenStream> = fields
             .iter()
             .map(|field| {
-                let field_string: String = field.name();
+                let field_string  = field.field_name();
                 let field_ident = field.field_ident();
                 match &field.data_type {
                     TypeDef::StructDef(struct_def, false) => {
@@ -505,7 +519,7 @@ impl StructDef {
                     )?;
 
                     let null_buffer =  null_buffer
-                    .unwrap_or_else(|| arrow::buffer::NullBuffer::new_null(
+                    .unwrap_or_else(|| arrow::buffer::NullBuffer::new_valid(
                         record_batch.num_rows(),
                     ));
                     Ok(Self {
@@ -747,7 +761,7 @@ impl From<StructField> for Field {
             ),
             TypeDef::DataType(dt, nullable) => (dt, nullable),
         };
-        Field::new(&struct_field.name, dt, nullable)
+        Field::new(&struct_field.field_name, dt, nullable)
     }
 }
 
@@ -1089,7 +1103,7 @@ impl StructField {
     fn get_field_literal(field: &Field, parent_nullable: bool) -> TokenStream {
         let name = field.name();
         let data_type = Self::get_data_type_literal(field.data_type(), parent_nullable);
-        let nullable = field.is_nullable();
+        let nullable = field.is_nullable() || parent_nullable;
         quote!(arrow::datatypes::Field::new(#name, #data_type, #nullable))
     }
 
@@ -1450,8 +1464,7 @@ impl StructField {
         match self.data_type {
             TypeDef::StructDef(_, _) => {
                 quote!({
-                    let struct_array: arrow_array::StructArray = self.#array_field.flush().into();
-                    std::sync::Arc::new(struct_array)
+                    std::sync::Arc::new(self.#array_field.as_struct_array())
                 })
             }
             TypeDef::DataType(_, _) => quote!(std::sync::Arc::new(self.#array_field.finish())),

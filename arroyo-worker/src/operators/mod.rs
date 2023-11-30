@@ -23,7 +23,6 @@ use wasmtime::{
     TypedFunc,
 };
 pub mod aggregating_window;
-pub mod arrow;
 pub mod functions;
 pub mod join_with_expiration;
 pub mod joins;

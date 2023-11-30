@@ -580,7 +580,7 @@ pub enum JoinType {
     Full,
 }
 
-pub trait RecordBatchBuilder: Default + Debug + Sync + Send {
+pub trait RecordBatchBuilder: Default + Debug + Sync + Send  + 'static {
     type Data: Data;
     fn add_data(&mut self, data: Option<Self::Data>);
     fn flush(&mut self) -> RecordBatch;

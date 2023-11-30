@@ -375,6 +375,12 @@ pub enum Operator {
         name: String,
         expression: String,
     },
+    StructToRecordBatch {
+        name: String,
+    },
+    RecordBatchToStruct {
+        name: String,
+    },
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -500,6 +506,8 @@ impl Debug for Operator {
                 name,
                 expression: _,
             } => write!(f, "updating_key<{}>", name),
+            Operator::StructToRecordBatch { name } => write!(f, "struct_to_record_batch<{}>", name),
+            Operator::RecordBatchToStruct { name } => write!(f, "record_batch_to_struct<{}>", name),
         }
     }
 }
@@ -1851,6 +1859,23 @@ impl Program {
                         new(#name.to_string(), #expr))
                     }
                 },
+                Operator::StructToRecordBatch { name } => {
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+                    let builder_name = format_ident!("{}RecordBatchBuilder", input.unwrap().weight().value);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            StructToRecordBatch::<#in_k, #in_t, #builder_name>::
+                        new(#name.to_string()))
+                    }
+                },
+                Operator::RecordBatchToStruct { name } => {
+                    let out_t = parse_type(&output.unwrap().weight().value);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            RecordBatchToStruct::<#out_t>::new(#name.to_string()))
+                    }
+                },
             };
 
             (node.operator_id.clone(), description, body, node.parallelism)
@@ -2194,6 +2219,16 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::UpdatingKeyOperator { name, expression } => {
                 GrpcOperator::UpdatingKeyOperator(GrpcApi::UpdatingKeyOperator { name, expression })
             }
+            Operator::StructToRecordBatch { name } => {
+                GrpcOperator::NamedOperator(
+                    GrpcApi::NamedOperator{name, operator: GrpcApi::OperatorName::StructToRecordBatch.into()}
+                )
+            }
+            Operator::RecordBatchToStruct { name } => {
+                GrpcOperator::NamedOperator(
+                    GrpcApi::NamedOperator{name, operator: GrpcApi::OperatorName::RecordBatchToStruct.into()}
+                )
+            },
         }
     }
 }
@@ -2502,6 +2537,14 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     name,
                     expression,
                 }) => Operator::UpdatingKeyOperator { name, expression },
+                GrpcOperator::NamedOperator(named_operator) => {
+                    let operator = named_operator.operator();
+                    let name = named_operator.name;
+                    match operator {
+                        GrpcApi::OperatorName::StructToRecordBatch => Operator::StructToRecordBatch { name },
+                        GrpcApi::OperatorName::RecordBatchToStruct => Operator::RecordBatchToStruct { name },
+                    }
+                }
             },
             None => bail!("unset on operator {:?}", operator),
         };

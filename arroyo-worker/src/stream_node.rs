@@ -193,6 +193,9 @@ pub trait ProcessFuncTrait: Send + 'static {
         match message {
             Message::Record(record) => {
                 unreachable!();
+            },
+            Message::RecordBatch(batch) => {
+                unreachable!();
             }
             Message::Barrier(t) => {
                 tracing::debug!(

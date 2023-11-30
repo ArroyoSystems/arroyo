@@ -91,7 +91,18 @@ message Operator {
     UpdatingOperator updating_operator = 24;
     NonWindowAggregator non_window_aggregator = 25;
     UpdatingKeyOperator updating_key_operator = 26;
+    NamedOperator named_operator = 28;
   }
+}
+
+message NamedOperator {
+  string name = 1;
+  OperatorName operator = 2;
+}
+
+enum OperatorName {
+  STRUCT_TO_RECORD_BATCH = 0;
+  RECORD_BATCH_TO_STRUCT = 1;
 }
 
 message WasmUdfs {
