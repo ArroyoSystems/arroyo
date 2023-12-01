@@ -22,7 +22,7 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_types::{
     from_micros, range_for_server, server_for_hash, CheckpointBarrier, Data, Key, Message, Record,
-    TaskInfo, UserError, Watermark, WorkerId, RecordBatchData,
+    RecordBatchData, TaskInfo, UserError, Watermark, WorkerId,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -201,7 +201,7 @@ pub struct Collector<K: Key, T: Data> {
 
 impl<K: Key, T: Data> Collector<K, T> {
     pub async fn collect_record_batch(&mut self, record_batch: RecordBatch) {
-        let message: Message<K, T>  = Message::RecordBatch(RecordBatchData(record_batch));
+        let message: Message<K, T> = Message::RecordBatch(RecordBatchData(record_batch));
         self.out_qs[0][0].send(&self.task_info, message).await;
     }
     pub async fn collect(&mut self, record: Record<K, T>) {

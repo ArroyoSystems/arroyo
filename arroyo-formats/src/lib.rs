@@ -3,7 +3,7 @@ extern crate core;
 use anyhow::bail;
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow_array::cast::AsArray;
-use arrow_array::{RecordBatch, StringArray};
+use arrow_array::{Array, RecordBatch, StringArray};
 use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_types::{Data, Debezium, RawJson, UserError};
@@ -25,6 +25,11 @@ pub trait SchemaData: Data + Serialize + DeserializeOwned {
     fn iterator_from_record_batch(
         _record_batch: RecordBatch,
     ) -> anyhow::Result<Box<dyn Iterator<Item = Self> + Send>> {
+        bail!("unimplemented");
+    }
+    fn nullable_iterator_from_struct_array(
+        _array: &arrow::array::StructArray,
+    ) -> anyhow::Result<Box<dyn Iterator<Item = Option<Self>> + Send>> {
         bail!("unimplemented");
     }
 
@@ -160,6 +165,20 @@ impl SchemaData for () {
 
     fn schema() -> Schema {
         Schema::empty()
+    }
+
+    fn iterator_from_record_batch(
+        record_batch: RecordBatch,
+    ) -> anyhow::Result<Box<dyn Iterator<Item = Self> + Send>> {
+        let len = record_batch.num_rows();
+        Ok(Box::new(std::iter::repeat(()).take(len)))
+    }
+
+    fn nullable_iterator_from_struct_array(
+        array: &arrow::array::StructArray,
+    ) -> anyhow::Result<Box<dyn Iterator<Item = Option<Self>> + Send>> {
+        let len = array.len();
+        Ok(Box::new(std::iter::repeat(None).take(len)))
     }
 
     fn to_raw_string(&self) -> Option<Vec<u8>> {

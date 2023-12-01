@@ -4,7 +4,8 @@ mod full_query_tests;
 mod smoke_tests;
 #[cfg(test)]
 mod tests {
-    use arroyo_sql_macro::single_test_codegen;
+    use arroyo_sql::types::GetArrowSchema;
+    use arroyo_sql_macro::{single_test_codegen, GetArrowSchema};
     use arroyo_types;
 
     // Casts
@@ -1219,6 +1220,23 @@ mod tests {
         },
         arroyo_types::from_nanos(1685659545809000000)
     );
+
+    #[derive(GetArrowSchema)]
+    struct TestDeriveStruct {
+        non_nullable_i32: i32,
+        subfield: Option<SubStruct>,
+    }
+
+    #[derive(GetArrowSchema)]
+    struct SubStruct {
+        my_subfield: u32,
+    }
+
+    #[test]
+    pub fn test_derive() {
+        let schema = TestDeriveStruct::arrow_schema();
+        assert_eq!("", format!("{:?}", schema));
+    }
 
     single_test_codegen!(
         "to_timestamp_millis",

@@ -889,6 +889,7 @@ dependencies = [
  "apache-avro",
  "arrow",
  "arrow-array",
+ "arrow-schema",
  "arroyo-formats",
  "arroyo-macro",
  "arroyo-metrics",

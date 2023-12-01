@@ -13,7 +13,7 @@ use std::io::ErrorKind;
 use syn::{parse_quote, parse_str};
 
 use tonic::{Code, Request};
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
 pub struct CompiledProgram {
@@ -108,6 +108,7 @@ impl ProgramCompiler {
             use arroyo_worker::operators::windows::*;
             use arroyo_worker::engine::{Program, SubtaskNode};
             use arroyo_worker::{LogicalEdge, LogicalNode};
+            use arroyo_types::RecordBatchBuilder;
             use types::*;
             use chrono;
             use std::time::SystemTime;

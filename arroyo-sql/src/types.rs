@@ -2,7 +2,7 @@ use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use anyhow::Result;
@@ -285,25 +285,6 @@ impl StructDef {
                 }
             }
 
-            impl #builder_ident {
-                fn nullable() -> Self {
-                    let fields :Vec<arrow::datatypes::Field> = vec![#(#nullable_schema_initializations,)*];
-                    #builder_ident {
-                        schema: std::sync::Arc::new(arrow::datatypes::Schema::new(fields)),
-                        _null_buffer_builder: Some(arrow::array::BooleanBufferBuilder::new(0)),
-                        #(#field_initializations,)*
-                    }
-                }
-                fn as_struct_array(&mut self) -> arrow_array::StructArray {
-                    
-                    arrow_array::StructArray::new(
-                        self.schema.fields().clone(),
-                        vec![#(#field_flushes,)*],
-                        self._null_buffer_builder.take().as_mut().map(|builder| builder.finish().into()),
-                    )
-                }
-            }
-
             impl arroyo_types::RecordBatchBuilder for #builder_ident {
                 type Data = #struct_type;
                 fn add_data(&mut self, data: Option<#struct_type>) {
@@ -314,6 +295,24 @@ impl StructDef {
                         Some(data) => {#(#field_appends;)*},
                         None => {#(#field_nulls;)*},
                     }
+                }
+
+                fn nullable() -> Self {
+                    let fields :Vec<arrow::datatypes::Field> = vec![#(#nullable_schema_initializations,)*];
+                    #builder_ident {
+                        schema: std::sync::Arc::new(arrow::datatypes::Schema::new(fields)),
+                        _null_buffer_builder: Some(arrow::array::BooleanBufferBuilder::new(0)),
+                        #(#field_initializations,)*
+                    }
+                }
+
+                fn as_struct_array(&mut self) -> arrow_array::StructArray {
+
+                    arrow_array::StructArray::new(
+                        self.schema.fields().clone(),
+                        vec![#(#field_flushes,)*],
+                        self._null_buffer_builder.take().as_mut().map(|builder| builder.finish().into()),
+                    )
                 }
 
                 fn flush(&mut self) -> arrow_array::RecordBatch {
@@ -383,6 +382,7 @@ impl StructDef {
         };
 
         let reader_type = self.parquet_reader_type();
+        let nullable_reader_type = self.parquet_nullable_reader_type();
 
         let avro_writer = self.generate_avro_writer();
 
@@ -407,6 +407,12 @@ impl StructDef {
                     record_batch: arrow_array::RecordBatch,
                 ) -> anyhow::Result<Box<dyn Iterator<Item = Self> + Send>> {
                     Ok(Box::new(#reader_type::new(record_batch)?))
+                }
+
+                fn nullable_iterator_from_struct_array(
+                    array: &arrow::array::StructArray,
+                ) -> anyhow::Result<Box<dyn Iterator<Item = Option<Self>> + Send>> {
+                    Ok(Box::new(#nullable_reader_type::new_from_array(array)?))
                 }
             }
         })
@@ -449,7 +455,7 @@ impl StructDef {
                     },
                     TypeDef::StructDef(struct_def, true) => {
                         let sub_type = struct_def.parquet_nullable_reader_type();
-                        quote! { #field_ident:  #sub_type::new_from_array(record_batch.column_by_name(#field_string).ok_or_else(|| anyhow::anyhow!("missing column '{}'", #field_string))?.clone())? }
+                        quote! { #field_ident:  #sub_type::new_from_array(arrow_array::cast::AsArray::as_struct(record_batch.column_by_name(#field_string).ok_or_else(|| anyhow::anyhow!("missing column '{}'", #field_string))?))? }
                     }
                     TypeDef::DataType(_, _) => {
                         quote! { #field_ident: record_batch.column_by_name(#field_string).ok_or_else(|| anyhow::anyhow!("missing column '{}'", #field_string))?.clone() }
@@ -510,8 +516,7 @@ impl StructDef {
             }
 
             impl #nullable_reader_type {
-                fn new_from_array(array : std::sync::Arc<dyn arrow::array::Array>) -> anyhow::Result<Self> {
-                    let struct_array = arrow_array::cast::AsArray::as_struct(&array);
+                fn new_from_array(struct_array : &arrow::array::StructArray) -> anyhow::Result<Self> {
                     let (fields, arrays, null_buffer) = struct_array.clone().into_parts();
                     let record_batch = arrow_array::RecordBatch::try_new(
                         std::sync::Arc::new(arrow::datatypes::Schema::new(fields)),
@@ -541,6 +546,19 @@ impl StructDef {
                         return None;
                     }
                     Some(self.reader.get(index))
+                }
+            }
+
+            impl Iterator for #nullable_reader_type {
+                type Item = Option<#struct_type>;
+
+                fn next(&mut self) -> Option<Self::Item> {
+                    if self.reader._offset == self.reader._rows {
+                        return None;
+                    }
+                    let result = self.get(self.reader._offset);
+                    self.reader._offset += 1;
+                    Some(result)
                 }
             }
         )
@@ -806,7 +824,7 @@ pub enum TypeDef {
     DataType(DataType, bool),
 }
 
-fn rust_to_arrow(typ: &Type) -> std::result::Result<DataType, ()> {
+pub fn rust_to_arrow(typ: &Type) -> std::result::Result<DataType, ()> {
     match typ {
         Type::Path(pat) => {
             let path: Vec<String> = pat
@@ -1107,7 +1125,7 @@ impl StructField {
         quote!(arrow::datatypes::Field::new(#name, #data_type, #nullable))
     }
 
-    fn get_data_type_literal(
+    pub fn get_data_type_literal(
         data_type: &arrow_schema::DataType,
         parent_nullable: bool,
     ) -> TokenStream {
@@ -1659,5 +1677,106 @@ impl TryFrom<StructField> for SourceField {
             },
             nullable,
         })
+    }
+}
+
+pub trait GetArrowType {
+    fn arrow_type() -> DataType;
+}
+
+pub trait GetArrowSchema {
+    fn arrow_schema() -> arrow::datatypes::Schema;
+}
+
+impl<T> GetArrowType for T
+where
+    T: GetArrowSchema,
+{
+    fn arrow_type() -> DataType {
+        DataType::Struct(Self::arrow_schema().fields.clone())
+    }
+}
+
+impl GetArrowType for bool {
+    fn arrow_type() -> DataType {
+        DataType::Boolean
+    }
+}
+
+impl GetArrowType for i8 {
+    fn arrow_type() -> DataType {
+        DataType::Int8
+    }
+}
+
+impl GetArrowType for i16 {
+    fn arrow_type() -> DataType {
+        DataType::Int16
+    }
+}
+
+impl GetArrowType for i32 {
+    fn arrow_type() -> DataType {
+        DataType::Int32
+    }
+}
+
+impl GetArrowType for i64 {
+    fn arrow_type() -> DataType {
+        DataType::Int64
+    }
+}
+
+impl GetArrowType for u8 {
+    fn arrow_type() -> DataType {
+        DataType::UInt8
+    }
+}
+
+impl GetArrowType for u16 {
+    fn arrow_type() -> DataType {
+        DataType::UInt16
+    }
+}
+
+impl GetArrowType for u32 {
+    fn arrow_type() -> DataType {
+        DataType::UInt32
+    }
+}
+
+impl GetArrowType for u64 {
+    fn arrow_type() -> DataType {
+        DataType::UInt64
+    }
+}
+
+impl GetArrowType for f32 {
+    fn arrow_type() -> DataType {
+        DataType::Float32
+    }
+}
+
+impl GetArrowType for f64 {
+    fn arrow_type() -> DataType {
+        DataType::Float64
+    }
+}
+
+impl GetArrowType for String {
+    fn arrow_type() -> DataType {
+        DataType::Utf8
+    }
+}
+
+impl GetArrowType for Vec<u8> {
+    fn arrow_type() -> DataType {
+        DataType::Binary
+    }
+}
+
+impl GetArrowType for SystemTime {
+    fn arrow_type() -> DataType {
+        DataType::Timestamp(TimeUnit::Nanosecond, None)
     }
 }

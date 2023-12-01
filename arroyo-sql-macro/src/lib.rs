@@ -1,12 +1,13 @@
 use arroyo_connectors::nexmark::{NexmarkConnector, NexmarkTable};
 use arroyo_connectors::{Connector, EmptyConfig};
+use arroyo_sql::types::{rust_to_arrow, StructField, TypeDef};
 use arroyo_sql::{
     get_test_expression, parse_and_get_program_sync, ArroyoSchemaProvider, SqlConfig,
 };
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_str, Expr, LitInt, LitStr, Token};
+use syn::{parse_macro_input, parse_str, DeriveInput, Expr, LitInt, LitStr, Token, Type};
 
 mod connectors;
 
@@ -258,6 +259,73 @@ impl Parse for CorrectnessTestCase {
             query,
             udfs,
         })
+    }
+}
+
+#[proc_macro_derive(GetArrowSchema)]
+pub fn get_arrow_schema_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let name = input.ident;
+    let fields = match input.data {
+        syn::Data::Struct(s) => s.fields,
+        _ => panic!("GetArrowSchema can only be derived for structs"),
+    };
+
+    let schema_fields = fields.iter().map(|f| {
+        let field_name = &f.ident;
+        let arrow_type_call = match &f.ty {
+            // Check if field type is an Option
+            Type::Path(type_path) if type_path.path.segments.last().unwrap().ident == "Option" => {
+                let inner_type = extract_inner_type(&f.ty);
+                quote! { <#inner_type as arroyo_sql::types::GetArrowType>::arrow_type() }
+            }
+            typ => quote! { <#typ as arroyo_sql::types::GetArrowType>::arrow_type() },
+        };
+        let is_nullable = is_option(&f.ty);
+
+        quote! {
+            arrow::datatypes::Field::new(
+                stringify!(#field_name),
+                #arrow_type_call,
+                #is_nullable
+            )
+        }
+    });
+
+    let expanded = quote! {
+        impl GetArrowSchema for #name {
+            fn arrow_schema() -> arrow::datatypes::Schema {
+                arrow::datatypes::Schema::new(vec![#(#schema_fields),*])
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+fn extract_inner_type(ty: &Type) -> &Type {
+    if let Type::Path(type_path) = ty {
+        if let syn::PathArguments::AngleBracketed(args) =
+            &type_path.path.segments.last().unwrap().arguments
+        {
+            if let Some(syn::GenericArgument::Type(inner_type)) = args.args.first() {
+                return inner_type;
+            }
+        }
+    }
+    panic!("Expected Option type");
+}
+
+fn is_option(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if type_path.path.segments.last().unwrap().ident == "Option" {
+            true
+        } else {
+            false
+        }
+    } else {
+        false
     }
 }
 

@@ -298,7 +298,7 @@ pub struct RecordBatchData(pub RecordBatch);
 
 impl<'de> BorrowDecode<'de> for RecordBatchData {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
-        decoder: &mut D,
+        _decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         Err(bincode::error::DecodeError::Other(
             "borrow decode unsupported",
@@ -309,7 +309,7 @@ impl<'de> BorrowDecode<'de> for RecordBatchData {
 impl Encode for RecordBatchData {
     fn encode<E: bincode::enc::Encoder>(
         &self,
-        encoder: &mut E,
+        _encoder: &mut E,
     ) -> Result<(), bincode::error::EncodeError> {
         Err(bincode::error::EncodeError::Other("encoding unsupported"))
     }
@@ -317,7 +317,7 @@ impl Encode for RecordBatchData {
 
 impl Decode for RecordBatchData {
     fn decode<D: bincode::de::Decoder>(
-        decoder: &mut D,
+        _decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         Err(bincode::error::DecodeError::Other("decoding unsupported"))
     }
@@ -580,10 +580,12 @@ pub enum JoinType {
     Full,
 }
 
-pub trait RecordBatchBuilder: Default + Debug + Sync + Send  + 'static {
+pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
     type Data: Data;
+    fn nullable() -> Self;
     fn add_data(&mut self, data: Option<Self::Data>);
     fn flush(&mut self) -> RecordBatch;
+    fn as_struct_array(&mut self) -> arrow::array::StructArray;
     fn schema(&self) -> SchemaRef;
 }
 

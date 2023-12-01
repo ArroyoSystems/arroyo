@@ -99,7 +99,7 @@ impl RecordTransform {
     pub fn output_struct(&self, input_struct: StructDef) -> StructDef {
         match self {
             RecordTransform::ValueProjection(projection) => {
-                projection.expression_type(&ValuePointerContext::new()) 
+                projection.expression_type(&ValuePointerContext::new())
             }
             RecordTransform::KeyProjection(_) | RecordTransform::Filter(_) => input_struct,
             RecordTransform::TimestampAssignment(_) => input_struct,

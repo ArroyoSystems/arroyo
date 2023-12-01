@@ -844,8 +844,12 @@ impl PlanNode {
                     })
                 }
             }
-            PlanOperator::StructToRecordBatch => Operator::StructToRecordBatch { name: "struct_to_record_batch".to_string() },
-            PlanOperator::RecordBatchToStruct => Operator::RecordBatchToStruct { name: "record_batch_to_struct".to_string() },
+            PlanOperator::StructToRecordBatch => Operator::StructToRecordBatch {
+                name: "struct_to_record_batch".to_string(),
+            },
+            PlanOperator::RecordBatchToStruct => Operator::RecordBatchToStruct {
+                name: "record_batch_to_struct".to_string(),
+            },
         }
     }
 
@@ -1008,8 +1012,7 @@ impl PlanType {
                 right_value,
                 ..
             } => vec![left_value.clone(), right_value.clone()],
-            PlanType::RecordBatch |
-            PlanType::KeyedLiteralTypeValue { .. } => vec![],
+            PlanType::RecordBatch | PlanType::KeyedLiteralTypeValue { .. } => vec![],
             PlanType::Debezium { values, .. } => values.clone(),
             PlanType::Updating(v) => v.value_structs(),
         }
@@ -1026,7 +1029,7 @@ impl PlanType {
             PlanType::Unkeyed(_)
             | PlanType::UnkeyedList(_)
             | PlanType::KeyedLiteralTypeValue { key: None, .. }
-            | PlanType::Debezium { key: None, .. } 
+            | PlanType::Debezium { key: None, .. }
             | PlanType::RecordBatch => vec![],
             PlanType::Keyed { key, .. }
             | PlanType::KeyedPair { key, .. }
@@ -1278,8 +1281,8 @@ impl PlanGraph {
                 PlanOperator::FromDebezium => {}
                 PlanOperator::FromUpdating => {}
                 PlanOperator::Sink(_, _) => {}
-                PlanOperator::StructToRecordBatch => {},
-                PlanOperator::RecordBatchToStruct => {},
+                PlanOperator::StructToRecordBatch => {}
+                PlanOperator::RecordBatchToStruct => {}
             }
         }
     }
@@ -1751,7 +1754,6 @@ impl PlanGraph {
     ) -> NodeIndex {
         let input_index = self.add_sql_operator(*input);
 
-
         let plan_node = PlanNode::from_record_transform(transform, self.get_plan_node(input_index));
 
         let plan_node_index = self.graph.add_node(plan_node);
@@ -1760,23 +1762,33 @@ impl PlanGraph {
         };
         self.graph.add_edge(input_index, plan_node_index, edge);
 
-
         let to_record_batch_operator = PlanOperator::StructToRecordBatch;
-        let to_record_batch_index = self.insert_operator(
-            to_record_batch_operator,
-            PlanType::RecordBatch,
+        let to_record_batch_index =
+            self.insert_operator(to_record_batch_operator, PlanType::RecordBatch);
+        self.graph.add_edge(
+            plan_node_index,
+            to_record_batch_index,
+            PlanEdge {
+                edge_type: EdgeType::Forward,
+            },
         );
-        self.graph.add_edge(plan_node_index, to_record_batch_index,  PlanEdge {
-            edge_type: EdgeType::Forward,
-        });
         let to_struct_operator = PlanOperator::RecordBatchToStruct;
         let to_struct_index = self.insert_operator(
             to_struct_operator,
             self.get_plan_node(plan_node_index).output_type.clone(),
         );
-        self.connections.insert(format!("tmp_value{}", self.graph.node_count()), to_struct_index);
+        self.connections.insert(
+            format!("tmp_value{}", self.graph.node_count()),
+            to_struct_index,
+        );
 
-        self.graph.add_edge(to_record_batch_index, to_struct_index, PlanEdge { edge_type: EdgeType::Forward });
+        self.graph.add_edge(
+            to_record_batch_index,
+            to_struct_index,
+            PlanEdge {
+                edge_type: EdgeType::Forward,
+            },
+        );
         to_struct_index
     }
 
@@ -2021,17 +2033,23 @@ pub fn get_program(
         .flat_map(|s| s.all_structs_including_named())
         .map(|t| t.struct_name())
         .collect();
-    connector_types.extend(plan_graph.connections.values().map(|idx| {
+    connector_types.extend(
         plan_graph
-            .graph
-            .node_weight(*idx)
-            .unwrap()
-            .output_type
-            .get_all_types()
-            .into_iter()
-            .map(|s| s.struct_name())
-            .collect::<Vec<_>>()
-    }).flatten());
+            .connections
+            .values()
+            .map(|idx| {
+                plan_graph
+                    .graph
+                    .node_weight(*idx)
+                    .unwrap()
+                    .output_type
+                    .get_all_types()
+                    .into_iter()
+                    .map(|s| s.struct_name())
+                    .collect::<Vec<_>>()
+            })
+            .flatten(),
+    );
 
     let types: HashSet<_> = plan_graph
         .graph
