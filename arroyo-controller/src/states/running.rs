@@ -111,6 +111,11 @@ impl State for Running {
                         },
                         Err(err) => {
                             error!(message = "error while running", error = format!("{:?}", err), job_id = ctx.config.id);
+                            log_event("running_error", json!({
+                                "service": "controller",
+                                "job_id": ctx.config.id,
+                                "error": format!("{:?}", err),
+                            }));
                             if ctx.status.restarts >= RESTARTS_ALLOWED as i32 {
                                 return Err(fatal(
                                     "Job has restarted too many times",

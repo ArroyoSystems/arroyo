@@ -1882,6 +1882,9 @@ impl CastExpression {
         matches!(data_type, DataType::Utf8 | DataType::LargeUtf8)
     }
     fn cast_expr(input_type: &DataType, output_type: &DataType, sub_expr: syn::Expr) -> syn::Expr {
+        if input_type == output_type {
+            return sub_expr;
+        }
         if Self::is_numeric(input_type) && Self::is_numeric(output_type) {
             let cast_type: syn::Type =
                 parse_str(&StructField::data_type_name(output_type)).unwrap();
