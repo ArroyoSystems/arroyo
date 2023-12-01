@@ -520,11 +520,7 @@ export function CreatePipeline() {
           {localUdfs
             .filter(u => u.errors?.length)
             .map(u => {
-              const text = `"${u.errors!.join('\\n')}"`;
-              let content = text;
-              try {
-                content = JSON.parse(text);
-              } catch (e) {}
+              const content = u.errors!.join('\n').replaceAll('\\n', '\n');
               return (
                 <Flex key={u.id} flexDirection={'column'} py={3} gap={2}>
                   <UdfLabel udf={u} />
