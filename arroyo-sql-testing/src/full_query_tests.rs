@@ -557,3 +557,18 @@ INSERT INTO avro_writes
 select cast(bid.datetime as TIMESTAMP), bid.auction as u64, bid.auction as i64, bid.extra
 from nexmark;"
 }
+
+full_pipeline_codegen! {
+  "raw_string_cast",
+  "create table logs (
+    value TEXT NOT NULL,
+    parsed TEXT GENERATED ALWAYS AS (value)
+) with (
+    connector = 'sse',
+    endpoint = 'http://host.docker.internal:9563/sse',
+    format = 'raw_string'
+);
+
+SELECT * from logs;
+"
+}
