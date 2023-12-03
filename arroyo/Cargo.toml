@@ -22,7 +22,7 @@ keywords = ["streaming", "data", "sql", "event-processing"]
 
 [dependencies]
 arroyo-openapi = { path = "../arroyo-openapi" }
-
+sqlparser = "0.4.0"
 anyhow = {version = "1.0.75", features = ["backtrace"]}
 bollard = "0"
 clap = { version = "4", features = ["derive"] }
@@ -38,3 +38,4 @@ dirs = "5.0.1"
 eventsource-client = "0.12.0"
 futures = "0.3.29"
 serde_json = "1.0.108"
+tracing = "0.1.40"

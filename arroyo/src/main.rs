@@ -1,3 +1,4 @@
+use crate::query::start_query;
 use anyhow::{bail, Context, Result};
 use bollard::container::{CreateContainerOptions, LogOutput, LogsOptions, StartContainerOptions};
 use bollard::image::CreateImageOptions;
@@ -11,7 +12,6 @@ use std::process::exit;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_stream::StreamExt;
-use crate::query::start_query;
 
 const CONTAINER_NAME: &str = "arroyo-cli-single";
 pub static VERSION: &str = "0.7.0";
@@ -43,7 +43,7 @@ enum Commands {
 
     Connect {
         endpoint: Option<String>,
-    }
+    },
 }
 
 #[tokio::main]
@@ -53,9 +53,7 @@ pub async fn main() {
     let result = match &cli.command {
         Commands::Start { tag, daemon } => start(tag.clone(), *daemon).await,
         Commands::Stop {} => stop().await,
-        Commands::Connect { endpoint } => {
-            start_query(endpoint.clone()).await
-        }
+        Commands::Connect { endpoint } => start_query(endpoint.clone()).await,
     };
 
     if let Err(e) = result {

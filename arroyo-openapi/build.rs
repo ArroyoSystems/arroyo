@@ -1,7 +1,7 @@
 use arroyo_api::ApiDoc;
-use std::{env, fs};
-use std::path::PathBuf;
 use progenitor::{GenerationSettings, InterfaceStyle};
+use std::path::PathBuf;
+use std::{env, fs};
 use utoipa::OpenApi;
 
 fn main() {
