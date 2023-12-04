@@ -2,6 +2,7 @@ use crate::api_types::udfs::Udf;
 use crate::grpc as grpc_proto;
 use crate::grpc::api as api_proto;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -15,7 +16,9 @@ pub struct ValidateQueryPost {
 #[serde(rename_all = "camelCase")]
 pub struct QueryValidationResult {
     pub graph: Option<PipelineGraph>,
-    pub errors: Option<Vec<String>>,
+    #[serde(default)]
+    pub errors: Vec<String>,
+    pub missing_query: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -165,7 +168,7 @@ pub struct OutputData {
     pub operator_id: String,
     pub timestamp: u64,
     pub key: String,
-    pub value: String,
+    pub value: Value,
 }
 
 impl From<grpc_proto::OutputData> for OutputData {
@@ -174,7 +177,8 @@ impl From<grpc_proto::OutputData> for OutputData {
             operator_id: value.operator_id,
             timestamp: value.timestamp,
             key: value.key,
-            value: value.value,
+            value: serde_json::from_str(&value.value)
+                .expect("Received non-JSON data from web sink"),
         }
     }
 }

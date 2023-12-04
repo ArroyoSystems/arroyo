@@ -181,6 +181,7 @@ fn get_pipeline_module(
         },
     )
     .unwrap()
+    .unwrap()
     .program;
 
     let function = program.make_graph_function();

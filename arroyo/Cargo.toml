@@ -30,12 +30,13 @@ open = "5.0.0"
 reqwest = "0.11.20"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-stream = "0.1.14"
-crossterm = "0.27.0"
+crossterm = { version = "0.27.0", features = ["event-stream"] }
 comfy-table = "7.1.0"
 url = { version = "2.4.1", features = [] }
-rustyline = { version = "12.0.0", features = ["derive"] }
 dirs = "5.0.1"
 eventsource-client = "0.12.0"
 futures = "0.3.29"
 serde_json = "1.0.108"
 tracing = "0.1.40"
+reedline = "0.26.0"
+thiserror = "1.0.50"

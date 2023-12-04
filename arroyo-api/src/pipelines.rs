@@ -61,7 +61,7 @@ async fn compile_sql<'e, E>(
     parallelism: usize,
     auth_data: &AuthData,
     tx: &E,
-) -> anyhow::Result<CompiledSql>
+) -> anyhow::Result<Option<CompiledSql>>
 where
     E: GenericClient,
 {
@@ -293,7 +293,8 @@ pub(crate) async fn create_pipeline<'a>(
                 tx,
             )
             .await
-            .map_err(|e| bad_request(e.to_string()))?;
+            .map_err(|e| bad_request(e.to_string()))?
+            .ok_or_else(|| bad_request("The provided SQL does not contain a query"))?;
             text = Some(sql.query);
             udfs = Some(api_udfs);
             is_preview = sql.preview;
@@ -469,7 +470,7 @@ pub async fn validate_query(
 
     let pipeline_graph_validation_result =
         match compile_sql(validate_query_post.query, &udfs, 1, &auth_data, &client).await {
-            Ok(CompiledSql { mut program, .. }) => {
+            Ok(Some(CompiledSql { mut program, .. })) => {
                 optimizations::optimize(&mut program.graph);
                 let nodes = program
                     .graph
@@ -499,12 +500,19 @@ pub async fn validate_query(
 
                 QueryValidationResult {
                     graph: Some(PipelineGraph { nodes, edges }),
-                    errors: None,
+                    errors: vec![],
+                    missing_query: false,
                 }
             }
+            Ok(None) => QueryValidationResult {
+                graph: None,
+                errors: vec![],
+                missing_query: true,
+            },
             Err(e) => QueryValidationResult {
                 graph: None,
-                errors: Some(vec![e.to_string()]),
+                errors: vec![e.to_string()],
+                missing_query: false,
             },
         };
 

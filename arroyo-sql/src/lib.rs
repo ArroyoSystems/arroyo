@@ -450,11 +450,11 @@ pub async fn parse_and_get_program(
     query: &str,
     schema_provider: ArroyoSchemaProvider,
     config: SqlConfig,
-) -> Result<CompiledSql> {
+) -> Result<Option<CompiledSql>> {
     let query = query.to_string();
 
     if query.trim().is_empty() {
-        bail!("Query is empty");
+        return Ok(None);
     }
 
     tokio::spawn(async move { parse_and_get_program_sync(query, schema_provider, config) })
@@ -466,7 +466,7 @@ pub fn parse_and_get_program_sync(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,
     config: SqlConfig,
-) -> Result<CompiledSql> {
+) -> Result<Option<CompiledSql>> {
     let dialect = PostgreSqlDialect {};
     let mut inserts = vec![];
     for statement in Parser::parse_sql(&dialect, &query)? {
@@ -489,7 +489,7 @@ pub fn parse_and_get_program_sync(
 
     // if there are no insert nodes, return an error
     if sql_pipeline_builder.insert_nodes.is_empty() {
-        bail!("The provided SQL does not contain a query");
+        return Ok(None);
     }
 
     // If there isn't a sink, add a web sink to the last insert
@@ -526,7 +526,7 @@ pub fn parse_and_get_program_sync(
         plan_graph.add_sql_operator(output);
     }
 
-    get_program(plan_graph, sql_pipeline_builder.schema_provider.clone())
+    get_program(plan_graph, sql_pipeline_builder.schema_provider.clone()).map(Some)
 }
 
 #[derive(Clone)]
