@@ -8,7 +8,9 @@ use std::{mem, thread};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use anyhow::{Error, Result, bail};
 use arrow_array::RecordBatch;
+use arroyo_datastream::Operator;
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use bincode::{config, Decode, Encode};
 
@@ -70,6 +72,18 @@ pub trait StreamNode: Send {
         in_qs: Vec<Vec<Receiver<QueueItem>>>,
         out_qs: Vec<Vec<OutQueue>>,
     ) -> JoinHandle<()>;
+}
+
+
+
+impl TryFrom<Operator> for Box<dyn StreamNode> {
+    type Error = Error;
+
+    fn try_from(operator: Operator) -> Result<Self> {
+        match operator {
+            operator => bail!("{:?} requires code generation, cannot instantiate directly", operator)
+        }
+    }
 }
 
 pub struct WatermarkHolder {

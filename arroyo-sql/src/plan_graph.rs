@@ -1,15 +1,16 @@
 use std::{
     collections::{HashMap, HashSet},
-    time::Duration,
+    time::Duration, sync::Arc,
 };
 
-use arrow_schema::DataType;
+use arrow_schema::{DataType, Schema};
 use arroyo_datastream::{
     EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program,
     ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator, StreamEdge, StreamNode,
     TumblingTopN, TumblingWindowAggregator, WindowAgg, WindowType,
 };
 
+use datafusion::{physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner}, physical_plan::PhysicalExpr};
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
@@ -31,8 +32,14 @@ use crate::{
     types::{StructDef, StructField, StructPair, TypeDef},
     ArroyoSchemaProvider, CompiledSql, SqlConfig,
 };
-use anyhow::Result;
+use anyhow::{Result, Context};
+use datafusion_common::DFSchemaRef;
+use datafusion_proto::{bytes::{Serializeable, physical_plan_to_bytes}, protobuf::PhysicalExprNode, physical_plan::to_proto};
+use datafusion_expr::Expr;
 use petgraph::Direction;
+use arroyo_datastream::EdgeType::Forward;
+use arroyo_rpc::grpc::api::ProjectionOperator;
+use prost::Message;
 
 #[derive(Debug, Clone)]
 pub enum PlanOperator {
@@ -96,6 +103,7 @@ pub enum PlanOperator {
     Sink(String, SqlSink),
     StructToRecordBatch,
     RecordBatchToStruct,
+    ArrowProjection{ expr: Vec<Arc<dyn PhysicalExpr>>, input_schema: DFSchemaRef, output_schema: DFSchemaRef }
 }
 
 #[derive(Debug, Clone)]
@@ -343,6 +351,7 @@ impl PlanNode {
             PlanOperator::NonWindowAggregate { .. } => "non_window_aggregate".to_string(),
             PlanOperator::StructToRecordBatch => "struct_to_record_batch".to_string(),
             PlanOperator::RecordBatchToStruct => "record_batch_to_struct".to_string(),
+            PlanOperator::ArrowProjection { .. } => "arrow_projection".to_string(),
         }
     }
 
@@ -850,6 +859,18 @@ impl PlanNode {
             PlanOperator::RecordBatchToStruct => Operator::RecordBatchToStruct {
                 name: "record_batch_to_struct".to_string(),
             },
+            PlanOperator::ArrowProjection{ expr, input_schema, output_schema } => {
+                let expressions: Vec<PhysicalExprNode> = expr.iter().map(|expr| expr.clone().try_into().expect("should serialize physical expression")).collect();
+                let expressions = expressions.into_iter().map(|node: PhysicalExprNode| node.encode_to_vec()).collect();
+                let arrow_output_schema = Schema::from(output_schema.clone().as_ref());
+                let arrow_input_schema = Schema::from(input_schema.as_ref());
+                let projection_proto = ProjectionOperator{
+                    name: "arrow_projection".to_string(),
+                    expressions,
+                    input_schema: serde_json::to_vec(&arrow_input_schema).expect("should be able to serialize input schema"),
+                    output_schema: serde_json::to_vec(&arrow_output_schema).expect("should be able to serialize output schema"),
+                };
+                Operator::ArrowProjection { name: "arrow_projection".to_string(), config: projection_proto.encode_to_vec() }}
         }
     }
 
@@ -1283,6 +1304,7 @@ impl PlanGraph {
                 PlanOperator::Sink(_, _) => {}
                 PlanOperator::StructToRecordBatch => {}
                 PlanOperator::RecordBatchToStruct => {}
+                PlanOperator::ArrowProjection { expr,input_schema, output_schema } => {},
             }
         }
     }
@@ -1311,6 +1333,9 @@ impl PlanGraph {
                 }
             }
             SqlOperator::Union(inputs) => self.add_union(inputs),
+            SqlOperator::ArrowProjection { input, expressions, input_schema, output_schema } => {
+                self.add_arrow_projection(input, expressions, input_schema, output_schema)
+            }
         }
     }
 
@@ -1981,6 +2006,40 @@ impl PlanGraph {
             self.graph.add_edge(input_index, union_node, edge);
         }
         union_node
+    }
+    fn add_arrow_projection(&mut self, input: Box<SqlOperator>, expressions: Vec<Arc<dyn PhysicalExpr>>,input_schema: DFSchemaRef, output_schema: DFSchemaRef) -> NodeIndex {
+        let input_index = self.add_sql_operator(*input);
+
+        let to_record_batch_operator = PlanOperator::StructToRecordBatch;
+        let to_record_batch_index =
+            self.insert_operator(to_record_batch_operator, PlanType::RecordBatch);
+        self.graph.add_edge(
+            input_index,
+            to_record_batch_index,
+            PlanEdge {
+                edge_type: EdgeType::Forward,
+            },
+        );
+
+        let planner = DefaultPhysicalPlanner::default();
+        let arrow_projection_operator = PlanOperator::ArrowProjection {expr: expressions, input_schema, output_schema: output_schema.clone()};
+        let arrow_projection_index = self.insert_operator(arrow_projection_operator, PlanType::RecordBatch);
+        self.graph.add_edge(to_record_batch_index, arrow_projection_index, PlanEdge{edge_type: Forward});
+
+        let to_struct_operator = PlanOperator::RecordBatchToStruct;
+        let to_struct_index = self.insert_operator(
+            to_struct_operator,
+            PlanType::Unkeyed(output_schema.try_into().unwrap()),
+        );
+
+        self.graph.add_edge(
+            arrow_projection_index,
+            to_struct_index,
+            PlanEdge {
+                edge_type: EdgeType::Forward,
+            },
+        );
+        to_struct_index
     }
 }
 

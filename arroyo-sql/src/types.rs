@@ -2,7 +2,7 @@ use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime}, ptr::null,
 };
 
 use anyhow::Result;
@@ -23,7 +23,7 @@ use crate::avro;
 use arroyo_rpc::api_types::connections::{
     FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
-use datafusion_common::ScalarValue;
+use datafusion_common::{ScalarValue, ToDFSchema, DFSchemaRef, DFField};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
@@ -41,6 +41,16 @@ pub struct StructDef {
 pub struct StructPair {
     pub left: StructDef,
     pub right: StructDef,
+}
+
+impl TryFrom<DFSchemaRef> for StructDef {
+    type Error = anyhow::Error;
+    fn try_from(schema: DFSchemaRef) -> Result<Self> {
+        let struct_fields :Vec<StructField> = schema.fields().iter().map(|field| {
+            field.try_into()
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(Self::for_fields(struct_fields))
+    }
 }
 
 impl StructDef {
@@ -117,7 +127,7 @@ impl StructDef {
         };
         quote! (
             #extra_derives
-            #[derive(Clone, Debug, bincode::Encode, bincode::Decode, PartialEq,  PartialOrd, serde::Serialize, serde::Deserialize)]
+            #[derive(Clone, Debug, bincode::Encode, bincode::Decode, PartialEq,  PartialOrd, serde::Serialize, serde::Deserialize, GetArrowSchema, GetRecordBatchBuilder)]
             pub struct #schema_name {
                 #(#fields)
                 ,*
@@ -601,6 +611,15 @@ pub struct StructField {
     pub original_type: Option<String>,
 }
 
+impl TryFrom<&DFField> for StructField {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &DFField) -> Result<Self> {
+        Ok(StructField::new(value.name().to_string(), value.qualifier().map(|qualifier| qualifier.to_string()), TypeDef::try_from_arrow(value.data_type(), value.is_nullable())?))
+    }
+    
+}
+
 impl StructField {
     pub fn new(name: String, alias: Option<String>, data_type: TypeDef) -> Self {
         if let TypeDef::DataType(DataType::Struct(_), _) = &data_type {
@@ -886,6 +905,8 @@ impl TryFrom<&Type> for TypeDef {
     }
 }
 
+
+
 impl TypeDef {
     pub fn is_optional(&self) -> bool {
         match self {
@@ -920,6 +941,16 @@ impl TypeDef {
         match self {
             TypeDef::StructDef(_, _) => None,
             TypeDef::DataType(dt, _) => Some(dt),
+        }
+    }
+
+    pub fn try_from_arrow(data_type: &DataType, nullable: bool) -> Result<Self> {
+        if let DataType::Struct(fields) = data_type {
+            Ok(TypeDef::StructDef(StructDef::for_fields(fields.iter().map(|field| {
+                Ok(StructField::new(field.name().to_string(), None, Self::try_from_arrow(field.data_type(), field.is_nullable())?))
+            }).collect::<Result<Vec<_>>>()?), nullable))
+        } else {
+            Ok(TypeDef::DataType(data_type.clone(), nullable))
         }
     }
 

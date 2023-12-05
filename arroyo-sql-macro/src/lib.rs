@@ -1,10 +1,11 @@
+use arrow_schema::{DataType, Field, TimeUnit};
 use arroyo_connectors::nexmark::{NexmarkConnector, NexmarkTable};
 use arroyo_connectors::{Connector, EmptyConfig};
 use arroyo_sql::types::{rust_to_arrow, StructField, TypeDef};
 use arroyo_sql::{
     get_test_expression, parse_and_get_program_sync, ArroyoSchemaProvider, SqlConfig,
 };
-use proc_macro::TokenStream;
+use proc_macro::{TokenStream, Ident};
 use quote::{quote, ToTokens};
 use syn::parse::{Parse, ParseStream};
 use syn::{parse_macro_input, parse_str, DeriveInput, Expr, LitInt, LitStr, Token, Type};
@@ -302,6 +303,273 @@ pub fn get_arrow_schema_derive(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+struct RecordBatchFieldTokens {
+    definition: proc_macro2::TokenStream,
+    initialization: proc_macro2::TokenStream,
+    append: proc_macro2::TokenStream,
+    append_null: proc_macro2::TokenStream,
+    field_flush: proc_macro2::TokenStream,
+}
+
+#[proc_macro_derive(GetRecordBatchBuilder)]
+pub fn get_record_batch_builder_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let name = input.ident;
+    let fields = match input.data {
+        syn::Data::Struct(s) => s.fields,
+        _ => panic!("GetArrowSchema can only be derived for structs"),
+    };
+    let fields: Vec<_> = fields.iter()
+    .map(|f| {
+        let field_name = f.ident.as_ref().unwrap();
+        let inner_type = match &f.ty {
+            // Check if field type is an Option
+            Type::Path(type_path) if type_path.path.segments.last().unwrap().ident == "Option" => {
+                extract_inner_type(&f.ty)
+            }
+            typ => typ,
+        };
+        let is_nullable = is_option(&f.ty);
+        
+        let arrow_type = rust_to_arrow(inner_type);
+        match arrow_type {
+            Ok(primitive_type) => {
+                let primitive_builder_type = primitive_builder(&primitive_type);
+                let definition = quote!(#field_name: #primitive_builder_type);
+                let initialization = quote!(#primitive_builder_type::new());
+                let append = primitive_append(&primitive_type, is_nullable, field_name);
+                let append_null = quote!(self.#field_name.append_null());
+                let field_flush = quote!(self.#field_name.finish());
+                RecordBatchFieldTokens {
+                    definition,
+                    initialization,
+                    append,
+                    append_null,
+                    field_flush,
+                }
+            },
+            Err(_) => {
+                match &f.ty {
+                        Type::Path(path) => {
+                            let path: Vec<String> = path
+                                .path
+                                .segments
+                                .iter()
+                                .map(|s| s.ident.to_string())
+                                .collect();
+                            let struct_builder_type: proc_macro2::TokenStream = parse_str(&format!("{}RecordBatchBuilder", path.join("::"))).unwrap();
+                            let definition = quote!(#field_name: #struct_builder_type);
+                            let initialization = if is_nullable {
+                                quote!(#struct_builder_type::nullable())
+                            } else {
+                                quote!(#struct_builder_type::new())
+                            };
+                            let append = if is_nullable {
+                                quote!(self.#field_name.add_data(data.#field_name))
+                            } else {
+                                quote!(self.#field_name.add_data(data.#field_name))
+                            };
+                            let append_null = quote!(self.#field_name.add_data(None));
+                            let field_flush = quote!( std::sync::Arc::new(self.#field_name.as_struct_array()));
+                            RecordBatchFieldTokens {
+                                definition,
+                                initialization,
+                                append,
+                                append_null,
+                                field_flush                    
+                            }
+                        }
+                        _ => unimplemented!()
+                }
+            },
+        }
+    }).collect();
+
+    let field_definitions: Vec<_> = fields.iter().map(|field| field.definition.clone()).collect();
+    let field_initializations : Vec<_> = fields.iter().map(|field| field.initialization.clone()).collect();
+    let field_appends : Vec<_> = fields.iter().map(|field| field.append.clone()).collect();
+    let field_nulls : Vec<_> = fields.iter().map(|field| field.append_null.clone()).collect();
+    let field_flushes : Vec<_> = fields.iter().map(|field| field.field_flush.clone()).collect();
+
+    let builder_ident: proc_macro2::Ident = parse_str(&format!("{}RecordBatchBuilder", name.to_string())).unwrap();
+
+    quote! {
+        impl GetRecordBatchBuilder<#builder_ident> for #name {
+            fn record_batch_builder() -> #builder_ident::new()
+        }
+            #[derive(Debug)]
+            pub struct #builder_ident {
+                schema: std::sync::Arc<arrow::datatypes::Schema>,
+                _null_buffer_builder: Option<arrow::array::BooleanBufferBuilder>,
+                #(#field_definitions,)*
+            }
+
+            impl Default for #builder_ident {
+                fn default() -> Self {
+                    #builder_ident {
+                        schema: Self::arrow_schema(),
+                        _null_buffer_builder: None,
+                        #(#field_initializations,)*
+                    }
+                }
+            }
+
+            impl arroyo_types::RecordBatchBuilder for #builder_ident {
+                type Data = #name;
+                fn add_data(&mut self, data: Option<#name>) {
+                    if let Some(buffer) = self._null_buffer_builder.as_mut() {
+                        buffer.append(data.is_some());
+                    }
+                    match data {
+                        Some(data) => {#(#field_appends;)*},
+                        None => {#(#field_nulls;)*},
+                    }
+                }
+
+                fn nullable() -> Self {
+                    #builder_ident {
+                        schema: #name:arrow_schema(),
+                        _null_buffer_builder: Some(arrow::array::BooleanBufferBuilder::new(0)),
+                        #(#field_initializations,)*
+                    }
+                }
+
+                fn as_struct_array(&mut self) -> arrow_array::StructArray {
+
+                    arrow_array::StructArray::new(
+                        self.schema.fields().clone(),
+                        vec![#(#field_flushes,)*],
+                        self._null_buffer_builder.take().as_mut().map(|builder| builder.finish().into()),
+                    )
+                }
+
+                fn flush(&mut self) -> arrow_array::RecordBatch {
+                    arrow_array::RecordBatch::try_new(self.schema.clone(), vec![#(#field_flushes,)*]).unwrap()
+                }
+
+                fn schema(&self) -> std::sync::Arc<arrow::datatypes::Schema> {
+                    self.schema.clone()
+                }
+            }
+        }.into()
+}
+
+fn primitive_append(data_type: &DataType, is_nullable: bool, field_ident: &proc_macro2::Ident) -> proc_macro2::TokenStream {
+    match (data_type, is_nullable) {
+        (
+        DataType::Timestamp(TimeUnit::Millisecond, None),
+        true,
+    ) => {
+        quote!(self.#field_ident.append_option(data.#field_ident.map(|time| arroyo_types::to_millis(time) as i64)))
+    },
+    (
+        DataType::Timestamp(TimeUnit::Millisecond, None),
+        false,
+    ) => {
+        quote!(self.#field_ident.append_value(arroyo_types::to_millis(data.#field_ident) as i64))
+    },
+    (
+        DataType::Timestamp(TimeUnit::Microsecond, None),
+        true,
+    ) => {
+        quote!(self.#field_ident.append_option(data.#field_ident.map(|time| arroyo_types::to_micros(time) as i64)))
+    },
+    (
+        DataType::Timestamp(TimeUnit::Microsecond, None),
+        false,
+    ) => {
+        quote!(self.#field_ident.append_value(arroyo_types::to_micros(data.#field_ident) as i64))
+    },
+    (
+        DataType::Timestamp(TimeUnit::Nanosecond, None),
+        true,
+    ) => {
+        quote!(self.#field_ident.append_option(data.#field_ident.map(|time| arroyo_types::to_nanos(time) as i64)))
+    },
+    (
+        DataType::Timestamp(TimeUnit::Nanosecond, None),
+        false,
+    ) => {
+        quote!(self.#field_ident.append_value(arroyo_types::to_nanos(data.#field_ident) as i64))
+    },
+       (_, true) =>  {
+        quote!(self.#field_ident.append_option(data.#field_ident))
+       },
+       (_, false) => {
+        quote!(self.#field_ident.append_value(data.#field_ident))
+       }
+    }
+}
+
+fn primitive_builder(data_type: &DataType) -> proc_macro2::TokenStream {
+    match data_type {
+        DataType::Boolean => quote!(arrow_array::builder::BooleanBuilder),
+        DataType::Int8 => {
+            quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int8Type>)
+        }
+        DataType::Int16 => {
+            quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int16Type>)
+        }
+        DataType::Int32 => {
+            quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int32Type>)
+        }
+        DataType::Int64 => {
+            quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Int64Type>)
+        }
+        DataType::UInt8 => {
+            quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::UInt8Type>)
+        }
+        DataType::UInt16 => {
+            quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::UInt16Type>)
+        }
+        DataType::UInt32 => {
+            quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::UInt32Type>)
+        }
+        DataType::UInt64 => {
+            quote!(arrow_array::builder::PrimitiveBuilder::<arrow_array::types::UInt64Type>)
+        }
+        DataType::Float16 => {
+            quote!(
+                arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Float16Type>
+            )
+        }
+        DataType::Float32 => {
+            quote!(
+                arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Float32Type>
+            )
+        }
+        DataType::Float64 => {
+            quote!(
+                arrow_array::builder::PrimitiveBuilder::<arrow_array::types::Float64Type>
+            )
+        }
+        DataType::Timestamp(arrow_schema::TimeUnit::Millisecond, None) => quote!(
+            arrow_array::builder::PrimitiveBuilder::<
+                arrow_array::types::TimestampMillisecondType,
+            >
+        ),
+        DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None) => quote!(
+            arrow_array::builder::PrimitiveBuilder::<
+                arrow_array::types::TimestampMicrosecondType,
+            >
+        ),
+        DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None) => quote!(
+            arrow_array::builder::PrimitiveBuilder::<
+                arrow_array::types::TimestampNanosecondType,
+            >
+        ),
+        DataType::Utf8 => {
+            quote!(
+                arrow_array::builder::GenericByteBuilder<
+                    arrow_array::types::GenericStringType<i32>,
+                >
+            )
+        },
+        _ => unimplemented!(),
+    }
 }
 
 fn extract_inner_type(ty: &Type) -> &Type {

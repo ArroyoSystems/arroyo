@@ -16,6 +16,7 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
 arroyo-formats = { path = "../arroyo-formats" }
+arroyo-datastream = { path = "../arroyo-datastream" }
 
 rand = "0.8"
 bincode = "2.0.0-rc.3"

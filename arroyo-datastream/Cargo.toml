@@ -17,6 +17,8 @@ proc-macro2 = "1"
 bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 rand = "0"
 toml = "0.7"
+bytes = "1.4"
+hex = "0.4"
 
 tokio = "1"
 tonic = {workspace = true}

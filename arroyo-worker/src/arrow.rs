@@ -3,7 +3,6 @@ use arrow::datatypes::SchemaRef;
 use arrow_array::builder::PrimitiveBuilder;
 use arrow_array::cast::AsArray;
 use arrow_array::types::TimestampNanosecondType;
-use arrow_array::ArrayRef;
 use arrow_array::RecordBatch;
 use arrow_array::RecordBatchOptions;
 use arrow_array::StructArray;
@@ -14,14 +13,20 @@ use arrow_schema::Schema;
 use arrow_schema::TimeUnit;
 use arroyo_formats::SchemaData;
 use arroyo_types::to_nanos;
-use arroyo_types::Data;
 use arroyo_types::RecordBatchBuilder;
 use arroyo_types::{Key, Record, RecordBatchData};
+use datafusion_execution::FunctionRegistry;
+use datafusion_expr::AggregateUDF;
+use datafusion_expr::ScalarUDF;
+use datafusion_expr::WindowUDF;
 use datafusion_physical_expr::PhysicalExpr;
+use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
+use datafusion_proto::protobuf::PhysicalExprNode;
+use prost::Message;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tracing::info;
 
 use crate::{engine::Context, stream_node::ProcessFuncTrait};
 
@@ -29,6 +34,49 @@ pub struct ProjectionOperator {
     name: String,
     exprs: Vec<Arc<dyn PhysicalExpr>>,
     output_schema: SchemaRef,
+}
+
+pub struct Registry {}
+
+impl FunctionRegistry for Registry {
+    fn udfs(&self) -> HashSet<String> {
+        HashSet::new()
+    }
+
+    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+        todo!()
+    }
+
+    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+        todo!()
+    }
+
+    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+        todo!()
+    }
+}
+
+impl ProjectionOperator {
+    pub fn from_config(name: String, config: Vec<u8>) -> Result<Self> {
+        let proto_config: arroyo_rpc::grpc::api::ProjectionOperator =
+            arroyo_rpc::grpc::api::ProjectionOperator::decode(&mut config.as_slice()).unwrap();
+
+        let registry = Registry {};
+        let input_schema = serde_json::from_slice(&proto_config.input_schema)?;
+        let output_schema = serde_json::from_slice(&proto_config.output_schema)?;
+
+        let exprs: Vec<_> = proto_config
+            .expressions
+            .into_iter()
+            .map(|expr| PhysicalExprNode::decode(&mut expr.as_slice()).unwrap())
+            .map(|expr| {parse_physical_expr(&expr, &registry, &input_schema).unwrap()})
+            .collect();
+        Ok(Self {
+            name,
+            exprs,
+            output_schema: Arc::new(output_schema),
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -40,23 +88,6 @@ impl ProcessFuncTrait for ProjectionOperator {
 
     fn name(&self) -> String {
         self.name.clone()
-    }
-
-    fn from_config(name: String, config: Vec<u8>) -> Result<Self> {
-        let config = String::from_utf8(config)?;
-        let exprs = serde_json::from_str(&config)?;
-        let output_schema = Schema::new(
-            exprs
-                .iter()
-                .enumerate()
-                .map(|(i, expr)| Field::new(&format!("col{}", i), expr.data_type(&[]), true))
-                .collect(),
-        );
-        Ok(Self {
-            name,
-            exprs,
-            output_schema: Arc::new(output_schema),
-        })
     }
 
     async fn process_element(&mut self, record: &Record<(), ()>, ctx: &mut Context<(), ()>) {

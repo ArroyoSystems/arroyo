@@ -589,6 +589,11 @@ pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
     fn schema(&self) -> SchemaRef;
 }
 
+
+pub trait GetRecordBatchBuilder<R: RecordBatchBuilder<Data = Self>> {
+    fn record_batch_builder() -> R;
+}
+
 unsafe impl<K: Key, T: Data> Sync for Record<K, T> {}
 
 impl<K: Key, T: Data> Record<K, T> {

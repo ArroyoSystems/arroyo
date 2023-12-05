@@ -12,12 +12,13 @@ use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
-use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
+use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge, ProjectionOperator};
 use arroyo_types::{Data, GlobalKey, JoinType, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use proc_macro2::Ident;
+use prost::Message;
 use quote::format_ident;
 use quote::quote;
 use serde::{Deserialize, Serialize};
@@ -381,6 +382,10 @@ pub enum Operator {
     RecordBatchToStruct {
         name: String,
     },
+    ArrowProjection {
+        name: String,
+        config: Vec<u8>,
+    }
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -508,6 +513,7 @@ impl Debug for Operator {
             } => write!(f, "updating_key<{}>", name),
             Operator::StructToRecordBatch { name } => write!(f, "struct_to_record_batch<{}>", name),
             Operator::RecordBatchToStruct { name } => write!(f, "record_batch_to_struct<{}>", name),
+            Operator::ArrowProjection { name, config:_ } => write!(f, "arrow_projection<{}>", name),
         }
     }
 }
@@ -1879,6 +1885,13 @@ impl Program {
                             RecordBatchToStruct::<#out_k, #out_t>::new(#name.to_string()))
                     }
                 },
+                Operator::ArrowProjection { name, config } => {
+                    let hex_string = hex::encode(config);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            ProjectionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()))
+                    }
+                },
             };
 
             (node.operator_id.clone(), description, body, node.parallelism)
@@ -2226,14 +2239,23 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
                     name,
                     operator: GrpcApi::OperatorName::StructToRecordBatch.into(),
+                    config: None,
                 })
             }
             Operator::RecordBatchToStruct { name } => {
                 GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
                     name,
                     operator: GrpcApi::OperatorName::RecordBatchToStruct.into(),
+                    config: None,
                 })
             }
+            Operator::ArrowProjection { name, config } => {
+                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
+                    name,
+                    operator: GrpcApi::OperatorName::ArrowProjection.into(),
+                    config: Some(config),
+                })
+            },
         }
     }
 }
@@ -2551,6 +2573,9 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         }
                         GrpcApi::OperatorName::RecordBatchToStruct => {
                             Operator::RecordBatchToStruct { name }
+                        },
+                        GrpcApi::OperatorName::ArrowProjection => {
+                            Operator::ArrowProjection { name, config: named_operator.config.unwrap() }
                         }
                     }
                 }
