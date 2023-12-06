@@ -1,4 +1,5 @@
 use anyhow::Result;
+use arrow::datatypes::Fields;
 use arrow::datatypes::SchemaRef;
 use arrow_array::builder::PrimitiveBuilder;
 use arrow_array::cast::AsArray;
@@ -6,12 +7,8 @@ use arrow_array::types::TimestampNanosecondType;
 use arrow_array::RecordBatch;
 use arrow_array::RecordBatchOptions;
 use arrow_array::StructArray;
-use arrow_schema::DataType;
-use arrow_schema::Field;
-use arrow_schema::Fields;
-use arrow_schema::Schema;
-use arrow_schema::TimeUnit;
 use arroyo_formats::SchemaData;
+use arroyo_types::KeyValueTimestampRecordBatchBuilder;
 use arroyo_types::to_nanos;
 use arroyo_types::RecordBatchBuilder;
 use arroyo_types::{Key, Record, RecordBatchData};
@@ -147,41 +144,6 @@ where
     }
 }
 
-#[derive(Default, Debug)]
-pub struct EmptyRecordBatchBuilder {
-    items: usize,
-}
-
-impl RecordBatchBuilder for EmptyRecordBatchBuilder {
-    type Data = ();
-    fn schema(&self) -> SchemaRef {
-        Arc::new(Schema::empty())
-    }
-    fn as_struct_array(&mut self) -> StructArray {
-        let items = self.items;
-        self.items = 0;
-        StructArray::new_null(Fields::empty(), items)
-    }
-
-    fn add_data(&mut self, _data: Option<Self::Data>) {
-        self.items += 1;
-    }
-
-    fn nullable() -> Self {
-        Self::default()
-    }
-
-    fn flush(&mut self) -> RecordBatch {
-        let items = self.items;
-        self.items = 0;
-        RecordBatch::try_new_with_options(
-            self.schema(),
-            vec![],
-            &RecordBatchOptions::new().with_row_count(Some(items)),
-        )
-        .unwrap()
-    }
-}
 
 #[async_trait::async_trait]
 impl<K: RecordBatchBuilder, T: RecordBatchBuilder> ProcessFuncTrait for StructToRecordBatch<K, T>
@@ -241,66 +203,6 @@ where
     }
 }
 
-struct KeyValueTimestampRecordBatchBuilder<K: RecordBatchBuilder, T: RecordBatchBuilder> {
-    key_builder: K,
-    value_builder: T,
-    timestamp_builder: PrimitiveBuilder<TimestampNanosecondType>,
-    schema: SchemaRef,
-}
-
-impl<K: RecordBatchBuilder, T: RecordBatchBuilder> KeyValueTimestampRecordBatchBuilder<K, T>
-where
-    K::Data: Key,
-{
-    fn new() -> Self {
-        let key_builder = K::default();
-        let value_builder = T::default();
-        let key_field = Field::new(
-            "key",
-            DataType::Struct(key_builder.schema().fields.clone()),
-            true,
-        );
-        let value_field = Field::new(
-            "value",
-            DataType::Struct(value_builder.schema().fields.clone()),
-            false,
-        );
-        let timestamp_field = Field::new(
-            "timestamp",
-            DataType::Timestamp(TimeUnit::Nanosecond, None),
-            false,
-        );
-        let schema = Arc::new(Schema::new(vec![key_field, value_field, timestamp_field]));
-        Self {
-            key_builder: K::default(),
-            value_builder: T::default(),
-            timestamp_builder: PrimitiveBuilder::<TimestampNanosecondType>::new(),
-            schema,
-        }
-    }
-
-    fn add_record(&mut self, record: &Record<K::Data, T::Data>) {
-        self.key_builder.add_data(record.key.clone());
-        self.value_builder.add_data(Some(record.value.clone()));
-        self.timestamp_builder
-            .append_value(to_nanos(record.timestamp) as i64);
-    }
-
-    fn flush(&mut self) -> RecordBatch {
-        let key_array = self.key_builder.as_struct_array();
-        let value_array = self.value_builder.as_struct_array();
-        let timestamp_array = self.timestamp_builder.finish();
-        RecordBatch::try_new(
-            self.schema.clone(),
-            vec![
-                Arc::new(key_array),
-                Arc::new(value_array),
-                Arc::new(timestamp_array),
-            ],
-        )
-        .unwrap()
-    }
-}
 
 pub struct RecordBatchToStruct<K: SchemaData + Key, T: SchemaData> {
     name: String,
