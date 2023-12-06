@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    time::Duration, sync::Arc,
+    sync::Arc,
+    time::Duration,
 };
 
 use arrow_schema::{DataType, Schema};
@@ -10,7 +11,10 @@ use arroyo_datastream::{
     TumblingTopN, TumblingWindowAggregator, WindowAgg, WindowType,
 };
 
-use datafusion::{physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner}, physical_plan::PhysicalExpr};
+use datafusion::{
+    physical_plan::PhysicalExpr,
+    physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
+};
 use petgraph::graph::{DiGraph, NodeIndex};
 use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
@@ -32,13 +36,17 @@ use crate::{
     types::{StructDef, StructField, StructPair, TypeDef},
     ArroyoSchemaProvider, CompiledSql, SqlConfig,
 };
-use anyhow::{Result, Context};
-use datafusion_common::DFSchemaRef;
-use datafusion_proto::{bytes::{Serializeable, physical_plan_to_bytes}, protobuf::PhysicalExprNode, physical_plan::to_proto};
-use datafusion_expr::Expr;
-use petgraph::Direction;
+use anyhow::{Context, Result};
 use arroyo_datastream::EdgeType::Forward;
 use arroyo_rpc::grpc::api::ProjectionOperator;
+use datafusion_common::DFSchemaRef;
+use datafusion_expr::Expr;
+use datafusion_proto::{
+    bytes::{physical_plan_to_bytes, Serializeable},
+    physical_plan::to_proto,
+    protobuf::PhysicalExprNode,
+};
+use petgraph::Direction;
 use prost::Message;
 
 #[derive(Debug, Clone)]
@@ -103,7 +111,11 @@ pub enum PlanOperator {
     Sink(String, SqlSink),
     StructToRecordBatch,
     RecordBatchToStruct,
-    ArrowProjection{ expr: Vec<Arc<dyn PhysicalExpr>>, input_schema: DFSchemaRef, output_schema: DFSchemaRef }
+    ArrowProjection {
+        expr: Vec<Arc<dyn PhysicalExpr>>,
+        input_schema: DFSchemaRef,
+        output_schema: DFSchemaRef,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -859,18 +871,38 @@ impl PlanNode {
             PlanOperator::RecordBatchToStruct => Operator::RecordBatchToStruct {
                 name: "record_batch_to_struct".to_string(),
             },
-            PlanOperator::ArrowProjection{ expr, input_schema, output_schema } => {
-                let expressions: Vec<PhysicalExprNode> = expr.iter().map(|expr| expr.clone().try_into().expect("should serialize physical expression")).collect();
-                let expressions = expressions.into_iter().map(|node: PhysicalExprNode| node.encode_to_vec()).collect();
+            PlanOperator::ArrowProjection {
+                expr,
+                input_schema,
+                output_schema,
+            } => {
+                let expressions: Vec<PhysicalExprNode> = expr
+                    .iter()
+                    .map(|expr| {
+                        expr.clone()
+                            .try_into()
+                            .expect("should serialize physical expression")
+                    })
+                    .collect();
+                let expressions = expressions
+                    .into_iter()
+                    .map(|node: PhysicalExprNode| node.encode_to_vec())
+                    .collect();
                 let arrow_output_schema = Schema::from(output_schema.clone().as_ref());
                 let arrow_input_schema = Schema::from(input_schema.as_ref());
-                let projection_proto = ProjectionOperator{
+                let projection_proto = ProjectionOperator {
                     name: "arrow_projection".to_string(),
                     expressions,
-                    input_schema: serde_json::to_vec(&arrow_input_schema).expect("should be able to serialize input schema"),
-                    output_schema: serde_json::to_vec(&arrow_output_schema).expect("should be able to serialize output schema"),
+                    input_schema: serde_json::to_vec(&arrow_input_schema)
+                        .expect("should be able to serialize input schema"),
+                    output_schema: serde_json::to_vec(&arrow_output_schema)
+                        .expect("should be able to serialize output schema"),
                 };
-                Operator::ArrowProjection { name: "arrow_projection".to_string(), config: projection_proto.encode_to_vec() }}
+                Operator::ArrowProjection {
+                    name: "arrow_projection".to_string(),
+                    config: projection_proto.encode_to_vec(),
+                }
+            }
         }
     }
 
@@ -1304,7 +1336,11 @@ impl PlanGraph {
                 PlanOperator::Sink(_, _) => {}
                 PlanOperator::StructToRecordBatch => {}
                 PlanOperator::RecordBatchToStruct => {}
-                PlanOperator::ArrowProjection { expr,input_schema, output_schema } => {},
+                PlanOperator::ArrowProjection {
+                    expr,
+                    input_schema,
+                    output_schema,
+                } => {}
             }
         }
     }
@@ -1333,9 +1369,12 @@ impl PlanGraph {
                 }
             }
             SqlOperator::Union(inputs) => self.add_union(inputs),
-            SqlOperator::ArrowProjection { input, expressions, input_schema, output_schema } => {
-                self.add_arrow_projection(input, expressions, input_schema, output_schema)
-            }
+            SqlOperator::ArrowProjection {
+                input,
+                expressions,
+                input_schema,
+                output_schema,
+            } => self.add_arrow_projection(input, expressions, input_schema, output_schema),
         }
     }
 
@@ -2007,7 +2046,13 @@ impl PlanGraph {
         }
         union_node
     }
-    fn add_arrow_projection(&mut self, input: Box<SqlOperator>, expressions: Vec<Arc<dyn PhysicalExpr>>,input_schema: DFSchemaRef, output_schema: DFSchemaRef) -> NodeIndex {
+    fn add_arrow_projection(
+        &mut self,
+        input: Box<SqlOperator>,
+        expressions: Vec<Arc<dyn PhysicalExpr>>,
+        input_schema: DFSchemaRef,
+        output_schema: DFSchemaRef,
+    ) -> NodeIndex {
         let input_index = self.add_sql_operator(*input);
 
         let to_record_batch_operator = PlanOperator::StructToRecordBatch;
@@ -2022,9 +2067,18 @@ impl PlanGraph {
         );
 
         let planner = DefaultPhysicalPlanner::default();
-        let arrow_projection_operator = PlanOperator::ArrowProjection {expr: expressions, input_schema, output_schema: output_schema.clone()};
-        let arrow_projection_index = self.insert_operator(arrow_projection_operator, PlanType::RecordBatch);
-        self.graph.add_edge(to_record_batch_index, arrow_projection_index, PlanEdge{edge_type: Forward});
+        let arrow_projection_operator = PlanOperator::ArrowProjection {
+            expr: expressions,
+            input_schema,
+            output_schema: output_schema.clone(),
+        };
+        let arrow_projection_index =
+            self.insert_operator(arrow_projection_operator, PlanType::RecordBatch);
+        self.graph.add_edge(
+            to_record_batch_index,
+            arrow_projection_index,
+            PlanEdge { edge_type: Forward },
+        );
 
         let to_struct_operator = PlanOperator::RecordBatchToStruct;
         let to_struct_index = self.insert_operator(
@@ -2129,7 +2183,7 @@ pub fn get_program(
     other_defs.extend(
         all_types
             .iter()
-            .filter(|t| connector_types.contains(&t.struct_name()))
+            //      .filter(|t| connector_types.contains(&t.struct_name()))
             .map(|s| s.generate_serializer_items().to_string()),
     );
 

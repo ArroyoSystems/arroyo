@@ -10,11 +10,11 @@ use anyhow::{anyhow, bail, Context};
 use anyhow::{Ok, Result};
 use arrow_schema::{DataType, Schema};
 use arroyo_datastream::{Operator, WindowType};
-use datafusion::execution::context::{SessionState, SessionConfig};
+use datafusion::execution::context::{SessionConfig, SessionState};
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::physical_plan::PhysicalExpr;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
-use datafusion_common::{DFField, ScalarValue, DFSchema, DFSchemaRef};
+use datafusion_common::{DFField, DFSchema, DFSchemaRef, ScalarValue};
 use datafusion_expr::expr::ScalarUDF;
 use datafusion_expr::{
     BinaryExpr, BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp,
@@ -46,7 +46,12 @@ pub enum SqlOperator {
     Union(Vec<SqlOperator>),
     Sink(String, SqlSink, Box<SqlOperator>),
     NamedTable(String, Box<SqlOperator>),
-    ArrowProjection{ input: Box<SqlOperator>, expressions: Vec<Arc<dyn PhysicalExpr>>, input_schema: DFSchemaRef, output_schema: DFSchemaRef },
+    ArrowProjection {
+        input: Box<SqlOperator>,
+        expressions: Vec<Arc<dyn PhysicalExpr>>,
+        input_schema: DFSchemaRef,
+        output_schema: DFSchemaRef,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -347,9 +352,12 @@ impl SqlOperator {
             SqlOperator::Sink(_, sql_sink, _) => sql_sink.struct_def.clone(),
             SqlOperator::NamedTable(_table_name, table) => table.return_type(),
             SqlOperator::Union(inputs) => inputs[0].return_type(),
-            SqlOperator::ArrowProjection { input:_, expressions:_, input_schema: _, output_schema } => {
-                StructDef::try_from(output_schema.clone()).unwrap()
-            },
+            SqlOperator::ArrowProjection {
+                input: _,
+                expressions: _,
+                input_schema: _,
+                output_schema,
+            } => StructDef::try_from(output_schema.clone()).unwrap(),
         }
     }
 
@@ -365,9 +373,12 @@ impl SqlOperator {
             SqlOperator::Sink(_, _, input) => input.has_window(),
             SqlOperator::NamedTable(_, input) => input.has_window(),
             SqlOperator::Union(inputs) => inputs[0].has_window(),
-            SqlOperator::ArrowProjection { input, expressions,input_schema, output_schema } => {
-                input.has_window()
-            },
+            SqlOperator::ArrowProjection {
+                input,
+                expressions,
+                input_schema,
+                output_schema,
+            } => input.has_window(),
         }
     }
 
@@ -396,9 +407,12 @@ impl SqlOperator {
             SqlOperator::Sink(_, _, input) => input.is_updating(),
             SqlOperator::NamedTable(_, table_operator) => table_operator.is_updating(),
             SqlOperator::Union(inputs) => inputs[0].is_updating(),
-            SqlOperator::ArrowProjection { input, expressions,input_schema, output_schema } => {
-                input.is_updating()
-            },
+            SqlOperator::ArrowProjection {
+                input,
+                expressions,
+                input_schema,
+                output_schema,
+            } => input.is_updating(),
         }
     }
 
@@ -419,9 +433,12 @@ impl SqlOperator {
             SqlOperator::Sink(_, _, input) => input.get_window(),
             SqlOperator::NamedTable(_, input) => input.get_window(),
             SqlOperator::Union(inputs) => inputs[0].get_window(),
-            SqlOperator::ArrowProjection { input, expressions, input_schema, output_schema } => {
-                input.get_window()
-            },
+            SqlOperator::ArrowProjection {
+                input,
+                expressions,
+                input_schema,
+                output_schema,
+            } => input.get_window(),
         }
     }
 }
@@ -581,16 +598,30 @@ impl<'a> SqlPipelineBuilder<'a> {
         }
     }
 
-    fn insert_arrow_projection(&mut self,
-        projection: &datafusion_expr::logical_plan::Projection
+    fn insert_arrow_projection(
+        &mut self,
+        projection: &datafusion_expr::logical_plan::Projection,
     ) -> Result<SqlOperator> {
-
         let planner = DefaultPhysicalPlanner::default();
         let input_dfschema = projection.input.schema().clone();
         let input_schema = Schema::from(input_dfschema.as_ref());
-        let session_state = SessionState::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
-        let expressions = projection.expr.iter().map(|expr| planner.create_physical_expr(expr, &input_dfschema, &input_schema, &session_state).context("can't create physical expr")).collect::<Result<Vec<_>>>()?;
-        Ok(SqlOperator::ArrowProjection { input: Box::new(self.insert_sql_plan(&projection.input)?), expressions,input_schema: input_dfschema, output_schema: projection.schema.clone() })
+        let session_state =
+            SessionState::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        let expressions = projection
+            .expr
+            .iter()
+            .map(|expr| {
+                planner
+                    .create_physical_expr(expr, &input_dfschema, &input_schema, &session_state)
+                    .context("can't create physical expr")
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(SqlOperator::ArrowProjection {
+            input: Box::new(self.insert_sql_plan(&projection.input)?),
+            expressions,
+            input_schema: input_dfschema,
+            output_schema: projection.schema.clone(),
+        })
     }
 
     fn insert_projection(

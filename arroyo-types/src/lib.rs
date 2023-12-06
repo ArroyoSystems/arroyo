@@ -1,7 +1,8 @@
-use arrow::datatypes::{SchemaRef, DataType, Field, TimeUnit, Schema, Fields};
-use arrow_array::{RecordBatch, StructArray, RecordBatchOptions};
+use arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
 use arrow_array::builder::PrimitiveBuilder;
+use arrow_array::cast::AsArray;
 use arrow_array::types::TimestampNanosecondType;
+use arrow_array::{Array, PrimitiveArray, RecordBatch, RecordBatchOptions, StructArray};
 use bincode::{config, BorrowDecode, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -592,7 +593,6 @@ pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
     fn schema(&self) -> SchemaRef;
 }
 
-
 pub trait GetRecordBatchBuilder<R: RecordBatchBuilder<Data = Self>> {
     fn record_batch_builder() -> R;
 }
@@ -602,6 +602,74 @@ pub struct KeyValueTimestampRecordBatchBuilder<K: RecordBatchBuilder, T: RecordB
     value_builder: T,
     timestamp_builder: PrimitiveBuilder<TimestampNanosecondType>,
     schema: SchemaRef,
+}
+
+pub struct KeyValueTimestampRecordBatch {
+    pub key_array: StructArray,
+    pub value_batch: RecordBatch,
+    pub timestamp_array: PrimitiveArray<TimestampNanosecondType>,
+}
+
+impl TryFrom<&RecordBatch> for KeyValueTimestampRecordBatch {
+    type Error = String;
+
+    fn try_from(value: &RecordBatch) -> Result<Self, String> {
+        let key_array = value
+            .column_by_name("key")
+            .ok_or_else(|| "no key column".to_string())?
+            .as_struct()
+            .clone();
+        let value_array = value
+            .column_by_name("value")
+            .ok_or_else(|| "no value column".to_string())?
+            .as_struct();
+        let value_batch: RecordBatch = value_array.try_into().unwrap();
+        let timestamp_array: PrimitiveArray<TimestampNanosecondType> = value
+            .column_by_name("timestamp")
+            .ok_or_else(|| "no timestamp column".to_string())?
+            .as_primitive()
+            .clone();
+        Ok(Self {
+            key_array,
+            value_batch,
+            timestamp_array,
+        })
+    }
+}
+
+impl From<&KeyValueTimestampRecordBatch> for RecordBatch {
+    fn from(value: &KeyValueTimestampRecordBatch) -> Self {
+        let key_field = Field::new(
+            "key",
+            DataType::Struct(value.key_array.fields().clone()),
+            true,
+        );
+        let value_field = Field::new(
+            "value",
+            DataType::Struct(value.value_batch.schema().fields.clone()),
+            false,
+        );
+        let timestamp_field = Field::new(
+            "timestamp",
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        );
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            key_field,
+            value_field,
+            timestamp_field,
+        ]));
+        let value_array: StructArray = value.value_batch.clone().into();
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(value.key_array.clone()),
+                Arc::new(value_array),
+                Arc::new(value.timestamp_array.clone()),
+            ],
+        )
+        .unwrap()
+    }
 }
 
 impl<K: RecordBatchBuilder, T: RecordBatchBuilder> KeyValueTimestampRecordBatchBuilder<K, T>
@@ -626,7 +694,11 @@ where
             DataType::Timestamp(TimeUnit::Nanosecond, None),
             false,
         );
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![key_field, value_field, timestamp_field]));
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            key_field,
+            value_field,
+            timestamp_field,
+        ]));
         Self {
             key_builder: K::default(),
             value_builder: T::default(),

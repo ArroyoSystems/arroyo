@@ -8,7 +8,7 @@ use std::{mem, thread};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use anyhow::{Error, Result, bail};
+use anyhow::{bail, Error, Result};
 use arrow_array::RecordBatch;
 use arroyo_datastream::Operator;
 use arroyo_state::tables::time_key_map::TimeKeyMap;
@@ -74,14 +74,15 @@ pub trait StreamNode: Send {
     ) -> JoinHandle<()>;
 }
 
-
-
 impl TryFrom<Operator> for Box<dyn StreamNode> {
     type Error = Error;
 
     fn try_from(operator: Operator) -> Result<Self> {
         match operator {
-            operator => bail!("{:?} requires code generation, cannot instantiate directly", operator)
+            operator => bail!(
+                "{:?} requires code generation, cannot instantiate directly",
+                operator
+            ),
         }
     }
 }

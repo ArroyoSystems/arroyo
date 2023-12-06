@@ -15,7 +15,7 @@ arroyo-formats = { path = "../arroyo-formats" }
 
 anyhow = "1"
 
-arrow-schema = {workspace = true }
+arrow-schema = {workspace = true, features = ['serde'] }
 
 syn = {version = "2", features = ["full"]}
 quote = "1.0"

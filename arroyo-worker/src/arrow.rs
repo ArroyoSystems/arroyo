@@ -8,8 +8,9 @@ use arrow_array::RecordBatch;
 use arrow_array::RecordBatchOptions;
 use arrow_array::StructArray;
 use arroyo_formats::SchemaData;
-use arroyo_types::KeyValueTimestampRecordBatchBuilder;
 use arroyo_types::to_nanos;
+use arroyo_types::KeyValueTimestampRecordBatch;
+use arroyo_types::KeyValueTimestampRecordBatchBuilder;
 use arroyo_types::RecordBatchBuilder;
 use arroyo_types::{Key, Record, RecordBatchData};
 use datafusion_execution::FunctionRegistry;
@@ -24,6 +25,7 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::SystemTime;
+use tracing::info;
 
 use crate::{engine::Context, stream_node::ProcessFuncTrait};
 
@@ -66,7 +68,7 @@ impl ProjectionOperator {
             .expressions
             .into_iter()
             .map(|expr| PhysicalExprNode::decode(&mut expr.as_slice()).unwrap())
-            .map(|expr| {parse_physical_expr(&expr, &registry, &input_schema).unwrap()})
+            .map(|expr| parse_physical_expr(&expr, &registry, &input_schema).unwrap())
             .collect();
         Ok(Self {
             name,
@@ -96,21 +98,25 @@ impl ProcessFuncTrait for ProjectionOperator {
         record_batch: &RecordBatchData,
         ctx: &mut Context<(), ()>,
     ) {
+        info!("incoming record batch {:?}", record_batch);
+        info!("expressions: {:#?}", self.exprs);
+        info!("output schema {:#?}", self.output_schema);
         let batch = &record_batch.0;
+        let mut data: KeyValueTimestampRecordBatch = batch.try_into().unwrap();
         let arrays: Vec<_> = self
             .exprs
             .iter()
-            .map(|expr| expr.evaluate(batch))
+            .map(|expr| expr.evaluate(&data.value_batch))
             .map(|r| r.unwrap().into_array(batch.num_rows()))
             .collect();
 
-        let projected_batch = if arrays.is_empty() {
+        data.value_batch = if arrays.is_empty() {
             let options = RecordBatchOptions::new().with_row_count(Some(batch.num_rows()));
             RecordBatch::try_new_with_options(self.output_schema.clone(), arrays, &options).unwrap()
         } else {
             RecordBatch::try_new(self.output_schema.clone(), arrays).unwrap()
         };
-        ctx.collect_record_batch(projected_batch).await;
+        ctx.collect_record_batch((&data).into()).await;
     }
 }
 
@@ -143,7 +149,6 @@ where
         }
     }
 }
-
 
 #[async_trait::async_trait]
 impl<K: RecordBatchBuilder, T: RecordBatchBuilder> ProcessFuncTrait for StructToRecordBatch<K, T>
@@ -202,7 +207,6 @@ where
             .await;
     }
 }
-
 
 pub struct RecordBatchToStruct<K: SchemaData + Key, T: SchemaData> {
     name: String,

@@ -12,7 +12,9 @@ use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
-use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge, ProjectionOperator};
+use arroyo_rpc::grpc::api::{
+    self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge, ProjectionOperator,
+};
 use arroyo_types::{Data, GlobalKey, JoinType, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -385,7 +387,7 @@ pub enum Operator {
     ArrowProjection {
         name: String,
         config: Vec<u8>,
-    }
+    },
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -513,7 +515,9 @@ impl Debug for Operator {
             } => write!(f, "updating_key<{}>", name),
             Operator::StructToRecordBatch { name } => write!(f, "struct_to_record_batch<{}>", name),
             Operator::RecordBatchToStruct { name } => write!(f, "record_batch_to_struct<{}>", name),
-            Operator::ArrowProjection { name, config:_ } => write!(f, "arrow_projection<{}>", name),
+            Operator::ArrowProjection { name, config: _ } => {
+                write!(f, "arrow_projection<{}>", name)
+            }
         }
     }
 }
@@ -1868,7 +1872,7 @@ impl Program {
                 Operator::StructToRecordBatch { name } => {
                     let key_type_string = &input.as_ref().unwrap().weight().key;
                     let key_builder_name = if "()" == key_type_string.as_str() {
-                        parse_type("arroyo_worker::arrow::EmptyRecordBatchBuilder")
+                        parse_type("arroyo_types::EmptyRecordBatchBuilder")
                     } else { parse_type(&format!("{}RecordBatchBuilder", key_type_string))};
                     let value_builder_name = format_ident!("{}RecordBatchBuilder", input.unwrap().weight().value);
                     quote! {
@@ -1889,7 +1893,7 @@ impl Program {
                     let hex_string = hex::encode(config);
                     quote! {
                         Box::new(arroyo_worker::arrow::
-                            ProjectionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()))
+                            ProjectionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
                     }
                 },
             };
@@ -2255,7 +2259,7 @@ impl From<Operator> for GrpcApi::operator::Operator {
                     operator: GrpcApi::OperatorName::ArrowProjection.into(),
                     config: Some(config),
                 })
-            },
+            }
         }
     }
 }
@@ -2573,10 +2577,11 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         }
                         GrpcApi::OperatorName::RecordBatchToStruct => {
                             Operator::RecordBatchToStruct { name }
-                        },
-                        GrpcApi::OperatorName::ArrowProjection => {
-                            Operator::ArrowProjection { name, config: named_operator.config.unwrap() }
                         }
+                        GrpcApi::OperatorName::ArrowProjection => Operator::ArrowProjection {
+                            name,
+                            config: named_operator.config.unwrap(),
+                        },
                     }
                 }
             },
