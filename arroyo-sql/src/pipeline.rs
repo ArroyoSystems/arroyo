@@ -819,7 +819,7 @@ impl<'a> SqlPipelineBuilder<'a> {
         }
     }
 
-    fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
+    pub fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
         match expression {
             Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
                 "hop" => {

@@ -1,13 +1,16 @@
 #![allow(clippy::new_without_default)]
 use anyhow::{anyhow, bail, Result};
 use arrow::array::ArrayRef;
+use arrow::compute::or;
 use arrow::datatypes::{self, DataType, Field};
-use arrow_schema::TimeUnit;
+use arrow_schema::{Schema, TimeUnit};
 use arroyo_connectors::kafka::{KafkaConfig, KafkaConnector, KafkaTable};
 use arroyo_connectors::{Connection, Connector};
-use arroyo_datastream::Program;
+use arroyo_datastream::{Program, WindowType};
 
+use arroyo_rpc::grpc::api::window;
 use datafusion::physical_plan::functions::make_scalar_function;
+use datafusion_common::{Column, OwnedTableReference, Result as DFResult};
 pub mod avro;
 pub(crate) mod code_gen;
 pub mod expressions;
@@ -27,14 +30,20 @@ use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
 use datafusion::sql::{planner::ContextProvider, TableReference};
 
+use datafusion_common::tree_node::{
+    RewriteRecursion, TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion,
+};
+use datafusion_expr::{
+    logical_plan, AccumulatorFactoryFunction, Aggregate, Expr, LogicalPlan, ReturnTypeFunction,
+    Signature, StateTypeFunction, TableScan, Volatility, WindowUDF,
+};
 use datafusion_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
-use datafusion_expr::{
-    AccumulatorFactoryFunction, LogicalPlan, ReturnTypeFunction, Signature, StateTypeFunction,
-    Volatility, WindowUDF,
-};
 use expressions::{Expression, ExpressionContext};
+use petgraph::data::Build;
+use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::IntoNodeReferences;
 use pipeline::{SqlOperator, SqlPipelineBuilder};
 use plan_graph::{get_program, PlanGraph};
 use schemas::window_arrow_struct;
@@ -44,16 +53,17 @@ use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::types::{StructDef, StructField, TypeDef};
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, ConnectionType};
 use arroyo_rpc::formats::{Format, JsonFormat};
-use datafusion_common::DataFusionError;
+use datafusion_common::{DFSchema, DFSchemaRef, DataFusionError};
 use prettyplease::unparse;
 use regex::Regex;
 use std::collections::HashSet;
+use std::fmt::Debug;
 
 use arroyo_rpc::OperatorConfig;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
-use tracing::warn;
+use tracing::{info, warn};
 use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
@@ -460,6 +470,354 @@ pub async fn parse_and_get_program(
     tokio::spawn(async move { parse_and_get_program_sync(query, schema_provider, config) })
         .await
         .map_err(|_| anyhow!("Something went wrong"))?
+}
+
+#[derive(Default, Debug)]
+pub(crate) struct QueryToGraphVisitor {
+    local_logical_plan_graph: DiGraph<LogicalPlanExtension, DataFusionEdge>,
+    table_source_to_nodes: HashMap<OwnedTableReference, NodeIndex>,
+}
+
+#[derive(Debug)]
+enum LogicalPlanExtension {
+    ValueCalculation(LogicalPlan),
+    KeyCalculation(LogicalPlan),
+    AggregateCalculation(AggregateCalculation),
+}
+
+impl LogicalPlanExtension {
+    fn inner_logical_plan(&self) -> Option<&LogicalPlan> {
+        match self {
+            LogicalPlanExtension::ValueCalculation(inner_plan)
+            | LogicalPlanExtension::KeyCalculation(inner_plan) => Some(inner_plan),
+            LogicalPlanExtension::AggregateCalculation(_) => None,
+        }
+    }
+    fn outgoing_edge(&self) -> DataFusionEdge {
+        match self {
+            LogicalPlanExtension::ValueCalculation(logical_plan) => DataFusionEdge {
+                value_schema: logical_plan.schema().clone(),
+                key_schema: None,
+            },
+            LogicalPlanExtension::KeyCalculation(logical_plan) => {
+                let value_schema = logical_plan.inputs()[0].schema().clone();
+                let key_schema = Some(logical_plan.schema().clone());
+                DataFusionEdge {
+                    value_schema,
+                    key_schema,
+                }
+            }
+            LogicalPlanExtension::AggregateCalculation(aggregate_calculation) => DataFusionEdge {
+                value_schema: aggregate_calculation.aggregate.schema.clone(),
+                key_schema: None,
+            },
+        }
+    }
+}
+
+struct AggregateCalculation {
+    window: WindowType,
+    aggregate: Aggregate,
+}
+
+impl Debug for AggregateCalculation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let logical_plan = LogicalPlan::Aggregate(self.aggregate.clone());
+        f.debug_struct("AggregateCalculation")
+            .field("window", &self.window)
+            .field("aggregate", &logical_plan)
+            .finish()
+    }
+}
+
+#[derive(Debug)]
+struct DataFusionEdge {
+    value_schema: DFSchemaRef,
+    key_schema: Option<DFSchemaRef>,
+}
+
+impl TreeNodeRewriter for QueryToGraphVisitor {
+    type N = LogicalPlan;
+
+    /// Invoked before (Preorder) any children of `node` are rewritten /
+    /// visited. Default implementation returns `Ok(Recursion::Continue)`
+    fn pre_visit(&mut self, _node: &Self::N) -> DFResult<RewriteRecursion> {
+        Ok(RewriteRecursion::Continue)
+    }
+
+    /// Invoked after (Postorder) all children of `node` have been mutated and
+    /// returns a potentially modified node.
+    fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
+        // we're trying to split out any shuffles and non-datafusion operations.
+        // These will be redefined as TableScans for the downstream operation,
+        // so we can just use a physical plan
+        match node {
+            LogicalPlan::Aggregate(Aggregate {
+                input,
+                mut group_expr,
+                aggr_expr,
+                schema,
+                ..
+            }) => {
+                let mut window_group_expr: Vec<_> = group_expr
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, expr)| {
+                        SqlPipelineBuilder::find_window(expr)
+                            .map(|option| option.map(|inner| (i, inner)))
+                            .transpose()
+                    })
+                    .collect::<Result<Vec<_>>>()
+                    .map_err(|err| DataFusionError::Plan(err.to_string()))?;
+                if window_group_expr.len() != 1 {
+                    return Err(datafusion_common::DataFusionError::NotImplemented(
+                        "require exactly 1 window in group by".to_string(),
+                    ));
+                }
+                let (window_index, window_type) = window_group_expr.pop().unwrap();
+                let mut key_fields = schema
+                    .fields()
+                    .iter()
+                    .take(group_expr.len())
+                    .cloned()
+                    .collect::<Vec<_>>();
+                group_expr.remove(window_index);
+                let window_field = key_fields.remove(window_index);
+
+                let key_schema = Arc::new(DFSchema::new_with_metadata(
+                    key_fields,
+                    schema.metadata().clone(),
+                )?);
+                let key_projection =
+                    LogicalPlan::Projection(datafusion_expr::Projection::try_new_with_schema(
+                        group_expr.clone(),
+                        input.clone(),
+                        key_schema.clone(),
+                    )?);
+                // TODO: copy keys instead of recomputing.
+
+                let key_index = self
+                    .local_logical_plan_graph
+                    .add_node(LogicalPlanExtension::KeyCalculation(key_projection));
+
+                let mut aggregate_input_fields = schema.fields().clone();
+                aggregate_input_fields.remove(window_index);
+                // TODO: incorporate the window field in the schema and adjust datafusion.
+                //aggregate_input_schema.push(window_field);
+
+                let input_arrow_schema = Arc::new(Schema::from(input.schema().as_ref()));
+
+                let input_table_scan = LogicalPlan::TableScan(TableScan {
+                    table_name: OwnedTableReference::parse_str("memory"),
+                    source: Arc::new(LogicalTableSource::new(input_arrow_schema)),
+                    projection: None,
+                    projected_schema: input.schema().clone(),
+                    filters: vec![],
+                    fetch: None,
+                });
+
+                let aggregate_calculation = AggregateCalculation {
+                    window: window_type,
+                    aggregate: Aggregate::try_new_with_schema(
+                        Arc::new(input_table_scan),
+                        group_expr,
+                        aggr_expr,
+                        Arc::new(DFSchema::new_with_metadata(
+                            aggregate_input_fields,
+                            schema.metadata().clone(),
+                        )?),
+                    )?,
+                };
+                let aggregate_index = self.local_logical_plan_graph.add_node(
+                    LogicalPlanExtension::AggregateCalculation(aggregate_calculation),
+                );
+                let table_name = format!("{}", aggregate_index.index());
+                self.local_logical_plan_graph.add_edge(
+                    key_index,
+                    aggregate_index,
+                    DataFusionEdge {
+                        value_schema: input.schema().clone(),
+                        key_schema: Some(key_schema),
+                    },
+                );
+                Ok(LogicalPlan::TableScan(TableScan {
+                    table_name: OwnedTableReference::partial("arroyo-virtual", table_name),
+                    source: Arc::new(LogicalTableSource::new(Arc::new(schema.as_ref().into()))),
+                    projection: None,
+                    projected_schema: input.schema().clone(),
+                    filters: vec![],
+                    fetch: None,
+                }))
+            }
+            LogicalPlan::TableScan(table_scan) => {
+                if let Some(projection_indices) = table_scan.projection {
+                    let input_table_scan = LogicalPlan::TableScan(TableScan {
+                        table_name: table_scan.table_name.clone(),
+                        source: table_scan.source.clone(),
+                        projection: None,
+                        projected_schema: Arc::new(
+                            table_scan.source.schema().as_ref().clone().try_into()?,
+                        ),
+                        filters: table_scan.filters.clone(),
+                        fetch: table_scan.fetch,
+                    });
+                    let projection_expressions: Vec<_> = projection_indices
+                        .into_iter()
+                        .map(|index| {
+                            Expr::Column(Column {
+                                relation: None,
+                                name: table_scan.source.schema().fields()[index]
+                                    .name()
+                                    .to_string(),
+                            })
+                        })
+                        .collect();
+                    let projection = LogicalPlan::Projection(datafusion_expr::Projection::try_new(
+                        projection_expressions,
+                        Arc::new(input_table_scan),
+                    )?);
+                    return projection.rewrite(self);
+                }
+                let node_index = match self.table_source_to_nodes.get(&table_scan.table_name) {
+                    Some(node_index) => *node_index,
+                    None => {
+                        let original_name = table_scan.table_name.clone();
+
+                        let index = self.local_logical_plan_graph.add_node(
+                            LogicalPlanExtension::ValueCalculation(LogicalPlan::TableScan(
+                                table_scan.clone(),
+                            )),
+                        );
+                        let Some(LogicalPlanExtension::ValueCalculation(LogicalPlan::TableScan(
+                            TableScan { table_name, .. },
+                        ))) = self.local_logical_plan_graph.node_weight_mut(index)
+                        else {
+                            return Err(DataFusionError::Internal(
+                                "expect a value node".to_string(),
+                            ));
+                        };
+                        *table_name = OwnedTableReference::partial(
+                            "arroyo-virtual",
+                            format!("{}", index.index()),
+                        );
+                        self.table_source_to_nodes.insert(original_name, index);
+                        index
+                    }
+                };
+                let Some(LogicalPlanExtension::ValueCalculation(interred_plan)) =
+                    self.local_logical_plan_graph.node_weight(node_index)
+                else {
+                    return Err(DataFusionError::Internal("expect a value node".to_string()));
+                };
+                Ok(interred_plan.clone())
+            }
+            other => Ok(other),
+        }
+    }
+}
+
+#[derive(Default)]
+struct TableScanFinder {
+    input_table_scan_ids: HashSet<usize>,
+}
+
+impl TreeNodeVisitor for TableScanFinder {
+    type N = LogicalPlan;
+
+    fn post_visit(
+        &mut self,
+        _node: &Self::N,
+    ) -> DFResult<datafusion_common::tree_node::VisitRecursion> {
+        Ok(datafusion_common::tree_node::VisitRecursion::Continue)
+    }
+
+    fn pre_visit(
+        &mut self,
+        node: &Self::N,
+    ) -> DFResult<datafusion_common::tree_node::VisitRecursion> {
+        match node {
+            LogicalPlan::TableScan(table_scan) => {
+                if let Some(schema) = table_scan.table_name.schema() {
+                    if schema == "arroyo-virtual" {
+                        self.input_table_scan_ids
+                            .insert(table_scan.table_name.table().parse().unwrap());
+                    }
+                }
+                Ok(datafusion_common::tree_node::VisitRecursion::Skip)
+            }
+            _ => Ok(datafusion_common::tree_node::VisitRecursion::Continue),
+        }
+    }
+}
+
+pub fn rewrite_experiment(
+    query: String,
+    mut schema_provider: ArroyoSchemaProvider,
+    config: SqlConfig,
+) -> Result<()> {
+    let dialect = PostgreSqlDialect {};
+    let mut inserts = vec![];
+    for statement in Parser::parse_sql(&dialect, &query)? {
+        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
+            schema_provider.insert_table(table);
+        } else {
+            inserts.push(Insert::try_from_statement(
+                &statement,
+                &mut schema_provider,
+            )?);
+        };
+    }
+    for insert in inserts {
+        let mut plan = match insert {
+            Insert::InsertQuery {
+                sink_name,
+                logical_plan,
+            } => logical_plan,
+            Insert::Anonymous { logical_plan } => logical_plan,
+        };
+        let mut rewriter = QueryToGraphVisitor::default();
+        println!("plan {:?}", plan);
+        let plan_rewrite = plan.rewrite(&mut rewriter).unwrap();
+        println!("plan rewrite {:?}", plan_rewrite);
+        rewriter
+            .local_logical_plan_graph
+            .add_node(LogicalPlanExtension::ValueCalculation(plan_rewrite));
+        let mut edges = vec![];
+        for (node_index, node) in rewriter.local_logical_plan_graph.node_references() {
+            let Some(logical_plan) = node.inner_logical_plan() else {
+                continue;
+            };
+            let mut visitor = TableScanFinder::default();
+            logical_plan.visit(&mut visitor).unwrap();
+            for index in visitor.input_table_scan_ids {
+                let table_scan_index = NodeIndex::from(index as u32);
+                let edge = rewriter
+                    .local_logical_plan_graph
+                    .find_edge(table_scan_index, node_index);
+                if edge.is_some() || node_index == table_scan_index {
+                    continue;
+                }
+                edges.push((
+                    table_scan_index,
+                    node_index,
+                    rewriter
+                        .local_logical_plan_graph
+                        .node_weight(table_scan_index)
+                        .unwrap()
+                        .outgoing_edge(),
+                ));
+            }
+        }
+        for (a, b, weight) in edges {
+            rewriter.local_logical_plan_graph.add_edge(a, b, weight);
+        }
+        println!("rewriter: {:?}", rewriter);
+        println!(
+            "graph: {:?}",
+            petgraph::dot::Dot::with_config(&rewriter.local_logical_plan_graph, &[])
+        );
+    }
+    Ok(())
 }
 
 pub fn parse_and_get_program_sync(

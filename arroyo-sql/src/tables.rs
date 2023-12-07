@@ -21,6 +21,7 @@ use datafusion_common::{config::ConfigOptions, DFField, DFSchema};
 use datafusion_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
 };
+use tracing::info;
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext};
 use crate::expressions::CastExpression;
@@ -831,6 +832,7 @@ impl Insert {
         }
 
         let logical_plan = produce_optimized_plan(statement, schema_provider)?;
+        info!("logical plan: {:#?}", logical_plan);
 
         match &logical_plan {
             LogicalPlan::Dml(DmlStatement {
