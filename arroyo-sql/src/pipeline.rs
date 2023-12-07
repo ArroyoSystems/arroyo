@@ -437,6 +437,8 @@ impl<'a> SqlPipelineBuilder<'a> {
     }
 
     pub fn insert_sql_plan(&mut self, plan: &LogicalPlan) -> Result<SqlOperator> {
+        // Check that output types are supported by Arroyo to avoid compile-time errors
+        let _output_struct_def: StructDef = plan.schema().clone().try_into()?;
         match plan {
             LogicalPlan::Projection(projection) => self.insert_projection(projection),
             LogicalPlan::Filter(filter) => self.insert_filter(filter),
