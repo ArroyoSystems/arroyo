@@ -196,7 +196,6 @@ async fn try_register_confluent_schema(
                     .await
                     .map_err(|e| anyhow!("Failed to write schema to schema registry: {}", e))?;
 
-                println!("Fetched id = {}", id);
                 avro.schema_id = Some(id as u32);
                 config.format = Some(Format::Avro(avro))
             }
@@ -210,8 +209,6 @@ async fn try_register_confluent_schema(
     }
 
     sink.config = serde_json::to_string(&config).unwrap();
-
-    println!("config = {}", sink.config);
 
     Ok(())
 }
