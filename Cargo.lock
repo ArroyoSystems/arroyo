@@ -912,6 +912,7 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "bytes",
  "chrono",
+ "datafusion",
  "datafusion-common",
  "datafusion-execution",
  "datafusion-expr",

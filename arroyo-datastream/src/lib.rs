@@ -388,6 +388,14 @@ pub enum Operator {
         name: String,
         config: Vec<u8>,
     },
+    ArrowValue {
+        name: String,
+        config: Vec<u8>
+    },
+    ArrowKey {
+        name: String,
+        config: Vec<u8> 
+    }
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -518,6 +526,8 @@ impl Debug for Operator {
             Operator::ArrowProjection { name, config: _ } => {
                 write!(f, "arrow_projection<{}>", name)
             }
+            Operator::ArrowValue { name, config: _ } => write!(f, "arrow_value<{}>", name),
+            Operator::ArrowKey { name, config } => write!(f, "arrow_key<{}>", name)
         }
     }
 }
@@ -1896,6 +1906,20 @@ impl Program {
                             ProjectionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
                     }
                 },
+                Operator::ArrowValue { name, config } => {
+                    let hex_string = hex::encode(config);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            ProjectionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
+                    }
+                },
+                Operator::ArrowKey { name, config } => {
+                    let hex_string = hex::encode(config);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            ProjectionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
+                    }
+                },
             };
 
             (node.operator_id.clone(), description, body, node.parallelism)
@@ -2260,6 +2284,12 @@ impl From<Operator> for GrpcApi::operator::Operator {
                     config: Some(config),
                 })
             }
+            Operator::ArrowValue { name, config } => {
+                GrpcOperator::NamedOperator(GrpcApi::NamedOperator { name, operator: GrpcApi::OperatorName::ArrowValuePlan.into(), config: Some(config) })
+            },
+            Operator::ArrowKey { name, config } => {
+                GrpcOperator::NamedOperator(GrpcApi::NamedOperator { name, operator: GrpcApi::OperatorName::ArrowKeyPlan.into(), config: Some(config) })
+            },
         }
     }
 }
@@ -2582,6 +2612,8 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                             name,
                             config: named_operator.config.unwrap(),
                         },
+                        GrpcApi::OperatorName::ArrowValuePlan => Operator::ArrowValue { name, config: named_operator.config.unwrap() },
+                        GrpcApi::OperatorName::ArrowKeyPlan => Operator::ArrowKey { name, config: named_operator.config.unwrap() },
                     }
                 }
             },

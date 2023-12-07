@@ -10,7 +10,7 @@ use arroyo_datastream::{Program, WindowType};
 
 use arroyo_rpc::grpc::api::window;
 use datafusion::physical_plan::functions::make_scalar_function;
-use datafusion_common::{Column, OwnedTableReference, Result as DFResult};
+use datafusion_common::{Column, OwnedTableReference, Result as DFResult, DFField};
 pub mod avro;
 pub(crate) mod code_gen;
 pub mod expressions;
@@ -56,6 +56,7 @@ use arroyo_rpc::formats::{Format, JsonFormat};
 use datafusion_common::{DFSchema, DFSchemaRef, DataFusionError};
 use prettyplease::unparse;
 use regex::Regex;
+use std::borrow::BorrowMut;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
@@ -478,19 +479,63 @@ pub(crate) struct QueryToGraphVisitor {
     table_source_to_nodes: HashMap<OwnedTableReference, NodeIndex>,
 }
 
+#[derive(Default)]
+struct KeyTimestampRewriter {
+
+}
+
+impl TreeNodeRewriter for KeyTimestampRewriter {
+    type N = LogicalPlan;
+
+    fn mutate(&mut self,mut node: Self::N) -> DFResult<Self::N> {
+        match  node {
+            LogicalPlan::Projection(ref mut projection) => {
+                projection.schema = add_timestamp_field(projection.schema.clone())?;
+                projection.expr.push(Expr::Column(Column { relation: None, name: "_timestamp".to_string()}));
+            },
+            LogicalPlan::Aggregate(ref mut aggregate) => {
+                aggregate.schema = add_timestamp_field(aggregate.schema.clone())?;
+            },
+            LogicalPlan::Join(ref mut join) => {
+                join.schema = add_timestamp_field(join.schema.clone())?;
+            },
+            LogicalPlan::Union(ref mut union) => {
+                union.schema = add_timestamp_field(union.schema.clone())?;
+            },
+            LogicalPlan::TableScan(ref mut table_scan) => {
+                table_scan.projected_schema = add_timestamp_field(table_scan.projected_schema.clone())?;
+            },
+            LogicalPlan::SubqueryAlias(ref mut subquery_alias) => {
+                let timestamp_field = DFField::new(Some(subquery_alias.alias.clone()), "_timestamp", DataType::Timestamp(TimeUnit::Nanosecond, None), false);
+                subquery_alias.schema = Arc::new(subquery_alias.schema.join(&DFSchema::new_with_metadata(vec![timestamp_field], HashMap::new())?)?);
+            }
+            _ => {}
+        }
+        Ok(node)
+    }
+}
+
+fn add_timestamp_field(schema: DFSchemaRef) -> DFResult<DFSchemaRef> {
+    let timestamp_field = DFField::new_unqualified("_timestamp", DataType::Timestamp(TimeUnit::Nanosecond, None), false);
+    Ok(Arc::new(schema.join(&DFSchema::new_with_metadata(vec![timestamp_field], HashMap::new())?)?))
+}
+
 #[derive(Debug)]
 enum LogicalPlanExtension {
     ValueCalculation(LogicalPlan),
     KeyCalculation(LogicalPlan),
     AggregateCalculation(AggregateCalculation),
+    Sink,
 }
 
 impl LogicalPlanExtension {
+    // used for finding input TableScans, if the variant already manually crafts its edges, return None.
     fn inner_logical_plan(&self) -> Option<&LogicalPlan> {
         match self {
             LogicalPlanExtension::ValueCalculation(inner_plan)
             | LogicalPlanExtension::KeyCalculation(inner_plan) => Some(inner_plan),
             LogicalPlanExtension::AggregateCalculation(_) => None,
+            LogicalPlanExtension::Sink => None,
         }
     }
     fn outgoing_edge(&self) -> DataFusionEdge {
@@ -511,6 +556,7 @@ impl LogicalPlanExtension {
                 value_schema: aggregate_calculation.aggregate.schema.clone(),
                 key_schema: None,
             },
+            LogicalPlanExtension::Sink => unreachable!()
         }
     }
 }
@@ -767,6 +813,7 @@ pub fn rewrite_experiment(
             )?);
         };
     }
+    let mut rewriter = QueryToGraphVisitor::default();
     for insert in inserts {
         let mut plan = match insert {
             Insert::InsertQuery {
@@ -775,13 +822,19 @@ pub fn rewrite_experiment(
             } => logical_plan,
             Insert::Anonymous { logical_plan } => logical_plan,
         };
-        let mut rewriter = QueryToGraphVisitor::default();
-        println!("plan {:?}", plan);
+        println!("plan {:?}\n\n", plan);
         let plan_rewrite = plan.rewrite(&mut rewriter).unwrap();
         println!("plan rewrite {:?}", plan_rewrite);
-        rewriter
+        let extended_plan_node = LogicalPlanExtension::ValueCalculation(plan_rewrite);
+        let edge = extended_plan_node.outgoing_edge();
+        let plan_index = rewriter
             .local_logical_plan_graph
-            .add_node(LogicalPlanExtension::ValueCalculation(plan_rewrite));
+            .add_node(extended_plan_node);
+
+        let sink_index = rewriter.local_logical_plan_graph.add_node(LogicalPlanExtension::Sink);
+        rewriter.local_logical_plan_graph.add_edge(plan_index, sink_index, edge);
+    
+        
         let mut edges = vec![];
         for (node_index, node) in rewriter.local_logical_plan_graph.node_references() {
             let Some(logical_plan) = node.inner_logical_plan() else {
@@ -811,12 +864,12 @@ pub fn rewrite_experiment(
         for (a, b, weight) in edges {
             rewriter.local_logical_plan_graph.add_edge(a, b, weight);
         }
-        println!("rewriter: {:?}", rewriter);
-        println!(
-            "graph: {:?}",
-            petgraph::dot::Dot::with_config(&rewriter.local_logical_plan_graph, &[])
-        );
     }
+    println!("rewriter: {:?}", rewriter);
+    println!(
+        "graph: {:?}",
+        petgraph::dot::Dot::with_config(&rewriter.local_logical_plan_graph, &[])
+    );
     Ok(())
 }
 

@@ -207,12 +207,14 @@ GROUP BY bidder, HOP(INTERVAL '3 second', INTERVAL '10' minute)) WHERE distinct_
 #[tokio::test]
 async fn test_query_parsing() {
     let schema_provider = get_test_schema_provider();
-    let sql = "WITH bids as (
-        SELECT bid.auction as auction, bid.price as price, bid.bidder as bidder, bid.extra as extra, bid.datetime as datetime
-        FROM nexmark where bid is not null)
+    let sql = "
+    CREATE TABLE impulse WITH (
+      connector = 'impulse',
+      event_rate = '10'
+    );
         SELECT * FROM (
-      SELECT bidder, hop(interval '3 second', interval '10 minute'), count(*) as bids from bids GROUP BY 1,2)
-      WHERE bids > 10";
+      SELECT counter, hop(interval '3 second', interval '10 minute'), count(*) as rows from impulse GROUP BY 1,2)
+      WHERE rows > 10";
     rewrite_experiment(sql.to_string(), schema_provider, SqlConfig::default()).unwrap();
 }
 

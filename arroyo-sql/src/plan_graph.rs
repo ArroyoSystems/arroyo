@@ -15,11 +15,11 @@ use datafusion::{
     physical_plan::PhysicalExpr,
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
-use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::{graph::{DiGraph, NodeIndex}, visit::Topo};
 use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
 
-use crate::expressions::AggregateComputation;
+use crate::{expressions::AggregateComputation, QueryToGraphVisitor};
 use crate::{
     code_gen::{
         BinAggregatingContext, CodeGenerator, CombiningContext, JoinListsContext, JoinPairContext,
@@ -2110,6 +2110,23 @@ impl From<PlanGraph> for DiGraph<StreamNode, StreamEdge> {
             },
         )
     }
+}
+
+pub (crate) fn get_arrow_program(mut rewriter: QueryToGraphVisitor, schema_provider: ArroyoSchemaProvider) -> Result<CompiledSql> {
+    let mut topo = Topo::new(&rewriter.local_logical_plan_graph);
+    let program_graph :DiGraph<StreamNode, StreamEdge> = DiGraph::new();
+    while let Some(node_index) = topo.next(&rewriter.local_logical_plan_graph) {
+        let logical_extension = rewriter.local_logical_plan_graph.node_weight(node_index).unwrap();
+        match logical_extension {
+            crate::LogicalPlanExtension::ValueCalculation(logical_plan) =>  {
+                
+            },
+            crate::LogicalPlanExtension::KeyCalculation(_) => todo!(),
+            crate::LogicalPlanExtension::AggregateCalculation(_) => todo!(),
+            crate::LogicalPlanExtension::Sink => todo!(),
+        }
+    }
+    todo!()
 }
 
 pub fn get_program(

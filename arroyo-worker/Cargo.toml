@@ -79,6 +79,7 @@ memchr = "2.6.3"
 apache-avro = "0.16.0"
 redis = { version = "0.23.3", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
 
+datafusion = "31.0"
 datafusion-proto = "31.0.0"
 datafusion-expr = "31.0.0"
 datafusion-physical-expr = "31.0"

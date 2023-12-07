@@ -13,13 +13,22 @@ use arroyo_types::KeyValueTimestampRecordBatch;
 use arroyo_types::KeyValueTimestampRecordBatchBuilder;
 use arroyo_types::RecordBatchBuilder;
 use arroyo_types::{Key, Record, RecordBatchData};
+use datafusion::execution::context::SessionContext;
+use datafusion::physical_plan::ExecutionPlan;
 use datafusion_execution::FunctionRegistry;
+use datafusion_execution::TaskContext;
+use datafusion_execution::runtime_env::RuntimeConfig;
+use datafusion_execution::runtime_env::RuntimeEnv;
 use datafusion_expr::AggregateUDF;
 use datafusion_expr::ScalarUDF;
 use datafusion_expr::WindowUDF;
 use datafusion_physical_expr::PhysicalExpr;
+use datafusion_proto::physical_plan::AsExecutionPlan;
+use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::protobuf::PhysicalExprNode;
+use datafusion_proto::protobuf::PhysicalPlanNode;
+use futures::StreamExt;
 use prost::Message;
 use std::collections::HashSet;
 use std::marker::PhantomData;
@@ -101,6 +110,77 @@ impl ProcessFuncTrait for ProjectionOperator {
         info!("incoming record batch {:?}", record_batch);
         info!("expressions: {:#?}", self.exprs);
         info!("output schema {:#?}", self.output_schema);
+        let batch = &record_batch.0;
+        let mut data: KeyValueTimestampRecordBatch = batch.try_into().unwrap();
+        let arrays: Vec<_> = self
+            .exprs
+            .iter()
+            .map(|expr| expr.evaluate(&data.value_batch))
+            .map(|r| r.unwrap().into_array(batch.num_rows()))
+            .collect();
+
+        data.value_batch = if arrays.is_empty() {
+            let options = RecordBatchOptions::new().with_row_count(Some(batch.num_rows()));
+            RecordBatch::try_new_with_options(self.output_schema.clone(), arrays, &options).unwrap()
+        } else {
+            RecordBatch::try_new(self.output_schema.clone(), arrays).unwrap()
+        };
+        ctx.collect_record_batch((&data).into()).await;
+    }
+}
+
+pub struct ValueExecutionOperator {
+    name: String,
+    execution_plan: Arc<dyn ExecutionPlan>
+}
+
+impl ValueExecutionOperator {
+    pub fn from_config(name: String, config: Vec<u8>) -> Result<Self> {
+        let proto_config: arroyo_rpc::grpc::api::ValuePlanOperator =
+            arroyo_rpc::grpc::api::ValuePlanOperator::decode(&mut config.as_slice()).unwrap();
+
+        let registry = Registry {};
+
+        let plan = PhysicalPlanNode::decode(&mut proto_config.physical_plan.as_slice()).unwrap();
+        let execution_plan = plan.try_into_physical_plan(&registry, 
+            &RuntimeEnv::new(RuntimeConfig::new())?, &DefaultPhysicalExtensionCodec{})?;
+
+        Ok(Self {
+            name,
+            execution_plan
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl ProcessFuncTrait for ValueExecutionOperator {
+    type InKey = ();
+    type InT = ();
+    type OutKey = ();
+    type OutT = ();
+
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    async fn process_element(&mut self, record: &Record<(), ()>, ctx: &mut Context<(), ()>) {
+        unimplemented!("only record batches supported");
+    }
+
+    async fn process_record_batch(
+        &mut self,
+        record_batch: &RecordBatchData,
+        ctx: &mut Context<(), ()>,
+    ) {
+        info!("incoming record batch {:?}", record_batch);
+        let batch = &record_batch.0;
+        let mut data: KeyValueTimestampRecordBatch = batch.try_into().unwrap();
+        let session_context = SessionContext::new();
+        session_context.register_batch("memory",  data.value_batch.clone());
+        let records = self.execution_plan.execute(0, session_context.task_ctx()).unwrap();
+        while let Some(batch) = records.next().await {
+            batch.unwrap();
+        }
         let batch = &record_batch.0;
         let mut data: KeyValueTimestampRecordBatch = batch.try_into().unwrap();
         let arrays: Vec<_> = self

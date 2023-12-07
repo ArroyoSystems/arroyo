@@ -108,10 +108,17 @@ message ProjectionOperator {
   bytes output_schema = 5;
 }
 
+message ValuePlanOperator {
+  string name = 1;
+  bytes physical_plan = 2;
+}
+
 enum OperatorName {
   STRUCT_TO_RECORD_BATCH = 0;
   RECORD_BATCH_TO_STRUCT = 1;
   ARROW_PROJECTION = 2;
+  ARROW_VALUE_PLAN = 3;
+  ARROW_KEY_PLAN = 4;
 }
 
 message WasmUdfs {
