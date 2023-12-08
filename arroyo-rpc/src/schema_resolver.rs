@@ -1,3 +1,4 @@
+use crate::var_str::VarStr;
 use anyhow::{anyhow, bail};
 use apache_avro::Schema;
 use async_trait::async_trait;
@@ -103,7 +104,7 @@ pub struct ConfluentSchemaRegistry {
     topic: String,
     client: Client,
     api_key: Option<String>,
-    api_secret: Option<String>,
+    api_secret: Option<VarStr>,
 }
 
 impl ConfluentSchemaRegistry {
@@ -111,7 +112,7 @@ impl ConfluentSchemaRegistry {
         endpoint: &str,
         topic: &str,
         api_key: Option<String>,
-        api_secret: Option<String>,
+        api_secret: Option<VarStr>,
     ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(5))
@@ -226,8 +227,14 @@ impl ConfluentSchemaRegistry {
     async fn get_schema_for_url<T: DeserializeOwned>(&self, url: Url) -> anyhow::Result<T> {
         let mut get_call = self.client.get(url.clone());
 
+        let secret = self
+            .api_secret
+            .as_ref()
+            .map(|s| s.sub_env_vars())
+            .transpose()?;
+
         if let Some(api_key) = self.api_key.as_ref() {
-            get_call = get_call.basic_auth(api_key, self.api_secret.as_ref());
+            get_call = get_call.basic_auth(api_key, secret);
         }
 
         let resp = get_call.send().await.map_err(|e| {

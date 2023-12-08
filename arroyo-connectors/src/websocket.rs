@@ -7,6 +7,7 @@ use anyhow::anyhow;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
+use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
@@ -25,7 +26,7 @@ use super::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/websocket/table.json");
 
-import_types!(schema = "../connector-schemas/websocket/table.json");
+import_types!(schema = "../connector-schemas/websocket/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
 const ICON: &str = include_str!("../resources/websocket.svg");
 
 pub struct WebsocketConnector {}
@@ -79,16 +80,23 @@ impl Connector for WebsocketConnector {
                 }
             };
 
-            let headers =
-                match string_to_map(table.headers.as_ref().map(|t| t.0.as_str()).unwrap_or(""))
-                    .ok_or_else(|| anyhow!("Headers are invalid; should be comma-separated pairs"))
-                {
-                    Ok(headers) => headers,
-                    Err(e) => {
-                        send(true, true, format!("Failed to parse headers: {:?}", e)).await;
-                        return;
-                    }
-                };
+            let headers_str = match table.headers.as_ref().map(|s| s.sub_env_vars()).transpose() {
+                Ok(headers) => headers,
+                Err(e) => {
+                    send(true, true, format!("{}", e.root_cause())).await;
+                    return;
+                }
+            };
+
+            let headers = match string_to_map(&headers_str.unwrap_or("".to_string()))
+                .ok_or_else(|| anyhow!("Headers are invalid; should be comma-separated pairs"))
+            {
+                Ok(headers) => headers,
+                Err(e) => {
+                    send(true, true, format!("Failed to parse headers: {:?}", e)).await;
+                    return;
+                }
+            };
 
             let uri = match Uri::from_str(&table.endpoint.to_string()) {
                 Ok(uri) => uri,
@@ -215,7 +223,7 @@ impl Connector for WebsocketConnector {
         let description = format!("WebsocketSource<{}>", table.endpoint);
 
         if let Some(headers) = &table.headers {
-            string_to_map(headers).ok_or_else(|| {
+            string_to_map(&headers.sub_env_vars()?).ok_or_else(|| {
                 anyhow!(
                     "Invalid format for headers; should be a \
                     comma-separated list of colon-separated key value pairs"
@@ -289,7 +297,7 @@ impl Connector for WebsocketConnector {
             EmptyConfig {},
             WebsocketTable {
                 endpoint,
-                headers: headers.map(Headers),
+                headers: headers.map(|s| VarStr::new(s)),
                 subscription_message: None,
                 subscription_messages,
             },

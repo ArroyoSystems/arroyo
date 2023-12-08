@@ -4,7 +4,7 @@ use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::formats::{Format, Framing};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
-use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
+use arroyo_rpc::{var_str::VarStr, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{string_to_map, Data, Message, Record, Watermark};
 use bincode::{Decode, Encode};
@@ -19,7 +19,9 @@ use tokio::select;
 use tracing::{debug, info};
 use typify::import_types;
 
-import_types!(schema = "../connector-schemas/sse/table.json");
+import_types!(
+    schema = "../connector-schemas/sse/table.json",
+    convert = { {type = "string", format = "var-str"} = VarStr });
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
 pub struct SSESourceState {
@@ -72,9 +74,14 @@ where
         let table: SseTable =
             serde_json::from_value(config.table).expect("Invalid table config for SSESource");
 
+        let headers = table
+            .headers
+            .as_ref()
+            .map(|s| s.sub_env_vars().expect("Failed to substitute env vars"));
+
         Self {
             url: table.endpoint,
-            headers: string_to_map(table.headers.as_ref().map(|t| t.0.as_str()).unwrap_or(""))
+            headers: string_to_map(&headers.unwrap_or("".to_string()))
                 .expect("Invalid header map")
                 .into_iter()
                 .collect(),

@@ -1,21 +1,20 @@
 use anyhow::{anyhow, bail};
-use arroyo_rpc::OperatorConfig;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::convert::Infallible;
-use typify::import_types;
-
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
+use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use axum::response::sse::Event;
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     message::BorrowedMessage,
     ClientConfig, Offset, TopicPartitionList,
 };
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::convert::Infallible;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 use tracing::{error, info, warn};
+use typify::import_types;
 
 use crate::{pull_opt, Connection, ConnectionType};
 
@@ -25,7 +24,13 @@ const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/kafka/connecti
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/kafka/table.json");
 const ICON: &str = include_str!("../resources/kafka.svg");
 
-import_types!(schema = "../connector-schemas/kafka/connection.json",);
+import_types!(
+    schema = "../connector-schemas/kafka/connection.json",
+    convert = {
+        {type = "string", format = "var-str"} = VarStr,
+        {type = "string", format = "var-str", isSensitive = true} = VarStr
+    }
+);
 import_types!(schema = "../connector-schemas/kafka/table.json");
 
 pub struct KafkaConnector {}
@@ -150,14 +155,16 @@ impl Connector for KafkaConnector {
                         mechanism: pull_opt("auth.mechanism", options)?,
                         protocol: pull_opt("auth.protocol", options)?,
                         username: pull_opt("auth.username", options)?,
-                        password: pull_opt("auth.password", options)?,
+                        password: VarStr::new(pull_opt("auth.password", options)?),
                     },
                     Some(other) => bail!("unknown auth type '{}'", other),
                 };
 
                 let schema_registry = options.remove("schema_registry.endpoint").map(|endpoint| {
                     let api_key = options.remove("schema_registry.api_key");
-                    let api_secret = options.remove("schema_registry.api_secret");
+                    let api_secret = options
+                        .remove("schema_registry.api_secret")
+                        .map(|secret| VarStr::new(secret));
                     SchemaRegistry::ConfluentSchemaRegistry {
                         endpoint,
                         api_key,
@@ -251,7 +258,10 @@ impl KafkaTester {
                 client_config.set("sasl.mechanism", mechanism);
                 client_config.set("security.protocol", protocol);
                 client_config.set("sasl.username", username);
-                client_config.set("sasl.password", password);
+                client_config.set(
+                    "sasl.password",
+                    password.sub_env_vars().map_err(|e| e.to_string())?,
+                );
             }
         };
 

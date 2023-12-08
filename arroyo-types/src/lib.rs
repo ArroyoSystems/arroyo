@@ -4,6 +4,7 @@ use bincode::{config, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::env;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -812,8 +813,6 @@ pub enum DateTruncPrecision {
     Minute,
     Second,
 }
-
-use std::convert::TryFrom;
 
 impl TryFrom<&str> for DatePart {
     type Error = String;

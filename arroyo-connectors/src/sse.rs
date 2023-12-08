@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
 use eventsource_client::Client;
@@ -22,7 +22,7 @@ use super::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/sse/table.json");
 
-import_types!(schema = "../connector-schemas/sse/table.json");
+import_types!(schema = "../connector-schemas/sse/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
 const ICON: &str = include_str!("../resources/sse.svg");
 
 pub struct SSEConnector {}
@@ -79,7 +79,7 @@ impl Connector for SSEConnector {
         let description = format!("SSESource<{}>", table.endpoint);
 
         if let Some(headers) = &table.headers {
-            string_to_map(headers).ok_or_else(|| {
+            string_to_map(&headers.sub_env_vars()?).ok_or_else(|| {
                 anyhow!(
                     "Invalid format for headers; should be a \
                     comma-separated list of colon-separated key value pairs"
@@ -134,7 +134,7 @@ impl Connector for SSEConnector {
             SseTable {
                 endpoint,
                 events,
-                headers: headers.map(Headers),
+                headers: headers.map(|s| VarStr::new(s)),
             },
             schema,
         )
@@ -174,11 +174,13 @@ impl SseTester {
             .map_err(|_| anyhow!("Endpoint URL is invalid"))?;
 
         let headers = string_to_map(
-            self.config
+            &self
+                .config
                 .headers
                 .as_ref()
-                .map(|t| t.0.as_str())
-                .unwrap_or(""),
+                .map(|s| s.sub_env_vars())
+                .transpose()?
+                .unwrap_or("".to_string()),
         )
         .ok_or_else(|| anyhow!("Headers are invalid; should be comma-separated pairs"))?;
 

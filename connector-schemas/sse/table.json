@@ -12,9 +12,9 @@
         "headers": {
             "title": "Headers",
             "type": "string",
-            "description": "Comma separated list of headers to send with the request",
-            "pattern": "([a-zA-Z0-9-]+: ?.+,)*([a-zA-Z0-9-]+: ?.+)",
-            "examples": ["Authentication: digest 1234,Content-Type: application/json"]
+            "description": "Comma separated list of headers to send with the request. May contain [variables](https://doc.arroyo.dev/connectors/overview#variables).",
+            "examples": ["Authentication: digest 1234,Content-Type: application/json"],
+            "format": "var-str"
         },
         "events": {
             "title": "Events",

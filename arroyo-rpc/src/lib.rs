@@ -2,6 +2,7 @@ pub mod api_types;
 pub mod formats;
 pub mod public_ids;
 pub mod schema_resolver;
+pub mod var_str;
 
 use std::collections::HashMap;
 use std::{fs, time::SystemTime};

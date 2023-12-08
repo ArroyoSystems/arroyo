@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 
 use anyhow::anyhow;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
 use reqwest::{Client, Request};
@@ -20,7 +20,10 @@ use super::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/polling_http/table.json");
 
-import_types!(schema = "../connector-schemas/polling_http/table.json");
+import_types!(
+    schema = "../connector-schemas/polling_http/table.json",
+    convert = { {type = "string", format = "var-str"} = VarStr }
+);
 const ICON: &str = include_str!("../resources/http.svg");
 
 pub struct PollingHTTPConnector {}
@@ -55,8 +58,13 @@ impl PollingHTTPConnector {
         config: &PollingHttpTable,
         tx: Sender<Result<Event, Infallible>>,
     ) -> anyhow::Result<()> {
-        let client =
-            construct_http_client(&config.endpoint, config.headers.as_ref().map(|t| &t.0))?;
+        let headers = config
+            .headers
+            .as_ref()
+            .map(|s| s.sub_env_vars())
+            .transpose()?;
+
+        let client = construct_http_client(&config.endpoint, headers)?;
         let req = Self::construct_test_request(&client, config)?;
 
         tx.send(Ok(Event::default()
@@ -126,7 +134,7 @@ impl Connector for PollingHTTPConnector {
                 Err(err) => TestSourceMessage {
                     error: true,
                     done: true,
-                    message: format!("{:?}", err),
+                    message: format!("{}", err.root_cause()),
                 },
             };
 
@@ -166,7 +174,7 @@ impl Connector for PollingHTTPConnector {
             EmptyConfig {},
             PollingHttpTable {
                 endpoint,
-                headers: headers.map(Headers),
+                headers: headers.map(|s| VarStr::new(s)),
                 method,
                 body,
                 poll_interval_ms: interval,
@@ -187,7 +195,7 @@ impl Connector for PollingHTTPConnector {
         let description = format!("PollingHTTPSource<{}>", table.endpoint);
 
         if let Some(headers) = &table.headers {
-            string_to_map(headers).ok_or_else(|| {
+            string_to_map(&headers.sub_env_vars()?).ok_or_else(|| {
                 anyhow!(
                     "Invalid format for headers; should be a \
                     comma-separated list of colon-separated key value pairs"

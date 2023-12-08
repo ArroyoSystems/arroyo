@@ -4,14 +4,19 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use crate::{
+    engine::{Context, StreamNode},
+    header_map, SourceFinishType,
+};
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
+    var_str::VarStr,
     ControlMessage, OperatorConfig,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{string_to_map, Data, Message, Record, UserError, Watermark};
+use arroyo_types::{Data, Message, Record, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -24,12 +29,9 @@ use tracing::{debug, info};
 use tungstenite::http::Request;
 use typify::import_types;
 
-use crate::{
-    engine::{Context, StreamNode},
-    SourceFinishType,
-};
-
-import_types!(schema = "../connector-schemas/websocket/table.json");
+import_types!(
+    schema = "../connector-schemas/websocket/table.json",
+    convert = { {type = "string", format = "var-str"} = VarStr });
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
 pub struct WebsocketSourceState {}
@@ -72,12 +74,21 @@ where
                 .map(|m| m.to_string()),
         );
 
+        let headers = header_map(table.headers)
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    (&k).try_into()
+                        .expect(&format!("invalid header name {}", k)),
+                    (&v).try_into()
+                        .expect(&format!("invalid header value {}", v)),
+                )
+            })
+            .collect();
+
         Self {
             url: table.endpoint,
-            headers: string_to_map(table.headers.as_ref().map(|t| t.0.as_str()).unwrap_or(""))
-                .expect("Invalid header map")
-                .into_iter()
-                .collect(),
+            headers,
             subscription_messages,
             deserializer: DataDeserializer::new(
                 config.format.expect("WebsocketSource requires a format"),
