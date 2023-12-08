@@ -23,7 +23,7 @@ use crate::avro;
 use arroyo_rpc::api_types::connections::{
     FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
-use datafusion_common::ScalarValue;
+use datafusion_common::{DFField, DFSchemaRef, ScalarValue};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
@@ -41,6 +41,18 @@ pub struct StructDef {
 pub struct StructPair {
     pub left: StructDef,
     pub right: StructDef,
+}
+
+impl TryFrom<DFSchemaRef> for StructDef {
+    type Error = anyhow::Error;
+    fn try_from(schema: DFSchemaRef) -> Result<Self> {
+        let struct_fields: Vec<StructField> = schema
+            .fields()
+            .iter()
+            .map(|field| field.try_into())
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self::for_fields(struct_fields))
+    }
 }
 
 impl StructDef {
@@ -569,6 +581,18 @@ pub struct StructField {
     pub original_type: Option<String>,
 }
 
+impl TryFrom<&DFField> for StructField {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &DFField) -> Result<Self> {
+        Ok(StructField::new(
+            value.name().to_string(),
+            value.qualifier().map(|qualifier| qualifier.to_string()),
+            TypeDef::try_from_arrow(value.data_type(), value.is_nullable())?,
+        ))
+    }
+}
+
 impl StructField {
     pub fn new(name: String, alias: Option<String>, data_type: TypeDef) -> Self {
         if let TypeDef::DataType(DataType::Struct(_), _) = &data_type {
@@ -983,6 +1007,68 @@ impl TypeDef {
         match self {
             TypeDef::StructDef(struct_def, _) => TypeDef::StructDef(struct_def.clone(), nullity),
             TypeDef::DataType(data_type, _) => TypeDef::DataType(data_type.clone(), nullity),
+        }
+    }
+    pub fn try_from_arrow(data_type: &DataType, nullable: bool) -> Result<Self> {
+        match data_type {
+            DataType::Null
+            | DataType::Boolean
+            | DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::UInt8
+            | DataType::UInt16
+            | DataType::UInt32
+            | DataType::UInt64
+            | DataType::Float16
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Binary
+            | DataType::LargeBinary
+            | DataType::Utf8
+            | DataType::LargeUtf8
+            | DataType::Timestamp(_, None) => Ok(TypeDef::DataType(data_type.clone(), nullable)),
+
+            DataType::Timestamp(_, Some(_))
+            | DataType::Date32
+            | DataType::Date64
+            | DataType::Time32(_)
+            | DataType::Time64(_)
+            | DataType::Duration(_)
+            | DataType::FixedSizeBinary(_)
+            | DataType::Union(_, _)
+            | DataType::Dictionary(_, _)
+            | DataType::Decimal128(_, _)
+            | DataType::Decimal256(_, _)
+            | DataType::Map(_, _)
+            | DataType::RunEndEncoded(_, _)
+            | DataType::FixedSizeList(_, _)
+            | DataType::LargeList(_)
+            | DataType::Interval(_) => bail!("{:?} not supported as struct type", data_type),
+            DataType::Struct(fields) => Ok(TypeDef::StructDef(
+                StructDef::for_fields(
+                    fields
+                        .iter()
+                        .map(|field| {
+                            Ok(StructField::new(
+                                field.name().to_string(),
+                                None,
+                                Self::try_from_arrow(field.data_type(), field.is_nullable())?,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                ),
+                nullable,
+            )),
+            DataType::List(field) => {
+                let TypeDef::DataType(..) =
+                    Self::try_from_arrow(field.data_type(), field.is_nullable())?
+                else {
+                    bail!("List contains unsupported data type {:?}", field);
+                };
+                Ok(TypeDef::DataType(data_type.clone(), nullable))
+            }
         }
     }
 }

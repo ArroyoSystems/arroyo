@@ -186,6 +186,23 @@ async fn test_no_inserting_updates_into_non_updating() {
 }
 
 #[tokio::test]
+async fn durations_error_out() {
+    let schema_provider = get_test_schema_provider();
+    let sql = "create table nexmark with (
+          connector = 'nexmark',
+          event_rate = '5'
+      );
+
+      select bid.datetime - DATE '2023-12-03'
+      from nexmark
+      group by 1;
+      ";
+    let _ = parse_and_get_program(sql, schema_provider, SqlConfig::default())
+        .await
+        .unwrap_err();
+}
+
+#[tokio::test]
 async fn test_no_aggregates_in_window() {
     let schema_provider = get_test_schema_provider();
     let sql = "WITH bids as (
