@@ -234,3 +234,50 @@ async fn test_udf() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn test_no_float_group_by() {
+    let schema_provider = get_test_schema_provider();
+
+    let sql = "create table nexmark with (
+        connector = 'nexmark',
+        event_rate = '5'
+    );
+
+    select cast(bid.price as float)
+    from nexmark
+    group by 1;";
+
+    let _ = parse_and_get_program(sql, schema_provider, SqlConfig::default())
+        .await
+        .unwrap_err();
+}
+
+#[tokio::test]
+async fn test_no_float_join_key() {
+    let schema_provider = get_test_schema_provider();
+
+    let sql = "create table test1 (
+         a FLOAT
+    ) with (
+        connector = 'websocket',
+        endpoint = 'ws://blah',
+        format = 'json'
+    );
+
+    create table test2 (
+         b FLOAT
+    ) with (
+        connector = 'websocket',
+        endpoint = 'ws://blah',
+        format = 'json'
+    );
+
+
+    select a from test1
+    LEFT JOIN test2 ON test1.a = test2.b";
+
+    let _ = parse_and_get_program(sql, schema_provider, SqlConfig::default())
+        .await
+        .unwrap_err();
+}
