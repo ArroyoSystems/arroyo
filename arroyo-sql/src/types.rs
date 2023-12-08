@@ -925,6 +925,22 @@ impl TypeDef {
         }
     }
 
+    pub fn try_as_key(&self) -> Result<()> {
+        match self {
+            TypeDef::StructDef(sd, _) => {
+                sd.fields
+                    .iter()
+                    .map(|f| f.data_type.try_as_key())
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(())
+            }
+            TypeDef::DataType(DataType::Float16 | DataType::Float32 | DataType::Float64, _) => {
+                bail!("FLOAT field cannot be used as key")
+            }
+            _ => Ok(()),
+        }
+    }
+
     pub fn get_literal(scalar: &ScalarValue) -> syn::Expr {
         if scalar.is_null() {
             return parse_quote!(None);
