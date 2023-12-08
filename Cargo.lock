@@ -868,6 +868,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
  "webpki 0.22.4",
 ]
 

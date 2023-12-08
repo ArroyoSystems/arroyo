@@ -1253,8 +1253,23 @@ impl ParquetFlusher {
     fn start(mut self) {
         tokio::spawn(async move {
             loop {
-                if !self.flush_iteration().await.unwrap() {
-                    return;
+                match self.flush_iteration().await {
+                    Ok(continue_flushing) => {
+                        if !continue_flushing {
+                            return;
+                        }
+                    }
+                    Err(err) => {
+                        self.control_tx
+                            .send(ControlResp::TaskFailed {
+                                operator_id: self.task_info.operator_id.clone(),
+                                task_index: self.task_info.task_index,
+                                error: err.to_string(),
+                            })
+                            .await
+                            .unwrap();
+                        return;
+                    }
                 }
             }
         });
@@ -1271,8 +1286,8 @@ impl ParquetFlusher {
         let cursor = Vec::new();
         let mut writer = ArrowWriter::try_new(cursor, record_batch.schema(), Some(props)).unwrap();
         writer.write(&record_batch)?;
-        writer.flush().unwrap();
-        let parquet_bytes = writer.into_inner().unwrap();
+        writer.flush()?;
+        let parquet_bytes = writer.into_inner()?;
         let bytes = parquet_bytes.len();
         self.storage.put(key, parquet_bytes).await?;
         Ok(bytes)
@@ -1494,10 +1509,13 @@ impl ParquetFlusher {
                 operator_id: self.task_info.operator_id.clone(),
                 subtask_metadata,
             }))
-            .await
-            .unwrap();
+            .await?;
         if cp.then_stop {
-            self.finish_tx.take().unwrap().send(()).unwrap();
+            self.finish_tx
+                .take()
+                .unwrap()
+                .send(())
+                .map_err(|_| anyhow::anyhow!("can't send finish"))?;
             return Ok(false);
         }
         Ok(true)

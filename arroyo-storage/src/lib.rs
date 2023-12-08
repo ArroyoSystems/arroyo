@@ -119,6 +119,31 @@ fn matchers() -> &'static HashMap<Backend, Vec<Regex>> {
     })
 }
 
+macro_rules! retry {
+    ($e:expr) => {{
+        use std::thread::sleep;
+        use std::time::Duration;
+        use tracing::error;
+        let mut retries = 0;
+        let max_retries: u32 = 10;
+        let backoff_factor: u64 = 2;
+        loop {
+            match $e {
+                Ok(value) => break Ok(value),
+                Err(e) if retries < max_retries => {
+                    retries += 1;
+                    error!("Error: {}. Retrying...", e);
+                    // exponential backoff, capped at 10 seconds.
+                    let backoff_time =
+                        Duration::from_millis(10_000.min(100 * backoff_factor.pow(retries)));
+                    sleep(backoff_time);
+                }
+                Err(e) => break Err(e),
+            }
+        }
+    }};
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct S3Config {
     endpoint: Option<String>,
@@ -502,11 +527,9 @@ impl StorageProvider {
         &self,
         path: P,
     ) -> Result<impl tokio::io::AsyncRead, StorageError> {
-        let path: String = path.into();
-        let bytes = self
-            .object_store
-            .get(&path.into())
-            .await
+        let path: Path = path.into().into();
+
+        let bytes = retry!(self.object_store.get(&path).await)
             .map_err(|e| Into::<StorageError>::into(e))?
             .into_stream();
 
@@ -519,9 +542,12 @@ impl StorageProvider {
         bytes: Vec<u8>,
     ) -> Result<String, StorageError> {
         let path = path.into().into();
-        self.object_store
-            .put(&self.qualify_path(&path), bytes.into())
-            .await?;
+        let bytes: Bytes = bytes.into();
+        retry!(
+            self.object_store
+                .put(&self.qualify_path(&path), bytes.clone())
+                .await
+        )?;
 
         Ok(format!("{}/{}", self.canonical_url, path))
     }
@@ -546,12 +572,11 @@ impl StorageProvider {
     }
 
     pub async fn start_multipart(&self, path: &Path) -> Result<MultipartId, StorageError> {
-        Ok(self
-            .object_store
-            .initiate_multipart_upload(path)
-            .await
-            .map_err(|e| Into::<StorageError>::into(e))?
-            .0)
+        Ok(
+            retry!(self.object_store.initiate_multipart_upload(path).await)
+                .map_err(|e| Into::<StorageError>::into(e))?
+                .0,
+        )
     }
 
     pub async fn add_multipart(
@@ -561,13 +586,14 @@ impl StorageProvider {
         part_number: usize,
         bytes: Bytes,
     ) -> Result<PartId, StorageError> {
-        Ok(self
-            .object_store
-            .get_put_part(path, multipart_id)
-            .await?
-            .put_part(bytes, part_number)
-            .await
-            .map_err(|e| Into::<StorageError>::into(e))?)
+        Ok(retry!(
+            self.object_store
+                .get_put_part(path, multipart_id)
+                .await?
+                .put_part(bytes.clone(), part_number)
+                .await
+        )
+        .map_err(|e| Into::<StorageError>::into(e))?)
     }
 
     pub async fn close_multipart(
@@ -576,13 +602,14 @@ impl StorageProvider {
         multipart_id: &MultipartId,
         parts: Vec<PartId>,
     ) -> Result<(), StorageError> {
-        Ok(self
-            .object_store
-            .get_put_part(path, multipart_id)
-            .await?
-            .complete(parts)
-            .await
-            .map_err(|e| Into::<StorageError>::into(e))?)
+        Ok(retry!(
+            self.object_store
+                .get_put_part(path, multipart_id)
+                .await?
+                .complete(parts.clone())
+                .await
+        )
+        .map_err(|e| Into::<StorageError>::into(e))?)
     }
 
     /// Produces a URL representation of this path that can be read by other systems,
