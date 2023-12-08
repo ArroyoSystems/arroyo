@@ -123,16 +123,19 @@ macro_rules! retry {
     ($e:expr) => {{
         use std::thread::sleep;
         use std::time::Duration;
+        use tracing::error;
         let mut retries = 0;
-        let max_retries: u32 = 5;
+        let max_retries: u32 = 10;
         let backoff_factor: u64 = 2;
         loop {
             match $e {
                 Ok(value) => break Ok(value),
                 Err(e) if retries < max_retries => {
                     retries += 1;
-                    println!("Error: {}. Retrying...", e);
-                    let backoff_time = Duration::from_millis(10 * backoff_factor.pow(retries));
+                    error!("Error: {}. Retrying...", e);
+                    // exponential backoff, capped at 10 seconds.
+                    let backoff_time =
+                        Duration::from_millis(10_000.min(100 * backoff_factor.pow(retries)));
                     sleep(backoff_time);
                 }
                 Err(e) => break Err(e),
