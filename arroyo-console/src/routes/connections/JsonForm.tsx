@@ -635,6 +635,7 @@ export function JsonForm({
 }) {
   let ajv = new Ajv();
   ajv.addKeyword('isSensitive');
+  ajv.addFormat('var-str', { validate: () => true });
   const memoAjv = useMemo(() => addFormats(ajv), [schema]);
 
   const formik = useFormik({

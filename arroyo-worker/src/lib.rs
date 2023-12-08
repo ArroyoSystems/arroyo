@@ -17,8 +17,8 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    from_millis, grpc_port, ports, to_micros, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV,
-    RUN_ID_ENV,
+    from_millis, grpc_port, ports, string_to_map, to_micros, CheckpointBarrier, NodeId, WorkerId,
+    JOB_ID_ENV, RUN_ID_ENV,
 };
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
@@ -44,6 +44,7 @@ pub use ordered_float::OrderedFloat;
 
 // re-export avro for use in generated code
 pub use apache_avro;
+use arroyo_rpc::var_str::VarStr;
 
 pub mod connectors;
 pub mod engine;
@@ -621,4 +622,13 @@ impl WorkerGrpc for WorkerServer {
 
         Ok(Response::new(JobFinishedResp {}))
     }
+}
+
+pub fn header_map(headers: Option<VarStr>) -> HashMap<String, String> {
+    string_to_map(
+        &headers
+            .map(|t| t.sub_env_vars().expect("Failed to substitute env vars"))
+            .unwrap_or("".to_string()),
+    )
+    .expect("Invalid header map")
 }

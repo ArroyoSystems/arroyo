@@ -4,16 +4,16 @@ use std::convert::Infallible;
 use anyhow::anyhow;
 use arroyo_rpc::OperatorConfig;
 
-use axum::response::sse::Event;
-use reqwest::{Client, Request};
-use serde_json::json;
-use tokio::sync::mpsc::Sender;
-use typify::import_types;
-
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
+use arroyo_rpc::var_str::VarStr;
+use axum::response::sse::Event;
+use reqwest::{Client, Request};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tokio::sync::mpsc::Sender;
+use typify::import_types;
 
 use crate::{construct_http_client, pull_opt, Connection, EmptyConfig};
 
@@ -21,7 +21,7 @@ use super::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/webhook/table.json");
 
-import_types!(schema = "../connector-schemas/webhook/table.json");
+import_types!(schema = "../connector-schemas/webhook/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
 const ICON: &str = include_str!("../resources/webhook.svg");
 
 pub struct WebhookConnector {}
@@ -47,8 +47,13 @@ impl WebhookConnector {
         config: &WebhookTable,
         tx: Sender<Result<Event, Infallible>>,
     ) -> anyhow::Result<()> {
-        let client =
-            construct_http_client(&config.endpoint, config.headers.as_ref().map(|t| &t.0))?;
+        let headers = config
+            .headers
+            .as_ref()
+            .map(|s| s.sub_env_vars())
+            .transpose()?;
+
+        let client = construct_http_client(&config.endpoint, headers)?;
         let req = Self::construct_test_request(&client, config)?;
 
         tx.send(Ok(Event::default()
@@ -176,14 +181,18 @@ impl Connector for WebhookConnector {
     ) -> anyhow::Result<Connection> {
         let endpoint = pull_opt("endpoint", options)?;
 
-        let headers = options
-            .remove("headers")
-            .map(|s| s.try_into())
-            .transpose()
-            .map_err(|e| anyhow!("invalid value for 'headers' config: {:?}", e))?;
+        let headers = options.remove("headers").map(|s| VarStr::new(s));
 
         let table = WebhookTable { endpoint, headers };
-        let client = construct_http_client(&table.endpoint, table.headers.as_ref().map(|t| &t.0))?;
+
+        let client = construct_http_client(
+            &table.endpoint,
+            table
+                .headers
+                .as_ref()
+                .map(|s| s.sub_env_vars())
+                .transpose()?,
+        )?;
         let _ = Self::construct_test_request(&client, &table)?;
 
         self.from_config(None, name, EmptyConfig {}, table, schema)

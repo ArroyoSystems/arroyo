@@ -6,8 +6,8 @@ use std::{
 
 use arroyo_macro::process_fn;
 use arroyo_rpc::ControlResp;
-use arroyo_rpc::{grpc::TableDescriptor, OperatorConfig};
-use arroyo_types::{string_to_map, CheckpointBarrier, Key, Record};
+use arroyo_rpc::{grpc::TableDescriptor, var_str::VarStr, OperatorConfig};
+use arroyo_types::{CheckpointBarrier, Key, Record};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Semaphore};
@@ -17,8 +17,9 @@ use tracing::warn;
 use typify::import_types;
 
 use crate::engine::{Context, StreamNode};
+use crate::header_map;
 
-import_types!(schema = "../connector-schemas/webhook/table.json");
+import_types!(schema = "../connector-schemas/webhook/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
 
 const MAX_INFLIGHT: u32 = 50;
 
@@ -48,8 +49,7 @@ where
         let table: WebhookTable =
             serde_json::from_value(config.table).expect("Invalid table config for WebhookSink");
 
-        let headers = string_to_map(table.headers.as_ref().map(|t| t.0.as_str()).unwrap_or(""))
-            .expect("Invalid header map")
+        let headers = header_map(table.headers)
             .into_iter()
             .map(|(k, v)| {
                 (

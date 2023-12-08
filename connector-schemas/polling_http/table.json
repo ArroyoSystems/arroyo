@@ -12,9 +12,9 @@
     "headers": {
       "title": "Headers",
       "type": "string",
-      "description": "Comma separated list of headers to send with the request",
-      "pattern": "([a-zA-Z0-9-]+: ?.+,)*([a-zA-Z0-9-]+: ?.+)",
-      "examples": ["Authentication: digest 1234,Content-Type: application/json"]
+      "description": "Comma separated list of headers to send with the request. May contain [variables](https://doc.arroyo.dev/connectors/overview#variables).",
+      "examples": ["Authentication: digest 1234,Content-Type: application/json"],
+      "format": "var-str"
     },
     "method": {
       "title": "Method",
@@ -26,7 +26,9 @@
         "PUT",
         "PATCH"
       ],
-      "examples": ["GET"]
+      "examples": [
+        "GET"
+      ]
     },
     "body": {
       "title": "Body",
@@ -37,7 +39,9 @@
       "title": "Polling Interval (ms)",
       "type": "integer",
       "description": "Number of milliseconds to wait between successful polls of the HTTP endpoint",
-      "examples": ["1000"]
+      "examples": [
+        "1000"
+      ]
     },
     "emit_behavior": {
       "title": "Emit Behavior",

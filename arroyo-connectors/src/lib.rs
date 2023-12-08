@@ -331,7 +331,7 @@ pub(crate) fn nullable_field(name: &str, field_type: SourceFieldType) -> SourceF
     }
 }
 
-fn construct_http_client(endpoint: &str, headers: Option<&String>) -> anyhow::Result<Client> {
+fn construct_http_client(endpoint: &str, headers: Option<String>) -> anyhow::Result<Client> {
     if let Err(e) = reqwest::Url::parse(&endpoint) {
         bail!("invalid endpoint '{}': {:?}", endpoint, e)
     };

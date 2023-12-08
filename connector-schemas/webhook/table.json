@@ -14,12 +14,11 @@
         "headers": {
             "title": "Headers",
             "type": "string",
-            "maxLength": 2048,
-            "description": "Optional, comma separated list of headers to send with the webhook",
-            "pattern": "([a-zA-Z0-9-]+: ?.+,)*([a-zA-Z0-9-]+: ?.+)",
+            "description": "Optional, comma separated list of headers to send with the webhook. May contain [variables](https://doc.arroyo.dev/connectors/overview#variables).",
             "examples": [
                 "Authentication: Basic my-auth-secret,Content-Type: application/json"
-            ]
+            ],
+            "format": "var-str"
         }
     },
     "required": [
