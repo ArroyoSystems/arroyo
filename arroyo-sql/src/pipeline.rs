@@ -660,8 +660,14 @@ impl<'a> SqlPipelineBuilder<'a> {
                     (window_type_def(), AggregateResultExtraction::WindowTake)
                 } else {
                     let data_type = expression.expression_type(&ValuePointerContext::new());
+
                     (data_type, AggregateResultExtraction::KeyColumn)
                 };
+
+                data_type
+                    .try_as_key()
+                    .map_err(|e| anyhow!("cannot group by {}: {}", field.name(), e))?;
+
                 if let TypeDef::DataType(DataType::Struct(_), _) = &data_type {
                     bail!("structs should be struct-defs {:?}", expr);
                 }
@@ -822,11 +828,13 @@ impl<'a> SqlPipelineBuilder<'a> {
             }
             _ => {}
         }
+
         let mut join_pairs = join.on.clone();
         if let Some(Expr::BinaryExpr(BinaryExpr { left, op, right })) = &join.filter {
             if *op != datafusion_expr::Operator::Eq {
                 bail!("only equality joins are supported");
             }
+
             // check which side each column comes from. Assumes there's at least one field
             let left_relation = join
                 .schema
@@ -846,8 +854,10 @@ impl<'a> SqlPipelineBuilder<'a> {
                 .as_ref()
                 .unwrap()
                 .to_string();
+
             let left_table = Column::convert_expr(left)?.relation.unwrap();
             let right_table = Column::convert_expr(right)?.relation.unwrap();
+
             let pair = if right_table == right_relation && left_table == left_relation {
                 (left.as_ref().clone(), right.as_ref().clone())
             } else if left_table == right_relation && right_table == left_relation {
@@ -855,6 +865,7 @@ impl<'a> SqlPipelineBuilder<'a> {
             } else {
                 bail!("join filter must contain at least one column from each side of the join");
             };
+
             join_pairs.push(pair);
         } else if join.filter.is_some() {
             bail!(
@@ -867,14 +878,25 @@ impl<'a> SqlPipelineBuilder<'a> {
             .iter()
             .map(|(left, _right)| Column::convert_expr(left))
             .collect::<Result<Vec<_>>>()?;
+
         let (left_computations, right_computations): (Vec<_>, Vec<_>) = join
             .on
             .iter()
             .map(|(left, right)| {
-                Ok((
-                    self.ctx(&left_input.return_type()).compile_expr(left)?,
-                    self.ctx(&right_input.return_type()).compile_expr(right)?,
-                ))
+                let left_expr = self.ctx(&left_input.return_type()).compile_expr(left)?;
+                let right_expr = self.ctx(&right_input.return_type()).compile_expr(right)?;
+
+                left_expr
+                    .expression_type(&ValuePointerContext::new())
+                    .try_as_key()
+                    .map_err(|e| anyhow!("cannot join on {}: {}", left, e))?;
+
+                right_expr
+                    .expression_type(&ValuePointerContext::new())
+                    .try_as_key()
+                    .map_err(|e| anyhow!("cannot join on {}: {}", right, e))?;
+
+                Ok((left_expr, right_expr))
             })
             .collect::<Result<Vec<_>>>()?
             .into_iter()
