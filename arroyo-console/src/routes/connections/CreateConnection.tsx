@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import { ConfigureConnection } from './ConfigureConnection';
 import { DefineSchema } from './DefineSchema';
 import { ConnectionTester } from './ConnectionTester';
+import { ConfigureProfile } from './ConfigureProfile';
 
 export type CreateConnectionState = {
   name: string | undefined;
@@ -44,21 +45,40 @@ export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
     count: connector.customSchemas ? 3 : 2,
   });
 
-  let steps = [
-    {
-      title: 'Configure connection',
+  let steps = [];
+
+  if (connector.connectionConfig) {
+    steps.push({
+      title: 'Configure profile',
       el: (
-        <ConfigureConnection
+        <ConfigureProfile
           connector={connector}
           state={state}
           setState={setState}
           onSubmit={() => {
-            setActiveStep(1);
+            setActiveStep(steps.length + 1);
           }}
         />
       ),
-    },
-    {
+    });
+  }
+
+  steps.push({
+    title: 'Configure table',
+    el: (
+      <ConfigureConnection
+        connector={connector}
+        state={state}
+        setState={setState}
+        onSubmit={() => {
+          setActiveStep(steps.length + 1);
+        }}
+      />
+    ),
+  });
+
+  if (connector.customSchemas) {
+    steps.push({
       title: 'Define schema',
       el: (
         <DefineSchema
@@ -70,16 +90,12 @@ export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
           }}
         />
       ),
-    },
-    {
-      title: 'Create',
-      el: <ConnectionTester connector={connector} state={state} setState={setState} />,
-    },
-  ];
-
-  if (!connector!.customSchemas) {
-    steps.splice(1, 1);
+    });
   }
+  steps.push({
+    title: 'Create',
+    el: <ConnectionTester connector={connector} state={state} setState={setState} />,
+  });
 
   return (
     <Stack spacing={8}>
