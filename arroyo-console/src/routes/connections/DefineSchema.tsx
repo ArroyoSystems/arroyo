@@ -53,9 +53,10 @@ const SchemaFormatEditor = ({
   }
 
   if (
-    connector.id == 'kafka' &&
     connectionProfile != null &&
-    (connectionProfile.config as any).schemaRegistryEnum?.endpoint != null
+    ((connector.id == 'kafka' &&
+      (connectionProfile.config as any).schemaRegistryEnum?.endpoint != null) ||
+      (connector.id == 'confluent' && (connectionProfile.config as any).schemaRegistry != null))
   ) {
     schemaTypeOptions.push({ name: 'Confluent Schema Registry', value: 'confluent' });
   }

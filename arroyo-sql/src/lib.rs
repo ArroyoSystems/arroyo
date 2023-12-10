@@ -712,6 +712,7 @@ pub fn get_test_expression(
                     read_mode: Some(arroyo_connectors::kafka::ReadMode::ReadUncommitted),
                     group_id: "test-consumer-group".to_string().try_into().unwrap(),
                 },
+                client_configs: HashMap::new(),
             },
             Some(&schema),
         )

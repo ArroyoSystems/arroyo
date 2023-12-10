@@ -1,0 +1,76 @@
+{
+    "type": "object",
+    "title": "ConfluentProfile",
+    "properties": {
+        "bootstrapServers": {
+            "type": "string",
+            "title": "Bootstrap Servers",
+            "description": "Comma-separated list of Kafka servers to connect to",
+            "examples": [
+                "pkc-f25ac.us-east-1.aws.confluent.cloud:9092"
+            ],
+            "pattern": "^(([\\w\\.\\-]+:\\d+),)*([\\w\\.\\-]+:\\d+)$"
+        },
+         "key": {
+            "type": "string",
+            "description": "Your Kafka cluster Key, found in the Confluent Cloud UI",
+            "format": "var-str"
+         },
+        "secret": {
+            "type": "string",
+            "description": "Your Kafka cluster Seret, found in the Confluent Cloud UI",
+            "format": "var-str"
+        },
+        "schemaRegistry": {
+            "type": "object",
+            "title": "Confluent Schema Registry",
+            "properties": {
+                "endpoint": {
+                    "title": "Endpoint",
+                    "type": "string",
+                    "description": "The endpoint for your Confluent Schema Registry",
+                    "examples": [
+                        "https://psrc-f87ab.us-east-2.aws.confluent.cloud"
+                    ],
+                    "format": "uri"
+                },
+                "apiKey": {
+                    "title": "API Key",
+                    "type": "string",
+                    "description": "The API key for your Confluent Schema Registry (note: this is not the same as your Kafka cluster key)",
+                    "format": "var-str",
+                    "examples": [
+                        "ABCDEFGHIJK01234"
+                    ]
+                },
+                "apiSecret": {
+                    "title": "API Secret",
+                    "type": "string",
+                    "description": "Secret for your Confluent Schema Registry",
+                    "format": "var-str",
+                    "examples": [
+                        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/="
+                    ]
+                }
+            },
+            "dependentRequired": {
+                "endpoint": [
+                    "apiKey",
+                    "apiSecret"
+                ]
+            },
+            "sensitive": [
+                "apiSecret"
+            ]
+        }
+    },
+    "required": [
+        "bootstrapServers",
+        "key",
+        "secret"
+    ],
+    "sensitive": [
+        "secret"
+    ]
+}
+

@@ -62,6 +62,14 @@
                     ]
                 }
             ]
+        },
+        "client_configs": {
+            "type": "object",
+            "title": "Client Configs",
+            "description": "Additional Kafka configs to pass to the underlying Kafka consumer or producer. See [Kafka Consumer Configs](https://kafka.apache.org/documentation/#consumerconfigs) and [Kafka Producer Configs](https://kafka.apache.org/documentation/#producerconfigs) for more details.",
+            "additionalProperties": {
+                "type": "string"
+            }
         }
     },
     "required": [

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use arroyo_connectors::{
     kafka::{KafkaConfig, KafkaConnector, KafkaTable, ReadMode},
     Connection, Connector,
@@ -99,6 +100,7 @@ pub fn get_json_schema_source() -> Result<Connection> {
             offset: arroyo_connectors::kafka::SourceOffset::Earliest,
             read_mode: Some(ReadMode::ReadUncommitted),
         },
+        client_configs: HashMap::new(),
     };
     KafkaConnector {}.from_config(
         Some(2),
@@ -204,6 +206,7 @@ pub fn get_avro_source() -> Result<Connection> {
             offset: arroyo_connectors::kafka::SourceOffset::Earliest,
             read_mode: Some(ReadMode::ReadUncommitted),
         },
+        client_configs: HashMap::new(),
     };
     KafkaConnector {}.from_config(
         Some(3),

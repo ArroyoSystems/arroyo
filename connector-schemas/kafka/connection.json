@@ -44,7 +44,8 @@
                         },
                         "username": {
                             "type": "string",
-                            "description": "The username to use for SASL authentication"
+                            "description": "The username to use for SASL authentication",
+                            "format": "var-str"
                         },
                         "password": {
                             "type": "string",
@@ -77,6 +78,7 @@
                             "title": "API Key",
                             "type": "string",
                             "description": "The API key for your Confluent Schema Registry",
+                            "format": "var-str",
                             "examples": [
                                 "ABCDEFGHIJK01234"
                             ]

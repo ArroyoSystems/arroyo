@@ -15,6 +15,7 @@ use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
+use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::api_types::connections::{
@@ -266,10 +267,7 @@ pub async fn create_connection_table(
     let (connector, connection_id, profile, schema) =
         get_and_validate_connector(&req, &auth_data, &transaction).await?;
 
-    let table_type: String = connector
-        .table_type(&profile, &req.config)
-        .unwrap()
-        .to_string();
+    let table_type = connector.table_type(&profile, &req.config).unwrap();
 
     if let Some(schema) = &schema {
         if schema.definition.is_none() && schema.inferred != Some(true) {
@@ -598,15 +596,23 @@ async fn get_schema(
     table_config: &Value,
     profile_config: &Value,
 ) -> Result<Option<ConfluentSchemaSubjectResponse>, ErrorResp> {
-    if connector != "kafka" {
-        return Err(bad_request(
-            "confluent schema registry can only be used for Kafka connections",
-        ));
-    }
-
-    // we unwrap here because this should already have been validated
-    let profile: KafkaConfig =
-        serde_json::from_value(profile_config.clone()).expect("invalid kafka config");
+    let profile: KafkaConfig = match connector {
+        "kafka" => {
+            // we unwrap here because this should already have been validated
+            serde_json::from_value(profile_config.clone()).expect("invalid kafka config")
+        }
+        "confluent" => {
+            let c: ConfluentProfile =
+                serde_json::from_value(profile_config.clone()).expect("invalid confluent config");
+            c.try_into()
+                .expect("unable to convert confluent config into kafka config")
+        }
+        _ => {
+            return Err(bad_request(
+                "confluent schema registry can only be used for Kafka or Confluent connections",
+            ));
+        }
+    };
 
     let table: KafkaTable =
         serde_json::from_value(table_config.clone()).expect("invalid kafka table");

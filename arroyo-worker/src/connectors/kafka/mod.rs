@@ -11,8 +11,7 @@ pub mod source;
 import_types!(
     schema = "../connector-schemas/kafka/connection.json",
     convert = {
-        {type = "string", format = "var-str"} = VarStr,
-        {type = "string", format = "var-str", isSensitive = true} = VarStr
+        {type = "string", format = "var-str"} = VarStr
     }
 );
 import_types!(schema = "../connector-schemas/kafka/table.json");
@@ -26,7 +25,7 @@ impl SourceOffset {
     }
 }
 
-pub fn client_configs(connection: &KafkaConfig) -> HashMap<String, String> {
+pub fn client_configs(connection: &KafkaConfig, table: &KafkaTable) -> HashMap<String, String> {
     let mut client_configs: HashMap<String, String> = HashMap::new();
 
     match &connection.authentication {
@@ -39,12 +38,24 @@ pub fn client_configs(connection: &KafkaConfig) -> HashMap<String, String> {
         } => {
             client_configs.insert("sasl.mechanism".to_string(), mechanism.to_string());
             client_configs.insert("security.protocol".to_string(), protocol.to_string());
-            client_configs.insert("sasl.username".to_string(), username.to_string());
+            client_configs.insert(
+                "sasl.username".to_string(),
+                username
+                    .sub_env_vars()
+                    .expect("Missing env-vars for Kafka username"),
+            );
             client_configs.insert(
                 "sasl.password".to_string(),
                 password
                     .sub_env_vars()
-                    .expect("Failed to substitute env vars"),
+                    .expect("Missing env-vars for Kafka password"),
+            );
+
+            client_configs.extend(
+                table
+                    .client_configs
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string())),
             );
         }
     };
