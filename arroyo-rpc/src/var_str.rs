@@ -55,7 +55,7 @@ impl VarStr {
     pub fn sub_env_vars(&self) -> anyhow::Result<String> {
         // Regex to match patterns like {{ VAR_NAME }}
         static RE: OnceLock<Regex> = OnceLock::new();
-        let re = RE.get_or_init(|| Regex::new(r"\{\{\s*(\w+)\s*\}\}").unwrap());
+        let re = RE.get_or_init(|| Regex::new(r"\{\{\s*(\w+)\s*}}").unwrap());
 
         let mut result = self.raw_val.to_string();
 

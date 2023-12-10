@@ -97,7 +97,7 @@ impl<K: Key + Serialize, T: SchemaData> KafkaSinkFunc<K, T> {
             topic: table.topic,
             bootstrap_servers: connection.bootstrap_servers.to_string(),
             producer: None,
-            consistency_mode: commit_mode.unwrap_or(SinkCommitMode::AtLeastOnce).into(),
+            consistency_mode: commit_mode.into(),
             write_futures: vec![],
             client_config: client_configs(&connection),
             serializer: DataSerializer::new(

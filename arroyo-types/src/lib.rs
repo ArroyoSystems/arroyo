@@ -111,6 +111,7 @@ pub const CHECKPOINT_URL_ENV: &str = "CHECKPOINT_URL";
 
 // compiler service
 pub const ARTIFACT_URL_ENV: &str = "ARTIFACT_URL";
+pub const COMPILER_FEATURES_ENV: &str = "COMPILER_FEATURES";
 
 // kubernetes scheduler configuration
 pub const K8S_NAMESPACE_ENV: &str = "K8S_NAMESPACE";

@@ -30,6 +30,9 @@
                         "username",
                         "password"
                     ],
+                    "sensitive": [
+                        "password"
+                    ],
                     "properties": {
                         "protocol": {
                             "type": "string",
@@ -45,8 +48,7 @@
                         },
                         "password": {
                             "type": "string",
-                            "description": "The password to use for SASL authentication. May be a [variable](https://doc.arroyo.dev/connectors/variables).",
-                            "isSensitive": true,
+                            "description": "The password to use for SASL authentication",
                             "format": "var-str"
                         }
                     },
@@ -82,8 +84,7 @@
                         "apiSecret": {
                             "title": "API Secret",
                             "type": "string",
-                            "description": "Secret for your Confluent Schema Registry. May be a [variable](https://doc.arroyo.dev/connectors/variables).",
-                            "isSensitive": true,
+                            "description": "Secret for your Confluent Schema Registry",
                             "examples": [
                                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/="
                             ],
@@ -92,6 +93,9 @@
                     },
                     "required": [
                         "endpoint"
+                    ],
+                    "sensitive": [
+                        "apiSecret"
                     ]
                 },
                 {

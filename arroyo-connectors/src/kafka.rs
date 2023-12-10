@@ -27,8 +27,7 @@ const ICON: &str = include_str!("../resources/kafka.svg");
 import_types!(
     schema = "../connector-schemas/kafka/connection.json",
     convert = {
-        {type = "string", format = "var-str"} = VarStr,
-        {type = "string", format = "var-str", isSensitive = true} = VarStr
+        {type = "string", format = "var-str"} = VarStr
     }
 );
 import_types!(schema = "../connector-schemas/kafka/table.json");
@@ -205,8 +204,8 @@ impl Connector for KafkaConnector {
                 let commit_mode = options.remove("sink.commit_mode");
                 TableType::Sink {
                     commit_mode: match commit_mode.as_ref().map(|f| f.as_str()) {
-                        Some("at_least_once") | None => Some(SinkCommitMode::AtLeastOnce),
-                        Some("exactly_once") => Some(SinkCommitMode::ExactlyOnce),
+                        Some("at_least_once") | None => SinkCommitMode::AtLeastOnce,
+                        Some("exactly_once") => SinkCommitMode::ExactlyOnce,
                         Some(other) => bail!("invalid value for commit_mode '{}'", other),
                     },
                 }

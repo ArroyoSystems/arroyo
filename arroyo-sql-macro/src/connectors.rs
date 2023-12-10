@@ -72,7 +72,7 @@ pub fn get_json_schema_source() -> Result<Connection> {
     let connection_schema = ConnectionSchema::try_new(
         Some(Format::Json(JsonFormat {
             confluent_schema_registry: false,
-            confluent_schema_version: None,
+            schema_id: None,
             include_schema: false,
             debezium: false,
             unstructured: false,

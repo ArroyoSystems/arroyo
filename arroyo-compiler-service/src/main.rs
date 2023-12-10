@@ -11,7 +11,7 @@ use arroyo_rpc::grpc::{
 
 use arroyo_server_common::start_admin_server;
 use arroyo_storage::StorageProvider;
-use arroyo_types::{grpc_port, ports, ARTIFACT_URL_ENV};
+use arroyo_types::{grpc_port, ports, ARTIFACT_URL_ENV, COMPILER_FEATURES_ENV};
 use prost::Message;
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -42,6 +42,10 @@ pub async fn main() {
         .await
         .expect("unable to construct storage provider");
 
+    let features: Vec<String> = std::env::var(COMPILER_FEATURES_ENV)
+        .map(|s| s.split(",").map(|s| s.to_string()).collect())
+        .unwrap_or_default();
+
     let last_used = Arc::new(AtomicU64::new(to_millis(SystemTime::now())));
 
     let service = CompileService {
@@ -50,6 +54,7 @@ pub async fn main() {
         last_used: last_used.clone(),
         storage,
         debug,
+        features,
     };
 
     let args = std::env::args().collect::<Vec<_>>();
@@ -133,16 +138,23 @@ pub struct CompileService {
     last_used: Arc<AtomicU64>,
     storage: StorageProvider,
     debug: bool,
+    features: Vec<String>,
 }
 
 impl CompileService {
-    async fn get_output(&self) -> io::Result<Output> {
+    async fn cargo_build(&self) -> io::Result<Output> {
         if self.debug {
-            let args = if std::env::var("VERBOSE").is_ok() {
+            let mut args = if std::env::var("VERBOSE").is_ok() {
                 vec!["build", "--verbose"]
             } else {
                 vec!["build"]
             };
+
+            let features = self.features.join(",");
+            if !self.features.is_empty() {
+                args.push("--features");
+                args.push(&features);
+            }
 
             Command::new("cargo")
                 .current_dir(&self.build_dir)
@@ -179,7 +191,7 @@ impl CompileService {
 
         self.write_udf_crates(&req.udf_crates).await?;
 
-        let result = self.get_output().await?;
+        let result = self.cargo_build().await?;
 
         if !result.status.success() {
             Err(Status::unimplemented(format!(

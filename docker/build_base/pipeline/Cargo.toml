@@ -4,6 +4,10 @@ name = "pipeline"
 version = "1.0.0"
 edition = "2021"
 
+[features]
+default = []
+kafka-sasl = ["arroyo-worker/kafka-sasl"]
+
 [dependencies]
 types = { path = "../types" }
 udfs = { path = "../udfs_dir/udfs" }

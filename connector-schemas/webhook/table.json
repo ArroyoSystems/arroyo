@@ -14,7 +14,7 @@
         "headers": {
             "title": "Headers",
             "type": "string",
-            "description": "Optional, comma separated list of headers to send with the webhook. May contain [variables](https://doc.arroyo.dev/connectors/overview#variables).",
+            "description": "Optional, comma separated list of headers to send with the webhook",
             "examples": [
                 "Authentication: Basic my-auth-secret,Content-Type: application/json"
             ],

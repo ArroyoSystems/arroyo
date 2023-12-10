@@ -18,7 +18,8 @@ use tracing::warn;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_rpc::api_types::connections::{
-    ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, SchemaDefinition,
+    ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, ConnectionType,
+    SchemaDefinition,
 };
 use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
 use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat};
@@ -101,7 +102,17 @@ async fn get_and_validate_connector<E: GenericClient>(
 
     let schema = if let Some(schema) = schema {
         let name = connector.name();
-        Some(expand_schema(&req.name, name, schema, &req.config, &profile_config).await?)
+        Some(
+            expand_schema(
+                &req.name,
+                name,
+                connector.table_type(&profile_config, &req.config).unwrap(),
+                schema,
+                &profile_config,
+                &req.config,
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -422,9 +433,10 @@ pub(crate) async fn get_connection_tables(
 pub(crate) async fn expand_schema(
     name: &str,
     connector: &str,
+    connection_type: ConnectionType,
     schema: ConnectionSchema,
-    table_config: &Value,
     profile_config: &Value,
+    table_config: &Value,
 ) -> Result<ConnectionSchema, ErrorResp> {
     let Some(format) = schema.format.as_ref() else {
         return Ok(schema);
@@ -432,10 +444,26 @@ pub(crate) async fn expand_schema(
 
     match format {
         Format::Json(_) => {
-            expand_json_schema(name, connector, schema, table_config, profile_config).await
+            expand_json_schema(
+                name,
+                connector,
+                connection_type,
+                schema,
+                profile_config,
+                table_config,
+            )
+            .await
         }
         Format::Avro(_) => {
-            expand_avro_schema(name, connector, schema, table_config, profile_config).await
+            expand_avro_schema(
+                name,
+                connector,
+                connection_type,
+                schema,
+                profile_config,
+                table_config,
+            )
+            .await
         }
         Format::Parquet(_) => Ok(schema),
         Format::RawString(_) => Ok(schema),
@@ -445,9 +473,10 @@ pub(crate) async fn expand_schema(
 async fn expand_avro_schema(
     name: &str,
     connector: &str,
+    connection_type: ConnectionType,
     mut schema: ConnectionSchema,
-    table_config: &Value,
     profile_config: &Value,
+    table_config: &Value,
 ) -> Result<ConnectionSchema, ErrorResp> {
     if let Some(Format::Avro(AvroFormat {
         confluent_schema_registry: true,
@@ -455,19 +484,36 @@ async fn expand_avro_schema(
     })) = &mut schema.format
     {
         let schema_response = get_schema(connector, table_config, profile_config).await?;
+        match connection_type {
+            ConnectionType::Source => {
+                let schema_response = schema_response.ok_or_else(|| bad_request(
+                        format!("No schema was found; ensure that the topic exists and has a value schema configured in the schema registry")))?;
 
-        if schema_response.schema_type != ConfluentSchemaType::Avro {
-            return Err(bad_request(format!(
-                "Format configured is avro, but confluent schema repository returned a {:?} schema",
-                schema_response.schema_type
-            )));
+                if schema_response.schema_type != ConfluentSchemaType::Avro {
+                    return Err(bad_request(format!(
+                        "Format configured is avro, but confluent schema repository returned a {:?} schema",
+                        schema_response.schema_type
+                    )));
+                }
+
+                schema.definition = Some(SchemaDefinition::AvroSchema(schema_response.schema));
+            }
+            ConnectionType::Sink => {
+                // don't fetch schemas for sinks for now
+            }
         }
-
-        schema.definition = Some(SchemaDefinition::AvroSchema(schema_response.schema));
     }
 
     let Some(SchemaDefinition::AvroSchema(definition)) = schema.definition.as_ref() else {
-        return Err(bad_request("avro format requires an avro schema be set"));
+        return match connection_type {
+            ConnectionType::Source => Err(bad_request(
+                "avro format requires an avro schema be set for sources",
+            )),
+            ConnectionType::Sink => {
+                schema.inferred = Some(true);
+                Ok(schema)
+            }
+        };
     };
 
     if let Some(Format::Avro(format)) = &mut schema.format {
@@ -491,27 +537,39 @@ async fn expand_avro_schema(
 async fn expand_json_schema(
     name: &str,
     connector: &str,
+    connection_type: ConnectionType,
     mut schema: ConnectionSchema,
-    table_config: &Value,
     profile_config: &Value,
+    table_config: &Value,
 ) -> Result<ConnectionSchema, ErrorResp> {
     if let Some(Format::Json(JsonFormat {
         confluent_schema_registry: true,
-        confluent_schema_version,
+        schema_id: confluent_schema_id,
         ..
     })) = schema.format.as_mut()
     {
         let schema_response = get_schema(connector, table_config, profile_config).await?;
 
-        if schema_response.schema_type != ConfluentSchemaType::Json {
-            return Err(bad_request(format!(
-                "Format configured is json, but confluent schema repository returned a {:?} schema",
-                schema_response.schema_type
-            )));
-        }
-        confluent_schema_version.replace(schema_response.version);
+        match connection_type {
+            ConnectionType::Source => {
+                let schema_response = schema_response.ok_or_else(|| bad_request(
+                    format!("No schema was found; ensure that the topic exists and has a value schema configured in the schema registry")))?;
 
-        schema.definition = Some(SchemaDefinition::JsonSchema(schema_response.schema));
+                if schema_response.schema_type != ConfluentSchemaType::Json {
+                    return Err(bad_request(format!(
+                        "Format configured is json, but confluent schema repository returned a {:?} schema",
+                        schema_response.schema_type
+                    )));
+                }
+                confluent_schema_id.replace(schema_response.version);
+
+                schema.definition = Some(SchemaDefinition::JsonSchema(schema_response.schema));
+            }
+            ConnectionType::Sink => {
+                // don't fetch schemas for sinks for now until we're better able to conform our output to the schema
+                schema.inferred = Some(true);
+            }
+        }
     }
 
     if let Some(d) = &schema.definition {
@@ -539,7 +597,7 @@ async fn get_schema(
     connector: &str,
     table_config: &Value,
     profile_config: &Value,
-) -> Result<ConfluentSchemaSubjectResponse, ErrorResp> {
+) -> Result<Option<ConfluentSchemaSubjectResponse>, ErrorResp> {
     if connector != "kafka" {
         return Err(bad_request(
             "confluent schema registry can only be used for Kafka connections",

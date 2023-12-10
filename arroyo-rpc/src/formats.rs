@@ -38,8 +38,8 @@ pub struct JsonFormat {
     #[serde(default)]
     pub confluent_schema_registry: bool,
 
-    #[serde(default)]
-    pub confluent_schema_version: Option<u32>,
+    #[serde(default, alias = "confluent_schema_version")]
+    pub schema_id: Option<u32>,
 
     #[serde(default)]
     pub include_schema: bool,
@@ -90,7 +90,7 @@ impl JsonFormat {
 
         Ok(Self {
             confluent_schema_registry,
-            confluent_schema_version: None,
+            schema_id: None,
             include_schema,
             debezium,
             unstructured,
