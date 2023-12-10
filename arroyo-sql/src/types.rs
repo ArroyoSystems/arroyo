@@ -600,16 +600,16 @@ impl StructField {
         }
 
         let qualified_name = match &alias {
-            Some(alias) => format!("{}_{}", alias, name),
+            Some(alias) => format!("{}.{}", alias, name),
             None => name.clone(),
         };
 
         let re = Regex::new("[^a-zA-Z0-9_]").unwrap();
         let field_name = re.replace_all(&qualified_name, "_").to_string();
 
-        let (ident, renamed_from) = match parse_str::<Ident>(&field_name) {
-            Ok(_) => (field_name.clone(), None),
-            Err(_) => (format!("r#_{}", field_name), Some(name.clone())),
+        let ident = match parse_str::<Ident>(&field_name) {
+            Ok(_) => field_name.clone(),
+            Err(_) => format!("r#_{}", field_name),
         };
 
         Self {
@@ -618,7 +618,7 @@ impl StructField {
             alias,
             data_type,
             ident,
-            renamed_from,
+            renamed_from: Some(qualified_name),
             original_type: None,
         }
     }

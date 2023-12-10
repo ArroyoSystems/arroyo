@@ -62,11 +62,6 @@ export function ConnectionTester({
     return name && /^[_a-zA-Z][a-zA-Z0-9_]*$/.test(name);
   };
 
-  const sseHandler = (event: TestSourceMessage) => {
-    messages.push(event);
-    setMessages(messages);
-  };
-
   const createRequest: ConnectionTablePost = {
     name: state.name!,
     connector: connector.id,
@@ -76,11 +71,17 @@ export function ConnectionTester({
   };
 
   const onClickTest = async () => {
-    setTesting(true);
-    setError(null);
-
     if (!testing) {
-      await useConnectionTableTest(sseHandler, createRequest);
+      setTesting(true);
+      setError(null);
+
+      let messages: Array<TestSourceMessage> = [];
+      setMessages(messages);
+
+      await useConnectionTableTest(event => {
+        messages = [...messages, event];
+        setMessages(messages);
+      }, createRequest);
       setTesting(false);
     }
   };

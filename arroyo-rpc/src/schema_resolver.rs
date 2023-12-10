@@ -2,9 +2,13 @@ use crate::var_str::VarStr;
 use anyhow::{anyhow, bail};
 use apache_avro::Schema;
 use async_trait::async_trait;
+use base64::prelude::BASE64_STANDARD;
+use base64::write::EncoderWriter;
+use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{Client, StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::time::Duration;
 use tracing::warn;
 
@@ -99,12 +103,16 @@ pub struct PostSchemaResponse {
     pub id: i32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct RegistryErrorResponse {
+    error_code: i32,
+    message: String,
+}
+
 pub struct ConfluentSchemaRegistry {
     endpoint: Url,
     topic: String,
     client: Client,
-    api_key: Option<String>,
-    api_secret: Option<VarStr>,
 }
 
 impl ConfluentSchemaRegistry {
@@ -114,21 +122,33 @@ impl ConfluentSchemaRegistry {
         api_key: Option<String>,
         api_secret: Option<VarStr>,
     ) -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .unwrap();
+        let mut client = Client::builder().timeout(Duration::from_secs(5));
+
+        if let Some(api_key) = api_key {
+            let mut buf = b"Basic ".to_vec();
+            {
+                let mut encoder = EncoderWriter::new(&mut buf, &BASE64_STANDARD);
+                let _ = write!(encoder, "{}:", api_key);
+                if let Some(password) = api_secret {
+                    let _ = write!(encoder, "{}", password.sub_env_vars()?);
+                }
+            }
+            let mut header =
+                HeaderValue::from_bytes(&buf).expect("base64 is always valid HeaderValue");
+            header.set_sensitive(true);
+            let mut headers = HeaderMap::new();
+            headers.append(reqwest::header::AUTHORIZATION, header);
+            client = client.default_headers(headers);
+        };
 
         let endpoint: Url = endpoint
             .try_into()
             .map_err(|_| anyhow!("{} is not a valid url", endpoint))?;
 
         Ok(Self {
-            client,
+            client: client.build()?,
             topic: topic.to_string(),
             endpoint,
-            api_key,
-            api_secret,
         })
     }
 
@@ -202,7 +222,10 @@ impl ConfluentSchemaRegistry {
         Ok(resp.id)
     }
 
-    pub async fn get_schema_for_id(&self, id: u32) -> anyhow::Result<ConfluentSchemaIdResponse> {
+    pub async fn get_schema_for_id(
+        &self,
+        id: u32,
+    ) -> anyhow::Result<Option<ConfluentSchemaIdResponse>> {
         let url = self.endpoint.join(&format!("/schemas/ids/{}", id)).unwrap();
 
         self.get_schema_for_url(url).await
@@ -211,7 +234,7 @@ impl ConfluentSchemaRegistry {
     pub async fn get_schema_for_version(
         &self,
         version: Option<u32>,
-    ) -> anyhow::Result<ConfluentSchemaSubjectResponse> {
+    ) -> anyhow::Result<Option<ConfluentSchemaSubjectResponse>> {
         let url = self
             .topic_endpoint()
             .join(
@@ -224,20 +247,8 @@ impl ConfluentSchemaRegistry {
         self.get_schema_for_url(url).await
     }
 
-    async fn get_schema_for_url<T: DeserializeOwned>(&self, url: Url) -> anyhow::Result<T> {
-        let mut get_call = self.client.get(url.clone());
-
-        let secret = self
-            .api_secret
-            .as_ref()
-            .map(|s| s.sub_env_vars())
-            .transpose()?;
-
-        if let Some(api_key) = self.api_key.as_ref() {
-            get_call = get_call.basic_auth(api_key, secret);
-        }
-
-        let resp = get_call.send().await.map_err(|e| {
+    async fn get_schema_for_url<T: DeserializeOwned>(&self, url: Url) -> anyhow::Result<Option<T>> {
+        let resp = self.client.get(url.clone()).send().await.map_err(|e| {
             warn!("Got error response from schema registry: {:?}", e);
             match e.status() {
                 Some(StatusCode::NOT_FOUND) => {
@@ -257,15 +268,24 @@ impl ConfluentSchemaRegistry {
             }
         })?;
 
-        if !resp.status().is_success() {
+        let status = resp.status();
+        if !status.is_success() {
+            let bytes = resp
+                .bytes()
+                .await
+                .map(|b| b.to_vec())
+                .unwrap_or_else(|_| "<failed to read body>".to_string().into_bytes());
+            let json = serde_json::from_slice::<RegistryErrorResponse>(&bytes);
+            if status.as_u16() == 404 && json.is_ok() && json.as_ref().unwrap().error_code == 40401
+            {
+                // valid response, but schema was not found
+                return Ok(None);
+            }
             bail!(
                 "Received an error status code from the schema endpoint while fetching {}: {} {}",
                 url,
-                resp.status().as_u16(),
-                resp.bytes()
-                    .await
-                    .map(|bs| String::from_utf8_lossy(&bs).to_string())
-                    .unwrap_or_else(|_| "<failed to read body>".to_string())
+                status.as_u16(),
+                String::from_utf8_lossy(&bytes)
             );
         }
 
@@ -284,7 +304,7 @@ impl SchemaResolver for ConfluentSchemaRegistry {
     async fn resolve_schema(&self, id: u32) -> Result<Option<String>, String> {
         self.get_schema_for_id(id)
             .await
-            .map(|s| Some(s.schema))
+            .map(|s| s.map(|r| r.schema))
             .map_err(|e| e.to_string())
     }
 }

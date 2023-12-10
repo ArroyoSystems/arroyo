@@ -56,7 +56,10 @@
                             ]
                         }
                     },
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "required": [
+                        "commit_mode"
+                    ]
                 }
             ]
         }

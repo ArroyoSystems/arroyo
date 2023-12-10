@@ -28,6 +28,7 @@ use arroyo_rpc::grpc::api::{
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_formats::avro::arrow_to_avro_schema;
+use arroyo_formats::json::arrow_to_json_schema;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
@@ -77,7 +78,7 @@ where
         .collect::<Vec<GlobalUdf>>();
 
     // error if there are duplicate local or duplicate global UDF names,
-    // but allow global UDFs to override local ones
+    // but allow  global UDFs to override local ones
 
     if has_duplicate_udf_names(global_udfs.iter().map(|u| &u.definition)) {
         bail!("Global UDFs have duplicate function names");
@@ -200,8 +201,20 @@ async fn try_register_confluent_schema(
                 config.format = Some(Format::Avro(avro))
             }
         }
-        Some(Format::Json(_)) => {
-            // TODO: add json schema support
+        Some(Format::Json(mut json)) => {
+            if json.confluent_schema_registry && json.schema_id.is_none() {
+                let fields: Vec<Field> = schema.fields.iter().map(|f| f.clone().into()).collect();
+
+                let schema = arrow_to_json_schema(&fields.into());
+
+                let id = schema_registry
+                    .write_schema(schema.to_string(), ConfluentSchemaType::Json)
+                    .await
+                    .map_err(|e| anyhow!("Failed to write schema to schema registry: {}", e))?;
+
+                json.schema_id = Some(id as u32);
+                config.format = Some(Format::Json(json))
+            }
         }
         _ => {
             // unsupported for schema registry

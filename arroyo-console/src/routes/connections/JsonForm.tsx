@@ -18,7 +18,7 @@ import {
 import { JSONSchema7 } from 'json-schema';
 import { useFormik } from 'formik';
 
-import Ajv from 'ajv';
+import Ajv from 'ajv/dist/2019';
 import addFormats from 'ajv-formats';
 import React, { useEffect, useMemo } from 'react';
 import { AddIcon, DeleteIcon } from '@chakra-ui/icons';
@@ -29,6 +29,7 @@ function StringWidget({
   title,
   description,
   placeholder,
+  format,
   required,
   password,
   maxLength,
@@ -40,6 +41,7 @@ function StringWidget({
   title: string;
   description?: string;
   placeholder?: string;
+  format?: string;
   maxLength?: number;
   required?: boolean;
   password?: boolean;
@@ -74,6 +76,15 @@ function StringWidget({
         description && (
           <FormHelperText>
             <Markdown>{description}</Markdown>
+            {format == 'var-str' && (
+              <Text mt={1} fontSize="sm" color="gray.500">
+                This field supports{' '}
+                <dfn title="To use variable substitution, wrap your variable in double-braces like `{{ MY_VAR }}`">
+                  enviroment variable substitution
+                </dfn>
+                .
+              </Text>
+            )}
           </FormHelperText>
         )
       )}
@@ -221,6 +232,7 @@ export function ArrayWidget({
             maxLength={itemsSchema.maxLength}
             description={itemsSchema.description}
             placeholder={example}
+            format={itemsSchema.format}
           />
         );
       default:
@@ -477,10 +489,11 @@ export function FormInner({
                       description={property.description}
                       required={schema.required?.includes(key)}
                       // @ts-ignore
-                      password={property.isSensitive || false}
+                      password={schema.sensitive?.includes(key)}
                       maxLength={property.maxLength}
                       // @ts-ignore
                       placeholder={property.examples ? (property.examples[0] as string) : undefined}
+                      format={property.format}
                       value={traversePath(values, nextPath)}
                       errors={errors}
                       onChange={onChange}
@@ -592,7 +605,7 @@ export function FormInner({
                   );
                 } else if (property.additionalProperties) {
                   return (
-                    <Box>
+                    <Box key={key}>
                       <MapWidget
                         path={nextPath}
                         key={key}
@@ -634,7 +647,7 @@ export function JsonForm({
   button?: string;
 }) {
   let ajv = new Ajv();
-  ajv.addKeyword('isSensitive');
+  ajv.addKeyword('sensitive');
   ajv.addFormat('var-str', { validate: () => true });
   const memoAjv = useMemo(() => addFormats(ajv), [schema]);
 

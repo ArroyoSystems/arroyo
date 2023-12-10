@@ -329,11 +329,7 @@ impl<T: SchemaData> DataDeserializer<T> {
         .map_err(|e| {
             UserError::new(
                 "Deserialization failed",
-                format!(
-                    "Failed to deserialize: '{}': {}",
-                    String::from_utf8_lossy(&msg),
-                    e
-                ),
+                format!("Failed to deserialize: {}", e),
             )
         })
     }
@@ -373,7 +369,7 @@ impl<T: SchemaData> DataSerializer<T> {
                         unreachable!("can't include schema when writing to confluent schema registry, should've been caught when creating JsonFormat");
                     }
                     writer.push(0);
-                    writer.extend(json.confluent_schema_version.expect("must have computed schema version to write using confluent schema registry").to_be_bytes());
+                    writer.extend(json.schema_id.expect("must have computed id version to write using confluent schema registry").to_be_bytes());
                 }
                 if json.include_schema {
                     let record = json! {{
