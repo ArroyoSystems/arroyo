@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
 
@@ -13,10 +13,8 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnectionProfile;
 use crate::rest::AppState;
-use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map, ApiError, BearerAuth, ErrorResp,
-};
-use crate::{handle_db_error, AuthData};
+use crate::rest_utils::{authenticate, bad_request, client, log_and_map, ApiError, BearerAuth, ErrorResp, not_found};
+use crate::{handle_db_error, AuthData, handle_delete};
 
 impl TryFrom<DbConnectionProfile> for ConnectionProfile {
     type Error = String;
@@ -112,6 +110,39 @@ pub async fn get_connection_profiles(
 
     Ok(Json(ConnectionProfileCollection { data }))
 }
+
+/// Delete a Connection Profile
+#[utoipa::path(
+    delete,
+    path = "/v1/connection_profiles/{id}",
+    tag = "connection_profiles",
+    params(
+       ("id" = String, Path, description = "Connection Profile id")
+    ),
+    responses(
+       (status = 200, description = "Deleted connection profile"),
+    ),
+)]
+pub(crate) async fn delete_connection_profile(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path(pub_id): Path<String>,
+) -> Result<(), ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    let deleted = api_queries::delete_connection_profile()
+        .bind(&client, &auth_data.organization_id, &pub_id)
+        .await
+        .map_err(|e| handle_delete("connection_profile", "connection tables", e))?;
+
+    if deleted == 0 {
+        return Err(not_found("Connection profile"));
+    }
+
+    Ok(())
+}
+
 
 pub(crate) async fn get_all_connection_profiles<C: GenericClient>(
     auth: &AuthData,

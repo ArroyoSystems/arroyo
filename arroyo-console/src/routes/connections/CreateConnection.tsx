@@ -48,6 +48,7 @@ export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
   let steps = [];
 
   if (connector.connectionConfig) {
+    let next = steps.length + 1;
     steps.push({
       title: 'Configure profile',
       el: (
@@ -56,13 +57,14 @@ export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
           state={state}
           setState={setState}
           onSubmit={() => {
-            setActiveStep(steps.length + 1);
+            setActiveStep(next);
           }}
         />
       ),
     });
   }
 
+  let next = steps.length + 1;
   steps.push({
     title: 'Configure table',
     el: (
@@ -71,13 +73,15 @@ export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
         state={state}
         setState={setState}
         onSubmit={() => {
-          setActiveStep(steps.length + 1);
+          setActiveStep(next);
         }}
       />
     ),
   });
 
   if (connector.customSchemas) {
+    let next = steps.length + 1;
+
     steps.push({
       title: 'Define schema',
       el: (
@@ -86,7 +90,7 @@ export const ConnectionCreator = ({ connector }: { connector: Connector }) => {
           state={state}
           setState={setState}
           next={() => {
-            setActiveStep(2);
+            setActiveStep(next);
           }}
         />
       ),

@@ -22,30 +22,30 @@ import {
   Th,
   Tbody,
   IconButton,
+  SimpleGrid,
+  Box, Link, Grid, Card, LinkBox, LinkOverlay, useToast,
 } from '@chakra-ui/react';
 import { useState } from 'react';
 import { JsonForm } from './JsonForm';
-import { AddIcon, ArrowForwardIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons';
-import { ConnectionProfile, Connector, post, useConnectionProfiles } from '../../lib/data_fetching';
+import {AddIcon, ArrowForwardIcon, DeleteIcon, EditIcon, InfoIcon, InfoOutlineIcon} from '@chakra-ui/icons';
+import {ConnectionProfile, Connector, del, post, useConnectionProfiles} from '../../lib/data_fetching';
 import { CreateConnectionState } from './CreateConnection';
 import { formatError } from '../../lib/util';
 
 function ClusterEditorModal({
-                              isOpen,
-                              onClose,
-                              editingProfile,
-                              connector,
-                              schema,
-                              addConnectionProfile
+  isOpen,
+  onClose,
+  editingProfile,
+  connector,
+  schema,
+  addConnectionProfile,
 }: {
-    isOpen: boolean;
-    onClose: () => void;
-    editingProfile: ConnectionProfile;
-    connector: string;
-    schema: JSONSchema7;
-    error: string | null;
-    setError: (e: string | null) => void;
-    addConnectionProfile: (c: ConnectionProfile) => void;
+  isOpen: boolean;
+  onClose: () => void;
+  editingProfile: ConnectionProfile;
+  connector: string;
+  schema: JSONSchema7;
+  addConnectionProfile: (c: ConnectionProfile) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
 
@@ -63,8 +63,13 @@ function ClusterEditorModal({
             hasName={true}
             error={error}
             initial={editingProfile.config || {}}
-            button={editingProfile.id ? 'Update' : 'Create'}
+            button={editingProfile.id ? 'Close' : 'Create'}
+            readonly={editingProfile.id != undefined}
             onSubmit={async d => {
+              if (editingProfile.id) {
+                onClose();
+                return;
+              }
               setError(null);
               const { data: connectionProfile, error } = await post('/v1/connection_profiles', {
                 body: {
@@ -109,6 +114,33 @@ const ClusterEditor = ({
 }) => {
   const [editingProfile, setEditingProfile] = useState<any>({});
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const toast = useToast();
+  const { mutateConnectionProfiles } = useConnectionProfiles();
+
+  const deleteProfile = async (profile: ConnectionProfile) => {
+    const { error } = await del('/v1/connection_profiles/{id}', {
+      params: { path: { id: profile.id } },
+    });
+    mutateConnectionProfiles();
+    if (error) {
+      toast({
+        title: 'Failed to delete connection profile',
+        description: formatError(error),
+        status: 'error',
+        duration: 9000,
+        isClosable: true,
+      });
+    } else {
+      toast({
+        title: 'Connection profile deleted',
+        description: `Successfully deleted connection profile ${profile.name}`,
+        status: 'success',
+        duration: 9000,
+        isClosable: true,
+      });
+    }
+  };
+
 
   return (
     <>
@@ -119,50 +151,44 @@ const ClusterEditor = ({
           Select an existing {connector} connection profile or create a new one
         </Text>
 
-        <Table>
-          <Thead>
-            <Tr>
-              <Th>Name</Th>
-              <Th>Description</Th>
-              <Th></Th>
-            </Tr>
-          </Thead>
+        <Stack spacing={4}>
+          {connections
+            .filter(c => c.connector == connector)
+            .map(c => (
+              <HStack key={c.id}>
+                <LinkBox  borderRadius={8} w={"100%"} p={4} border={"1px solid #777"} _hover={{ bg: "gray.600", borderColor: "black" }}>
+                  <LinkOverlay href={"#"} onClick={() => onSubmit(c.id)} />
+                  <HStack spacing={4}>
+                    <Heading size={"14px"}>{c.name}</Heading>
+                    <Text fontStyle={"italic"}>
+                      {c.description}
+                    </Text>
+                  </HStack>
+                </LinkBox>
+                <Spacer />
+                <Box>
+                  <HStack>
+                    <IconButton
+                      variant={'outline'}
+                      aria-label={'Info'}
+                      icon={<InfoOutlineIcon />}
+                      onClick={() => {
+                        setEditingProfile(c);
+                        onOpen();
+                      }}
+                    />
 
-          <Tbody>
-            {connections
-              .filter(c => c.connector == connector)
-              .map(c => (
-                <Tr key={c.id}>
-                  <Th>
-                    <Button onClick={() => onSubmit(c.id)}>{c.name}</Button>
-                  </Th>
-                  <Th>{c.description}</Th>
-                  <Th>
-                    <HStack alignItems={'right'}>
-                      <Spacer />
-
-                      <IconButton
-                        variant={'outline'}
-                        aria-label={'Edit'}
-                        icon={<EditIcon />}
-                        onClick={() => {
-                          setEditingProfile(c);
-                          onOpen();
-                        }}
-                      />
-
-                      <IconButton
-                        variant={'outline'}
-                        aria-label={'Delete'}
-                        icon={<DeleteIcon />}
-                        onClick={() => deleteConnection(c)}
-                      />
-                    </HStack>
-                  </Th>
-                </Tr>
-              ))}
-          </Tbody>
-        </Table>
+                    <IconButton
+                      variant={'outline'}
+                      aria-label={'Delete'}
+                      icon={<DeleteIcon />}
+                      onClick={() => deleteProfile(c)}
+                    />
+                  </HStack>
+                </Box>
+              </HStack>
+            ))}
+        </Stack>
 
         <HStack>
           <Spacer />
@@ -178,13 +204,14 @@ const ClusterEditor = ({
         </HStack>
       </Stack>
 
-        <ClusterEditorModal
-            isOpen={isOpen}
-            onClose={onClose}
-            editingProfile={editingProfile}
-            connector={connector}
-            schema={schema}
-            addConnectionProfile={addConnectionProfile} />
+      <ClusterEditorModal
+        isOpen={isOpen}
+        onClose={onClose}
+        editingProfile={editingProfile}
+        connector={connector}
+        schema={schema}
+        addConnectionProfile={addConnectionProfile}
+      />
     </>
   );
 };
@@ -220,7 +247,6 @@ export const ConfigureProfile = ({
       schema={JSON.parse(connector.connectionConfig!)}
       addConnectionProfile={c => {
         mutateConnectionProfiles();
-        setState({ ...state, connectionProfileId: c.id });
       }}
     />
   );

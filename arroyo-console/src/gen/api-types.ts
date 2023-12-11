@@ -22,6 +22,13 @@ export interface paths {
      */
     post: operations["create_connection_profile"];
   };
+  "/v1/connection_profiles/{id}": {
+    /**
+     * Delete a Connection Profile 
+     * @description Delete a Connection Profile
+     */
+    delete: operations["delete_connection_profile"];
+  };
   "/v1/connection_tables": {
     /**
      * List all connection tables 
@@ -197,9 +204,11 @@ export interface components {
   schemas: {
     AvroFormat: {
       confluentSchemaRegistry?: boolean;
-      embeddedSchema?: boolean;
       intoUnstructuredJson?: boolean;
+      rawDatums?: boolean;
       readerSchema?: string;
+      /** Format: int32 */
+      schemaId?: number | null;
     };
     Checkpoint: {
       backend: string;
@@ -363,6 +372,8 @@ export interface components {
       confluentSchemaRegistry?: boolean;
       debezium?: boolean;
       includeSchema?: boolean;
+      /** Format: int32 */
+      schemaId?: number | null;
       timestampFormat?: components["schemas"]["TimestampFormat"];
       unstructured?: boolean;
     };
@@ -578,6 +589,22 @@ export interface operations {
           "application/json": components["schemas"]["ConnectionProfile"];
         };
       };
+    };
+  };
+  /**
+   * Delete a Connection Profile 
+   * @description Delete a Connection Profile
+   */
+  delete_connection_profile: {
+    parameters: {
+      path: {
+        /** @description Connection Profile id */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Deleted connection profile */
+      200: never;
     };
   };
   /**
