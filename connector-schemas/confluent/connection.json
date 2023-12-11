@@ -13,12 +13,12 @@
         },
          "key": {
             "type": "string",
-            "description": "Your Kafka cluster Key, found in the Confluent Cloud UI",
+            "description": "Your Kafka cluster _key_, found in the Confluent Cloud UI",
             "format": "var-str"
          },
         "secret": {
             "type": "string",
-            "description": "Your Kafka cluster Seret, found in the Confluent Cloud UI",
+            "description": "Your Kafka cluster _secret_, found in the Confluent Cloud UI",
             "format": "var-str"
         },
         "schemaRegistry": {
