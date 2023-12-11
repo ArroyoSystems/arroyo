@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use arroyo_connectors::{
     kafka::{KafkaConfig, KafkaConnector, KafkaTable, ReadMode},
     Connection, Connector,
@@ -7,6 +6,7 @@ use arroyo_rpc::{
     api_types::connections::{ConnectionSchema, SchemaDefinition},
     formats::{AvroFormat, Format, JsonFormat, TimestampFormat},
 };
+use std::collections::HashMap;
 
 use anyhow::Result;
 use arroyo_sql::{avro::convert_avro_schema, json_schema::convert_json_schema};
