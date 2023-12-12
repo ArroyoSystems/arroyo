@@ -34,6 +34,86 @@ import_types!(schema = "../connector-schemas/kafka/table.json");
 
 pub struct KafkaConnector {}
 
+impl KafkaConnector {
+    pub fn connection_from_options(
+        options: &mut HashMap<String, String>,
+    ) -> anyhow::Result<KafkaConfig> {
+        let auth = options.remove("auth.type");
+        let auth = match auth.as_ref().map(|t| t.as_str()) {
+            Some("none") | None => KafkaConfigAuthentication::None {},
+            Some("sasl") => KafkaConfigAuthentication::Sasl {
+                mechanism: pull_opt("auth.mechanism", options)?,
+                protocol: pull_opt("auth.protocol", options)?,
+                username: VarStr::new(pull_opt("auth.username", options)?),
+                password: VarStr::new(pull_opt("auth.password", options)?),
+            },
+            Some(other) => bail!("unknown auth type '{}'", other),
+        };
+
+        let schema_registry = options.remove("schema_registry.endpoint").map(|endpoint| {
+            let api_key = options.remove("schema_registry.api_key").map(VarStr::new);
+            let api_secret = options
+                .remove("schema_registry.api_secret")
+                .map(VarStr::new);
+            SchemaRegistry::ConfluentSchemaRegistry {
+                endpoint,
+                api_key,
+                api_secret,
+            }
+        });
+        Ok(KafkaConfig {
+            authentication: auth,
+            bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", options)?),
+            schema_registry_enum: schema_registry,
+        })
+    }
+
+    pub fn table_from_options(options: &mut HashMap<String, String>) -> anyhow::Result<KafkaTable> {
+        let typ = pull_opt("type", options)?;
+        let table_type = match typ.as_str() {
+            "source" => {
+                let offset = options.remove("source.offset");
+                TableType::Source {
+                    offset: match offset.as_ref().map(|f| f.as_str()) {
+                        Some("earliest") => SourceOffset::Earliest,
+                        None | Some("latest") => SourceOffset::Latest,
+                        Some(other) => bail!("invalid value for source.offset '{}'", other),
+                    },
+                    read_mode: match options
+                        .remove("source.read_mode")
+                        .as_ref()
+                        .map(|f| f.as_str())
+                    {
+                        Some("read_committed") => Some(ReadMode::ReadCommitted),
+                        Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
+                        Some(other) => bail!("invalid value for source.read_mode '{}'", other),
+                    },
+                    group_id: options.remove("source.group_id"),
+                }
+            }
+            "sink" => {
+                let commit_mode = options.remove("sink.commit_mode");
+                TableType::Sink {
+                    commit_mode: match commit_mode.as_ref().map(|f| f.as_str()) {
+                        Some("at_least_once") | None => SinkCommitMode::AtLeastOnce,
+                        Some("exactly_once") => SinkCommitMode::ExactlyOnce,
+                        Some(other) => bail!("invalid value for commit_mode '{}'", other),
+                    },
+                }
+            }
+            _ => {
+                bail!("type must be one of 'source' or 'sink")
+            }
+        };
+
+        Ok(KafkaTable {
+            topic: pull_opt("topic", options)?,
+            type_: table_type,
+            client_configs: HashMap::new(),
+        })
+    }
+}
+
 impl Connector for KafkaConnector {
     type ProfileT = KafkaConfig;
     type TableT = KafkaTable;
@@ -47,7 +127,7 @@ impl Connector for KafkaConnector {
             id: "kafka".to_string(),
             name: "Kafka".to_string(),
             icon: ICON.to_string(),
-            description: "Confluent Cloud, Amazon MSK, or self-hosted".to_string(),
+            description: "Read and write from a Kafka cluster".to_string(),
             enabled: true,
             source: true,
             sink: true,
@@ -144,90 +224,24 @@ impl Connector for KafkaConnector {
         schema: Option<&ConnectionSchema>,
         profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        let connection = match profile {
-            Some(connection_profile) => serde_json::from_value(connection_profile.config.clone())?,
-            None => {
-                let auth = options.remove("auth.type");
-                let auth = match auth.as_ref().map(|t| t.as_str()) {
-                    Some("none") | None => KafkaConfigAuthentication::None {},
-                    Some("sasl") => KafkaConfigAuthentication::Sasl {
-                        mechanism: pull_opt("auth.mechanism", options)?,
-                        protocol: pull_opt("auth.protocol", options)?,
-                        username: pull_opt("auth.username", options)?,
-                        password: VarStr::new(pull_opt("auth.password", options)?),
-                    },
-                    Some(other) => bail!("unknown auth type '{}'", other),
-                };
+        let connection = profile
+            .map(|p| {
+                serde_json::from_value(p.config.clone()).map_err(|e| {
+                    anyhow!("invalid config for profile '{}' in database: {}", p.id, e)
+                })
+            })
+            .unwrap_or_else(|| Self::connection_from_options(options))?;
 
-                let schema_registry = options.remove("schema_registry.endpoint").map(|endpoint| {
-                    let api_key = options.remove("schema_registry.api_key");
-                    let api_secret = options
-                        .remove("schema_registry.api_secret")
-                        .map(|secret| VarStr::new(secret));
-                    SchemaRegistry::ConfluentSchemaRegistry {
-                        endpoint,
-                        api_key,
-                        api_secret,
-                    }
-                });
-                KafkaConfig {
-                    authentication: auth,
-                    bootstrap_servers: BootstrapServers(pull_opt("bootstrap_servers", options)?),
-                    schema_registry_enum: schema_registry,
-                }
-            }
-        };
-
-        let typ = pull_opt("type", options)?;
-        let table_type = match typ.as_str() {
-            "source" => {
-                let offset = options.remove("source.offset");
-                TableType::Source {
-                    offset: match offset.as_ref().map(|f| f.as_str()) {
-                        Some("earliest") => SourceOffset::Earliest,
-                        None | Some("latest") => SourceOffset::Latest,
-                        Some(other) => bail!("invalid value for source.offset '{}'", other),
-                    },
-                    read_mode: match options
-                        .remove("source.read_mode")
-                        .as_ref()
-                        .map(|f| f.as_str())
-                    {
-                        Some("read_committed") => Some(ReadMode::ReadCommitted),
-                        Some("read_uncommitted") | None => Some(ReadMode::ReadUncommitted),
-                        Some(other) => bail!("invalid value for source.read_mode '{}'", other),
-                    },
-                    group_id: options.remove("source.group_id"),
-                }
-            }
-            "sink" => {
-                let commit_mode = options.remove("sink.commit_mode");
-                TableType::Sink {
-                    commit_mode: match commit_mode.as_ref().map(|f| f.as_str()) {
-                        Some("at_least_once") | None => SinkCommitMode::AtLeastOnce,
-                        Some("exactly_once") => SinkCommitMode::ExactlyOnce,
-                        Some(other) => bail!("invalid value for commit_mode '{}'", other),
-                    },
-                }
-            }
-            _ => {
-                bail!("type must be one of 'source' or 'sink")
-            }
-        };
-
-        let table = KafkaTable {
-            topic: pull_opt("topic", options)?,
-            type_: table_type,
-        };
+        let table = Self::table_from_options(options)?;
 
         Self::from_config(&self, None, name, connection, table, schema)
     }
 }
 
-struct KafkaTester {
-    connection: KafkaConfig,
-    table: KafkaTable,
-    tx: Sender<Result<Event, Infallible>>,
+pub struct KafkaTester {
+    pub connection: KafkaConfig,
+    pub table: KafkaTable,
+    pub tx: Sender<Result<Event, Infallible>>,
 }
 
 pub struct TopicMetadata {
@@ -256,7 +270,10 @@ impl KafkaTester {
             } => {
                 client_config.set("sasl.mechanism", mechanism);
                 client_config.set("security.protocol", protocol);
-                client_config.set("sasl.username", username);
+                client_config.set(
+                    "sasl.username",
+                    username.sub_env_vars().map_err(|e| e.to_string())?,
+                );
                 client_config.set(
                     "sasl.password",
                     password.sub_env_vars().map_err(|e| e.to_string())?,

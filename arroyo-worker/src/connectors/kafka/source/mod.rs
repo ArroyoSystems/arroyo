@@ -99,7 +99,7 @@ where
         else {
             panic!("found non-source kafka config in source operator");
         };
-        let mut client_configs = client_configs(&connection);
+        let mut client_configs = client_configs(&connection, &table);
         if let Some(ReadMode::ReadCommitted) = read_mode {
             client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
         }

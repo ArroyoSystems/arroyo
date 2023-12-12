@@ -119,7 +119,7 @@ impl ConfluentSchemaRegistry {
     pub fn new(
         endpoint: &str,
         topic: &str,
-        api_key: Option<String>,
+        api_key: Option<VarStr>,
         api_secret: Option<VarStr>,
     ) -> anyhow::Result<Self> {
         let mut client = Client::builder().timeout(Duration::from_secs(5));
@@ -128,7 +128,7 @@ impl ConfluentSchemaRegistry {
             let mut buf = b"Basic ".to_vec();
             {
                 let mut encoder = EncoderWriter::new(&mut buf, &BASE64_STANDARD);
-                let _ = write!(encoder, "{}:", api_key);
+                let _ = write!(encoder, "{}:", api_key.sub_env_vars()?);
                 if let Some(password) = api_secret {
                     let _ = write!(encoder, "{}", password.sub_env_vars()?);
                 }

@@ -6,6 +6,7 @@ use arroyo_rpc::{
     api_types::connections::{ConnectionSchema, SchemaDefinition},
     formats::{AvroFormat, Format, JsonFormat, TimestampFormat},
 };
+use std::collections::HashMap;
 
 use anyhow::Result;
 use arroyo_sql::{avro::convert_avro_schema, json_schema::convert_json_schema};
@@ -99,6 +100,7 @@ pub fn get_json_schema_source() -> Result<Connection> {
             offset: arroyo_connectors::kafka::SourceOffset::Earliest,
             read_mode: Some(ReadMode::ReadUncommitted),
         },
+        client_configs: HashMap::new(),
     };
     KafkaConnector {}.from_config(
         Some(2),
@@ -204,6 +206,7 @@ pub fn get_avro_source() -> Result<Connection> {
             offset: arroyo_connectors::kafka::SourceOffset::Earliest,
             read_mode: Some(ReadMode::ReadUncommitted),
         },
+        client_configs: HashMap::new(),
     };
     KafkaConnector {}.from_config(
         Some(3),

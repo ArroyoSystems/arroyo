@@ -94,12 +94,12 @@ impl<K: Key + Serialize, T: SchemaData> KafkaSinkFunc<K, T> {
         };
 
         Self {
-            topic: table.topic,
             bootstrap_servers: connection.bootstrap_servers.to_string(),
             producer: None,
             consistency_mode: commit_mode.into(),
             write_futures: vec![],
-            client_config: client_configs(&connection),
+            client_config: client_configs(&connection, &table),
+            topic: table.topic,
             serializer: DataSerializer::new(
                 config.format.expect("Format must be defined for KafkaSink"),
             ),
