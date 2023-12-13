@@ -330,8 +330,8 @@ impl GeneratorConfig {
             total_proportion: nexmark_config.person_proportion
                 + nexmark_config.auction_proportion
                 + nexmark_config.bid_proportion,
-            inter_event_delay: Duration::from_micros(
-                (1000000.0 / (nexmark_config.first_event_rate)
+            inter_event_delay: Duration::from_nanos(
+                (1_000_000_000.0 / (nexmark_config.first_event_rate)
                     * (nexmark_config.num_event_generators as f64)) as u64,
             ),
             _step_length_second: (nexmark_config.rate_period_seconds + 2 - 1) / 2,
@@ -510,7 +510,7 @@ impl GeneratorConfig {
 
     fn timestamp_for_event(&self, event_number: u64) -> SystemTime {
         self.base_time
-            + Duration::from_micros(self.inter_event_delay.as_micros() as u64 * event_number)
+            + Duration::from_nanos(self.inter_event_delay.as_nanos() as u64 * event_number)
     }
 
     fn next_price(random: &mut SmallRng) -> u64 {
