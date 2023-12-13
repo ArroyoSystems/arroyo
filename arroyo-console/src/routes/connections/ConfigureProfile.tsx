@@ -49,6 +49,50 @@ function ClusterEditorModal({
 }) {
   const [error, setError] = useState<string | null>(null);
 
+  const onTest = async (d) => {
+    setError(null);
+    const { data: connectionProfile, error } = await post('/v1/connection_profiles/test', {
+      body: {
+        name: d.name,
+        connector: connector,
+        config: d,
+      },
+    });
+
+    if (error) {
+      setError(formatError(error));
+      return;
+    }
+
+    onClose();
+  }
+
+  const onSubmit = async (d) => {
+    if (editingProfile.id) {
+      onClose();
+      return;
+    }
+    setError(null);
+    const { data: connectionProfile, error } = await post('/v1/connection_profiles', {
+      body: {
+        name: d.name,
+        connector: connector,
+        config: d,
+      },
+    });
+
+    if (connectionProfile) {
+      addConnectionProfile(connectionProfile);
+    }
+
+    if (error) {
+      setError(formatError(error));
+      return;
+    }
+
+    onClose();
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} size={'2xl'}>
       <ModalOverlay />
@@ -65,32 +109,19 @@ function ClusterEditorModal({
             initial={editingProfile.config || {}}
             button={editingProfile.id ? 'Close' : 'Create'}
             readonly={editingProfile.id != undefined}
-            onSubmit={async d => {
-              if (editingProfile.id) {
-                onClose();
-                return;
-              }
-              setError(null);
-              const { data: connectionProfile, error } = await post('/v1/connection_profiles', {
-                body: {
-                  name: d.name,
-                  connector: connector,
-                  config: d,
-                },
-              });
-
-              if (connectionProfile) {
-                addConnectionProfile(connectionProfile);
-              }
-
-              if (error) {
-                setError(formatError(error));
-                return;
-              }
-
-              onClose();
-            }}
-          />
+          >
+            {editingProfile.id ? (
+              <Button
+                onClick={() => {
+                  onTest(editingProfile.config);
+                }}
+              >
+                Test
+              </Button>
+            ) : (
+              <></>
+            )}
+          </JsonForm>
         </ModalBody>
       </ModalContent>
     </Modal>

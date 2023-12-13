@@ -12,11 +12,12 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot::Receiver;
 use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
 
-use crate::{pull_opt, Connection, ConnectionType};
+use crate::{pull_opt, Connection, ConnectionType, send};
 
 use super::Connector;
 
@@ -194,6 +195,22 @@ impl Connector for KafkaConnector {
         })
     }
 
+    fn test_profile(&self, profile: Self::ProfileT) -> Option<Receiver<TestSourceMessage>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        tokio::spawn(async move {
+            let tester = KafkaTester {
+                connection: profile,
+            };
+
+            let mut message = tester.test_connection().await;
+            message.done = true;
+            tx.send(message).unwrap();
+        });
+
+        Some(rx)
+    }
+
     fn test(
         &self,
         _: &str,
@@ -204,11 +221,9 @@ impl Connector for KafkaConnector {
     ) {
         let tester = KafkaTester {
             connection: config,
-            table,
-            tx,
         };
 
-        tester.start();
+        tester.start(table, tx);
     }
 
     fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
@@ -241,8 +256,6 @@ impl Connector for KafkaConnector {
 
 pub struct KafkaTester {
     pub connection: KafkaConfig,
-    pub table: KafkaTable,
-    pub tx: Sender<Result<Event, Infallible>>,
 }
 
 pub struct TopicMetadata {
@@ -294,10 +307,10 @@ impl KafkaTester {
     }
 
     #[allow(unused)]
-    pub async fn topic_metadata(&self) -> Result<TopicMetadata, Status> {
+    pub async fn topic_metadata(&self, topic: &str) -> Result<TopicMetadata, Status> {
         let client = self.connect().await.map_err(Status::failed_precondition)?;
         let metadata = client
-            .fetch_metadata(Some(&self.table.topic), Duration::from_secs(5))
+            .fetch_metadata(Some(&topic), Duration::from_secs(5))
             .map_err(|e| {
                 Status::failed_precondition(format!(
                     "Failed to read topic metadata from Kafka: {:?}",
@@ -327,18 +340,18 @@ impl KafkaTester {
         })
     }
 
-    async fn test(&self) -> Result<(), String> {
+    async fn test(&self, table: KafkaTable, mut tx: Sender<Result<Event, Infallible>>) -> Result<(), String> {
         let client = self.connect().await?;
 
-        self.info("Connected to Kafka").await;
+        self.info(&mut tx, "Connected to Kafka").await;
 
-        let topic = self.table.topic.clone();
+        let topic = table.topic.clone();
 
         let metadata = client
             .fetch_metadata(Some(&topic), Duration::from_secs(10))
             .map_err(|e| format!("Failed to fetch metadata: {:?}", e))?;
 
-        self.info("Fetched topic metadata").await;
+        self.info(&mut tx, "Fetched topic metadata").await;
 
         {
             let topic_metadata = metadata.topics().get(0).ok_or_else(|| {
@@ -379,15 +392,15 @@ impl KafkaTester {
                 .map_err(|e| format!("Failed to subscribe to topic '{}': {:?}", topic, e))?;
         }
 
-        if let TableType::Source { .. } = self.table.type_ {
-            self.info("Waiting for messages").await;
+        if let TableType::Source { .. } = table.type_ {
+            self.info(&mut tx, "Waiting for messages").await;
 
             let start = Instant::now();
             let timeout = Duration::from_secs(30);
             while start.elapsed() < timeout {
                 match client.poll(Duration::ZERO) {
                     Some(Ok(message)) => {
-                        self.info("Received message from Kafka").await;
+                        self.info(&mut tx, "Received message from Kafka").await;
                         self.test_schema(message)?;
                         return Ok(());
                     }
@@ -416,24 +429,13 @@ impl KafkaTester {
         Ok(())
     }
 
-    async fn info(&self, s: impl Into<String>) {
-        self.send(TestSourceMessage {
+    async fn info(&self, tx: &mut Sender<Result<Event, Infallible>>, s: impl Into<String>) {
+        send(tx, TestSourceMessage {
             error: false,
             done: false,
             message: s.into(),
         })
         .await;
-    }
-
-    async fn send(&self, msg: TestSourceMessage) {
-        if self
-            .tx
-            .send(Ok(Event::default().json_data(msg).unwrap()))
-            .await
-            .is_err()
-        {
-            warn!("Test API rx closed while sending message");
-        }
     }
 
     #[allow(unused)]
@@ -452,18 +454,18 @@ impl KafkaTester {
         }
     }
 
-    pub fn start(self) {
+    pub fn start(self, table: KafkaTable, mut tx: Sender<Result<Event, Infallible>>) {
         tokio::spawn(async move {
             info!("Started kafka tester");
-            if let Err(e) = self.test().await {
-                self.send(TestSourceMessage {
+            if let Err(e) = self.test(table, tx.clone()).await {
+                send(&mut tx, TestSourceMessage {
                     error: true,
                     done: true,
                     message: e,
                 })
                 .await;
             } else {
-                self.send(TestSourceMessage {
+                send(&mut tx, TestSourceMessage {
                     error: false,
                     done: true,
                     message: "Connection is valid".to_string(),

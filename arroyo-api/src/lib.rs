@@ -5,7 +5,8 @@ use tracing::warn;
 use utoipa::OpenApi;
 
 use crate::connection_profiles::{
-    __path_create_connection_profile, __path_get_connection_profiles, __path_delete_connection_profile
+    __path_create_connection_profile, __path_get_connection_profiles, __path_delete_connection_profile,
+    __path_test_connection_profile
 };
 use crate::connection_tables::{
     __path_create_connection_table, __path_delete_connection_table, __path_get_connection_tables,
@@ -145,6 +146,7 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         get_operator_metric_groups,
         get_connectors,
         get_connection_profiles,
+        test_connection_profile,
         delete_connection_profile,
         get_connection_tables,
         create_connection_table,

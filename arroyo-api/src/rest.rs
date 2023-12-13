@@ -17,7 +17,7 @@ use tower_http::services::ServeDir;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::connection_profiles::{create_connection_profile, delete_connection_profile, get_connection_profiles};
+use crate::connection_profiles::{create_connection_profile, delete_connection_profile, get_connection_profiles, test_connection_profile};
 use crate::connection_tables::{
     create_connection_table, delete_connection_table, get_connection_tables, test_connection_table,
     test_schema,
@@ -107,6 +107,7 @@ pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
     let api_routes = Router::new()
         .route("/ping", get(ping))
         .route("/connectors", get(get_connectors))
+        .route("/connection_profiles/test", post(test_connection_profile))
         .route("/connection_profiles", post(create_connection_profile))
         .route("/connection_profiles", get(get_connection_profiles))
         .route("/connection_profiles/:id", delete(delete_connection_profile))

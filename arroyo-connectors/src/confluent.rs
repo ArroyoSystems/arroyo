@@ -145,11 +145,9 @@ impl Connector for ConfluentConnector {
             .insert("client.id".to_string(), CLIENT_ID.to_string());
         let tester = KafkaTester {
             connection: config.try_into().unwrap(),
-            table,
-            tx,
         };
 
-        tester.start();
+        tester.start(table, tx);
     }
 
     fn from_options(

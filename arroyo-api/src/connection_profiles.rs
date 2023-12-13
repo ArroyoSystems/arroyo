@@ -3,7 +3,7 @@ use axum::Json;
 use axum_extra::extract::WithRejection;
 
 use arroyo_connectors::connector_for_type;
-use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionProfilePost};
+use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionProfilePost, TestSourceMessage};
 use arroyo_rpc::api_types::ConnectionProfileCollection;
 use cornucopia_async::GenericClient;
 use tracing::warn;
@@ -39,6 +39,38 @@ impl TryFrom<DbConnectionProfile> for ConnectionProfile {
             description,
         })
     }
+}
+
+/// Test connection profile
+#[utoipa::path(
+    post,
+    path = "/v1/connection_profiles/test",
+    tag = "connection_profiles",
+    request_body = ConnectionProfilePost,
+    responses(
+        (status = 200, description = "Result of testing connection profile", body = TestSourceMessage),
+    ),
+)]
+pub async fn test_connection_profile(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    WithRejection(Json(req), _): WithRejection<Json<ConnectionProfilePost>, ApiError>,
+) -> Result<Json<TestSourceMessage>, ErrorResp> {
+    let _auth_data = authenticate(&state.pool, bearer_auth).await.unwrap();
+
+    let connector = connector_for_type(&req.connector)
+        .ok_or_else(|| bad_request("Unknown connector type".to_string()))?;
+
+    let Some(rx) = connector
+        .test_profile(&req.config)
+        .map_err(|e| bad_request(format!("Invalid config: {:?}", e)))? else {
+        return Ok(Json(TestSourceMessage::done("This connector does not support testing")));
+    };
+
+    let result = rx.await
+        .map_err(log_and_map)?;
+
+    Ok(Json(result))
 }
 
 /// Create connection profile
@@ -89,6 +121,7 @@ pub async fn create_connection_profile(
 
     Ok(Json(connection_profile))
 }
+
 
 /// List all connection profiles
 #[utoipa::path(

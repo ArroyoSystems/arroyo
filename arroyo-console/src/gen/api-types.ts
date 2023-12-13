@@ -22,6 +22,13 @@ export interface paths {
      */
     post: operations["create_connection_profile"];
   };
+  "/v1/connection_profiles/test": {
+    /**
+     * Test connection profile 
+     * @description Test connection profile
+     */
+    post: operations["test_connection_profile"];
+  };
   "/v1/connection_profiles/{id}": {
     /**
      * Delete a Connection Profile 
@@ -587,6 +594,25 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["ConnectionProfile"];
+        };
+      };
+    };
+  };
+  /**
+   * Test connection profile 
+   * @description Test connection profile
+   */
+  test_connection_profile: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionProfilePost"];
+      };
+    };
+    responses: {
+      /** @description Result of testing connection profile */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TestSourceMessage"];
         };
       };
     };

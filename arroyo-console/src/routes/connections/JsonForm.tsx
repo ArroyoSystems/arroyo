@@ -690,8 +690,8 @@ export function JsonForm({
   initial = {},
   hasName,
   error,
-  button = 'Create',
   readonly = false,
+  children,
 }: {
   schema: JSONSchema7;
   onSubmit: (values: any) => Promise<void>;
@@ -700,6 +700,7 @@ export function JsonForm({
   error: string | null;
   button?: string;
   readonly?: boolean;
+  children: JSX.Element,
 }) {
   let ajv = new Ajv();
   ajv.addKeyword('sensitive');
@@ -767,9 +768,7 @@ export function JsonForm({
         </Alert>
       )}
 
-      <Button mt={8} mb={4} type="submit" isLoading={formik.isSubmitting}>
-        {button}
-      </Button>
+      { children }
     </form>
   );
 }
