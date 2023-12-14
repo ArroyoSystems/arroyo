@@ -97,7 +97,9 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
         match &self.table {
             TableType::Source {
                 compression_format, ..
-            } => compression_format.clone().unwrap(),
+            } => compression_format
+                .clone()
+                .unwrap_or(CompressionFormat::None),
             TableType::Sink { .. } => unreachable!(),
         }
     }
