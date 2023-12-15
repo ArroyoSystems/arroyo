@@ -81,6 +81,7 @@ pub fn get_json_schema_source() -> Result<Connection> {
         })),
         None,
         None,
+        None,
         struct_fields
             .into_iter()
             .map(|field| field.try_into().unwrap())
@@ -185,6 +186,7 @@ pub fn get_avro_source() -> Result<Connection> {
     format.add_reader_schema(apache_avro::Schema::parse_str(avro_schema).unwrap());
     let connection_schema = ConnectionSchema::try_new(
         Some(Format::Avro(format)),
+        None,
         None,
         None,
         struct_fields

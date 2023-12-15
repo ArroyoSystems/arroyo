@@ -323,6 +323,26 @@ impl UserError {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum SourceError {
+    BadData { details: String },
+    Other { name: String, details: String },
+}
+
+impl SourceError {
+    pub fn bad_data(details: impl Into<String>) -> SourceError {
+        SourceError::BadData {
+            details: details.into(),
+        }
+    }
+    pub fn other(name: impl Into<String>, details: impl Into<String>) -> SourceError {
+        SourceError::Other {
+            name: name.into(),
+            details: details.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Serialize, Deserialize)]
 pub enum UpdatingData<T: Data> {
     Retract(T),
@@ -778,6 +798,7 @@ pub static BYTES_RECV: &str = "arroyo_worker_bytes_recv";
 pub static BYTES_SENT: &str = "arroyo_worker_bytes_sent";
 pub static TX_QUEUE_SIZE: &str = "arroyo_worker_tx_queue_size";
 pub static TX_QUEUE_REM: &str = "arroyo_worker_tx_queue_rem";
+pub static DESERIALIZATION_ERRORS: &str = "arroyo_worker_deserialization_errors";
 
 #[derive(Debug, Copy, Clone, Encode, Decode)]
 pub struct CheckpointBarrier {

@@ -1,6 +1,8 @@
 use crate::engine::OutQueue;
 use arroyo_metrics::gauge_for_task;
-use arroyo_types::{TaskInfo, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT};
+use arroyo_types::{
+    TaskInfo, BYTES_RECV, BYTES_SENT, DESERIALIZATION_ERRORS, MESSAGES_RECV, MESSAGES_SENT,
+};
 use lazy_static::lazy_static;
 use prometheus::{labels, register_int_counter_vec, IntCounter, IntCounterVec, IntGauge};
 
@@ -31,6 +33,12 @@ lazy_static! {
         &TASK_METRIC_LABELS
     )
     .unwrap();
+    pub static ref DESERIALIZATION_ERRORS_COUNTER: IntCounterVec = register_int_counter_vec!(
+        DESERIALIZATION_ERRORS,
+        "Count of deserialization errors",
+        &TASK_METRIC_LABELS
+    )
+    .unwrap();
 }
 
 pub enum TaskCounters {
@@ -38,6 +46,7 @@ pub enum TaskCounters {
     MessagesSent,
     BytesReceived,
     BytesSent,
+    DeserializationErrors,
 }
 
 impl TaskCounters {
@@ -63,6 +72,12 @@ impl TaskCounters {
                 &task_info.task_index.to_string(),
                 &task_info.operator_name,
             ]),
+            TaskCounters::DeserializationErrors => DESERIALIZATION_ERRORS_COUNTER
+                .with_label_values(&[
+                    &task_info.operator_id,
+                    &task_info.task_index.to_string(),
+                    &task_info.operator_name,
+                ]),
         }
     }
 }

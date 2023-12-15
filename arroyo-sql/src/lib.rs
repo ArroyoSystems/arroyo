@@ -684,6 +684,7 @@ pub fn get_test_expression(
     let struct_def = test_struct_def();
     let schema = ConnectionSchema {
         format: Some(Format::Json(JsonFormat::default())),
+        bad_data: None,
         framing: None,
         struct_name: struct_def.name.clone(),
         fields: struct_def

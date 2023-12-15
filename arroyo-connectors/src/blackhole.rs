@@ -96,6 +96,7 @@ impl Connector for BlackholeConnector {
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: None,
+            bad_data: None,
             framing: None,
         };
 

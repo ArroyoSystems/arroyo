@@ -219,6 +219,7 @@ pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
         UdfPost,
         GlobalUdf,
         GlobalUdfCollection,
+        BadData,
     )),
     tags(
         (name = "ping", description = "Ping endpoint"),

@@ -1,9 +1,9 @@
 use crate::engine::{Context, StreamNode};
-use crate::SourceFinishType;
+use crate::{RateLimiter, SourceFinishType};
 use anyhow::anyhow;
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
-use arroyo_rpc::formats::{Format, Framing};
+use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage};
@@ -33,6 +33,8 @@ where
     endpoint: Option<String>,
     offset_mode: SourceOffset,
     deserializer: DataDeserializer<T>,
+    bad_data: Option<BadData>,
+    rate_limiter: RateLimiter,
     _t: PhantomData<K>,
 }
 
@@ -57,6 +59,7 @@ where
         topic: &str,
         offset_mode: SourceOffset,
         format: Format,
+        bad_data: Option<BadData>,
         framing: Option<Framing>,
     ) -> Self {
         Self {
@@ -64,6 +67,8 @@ where
             endpoint: endpoint.map(|e| e.to_string()),
             offset_mode,
             deserializer: DataDeserializer::new(format, framing),
+            rate_limiter: RateLimiter::new(),
+            bad_data,
             _t: PhantomData,
         }
     }
@@ -85,6 +90,8 @@ where
                 config.format.expect("Format must be specified for fluvio"),
                 config.framing,
             ),
+            bad_data: config.bad_data,
+            rate_limiter: RateLimiter::new(),
             _t: PhantomData,
         }
     }
@@ -202,11 +209,7 @@ where
                             let timestamp = from_millis(msg.timestamp().max(0) as u64);
                             let iter = self.deserializer.deserialize_slice(msg.value()).await;
                             for value in iter {
-                                ctx.collector.collect(Record {
-                                    timestamp,
-                                    key: None,
-                                    value: value?,
-                                }).await;
+                                ctx.collect_source_record(timestamp, value, &self.bad_data, &mut self.rate_limiter).await?;
                             }
                             offsets.insert(msg.partition(), msg.offset());
                         },

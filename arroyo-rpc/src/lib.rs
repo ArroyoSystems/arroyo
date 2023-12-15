@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::{fs, time::SystemTime};
 
 use crate::api_types::connections::PrimitiveType;
-use crate::formats::{Format, Framing};
+use crate::formats::{BadData, Format, Framing};
 use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use arroyo_types::CheckpointBarrier;
 use grpc::{StopMode, TaskCheckpointEventType};
@@ -165,6 +165,7 @@ pub struct OperatorConfig {
     pub connection: Value,
     pub table: Value,
     pub format: Option<Format>,
+    pub bad_data: Option<BadData>,
     pub framing: Option<Framing>,
     pub rate_limit: Option<RateLimit>,
 }
@@ -175,6 +176,7 @@ impl Default for OperatorConfig {
             connection: serde_json::from_str("{}").unwrap(),
             table: serde_json::from_str("{}").unwrap(),
             format: None,
+            bad_data: None,
             framing: None,
             rate_limit: None,
         }

@@ -4,7 +4,7 @@ use apache_avro::{from_avro_datum, Reader, Schema, Writer};
 use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_types::UserError;
+use arroyo_types::SourceError;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
@@ -17,7 +17,7 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
     schema_registry: Arc<Mutex<HashMap<u32, Schema>>>,
     resolver: Arc<dyn SchemaResolver + Sync>,
     mut msg: &'a [u8],
-) -> Result<impl Iterator<Item = Result<T, UserError>> + 'a, String> {
+) -> Result<impl Iterator<Item = Result<T, SourceError>> + 'a, String> {
     let id = if format.confluent_schema_registry {
         let magic_byte = msg[0];
         if magic_byte != 0 {
@@ -72,10 +72,7 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
     let into_json = format.into_unstructured_json;
     Ok(messages.into_iter().map(move |record| {
         let value = record.map_err(|e| {
-            UserError::new(
-                "Deserialization failed",
-                format!("Failed to deserialize from avro: {:?}", e),
-            )
+            SourceError::bad_data(format!("Failed to deserialize from avro: {:?}", e))
         })?;
 
         if into_json {
@@ -84,10 +81,10 @@ pub async fn deserialize_slice_avro<'a, T: DeserializeOwned>(
             // for now round-trip through json in order to handle unsupported avro features
             // as that allows us to rely on raw json deserialization
             serde_json::from_value(avro_to_json(value)).map_err(|e| {
-                UserError::new(
-                    "Deserialization failed",
-                    format!("Failed to convert avro message into struct type: {:?}", e),
-                )
+                SourceError::bad_data(format!(
+                    "Failed to convert avro message into struct type: {:?}",
+                    e
+                ))
             })
         }
     }))
