@@ -21,7 +21,13 @@ import {
 } from '@chakra-ui/react';
 import { useState } from 'react';
 import { JsonForm } from './JsonForm';
-import { AddIcon, ArrowBackIcon, DeleteIcon, InfoOutlineIcon } from '@chakra-ui/icons';
+import {
+  AddIcon,
+  ArrowBackIcon,
+  ArrowRightIcon,
+  DeleteIcon,
+  InfoOutlineIcon,
+} from '@chakra-ui/icons';
 import { ConnectionProfile, Connector, del, useConnectionProfiles } from '../../lib/data_fetching';
 import { CreateConnectionState } from './CreateConnection';
 import { formatError } from '../../lib/util';
@@ -68,16 +74,19 @@ const ClusterChooser = ({
   connections,
   onSubmit,
   schema,
+  setCreatingCluster,
 }: {
   connector: string;
   connections: Array<ConnectionProfile>;
   onSubmit: (c: string) => void;
   schema: JSONSchema7;
+  setCreatingCluster: (b: boolean) => void;
 }) => {
   const [editingProfile, setEditingProfile] = useState<any>({});
   const { isOpen, onOpen, onClose } = useDisclosure();
   const toast = useToast();
   const { mutateConnectionProfiles } = useConnectionProfiles();
+  const [selected, setSelected] = useState<string | null>(null);
 
   const deleteProfile = async (profile: ConnectionProfile) => {
     const { error } = await del('/v1/connection_profiles/{id}', {
@@ -109,7 +118,15 @@ const ClusterChooser = ({
         <Heading size={'xx-small'}>Cluster config</Heading>
 
         <Text fontSize={'sm'}>
-          Select an existing {connector} connection profile or create a new one
+          Select an existing {connector}{' '}
+          <dfn
+            title={
+              'A connection profile allows you to define common connection details once and use it across multiple connection tables'
+            }
+          >
+            connection profile
+          </dfn>{' '}
+          or create a new one
         </Text>
 
         <Stack spacing={4}>
@@ -121,10 +138,11 @@ const ClusterChooser = ({
                   borderRadius={8}
                   w={'100%'}
                   p={4}
+                  bg={c.id == selected ? 'blue.700' : 'gray.800'}
                   border={'1px solid #777'}
-                  _hover={{ bg: 'gray.600', borderColor: 'black' }}
+                  _hover={{ bg: c.id == selected ? 'blue.700' : 'gray.600', borderColor: 'black' }}
                 >
-                  <LinkOverlay href={'#'} onClick={() => onSubmit(c.id)} />
+                  <LinkOverlay href={'#'} onClick={() => setSelected(c.id)} />
                   <HStack spacing={4}>
                     <Heading size={'14px'}>{c.name}</Heading>
                     <Text fontStyle={'italic'}>{c.description}</Text>
@@ -154,6 +172,19 @@ const ClusterChooser = ({
               </HStack>
             ))}
         </Stack>
+
+        <HStack>
+          <Button isDisabled={selected == null} onClick={() => onSubmit(selected!)}>
+            Continue
+            <ArrowRightIcon w={3} h={3} ml={2} />
+          </Button>
+
+          <Spacer />
+          <Button onClick={() => setCreatingCluster(true)}>
+            <AddIcon w={3} h={3} mr={2} />
+            Create new
+          </Button>
+        </HStack>
       </Stack>
 
       <ClusterViewerModal
@@ -208,25 +239,16 @@ export const ConfigureProfile = ({
     );
   } else {
     return (
-      <Stack spacing={4}>
-        <ClusterChooser
-          onSubmit={c => {
-            setState({ ...state, connectionProfileId: c });
-            onSubmit();
-          }}
-          connector={connector.id}
-          connections={connectionProfiles!}
-          schema={JSON.parse(connector.connectionConfig!)}
-        />
-
-        <HStack>
-          <Spacer />
-          <Button onClick={() => setCreatingCluster(true)}>
-            <AddIcon w={3} h={3} mr={2} />
-            Create new
-          </Button>
-        </HStack>
-      </Stack>
+      <ClusterChooser
+        onSubmit={c => {
+          setState({ ...state, connectionProfileId: c });
+          onSubmit();
+        }}
+        connector={connector.id}
+        connections={connectionProfiles!}
+        schema={JSON.parse(connector.connectionConfig!)}
+        setCreatingCluster={setCreatingCluster}
+      />
     );
   }
 };
