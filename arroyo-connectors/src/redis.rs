@@ -9,6 +9,7 @@ use redis::cluster::ClusterClient;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
+use tokio::sync::oneshot::Receiver;
 use typify::import_types;
 
 use crate::{pull_opt, pull_option_to_u64, Connection, Connector};
@@ -147,6 +148,26 @@ impl Connector for RedisConnector {
         s: Option<&ConnectionSchema>,
     ) -> Option<ConnectionSchema> {
         s.cloned()
+    }
+
+    fn test_profile(&self, profile: Self::ProfileT) -> Option<Receiver<TestSourceMessage>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        tokio::spawn(async move {
+            let (itx, _) = tokio::sync::mpsc::channel(8);
+            let message = match test_inner(profile, itx).await {
+                Ok(_) => {
+                    TestSourceMessage::done("Successfully connected to Redis")
+                }
+                Err(e) => {
+                    TestSourceMessage::fail(format!("Failed to connect to Redis: {:?}", e))
+                }
+            };
+
+            tx.send(message).unwrap();
+        });
+
+        Some(rx)
     }
 
     fn test(
