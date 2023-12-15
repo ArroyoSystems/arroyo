@@ -6,7 +6,7 @@ use arrow_array::cast::AsArray;
 use arrow_array::{RecordBatch, StringArray};
 use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_types::{Data, Debezium, RawJson, UserError};
+use arroyo_types::{Data, Debezium, RawJson, SourceError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
@@ -290,7 +290,7 @@ impl<T: SchemaData> DataDeserializer<T> {
     pub async fn deserialize_slice<'a>(
         &mut self,
         msg: &'a [u8],
-    ) -> impl Iterator<Item = Result<T, UserError>> + 'a + Send {
+    ) -> impl Iterator<Item = Result<T, SourceError>> + 'a + Send {
         match &*self.format {
             Format::Avro(avro) => {
                 let schema_registry = self.schema_registry.clone();
@@ -300,9 +300,13 @@ impl<T: SchemaData> DataDeserializer<T> {
                 {
                     Ok(iter) => Box::new(iter),
                     Err(e) => Box::new(
-                        vec![Err(UserError::new("Avro deserialization failed", e))].into_iter(),
+                        vec![Err(SourceError::other(
+                            "Avro error",
+                            format!("Avro deserialization failed: {}", e),
+                        ))]
+                        .into_iter(),
                     )
-                        as Box<dyn Iterator<Item = Result<T, UserError>> + Send>,
+                        as Box<dyn Iterator<Item = Result<T, SourceError>> + Send>,
                 }
             }
             _ => {
@@ -310,7 +314,7 @@ impl<T: SchemaData> DataDeserializer<T> {
                 Box::new(
                     FramingIterator::new(self.framing.clone(), msg)
                         .map(move |t| new_self.deserialize_single(t)),
-                ) as Box<dyn Iterator<Item = Result<T, UserError>> + Send>
+                ) as Box<dyn Iterator<Item = Result<T, SourceError>> + Send>
             }
         }
     }
@@ -319,19 +323,14 @@ impl<T: SchemaData> DataDeserializer<T> {
         self.format.clone()
     }
 
-    pub fn deserialize_single(&self, msg: &[u8]) -> Result<T, UserError> {
+    pub fn deserialize_single(&self, msg: &[u8]) -> Result<T, SourceError> {
         match &*self.format {
             Format::Json(json) => json::deserialize_slice_json(json, msg),
             Format::Avro(_) => unreachable!("avro should be handled by here"),
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
             Format::RawString(_) => deserialize_raw_string(msg),
         }
-        .map_err(|e| {
-            UserError::new(
-                "Deserialization failed",
-                format!("Failed to deserialize: {}", e),
-            )
-        })
+        .map_err(|e| SourceError::bad_data(format!("Failed to deserialize: {:?}", e)))
     }
 }
 

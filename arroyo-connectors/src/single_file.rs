@@ -105,6 +105,7 @@ impl Connector for SingleFileConnector {
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: Some(format),
+            bad_data: schema.bad_data.clone(),
             framing: schema.framing.clone(),
         };
 

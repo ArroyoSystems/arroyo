@@ -1,4 +1,4 @@
-use crate::formats::{Format, Framing};
+use crate::formats::{BadData, Format, Framing};
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -128,6 +128,7 @@ pub enum SchemaDefinition {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSchema {
     pub format: Option<Format>,
+    pub bad_data: Option<BadData>,
     pub framing: Option<Framing>,
     pub struct_name: Option<String>,
     pub fields: Vec<SourceField>,
@@ -138,6 +139,7 @@ pub struct ConnectionSchema {
 impl ConnectionSchema {
     pub fn try_new(
         format: Option<Format>,
+        bad_data: Option<BadData>,
         framing: Option<Framing>,
         struct_name: Option<String>,
         fields: Vec<SourceField>,
@@ -146,6 +148,7 @@ impl ConnectionSchema {
     ) -> anyhow::Result<Self> {
         let s = ConnectionSchema {
             format,
+            bad_data,
             framing,
             struct_name,
             fields,

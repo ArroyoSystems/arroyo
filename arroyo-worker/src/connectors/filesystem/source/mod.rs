@@ -24,12 +24,13 @@ use tracing::{info, warn};
 
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
-use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp, OperatorConfig};
+use arroyo_rpc::formats::BadData;
+use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
 use arroyo_storage::StorageProvider;
-use arroyo_types::{Data, Record, UserError};
+use arroyo_types::{Data, SourceError, UserError};
 use typify::import_types;
 
-use crate::{engine::Context, SourceFinishType};
+use crate::{engine::Context, RateLimiter, SourceFinishType};
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 
@@ -37,6 +38,8 @@ import_types!(schema = "../connector-schemas/filesystem/table.json");
 pub struct FileSystemSourceFunc<K: Data, T: SchemaData + Data> {
     table: TableType,
     deserializer: DataDeserializer<T>,
+    bad_data: Option<BadData>,
+    rate_limiter: RateLimiter,
     file_states: HashMap<String, FileReadState>,
     _t: PhantomData<(K, T)>,
 }
@@ -61,6 +64,8 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
         Self {
             table: table.table_type,
             deserializer: DataDeserializer::new(format, config.framing),
+            bad_data: config.bad_data,
+            rate_limiter: RateLimiter::new(),
             file_states: HashMap::new(),
             _t: PhantomData,
         }
@@ -78,15 +83,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
         match self.run_int(ctx).await {
             Ok(r) => r,
             Err(e) => {
-                ctx.control_tx
-                    .send(ControlResp::Error {
-                        operator_id: ctx.task_info.operator_id.clone(),
-                        task_index: ctx.task_info.task_index,
-                        message: e.name.clone(),
-                        details: e.details.clone(),
-                    })
-                    .await
-                    .unwrap();
+                ctx.report_error(e.name.clone(), e.details.clone()).await;
 
                 panic!("{}: {}", e.name, e.details);
             }
@@ -189,7 +186,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
         &mut self,
         storage_provider: &StorageProvider,
         path: String,
-    ) -> Result<Box<dyn Stream<Item = Result<T, UserError>> + Unpin + Send>, UserError> {
+    ) -> Result<Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>, UserError> {
         let format = self.deserializer.get_format().clone();
         match *format {
             arroyo_rpc::formats::Format::Json(_) => {
@@ -210,13 +207,13 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                 let lines = LinesStream::new(BufReader::new(compression_reader).lines());
                 let x = Box::new(lines.map(move |res| match res {
                     Ok(line) => deserializer.deserialize_single(line.as_bytes()),
-                    Err(err) => Err(UserError::new(
+                    Err(err) => Err(SourceError::other(
                         "could not read line from stream",
                         err.to_string(),
                     )),
                 }))
-                    as Box<dyn Stream<Item = Result<T, UserError>> + Unpin + Send>;
-                Ok(x as Box<dyn Stream<Item = Result<T, UserError>> + Unpin + Send>)
+                    as Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>;
+                Ok(x as Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>)
             }
             arroyo_rpc::formats::Format::Avro(_) => todo!(),
             arroyo_rpc::formats::Format::Parquet(_) => {
@@ -248,24 +245,25 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                         let iterator = match T::iterator_from_record_batch(record_batch) {
                             Ok(iterator) => iterator.map(|item| Ok(item)),
                             Err(err) => {
-                                return Box::pin(tokio_stream::once(Err(UserError::new(
+                                return Box::pin(tokio_stream::once(Err(SourceError::other(
                                     "could not get iterator from parquet record batch",
                                     err.to_string(),
                                 ))))
-                                    as Pin<Box<dyn Stream<Item = Result<T, UserError>> + Send>>
+                                    as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>
                             }
                         };
 
                         let stream = futures::stream::iter(iterator);
-                        Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<T, UserError>> + Send>>
+                        Box::pin(stream)
+                            as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>
                     }
-                    Err(err) => Box::pin(tokio_stream::once(Err(UserError::new(
+                    Err(err) => Box::pin(tokio_stream::once(Err(SourceError::other(
                         "could not read record batch from stream",
                         err.to_string(),
                     ))))
-                        as Pin<Box<dyn Stream<Item = Result<T, UserError>> + Send>>,
+                        as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>,
                 }))
-                    as Box<dyn Stream<Item = Result<T, UserError>> + Send + Unpin>;
+                    as Box<dyn Stream<Item = Result<T, SourceError>> + Send + Unpin>;
                 Ok(result)
             }
             arroyo_rpc::formats::Format::RawString(_) => todo!(),
@@ -313,14 +311,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                 item = reader.next() => {
                     match item {
                         Some(value) => {
-                            let value = value?;
-                            ctx.collector
-                                .collect(Record{
-                                    timestamp: SystemTime::now(),
-                                    key: None,
-                                    value: value,
-                                })
-                                .await;
+                            ctx.collect_source_record(SystemTime::now(), value, &self.bad_data, &mut self.rate_limiter).await?;
                             records_read += 1;
                         }
                         None => {

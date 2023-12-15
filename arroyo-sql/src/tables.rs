@@ -8,7 +8,7 @@ use arroyo_datastream::{ConnectorOp, Operator};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
 };
-use arroyo_rpc::formats::{Format, Framing};
+use arroyo_rpc::formats::{BadData, Format, Framing};
 use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
@@ -190,6 +190,9 @@ impl ConnectorTable {
 
         let format = Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
 
+        let bad_data =
+            BadData::from_opts(options).map_err(|e| anyhow!("Invalid bad_data: '{e}'"))?;
+
         let framing = Framing::from_opts(options).map_err(|e| anyhow!("invalid framing: '{e}'"))?;
 
         let schema_fields: Result<Vec<SourceField>> = fields
@@ -209,6 +212,7 @@ impl ConnectorTable {
 
         let schema = ConnectionSchema::try_new(
             format,
+            bad_data,
             framing,
             None,
             schema_fields?,

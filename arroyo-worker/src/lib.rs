@@ -5,6 +5,7 @@
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use anyhow::Result;
+use std::ops::Sub;
 
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
@@ -27,10 +28,11 @@ use rand::Rng;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
+use std::future::Future;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::sync::broadcast;
@@ -631,4 +633,27 @@ pub fn header_map(headers: Option<VarStr>) -> HashMap<String, String> {
             .unwrap_or("".to_string()),
     )
     .expect("Invalid header map")
+}
+
+pub struct RateLimiter {
+    last: Instant,
+}
+
+impl RateLimiter {
+    pub fn new() -> Self {
+        RateLimiter {
+            last: Instant::now().sub(Duration::from_secs(60)),
+        }
+    }
+
+    pub async fn rate_limit<F, Fut>(&mut self, f: F)
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = ()> + Send,
+    {
+        if self.last.elapsed() > Duration::from_secs(5) {
+            f().await;
+            self.last = Instant::now();
+        }
+    }
 }

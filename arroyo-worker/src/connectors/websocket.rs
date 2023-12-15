@@ -1,22 +1,20 @@
 use std::str::FromStr;
-use std::{
-    marker::PhantomData,
-    time::{Duration, Instant, SystemTime},
-};
+use std::{marker::PhantomData, time::SystemTime};
 
 use crate::{
     engine::{Context, StreamNode},
-    header_map, SourceFinishType,
+    header_map, RateLimiter, SourceFinishType,
 };
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
+use arroyo_rpc::formats::BadData;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     var_str::VarStr,
     ControlMessage, OperatorConfig,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{Data, Message, Record, UserError, Watermark};
+use arroyo_types::{Data, Message, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -46,6 +44,8 @@ where
     headers: Vec<(String, String)>,
     subscription_messages: Vec<String>,
     deserializer: DataDeserializer<T>,
+    bad_data: Option<BadData>,
+    rate_limiter: RateLimiter,
     state: WebsocketSourceState,
     _t: PhantomData<K>,
 }
@@ -94,6 +94,8 @@ where
                 config.format.expect("WebsocketSource requires a format"),
                 config.framing,
             ),
+            bad_data: config.bad_data,
+            rate_limiter: RateLimiter::new(),
             state: WebsocketSourceState::default(),
             _t: PhantomData,
         }
@@ -162,19 +164,30 @@ where
     ) -> Result<(), UserError> {
         let iter = self.deserializer.deserialize_slice(msg).await;
         for value in iter {
-            ctx.collector
-                .collect(Record {
-                    timestamp: SystemTime::now(),
-                    key: None,
-                    value: value?,
-                })
-                .await;
+            ctx.collect_source_record(
+                SystemTime::now(),
+                value,
+                &self.bad_data,
+                &mut self.rate_limiter,
+            )
+            .await?;
         }
 
         Ok(())
     }
 
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
+        match self.run_int(ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.report_error(e.name.clone(), e.details.clone()).await;
+
+                panic!("{}: {}", e.name, e.details);
+            }
+        }
+    }
+
+    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
         let uri = match Uri::from_str(&self.url.to_string()) {
             Ok(uri) => uri,
             Err(e) => {
@@ -227,9 +240,6 @@ where
             }
         };
 
-        let mut last_reported_error: Option<Instant> = None;
-        let mut errors = 0;
-
         let (mut tx, mut rx) = ws_stream.split();
 
         for msg in &self.subscription_messages {
@@ -253,21 +263,20 @@ where
                     message = rx.next()  => {
                         match message {
                             Some(Ok(msg)) => {
-                                let result = match msg {
+                                match msg {
                                     tungstenite::Message::Text(t) => {
-                                        self.handle_message(&t.as_bytes(), ctx).await
+                                        self.handle_message(&t.as_bytes(), ctx).await?
                                     },
                                     tungstenite::Message::Binary(bs) => {
-                                        self.handle_message(&bs, ctx).await
+                                        self.handle_message(&bs, ctx).await?
                                     },
                                     tungstenite::Message::Ping(d) => {
                                         tx.send(tungstenite::Message::Pong(d)).await
                                             .map(|_| ())
-                                            .map_err(|e| UserError::new("Failed to send pong to websocket server", e.to_string()))
+                                            .map_err(|e| UserError::new("Failed to send pong to websocket server", e.to_string()))?
                                     },
                                     tungstenite::Message::Pong(_) => {
                                         // ignore
-                                        Ok(())
                                     },
                                     tungstenite::Message::Close(_) => {
                                         ctx.report_error("Received close frame from server".to_string(), "".to_string()).await;
@@ -275,18 +284,7 @@ where
                                     },
                                     tungstenite::Message::Frame(_) => {
                                         // this should be captured by tungstenite
-                                        Ok(())
                                     },
-                                };
-
-                                if let Err(e) = result {
-                                    errors += 1;
-                                    if last_reported_error.map(|i| i.elapsed() > Duration::from_secs(30)).unwrap_or(true) {
-                                        ctx.report_error(format!("{} x {}", e.name, errors),
-                                            e.details).await;
-                                        errors = 0;
-                                        last_reported_error = Some(Instant::now());
-                                    }
                                 };
                             }
                         Some(Err(e)) => {
@@ -295,13 +293,13 @@ where
                         }
                         None => {
                             info!("Socket closed");
-                            return SourceFinishType::Final;
+                            return Ok(SourceFinishType::Final);
                         }
                     }
                     }
                     control_message = ctx.control_rx.recv() => {
                         if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
-                            return r;
+                            return Ok(r);
                         }
                     }
                 }
@@ -312,7 +310,7 @@ where
             loop {
                 let msg = ctx.control_rx.recv().await;
                 if let Some(r) = self.our_handle_control_message(ctx, msg).await {
-                    return r;
+                    return Ok(r);
                 }
             }
         }

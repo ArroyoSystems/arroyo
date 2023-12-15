@@ -1,12 +1,12 @@
 use crate::engine::Context;
-use crate::SourceFinishType;
+use crate::{RateLimiter, SourceFinishType};
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
-use arroyo_rpc::formats::{Format, Framing};
+use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};
 use arroyo_rpc::{var_str::VarStr, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{string_to_map, Data, Message, Record, Watermark};
+use arroyo_types::{string_to_map, Data, Message, UserError, Watermark};
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
 use futures::StreamExt;
@@ -14,7 +14,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::marker::PhantomData;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::SystemTime;
 use tokio::select;
 use tracing::{debug, info};
 use typify::import_types;
@@ -38,6 +38,8 @@ where
     headers: Vec<(String, String)>,
     events: Vec<String>,
     deserializer: DataDeserializer<T>,
+    bad_data: Option<BadData>,
+    rate_limiter: RateLimiter,
     state: SSESourceState,
     _t: PhantomData<K>,
 }
@@ -53,6 +55,7 @@ where
         headers: Vec<(&str, &str)>,
         events: Vec<&str>,
         format: Format,
+        bad_data: Option<BadData>,
         framing: Option<Framing>,
     ) -> Self {
         SSESourceFunc {
@@ -63,6 +66,8 @@ where
                 .collect(),
             events: events.into_iter().map(|s| s.to_string()).collect(),
             deserializer: DataDeserializer::new(format, framing),
+            bad_data,
+            rate_limiter: RateLimiter::new(),
             state: SSESourceState::default(),
             _t: PhantomData,
         }
@@ -93,6 +98,8 @@ where
                 config.format.expect("SSESource requires a format"),
                 config.framing,
             ),
+            bad_data: config.bad_data,
+            rate_limiter: RateLimiter::new(),
             state: SSESourceState::default(),
             _t: PhantomData,
         }
@@ -155,6 +162,17 @@ where
     }
 
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
+        match self.run_int(ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.report_error(e.name.clone(), e.details.clone()).await;
+
+                panic!("{}: {}", e.name, e.details);
+            }
+        }
+    }
+
+    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
         let mut client = eventsource_client::ClientBuilder::for_url(&self.url).unwrap();
 
         if let Some(id) = &self.state.last_id {
@@ -167,9 +185,6 @@ where
 
         let mut stream = client.build().stream();
         let events: HashSet<_> = self.events.iter().cloned().collect();
-
-        let mut last_reported_error = Instant::now();
-        let mut errors = 0;
 
         // since there's no way to partition across an event source, only read on the first task
         if ctx.task_info.task_index == 0 {
@@ -188,29 +203,7 @@ where
                                             let iter = self.deserializer.deserialize_slice(&event.data.as_bytes()).await;
 
                                             for v in iter {
-                                                match v {
-                                                    Ok(value) => {
-                                                        ctx.collector.collect(Record {
-                                                            timestamp: SystemTime::now(),
-                                                            key: None,
-                                                            value,
-                                                        }).await;
-                                                    }
-                                                    Err(e) => {
-                                                        errors += 1;
-                                                        if last_reported_error.elapsed() > Duration::from_secs(30) {
-                                                            ctx.control_tx.send(
-                                                                ControlResp::Error {
-                                                                    operator_id: ctx.task_info.operator_id.clone(),
-                                                                    task_index: ctx.task_info.task_index,
-                                                                    message: format!("{} x {}", e.name, errors),
-                                                                    details: e.details,
-                                                            }).await.unwrap();
-                                                            errors = 0;
-                                                            last_reported_error = Instant::now();
-                                                        }
-                                                    }
-                                                }
+                                                ctx.collect_source_record(SystemTime::now(), v, &self.bad_data, &mut self.rate_limiter).await?;
                                             }
                                         }
                                     }
@@ -231,13 +224,13 @@ where
                             }
                             None => {
                                 info!("Socket closed");
-                                return SourceFinishType::Final;
+                                return Ok(SourceFinishType::Final);
                             }
                         }
                     }
                     control_message = ctx.control_rx.recv() => {
                         if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
-                            return r;
+                            return Ok(r);
                         }
                     }
                 }
@@ -249,7 +242,7 @@ where
             loop {
                 let msg = ctx.control_rx.recv().await;
                 if let Some(r) = self.our_handle_control_message(ctx, msg).await {
-                    return r;
+                    return Ok(r);
                 }
             }
         }

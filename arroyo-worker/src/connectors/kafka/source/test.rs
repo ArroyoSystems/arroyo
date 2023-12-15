@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
 use crate::engine::{Context, OutQueue, QueueItem};
+use crate::RateLimiter;
 use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
@@ -88,6 +89,8 @@ impl KafkaTopicTester {
             self.group_id.clone(),
             crate::connectors::kafka::SourceOffset::Earliest,
             Format::Json(JsonFormat::default()),
+            None,
+            RateLimiter::new(),
             None,
             100,
             vec![],

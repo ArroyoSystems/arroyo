@@ -1,8 +1,8 @@
 use crate::engine::{Context, StreamNode};
-use crate::SourceFinishType;
+use crate::{RateLimiter, SourceFinishType};
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
-use arroyo_rpc::formats::{Format, Framing};
+use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, FailingSchemaResolver, SchemaResolver};
 use arroyo_rpc::OperatorConfig;
@@ -10,7 +10,7 @@ use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
-use governor::{Quota, RateLimiter};
+use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
 use rdkafka::{ClientConfig, Message as KMessage, Offset, TopicPartitionList};
 use serde::de::DeserializeOwned;
@@ -38,6 +38,8 @@ where
     group_id: Option<String>,
     offset_mode: super::SourceOffset,
     deserializer: DataDeserializer<T>,
+    bad_data: Option<BadData>,
+    rate_limiter: RateLimiter,
     client_configs: HashMap<String, String>,
     messages_per_second: NonZeroU32,
     _t: PhantomData<K>,
@@ -65,6 +67,8 @@ where
         group: Option<String>,
         offset_mode: super::SourceOffset,
         format: Format,
+        bad_data: Option<BadData>,
+        rate_limiter: RateLimiter,
         framing: Option<Framing>,
         messages_per_second: u32,
         client_configs: Vec<(&str, &str)>,
@@ -74,6 +78,8 @@ where
             bootstrap_servers: servers.to_string(),
             group_id: group,
             offset_mode,
+            bad_data,
+            rate_limiter,
             deserializer: DataDeserializer::new(format, framing),
             client_configs: client_configs
                 .iter()
@@ -134,6 +140,8 @@ where
                 config.framing,
                 schema_resolver,
             ),
+            bad_data: config.bad_data,
+            rate_limiter: RateLimiter::new(),
             client_configs,
             messages_per_second: NonZeroU32::new(
                 config
@@ -250,7 +258,7 @@ where
             .await
             .map_err(|e| UserError::new("Could not create Kafka consumer", format!("{:?}", e)))?;
 
-        let rate_limiter = RateLimiter::direct(Quota::per_second(self.messages_per_second));
+        let rate_limiter = GovernorRateLimiter::direct(Quota::per_second(self.messages_per_second));
         let mut offsets = HashMap::new();
 
         if consumer.assignment().unwrap().count() == 0 {
@@ -272,11 +280,12 @@ where
                                 let iter = self.deserializer.deserialize_slice(v).await;
 
                                 for value in iter {
-                                    ctx.collector.collect(Record {
-                                        timestamp: from_millis(timestamp as u64),
-                                        key: None,
-                                        value: value?,
-                                    }).await;
+                                    ctx.collect_source_record(
+                                        from_millis(timestamp as u64),
+                                        value,
+                                        &self.bad_data,
+                                        &mut self.rate_limiter,
+                                    ).await?;
                                 }
 
                                 offsets.insert(msg.partition(), msg.offset());

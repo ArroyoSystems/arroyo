@@ -261,6 +261,29 @@ impl Format {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BadData {
+    Fail {},
+    Drop {},
+}
+
+impl BadData {
+    pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Option<Self>, String> {
+        let Some(method) = opts.remove("bad_data") else {
+            return Ok(None);
+        };
+
+        let method = match method.as_str() {
+            "drop" => BadData::Drop {},
+            "fail" => BadData::Fail {},
+            f => return Err(format!("Unknown invalid data behavior '{}'", f)),
+        };
+
+        Ok(Some(method))
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Framing {
     pub method: FramingMethod,

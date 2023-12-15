@@ -10,12 +10,13 @@ use std::{
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
+use arroyo_rpc::formats::BadData;
 use arroyo_rpc::{
     grpc::{StopMode, TableDescriptor},
     ControlMessage, OperatorConfig,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{from_nanos, Data, Record, UserError};
+use arroyo_types::{from_nanos, Data, UserError};
 use aws_config::from_env;
 use aws_sdk_kinesis::{
     client::fluent_builders::GetShardIterator,
@@ -33,7 +34,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::{engine::Context, SourceFinishType};
+use crate::{engine::Context, RateLimiter, SourceFinishType};
 
 use super::{KinesisTable, SourceOffset, TableType};
 
@@ -48,6 +49,8 @@ pub enum KinesisOffset {
 pub struct KinesisSourceFunc<K: Data, T: SchemaData> {
     stream_name: String,
     deserializer: DataDeserializer<T>,
+    bad_data: Option<BadData>,
+    rate_limiter: RateLimiter,
     kinesis_client: Option<KinesisClient>,
     aws_region: Option<String>,
     shards: HashMap<String, ShardState>,
@@ -193,6 +196,8 @@ impl<K: Data, T: SchemaData> KinesisSourceFunc<K, T> {
                     .expect("format must be set for kinesis source"),
                 config.framing,
             ),
+            bad_data: config.bad_data,
+            rate_limiter: RateLimiter::new(),
             _phantom: PhantomData,
         }
     }
@@ -204,7 +209,7 @@ impl<K: Data, T: SchemaData> KinesisSourceFunc<K, T> {
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(r) => r,
-            Err(UserError { name, details }) => {
+            Err(UserError { name, details, .. }) => {
                 ctx.report_error(name.clone(), details.clone()).await;
                 panic!("{}: {}", name, details);
             }
@@ -477,12 +482,13 @@ impl<K: Data, T: SchemaData> KinesisSourceFunc<K, T> {
             let timestamp = record.approximate_arrival_timestamp.unwrap();
             let iter = self.deserializer.deserialize_slice(&data).await;
             for value in iter {
-                let output_record = Record {
-                    timestamp: from_nanos(timestamp.as_nanos() as u128),
-                    key: None,
-                    value: value?,
-                };
-                ctx.collect(output_record).await;
+                ctx.collect_source_record(
+                    from_nanos(timestamp.as_nanos() as u128),
+                    value,
+                    &self.bad_data,
+                    &mut self.rate_limiter,
+                )
+                .await?;
             }
         }
         Ok(get_records_output.next_shard_iterator)

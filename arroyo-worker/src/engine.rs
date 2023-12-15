@@ -14,6 +14,7 @@ use bincode::{config, Decode, Encode};
 use tracing::{debug, info, warn};
 
 pub use arroyo_macro::StreamNode;
+use arroyo_rpc::formats::BadData;
 use arroyo_rpc::grpc::{
     CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
     TaskAssignment,
@@ -21,7 +22,7 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_types::{
     from_micros, range_for_server, server_for_hash, CheckpointBarrier, Data, Key, Message, Record,
-    TaskInfo, UserError, Watermark, WorkerId,
+    SourceError, TaskInfo, UserError, Watermark, WorkerId,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -33,8 +34,8 @@ use tokio::task::JoinHandle;
 
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::TIMER_TABLE;
 use crate::{LogicalEdge, LogicalNode, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
+use crate::{RateLimiter, TIMER_TABLE};
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
 
 const QUEUE_SIZE: usize = 4 * 1024;
@@ -441,6 +442,49 @@ impl<K: Key, T: Data> Context<K, T> {
 
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         self.state.load_compacted(compaction).await;
+    }
+
+    /// Collects a source record, handling errors and rate limiting.
+    /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
+    pub async fn collect_source_record(
+        &mut self,
+        timestamp: SystemTime,
+        value: Result<T, SourceError>,
+        bad_data: &Option<BadData>,
+        rate_limiter: &mut RateLimiter,
+    ) -> Result<(), UserError> {
+        match value {
+            Ok(value) => Ok(self
+                .collector
+                .collect(Record {
+                    timestamp,
+                    key: None,
+                    value,
+                })
+                .await),
+            Err(SourceError::BadData { details }) => match bad_data {
+                Some(BadData::Drop {}) => {
+                    rate_limiter
+                        .rate_limit(|| async {
+                            warn!("Dropping invalid data: {}", details.clone());
+                            self.report_user_error(UserError::new(
+                                "Dropping invalid data",
+                                details,
+                            ))
+                            .await;
+                        })
+                        .await;
+                    TaskCounters::DeserializationErrors
+                        .for_task(&self.task_info)
+                        .inc();
+                    return Ok(());
+                }
+                Some(BadData::Fail {}) | None => {
+                    Err(UserError::new("Deserialization error", details))
+                }
+            },
+            Err(SourceError::Other { name, details }) => Err(UserError::new(name, details)),
+        }
     }
 }
 

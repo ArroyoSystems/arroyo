@@ -23,6 +23,7 @@ pub fn nexmark_schema() -> ConnectionSchema {
     use arroyo_rpc::api_types::connections::PrimitiveType::*;
     ConnectionSchema {
         format: None,
+        bad_data: None,
         framing: None,
         struct_name: Some("arroyo_types::nexmark::Event".to_string()),
         fields: vec![
@@ -207,6 +208,7 @@ impl Connector for NexmarkConnector {
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: None,
+            bad_data: None,
             framing: None,
         };
 

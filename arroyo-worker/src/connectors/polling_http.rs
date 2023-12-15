@@ -8,22 +8,24 @@ use std::{marker::PhantomData, time::Duration};
 
 use arroyo_macro::source_fn;
 use arroyo_rpc::ControlMessage;
-use arroyo_rpc::{grpc::TableDescriptor, var_str::VarStr, OperatorConfig};
-use arroyo_types::{string_to_map, Message, Record, UserError, Watermark};
+use arroyo_rpc::{grpc::TableDescriptor, OperatorConfig};
+use arroyo_types::{string_to_map, Message, UserError, Watermark};
 
 use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 
 use arroyo_formats::{DataDeserializer, SchemaData};
+use arroyo_rpc::formats::BadData;
 use arroyo_rpc::grpc::StopMode;
+use arroyo_rpc::var_str::VarStr;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use tracing::{debug, info, warn};
 use typify::import_types;
 
 use crate::{
     engine::{Context, StreamNode},
-    SourceFinishType,
+    RateLimiter, SourceFinishType,
 };
 
 import_types!(
@@ -47,7 +49,8 @@ where
     polling_interval: Duration,
     emit_behavior: EmitBehavior,
     deserializer: DataDeserializer<T>,
-
+    bad_data: Option<BadData>,
+    rate_limiter: RateLimiter,
     _t: PhantomData<(K, T)>,
 }
 
@@ -115,6 +118,8 @@ where
                 .unwrap_or(DEFAULT_POLLING_INTERVAL),
             emit_behavior: table.emit_behavior.unwrap_or(EmitBehavior::All),
             deserializer,
+            bad_data: config.bad_data,
+            rate_limiter: RateLimiter::new(),
             _t: PhantomData,
         }
     }
@@ -251,6 +256,17 @@ where
     }
 
     async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
+        match self.run_int(ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.report_error(e.name.clone(), e.details.clone()).await;
+
+                panic!("{}: {}", e.name, e.details);
+            }
+        }
+    }
+
+    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
         // since there's no way to partition across an http source, only read on the first task
         let mut timer = tokio::time::interval(self.polling_interval);
         timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -270,18 +286,7 @@ where
                                 let iter = self.deserializer.deserialize_slice(&buf).await;
 
                                 for record in iter {
-                                    match record {
-                                        Ok(value) => {
-                                            ctx.collect(Record {
-                                                timestamp: SystemTime::now(),
-                                                key: None,
-                                                value,
-                                            }).await;
-                                        }
-                                        Err(e) => {
-                                            ctx.report_user_error(e).await;
-                                        }
-                                    }
+                                    ctx.collect_source_record(SystemTime::now(), record, &self.bad_data, &mut self.rate_limiter).await?;
                                 }
 
                                 self.state.last_message = Some(buf);
@@ -293,7 +298,7 @@ where
                     }
                     control_message = ctx.control_rx.recv() => {
                         if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
-                            return r;
+                            return Ok(r);
                         }
                     }
                 }
@@ -304,7 +309,7 @@ where
             loop {
                 let msg = ctx.control_rx.recv().await;
                 if let Some(r) = self.our_handle_control_message(ctx, msg).await {
-                    return r;
+                    return Ok(r);
                 }
             }
         }
