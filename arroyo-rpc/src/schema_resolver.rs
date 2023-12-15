@@ -1,5 +1,5 @@
 use crate::var_str::VarStr;
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use apache_avro::Schema;
 use async_trait::async_trait;
 use base64::prelude::BASE64_STANDARD;
@@ -42,6 +42,7 @@ pub struct FixedSchemaResolver {
     id: u32,
     schema: String,
 }
+
 impl FixedSchemaResolver {
     pub fn new(id: u32, schema: Schema) -> Self {
         FixedSchemaResolver {
@@ -109,19 +110,14 @@ struct RegistryErrorResponse {
     message: String,
 }
 
-pub struct ConfluentSchemaRegistry {
+
+pub struct ConfluentSchemaRegistryClient {
     endpoint: Url,
-    topic: String,
     client: Client,
 }
 
-impl ConfluentSchemaRegistry {
-    pub fn new(
-        endpoint: &str,
-        topic: &str,
-        api_key: Option<VarStr>,
-        api_secret: Option<VarStr>,
-    ) -> anyhow::Result<Self> {
+impl ConfluentSchemaRegistryClient {
+    pub fn new(endpoint: &str, api_key: Option<VarStr>, api_secret: Option<VarStr>) -> anyhow::Result<Self> {
         let mut client = Client::builder().timeout(Duration::from_secs(5));
 
         if let Some(api_key) = api_key {
@@ -146,23 +142,63 @@ impl ConfluentSchemaRegistry {
             .map_err(|_| anyhow!("{} is not a valid url", endpoint))?;
 
         Ok(Self {
-            client: client.build()?,
-            topic: topic.to_string(),
             endpoint,
+            client: client.build()?,
         })
     }
 
-    fn topic_endpoint(&self) -> Url {
-        self.endpoint
-            .join(&format!("subjects/{}-value/versions/", self.topic))
-            .unwrap()
+    async fn get_schema_for_url<T: DeserializeOwned>(&self, url: Url) -> anyhow::Result<Option<T>> {
+        let resp = self.client.get(url.clone()).send().await.map_err(|e| {
+            warn!("Got error response from schema registry: {:?}", e);
+            match e.status() {
+                Some(StatusCode::NOT_FOUND) => {
+                    anyhow!("schema not found")
+                }
+                Some(code) => anyhow!("schema registry returned error: {}", code),
+                None => {
+                    warn!(
+                        "unknown error connecting to schema registry {}: {:?}",
+                        self.endpoint, e
+                    );
+                    anyhow!(
+                        "could not connect to Schema Registry at {}: unknown error",
+                        self.endpoint
+                    )
+                }
+            }
+        })?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let bytes = resp
+                .bytes()
+                .await
+                .map(|b| b.to_vec())
+                .unwrap_or_else(|_| "<failed to read body>".to_string().into_bytes());
+            let json = serde_json::from_slice::<RegistryErrorResponse>(&bytes);
+            if status.as_u16() == 404 && json.is_ok() && json.as_ref().unwrap().error_code == 40401
+            {
+                // valid response, but schema was not found
+                return Ok(None);
+            }
+            bail!(
+                "received an error status code from the schema endpoint while fetching {}: {} {}",
+                url,
+                status.as_u16(),
+                String::from_utf8_lossy(&bytes)
+            );
+        }
+
+        resp.json().await.map_err(|e| {
+            warn!(
+                "invalid json from schema registry: {:?} for request {:?}",
+                e, url
+            );
+            anyhow!("schema registry response could not be deserialized: {}", e)
+        })
     }
 
-    pub async fn write_schema(
-        &self,
-        schema: impl Into<String>,
-        schema_type: ConfluentSchemaType,
-    ) -> anyhow::Result<i32> {
+    async fn write_schema(&self, url: Url, schema: impl Into<String>, schema_type: ConfluentSchemaType) -> anyhow::Result<i32> {
         let req = PostSchemaRequest {
             schema: schema.into(),
             schema_type,
@@ -170,7 +206,7 @@ impl ConfluentSchemaRegistry {
 
         let resp = self
             .client
-            .post(self.topic_endpoint())
+            .post(url)
             .json(&req)
             .send()
             .await
@@ -194,22 +230,21 @@ impl ConfluentSchemaRegistry {
             match status {
                 StatusCode::CONFLICT => {
                     bail!(
-                        "Failed to register new schema for topic '{}': {}",
-                        self.topic,
+                        "{}",
                         body
                     )
                 }
                 StatusCode::UNPROCESSABLE_ENTITY => {
-                    bail!("Invalid schema for topic '{}': {}", self.topic, body);
+                    bail!("invalid schema: {}", body);
                 }
                 StatusCode::UNAUTHORIZED => {
-                    bail!("Invalid credentials for schema registry");
+                    bail!("invalid credentials for schema registry");
                 }
                 StatusCode::NOT_FOUND => {
-                    bail!("Schema registry returned 404 for topic {}. Make sure that the topic exists.", self.topic)
+                    bail!("schema not found; make sure that the topic exists")
                 }
                 code => {
-                    bail!("Schema registry returned error {}: {}", code.as_u16(), body);
+                    bail!("schema registry returned error {}: {}", code.as_u16(), body);
                 }
             }
         }
@@ -222,80 +257,100 @@ impl ConfluentSchemaRegistry {
         Ok(resp.id)
     }
 
-    pub async fn get_schema_for_id(
-        &self,
-        id: u32,
-    ) -> anyhow::Result<Option<ConfluentSchemaIdResponse>> {
-        let url = self.endpoint.join(&format!("/schemas/ids/{}", id)).unwrap();
-
-        self.get_schema_for_url(url).await
-    }
-
-    pub async fn get_schema_for_version(
-        &self,
-        version: Option<u32>,
-    ) -> anyhow::Result<Option<ConfluentSchemaSubjectResponse>> {
-        let url = self
-            .topic_endpoint()
-            .join(
-                &version
-                    .map(|v| format!("{}", v))
-                    .unwrap_or_else(|| "latest".to_string()),
-            )
-            .unwrap();
-
-        self.get_schema_for_url(url).await
-    }
-
-    async fn get_schema_for_url<T: DeserializeOwned>(&self, url: Url) -> anyhow::Result<Option<T>> {
-        let resp = self.client.get(url.clone()).send().await.map_err(|e| {
-            warn!("Got error response from schema registry: {:?}", e);
+    pub async fn test(&self) -> anyhow::Result<()> {
+        let resp = self.client.get(self.endpoint.join("subjects").map_err(|_| anyhow!("invalid endpoint"))?).send().await.map_err(|e| {
             match e.status() {
-                Some(StatusCode::NOT_FOUND) => {
-                    anyhow!("Could not find value schema for topic '{}'", self.topic)
-                }
-                Some(code) => anyhow!("Schema registry returned error: {}", code),
+                Some(code) => anyhow!("schema registry returned error: {}", code),
                 None => {
                     warn!(
-                        "Unknown error connecting to schema registry {}: {:?}",
+                        "unknown error connecting to schema registry {}: {:?}",
                         self.endpoint, e
                     );
                     anyhow!(
-                        "Could not connect to Schema Registry at {}: unknown error",
+                        "could not connect to Schema Registry at {}: unknown error",
                         self.endpoint
                     )
                 }
             }
         })?;
 
-        let status = resp.status();
-        if !status.is_success() {
-            let bytes = resp
-                .bytes()
-                .await
-                .map(|b| b.to_vec())
-                .unwrap_or_else(|_| "<failed to read body>".to_string().into_bytes());
-            let json = serde_json::from_slice::<RegistryErrorResponse>(&bytes);
-            if status.as_u16() == 404 && json.is_ok() && json.as_ref().unwrap().error_code == 40401
-            {
-                // valid response, but schema was not found
-                return Ok(None);
+        match resp.status() {
+            StatusCode::OK => {
+                return Ok(());
             }
-            bail!(
-                "Received an error status code from the schema endpoint while fetching {}: {} {}",
-                url,
-                status.as_u16(),
-                String::from_utf8_lossy(&bytes)
-            );
+            StatusCode::NOT_FOUND => {
+                bail!("schema registry returned 404 Not Found; check the endpoint is correct")
+            }
+            StatusCode::UNAUTHORIZED => {
+                bail!("schema registry returned 401 Unauthorized: check your credentials")
+            }
+            code => {
+                bail!("schema registry returned error code {}; verify the endpoint is correct", code);
+            }
         }
+    }
+}
 
-        resp.json().await.map_err(|e| {
-            warn!(
-                "Invalid json from schema registry: {:?} for request {:?}",
-                e, url
-            );
-            anyhow!("Schema registry response could not be deserialized: {}", e)
+pub struct ConfluentSchemaRegistry {
+    client: ConfluentSchemaRegistryClient,
+    topic: String,
+}
+
+impl ConfluentSchemaRegistry {
+    pub fn new(
+        endpoint: &str,
+        topic: &str,
+        api_key: Option<VarStr>,
+        api_secret: Option<VarStr>,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            client: ConfluentSchemaRegistryClient::new(endpoint, api_key, api_secret)?,
+            topic: topic.to_string(),
         })
+    }
+
+    fn topic_endpoint(&self) -> Url {
+        self.client.endpoint
+            .join(&format!("subjects/{}-value/versions/", self.topic))
+            .unwrap()
+    }
+
+    pub async fn write_schema(
+        &self,
+        schema: impl Into<String>,
+        schema_type: ConfluentSchemaType,
+    ) -> anyhow::Result<i32> {
+        self.client.write_schema(self.topic_endpoint(), schema, schema_type)
+            .await
+            .context(format!("failed to write schema for topic '{}'", self.topic))
+    }
+
+    pub async fn get_schema_for_id(
+        &self,
+        id: u32,
+    ) -> anyhow::Result<Option<ConfluentSchemaIdResponse>> {
+        let url = self.client.endpoint.join(&format!("/schemas/ids/{}", id)).unwrap();
+
+        self.client.get_schema_for_url(url).await
+            .context(format!("failed to fetch schema for topic '{}'", self.topic))
+    }
+
+    pub async fn get_schema_for_version(
+        &self,
+        version: Option<u32>,
+    ) -> anyhow::Result<Option<ConfluentSchemaSubjectResponse>> {
+        let version = version
+            .map(|v| format!("{}", v))
+            .unwrap_or_else(|| "latest".to_string());
+
+        let url = self
+            .topic_endpoint()
+            .join(&version)
+            .unwrap();
+
+        self.client.get_schema_for_url(url)
+            .await
+            .context(format!("failed to fetch schema for topic '{}' with version {}", self.topic, version))
     }
 }
 

@@ -16,6 +16,7 @@ use tokio::sync::oneshot::Receiver;
 use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
+use arroyo_rpc::schema_resolver::ConfluentSchemaRegistryClient;
 
 use crate::{pull_opt, send, Connection, ConnectionType};
 
@@ -204,6 +205,14 @@ impl Connector for KafkaConnector {
             };
 
             let mut message = tester.test_connection().await;
+
+            if !message.error {
+                if let Err(e) = tester.test_schema_registry().await {
+                    message.error = true;
+                    message.message = format!("Failed to connect to schema registry: {:?}", e);
+                }
+            }
+
             message.done = true;
             tx.send(message).unwrap();
         });
@@ -336,6 +345,21 @@ impl KafkaTester {
         Ok(TopicMetadata {
             partitions: topic_metadata.partitions().len(),
         })
+    }
+
+    pub async fn test_schema_registry(&self) -> anyhow::Result<()> {
+        match &self.connection.schema_registry_enum {
+            Some(SchemaRegistry::ConfluentSchemaRegistry { api_key, api_secret, endpoint }) => {
+                let client = ConfluentSchemaRegistryClient::new(
+                    endpoint, api_key.clone(), api_secret.clone()
+                )?;
+
+                client.test().await?;
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 
     async fn test(

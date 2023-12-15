@@ -5,7 +5,8 @@
         "topic": {
             "title": "Topic",
             "type": "string",
-            "description": "The Kafka topic to use for this table"
+            "description": "The Kafka topic to use for this table",
+            "format": "autocomplete"
         },
         "type": {
             "type": "object",
