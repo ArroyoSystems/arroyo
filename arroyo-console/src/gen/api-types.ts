@@ -197,10 +197,17 @@ export interface components {
   schemas: {
     AvroFormat: {
       confluentSchemaRegistry?: boolean;
-      embeddedSchema?: boolean;
       intoUnstructuredJson?: boolean;
+      rawDatums?: boolean;
       readerSchema?: string;
+      /** Format: int32 */
+      schemaId?: number | null;
     };
+    BadData: OneOf<[{
+      fail: Record<string, never>;
+    }, {
+      drop: Record<string, never>;
+    }]>;
     Checkpoint: {
       backend: string;
       /** Format: int32 */
@@ -239,6 +246,7 @@ export interface components {
       name: string;
     };
     ConnectionSchema: {
+      badData?: components["schemas"]["BadData"] | null;
       definition?: components["schemas"]["SchemaDefinition"] | null;
       fields: (components["schemas"]["SourceField"])[];
       format?: components["schemas"]["Format"] | null;
@@ -363,6 +371,8 @@ export interface components {
       confluentSchemaRegistry?: boolean;
       debezium?: boolean;
       includeSchema?: boolean;
+      /** Format: int32 */
+      schemaId?: number | null;
       timestampFormat?: components["schemas"]["TimestampFormat"];
       unstructured?: boolean;
     };
