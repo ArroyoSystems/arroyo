@@ -63,6 +63,13 @@
             "oneOf": [
                 {
                     "type": "object",
+                    "title": "None",
+                    "properties": {
+                    },
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
                     "title": "Confluent Schema Registry",
                     "properties": {
                         "endpoint": {
@@ -99,13 +106,6 @@
                     "sensitive": [
                         "apiSecret"
                     ]
-                },
-                {
-                    "type": "object",
-                    "title": "None",
-                    "properties": {
-                    },
-                    "additionalProperties": false
                 }
             ]
         }
