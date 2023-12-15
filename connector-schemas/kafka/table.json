@@ -28,8 +28,8 @@
                             "title": "read mode",
                             "description": "Controls whether the source will wait for messages to be committed; use `read_committed` for transactional sources.",
                             "enum": [
-                                "read_committed",
-                                "read_uncommitted"
+                                "read_uncommitted",
+                                "read_committed"
                             ]
                         },
                         "group_id": {

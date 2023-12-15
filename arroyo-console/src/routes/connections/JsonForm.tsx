@@ -145,32 +145,52 @@ function NumberWidget({
 
 function SelectWidget({
   path,
+  valuePath,
   title,
   description,
   placeholder,
-  required,
   options,
   value,
   onChange,
+  defaultValue,
+  resetField,
 }: {
   path: string;
+  valuePath: string;
   title?: string;
   description?: string;
   placeholder?: string;
-  required?: boolean;
   options: Array<{ value: string; label: string }>;
   value: string;
   onChange: (e: React.ChangeEvent<any>) => void;
+  defaultValue?: string;
+  resetField: (field: string) => any;
 }) {
+  useEffect(() => {
+    if (!value) {
+      if (defaultValue) {
+        // @ts-ignore
+        onChange({ target: { name: path, value: defaultValue } });
+      } else {
+        // @ts-ignore
+        onChange({ target: { name: path, value: options[0].value } });
+      }
+    }
+  });
+
+  const onChangeWrapper = (e: React.ChangeEvent<any>) => {
+    resetField(valuePath);
+    onChange(e);
+  };
+
   return (
-    <FormControl isRequired={required}>
+    <FormControl>
       {title && <FormLabel>{title}</FormLabel>}
       <Select
         placeholder={placeholder}
         name={path}
-        isRequired={required}
         value={value}
-        onChange={onChange}
+        onChange={onChangeWrapper}
         borderColor={'gray.600'}
       >
         {options.map(option => (
@@ -427,12 +447,14 @@ export function FormInner({
   path,
   values,
   errors,
+  resetField,
 }: {
   schema: JSONSchema7;
   onChange: (e: React.ChangeEvent<any>) => void;
   path?: string;
   values: any;
   errors: any;
+  resetField: (field: string) => void;
 }) {
   useEffect(() => {
     if (!schema.properties || Object.keys(schema.properties).length == 0) {
@@ -467,17 +489,18 @@ export function FormInner({
                   return (
                     <SelectWidget
                       path={nextPath}
+                      valuePath={nextPath}
                       key={key}
                       title={property.title || key}
                       description={property.description}
-                      placeholder="Select an option"
-                      required={schema.required?.includes(key)}
                       options={property.enum.map(value => ({
                         value: value!.toString(),
                         label: value!.toString(),
                       }))}
                       value={traversePath(values, nextPath)}
                       onChange={onChange}
+                      defaultValue={property.default?.toString()}
+                      resetField={resetField}
                     />
                   );
                 } else {
@@ -551,9 +574,8 @@ export function FormInner({
                       <Stack p={4}>
                         <SelectWidget
                           path={typeKey}
-                          placeholder="Select an option"
+                          valuePath={nextPath}
                           description={property.description}
-                          required={schema.required?.includes(key)}
                           options={property.oneOf.map(oneOf => ({
                             // @ts-ignore
                             value: oneOf.title!,
@@ -566,6 +588,7 @@ export function FormInner({
                           }))}
                           value={value}
                           onChange={onChange}
+                          resetField={resetField}
                         />
                         {value != undefined && (
                           <Box p={4}>
@@ -577,6 +600,7 @@ export function FormInner({
                               errors={errors}
                               onChange={onChange}
                               values={values}
+                              resetField={resetField}
                             />
                           </Box>
                         )}
@@ -599,6 +623,7 @@ export function FormInner({
                           errors={errors}
                           onChange={onChange}
                           values={values}
+                          resetField={resetField}
                         />
                       </Box>
                     </fieldset>
@@ -675,6 +700,10 @@ export function JsonForm({
     },
   });
 
+  const resetField = (field: string) => {
+    formik.setFieldValue(field, undefined);
+  };
+
   return (
     <form onSubmit={formik.handleSubmit}>
       {hasName && (
@@ -696,6 +725,7 @@ export function JsonForm({
         onChange={formik.handleChange}
         values={formik.values}
         errors={formik.errors}
+        resetField={resetField}
       />
 
       {error && (

@@ -68,8 +68,8 @@
                                             "title": "List Operation",
                                             "description": "How values are pushed onto the list",
                                             "enum": [
-                                                "Prepend",
-                                                "Append"
+                                                "Append",
+                                                "Prepend"
                                             ]
                                         }
                                     },
