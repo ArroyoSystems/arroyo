@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail};
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
+use arroyo_rpc::schema_resolver::ConfluentSchemaRegistryClient;
 use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use axum::response::sse::Event;
 use rdkafka::{
@@ -16,7 +17,6 @@ use tokio::sync::oneshot::Receiver;
 use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
-use arroyo_rpc::schema_resolver::ConfluentSchemaRegistryClient;
 
 use crate::{pull_opt, send, Connection, ConnectionType};
 
@@ -349,9 +349,15 @@ impl KafkaTester {
 
     pub async fn test_schema_registry(&self) -> anyhow::Result<()> {
         match &self.connection.schema_registry_enum {
-            Some(SchemaRegistry::ConfluentSchemaRegistry { api_key, api_secret, endpoint }) => {
+            Some(SchemaRegistry::ConfluentSchemaRegistry {
+                api_key,
+                api_secret,
+                endpoint,
+            }) => {
                 let client = ConfluentSchemaRegistryClient::new(
-                    endpoint, api_key.clone(), api_secret.clone()
+                    endpoint,
+                    api_key.clone(),
+                    api_secret.clone(),
                 )?;
 
                 client.test().await?;

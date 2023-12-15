@@ -173,7 +173,7 @@ function SelectWidget({
   onChange: (e: React.ChangeEvent<any>) => void;
   defaultValue?: string;
   resetField: (field: string) => any;
-  readonly?: boolean,
+  readonly?: boolean;
 }) {
   useEffect(() => {
     if (!value) {

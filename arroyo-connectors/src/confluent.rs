@@ -3,7 +3,9 @@ use crate::kafka::{
 };
 use crate::{kafka, pull_opt, Connection, Connector};
 use anyhow::anyhow;
-use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use arroyo_rpc::var_str::VarStr;
 use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
@@ -133,7 +135,7 @@ impl Connector for ConfluentConnector {
             .client_configs
             .insert("client.id".to_string(), CLIENT_ID.to_string());
         let tester = KafkaTester {
-            connection: config.into()
+            connection: config.into(),
         };
 
         tester.start(table, tx);
