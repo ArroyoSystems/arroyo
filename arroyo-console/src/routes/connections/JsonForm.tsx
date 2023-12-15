@@ -49,7 +49,7 @@ function StringWidget({
   value: string;
   errors: any;
   onChange: (e: React.ChangeEvent<any>) => void;
-  readonly?: boolean,
+  readonly?: boolean;
 }) {
   return (
     <FormControl isRequired={required} isInvalid={errors[path]}>
@@ -301,17 +301,27 @@ export function ArrayWidget({
             {values?.map((value: any, index: number) => (
               <Flex alignItems={'flex-end'} gap={2} key={index}>
                 {arrayItem(value, index)}
-                {!readonly && <IconButton
-                  width={8}
-                  height={8}
-                  minWidth={0}
-                  aria-label="Delete item"
-                  onClick={() => deleteItem(index)}
-                  icon={<DeleteIcon width={3} />}
-                />}
+                {!readonly && (
+                  <IconButton
+                    width={8}
+                    height={8}
+                    minWidth={0}
+                    aria-label="Delete item"
+                    onClick={() => deleteItem(index)}
+                    icon={<DeleteIcon width={3} />}
+                  />
+                )}
               </Flex>
             ))}
-            { !readonly &&<IconButton mt={1} height={8} aria-label="Add item" onClick={add} icon={<AddIcon />} /> }
+            {!readonly && (
+              <IconButton
+                mt={1}
+                height={8}
+                aria-label="Add item"
+                onClick={add}
+                icon={<AddIcon />}
+              />
+            )}
           </Stack>
         </FormControl>
       </fieldset>
@@ -413,14 +423,16 @@ export function MapWidget({
               readOnly={readonly}
             />
           </Flex>
-          {!readonly && <IconButton
-            width={8}
-            height={8}
-            minWidth={0}
-            aria-label="Delete item"
-            onClick={() => deleteItem(i)}
-            icon={<DeleteIcon width={3} />}
-          />}
+          {!readonly && (
+            <IconButton
+              width={8}
+              height={8}
+              minWidth={0}
+              aria-label="Delete item"
+              onClick={() => deleteItem(i)}
+              icon={<DeleteIcon width={3} />}
+            />
+          )}
         </Flex>
         <FormErrorMessage>{pair.error}</FormErrorMessage>
       </FormControl>
@@ -451,7 +463,15 @@ export function MapWidget({
               )
             )}
             {keyValues.map((pair, index) => mapItem(pair, index))}
-            {!readonly && <IconButton mt={1} height={8} aria-label="Add item" onClick={add} icon={<AddIcon />} /> }
+            {!readonly && (
+              <IconButton
+                mt={1}
+                height={8}
+                aria-label="Add item"
+                onClick={add}
+                icon={<AddIcon />}
+              />
+            )}
           </Stack>
         </FormControl>
       </fieldset>
@@ -466,7 +486,7 @@ export function FormInner({
   values,
   errors,
   resetField,
-  readonly
+  readonly,
 }: {
   schema: JSONSchema7;
   onChange: (e: React.ChangeEvent<any>) => void;
@@ -687,20 +707,25 @@ export function FormInner({
 export function JsonForm({
   schema,
   onSubmit,
+  onChange,
   initial = {},
   hasName,
   error,
   readonly = false,
-  children,
+  button = 'Next',
+  buttonColor = 'blue',
+  inProgress = false,
 }: {
   schema: JSONSchema7;
   onSubmit: (values: any) => Promise<void>;
+  onChange?: (e: any) => void;
   initial?: any;
   hasName?: boolean;
   error: string | null;
   button?: string;
   readonly?: boolean;
-  children: JSX.Element,
+  buttonColor?: string;
+  inProgress?: boolean;
 }) {
   let ajv = new Ajv();
   ajv.addKeyword('sensitive');
@@ -745,7 +770,12 @@ export function JsonForm({
             type="text"
             placeholder={`my-${schema.title?.toLowerCase()}`}
             value={formik.values.name || ''}
-            onChange={formik.handleChange}
+            onChange={e => {
+              formik.handleChange(e);
+              if (onChange) {
+                onChange(formik.values);
+              }
+            }}
             readOnly={readonly}
           />
           <FormHelperText>Enter a name to identify this {schema.title || 'object'}</FormHelperText>
@@ -754,7 +784,12 @@ export function JsonForm({
 
       <FormInner
         schema={schema}
-        onChange={formik.handleChange}
+        onChange={e => {
+          formik.handleChange(e);
+          if (onChange) {
+            onChange(formik.values);
+          }
+        }}
         values={formik.values}
         errors={formik.errors}
         resetField={resetField}
@@ -768,7 +803,15 @@ export function JsonForm({
         </Alert>
       )}
 
-      { children }
+      <Button
+        colorScheme={buttonColor}
+        mt={8}
+        mb={4}
+        type="submit"
+        isLoading={formik.isSubmitting || inProgress}
+      >
+        {button}
+      </Button>
     </form>
   );
 }

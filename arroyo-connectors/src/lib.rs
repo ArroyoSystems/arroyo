@@ -1,5 +1,8 @@
 use anyhow::{anyhow, bail, Context};
-use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType,
+    TestSourceMessage,
+};
 use arroyo_rpc::primitive_to_sql;
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
@@ -108,7 +111,10 @@ pub trait Connector: Send {
     }
 
     #[allow(unused)]
-    fn test_profile(&self, profile: Self::ProfileT) -> Option<tokio::sync::oneshot::Receiver<TestSourceMessage>> {
+    fn test_profile(
+        &self,
+        profile: Self::ProfileT,
+    ) -> Option<tokio::sync::oneshot::Receiver<TestSourceMessage>> {
         None
     }
 
@@ -163,7 +169,10 @@ pub trait ErasedConnector: Send {
         schema: Option<&ConnectionSchema>,
     ) -> Result<Option<ConnectionSchema>, serde_json::Error>;
 
-    fn test_profile(&self, profile: &serde_json::Value) -> Result<Option<tokio::sync::oneshot::Receiver<TestSourceMessage>>, serde_json::Error>;
+    fn test_profile(
+        &self,
+        profile: &serde_json::Value,
+    ) -> Result<Option<tokio::sync::oneshot::Receiver<TestSourceMessage>>, serde_json::Error>;
 
     fn test(
         &self,
@@ -232,7 +241,10 @@ impl<C: Connector> ErasedConnector for C {
         Ok(self.get_schema(self.parse_config(config)?, self.parse_table(table)?, schema))
     }
 
-    fn test_profile(&self, profile: &serde_json::Value) ->  Result<Option<tokio::sync::oneshot::Receiver<TestSourceMessage>>, serde_json::Error> {
+    fn test_profile(
+        &self,
+        profile: &serde_json::Value,
+    ) -> Result<Option<tokio::sync::oneshot::Receiver<TestSourceMessage>>, serde_json::Error> {
         Ok(self.test_profile(self.parse_config(profile)?))
     }
 
@@ -292,7 +304,6 @@ pub(crate) async fn send(tx: &mut Sender<Result<Event, Infallible>>, msg: impl S
         warn!("Test API rx closed while sending message");
     }
 }
-
 
 pub(crate) fn pull_opt(name: &str, opts: &mut HashMap<String, String>) -> anyhow::Result<String> {
     opts.remove(name)

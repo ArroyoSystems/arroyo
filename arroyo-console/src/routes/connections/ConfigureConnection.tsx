@@ -1,6 +1,4 @@
-import {
-  Stack,
-} from '@chakra-ui/react';
+import { Stack } from '@chakra-ui/react';
 import { useState } from 'react';
 import { JsonForm } from './JsonForm';
 import { Connector, useConnectionProfiles } from '../../lib/data_fetching';

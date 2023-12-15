@@ -3,7 +3,9 @@ use axum::Json;
 use axum_extra::extract::WithRejection;
 
 use arroyo_connectors::connector_for_type;
-use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionProfilePost, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionProfilePost, TestSourceMessage,
+};
 use arroyo_rpc::api_types::ConnectionProfileCollection;
 use cornucopia_async::GenericClient;
 use tracing::warn;
@@ -13,8 +15,10 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnectionProfile;
 use crate::rest::AppState;
-use crate::rest_utils::{authenticate, bad_request, client, log_and_map, ApiError, BearerAuth, ErrorResp, not_found};
-use crate::{handle_db_error, AuthData, handle_delete};
+use crate::rest_utils::{
+    authenticate, bad_request, client, log_and_map, not_found, ApiError, BearerAuth, ErrorResp,
+};
+use crate::{handle_db_error, handle_delete, AuthData};
 
 impl TryFrom<DbConnectionProfile> for ConnectionProfile {
     type Error = String;
@@ -63,12 +67,14 @@ pub async fn test_connection_profile(
 
     let Some(rx) = connector
         .test_profile(&req.config)
-        .map_err(|e| bad_request(format!("Invalid config: {:?}", e)))? else {
-        return Ok(Json(TestSourceMessage::done("This connector does not support testing")));
+        .map_err(|e| bad_request(format!("Invalid config: {:?}", e)))?
+    else {
+        return Ok(Json(TestSourceMessage::done(
+            "This connector does not support testing",
+        )));
     };
 
-    let result = rx.await
-        .map_err(log_and_map)?;
+    let result = rx.await.map_err(log_and_map)?;
 
     Ok(Json(result))
 }
@@ -122,7 +128,6 @@ pub async fn create_connection_profile(
     Ok(Json(connection_profile))
 }
 
-
 /// List all connection profiles
 #[utoipa::path(
     get,
@@ -175,7 +180,6 @@ pub(crate) async fn delete_connection_profile(
 
     Ok(())
 }
-
 
 pub(crate) async fn get_all_connection_profiles<C: GenericClient>(
     auth: &AuthData,

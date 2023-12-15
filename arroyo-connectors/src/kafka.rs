@@ -17,7 +17,7 @@ use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
 
-use crate::{pull_opt, Connection, ConnectionType, send};
+use crate::{pull_opt, send, Connection, ConnectionType};
 
 use super::Connector;
 
@@ -219,9 +219,7 @@ impl Connector for KafkaConnector {
         _: Option<&ConnectionSchema>,
         tx: Sender<Result<Event, Infallible>>,
     ) {
-        let tester = KafkaTester {
-            connection: config,
-        };
+        let tester = KafkaTester { connection: config };
 
         tester.start(table, tx);
     }
@@ -340,7 +338,11 @@ impl KafkaTester {
         })
     }
 
-    async fn test(&self, table: KafkaTable, mut tx: Sender<Result<Event, Infallible>>) -> Result<(), String> {
+    async fn test(
+        &self,
+        table: KafkaTable,
+        mut tx: Sender<Result<Event, Infallible>>,
+    ) -> Result<(), String> {
         let client = self.connect().await?;
 
         self.info(&mut tx, "Connected to Kafka").await;
@@ -430,11 +432,14 @@ impl KafkaTester {
     }
 
     async fn info(&self, tx: &mut Sender<Result<Event, Infallible>>, s: impl Into<String>) {
-        send(tx, TestSourceMessage {
-            error: false,
-            done: false,
-            message: s.into(),
-        })
+        send(
+            tx,
+            TestSourceMessage {
+                error: false,
+                done: false,
+                message: s.into(),
+            },
+        )
         .await;
     }
 
@@ -458,18 +463,24 @@ impl KafkaTester {
         tokio::spawn(async move {
             info!("Started kafka tester");
             if let Err(e) = self.test(table, tx.clone()).await {
-                send(&mut tx, TestSourceMessage {
-                    error: true,
-                    done: true,
-                    message: e,
-                })
+                send(
+                    &mut tx,
+                    TestSourceMessage {
+                        error: true,
+                        done: true,
+                        message: e,
+                    },
+                )
                 .await;
             } else {
-                send(&mut tx, TestSourceMessage {
-                    error: false,
-                    done: true,
-                    message: "Connection is valid".to_string(),
-                })
+                send(
+                    &mut tx,
+                    TestSourceMessage {
+                        error: false,
+                        done: true,
+                        message: "Connection is valid".to_string(),
+                    },
+                )
                 .await;
             }
         });
