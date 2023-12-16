@@ -1,11 +1,10 @@
+use std::collections::BTreeMap;
 use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
 
 use arroyo_connectors::connector_for_type;
-use arroyo_rpc::api_types::connections::{
-    ConnectionProfile, ConnectionProfilePost, TestSourceMessage,
-};
+use arroyo_rpc::api_types::connections::{ConnectionAutocompleteResp, ConnectionProfile, ConnectionProfilePost, TestSourceMessage};
 use arroyo_rpc::api_types::ConnectionProfileCollection;
 use cornucopia_async::GenericClient;
 use tracing::warn;
@@ -179,6 +178,46 @@ pub(crate) async fn delete_connection_profile(
     }
 
     Ok(())
+}
+
+/// Get autocomplete suggestions for a connection profile
+#[utoipa::path(
+    get,
+    path = "/v1/connection_profiles/{id}/autocomplete",
+    tag = "connection_profiles",
+    params(
+       ("id" = String, Path, description = "Connection Profile id")
+    ),
+    responses(
+       (status = 200, description = "Autocomplete suggestions for connection profile"),
+    ),
+)]
+pub(crate) async fn get_connection_profile_autocomplete(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path(pub_id): Path<String>,
+) -> Result<Json<ConnectionAutocompleteResp>, ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    let connection_profile = api_queries::get_connection_profile_by_pub_id()
+        .bind(&client, &auth_data.organization_id, &pub_id)
+        .opt()
+        .await
+        .map_err(log_and_map)?
+        .ok_or_else(|| not_found("Connection profile"))?;
+
+    let connector = connector_for_type(&connection_profile.r#type).unwrap();
+
+    let result = connector.get_autocomplete(&connection_profile.config).unwrap()
+        .await
+        .map_err(log_and_map)?
+        .map_err(|e| bad_request(format!("Failed to get autocomplete suggestions: {}", e)))?;
+
+
+    Ok(Json(ConnectionAutocompleteResp {
+        values: BTreeMap::from_iter(result.into_iter())
+    }))
 }
 
 pub(crate) async fn get_all_connection_profiles<C: GenericClient>(

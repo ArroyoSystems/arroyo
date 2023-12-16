@@ -1,7 +1,6 @@
 import { Stack } from '@chakra-ui/react';
-import { useState } from 'react';
 import { JsonForm } from './JsonForm';
-import { Connector, useConnectionProfiles } from '../../lib/data_fetching';
+import {Connector, useConnectionProfileAutocomplete} from '../../lib/data_fetching';
 import { CreateConnectionState } from './CreateConnection';
 
 export const ConfigureConnection = ({
@@ -15,13 +14,9 @@ export const ConfigureConnection = ({
   state: CreateConnectionState;
   setState: (s: CreateConnectionState) => void;
 }) => {
-  let { connectionProfiles, connectionProfilesLoading, mutateConnectionProfiles } =
-    useConnectionProfiles();
-  const [clusterError, setClusterError] = useState<string | null>(null);
-
-  if (connectionProfilesLoading) {
-    return <></>;
-  }
+  const {autocompleteData, autocompleteError} = state.connectionProfileId ?
+    useConnectionProfileAutocomplete(state.connectionProfileId) :
+    {autocompleteData: undefined, autocompleteError: null};
 
   return (
     <Stack spacing={8}>
@@ -30,15 +25,13 @@ export const ConfigureConnection = ({
           schema={JSON.parse(connector.tableConfig)}
           initial={state.table || {}}
           onSubmit={async table => {
-            if (connector?.connectionConfig && state.connectionProfileId == null) {
-              setClusterError('Cluster is required');
-              return;
-            }
             setState({ ...state, table: table });
             onSubmit();
           }}
           error={null}
           button={'Next'}
+          autocompleteData={autocompleteData}
+          autocompleteError={autocompleteError}
         />
       </Stack>
     </Stack>

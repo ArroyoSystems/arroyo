@@ -23,6 +23,7 @@ import addFormats from 'ajv-formats';
 import React, { useEffect, useMemo } from 'react';
 import { AddIcon, DeleteIcon } from '@chakra-ui/icons';
 import Markdown from 'react-markdown';
+import { useConnectionProfileAutocomplete } from '../../lib/data_fetching';
 
 function StringWidget({
   path,
@@ -137,6 +138,71 @@ function NumberWidget({
         onChange={e => onChange(e)}
         readOnly={readonly}
       />
+      {errors[path] ? (
+        <FormErrorMessage>{errors[path]}</FormErrorMessage>
+      ) : (
+        description && (
+          <FormHelperText>
+            <Markdown>{description}</Markdown>
+          </FormHelperText>
+        )
+      )}
+    </FormControl>
+  );
+}
+
+function AutocompleteWidget({
+  path,
+  title,
+  description,
+  placeholder,
+  required,
+  value,
+  errors,
+  onChange,
+  readonly,
+  autocompleteData,
+  autocompleteError,
+}: {
+  path: string;
+  title: string;
+  description?: string;
+  placeholder?: string;
+  required?: boolean;
+  value: string;
+  errors: any;
+  onChange: (e: React.ChangeEvent<any>) => void;
+  readonly?: boolean;
+  autocompleteData?: {
+    values: {
+      [key: string]: (string)[] | undefined;
+    };
+  };
+  autocompleteError?: string;
+}) {
+  return (
+    <FormControl isRequired={required} isInvalid={errors[path]}>
+      <FormLabel>{title}</FormLabel>
+      <Input
+        name={path}
+        type={'text'}
+        placeholder={placeholder}
+        value={value || ''}
+        onChange={e => onChange(e)}
+        readOnly={readonly}
+      />
+
+      {autocompleteData && autocompleteData.values[path] && (
+        <Box mt={2}>
+          {autocompleteData.values[path]?.map((value, index) => (
+            <Text key={index} fontSize={'sm'}>
+              {value}
+            </Text>
+          ))}
+        </Box>
+      )}
+
+
       {errors[path] ? (
         <FormErrorMessage>{errors[path]}</FormErrorMessage>
       ) : (
@@ -487,6 +553,8 @@ export function FormInner({
   errors,
   resetField,
   readonly,
+  autocompleteData,
+  autocompleteError,
 }: {
   schema: JSONSchema7;
   onChange: (e: React.ChangeEvent<any>) => void;
@@ -495,6 +563,12 @@ export function FormInner({
   errors: any;
   resetField: (field: string) => void;
   readonly?: boolean;
+  autocompleteData?: {
+    values: {
+      [key: string]: (string)[] | undefined;
+    };
+  };
+  autocompleteError?: string;
 }) {
   useEffect(() => {
     if (!schema.properties || Object.keys(schema.properties).length == 0) {
@@ -542,6 +616,20 @@ export function FormInner({
                       defaultValue={property.default?.toString()}
                       resetField={resetField}
                       readonly={readonly}
+                    />
+                  );
+                } else if (property.format == 'autocomplete') {
+                  return (
+                    <AutocompleteWidget
+                      path={nextPath}
+                      key={key}
+                      title={property.title || key}
+                      value={traversePath(values, nextPath)}
+                      errors={errors}
+                      onChange={onChange}
+                      readonly={readonly}
+                      autocompleteData={autocompleteData}
+                      autocompleteError={autocompleteError}
                     />
                   );
                 } else {
@@ -715,6 +803,8 @@ export function JsonForm({
   button = 'Next',
   buttonColor = 'blue',
   inProgress = false,
+  autocompleteData,
+  autocompleteError,
 }: {
   schema: JSONSchema7;
   onSubmit: (values: any) => Promise<void>;
@@ -726,10 +816,17 @@ export function JsonForm({
   readonly?: boolean;
   buttonColor?: string;
   inProgress?: boolean;
+  autocompleteData?: {
+    values: {
+      [key: string]: (string)[] | undefined;
+    };
+  };
+  autocompleteError?: string;
 }) {
   let ajv = new Ajv();
   ajv.addKeyword('sensitive');
   ajv.addFormat('var-str', { validate: () => true });
+  ajv.addFormat('autocomplete', { validate: () => true });
   const memoAjv = useMemo(() => addFormats(ajv), [schema]);
 
   const formik = useFormik({
@@ -794,6 +891,8 @@ export function JsonForm({
         errors={formik.errors}
         resetField={resetField}
         readonly={readonly}
+        autocompleteData={autocompleteData}
+        autocompleteError={autocompleteError}
       />
 
       {error && (
