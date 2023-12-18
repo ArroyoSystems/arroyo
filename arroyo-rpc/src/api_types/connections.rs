@@ -1,7 +1,7 @@
 use crate::formats::{BadData, Format, Framing};
-use std::collections::{BTreeMap};
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use utoipa::{IntoParams, ToSchema};
 

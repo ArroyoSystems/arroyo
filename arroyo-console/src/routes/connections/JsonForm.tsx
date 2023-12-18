@@ -8,12 +8,17 @@ import {
   FormErrorMessage,
   FormHelperText,
   FormLabel,
+  HStack,
   IconButton,
   Input,
+  ListItem,
   Select,
+  Spinner,
   Stack,
   Text,
   Textarea,
+  Tooltip,
+  UnorderedList,
 } from '@chakra-ui/react';
 import { JSONSchema7 } from 'json-schema';
 import { useFormik } from 'formik';
@@ -21,9 +26,9 @@ import { useFormik } from 'formik';
 import Ajv from 'ajv/dist/2019';
 import addFormats from 'ajv-formats';
 import React, { useEffect, useMemo } from 'react';
-import { AddIcon, DeleteIcon } from '@chakra-ui/icons';
+import { AddIcon, DeleteIcon, WarningIcon } from '@chakra-ui/icons';
 import Markdown from 'react-markdown';
-import { useConnectionProfileAutocomplete } from '../../lib/data_fetching';
+import { useCombobox } from 'downshift';
 
 function StringWidget({
   path,
@@ -175,33 +180,103 @@ function AutocompleteWidget({
   readonly?: boolean;
   autocompleteData?: {
     values: {
-      [key: string]: (string)[] | undefined;
+      [key: string]: string[] | undefined;
     };
   };
   autocompleteError?: string;
 }) {
+  const total = autocompleteData?.values[path] || [];
+  const [items, setItems] = React.useState<string[]>(total);
+
+  const {
+    isOpen,
+    getToggleButtonProps,
+    getLabelProps,
+    getMenuProps,
+    getInputProps,
+    highlightedIndex,
+    getItemProps,
+  } = useCombobox({
+    onInputValueChange({ inputValue }) {
+      // @ts-ignore
+      onChange({ target: { name: path, value: inputValue } });
+      if (inputValue && inputValue?.length > 0) {
+        setItems(total.filter(items => items.toLowerCase().startsWith(inputValue.toLowerCase())));
+      } else {
+        setItems(total);
+      }
+    },
+    initialInputValue: value,
+    items,
+  });
+
   return (
     <FormControl isRequired={required} isInvalid={errors[path]}>
-      <FormLabel>{title}</FormLabel>
-      <Input
-        name={path}
-        type={'text'}
-        placeholder={placeholder}
-        value={value || ''}
-        onChange={e => onChange(e)}
-        readOnly={readonly}
-      />
-
-      {autocompleteData && autocompleteData.values[path] && (
-        <Box mt={2}>
-          {autocompleteData.values[path]?.map((value, index) => (
-            <Text key={index} fontSize={'sm'}>
-              {value}
-            </Text>
-          ))}
-        </Box>
-      )}
-
+      <FormLabel {...getLabelProps()}>{title}</FormLabel>
+      <HStack>
+        <Input
+          name={path}
+          type={'text'}
+          placeholder={placeholder}
+          onChange={e => onChange(e)}
+          readOnly={readonly}
+          {...getInputProps()}
+        />
+        <Tooltip
+          label={
+            autocompleteError
+              ? autocompleteError
+              : autocompleteData
+              ? 'Show options'
+              : 'Data loading...'
+          }
+        >
+          <Button
+            {...getToggleButtonProps()}
+            isDisabled={autocompleteError != undefined || total.length == 0}
+            size={'sm'}
+          >
+            {autocompleteError ? (
+              <WarningIcon />
+            ) : autocompleteData ? (
+              <Text p={1}>▼</Text>
+            ) : (
+              <Spinner size={'sm'} speed={'0.5s'} />
+            )}
+          </Button>
+        </Tooltip>
+        <UnorderedList
+          position={'absolute'}
+          top={20}
+          left={-3}
+          {...getMenuProps()}
+          bg={'gray.700'}
+          zIndex={100}
+          borderColor={'gray.500'}
+          borderWidth={'1px'}
+          borderRadius={8}
+          listStyleType={'none'}
+          w={'90%'}
+          display={isOpen && items.length > 0 ? 'block' : 'none'}
+          opacity={0.95}
+          overflow={'hidden'}
+        >
+          {isOpen &&
+            items.map((item, index) => (
+              <ListItem
+                cursor={'default'}
+                p={2}
+                m={1}
+                key={`${item}${index}`}
+                {...getItemProps({ item, index })}
+                bg={highlightedIndex === index ? 'blue.600' : undefined}
+                borderRadius={4}
+              >
+                {item}
+              </ListItem>
+            ))}
+        </UnorderedList>
+      </HStack>
 
       {errors[path] ? (
         <FormErrorMessage>{errors[path]}</FormErrorMessage>
@@ -565,7 +640,7 @@ export function FormInner({
   readonly?: boolean;
   autocompleteData?: {
     values: {
-      [key: string]: (string)[] | undefined;
+      [key: string]: string[] | undefined;
     };
   };
   autocompleteError?: string;
@@ -818,7 +893,7 @@ export function JsonForm({
   inProgress?: boolean;
   autocompleteData?: {
     values: {
-      [key: string]: (string)[] | undefined;
+      [key: string]: string[] | undefined;
     };
   };
   autocompleteError?: string;

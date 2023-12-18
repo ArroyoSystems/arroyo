@@ -1,10 +1,12 @@
-use std::collections::BTreeMap;
 use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
+use std::collections::BTreeMap;
 
 use arroyo_connectors::connector_for_type;
-use arroyo_rpc::api_types::connections::{ConnectionAutocompleteResp, ConnectionProfile, ConnectionProfilePost, TestSourceMessage};
+use arroyo_rpc::api_types::connections::{
+    ConnectionAutocompleteResp, ConnectionProfile, ConnectionProfilePost, TestSourceMessage,
+};
 use arroyo_rpc::api_types::ConnectionProfileCollection;
 use cornucopia_async::GenericClient;
 use tracing::warn;
@@ -209,14 +211,15 @@ pub(crate) async fn get_connection_profile_autocomplete(
 
     let connector = connector_for_type(&connection_profile.r#type).unwrap();
 
-    let result = connector.get_autocomplete(&connection_profile.config).unwrap()
+    let result = connector
+        .get_autocomplete(&connection_profile.config)
+        .unwrap()
         .await
         .map_err(log_and_map)?
         .map_err(|e| bad_request(format!("Failed to get autocomplete suggestions: {}", e)))?;
 
-
     Ok(Json(ConnectionAutocompleteResp {
-        values: BTreeMap::from_iter(result.into_iter())
+        values: BTreeMap::from_iter(result.into_iter()),
     }))
 }
 

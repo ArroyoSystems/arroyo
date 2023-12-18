@@ -13,11 +13,11 @@ use nexmark::NexmarkConnector;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::Value;
 use sse::SSEConnector;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
-use serde_json::Value;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tracing::warn;
@@ -121,7 +121,10 @@ pub trait Connector: Send {
     }
 
     #[allow(unused)]
-    fn get_autocomplete(&self, profile: Self::ProfileT) -> oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>> {
+    fn get_autocomplete(
+        &self,
+        profile: Self::ProfileT,
+    ) -> oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>> {
         let (tx, rx) = oneshot::channel();
         tx.send(Ok(HashMap::new())).unwrap();
         rx
@@ -181,7 +184,10 @@ pub trait ErasedConnector: Send {
     /// Returns a map of autocomplete values from key names (with paths separated by dots) to values that should
     /// be used to autocomplete them.
     #[allow(unused)]
-    fn get_autocomplete(&self, profile: &serde_json::Value) ->Result<oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>>, serde_json::Error>;
+    fn get_autocomplete(
+        &self,
+        profile: &serde_json::Value,
+    ) -> Result<oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>>, serde_json::Error>;
 
     fn test_profile(
         &self,
@@ -255,7 +261,11 @@ impl<C: Connector> ErasedConnector for C {
         Ok(self.get_schema(self.parse_config(config)?, self.parse_table(table)?, schema))
     }
 
-    fn get_autocomplete(&self, profile: &Value) -> Result<oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>>, serde_json::Error> {
+    fn get_autocomplete(
+        &self,
+        profile: &Value,
+    ) -> Result<oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>>, serde_json::Error>
+    {
         Ok(self.get_autocomplete(self.parse_config(profile)?))
     }
 

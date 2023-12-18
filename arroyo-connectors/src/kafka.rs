@@ -3,6 +3,7 @@ use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, Te
 use arroyo_rpc::schema_resolver::ConfluentSchemaRegistryClient;
 use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use axum::response::sse::Event;
+use futures::TryFutureExt;
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     message::BorrowedMessage,
@@ -12,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::{Duration, Instant};
-use futures::TryFutureExt;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
@@ -198,7 +198,10 @@ impl Connector for KafkaConnector {
         })
     }
 
-    fn get_autocomplete(&self, profile: Self::ProfileT) -> oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>> {
+    fn get_autocomplete(
+        &self,
+        profile: Self::ProfileT,
+    ) -> oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>> {
         let (tx, rx) = oneshot::channel();
 
         tokio::spawn(async move {
@@ -206,13 +209,21 @@ impl Connector for KafkaConnector {
                 connection: profile,
             };
 
-            tx.send(kafka.fetch_topics().await
-                .map_err(|e| anyhow!("Failed to fetch topics from Kafka: {:?}", e))
-                .map(|topics| {
-                    let mut map = HashMap::new();
-                    map.insert("topic".to_string(), topics.into_iter().map(|(name, _)| name).collect());
-                    map
-                })).unwrap();
+            tx.send(
+                kafka
+                    .fetch_topics()
+                    .await
+                    .map_err(|e| anyhow!("Failed to fetch topics from Kafka: {:?}", e))
+                    .map(|topics| {
+                        let mut map = HashMap::new();
+                        map.insert(
+                            "topic".to_string(),
+                            topics.into_iter().map(|(name, _)| name).collect(),
+                        );
+                        map
+                    }),
+            )
+            .unwrap();
         });
 
         rx
@@ -334,7 +345,9 @@ impl KafkaTester {
                 .map_err(|e| format!("Failed to connect to Kafka: {:?}", e))?;
 
             Ok(client)
-        }).await.map_err(|_| "unexpected error while connecting to kafka")?
+        })
+        .await
+        .map_err(|_| "unexpected error while connecting to kafka")?
     }
 
     #[allow(unused)]
@@ -383,8 +396,14 @@ impl KafkaTester {
                 .fetch_metadata(None, Duration::from_secs(5))
                 .map_err(|e| anyhow!("Failed to read topic metadata from Kafka: {:?}", e))?;
 
-            Ok(metadata.topics().iter().map(|t| (t.name().to_string(), t.partitions().len())).collect())
-        }).await.map_err(|_| anyhow!("unexpected error while fetching topic metadata"))?
+            Ok(metadata
+                .topics()
+                .iter()
+                .map(|t| (t.name().to_string(), t.partitions().len()))
+                .collect())
+        })
+        .await
+        .map_err(|_| anyhow!("unexpected error while fetching topic metadata"))?
     }
 
     pub async fn test_schema_registry(&self) -> anyhow::Result<()> {
