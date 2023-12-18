@@ -18,8 +18,9 @@ import {
   LinkBox,
   LinkOverlay,
   useToast,
+  Flex,
 } from '@chakra-ui/react';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { JsonForm } from './JsonForm';
 import {
   AddIcon,
@@ -118,9 +119,7 @@ const ClusterChooser = ({
 
   return (
     <>
-      <Stack spacing={4} padding={4} maxW={800}>
-        <Heading size={'xx-small'}>Cluster config</Heading>
-
+      <Stack spacing={6} padding={4} maxW={800}>
         <Text fontSize={'sm'}>
           Select an existing {connector}{' '}
           <dfn
@@ -133,7 +132,7 @@ const ClusterChooser = ({
           or create a new one
         </Text>
 
-        <Stack spacing={4} w={800}>
+        <Stack spacing={3} w={800}>
           {connections
             .filter(c => c.connector == connector)
             .map(c => (
@@ -142,44 +141,45 @@ const ClusterChooser = ({
                   borderRadius={8}
                   w={'100%'}
                   p={4}
-                  bg={c.id == selected ? 'blue.700' : 'gray.800'}
-                  border={'1px solid #777'}
-                  _hover={{ bg: c.id == selected ? 'blue.700' : 'gray.600', borderColor: 'black' }}
+                  borderWidth={c.id == selected ? '2px' : '1px'}
+                  borderColor={c.id == selected ? 'blue.300' : 'gray.700'}
+                  _hover={{
+                    bg: 'gray.800',
+                  }}
                 >
                   <LinkOverlay href={'#'} onClick={() => setSelected(c.id)} />
-                  <HStack spacing={4} overflowX={'hidden'} maxW={'620'}>
-                    <Heading size={'14px'}>{c.name}</Heading>
-                    <Text
-                      overflowX={'hidden'}
-                      textOverflow={'ellipsis'}
-                      whiteSpace={'nowrap'}
-                      fontStyle={'italic'}
-                    >
-                      {c.description}
-                    </Text>
-                  </HStack>
+                  <Flex justifyContent={'space-between'}>
+                    <HStack spacing={4} overflowX={'hidden'} maxW={'620'}>
+                      <Heading size={'14px'}>{c.name}</Heading>
+                      <Text
+                        overflowX={'hidden'}
+                        textOverflow={'ellipsis'}
+                        whiteSpace={'nowrap'}
+                        fontStyle={'italic'}
+                      >
+                        {c.description}
+                      </Text>
+                    </HStack>
+                    <HStack>
+                      <IconButton
+                        variant={'ghost'}
+                        aria-label={'Info'}
+                        icon={<InfoOutlineIcon />}
+                        onClick={() => {
+                          setViewingProfile(c);
+                          onOpen();
+                        }}
+                      />
+                      <IconButton
+                        variant={'ghost'}
+                        aria-label={'Delete'}
+                        icon={<DeleteIcon />}
+                        onClick={() => deleteProfile(c)}
+                      />
+                    </HStack>
+                  </Flex>
                 </LinkBox>
-                <Spacer />
-                <Box>
-                  <HStack>
-                    <IconButton
-                      variant={'outline'}
-                      aria-label={'Info'}
-                      icon={<InfoOutlineIcon />}
-                      onClick={() => {
-                        setViewingProfile(c);
-                        onOpen();
-                      }}
-                    />
-
-                    <IconButton
-                      variant={'outline'}
-                      aria-label={'Delete'}
-                      icon={<DeleteIcon />}
-                      onClick={() => deleteProfile(c)}
-                    />
-                  </HStack>
-                </Box>
+                <Box></Box>
               </HStack>
             ))}
         </Stack>
