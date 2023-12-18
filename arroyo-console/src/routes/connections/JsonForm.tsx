@@ -185,8 +185,16 @@ function AutocompleteWidget({
   };
   autocompleteError?: string;
 }) {
-  const total = autocompleteData?.values[path] || [];
-  const [items, setItems] = React.useState<string[]>(total);
+  const ourItems = autocompleteData?.values[path] || [];
+  const [allItems, setAllItems] = React.useState<string[]>(ourItems);
+  const [items, setItems] = React.useState<string[]>(ourItems);
+
+  useEffect(() => {
+    if (autocompleteData && allItems.length == 0) {
+      setAllItems(ourItems);
+      setItems(ourItems);
+    }
+  }, [autocompleteData]);
 
   const {
     isOpen,
@@ -201,9 +209,11 @@ function AutocompleteWidget({
       // @ts-ignore
       onChange({ target: { name: path, value: inputValue } });
       if (inputValue && inputValue?.length > 0) {
-        setItems(total.filter(items => items.toLowerCase().startsWith(inputValue.toLowerCase())));
+        setItems(
+          allItems.filter(items => items.toLowerCase().startsWith(inputValue.toLowerCase()))
+        );
       } else {
-        setItems(total);
+        setItems(allItems);
       }
     },
     initialInputValue: value,
@@ -233,7 +243,7 @@ function AutocompleteWidget({
         >
           <Button
             {...getToggleButtonProps()}
-            isDisabled={autocompleteError != undefined || total.length == 0}
+            isDisabled={autocompleteError != undefined || allItems.length == 0}
             size={'sm'}
           >
             {autocompleteError ? (
