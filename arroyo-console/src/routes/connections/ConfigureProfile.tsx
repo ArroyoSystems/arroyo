@@ -32,6 +32,7 @@ import { ConnectionProfile, Connector, del, useConnectionProfiles } from '../../
 import { CreateConnectionState } from './CreateConnection';
 import { formatError } from '../../lib/util';
 import { CreateProfile } from './CreateProfile';
+import Loading from '../../components/Loading';
 
 function ClusterViewerModal({
   isOpen,
@@ -82,7 +83,7 @@ const ClusterChooser = ({
   schema: JSONSchema7;
   setCreatingCluster: (b: boolean) => void;
 }) => {
-  const [editingProfile, setEditingProfile] = useState<any>({});
+  const [viewingProfile, setViewingProfile] = useState<ConnectionProfile | null>(null);
   const { isOpen, onOpen, onClose } = useDisclosure();
   const toast = useToast();
   const { mutateConnectionProfiles } = useConnectionProfiles();
@@ -102,6 +103,9 @@ const ClusterChooser = ({
         isClosable: true,
       });
     } else {
+      if (profile.id == selected) {
+        setSelected(null);
+      }
       toast({
         title: 'Connection profile deleted',
         description: `Successfully deleted connection profile ${profile.name}`,
@@ -129,11 +133,11 @@ const ClusterChooser = ({
           or create a new one
         </Text>
 
-        <Stack spacing={4}>
+        <Stack spacing={4} w={800}>
           {connections
             .filter(c => c.connector == connector)
             .map(c => (
-              <HStack key={c.id}>
+              <HStack key={c.id} w={768}>
                 <LinkBox
                   borderRadius={8}
                   w={'100%'}
@@ -143,9 +147,16 @@ const ClusterChooser = ({
                   _hover={{ bg: c.id == selected ? 'blue.700' : 'gray.600', borderColor: 'black' }}
                 >
                   <LinkOverlay href={'#'} onClick={() => setSelected(c.id)} />
-                  <HStack spacing={4}>
+                  <HStack spacing={4} overflowX={'hidden'} maxW={'620'}>
                     <Heading size={'14px'}>{c.name}</Heading>
-                    <Text fontStyle={'italic'}>{c.description}</Text>
+                    <Text
+                      overflowX={'hidden'}
+                      textOverflow={'ellipsis'}
+                      whiteSpace={'nowrap'}
+                      fontStyle={'italic'}
+                    >
+                      {c.description}
+                    </Text>
                   </HStack>
                 </LinkBox>
                 <Spacer />
@@ -156,7 +167,7 @@ const ClusterChooser = ({
                       aria-label={'Info'}
                       icon={<InfoOutlineIcon />}
                       onClick={() => {
-                        setEditingProfile(c);
+                        setViewingProfile(c);
                         onOpen();
                       }}
                     />
@@ -174,26 +185,33 @@ const ClusterChooser = ({
         </Stack>
 
         <HStack>
-          <Button isDisabled={selected == null} onClick={() => onSubmit(selected!)}>
-            Continue
-            <ArrowRightIcon w={3} h={3} ml={2} />
-          </Button>
-
-          <Spacer />
           <Button onClick={() => setCreatingCluster(true)}>
             <AddIcon w={3} h={3} mr={2} />
             Create new
           </Button>
+
+          <Spacer />
+
+          <Button
+            isDisabled={selected == null}
+            onClick={() => onSubmit(selected!)}
+            colorScheme={'blue'}
+          >
+            Continue
+            <ArrowRightIcon w={3} h={3} ml={2} />
+          </Button>
         </HStack>
       </Stack>
 
-      <ClusterViewerModal
-        isOpen={isOpen}
-        onClose={onClose}
-        profile={editingProfile}
-        connector={connector}
-        schema={schema}
-      />
+      {viewingProfile && (
+        <ClusterViewerModal
+          isOpen={isOpen}
+          onClose={onClose}
+          profile={viewingProfile}
+          connector={connector}
+          schema={schema}
+        />
+      )}
     </>
   );
 };
@@ -214,7 +232,7 @@ export const ConfigureProfile = ({
   const [creatingCluster, setCreatingCluster] = useState<boolean>(false);
 
   if (connectionProfilesLoading) {
-    return <></>;
+    return <Loading />;
   }
 
   if (creatingCluster) {

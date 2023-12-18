@@ -59,7 +59,6 @@ export const CreateProfile = ({
 
     setValidating(false);
     let valid = !(error == true || data.error);
-    console.log('Valid is: ', valid);
     setValid(valid);
   };
 
