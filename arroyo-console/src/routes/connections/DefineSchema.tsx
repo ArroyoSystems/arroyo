@@ -262,6 +262,7 @@ export const DefineSchema = ({
   type DataFormatOption = { name: string; value: string; el?: ReactElement; disabled?: boolean };
   const [selectedFormat, setSelectedFormat] = useState<string | undefined>(undefined);
   const [selectedFraming, setSelectedFraming] = useState<string | undefined>(undefined);
+  const [selectedBadData, setSelectedBadData] = useState<string | undefined>(undefined);
 
   let { connectionProfiles, connectionProfilesLoading } = useConnectionProfiles();
 
@@ -334,6 +335,16 @@ export const DefineSchema = ({
     },
   ];
 
+  type BadDataOption = {
+    name: string;
+    value: components['schemas']['BadData'];
+  };
+
+  const badDataOptions: BadDataOption[] = [
+    { name: 'Fail', value: { fail: {} } },
+    { name: 'Drop', value: { drop: {} } },
+  ];
+
   const onFormatChange = (e: ChangeEvent<DataFormatOption>) => {
     let format = String(e.target.value);
     setSelectedFormat(format);
@@ -368,6 +379,18 @@ export const DefineSchema = ({
     });
   };
 
+  const onBadDataChange: ChangeEventHandler<HTMLSelectElement> = e => {
+    setSelectedBadData(e.target.value);
+    setState({
+      ...state,
+      schema: {
+        ...state.schema,
+        fields: [],
+        badData: badDataOptions.find(f => f.name == e.target.value)?.value,
+      },
+    });
+  };
+
   return (
     <Stack spacing={8}>
       <FormControl>
@@ -382,6 +405,27 @@ export const DefineSchema = ({
         <FormHelperText maxW={'lg'}>
           Framing describes how records are framed within the input data. If each input event
           contains a single record this can be left as None.
+        </FormHelperText>
+      </FormControl>
+
+      <FormControl>
+        <FormLabel>Bad Data</FormLabel>
+        <Select
+          maxW={'lg'}
+          placeholder="Select option"
+          value={selectedBadData}
+          onChange={onBadDataChange}
+        >
+          {badDataOptions.map(o => (
+            <option key={o.name} value={o.name}>
+              {o.name}
+            </option>
+          ))}
+        </Select>
+        <FormHelperText maxW={'lg'}>
+          This option describes how the job should handle data that doesn't match the defined
+          schema. 'Fail' will cause the job to fail, while 'Drop' will cause the job to drop
+          (ignore) bad data.
         </FormHelperText>
       </FormControl>
 

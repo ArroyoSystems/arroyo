@@ -217,6 +217,11 @@ export interface components {
       /** Format: int32 */
       schemaId?: number | null;
     };
+    BadData: OneOf<[{
+      fail: Record<string, never>;
+    }, {
+      drop: Record<string, never>;
+    }]>;
     Checkpoint: {
       backend: string;
       /** Format: int32 */
@@ -255,6 +260,7 @@ export interface components {
       name: string;
     };
     ConnectionSchema: {
+      badData?: components["schemas"]["BadData"] | null;
       definition?: components["schemas"]["SchemaDefinition"] | null;
       fields: (components["schemas"]["SourceField"])[];
       format?: components["schemas"]["Format"] | null;
