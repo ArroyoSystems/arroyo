@@ -375,6 +375,30 @@ pub enum Operator {
         name: String,
         expression: String,
     },
+    StructToRecordBatch {
+        name: String,
+    },
+    RecordBatchToStruct {
+        name: String,
+    },
+    ArrowProjection {
+        name: String,
+        config: Vec<u8>,
+    },
+    ArrowValue {
+        name: String,
+        config: Vec<u8>,
+    },
+    ArrowKey {
+        name: String,
+        config: Vec<u8>,
+    },
+    RecordBatchGrpc,
+    ArrowAggregate {
+        name: String,
+        config: Vec<u8>,
+    },
+    ArrowWatermark,
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -500,6 +524,16 @@ impl Debug for Operator {
                 name,
                 expression: _,
             } => write!(f, "updating_key<{}>", name),
+            Operator::StructToRecordBatch { name } => write!(f, "struct_to_record_batch<{}>", name),
+            Operator::RecordBatchToStruct { name } => write!(f, "record_batch_to_struct<{}>", name),
+            Operator::ArrowProjection { name, config: _ } => {
+                write!(f, "arrow_projection<{}>", name)
+            }
+            Operator::ArrowValue { name, config: _ } => write!(f, "arrow_value<{}>", name),
+            Operator::ArrowKey { name, config: _ } => write!(f, "arrow_key<{}>", name),
+            Operator::RecordBatchGrpc => write!(f, "record_batch_sink"),
+            Operator::ArrowAggregate { name, config: _ } => write!(f, "arrow_aggregate<{}>", name),
+            Operator::ArrowWatermark => write!(f, "arrow_watermark"),
         }
     }
 }
@@ -1477,7 +1511,6 @@ impl Program {
                         }
                         None => quote!(None),
                     };
-
                     match &watermark.strategy {
                         WatermarkStrategy::FixedLateness { max_lateness } => {
                             let max_lateness = duration_to_syn_expr(*max_lateness);
@@ -1867,6 +1900,58 @@ impl Program {
                         new(#name.to_string(), #expr))
                     }
                 },
+                Operator::StructToRecordBatch { name } => {
+                    let value_builder_name = parse_type(&format!("{}RecordBatchBuilder", input.unwrap().weight().value.replace(":", "_")));
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            StructToRecordBatch::<#value_builder_name>::
+                        new(#name.to_string()))
+                    }
+                },
+                Operator::RecordBatchToStruct { name } => {
+                    let out_k = parse_type(&output.unwrap().weight().key);
+                    let out_t = parse_type(&output.unwrap().weight().value);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            RecordBatchToStruct::<#out_k, #out_t>::new(#name.to_string()))
+                    }
+                },
+                Operator::ArrowProjection { name, config } => {
+                    let hex_string = hex::encode(config);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            ProjectionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
+                    }
+                },
+                Operator::ArrowValue { name, config } => {
+                    let hex_string = hex::encode(config);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            ValueExecutionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
+                    }
+                },
+                Operator::ArrowKey { name, config } => {
+                    let hex_string = hex::encode(config);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::
+                            KeyExecutionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
+                    }
+                },
+                Operator::RecordBatchGrpc => quote! {
+                    Box::new(arroyo_worker::arrow::GrpcRecordBatchSink::default())
+                },
+                Operator::ArrowAggregate { name, config } => {
+                    let hex_string = hex::encode(config);
+                    quote! {
+                        Box::new(arroyo_worker::arrow::tumbling_aggregating_window::
+                            TumblingAggregatingWindowFunc::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
+                    }
+                },
+                Operator::ArrowWatermark => {
+                    quote!{
+                        Box::new(arroyo_worker::arrow::DefaultTimestampWatermark{})
+                    }
+                },
             };
 
             (node.operator_id.clone(), description, body, node.parallelism)
@@ -2210,6 +2295,58 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::UpdatingKeyOperator { name, expression } => {
                 GrpcOperator::UpdatingKeyOperator(GrpcApi::UpdatingKeyOperator { name, expression })
             }
+            Operator::StructToRecordBatch { name } => {
+                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
+                    name,
+                    operator: GrpcApi::OperatorName::StructToRecordBatch.into(),
+                    config: None,
+                })
+            }
+            Operator::RecordBatchToStruct { name } => {
+                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
+                    name,
+                    operator: GrpcApi::OperatorName::RecordBatchToStruct.into(),
+                    config: None,
+                })
+            }
+            Operator::ArrowProjection { name, config } => {
+                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
+                    name,
+                    operator: GrpcApi::OperatorName::ArrowProjection.into(),
+                    config: Some(config),
+                })
+            }
+            Operator::ArrowValue { name, config } => {
+                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
+                    name,
+                    operator: GrpcApi::OperatorName::ArrowValuePlan.into(),
+                    config: Some(config),
+                })
+            }
+            Operator::ArrowKey { name, config } => {
+                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
+                    name,
+                    operator: GrpcApi::OperatorName::ArrowKeyPlan.into(),
+                    config: Some(config),
+                })
+            }
+            Operator::RecordBatchGrpc => GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
+                name: "sink".into(),
+                operator: GrpcApi::OperatorName::RecordBatchGrpc.into(),
+                ..Default::default()
+            }),
+            Operator::ArrowAggregate { name, config } => {
+                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
+                    name,
+                    operator: GrpcApi::OperatorName::ArrowAggregate.into(),
+                    config: Some(config),
+                })
+            }
+            Operator::ArrowWatermark => GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
+                name: "arrow_watermark".into(),
+                operator: GrpcApi::OperatorName::ArrowWatermark.into(),
+                config: None,
+            }),
         }
     }
 }
@@ -2518,6 +2655,36 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     name,
                     expression,
                 }) => Operator::UpdatingKeyOperator { name, expression },
+                GrpcOperator::NamedOperator(named_operator) => {
+                    let operator = named_operator.operator();
+                    let name = named_operator.name;
+                    match operator {
+                        GrpcApi::OperatorName::StructToRecordBatch => {
+                            Operator::StructToRecordBatch { name }
+                        }
+                        GrpcApi::OperatorName::RecordBatchToStruct => {
+                            Operator::RecordBatchToStruct { name }
+                        }
+                        GrpcApi::OperatorName::ArrowProjection => Operator::ArrowProjection {
+                            name,
+                            config: named_operator.config.unwrap(),
+                        },
+                        GrpcApi::OperatorName::ArrowValuePlan => Operator::ArrowValue {
+                            name,
+                            config: named_operator.config.unwrap(),
+                        },
+                        GrpcApi::OperatorName::ArrowKeyPlan => Operator::ArrowKey {
+                            name,
+                            config: named_operator.config.unwrap(),
+                        },
+                        GrpcApi::OperatorName::RecordBatchGrpc => Operator::RecordBatchGrpc,
+                        GrpcApi::OperatorName::ArrowAggregate => Operator::ArrowAggregate {
+                            name,
+                            config: named_operator.config.unwrap(),
+                        },
+                        GrpcApi::OperatorName::ArrowWatermark => Operator::ArrowWatermark,
+                    }
+                }
             },
             None => bail!("unset on operator {:?}", operator),
         };

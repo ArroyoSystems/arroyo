@@ -8,6 +8,9 @@ use std::{mem, thread};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use anyhow::{bail, Error, Result};
+use arrow_array::RecordBatch;
+use arroyo_datastream::Operator;
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use bincode::{config, Decode, Encode};
 
@@ -22,7 +25,7 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_types::{
     from_micros, range_for_server, server_for_hash, CheckpointBarrier, Data, Key, Message, Record,
-    SourceError, TaskInfo, UserError, Watermark, WorkerId,
+    RecordBatchData, SourceError, TaskInfo, UserError, Watermark, WorkerId,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -70,6 +73,19 @@ pub trait StreamNode: Send {
         in_qs: Vec<Vec<Receiver<QueueItem>>>,
         out_qs: Vec<Vec<OutQueue>>,
     ) -> JoinHandle<()>;
+}
+
+impl TryFrom<Operator> for Box<dyn StreamNode> {
+    type Error = Error;
+
+    fn try_from(operator: Operator) -> Result<Self> {
+        match operator {
+            operator => bail!(
+                "{:?} requires code generation, cannot instantiate directly",
+                operator
+            ),
+        }
+    }
 }
 
 pub struct WatermarkHolder {
@@ -200,6 +216,11 @@ pub struct Collector<K: Key, T: Data> {
 }
 
 impl<K: Key, T: Data> Collector<K, T> {
+    pub async fn collect_record_batch(&mut self, record_batch: RecordBatch) {
+        let message: Message<K, T> = Message::RecordBatch(RecordBatchData(record_batch));
+        self.out_qs[0][0].send(&self.task_info, message).await;
+    }
+
     pub async fn collect(&mut self, record: Record<K, T>) {
         fn out_idx<K: Key>(key: &Option<K>, qs: usize) -> usize {
             let hash = if let Some(key) = &key {
@@ -418,6 +439,10 @@ impl<K: Key, T: Data> Context<K, T> {
 
     pub async fn collect(&mut self, record: Record<K, T>) {
         self.collector.collect(record).await;
+    }
+
+    pub async fn collect_record_batch(&mut self, record: RecordBatch) {
+        self.collector.collect_record_batch(record).await;
     }
 
     pub async fn broadcast(&mut self, message: Message<K, T>) {

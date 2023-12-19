@@ -6,6 +6,7 @@ members = [
     "arroyo-controller",
     "arroyo-connectors",
     "arroyo-datastream",
+    "arroyo-df",
     "arroyo-formats",
     "arroyo-macro",
     "arroyo-metrics",
@@ -13,9 +14,6 @@ members = [
     "arroyo-openapi",
     "arroyo-rpc",
     "arroyo-server-common",
-    "arroyo-sql",
-    "arroyo-sql-macro",
-    "arroyo-sql-testing",
     "arroyo-state",
     "arroyo-storage",
     "arroyo-types",
@@ -43,6 +41,9 @@ parquet = { version = "46.0.0" }
 
 [profile.release]
 debug = 1
+
+[profile.dev]
+incremental = false
 
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }

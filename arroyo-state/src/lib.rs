@@ -1,14 +1,16 @@
 use crate::tables::DataTuple;
 use anyhow::Result;
+use arrow_array::RecordBatch;
 use arroyo_rpc::grpc::{
     CheckpointMetadata, OperatorCheckpointMetadata, TableDeleteBehavior, TableDescriptor,
     TableType, TableWriteBehavior,
 };
 use arroyo_rpc::{CompactionResult, ControlResp};
-use arroyo_types::{CheckpointBarrier, Data, Key, TaskInfo};
+use arroyo_types::{CheckpointBarrier, Data, Key, Record, TaskInfo};
 use async_trait::async_trait;
 use bincode::config::Configuration;
 use bincode::{Decode, Encode};
+use parquet::ParquetStats;
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -229,6 +231,13 @@ pub trait BackingStore {
     /// inserts committing data into the BackingStore instance
     /// this data will be passed to all subtasks of the operator in the commit message.
     async fn insert_committing_data(&mut self, epoch: u32, table: char, committing_data: Vec<u8>);
+
+    async fn write_record_batch_to_table(
+        &mut self,
+        table: char,
+        parquet_stats: ParquetStats,
+        batch: RecordBatch,
+    );
 }
 
 pub struct StateStore<S: BackingStore> {
@@ -453,6 +462,16 @@ impl<S: BackingStore> StateStore<S> {
         self.backend
             .insert_committing_data(epoch, table, committing_data)
             .await
+    }
+    pub async fn insert_record_batch(
+        &mut self,
+        table: char,
+        record_batch: RecordBatch,
+        parquet_stats: ParquetStats,
+    ) {
+        self.backend
+            .write_record_batch_to_table(table, parquet_stats, record_batch)
+            .await;
     }
 }
 

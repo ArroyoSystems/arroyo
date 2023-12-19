@@ -1,6 +1,6 @@
 [package]
-name = "arroyo-sql"
-version = "0.9.0-dev"
+name = "arroyo-df"
+version = "0.8.0"
 edition = "2021"
 
 
@@ -14,7 +14,9 @@ arroyo-formats = { path = "../arroyo-formats" }
 datafusion = "31.0"
 datafusion-expr = "31.0"
 datafusion-common = "31.0"
-arrow-schema = {workspace = true }
+datafusion-proto = "31.0"
+prost = "0.11"
+arrow-schema = {workspace = true, features = ["serde"] }
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"
 
@@ -24,7 +26,9 @@ tokio = "1.27"
 quote = "1.0"
 regex = "1"
 arrow = { workspace = true }
+arrow-array = { workspace = true}
 anyhow = {version = "1.0.70", features = ["backtrace"]}
+async-trait = "0.1"
 
 proc-macro2 = "1"
 syn = {version = "2", features = ["full", "parsing"]}

@@ -108,6 +108,7 @@ impl ProgramCompiler {
             use arroyo_worker::operators::windows::*;
             use arroyo_worker::engine::{Program, SubtaskNode};
             use arroyo_worker::{LogicalEdge, LogicalNode};
+            use arroyo_types::RecordBatchBuilder;
             use types::*;
             use chrono;
             use std::time::SystemTime;

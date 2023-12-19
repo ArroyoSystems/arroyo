@@ -2,6 +2,7 @@
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 
+use arroyo_df::{parse_dependencies, ArroyoSchemaProvider};
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::{
@@ -17,7 +18,6 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_server_common::log_event;
-use arroyo_sql::{parse_dependencies, ArroyoSchemaProvider};
 use arroyo_types::{
     from_micros, ports, DatabaseConfig, NodeId, WorkerId, REMOTE_COMPILER_ENDPOINT_ENV,
 };
@@ -361,6 +361,7 @@ impl ControllerGrpc for ControllerServer {
         request: Request<SinkDataReq>,
     ) -> Result<Response<SinkDataResp>, Status> {
         let req = request.into_inner();
+        //info!("received {:#?}", req);
         let mut data_txs = self.data_txs.lock().await;
         if let Some(v) = data_txs.get_mut(&req.job_id) {
             let output = OutputData {

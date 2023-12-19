@@ -5,7 +5,8 @@ use crate::{
     DeleteTimeRangeOperation, DeleteValueOperation, StateStore, BINCODE_CONFIG,
 };
 use anyhow::{bail, Context, Result};
-use arrow_array::RecordBatch;
+use arrow_array::types::GenericBinaryType;
+use arrow_array::{Array, RecordBatch};
 use arroyo_rpc::grpc::backend_data::BackendData;
 use arroyo_rpc::grpc::{
     backend_data, CheckpointMetadata, OperatorCheckpointMetadata, ParquetStoreData,
@@ -491,6 +492,23 @@ impl BackingStore for ParquetBackend {
                 epoch,
                 table,
                 data: committing_data,
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn write_record_batch_to_table(
+        &mut self,
+        table: char,
+        parquet_stats: ParquetStats,
+        record_batch: RecordBatch,
+    ) {
+        self.writer
+            .sender
+            .send(ParquetQueueItem::RecordBatch {
+                record_batch,
+                parquet_stats,
+                table,
             })
             .await
             .unwrap();
@@ -1029,6 +1047,7 @@ impl ParquetWriter {
                 .map(|table| (table.name.chars().next().unwrap(), table.clone()))
                 .collect(),
             builders: HashMap::new(),
+            batches: HashMap::new(),
             commit_data: HashMap::new(),
             current_files,
             load_compacted_tx,
@@ -1103,6 +1122,11 @@ enum ParquetQueueItem {
         table: char,
         data: Vec<u8>,
     },
+    RecordBatch {
+        record_batch: RecordBatch,
+        parquet_stats: ParquetStats,
+        table: char,
+    },
 }
 
 #[derive(Debug)]
@@ -1123,7 +1147,7 @@ struct ParquetCheckpoint {
     then_stop: bool,
 }
 
-struct RecordBatchBuilder {
+pub struct RecordBatchBuilder {
     key_hash_builder: arrow_array::builder::PrimitiveBuilder<arrow_array::types::UInt64Type>,
     start_time_array:
         arrow_array::builder::PrimitiveBuilder<arrow_array::types::TimestampNanosecondType>,
@@ -1133,10 +1157,11 @@ struct RecordBatchBuilder {
     operation_array: arrow_array::builder::BinaryBuilder,
 }
 
-struct ParquetStats {
-    max_timestamp: SystemTime,
-    min_routing_key: u64,
-    max_routing_key: u64,
+#[derive(Debug)]
+pub struct ParquetStats {
+    pub max_timestamp: SystemTime,
+    pub min_routing_key: u64,
+    pub max_routing_key: u64,
 }
 
 impl Default for ParquetStats {
@@ -1183,10 +1208,12 @@ impl RecordBatchBuilder {
         > = self.start_time_array.finish();
         let key_array: arrow_array::BinaryArray = self.key_bytes.finish();
         let data_array: arrow_array::BinaryArray = self.data_bytes.finish();
-        let operations_array = self.operation_array.finish();
+        let operations_array: arrow_array::GenericByteArray<
+            arrow_array::types::GenericBinaryType<i32>,
+        > = self.operation_array.finish();
         Some((
             arrow_array::RecordBatch::try_new(
-                self.schema(),
+                Self::schema(),
                 vec![
                     std::sync::Arc::new(key_hash_array),
                     std::sync::Arc::new(start_time_array),
@@ -1200,7 +1227,7 @@ impl RecordBatchBuilder {
         ))
     }
 
-    fn schema(&self) -> std::sync::Arc<arrow_schema::Schema> {
+    fn schema() -> std::sync::Arc<arrow_schema::Schema> {
         std::sync::Arc::new(arrow::datatypes::Schema::new(vec![
             arrow::datatypes::Field::new("key_hash", arrow::datatypes::DataType::UInt64, false),
             arrow::datatypes::Field::new(
@@ -1217,7 +1244,28 @@ impl RecordBatchBuilder {
             arrow::datatypes::Field::new("operation", arrow::datatypes::DataType::Binary, false),
         ]))
     }
+
+    pub fn get_batch(
+        key_hash_array: arrow_array::PrimitiveArray<arrow_array::types::UInt64Type>,
+        start_time_array: arrow_array::PrimitiveArray<arrow_array::types::TimestampNanosecondType>,
+        key_array: arrow_array::BinaryArray,
+        data_array: arrow_array::BinaryArray,
+        operations_array: arrow_array::GenericByteArray<GenericBinaryType<i32>>,
+    ) -> RecordBatch {
+        RecordBatch::try_new(
+            Self::schema(),
+            vec![
+                std::sync::Arc::new(key_hash_array),
+                std::sync::Arc::new(start_time_array),
+                std::sync::Arc::new(key_array),
+                std::sync::Arc::new(data_array),
+                std::sync::Arc::new(operations_array),
+            ],
+        )
+        .unwrap()
+    }
 }
+
 impl Default for RecordBatchBuilder {
     fn default() -> Self {
         Self {
@@ -1243,6 +1291,7 @@ struct ParquetFlusher {
     task_info: TaskInfo,
     table_descriptors: HashMap<char, TableDescriptor>,
     builders: HashMap<char, RecordBatchBuilder>,
+    batches: HashMap<char, Vec<(RecordBatch, ParquetStats)>>,
     commit_data: HashMap<char, Vec<u8>>,
     current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>, // table -> epoch -> file
     load_compacted_tx: Receiver<CompactionResult>,
@@ -1374,6 +1423,9 @@ impl ParquetFlusher {
                                 commit_epoch = Some(epoch);
                             }
                             self.commit_data.insert(table, data);
+                        }
+                        Some(ParquetQueueItem::RecordBatch{record_batch, parquet_stats, table}) => {
+                            self.batches.entry(table).or_default().push((record_batch, parquet_stats));
                         }
                         None => {
                             debug!("Parquet flusher closed");

@@ -4,7 +4,8 @@ use std::pin::Pin;
 use std::time::SystemTime;
 use std::{collections::HashMap, marker::PhantomData};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
+use arrow_array::RecordBatch;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
 use bincode::{Decode, Encode};
@@ -182,6 +183,58 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
         Ok(SourceFinishType::Final)
     }
 
+    async fn get_record_batch_stream(
+        &mut self,
+        storage_provider: &StorageProvider,
+        path: String,
+    ) -> Result<Box<dyn Stream<Item = Result<RecordBatch, UserError>> + Unpin + Send>, UserError>
+    {
+        let format = self.deserializer.get_format().clone();
+        match *format {
+            arroyo_rpc::formats::Format::Json(_) => {
+                Err(UserError::new("unsupported format:", "json"))
+            }
+            arroyo_rpc::formats::Format::Avro(_) => {
+                Err(UserError::new("unsupported format:", "avro"))
+            }
+            arroyo_rpc::formats::Format::Parquet(_) => {
+                let object_meta = storage_provider
+                    .get_backing_store()
+                    .head(&(path.clone().into()))
+                    .await
+                    .map_err(|err| {
+                        UserError::new("could not get object metadata", err.to_string())
+                    })?;
+                let object_reader =
+                    ParquetObjectReader::new(storage_provider.get_backing_store(), object_meta);
+                let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
+                    .await
+                    .map_err(|err| {
+                        UserError::new(
+                            "could not create parquet record batch stream builder",
+                            format!("path:{}, err:{}", path, err),
+                        )
+                    })?;
+                let stream = reader_builder.build().map_err(|err| {
+                    UserError::new(
+                        "could not build parquet record batch stream",
+                        err.to_string(),
+                    )
+                })?;
+                let result = Box::new(stream.map(|res| match res {
+                    Ok(record_batch) => Ok(record_batch),
+                    Err(err) => Err(UserError::new(
+                        "could not read record batch from stream",
+                        err.to_string(),
+                    )),
+                }))
+                    as Box<dyn Stream<Item = Result<RecordBatch, UserError>> + Send + Unpin>;
+                Ok(result)
+            }
+            arroyo_rpc::formats::Format::RawString(_) => todo!(),
+        }
+    }
+
     async fn get_item_stream(
         &mut self,
         storage_provider: &StorageProvider,
@@ -290,7 +343,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
             }
         };
         let mut reader = self
-            .get_item_stream(storage_provider, obj_key.to_string())
+            .get_record_batch_stream(storage_provider, obj_key.to_string())
             .await?;
         if records_read > 0 {
             warn!("skipping {} items", records_read);
@@ -311,7 +364,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                 item = reader.next() => {
                     match item {
                         Some(value) => {
-                            ctx.collect_source_record(SystemTime::now(), value, &self.bad_data, &mut self.rate_limiter).await?;
+                            ctx.collect_record_batch(value?).await;
                             records_read += 1;
                         }
                         None => {

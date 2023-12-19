@@ -48,6 +48,7 @@ pub use ordered_float::OrderedFloat;
 pub use apache_avro;
 use arroyo_rpc::var_str::VarStr;
 
+pub mod arrow;
 pub mod connectors;
 pub mod engine;
 mod inq_reader;
@@ -55,6 +56,7 @@ mod metrics;
 mod network_manager;
 pub mod operators;
 mod process_fn;
+pub mod stream_node;
 
 pub const PROMETHEUS_PUSH_GATEWAY: &str = "localhost:9091";
 pub const METRICS_PUSH_INTERVAL: Duration = Duration::from_secs(1);

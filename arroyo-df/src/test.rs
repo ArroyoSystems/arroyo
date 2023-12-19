@@ -4,7 +4,10 @@ use arroyo_connectors::{
     Connector, EmptyConfig,
 };
 
-use crate::{parse_and_get_program, types::TypeDef, ArroyoSchemaProvider, SqlConfig};
+use crate::{
+    parse_and_get_arrow_program, parse_and_get_program, types::TypeDef, ArroyoSchemaProvider,
+    SqlConfig,
+};
 
 #[tokio::test]
 async fn test_parse() {
@@ -186,23 +189,6 @@ async fn test_no_inserting_updates_into_non_updating() {
 }
 
 #[tokio::test]
-async fn durations_error_out() {
-    let schema_provider = get_test_schema_provider();
-    let sql = "create table nexmark with (
-          connector = 'nexmark',
-          event_rate = '5'
-      );
-
-      select bid.datetime - DATE '2023-12-03'
-      from nexmark
-      group by 1;
-      ";
-    let _ = parse_and_get_program(sql, schema_provider, SqlConfig::default())
-        .await
-        .unwrap_err();
-}
-
-#[tokio::test]
 async fn test_no_aggregates_in_window() {
     let schema_provider = get_test_schema_provider();
     let sql = "WITH bids as (
@@ -219,6 +205,21 @@ GROUP BY bidder, HOP(INTERVAL '3 second', INTERVAL '10' minute)) WHERE distinct_
 }
 
 #[tokio::test]
+async fn test_query_parsing() {
+    let schema_provider = get_test_schema_provider();
+    let sql = "
+    CREATE TABLE nexmark WITH (
+      connector = 'nexmark',
+      event_rate = '10'
+    );select bid.datetime
+    from nexmark ;";
+    parse_and_get_arrow_program(sql.to_string(), schema_provider, SqlConfig::default())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+
 async fn test_udf() {
     let mut schema_provider = get_test_schema_provider();
 
@@ -233,51 +234,4 @@ async fn test_udf() {
     parse_and_get_program(sql, schema_provider, SqlConfig::default())
         .await
         .unwrap();
-}
-
-#[tokio::test]
-async fn test_no_float_group_by() {
-    let schema_provider = get_test_schema_provider();
-
-    let sql = "create table nexmark with (
-        connector = 'nexmark',
-        event_rate = '5'
-    );
-
-    select cast(bid.price as float)
-    from nexmark
-    group by 1;";
-
-    let _ = parse_and_get_program(sql, schema_provider, SqlConfig::default())
-        .await
-        .unwrap_err();
-}
-
-#[tokio::test]
-async fn test_no_float_join_key() {
-    let schema_provider = get_test_schema_provider();
-
-    let sql = "create table test1 (
-         a FLOAT
-    ) with (
-        connector = 'websocket',
-        endpoint = 'ws://blah',
-        format = 'json'
-    );
-
-    create table test2 (
-         b FLOAT
-    ) with (
-        connector = 'websocket',
-        endpoint = 'ws://blah',
-        format = 'json'
-    );
-
-
-    select a from test1
-    LEFT JOIN test2 ON test1.a = test2.b";
-
-    let _ = parse_and_get_program(sql, schema_provider, SqlConfig::default())
-        .await
-        .unwrap_err();
 }

@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
-use arrow_schema::{DataType, Field};
+use arrow_schema::{DataType, Field, Schema};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::{ConnectorOp, Operator};
 use arroyo_rpc::api_types::connections::{
@@ -17,21 +17,19 @@ use datafusion::{
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
+use datafusion_common::Column;
 use datafusion_common::{config::ConfigOptions, DFField, DFSchema};
 use datafusion_expr::{
-    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, LogicalPlan, WriteOp,
+    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, LogicalPlan, Projection,
+    WriteOp,
 };
+use tracing::info;
 
-use crate::code_gen::{CodeGenerator, ValuePointerContext};
-use crate::expressions::CastExpression;
 use crate::external::SinkUpdateType;
 use crate::{avro, DEFAULT_IDLE_TIME};
 use crate::{
-    expressions::{Column, ColumnExpression, Expression, ExpressionContext},
     external::{ProcessingMode, SqlSink, SqlSource},
     json_schema,
-    operators::Projection,
-    pipeline::{SourceOperator, SqlOperator, SqlPipelineBuilder},
     types::{convert_data_type, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
 };
@@ -59,7 +57,7 @@ pub enum FieldSpec {
     StructField(StructField),
     VirtualField {
         field: StructField,
-        expression: Expression,
+        expression: Expr,
     },
 }
 
@@ -190,9 +188,6 @@ impl ConnectorTable {
 
         let format = Format::from_opts(options).map_err(|e| anyhow!("invalid format: '{e}'"))?;
 
-        let bad_data =
-            BadData::from_opts(options).map_err(|e| anyhow!("Invalid bad_data: '{e}'"))?;
-
         let framing = Framing::from_opts(options).map_err(|e| anyhow!("invalid framing: '{e}'"))?;
 
         let schema_fields: Result<Vec<SourceField>> = fields
@@ -209,6 +204,8 @@ impl ConnectorTable {
                 })
             })
             .collect();
+        let bad_data =
+            BadData::from_opts(options).map_err(|e| anyhow!("Invalid bad_data: '{e}'"))?;
 
         let schema = ConnectionSchema::try_new(
             format,
@@ -264,50 +261,13 @@ impl ConnectorTable {
 
     fn virtual_field_projection(&self) -> Result<Option<Projection>> {
         if self.has_virtual_fields() {
-            let fields = self
-                .fields
-                .iter()
-                .map(|field| {
-                    match field {
-                        FieldSpec::StructField(struct_field) => Ok((Column{relation: None, name: struct_field.name.clone()}, Expression::Column(ColumnExpression::new(struct_field.clone())))),
-                        FieldSpec::VirtualField { field, expression } => {
-                            let expression_type_def = expression.expression_type(&ValuePointerContext::new());
-                            let expression_return_type = expression_type_def.as_datatype().expect("virtual fields shouldn't return structs");
-                            let expression_nullability = expression_type_def.is_optional();
-                            let field_return_type = field.data_type.as_datatype().expect("virtual fields shouldn't return structs");
-                            let field_nullability = field.data_type.is_optional();
-                            if !field_nullability && expression_nullability {
-                                bail!("virtual field {} is not nullable, but the expression for calculating it is nullable", field.name);
-                            }
-                            if field_nullability == expression_nullability && expression_return_type == field_return_type {
-                                // no need to cast
-                                Ok((Column {
-                                    relation: None,
-                                    name: field.name.clone(),
-                                },
-                                    expression.clone()
-                                ))
-                            } else {
-                                let force_nullability = field_nullability && !expression_nullability;
-                                let cast_expr = CastExpression::new(Box::new(expression.clone()), field_return_type, &crate::code_gen::ValuePointerContext::new(), force_nullability)?;
-                                Ok((
-                                    Column {
-                                        relation: None,
-                                        name: field.name.clone(),
-                                    },
-                                    cast_expr))
-                            }
-                    }
-                }
-                }).collect::<Result<Vec<_>>>()?.into_iter().collect();
-
-            Ok(Some(Projection::new(fields)))
+            bail!("virtual fields not supported in Arrow");
         } else {
             Ok(None)
         }
     }
 
-    fn timestamp_override(&self) -> Result<Option<Expression>> {
+    fn timestamp_override(&self) -> Result<Option<Expr>> {
         if let Some(field_name) = &self.event_time_field {
             if self.is_update() {
                 bail!("can't use event_time_field with update mode.")
@@ -331,15 +291,16 @@ impl ConnectorTable {
                     )
                 })?;
 
-            Ok(Some(Expression::Column(ColumnExpression::new(
-                field.struct_field().clone(),
+            Ok(Some(Expr::Column(Column::new(
+                field.struct_field().alias.as_ref().cloned(),
+                field.struct_field().name(),
             ))))
         } else {
             Ok(None)
         }
     }
 
-    fn watermark_column(&self) -> Result<Option<Expression>> {
+    fn watermark_column(&self) -> Result<Option<Expr>> {
         if let Some(field_name) = &self.watermark_field {
             // check that a column exists and it is a timestamp
             let field = self
@@ -359,8 +320,9 @@ impl ConnectorTable {
                     )
                 })?;
 
-            Ok(Some(Expression::Column(ColumnExpression::new(
-                field.struct_field().clone(),
+            Ok(Some(Expr::Column(Column::new(
+                field.struct_field().alias.as_ref().cloned(),
+                field.struct_field().name(),
             ))))
         } else {
             Ok(None)
@@ -383,7 +345,7 @@ impl ConnectorTable {
         }
     }
 
-    pub fn as_sql_source(&self) -> Result<SqlOperator> {
+    pub fn as_sql_source(&self) -> Result<SourceOperator> {
         match self.connection_type {
             ConnectionType::Source => {}
             ConnectionType::Sink => {
@@ -418,16 +380,18 @@ impl ConnectorTable {
             idle_time: self.idle_time,
         };
 
-        Ok(SqlOperator::Source(SourceOperator {
+        Ok(SourceOperator {
             name: self.name.clone(),
             source,
-            virtual_field_projection,
             timestamp_override,
             watermark_column,
-        }))
+        })
     }
 
-    pub fn as_sql_sink(&self, mut input: SqlOperator) -> Result<SqlOperator> {
+    // TODO: implement
+    pub fn as_sql_sink(&self) -> Result<()> {
+        todo!();
+        /*
         match self.connection_type {
             ConnectionType::Source => {
                 bail!("inserting into a source is not allowed")
@@ -489,8 +453,16 @@ impl ConnectorTable {
                 operator: Operator::ConnectorSink(self.connector_op()),
             },
             Box::new(input),
-        ))
+        ))*/
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceOperator {
+    pub name: String,
+    pub source: SqlSource,
+    pub timestamp_override: Option<Expr>,
+    pub watermark_column: Option<Expr>,
 }
 
 #[derive(Debug, Clone)]
@@ -577,11 +549,6 @@ impl Table {
             HashMap::new(),
         )?;
 
-        let expression_context = ExpressionContext {
-            input_struct: &physical_struct,
-            schema_provider,
-        };
-
         let sql_to_rel = SqlToRel::new(schema_provider);
         struct_field_pairs
             .into_iter()
@@ -589,8 +556,8 @@ impl Table {
                 if let Some(generating_expression) = generating_expression {
                     // TODO: Implement automatic type coercion here, as we have elsewhere.
                     // It is done by calling the Analyzer which inserts CAST operators where necessary.
-
-                    let df_expr = sql_to_rel.sql_to_expr(
+                    todo!("support generating expressions");
+                    /*let df_expr = sql_to_rel.sql_to_expr(
                         generating_expression,
                         &physical_schema,
                         &mut PlannerContext::default(),
@@ -599,7 +566,7 @@ impl Table {
                     Ok(FieldSpec::VirtualField {
                         field: struct_field,
                         expression,
-                    })
+                    })*/
                 } else {
                     Ok(FieldSpec::StructField(struct_field))
                 }
@@ -762,30 +729,12 @@ impl Table {
         }
     }
 
-    pub fn as_sql_source(&self, builder: &mut SqlPipelineBuilder) -> Result<SqlOperator> {
+    pub fn as_sql_sink(&self, input: LogicalPlan) -> Result<()> {
         match self {
-            Table::ConnectorTable(cn) => cn.as_sql_source(),
-            Table::MemoryTable { name, .. } => Ok(builder
-                .planned_tables
-                .get(name)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "memory table {} not found in planned tables. This is a bug.",
-                        name
-                    )
-                })?
-                .clone()),
-            Table::TableFromQuery { logical_plan, .. } => {
-                builder.insert_sql_plan(&logical_plan.clone())
-            }
-        }
-    }
-
-    pub fn as_sql_sink(&self, input: SqlOperator) -> Result<SqlOperator> {
-        match self {
-            Table::ConnectorTable(c) => c.as_sql_sink(input),
+            Table::ConnectorTable(c) => c.as_sql_sink(),
             Table::MemoryTable { name, .. } => {
-                Ok(SqlOperator::NamedTable(name.clone(), Box::new(input)))
+                todo!()
+                //Ok(SqlOperator::NamedTable(name.clone(), Box::new(input)))
             }
             Table::TableFromQuery { .. } => todo!(),
         }
@@ -835,6 +784,7 @@ impl Insert {
         }
 
         let logical_plan = produce_optimized_plan(statement, schema_provider)?;
+        info!("logical plan: {:#?}", logical_plan);
 
         match &logical_plan {
             LogicalPlan::Dml(DmlStatement {

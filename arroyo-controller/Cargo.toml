@@ -14,7 +14,7 @@ arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-storage = { path = "../arroyo-storage" }
-arroyo-sql = { path = "../arroyo-sql" }
+arroyo-df = { path = "../arroyo-df" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 
 tonic = {workspace = true}

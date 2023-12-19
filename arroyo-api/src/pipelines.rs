@@ -27,6 +27,8 @@ use arroyo_rpc::grpc::api::{
 };
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
+use arroyo_df::types::StructDef;
+use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::avro::arrow_to_avro_schema;
 use arroyo_formats::json::arrow_to_json_schema;
 use arroyo_rpc::formats::Format;
@@ -34,8 +36,6 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
 use arroyo_rpc::{error_chain, OperatorConfig};
 use arroyo_server_common::log_event;
-use arroyo_sql::types::StructDef;
-use arroyo_sql::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use petgraph::visit::EdgeRef;
 use prost::Message;
 use serde_json::json;
@@ -138,7 +138,7 @@ where
         schema_provider.add_connection_profile(profile);
     }
 
-    arroyo_sql::parse_and_get_program(
+    arroyo_df::parse_and_get_program(
         &query,
         schema_provider,
         SqlConfig {
