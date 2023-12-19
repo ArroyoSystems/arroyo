@@ -18,8 +18,8 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::connection_profiles::{
-    create_connection_profile, delete_connection_profile, get_connection_profiles,
-    test_connection_profile,
+    create_connection_profile, delete_connection_profile, get_connection_profile_autocomplete,
+    get_connection_profiles, test_connection_profile,
 };
 use crate::connection_tables::{
     create_connection_table, delete_connection_table, get_connection_tables, test_connection_table,
@@ -116,6 +116,10 @@ pub fn create_rest_app(pool: Pool, controller_addr: &str) -> Router {
         .route(
             "/connection_profiles/:id",
             delete(delete_connection_profile),
+        )
+        .route(
+            "/connection_profiles/:id/autocomplete",
+            get(get_connection_profile_autocomplete),
         )
         .route("/connection_tables", get(get_connection_tables))
         .route("/connection_tables", post(create_connection_table))

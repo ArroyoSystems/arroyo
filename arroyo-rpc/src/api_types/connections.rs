@@ -1,6 +1,7 @@
 use crate::formats::{BadData, Format, Framing};
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use utoipa::{IntoParams, ToSchema};
 
@@ -201,6 +202,12 @@ pub struct ConnectionTablePost {
     pub connection_profile_id: Option<String>,
     pub config: serde_json::Value,
     pub schema: Option<ConnectionSchema>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionAutocompleteResp {
+    pub values: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

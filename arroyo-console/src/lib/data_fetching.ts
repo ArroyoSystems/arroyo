@@ -57,6 +57,10 @@ const connectionProfilesKey = () => {
   return { key: 'Connections' };
 };
 
+const connectionProfileAutocompleteKey = (id: string) => {
+  return { key: `ConnectionProfileAutocomplete`, connectionProfileId: id };
+};
+
 const connectionTablesKey = (limit: number) => {
   return (pageIndex: number, previousPageData: schemas['ConnectionTableCollection']) => {
     if (previousPageData && !previousPageData.hasMore) return null;
@@ -80,11 +84,11 @@ const pipelinesKey = (
   if (previousPageData && !previousPageData.hasMore) return null;
 
   if (pageIndex === 0 || !previousPageData) {
-    return { key: 'Piplines', startingAfter: undefined };
+    return { key: 'Pipelines', startingAfter: undefined };
   }
 
   return {
-    key: 'Piplines',
+    key: 'Pipelines',
     startingAfter: previousPageData.data[previousPageData.data.length - 1].id,
   };
 };
@@ -226,6 +230,33 @@ export const useConnectionTables = (limit: number) => {
     mutateConnectionTables: mutate,
     connectionTablesTotalPages: size,
     setConnectionTablesMaxPages: setSize,
+  };
+};
+
+// ConnectionProfile autocomplete
+const connectionProfileAutocompleteFetcher = () => {
+  return async (params: { connectionProfileId: string }) => {
+    const { data, error } = await get('/v1/connection_profiles/{id}/autocomplete', {
+      params: {
+        path: {
+          id: params.connectionProfileId,
+        },
+      },
+    });
+
+    return processResponse(data, error);
+  };
+};
+
+export const useConnectionProfileAutocomplete = (id: string) => {
+  const { data, error } = useSWR<schemas['ConnectionAutocompleteResp']>(
+    connectionProfileAutocompleteKey(id),
+    connectionProfileAutocompleteFetcher()
+  );
+
+  return {
+    autocompleteData: data,
+    autocompleteError: error,
   };
 };
 

@@ -36,6 +36,13 @@ export interface paths {
      */
     delete: operations["delete_connection_profile"];
   };
+  "/v1/connection_profiles/{id}/autocomplete": {
+    /**
+     * Get autocomplete suggestions for a connection profile 
+     * @description Get autocomplete suggestions for a connection profile
+     */
+    get: operations["get_connection_profile_autocomplete"];
+  };
   "/v1/connection_tables": {
     /**
      * List all connection tables 
@@ -244,6 +251,11 @@ export interface components {
     };
     /** @enum {string} */
     CheckpointSpanType: "alignment" | "sync" | "async" | "committing";
+    ConnectionAutocompleteResp: {
+      values: {
+        [key: string]: (string)[] | undefined;
+      };
+    };
     ConnectionProfile: {
       config: unknown;
       connector: string;
@@ -636,6 +648,22 @@ export interface operations {
     };
     responses: {
       /** @description Deleted connection profile */
+      200: never;
+    };
+  };
+  /**
+   * Get autocomplete suggestions for a connection profile 
+   * @description Get autocomplete suggestions for a connection profile
+   */
+  get_connection_profile_autocomplete: {
+    parameters: {
+      path: {
+        /** @description Connection Profile id */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Autocomplete suggestions for connection profile */
       200: never;
     };
   };

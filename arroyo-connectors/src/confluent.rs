@@ -123,6 +123,14 @@ impl Connector for ConfluentConnector {
         }
     }
 
+    fn get_autocomplete(
+        &self,
+        profile: Self::ProfileT,
+    ) -> Receiver<anyhow::Result<HashMap<String, Vec<String>>>> {
+        let profile = profile.into();
+        KafkaConnector {}.get_autocomplete(profile)
+    }
+
     fn test(
         &self,
         _: &str,

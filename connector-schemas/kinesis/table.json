@@ -24,8 +24,8 @@
                             "type": "string",
                             "description": "The offset to start reading from",
                             "enum": [
-                                "earliest",
-                                "latest"
+                                "latest",
+                                "earliest"
                             ]
                         }
                     },

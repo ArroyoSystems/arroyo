@@ -13,11 +13,13 @@ use nexmark::NexmarkConnector;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::Value;
 use sse::SSEConnector;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
 use tracing::warn;
 use websocket::WebsocketConnector;
 
@@ -118,6 +120,16 @@ pub trait Connector: Send {
         None
     }
 
+    #[allow(unused)]
+    fn get_autocomplete(
+        &self,
+        profile: Self::ProfileT,
+    ) -> oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>> {
+        let (tx, rx) = oneshot::channel();
+        tx.send(Ok(HashMap::new())).unwrap();
+        rx
+    }
+
     fn test(
         &self,
         name: &str,
@@ -169,10 +181,18 @@ pub trait ErasedConnector: Send {
         schema: Option<&ConnectionSchema>,
     ) -> Result<Option<ConnectionSchema>, serde_json::Error>;
 
+    /// Returns a map of autocomplete values from key names (with paths separated by dots) to values that should
+    /// be used to autocomplete them.
+    #[allow(unused)]
+    fn get_autocomplete(
+        &self,
+        profile: &serde_json::Value,
+    ) -> Result<oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>>, serde_json::Error>;
+
     fn test_profile(
         &self,
         profile: &serde_json::Value,
-    ) -> Result<Option<tokio::sync::oneshot::Receiver<TestSourceMessage>>, serde_json::Error>;
+    ) -> Result<Option<oneshot::Receiver<TestSourceMessage>>, serde_json::Error>;
 
     fn test(
         &self,
@@ -239,6 +259,14 @@ impl<C: Connector> ErasedConnector for C {
         schema: Option<&ConnectionSchema>,
     ) -> Result<Option<ConnectionSchema>, serde_json::Error> {
         Ok(self.get_schema(self.parse_config(config)?, self.parse_table(table)?, schema))
+    }
+
+    fn get_autocomplete(
+        &self,
+        profile: &Value,
+    ) -> Result<oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>>, serde_json::Error>
+    {
+        Ok(self.get_autocomplete(self.parse_config(profile)?))
     }
 
     fn test_profile(

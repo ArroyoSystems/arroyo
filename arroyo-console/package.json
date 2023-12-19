@@ -36,6 +36,7 @@
     "ajv-formats": "^2.1.1",
     "d3": "^7.8.5",
     "dagre": "^0.8.5",
+    "downshift": "^8.2.3",
     "formik": "^2.4.2",
     "framer-motion": "^7.10.3",
     "lodash": "^4.17.21",

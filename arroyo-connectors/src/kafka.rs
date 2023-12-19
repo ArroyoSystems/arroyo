@@ -3,6 +3,7 @@ use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, Te
 use arroyo_rpc::schema_resolver::ConfluentSchemaRegistryClient;
 use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use axum::response::sse::Event;
+use futures::TryFutureExt;
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
     message::BorrowedMessage,
@@ -13,6 +14,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tonic::Status;
 use tracing::{error, info, warn};
@@ -196,6 +198,41 @@ impl Connector for KafkaConnector {
         })
     }
 
+    fn get_autocomplete(
+        &self,
+        profile: Self::ProfileT,
+    ) -> oneshot::Receiver<anyhow::Result<HashMap<String, Vec<String>>>> {
+        let (tx, rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            let kafka = KafkaTester {
+                connection: profile,
+            };
+
+            tx.send(
+                kafka
+                    .fetch_topics()
+                    .await
+                    .map_err(|e| anyhow!("Failed to fetch topics from Kafka: {:?}", e))
+                    .map(|topics| {
+                        let mut map = HashMap::new();
+                        map.insert(
+                            "topic".to_string(),
+                            topics
+                                .into_iter()
+                                .map(|(name, _)| name)
+                                .filter(|name| !name.starts_with("_"))
+                                .collect(),
+                        );
+                        map
+                    }),
+            )
+            .unwrap();
+        });
+
+        rx
+    }
+
     fn test_profile(&self, profile: Self::ProfileT) -> Option<Receiver<TestSourceMessage>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -304,47 +341,73 @@ impl KafkaTester {
 
         let client: BaseConsumer = client_config
             .create()
-            .map_err(|e| format!("Failed to connect: {:?}", e))?;
+            .map_err(|e| format!("invalid kafka config: {:?}", e))?;
 
-        client
-            .fetch_metadata(None, Duration::from_secs(10))
-            .map_err(|e| format!("Failed to connect to Kafka: {:?}", e))?;
+        tokio::task::spawn_blocking(move || {
+            client
+                .fetch_metadata(None, Duration::from_secs(10))
+                .map_err(|e| format!("Failed to connect to Kafka: {:?}", e))?;
 
-        Ok(client)
+            Ok(client)
+        })
+        .await
+        .map_err(|_| "unexpected error while connecting to kafka")?
     }
 
     #[allow(unused)]
     pub async fn topic_metadata(&self, topic: &str) -> Result<TopicMetadata, Status> {
         let client = self.connect().await.map_err(Status::failed_precondition)?;
-        let metadata = client
-            .fetch_metadata(Some(&topic), Duration::from_secs(5))
-            .map_err(|e| {
-                Status::failed_precondition(format!(
-                    "Failed to read topic metadata from Kafka: {:?}",
-                    e
-                ))
+
+        let topic = topic.to_string();
+        tokio::task::spawn_blocking(move || {
+            let metadata = client
+                .fetch_metadata(Some(&topic), Duration::from_secs(5))
+                .map_err(|e| {
+                    Status::failed_precondition(format!(
+                        "Failed to read topic metadata from Kafka: {:?}",
+                        e
+                    ))
+                })?;
+
+            let topic_metadata = metadata.topics().iter().next().ok_or_else(|| {
+                Status::failed_precondition("Metadata response from broker did not include topic")
             })?;
 
-        let topic_metadata = metadata.topics().iter().next().ok_or_else(|| {
-            Status::failed_precondition("Metadata response from broker did not include topic")
-        })?;
+            if let Some(e) = topic_metadata.error() {
+                let err = match e {
+                    rdkafka::types::RDKafkaRespErr::RD_KAFKA_RESP_ERR_TOPIC_AUTHORIZATION_FAILED => {
+                        "Not authorized to access topic".to_string()
+                    }
+                    rdkafka::types::RDKafkaRespErr::RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART => {
+                        "Topic does not exist".to_string()
+                    }
+                    _ => format!("Error while fetching topic metadata: {:?}", e),
+                };
+                return Err(Status::failed_precondition(err));
+            }
 
-        if let Some(e) = topic_metadata.error() {
-            let err = match e {
-                rdkafka::types::RDKafkaRespErr::RD_KAFKA_RESP_ERR_TOPIC_AUTHORIZATION_FAILED => {
-                    "Not authorized to access topic".to_string()
-                }
-                rdkafka::types::RDKafkaRespErr::RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART => {
-                    "Topic does not exist".to_string()
-                }
-                _ => format!("Error while fetching topic metadata: {:?}", e),
-            };
-            return Err(Status::failed_precondition(err));
-        }
+            Ok(TopicMetadata {
+                partitions: topic_metadata.partitions().len(),
+            })
+        }).map_err(|_| Status::internal("unexpected error while fetching topic metadata")).await?
+    }
 
-        Ok(TopicMetadata {
-            partitions: topic_metadata.partitions().len(),
+    async fn fetch_topics(&self) -> anyhow::Result<Vec<(String, usize)>> {
+        let client = self.connect().await.map_err(|e| anyhow!("{}", e))?;
+
+        tokio::task::spawn_blocking(move || {
+            let metadata = client
+                .fetch_metadata(None, Duration::from_secs(5))
+                .map_err(|e| anyhow!("Failed to read topic metadata from Kafka: {:?}", e))?;
+
+            Ok(metadata
+                .topics()
+                .iter()
+                .map(|t| (t.name().to_string(), t.partitions().len()))
+                .collect())
         })
+        .await
+        .map_err(|_| anyhow!("unexpected error while fetching topic metadata"))?
     }
 
     pub async fn test_schema_registry(&self) -> anyhow::Result<()> {

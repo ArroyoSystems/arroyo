@@ -8,12 +8,17 @@ import {
   FormErrorMessage,
   FormHelperText,
   FormLabel,
+  HStack,
   IconButton,
   Input,
+  ListItem,
   Select,
+  Spinner,
   Stack,
   Text,
   Textarea,
+  Tooltip,
+  UnorderedList,
 } from '@chakra-ui/react';
 import { JSONSchema7 } from 'json-schema';
 import { useFormik } from 'formik';
@@ -21,8 +26,9 @@ import { useFormik } from 'formik';
 import Ajv from 'ajv/dist/2019';
 import addFormats from 'ajv-formats';
 import React, { useEffect, useMemo } from 'react';
-import { AddIcon, DeleteIcon } from '@chakra-ui/icons';
+import { AddIcon, DeleteIcon, WarningIcon } from '@chakra-ui/icons';
 import Markdown from 'react-markdown';
+import { useCombobox } from 'downshift';
 
 function StringWidget({
   path,
@@ -137,6 +143,150 @@ function NumberWidget({
         onChange={e => onChange(e)}
         readOnly={readonly}
       />
+      {errors[path] ? (
+        <FormErrorMessage>{errors[path]}</FormErrorMessage>
+      ) : (
+        description && (
+          <FormHelperText>
+            <Markdown>{description}</Markdown>
+          </FormHelperText>
+        )
+      )}
+    </FormControl>
+  );
+}
+
+function AutocompleteWidget({
+  path,
+  title,
+  description,
+  placeholder,
+  required,
+  value,
+  errors,
+  onChange,
+  readonly,
+  autocompleteData,
+  autocompleteError,
+}: {
+  path: string;
+  title: string;
+  description?: string;
+  placeholder?: string;
+  required?: boolean;
+  value: string;
+  errors: any;
+  onChange: (e: React.ChangeEvent<any>) => void;
+  readonly?: boolean;
+  autocompleteData?: {
+    values: {
+      [key: string]: string[] | undefined;
+    };
+  };
+  autocompleteError?: string;
+}) {
+  const ourItems = autocompleteData?.values[path] || [];
+  const [allItems, setAllItems] = React.useState<string[]>(ourItems);
+  const [items, setItems] = React.useState<string[]>(ourItems);
+
+  useEffect(() => {
+    if (autocompleteData && allItems.length == 0) {
+      setAllItems(ourItems);
+      setItems(ourItems);
+    }
+  }, [autocompleteData]);
+
+  const {
+    isOpen,
+    getToggleButtonProps,
+    getLabelProps,
+    getMenuProps,
+    getInputProps,
+    highlightedIndex,
+    getItemProps,
+  } = useCombobox({
+    onInputValueChange({ inputValue }) {
+      // @ts-ignore
+      onChange({ target: { name: path, value: inputValue } });
+      if (inputValue && inputValue?.length > 0) {
+        setItems(allItems.filter(items => items.toLowerCase().includes(inputValue.toLowerCase())));
+      } else {
+        setItems(allItems);
+      }
+    },
+    initialInputValue: value,
+    items,
+  });
+
+  return (
+    <FormControl isRequired={required} isInvalid={errors[path]}>
+      <FormLabel {...getLabelProps()}>{title}</FormLabel>
+      <HStack>
+        <Input
+          name={path}
+          type={'text'}
+          placeholder={placeholder}
+          onChange={e => onChange(e)}
+          readOnly={readonly}
+          {...getInputProps()}
+        />
+        <Tooltip
+          label={
+            autocompleteError
+              ? autocompleteError
+              : autocompleteData
+              ? 'Show options'
+              : 'Data loading...'
+          }
+        >
+          <Button
+            {...getToggleButtonProps()}
+            isDisabled={autocompleteError != undefined || allItems.length == 0}
+            size={'sm'}
+          >
+            {autocompleteError ? (
+              <WarningIcon />
+            ) : autocompleteData ? (
+              <Text p={1}>▼</Text>
+            ) : (
+              <Spinner size={'sm'} speed={'0.5s'} />
+            )}
+          </Button>
+        </Tooltip>
+        <UnorderedList
+          position={'absolute'}
+          top={20}
+          left={-3}
+          {...getMenuProps()}
+          bg={'gray.700'}
+          zIndex={100}
+          borderColor={'gray.500'}
+          borderWidth={'1px'}
+          borderRadius={8}
+          listStyleType={'none'}
+          maxH={'400px'}
+          w={'90%'}
+          display={isOpen && items.length > 0 ? 'block' : 'none'}
+          opacity={0.95}
+          overflowY={'scroll'}
+        >
+          {isOpen &&
+            items.map((item, index) => (
+              <ListItem
+                cursor={'default'}
+                p={2}
+                m={1}
+                key={`${item}${index}`}
+                {...getItemProps({ item, index })}
+                bg={highlightedIndex === index ? 'blue.600' : undefined}
+                borderRadius={4}
+              >
+                {item}
+              </ListItem>
+            ))}
+        </UnorderedList>
+      </HStack>
+
       {errors[path] ? (
         <FormErrorMessage>{errors[path]}</FormErrorMessage>
       ) : (
@@ -487,6 +637,8 @@ export function FormInner({
   errors,
   resetField,
   readonly,
+  autocompleteData,
+  autocompleteError,
 }: {
   schema: JSONSchema7;
   onChange: (e: React.ChangeEvent<any>) => void;
@@ -495,6 +647,12 @@ export function FormInner({
   errors: any;
   resetField: (field: string) => void;
   readonly?: boolean;
+  autocompleteData?: {
+    values: {
+      [key: string]: string[] | undefined;
+    };
+  };
+  autocompleteError?: string;
 }) {
   useEffect(() => {
     if (!schema.properties || Object.keys(schema.properties).length == 0) {
@@ -542,6 +700,20 @@ export function FormInner({
                       defaultValue={property.default?.toString()}
                       resetField={resetField}
                       readonly={readonly}
+                    />
+                  );
+                } else if (property.format == 'autocomplete') {
+                  return (
+                    <AutocompleteWidget
+                      path={nextPath}
+                      key={key}
+                      title={property.title || key}
+                      value={traversePath(values, nextPath)}
+                      errors={errors}
+                      onChange={onChange}
+                      readonly={readonly}
+                      autocompleteData={autocompleteData}
+                      autocompleteError={autocompleteError}
                     />
                   );
                 } else {
@@ -715,6 +887,8 @@ export function JsonForm({
   button = 'Next',
   buttonColor = 'blue',
   inProgress = false,
+  autocompleteData,
+  autocompleteError,
 }: {
   schema: JSONSchema7;
   onSubmit: (values: any) => Promise<void>;
@@ -726,10 +900,17 @@ export function JsonForm({
   readonly?: boolean;
   buttonColor?: string;
   inProgress?: boolean;
+  autocompleteData?: {
+    values: {
+      [key: string]: string[] | undefined;
+    };
+  };
+  autocompleteError?: string;
 }) {
   let ajv = new Ajv();
   ajv.addKeyword('sensitive');
   ajv.addFormat('var-str', { validate: () => true });
+  ajv.addFormat('autocomplete', { validate: () => true });
   const memoAjv = useMemo(() => addFormats(ajv), [schema]);
 
   const formik = useFormik({
@@ -794,6 +975,8 @@ export function JsonForm({
         errors={formik.errors}
         resetField={resetField}
         readonly={readonly}
+        autocompleteData={autocompleteData}
+        autocompleteError={autocompleteError}
       />
 
       {error && (
