@@ -18,6 +18,9 @@ use tracing::warn;
 use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_connectors::{connector_for_type, ErasedConnector};
+use arroyo_df::avro;
+use arroyo_df::json_schema::convert_json_schema;
+use arroyo_df::types::{StructField, TypeDef};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, ConnectionType,
     SchemaDefinition,
@@ -28,9 +31,6 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaSubjectResponse, ConfluentSchemaType,
 };
-use arroyo_sql::avro;
-use arroyo_sql::json_schema::convert_json_schema;
-use arroyo_sql::types::{StructField, TypeDef};
 
 use crate::rest::AppState;
 use crate::rest_utils::{

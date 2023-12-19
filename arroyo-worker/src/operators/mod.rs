@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::str::FromStr;
 use std::{fmt::Debug, path::PathBuf};
@@ -5,12 +6,14 @@ use std::{fmt::Debug, path::PathBuf};
 use std::marker::PhantomData;
 use std::ops::Add;
 
-use crate::engine::{Collector, Context, StreamNode};
+use crate::engine::{CheckpointCounter, Collector, Context, StreamNode};
+use crate::stream_node::ProcessFuncTrait;
+use crate::ControlOutcome;
 use arroyo_macro::process_fn;
-use arroyo_rpc::grpc::TableDescriptor;
+use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor};
 use arroyo_types::{
-    from_millis, to_millis, CheckpointBarrier, Data, GlobalKey, Key, Message, Record, TaskInfo,
-    UpdatingData, Watermark, Window,
+    from_millis, to_millis, CheckpointBarrier, Data, GlobalKey, Key, Message, Record,
+    RecordBatchData, TaskInfo, UpdatingData, Watermark, Window,
 };
 use bincode::{config, Decode, Encode};
 use std::time::{Duration, SystemTime};
@@ -549,15 +552,19 @@ impl<K: Key, V: Data> FlattenOperator<K, V> {
         }
     }
 }
-
-#[derive(StreamNode)]
 pub struct MapOperator<InKey: Key, InT: Data, OutKey: Key, OutT: Data> {
     pub name: String,
     pub map_fn: Box<dyn Fn(&Record<InKey, InT>, &TaskInfo) -> Record<OutKey, OutT> + Send>,
 }
 
-#[process_fn(in_k = InKey, in_t = InT, out_k = OutKey, out_t = OutT)]
-impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> MapOperator<InKey, InT, OutKey, OutT> {
+#[async_trait::async_trait]
+impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> ProcessFuncTrait
+    for MapOperator<InKey, InT, OutKey, OutT>
+{
+    type InKey = InKey;
+    type InT = InT;
+    type OutKey = OutKey;
+    type OutT = OutT;
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -569,6 +576,14 @@ impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> MapOperator<InKey, InT, Out
     ) {
         let record = (self.map_fn)(record, &ctx.task_info);
         ctx.collector.collect(record).await;
+    }
+
+    async fn process_record_batch(
+        &mut self,
+        record_batch: &RecordBatchData,
+        ctx: &mut Context<OutKey, OutT>,
+    ) {
+        unreachable!("process_record_batch not implemented for MapOperator")
     }
 }
 

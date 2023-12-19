@@ -9,18 +9,10 @@ use quote::{format_ident, quote};
 pub const ROOT_NAME: &str = "ArroyoAvroRoot";
 
 pub fn convert_avro_schema(name: &str, schema: &str) -> anyhow::Result<Vec<StructField>> {
-    convert_avro_schema_helper(name, schema, false)
-}
-
-fn convert_avro_schema_helper(
-    name: &str,
-    schema: &str,
-    for_generation: bool,
-) -> anyhow::Result<Vec<StructField>> {
     let schema =
         Schema::parse_str(schema).map_err(|e| anyhow!("avro schema is not valid: {:?}", e))?;
 
-    let (typedef, _) = to_typedef(name, &schema, for_generation);
+    let (typedef, _) = to_typedef(name, &schema);
     match typedef {
         TypeDef::StructDef(sd, _) => Ok(sd.fields),
         TypeDef::DataType(_, _) => {
@@ -30,7 +22,7 @@ fn convert_avro_schema_helper(
 }
 
 pub fn get_defs(name: &str, schema: &str) -> anyhow::Result<String> {
-    let fields = convert_avro_schema_helper(name, schema, true)?;
+    let fields = convert_avro_schema(name, schema)?;
 
     let sd = StructDef::new(Some(ROOT_NAME.to_string()), true, fields, None);
     let defs: Vec<_> = sd
@@ -56,11 +48,7 @@ pub fn get_defs(name: &str, schema: &str) -> anyhow::Result<String> {
     .to_string())
 }
 
-fn to_typedef(
-    source_name: &str,
-    schema: &Schema,
-    for_generation: bool,
-) -> (TypeDef, Option<String>) {
+fn to_typedef(source_name: &str, schema: &Schema) -> (TypeDef, Option<String>) {
     match schema {
         Schema::Null => (TypeDef::DataType(DataType::Null, false), None),
         Schema::Boolean => (TypeDef::DataType(DataType::Boolean, false), None),
@@ -88,7 +76,7 @@ fn to_typedef(
                 .partition(|v| matches!(v, Schema::Null));
 
             if nulls.len() == 1 && not_nulls.len() == 1 {
-                let (dt, original) = to_typedef(source_name, not_nulls[0], for_generation);
+                let (dt, original) = to_typedef(source_name, not_nulls[0]);
                 (dt.to_optional(), original)
             } else {
                 (
@@ -102,21 +90,16 @@ fn to_typedef(
                 .fields
                 .iter()
                 .map(|f| {
-                    let (ft, original) = to_typedef(source_name, &f.schema, for_generation);
+                    let (ft, original) = to_typedef(source_name, &f.schema);
                     StructField::with_rename(f.name.clone(), None, ft, None, original)
                 })
                 .collect();
 
-            let name = if for_generation {
-                // if we're generating the actual structs, we don't want to namespace
-                record.name.name.to_string()
-            } else {
-                // otherwise, if we're getting the schema, we need the namespacing to find the proper structs
-                format!("{}::{}", source_name, record.name.name)
-            };
-
             (
-                TypeDef::StructDef(StructDef::for_name(Some(name), fields), false),
+                TypeDef::StructDef(
+                    StructDef::for_name(Some(record.name.name.clone()), fields),
+                    false,
+                ),
                 None,
             )
         }

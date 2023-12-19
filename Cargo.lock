@@ -451,10 +451,10 @@ dependencies = [
  "arrow-schema",
  "arroyo-connectors",
  "arroyo-datastream",
+ "arroyo-df",
  "arroyo-formats",
  "arroyo-rpc",
  "arroyo-server-common",
- "arroyo-sql",
  "arroyo-state",
  "arroyo-types",
  "async-trait",
@@ -557,9 +557,9 @@ dependencies = [
  "anyhow",
  "arrow-schema",
  "arroyo-datastream",
+ "arroyo-df",
  "arroyo-rpc",
  "arroyo-server-common",
- "arroyo-sql",
  "arroyo-state",
  "arroyo-storage",
  "arroyo-types",
@@ -609,7 +609,9 @@ dependencies = [
  "arroyo-rpc",
  "arroyo-types",
  "bincode 2.0.0-rc.3",
+ "bytes",
  "dyn-clone",
+ "hex",
  "petgraph",
  "proc-macro2",
  "prost",
@@ -621,6 +623,43 @@ dependencies = [
  "tokio",
  "toml 0.7.8",
  "tonic",
+]
+
+[[package]]
+name = "arroyo-df"
+version = "0.8.0"
+dependencies = [
+ "anyhow",
+ "apache-avro",
+ "arrow",
+ "arrow-array",
+ "arrow-schema",
+ "arroyo-connectors",
+ "arroyo-datastream",
+ "arroyo-formats",
+ "arroyo-rpc",
+ "arroyo-types",
+ "async-trait",
+ "bincode 2.0.0-rc.3",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "datafusion-proto",
+ "petgraph",
+ "prettyplease 0.2.15",
+ "proc-macro2",
+ "prost",
+ "quote",
+ "regex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_json_path",
+ "syn 2.0.39",
+ "tokio",
+ "tracing",
+ "typify",
+ "unicase",
 ]
 
 [[package]]
@@ -701,6 +740,7 @@ version = "0.9.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
+ "arrow-schema",
  "arroyo-types",
  "async-trait",
  "base64 0.21.5",
@@ -743,87 +783,6 @@ dependencies = [
  "tracing-logfmt",
  "tracing-subscriber",
  "vergen",
-]
-
-[[package]]
-name = "arroyo-sql"
-version = "0.9.0-dev"
-dependencies = [
- "anyhow",
- "apache-avro",
- "arrow",
- "arrow-schema",
- "arroyo-connectors",
- "arroyo-datastream",
- "arroyo-formats",
- "arroyo-rpc",
- "arroyo-types",
- "bincode 2.0.0-rc.3",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "petgraph",
- "prettyplease 0.2.15",
- "proc-macro2",
- "quote",
- "regex",
- "schemars",
- "serde",
- "serde_json",
- "serde_json_path",
- "syn 2.0.39",
- "tokio",
- "tracing",
- "typify",
- "unicase",
-]
-
-[[package]]
-name = "arroyo-sql-macro"
-version = "0.9.0-dev"
-dependencies = [
- "anyhow",
- "apache-avro",
- "arroyo-connectors",
- "arroyo-datastream",
- "arroyo-formats",
- "arroyo-rpc",
- "arroyo-sql",
- "proc-macro2",
- "quote",
- "runtime-macros-derive",
- "serde_json",
- "syn 2.0.39",
-]
-
-[[package]]
-name = "arroyo-sql-testing"
-version = "0.9.0-dev"
-dependencies = [
- "anyhow",
- "arrow",
- "arrow-array",
- "arrow-schema",
- "arroyo-formats",
- "arroyo-rpc",
- "arroyo-sql",
- "arroyo-sql-macro",
- "arroyo-state",
- "arroyo-types",
- "arroyo-worker",
- "bincode 2.0.0-rc.3",
- "bincode_derive",
- "chrono",
- "hex",
- "petgraph",
- "quote",
- "serde",
- "serde_json",
- "syn 2.0.39",
- "test-log",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -889,10 +848,15 @@ dependencies = [
 name = "arroyo-worker"
 version = "0.9.0-dev"
 dependencies = [
+ "ahash 0.8.3",
  "anyhow",
  "apache-avro",
  "arrow",
  "arrow-array",
+ "arrow-json",
+ "arrow-schema",
+ "arroyo-datastream",
+ "arroyo-df",
  "arroyo-formats",
  "arroyo-macro",
  "arroyo-metrics",
@@ -909,6 +873,12 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "bytes",
  "chrono",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-execution",
+ "datafusion-expr",
+ "datafusion-physical-expr",
+ "datafusion-proto",
  "deltalake",
  "eventsource-client",
  "fluvio",
@@ -2717,6 +2687,21 @@ dependencies = [
  "sha2 0.10.7",
  "unicode-segmentation",
  "uuid",
+]
+
+[[package]]
+name = "datafusion-proto"
+version = "31.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "440553913695dd8db587b43f54fdc7bbd8649326172d16a4904bb41e792b7297"
+dependencies = [
+ "arrow",
+ "chrono",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "object_store",
+ "prost",
 ]
 
 [[package]]
@@ -6535,17 +6520,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runtime-macros-derive"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17cf6d9e3337e2f0a3280e4b0c7c7280f03ad044f5ebef295fe93d410d02a8a2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "rusoto_core"
 version = "0.47.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7772,17 +7746,6 @@ dependencies = [
  "quote",
  "syn 1.0.109",
  "test-case-core",
-]
-
-[[package]]
-name = "test-log"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9601d162c1d77e62c1ea0bc8116cd1caf143ce3af947536c3c9052a1677fe0c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]

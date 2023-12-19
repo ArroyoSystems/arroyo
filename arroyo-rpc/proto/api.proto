@@ -91,7 +91,55 @@ message Operator {
     UpdatingOperator updating_operator = 24;
     NonWindowAggregator non_window_aggregator = 25;
     UpdatingKeyOperator updating_key_operator = 26;
+    NamedOperator named_operator = 28;
   }
+}
+
+message NamedOperator {
+  string name = 1;
+  OperatorName operator = 2;
+  optional bytes config = 3;
+}
+
+message ProjectionOperator {
+  string name = 1;
+  repeated bytes expressions = 2;
+  bytes input_schema = 4;
+  bytes output_schema = 5;
+}
+
+message ValuePlanOperator {
+  string name = 1;
+  bytes physical_plan = 2;
+}
+
+message KeyPlanOperator {
+  string name = 1;
+  bytes physical_plan = 2;
+  repeated uint64 key_fields = 3;
+}
+
+message WindowAggregateOperator {
+  string name = 1;
+  bytes physical_plan = 2;
+  bytes binning_function = 3;
+  bytes binning_schema = 4;
+  Window window = 5;
+  string window_field_name = 6;
+  uint64 window_index = 7;
+  repeated uint64 key_fields = 8;
+  bytes input_schema = 9;
+}
+
+enum OperatorName {
+  STRUCT_TO_RECORD_BATCH = 0;
+  RECORD_BATCH_TO_STRUCT = 1;
+  ARROW_PROJECTION = 2;
+  ARROW_VALUE_PLAN = 3;
+  ARROW_KEY_PLAN = 4;
+  RECORD_BATCH_GRPC = 5;
+  ARROW_AGGREGATE = 6;
+  ARROW_WATERMARK = 7;
 }
 
 message WasmUdfs {
@@ -108,6 +156,9 @@ message WasmFunction{
   string value_arg_type = 6;
   string return_type = 7;
   string body = 8;
+}
+message MemTableScan {
+  string alias = 1;
 }
 
 enum WasmBehavior {
