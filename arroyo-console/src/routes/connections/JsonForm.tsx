@@ -209,9 +209,7 @@ function AutocompleteWidget({
       // @ts-ignore
       onChange({ target: { name: path, value: inputValue } });
       if (inputValue && inputValue?.length > 0) {
-        setItems(
-          allItems.filter(items => items.toLowerCase().startsWith(inputValue.toLowerCase()))
-        );
+        setItems(allItems.filter(items => items.toLowerCase().includes(inputValue.toLowerCase())));
       } else {
         setItems(allItems);
       }
@@ -266,10 +264,11 @@ function AutocompleteWidget({
           borderWidth={'1px'}
           borderRadius={8}
           listStyleType={'none'}
+          maxH={'400px'}
           w={'90%'}
           display={isOpen && items.length > 0 ? 'block' : 'none'}
           opacity={0.95}
-          overflow={'hidden'}
+          overflowY={'scroll'}
         >
           {isOpen &&
             items.map((item, index) => (

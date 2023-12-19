@@ -140,7 +140,7 @@ const ClusterChooser = ({
                 <LinkBox
                   borderRadius={8}
                   w={'100%'}
-                  p={4}
+                  p={c.id == selected ? '15px' : '16px'}
                   borderWidth={c.id == selected ? '2px' : '1px'}
                   borderColor={c.id == selected ? 'blue.300' : 'gray.700'}
                   _hover={{

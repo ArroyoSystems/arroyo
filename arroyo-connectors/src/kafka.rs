@@ -218,7 +218,11 @@ impl Connector for KafkaConnector {
                         let mut map = HashMap::new();
                         map.insert(
                             "topic".to_string(),
-                            topics.into_iter().map(|(name, _)| name).collect(),
+                            topics
+                                .into_iter()
+                                .map(|(name, _)| name)
+                                .filter(|name| !name.starts_with("_"))
+                                .collect(),
                         );
                         map
                     }),
