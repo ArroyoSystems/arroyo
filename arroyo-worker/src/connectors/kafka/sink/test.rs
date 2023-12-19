@@ -30,22 +30,41 @@ impl KafkaTopicTester {
             .set("group.id", format!("{}-{}-creator", job_id, "operator_id"))
             .create()
             .unwrap();
-        admin_client
-            .delete_topics(&[&self.topic], &AdminOptions::new())
-            .await
-            .expect("deletion should have worked");
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        admin_client
-            .create_topics(
-                [&NewTopic::new(
-                    &self.topic,
-                    num_partitions,
-                    rdkafka::admin::TopicReplication::Fixed(1),
-                )],
-                &AdminOptions::new(),
-            )
-            .await
-            .expect("new topic should be present");
+        let mut tries = 0;
+        while tries < 5 {
+            let delete_result = &admin_client
+                .delete_topics(&[&self.topic], &AdminOptions::new())
+                .await
+                .expect("deletion should have worked")[0];
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if delete_result.is_err() {
+                tries += 1;
+                continue;
+            } else {
+                break;
+            }
+        }
+        tries = 0;
+        while tries < 5 {
+            let create_result = &admin_client
+                .create_topics(
+                    [&NewTopic::new(
+                        &self.topic,
+                        num_partitions,
+                        rdkafka::admin::TopicReplication::Fixed(1),
+                    )],
+                    &AdminOptions::new(),
+                )
+                .await
+                .expect("new topic should be present")[0];
+            if create_result.is_err() {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                tries += 1;
+                continue;
+            } else {
+                break;
+            }
+        }
     }
 
     async fn get_sink_with_writes(&self) -> KafkaSinkWithWrites {
