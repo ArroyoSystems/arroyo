@@ -136,7 +136,7 @@ impl Connector for ConfluentConnector {
         _: &str,
         config: Self::ProfileT,
         mut table: Self::TableT,
-        _: Option<&ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
         tx: Sender<Result<Event, Infallible>>,
     ) {
         table
@@ -146,7 +146,7 @@ impl Connector for ConfluentConnector {
             connection: config.into(),
         };
 
-        tester.start(table, tx);
+        tester.start(table, schema.cloned(), tx);
     }
 
     fn test_profile(&self, profile: Self::ProfileT) -> Option<Receiver<TestSourceMessage>> {

@@ -27,7 +27,7 @@ export const CreateProfile = ({
   const [error, setError] = useState<string | null>(null);
   const [valid, setValid] = useState<boolean | null>(null);
   const [validating, setValidating] = useState<boolean>(false);
-  const [state, setState] = useState<any | null>(null);
+  const state = useRef<any | null>(null);
   const toast = useToast();
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = useRef<any>();
@@ -67,7 +67,7 @@ export const CreateProfile = ({
       await validate(d);
       return;
     }
-    setState(d);
+    state.current = d;
 
     if (!valid) {
       onOpen();
@@ -84,9 +84,9 @@ export const CreateProfile = ({
     setError(null);
     const { data: connectionProfile, error } = await post('/v1/connection_profiles', {
       body: {
-        name: state.name,
+        name: state.current.name,
         connector: connector.id,
-        config: state,
+        config: state.current,
       },
     });
 
@@ -117,7 +117,7 @@ export const CreateProfile = ({
             setError(null);
             setValid(null);
           }
-          setState(values);
+          state.current = values;
         }}
         inProgress={validating}
       />

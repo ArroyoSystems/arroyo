@@ -1,21 +1,24 @@
 use anyhow::{anyhow, bail};
+use arroyo_formats::avro::deserialize_slice_avro;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
-use arroyo_rpc::schema_resolver::ConfluentSchemaRegistryClient;
-use arroyo_rpc::{var_str::VarStr, OperatorConfig};
+use arroyo_rpc::formats::{Format, JsonFormat};
+use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistryClient, FailingSchemaResolver};
+use arroyo_rpc::{schema_resolver, var_str::VarStr, OperatorConfig};
 use axum::response::sse::Event;
 use futures::TryFutureExt;
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},
-    message::BorrowedMessage,
-    ClientConfig, Offset, TopicPartitionList,
+    ClientConfig, Message, Offset, TopicPartitionList,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
+use tokio::sync::{oneshot, Mutex};
 use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
@@ -262,12 +265,12 @@ impl Connector for KafkaConnector {
         _: &str,
         config: Self::ProfileT,
         table: Self::TableT,
-        _: Option<&ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
         tx: Sender<Result<Event, Infallible>>,
     ) {
         let tester = KafkaTester { connection: config };
 
-        tester.start(table, tx);
+        tester.start(table, schema.cloned(), tx);
     }
 
     fn table_type(&self, _: Self::ProfileT, table: Self::TableT) -> ConnectionType {
@@ -431,12 +434,98 @@ impl KafkaTester {
         Ok(())
     }
 
+    pub async fn validate_schema(
+        &self,
+        table: &KafkaTable,
+        format: &Format,
+        msg: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        match format {
+            Format::Json(JsonFormat {
+                confluent_schema_registry,
+                ..
+            }) => {
+                if *confluent_schema_registry {
+                    if msg[0] != 0 {
+                        bail!("Message appears to be encoded as normal JSON, rather than SR-JSON, but the schema registry is enabled. Ensure that the format and schema type are correct.");
+                    }
+                    serde_json::from_slice::<Value>(&msg[5..]).map_err(|e|
+                        anyhow!("Failed to parse message as schema-registry JSON (SR-JSON): {:?}. Ensure that the format and schema type are correct.", e))?;
+                } else if msg[0] == 0 {
+                    bail!("Message is not valid JSON. It may be encoded as SR-JSON, but the schema registry is not enabled. Ensure that the format and schema type are correct.");
+                } else {
+                    serde_json::from_slice(&msg).map_err(|e|
+                        anyhow!("Failed to parse message as JSON: {:?}. Ensure that the format and schema type are correct.", e))?;
+                }
+            }
+            Format::Avro(avro) => {
+                if avro.confluent_schema_registry {
+                    let schema_resolver = match &self.connection.schema_registry_enum {
+                        Some(SchemaRegistry::ConfluentSchemaRegistry {
+                            endpoint,
+                            api_key,
+                            api_secret,
+                        }) => schema_resolver::ConfluentSchemaRegistry::new(
+                            endpoint,
+                            &table.topic,
+                            api_key.clone(),
+                            api_secret.clone(),
+                        ),
+                        _ => {
+                            bail!(
+                                "schema registry is enabled, but no schema registry is configured"
+                            );
+                        }
+                    }
+                    .map_err(|e| anyhow!("Failed to construct schema registry: {:?}", e))?;
+
+                    if msg[0] != 0 {
+                        bail!("Message appears to be encoded as normal Avro, rather than SR-Avro, but the schema registry is enabled. Ensure that the format and schema type are correct.");
+                    }
+
+                    let schema_registry = Arc::new(Mutex::new(HashMap::new()));
+
+                    let _ = deserialize_slice_avro::<Value>(avro, schema_registry, Arc::new(schema_resolver), &msg)
+                        .await
+                        .map_err(|e|
+                            anyhow!("Failed to parse message as schema-registry Avro (SR-Avro): {:?}. Ensure that the format and schema type are correct.", e))?;
+                } else {
+                    let resolver = Arc::new(FailingSchemaResolver::new());
+                    let registry = Arc::new(Mutex::new(HashMap::new()));
+
+                    let _ = deserialize_slice_avro::<Value>(avro, registry, resolver, &msg)
+                        .await
+                        .map_err(|e|
+                            if msg[0] == 0 {
+                                anyhow!("Failed to parse message are regular Avro. It may be encoded as SR-Avro, but the schema registry is not enabled. Ensure that the format and schema type are correct.")
+                            } else {
+                                anyhow!("Failed to parse message as Avro: {:?}. Ensure that the format and schema type are correct.", e)
+                            })?;
+                }
+            }
+            Format::Parquet(_) => {
+                unreachable!()
+            }
+            Format::RawString(_) => {
+                String::from_utf8(msg).map_err(|e|
+                    anyhow!("Failed to parse message as UTF-8: {:?}. Ensure that the format and schema type are correct.", e))?;
+            }
+        };
+
+        Ok(())
+    }
+
     async fn test(
         &self,
         table: KafkaTable,
+        schema: Option<ConnectionSchema>,
         mut tx: Sender<Result<Event, Infallible>>,
-    ) -> Result<(), String> {
-        let client = self.connect().await?;
+    ) -> anyhow::Result<()> {
+        let format = schema
+            .and_then(|s| s.format)
+            .ok_or_else(|| anyhow!("No format defined for Kafka connection"))?;
+
+        let client = self.connect().await.map_err(|e| anyhow!("{}", e))?;
 
         self.info(&mut tx, "Connected to Kafka").await;
 
@@ -444,13 +533,13 @@ impl KafkaTester {
 
         let metadata = client
             .fetch_metadata(Some(&topic), Duration::from_secs(10))
-            .map_err(|e| format!("Failed to fetch metadata: {:?}", e))?;
+            .map_err(|e| anyhow!("Failed to fetch metadata: {:?}", e))?;
 
         self.info(&mut tx, "Fetched topic metadata").await;
 
         {
             let topic_metadata = metadata.topics().get(0).ok_or_else(|| {
-                format!(
+                anyhow!(
                     "Returned metadata was empty; unable to subscribe to topic '{}'",
                     topic
                 )
@@ -461,17 +550,17 @@ impl KafkaTester {
                     rdkafka::types::RDKafkaRespErr::RD_KAFKA_RESP_ERR__UNKNOWN_PARTITION
                     | rdkafka::types::RDKafkaRespErr::RD_KAFKA_RESP_ERR__UNKNOWN_TOPIC
                     | rdkafka::types::RDKafkaRespErr::RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART => {
-                        return Err(format!(
+                        bail!(
                             "Topic '{}' does not exist in the configured Kafka cluster",
                             topic
-                        ));
+                        );
                     }
                     e => {
                         error!("Unhandled Kafka error while fetching metadata: {:?}", e);
-                        return Err(format!(
+                        bail!(
                             "Something went wrong while fetching topic metadata: {:?}",
                             e
-                        ));
+                        );
                     }
                 }
             }
@@ -484,7 +573,7 @@ impl KafkaTester {
 
             client
                 .assign(&TopicPartitionList::from_topic_map(&map).unwrap())
-                .map_err(|e| format!("Failed to subscribe to topic '{}': {:?}", topic, e))?;
+                .map_err(|e| anyhow!("Failed to subscribe to topic '{}': {:?}", topic, e))?;
         }
 
         if let TableType::Source { .. } = table.type_ {
@@ -496,12 +585,24 @@ impl KafkaTester {
                 match client.poll(Duration::ZERO) {
                     Some(Ok(message)) => {
                         self.info(&mut tx, "Received message from Kafka").await;
-                        self.test_schema(message)?;
+                        self.validate_schema(
+                            &table,
+                            &format,
+                            message
+                                .detach()
+                                .payload()
+                                .ok_or_else(|| anyhow!("received message with empty payload"))?
+                                .to_vec(),
+                        )
+                        .await?;
+
+                        self.info(&mut tx, "Successfully validated message schema")
+                            .await;
                         return Ok(());
                     }
                     Some(Err(e)) => {
                         warn!("Error while reading from kafka in test: {:?}", e);
-                        return Err(format!("Error while reading messages from Kafka: {}", e));
+                        return Err(anyhow!("Error while reading messages from Kafka: {}", e));
                     }
                     None => {
                         // wait
@@ -510,17 +611,12 @@ impl KafkaTester {
                 }
             }
 
-            return Err(format!(
+            return Err(anyhow!(
                 "No messages received from Kafka within {} seconds",
                 timeout.as_secs()
             ));
         }
 
-        Ok(())
-    }
-
-    fn test_schema(&self, _: BorrowedMessage) -> Result<(), String> {
-        // TODO: test the schema against the message
         Ok(())
     }
 
@@ -552,16 +648,21 @@ impl KafkaTester {
         }
     }
 
-    pub fn start(self, table: KafkaTable, mut tx: Sender<Result<Event, Infallible>>) {
+    pub fn start(
+        self,
+        table: KafkaTable,
+        schema: Option<ConnectionSchema>,
+        mut tx: Sender<Result<Event, Infallible>>,
+    ) {
         tokio::spawn(async move {
             info!("Started kafka tester");
-            if let Err(e) = self.test(table, tx.clone()).await {
+            if let Err(e) = self.test(table, schema, tx.clone()).await {
                 send(
                     &mut tx,
                     TestSourceMessage {
                         error: true,
                         done: true,
-                        message: e,
+                        message: e.to_string(),
                     },
                 )
                 .await;
