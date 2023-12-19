@@ -13,7 +13,9 @@ export function ConfluentSchemaEditor({
 }) {
   return (
     <Stack spacing={4} maxW="lg">
-      <Text>Schemas will be loaded from the configured Confluent Schema Registry</Text>
+      <Text>
+        Schemas will be loaded from and written to the configured Confluent Schema Registry
+      </Text>
 
       <Button colorScheme="green" onClick={() => next()}>
         Continue

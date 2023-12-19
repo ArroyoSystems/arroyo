@@ -251,7 +251,10 @@ const connectionProfileAutocompleteFetcher = () => {
 export const useConnectionProfileAutocomplete = (id: string) => {
   const { data, error } = useSWR<schemas['ConnectionAutocompleteResp']>(
     connectionProfileAutocompleteKey(id),
-    connectionProfileAutocompleteFetcher()
+    connectionProfileAutocompleteFetcher(),
+    {
+      revalidateOnMount: true,
+    }
   );
 
   return {

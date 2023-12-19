@@ -604,8 +604,7 @@ async fn get_schema(
         "confluent" => {
             let c: ConfluentProfile =
                 serde_json::from_value(profile_config.clone()).expect("invalid confluent config");
-            c.try_into()
-                .expect("unable to convert confluent config into kafka config")
+            c.into()
         }
         _ => {
             return Err(bad_request(
@@ -640,7 +639,11 @@ async fn get_schema(
     resolver.get_schema_for_version(None).await.map_err(|e| {
         bad_request(format!(
             "failed to fetch schemas from schema repository: {}",
-            e
+            e.chain()
+                .into_iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(": ")
         ))
     })
 }

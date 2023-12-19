@@ -64,7 +64,7 @@ function StringWidget({
         <Input
           name={path}
           type={password ? 'password' : 'text'}
-          placeholder={placeholder}
+          placeholder={readonly ? undefined : placeholder}
           value={value || ''}
           onChange={e => onChange(e)}
           readOnly={readonly}

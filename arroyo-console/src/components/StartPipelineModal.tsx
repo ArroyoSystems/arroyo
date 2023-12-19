@@ -37,7 +37,7 @@ const StartPipelineModal: React.FC<StartPipelineModalProps> = ({
   start,
 }) => {
   return (
-    <Modal isOpen={isOpen} onClose={onClose} isCentered>
+    <Modal isOpen={isOpen} onClose={onClose} isCentered size={startError ? '4xl' : 'xl'}>
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>Start Pipeline</ModalHeader>
@@ -47,7 +47,9 @@ const StartPipelineModal: React.FC<StartPipelineModalProps> = ({
             {startError ? (
               <Alert status="error">
                 <AlertIcon />
-                <AlertDescription>{startError}</AlertDescription>
+                <AlertDescription overflowY={'auto'} maxH={400} whiteSpace={'pre-wrap'}>
+                  {startError}
+                </AlertDescription>
               </Alert>
             ) : null}
 

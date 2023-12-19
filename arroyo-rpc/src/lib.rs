@@ -182,3 +182,11 @@ impl Default for OperatorConfig {
         }
     }
 }
+
+pub fn error_chain(e: anyhow::Error) -> String {
+    e.chain()
+        .into_iter()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join(": ")
+}
