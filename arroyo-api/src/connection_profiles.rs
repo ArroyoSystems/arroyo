@@ -1,9 +1,11 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::Json;
 use axum_extra::extract::WithRejection;
 
 use arroyo_connectors::connector_for_type;
-use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionProfilePost};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionProfilePost, TestSourceMessage,
+};
 use arroyo_rpc::api_types::ConnectionProfileCollection;
 use cornucopia_async::GenericClient;
 use tracing::warn;
@@ -14,9 +16,9 @@ use crate::queries::api_queries;
 use crate::queries::api_queries::DbConnectionProfile;
 use crate::rest::AppState;
 use crate::rest_utils::{
-    authenticate, bad_request, client, log_and_map, ApiError, BearerAuth, ErrorResp,
+    authenticate, bad_request, client, log_and_map, not_found, ApiError, BearerAuth, ErrorResp,
 };
-use crate::{handle_db_error, AuthData};
+use crate::{handle_db_error, handle_delete, AuthData};
 
 impl TryFrom<DbConnectionProfile> for ConnectionProfile {
     type Error = String;
@@ -41,6 +43,40 @@ impl TryFrom<DbConnectionProfile> for ConnectionProfile {
             description,
         })
     }
+}
+
+/// Test connection profile
+#[utoipa::path(
+    post,
+    path = "/v1/connection_profiles/test",
+    tag = "connection_profiles",
+    request_body = ConnectionProfilePost,
+    responses(
+        (status = 200, description = "Result of testing connection profile", body = TestSourceMessage),
+    ),
+)]
+pub async fn test_connection_profile(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    WithRejection(Json(req), _): WithRejection<Json<ConnectionProfilePost>, ApiError>,
+) -> Result<Json<TestSourceMessage>, ErrorResp> {
+    let _auth_data = authenticate(&state.pool, bearer_auth).await.unwrap();
+
+    let connector = connector_for_type(&req.connector)
+        .ok_or_else(|| bad_request("Unknown connector type".to_string()))?;
+
+    let Some(rx) = connector
+        .test_profile(&req.config)
+        .map_err(|e| bad_request(format!("Invalid config: {:?}", e)))?
+    else {
+        return Ok(Json(TestSourceMessage::done(
+            "This connector does not support testing",
+        )));
+    };
+
+    let result = rx.await.map_err(log_and_map)?;
+
+    Ok(Json(result))
 }
 
 /// Create connection profile
@@ -111,6 +147,38 @@ pub async fn get_connection_profiles(
     let data = get_all_connection_profiles(&auth_data, &client).await?;
 
     Ok(Json(ConnectionProfileCollection { data }))
+}
+
+/// Delete a Connection Profile
+#[utoipa::path(
+    delete,
+    path = "/v1/connection_profiles/{id}",
+    tag = "connection_profiles",
+    params(
+       ("id" = String, Path, description = "Connection Profile id")
+    ),
+    responses(
+       (status = 200, description = "Deleted connection profile"),
+    ),
+)]
+pub(crate) async fn delete_connection_profile(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path(pub_id): Path<String>,
+) -> Result<(), ErrorResp> {
+    let client = client(&state.pool).await?;
+    let auth_data = authenticate(&state.pool, bearer_auth).await?;
+
+    let deleted = api_queries::delete_connection_profile()
+        .bind(&client, &auth_data.organization_id, &pub_id)
+        .await
+        .map_err(|e| handle_delete("connection_profile", "connection tables", e))?;
+
+    if deleted == 0 {
+        return Err(not_found("Connection profile"));
+    }
+
+    Ok(())
 }
 
 pub(crate) async fn get_all_connection_profiles<C: GenericClient>(

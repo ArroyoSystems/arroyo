@@ -3,13 +3,16 @@ use crate::kafka::{
 };
 use crate::{kafka, pull_opt, Connection, Connector};
 use anyhow::anyhow;
-use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, ConnectionType};
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use arroyo_rpc::var_str::VarStr;
 use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot::Receiver;
 use typify::import_types;
 
 const CLIENT_ID: &str = "cwc|0014U00003Df8ZvQAJ";
@@ -51,39 +54,27 @@ impl ConfluentConnector {
     }
 }
 
-impl TryFrom<Option<ConfluentSchemaRegistry>> for kafka::SchemaRegistry {
-    type Error = anyhow::Error;
-
-    fn try_from(value: Option<ConfluentSchemaRegistry>) -> anyhow::Result<Self> {
+impl From<Option<ConfluentSchemaRegistry>> for kafka::SchemaRegistry {
+    fn from(value: Option<ConfluentSchemaRegistry>) -> Self {
         let Some(value) = value else {
-            return Ok(kafka::SchemaRegistry::None {});
+            return kafka::SchemaRegistry::None {};
         };
 
         let Some(endpoint) = value.endpoint else {
-            return Ok(kafka::SchemaRegistry::None {});
+            return kafka::SchemaRegistry::None {};
         };
 
-        Ok(kafka::SchemaRegistry::ConfluentSchemaRegistry {
-            api_key: Some(
-                value
-                    .api_key
-                    .ok_or_else(|| anyhow!("schema registry api_key is required"))?,
-            ),
-            api_secret: Some(
-                value
-                    .api_secret
-                    .ok_or_else(|| anyhow!("schema registry api_secret is required"))?,
-            ),
+        kafka::SchemaRegistry::ConfluentSchemaRegistry {
+            api_key: value.api_key,
+            api_secret: value.api_secret,
             endpoint,
-        })
+        }
     }
 }
 
-impl TryFrom<ConfluentProfile> for KafkaConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(c: ConfluentProfile) -> anyhow::Result<Self> {
-        Ok(Self {
+impl From<ConfluentProfile> for KafkaConfig {
+    fn from(c: ConfluentProfile) -> Self {
+        Self {
             bootstrap_servers: c.bootstrap_servers.0.try_into().unwrap(),
             authentication: KafkaConfigAuthentication::Sasl {
                 protocol: "SASL_SSL".to_string(),
@@ -91,8 +82,8 @@ impl TryFrom<ConfluentProfile> for KafkaConfig {
                 username: c.key,
                 password: c.secret,
             },
-            schema_registry_enum: Some(c.schema_registry.try_into()?),
-        })
+            schema_registry_enum: Some(c.schema_registry.into()),
+        }
     }
 }
 
@@ -144,12 +135,15 @@ impl Connector for ConfluentConnector {
             .client_configs
             .insert("client.id".to_string(), CLIENT_ID.to_string());
         let tester = KafkaTester {
-            connection: config.try_into().unwrap(),
-            table,
-            tx,
+            connection: config.into(),
         };
 
-        tester.start();
+        tester.start(table, tx);
+    }
+
+    fn test_profile(&self, profile: Self::ProfileT) -> Option<Receiver<TestSourceMessage>> {
+        let profile = profile.into();
+        KafkaConnector {}.test_profile(profile)
     }
 
     fn from_options(
@@ -183,6 +177,6 @@ impl Connector for ConfluentConnector {
         table
             .client_configs
             .insert("client.id".to_string(), CLIENT_ID.to_string());
-        KafkaConnector {}.from_config(id, name, config.try_into()?, table, schema)
+        KafkaConnector {}.from_config(id, name, config.into(), table, schema)
     }
 }

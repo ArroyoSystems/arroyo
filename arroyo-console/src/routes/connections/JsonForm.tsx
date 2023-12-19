@@ -36,6 +36,7 @@ function StringWidget({
   value,
   errors,
   onChange,
+  readonly,
 }: {
   path: string;
   title: string;
@@ -48,6 +49,7 @@ function StringWidget({
   value: string;
   errors: any;
   onChange: (e: React.ChangeEvent<any>) => void;
+  readonly?: boolean;
 }) {
   return (
     <FormControl isRequired={required} isInvalid={errors[path]}>
@@ -59,6 +61,7 @@ function StringWidget({
           placeholder={placeholder}
           value={value || ''}
           onChange={e => onChange(e)}
+          readOnly={readonly}
         />
       ) : (
         <Textarea
@@ -68,6 +71,7 @@ function StringWidget({
           onChange={e => onChange(e)}
           resize={'vertical'}
           size={'md'}
+          readOnly={readonly}
         />
       )}
       {errors[path] ? (
@@ -104,6 +108,7 @@ function NumberWidget({
   value,
   errors,
   onChange,
+  readonly,
 }: {
   path: string;
   title: string;
@@ -116,6 +121,7 @@ function NumberWidget({
   value: number;
   errors: any;
   onChange: (e: React.ChangeEvent<any>) => void;
+  readonly?: boolean;
 }) {
   return (
     <FormControl isRequired={required} isInvalid={errors[path]}>
@@ -129,6 +135,7 @@ function NumberWidget({
         placeholder={placeholder ? String(placeholder) : undefined}
         value={value || ''}
         onChange={e => onChange(e)}
+        readOnly={readonly}
       />
       {errors[path] ? (
         <FormErrorMessage>{errors[path]}</FormErrorMessage>
@@ -154,6 +161,7 @@ function SelectWidget({
   onChange,
   defaultValue,
   resetField,
+  readonly,
 }: {
   path: string;
   valuePath: string;
@@ -165,6 +173,7 @@ function SelectWidget({
   onChange: (e: React.ChangeEvent<any>) => void;
   defaultValue?: string;
   resetField: (field: string) => any;
+  readonly?: boolean;
 }) {
   useEffect(() => {
     if (!value) {
@@ -192,6 +201,8 @@ function SelectWidget({
         value={value}
         onChange={onChangeWrapper}
         borderColor={'gray.600'}
+        isReadOnly={readonly}
+        isDisabled={readonly}
       >
         {options.map(option => (
           <option key={option.value} value={option.value}>
@@ -214,12 +225,14 @@ export function ArrayWidget({
   path,
   values,
   errors,
+  readonly,
 }: {
   schema: JSONSchema7;
   onChange: (e: React.ChangeEvent<any>) => void;
   path: string;
   values: any;
   errors: any;
+  readonly?: boolean;
 }) {
   const add = () => {
     // @ts-ignore
@@ -253,6 +266,7 @@ export function ArrayWidget({
             description={itemsSchema.description}
             placeholder={example}
             format={itemsSchema.format}
+            readonly={readonly}
           />
         );
       default:
@@ -287,17 +301,27 @@ export function ArrayWidget({
             {values?.map((value: any, index: number) => (
               <Flex alignItems={'flex-end'} gap={2} key={index}>
                 {arrayItem(value, index)}
-                <IconButton
-                  width={8}
-                  height={8}
-                  minWidth={0}
-                  aria-label="Delete item"
-                  onClick={() => deleteItem(index)}
-                  icon={<DeleteIcon width={3} />}
-                />
+                {!readonly && (
+                  <IconButton
+                    width={8}
+                    height={8}
+                    minWidth={0}
+                    aria-label="Delete item"
+                    onClick={() => deleteItem(index)}
+                    icon={<DeleteIcon width={3} />}
+                  />
+                )}
               </Flex>
             ))}
-            <IconButton mt={1} height={8} aria-label="Add item" onClick={add} icon={<AddIcon />} />
+            {!readonly && (
+              <IconButton
+                mt={1}
+                height={8}
+                aria-label="Add item"
+                onClick={add}
+                icon={<AddIcon />}
+              />
+            )}
           </Stack>
         </FormControl>
       </fieldset>
@@ -311,12 +335,14 @@ export function MapWidget({
   path,
   values,
   errors,
+  readonly,
 }: {
   schema: JSONSchema7;
   onChange: (e: React.ChangeEvent<any>) => void;
   path: string;
   values: any;
   errors: any;
+  readonly?: boolean;
 }) {
   interface KeyValuePair {
     key: string;
@@ -387,22 +413,26 @@ export function MapWidget({
               id={i + '_key'}
               value={pair.key}
               onChange={e => updateKeyValue(i, e.target.value, pair.value)}
+              readOnly={readonly}
             />
             <Text>→</Text>
             <Input
               id={i + '_value'}
               value={pair.value}
               onChange={e => updateKeyValue(i, pair.key, e.target.value)}
+              readOnly={readonly}
             />
           </Flex>
-          <IconButton
-            width={8}
-            height={8}
-            minWidth={0}
-            aria-label="Delete item"
-            onClick={() => deleteItem(i)}
-            icon={<DeleteIcon width={3} />}
-          />
+          {!readonly && (
+            <IconButton
+              width={8}
+              height={8}
+              minWidth={0}
+              aria-label="Delete item"
+              onClick={() => deleteItem(i)}
+              icon={<DeleteIcon width={3} />}
+            />
+          )}
         </Flex>
         <FormErrorMessage>{pair.error}</FormErrorMessage>
       </FormControl>
@@ -433,7 +463,15 @@ export function MapWidget({
               )
             )}
             {keyValues.map((pair, index) => mapItem(pair, index))}
-            <IconButton mt={1} height={8} aria-label="Add item" onClick={add} icon={<AddIcon />} />
+            {!readonly && (
+              <IconButton
+                mt={1}
+                height={8}
+                aria-label="Add item"
+                onClick={add}
+                icon={<AddIcon />}
+              />
+            )}
           </Stack>
         </FormControl>
       </fieldset>
@@ -448,6 +486,7 @@ export function FormInner({
   values,
   errors,
   resetField,
+  readonly,
 }: {
   schema: JSONSchema7;
   onChange: (e: React.ChangeEvent<any>) => void;
@@ -455,6 +494,7 @@ export function FormInner({
   values: any;
   errors: any;
   resetField: (field: string) => void;
+  readonly?: boolean;
 }) {
   useEffect(() => {
     if (!schema.properties || Object.keys(schema.properties).length == 0) {
@@ -501,6 +541,7 @@ export function FormInner({
                       onChange={onChange}
                       defaultValue={property.default?.toString()}
                       resetField={resetField}
+                      readonly={readonly}
                     />
                   );
                 } else {
@@ -520,6 +561,7 @@ export function FormInner({
                       value={traversePath(values, nextPath)}
                       errors={errors}
                       onChange={onChange}
+                      readonly={readonly}
                     />
                   );
                 }
@@ -542,6 +584,7 @@ export function FormInner({
                     value={traversePath(values, nextPath)}
                     errors={errors}
                     onChange={onChange}
+                    readonly={readonly}
                   />
                 );
               }
@@ -554,6 +597,7 @@ export function FormInner({
                     values={traversePath(values, nextPath)}
                     errors={errors}
                     onChange={onChange}
+                    readonly={readonly}
                   />
                 );
               }
@@ -589,6 +633,7 @@ export function FormInner({
                           value={value}
                           onChange={onChange}
                           resetField={resetField}
+                          readonly={readonly}
                         />
                         {value != undefined && (
                           <Box p={4}>
@@ -601,6 +646,7 @@ export function FormInner({
                               onChange={onChange}
                               values={values}
                               resetField={resetField}
+                              readonly={readonly}
                             />
                           </Box>
                         )}
@@ -624,6 +670,7 @@ export function FormInner({
                           onChange={onChange}
                           values={values}
                           resetField={resetField}
+                          readonly={readonly}
                         />
                       </Box>
                     </fieldset>
@@ -638,6 +685,7 @@ export function FormInner({
                         values={traversePath(values, nextPath)}
                         errors={errors}
                         onChange={onChange}
+                        readonly={readonly}
                       />
                     </Box>
                   );
@@ -659,17 +707,25 @@ export function FormInner({
 export function JsonForm({
   schema,
   onSubmit,
+  onChange,
   initial = {},
   hasName,
   error,
-  button = 'Create',
+  readonly = false,
+  button = 'Next',
+  buttonColor = 'blue',
+  inProgress = false,
 }: {
   schema: JSONSchema7;
   onSubmit: (values: any) => Promise<void>;
+  onChange?: (e: any) => void;
   initial?: any;
   hasName?: boolean;
   error: string | null;
   button?: string;
+  readonly?: boolean;
+  buttonColor?: string;
+  inProgress?: boolean;
 }) {
   let ajv = new Ajv();
   ajv.addKeyword('sensitive');
@@ -714,7 +770,13 @@ export function JsonForm({
             type="text"
             placeholder={`my-${schema.title?.toLowerCase()}`}
             value={formik.values.name || ''}
-            onChange={formik.handleChange}
+            onChange={e => {
+              formik.handleChange(e);
+              if (onChange) {
+                onChange(formik.values);
+              }
+            }}
+            readOnly={readonly}
           />
           <FormHelperText>Enter a name to identify this {schema.title || 'object'}</FormHelperText>
         </FormControl>
@@ -722,10 +784,16 @@ export function JsonForm({
 
       <FormInner
         schema={schema}
-        onChange={formik.handleChange}
+        onChange={e => {
+          formik.handleChange(e);
+          if (onChange) {
+            onChange(formik.values);
+          }
+        }}
         values={formik.values}
         errors={formik.errors}
         resetField={resetField}
+        readonly={readonly}
       />
 
       {error && (
@@ -735,7 +803,13 @@ export function JsonForm({
         </Alert>
       )}
 
-      <Button mt={8} mb={4} type="submit" isLoading={formik.isSubmitting}>
+      <Button
+        colorScheme={buttonColor}
+        mt={8}
+        mb={4}
+        type="submit"
+        isLoading={formik.isSubmitting || inProgress}
+      >
         {button}
       </Button>
     </form>

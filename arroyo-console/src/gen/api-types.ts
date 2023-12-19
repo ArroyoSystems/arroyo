@@ -22,6 +22,20 @@ export interface paths {
      */
     post: operations["create_connection_profile"];
   };
+  "/v1/connection_profiles/test": {
+    /**
+     * Test connection profile 
+     * @description Test connection profile
+     */
+    post: operations["test_connection_profile"];
+  };
+  "/v1/connection_profiles/{id}": {
+    /**
+     * Delete a Connection Profile 
+     * @description Delete a Connection Profile
+     */
+    delete: operations["delete_connection_profile"];
+  };
   "/v1/connection_tables": {
     /**
      * List all connection tables 
@@ -588,6 +602,41 @@ export interface operations {
           "application/json": components["schemas"]["ConnectionProfile"];
         };
       };
+    };
+  };
+  /**
+   * Test connection profile 
+   * @description Test connection profile
+   */
+  test_connection_profile: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectionProfilePost"];
+      };
+    };
+    responses: {
+      /** @description Result of testing connection profile */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TestSourceMessage"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete a Connection Profile 
+   * @description Delete a Connection Profile
+   */
+  delete_connection_profile: {
+    parameters: {
+      path: {
+        /** @description Connection Profile id */
+        id: string;
+      };
+    };
+    responses: {
+      /** @description Deleted connection profile */
+      200: never;
     };
   };
   /**

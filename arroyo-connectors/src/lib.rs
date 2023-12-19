@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail, Context};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType,
+    TestSourceMessage,
 };
 use arroyo_rpc::primitive_to_sql;
 use arroyo_types::string_to_map;
@@ -17,6 +18,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
+use tracing::warn;
 use websocket::WebsocketConnector;
 
 use self::kafka::KafkaConnector;
@@ -108,6 +110,14 @@ pub trait Connector: Send {
         schema.cloned()
     }
 
+    #[allow(unused)]
+    fn test_profile(
+        &self,
+        profile: Self::ProfileT,
+    ) -> Option<tokio::sync::oneshot::Receiver<TestSourceMessage>> {
+        None
+    }
+
     fn test(
         &self,
         name: &str,
@@ -158,6 +168,11 @@ pub trait ErasedConnector: Send {
         table: &serde_json::Value,
         schema: Option<&ConnectionSchema>,
     ) -> Result<Option<ConnectionSchema>, serde_json::Error>;
+
+    fn test_profile(
+        &self,
+        profile: &serde_json::Value,
+    ) -> Result<Option<tokio::sync::oneshot::Receiver<TestSourceMessage>>, serde_json::Error>;
 
     fn test(
         &self,
@@ -226,6 +241,13 @@ impl<C: Connector> ErasedConnector for C {
         Ok(self.get_schema(self.parse_config(config)?, self.parse_table(table)?, schema))
     }
 
+    fn test_profile(
+        &self,
+        profile: &serde_json::Value,
+    ) -> Result<Option<tokio::sync::oneshot::Receiver<TestSourceMessage>>, serde_json::Error> {
+        Ok(self.test_profile(self.parse_config(profile)?))
+    }
+
     fn test(
         &self,
         name: &str,
@@ -270,6 +292,16 @@ impl<C: Connector> ErasedConnector for C {
             self.parse_table(table)?,
             schema,
         )
+    }
+}
+
+pub(crate) async fn send(tx: &mut Sender<Result<Event, Infallible>>, msg: impl Serialize) {
+    if tx
+        .send(Ok(Event::default().json_data(msg).unwrap()))
+        .await
+        .is_err()
+    {
+        warn!("Test API rx closed while sending message");
     }
 }
 

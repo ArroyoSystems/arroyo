@@ -34,7 +34,7 @@ ORDER BY COALESCE(connection_profiles.updated_at, connection_profiles.created_at
 
 --! delete_connection_profile
 DELETE FROM connection_profiles
-WHERE organization_id = :organization_id AND name = :name;
+WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 ----------- schemas --------------------
 
