@@ -497,7 +497,7 @@ impl KafkaTester {
                         .await
                         .map_err(|e|
                             if msg[0] == 0 {
-                                anyhow!("Failed to parse message are regular Avro. It may be encoded as SR-Avro, but the schema registry is not enabled. Ensure that the format and schema type are correct.")
+                                anyhow!("Failed to parse message as regular Avro. It may be encoded as SR-Avro, but the schema registry is not enabled. Ensure that the format and schema type are correct.")
                             } else {
                                 anyhow!("Failed to parse message as Avro: {:?}. Ensure that the format and schema type are correct.", e)
                             })?;

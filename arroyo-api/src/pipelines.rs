@@ -32,7 +32,7 @@ use arroyo_formats::json::arrow_to_json_schema;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{error_chain, OperatorConfig};
 use arroyo_server_common::log_event;
 use arroyo_sql::types::StructDef;
 use arroyo_sql::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
@@ -194,8 +194,7 @@ async fn try_register_confluent_schema(
 
                 let id = schema_registry
                     .write_schema(schema.canonical_form(), ConfluentSchemaType::Avro)
-                    .await
-                    .map_err(|e| anyhow!("Failed to write schema to schema registry: {}", e))?;
+                    .await?;
 
                 avro.schema_id = Some(id as u32);
                 config.format = Some(Format::Avro(avro))
@@ -209,8 +208,7 @@ async fn try_register_confluent_schema(
 
                 let id = schema_registry
                     .write_schema(schema.to_string(), ConfluentSchemaType::Json)
-                    .await
-                    .map_err(|e| anyhow!("Failed to write schema to schema registry: {}", e))?;
+                    .await?;
 
                 json.schema_id = Some(id as u32);
                 config.format = Some(Format::Json(json))
@@ -346,7 +344,7 @@ pub(crate) async fn create_pipeline<'a>(
             message: format!(
                 "Failed to register schemas with the schema registry. Make sure \
             that the schema_registry is configured correctly and running.\nDetails: {}",
-                e
+                error_chain(e)
             ),
         })?;
 

@@ -231,7 +231,11 @@ impl ConfluentSchemaRegistryClient {
 
             match status {
                 StatusCode::CONFLICT => {
-                    bail!("{}", body)
+                    bail!(
+                        "there is already an existing schema for this topic which is \
+                    incompatible with the new schema being registered:\n\n{}",
+                        body
+                    )
                 }
                 StatusCode::UNPROCESSABLE_ENTITY => {
                     bail!("invalid schema: {}", body);
@@ -333,7 +337,7 @@ impl ConfluentSchemaRegistry {
         self.client
             .write_schema(self.topic_endpoint(), schema, schema_type)
             .await
-            .context(format!("failed to write schema for topic '{}'", self.topic))
+            .context(format!("topic '{}'", self.topic))
     }
 
     pub async fn get_schema_for_id(

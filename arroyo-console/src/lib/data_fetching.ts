@@ -150,7 +150,7 @@ const pingFetcher = async () => {
 
 export const usePing = () => {
   const { data, error, isLoading } = useSWR('ping', pingFetcher, {
-    refreshInterval: 100000000,
+    refreshInterval: 1000,
     onErrorRetry: (error, key, config, revalidate, {}) => {
       // explicitly define this function to override the exponential backoff
       setTimeout(() => revalidate(), 1000);
@@ -251,7 +251,10 @@ const connectionProfileAutocompleteFetcher = () => {
 export const useConnectionProfileAutocomplete = (id: string) => {
   const { data, error } = useSWR<schemas['ConnectionAutocompleteResp']>(
     connectionProfileAutocompleteKey(id),
-    connectionProfileAutocompleteFetcher()
+    connectionProfileAutocompleteFetcher(),
+    {
+      revalidateOnMount: true,
+    }
   );
 
   return {
