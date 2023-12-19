@@ -9,7 +9,7 @@ ARG GIT_SHA
 
 RUN apt-get update
 RUN apt-get -y install git curl pkg-config unzip build-essential libssl-dev openssl libsasl2-dev \
-    cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash
+    cmake clang wget postgresql postgresql-client supervisor python3 python-is-python3 sudo bash gpg
 
 RUN wget https://github.com/rui314/mold/releases/download/v1.11.0/mold-1.11.0-${MOLD_ARCH}-linux.tar.gz && \
     tar xvfz mold*.tar.gz && \
@@ -44,9 +44,12 @@ RUN cargo install wasm-pack
 # Set up DB
 RUN cargo install refinery_cli
 
-# Install pnpm
-RUN  curl -fsSL https://deb.nodesource.com/setup_19.x | sudo -E bash - && \
-    sudo apt-get install -y nodejs && \
+# Install node & pnpm
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" |  \
+      sudo tee /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && apt-get install -y nodejs && \
     curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=8.10.4 SHELL=$(which bash) bash -
 
 COPY arroyo-types arroyo-types
