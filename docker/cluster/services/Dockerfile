@@ -10,10 +10,16 @@ RUN apt-get update && \
     cargo install wasm-pack && \
     wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-${PROTO_ARCH}.zip && \
     unzip protoc*.zip && \
-    mv bin/protoc /usr/local/bin && \
-    curl -fsSL https://deb.nodesource.com/setup_19.x | sudo -E bash - && \
-    sudo apt-get install -y nodejs && \
+    mv bin/protoc /usr/local/bin
+
+# Install node & pnpm
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" |  \
+      sudo tee /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && apt-get install -y nodejs && \
     curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=8.10.4 SHELL=$(which bash) bash -
+
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
