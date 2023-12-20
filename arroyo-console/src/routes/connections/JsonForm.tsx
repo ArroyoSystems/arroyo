@@ -268,7 +268,7 @@ function AutocompleteWidget({
           w={'90%'}
           display={isOpen && items.length > 0 ? 'block' : 'none'}
           opacity={0.95}
-          overflowY={'scroll'}
+          overflowY={'auto'}
         >
           {isOpen &&
             items.map((item, index) => (

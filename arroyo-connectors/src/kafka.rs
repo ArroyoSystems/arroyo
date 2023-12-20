@@ -454,7 +454,7 @@ impl KafkaTester {
                 } else if msg[0] == 0 {
                     bail!("Message is not valid JSON. It may be encoded as SR-JSON, but the schema registry is not enabled. Ensure that the format and schema type are correct.");
                 } else {
-                    serde_json::from_slice(&msg).map_err(|e|
+                    serde_json::from_slice::<Value>(&msg).map_err(|e|
                         anyhow!("Failed to parse message as JSON: {:?}. Ensure that the format and schema type are correct.", e))?;
                 }
             }

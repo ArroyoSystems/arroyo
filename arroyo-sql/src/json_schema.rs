@@ -103,7 +103,7 @@ pub fn get_defs(source_name: &str, schema: &str) -> Result<String, String> {
                 serde_opts.push(quote!(#[serde(rename = #rename)]));
             }
 
-            let ident = format_ident!("{}", f.name);
+            let ident = f.field_ident();
             let typ = match &f.data_type {
                 TypeDef::DataType(dt, _) => StructField::data_type_name(dt),
                 TypeDef::StructDef(sd, _) => {
@@ -168,7 +168,7 @@ fn to_schema_type(
                 let field_type = type_space.get_type(&info.type_id).unwrap();
                 if let Some((t, original)) = to_schema_type(type_space, source_name, &field_type) {
                     fields.push(StructField::with_rename(
-                        info.name.to_string(),
+                        info.rename.unwrap_or(&info.name).to_string(),
                         None,
                         t,
                         info.rename.map(|t| t.to_string()),
@@ -236,6 +236,7 @@ fn to_schema_type(
 #[cfg(test)]
 mod test {
     use crate::json_schema::get_defs;
+    use std::collections::HashSet;
 
     use super::convert_json_schema;
 
@@ -298,5 +299,30 @@ mod test {
 
         let _ = convert_json_schema("nexmark", json_schema).unwrap();
         let _ = get_defs("nexmark", json_schema).unwrap();
+    }
+
+    #[test]
+    fn differ_by_case_names() {
+        let json_schema = r##"
+        {
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "string"
+            },
+            "A": {
+              "type": "string"
+            }
+          }
+        }
+        "##;
+
+        let schema = convert_json_schema("duplicate_names", json_schema).unwrap();
+
+        let names = schema
+            .iter()
+            .map(|f| f.field_ident().to_string())
+            .collect::<HashSet<_>>();
+        assert_eq!(names.len(), schema.len());
     }
 }
