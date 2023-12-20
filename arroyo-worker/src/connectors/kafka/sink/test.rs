@@ -12,6 +12,7 @@ use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::producer::Producer;
 use rdkafka::{ClientConfig, Message};
+use rdkafka_sys::RDKafkaErrorCode;
 use tokio::sync::mpsc::channel;
 use tracing::error;
 
@@ -39,7 +40,10 @@ impl KafkaTopicTester {
                 .expect("deletion should have worked")[0];
             tokio::time::sleep(Duration::from_secs(1)).await;
             if let Err((topic, err)) = delete_result {
-                error!("failed to delete topic {} with error {:?}", topic, err);
+                if *err == RDKafkaErrorCode::UnknownTopic {
+                    continue;
+                }
+                println!("failed to delete topic {} with error {:?}", topic, err);
                 tries += 1;
                 if tries == 5 {
                     panic!("failed to delete topic 5 times");
@@ -63,7 +67,7 @@ impl KafkaTopicTester {
                 .await
                 .expect("new topic should be present")[0];
             if let Err((topic, err)) = create_result {
-                error!("failed to create topic {} with error {:?}", topic, err);
+                println!("failed to create topic {} with error {:?}", topic, err);
                 tries += 1;
                 if tries == 5 {
                     panic!("failed to create topic 5 times");
