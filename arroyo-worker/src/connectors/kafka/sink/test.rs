@@ -40,7 +40,7 @@ impl KafkaTopicTester {
                 .expect("deletion should have worked")[0];
             tokio::time::sleep(Duration::from_secs(1)).await;
             if let Err((topic, err)) = delete_result {
-                if *err == RDKafkaErrorCode::UnknownTopic {
+                if *err == RDKafkaErrorCode::UnknownTopicOrPartition {
                     continue;
                 }
                 println!("failed to delete topic {} with error {:?}", topic, err);
