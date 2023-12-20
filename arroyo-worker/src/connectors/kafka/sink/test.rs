@@ -13,6 +13,7 @@ use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::producer::Producer;
 use rdkafka::{ClientConfig, Message};
 use tokio::sync::mpsc::channel;
+use tracing::error;
 
 use super::KafkaSinkFunc;
 
@@ -31,14 +32,18 @@ impl KafkaTopicTester {
             .create()
             .unwrap();
         let mut tries = 0;
-        while tries < 5 {
+        loop {
             let delete_result = &admin_client
                 .delete_topics(&[&self.topic], &AdminOptions::new())
                 .await
                 .expect("deletion should have worked")[0];
             tokio::time::sleep(Duration::from_secs(1)).await;
-            if delete_result.is_err() {
+            if let Err((topic, err)) = delete_result {
+                error!("failed to delete topic {} with error {:?}", topic, err);
                 tries += 1;
+                if tries == 5 {
+                    panic!("failed to delete topic 5 times");
+                }
                 continue;
             } else {
                 break;
@@ -57,9 +62,12 @@ impl KafkaTopicTester {
                 )
                 .await
                 .expect("new topic should be present")[0];
-            if create_result.is_err() {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+            if let Err((topic, err)) = create_result {
+                error!("failed to create topic {} with error {:?}", topic, err);
                 tries += 1;
+                if tries == 5 {
+                    panic!("failed to create topic 5 times");
+                }
                 continue;
             } else {
                 break;
