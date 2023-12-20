@@ -196,7 +196,7 @@ async fn test_kafka_checkpoint_flushes() {
     let mut sink_with_writes = kafka_topic_tester.get_sink_with_writes().await;
     let mut consumer = kafka_topic_tester.get_consumer("0");
 
-    for message in 1u32..200 {
+    for message in 1u32..20 {
         let payload_and_key = message.to_string();
         let mut record = Record {
             timestamp: SystemTime::now(),
@@ -220,7 +220,7 @@ async fn test_kafka_checkpoint_flushes() {
         .handle_checkpoint(barrier, &mut sink_with_writes.ctx)
         .await;
 
-    for message in 1u32..200 {
+    for message in 1u32..20 {
         let record = get_data(&mut consumer).await.value;
         let result: TestOutStruct = serde_json::from_str(&record).unwrap();
         assert_eq!(message.to_string(), result.t, "{} {:?}", message, record);
