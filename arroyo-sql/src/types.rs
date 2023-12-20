@@ -594,6 +594,21 @@ impl TryFrom<&DFField> for StructField {
 }
 
 impl StructField {
+    fn normalize_name_ident(name: &str) -> (String, String) {
+        let re = Regex::new("[^a-zA-Z0-9_]").unwrap();
+        let mut field_name = re.replace_all(name, "_").to_string();
+
+        if field_name.starts_with(|c: char| c.is_numeric()) {
+            field_name = format!("_{}", field_name);
+        }
+
+        let ident = match parse_str::<Ident>(&field_name) {
+            Ok(_) => field_name.clone(),
+            Err(_) => format!("r#{}", field_name),
+        };
+        (field_name, ident)
+    }
+
     pub fn new(name: String, alias: Option<String>, data_type: TypeDef) -> Self {
         if let TypeDef::DataType(DataType::Struct(_), _) = &data_type {
             panic!("can't use DataType::Struct as a struct field, should be a StructType");
@@ -604,13 +619,7 @@ impl StructField {
             None => name.clone(),
         };
 
-        let re = Regex::new("[^a-zA-Z0-9_]").unwrap();
-        let field_name = re.replace_all(&qualified_name, "_").to_string();
-
-        let ident = match parse_str::<Ident>(&field_name) {
-            Ok(_) => field_name.clone(),
-            Err(_) => format!("r#_{}", field_name),
-        };
+        let (field_name, ident) = Self::normalize_name_ident(&qualified_name);
 
         Self {
             name,
@@ -630,10 +639,12 @@ impl StructField {
         renamed_from: Option<String>,
         original_type: Option<String>,
     ) -> Self {
+        let (field_name, ident) = Self::normalize_name_ident(&name);
+
         Self {
-            name: name.clone(),
-            field_name: name.clone(),
-            ident: name.clone(),
+            name,
+            field_name,
+            ident,
             alias,
             data_type,
             renamed_from,
