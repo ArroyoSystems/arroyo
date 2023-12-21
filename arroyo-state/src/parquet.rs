@@ -1252,6 +1252,18 @@ impl RecordBatchBuilder {
         data_array: arrow_array::BinaryArray,
         operations_array: arrow_array::GenericByteArray<GenericBinaryType<i32>>,
     ) -> RecordBatch {
+        info!(
+            "key hash:{},
+        start time:{}
+        key:{}
+        value:{}
+        operations:{}",
+            key_hash_array.len(),
+            start_time_array.len(),
+            key_array.len(),
+            data_array.len(),
+            operations_array.len()
+        );
         RecordBatch::try_new(
             Self::schema(),
             vec![

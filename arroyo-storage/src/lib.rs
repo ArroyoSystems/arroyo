@@ -9,7 +9,7 @@ use std::{
 use arroyo_types::{S3_ENDPOINT_ENV, S3_REGION_ENV};
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use object_store::aws::{AmazonS3ConfigKey, AwsCredential};
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::PartId;
@@ -487,8 +487,6 @@ impl StorageProvider {
         let list = self
             .object_store
             .list(key_path.as_ref())
-            .await
-            .map_err(|e| Into::<StorageError>::into(e))?
             .filter_map(move |meta| {
                 let result = {
                     match meta {

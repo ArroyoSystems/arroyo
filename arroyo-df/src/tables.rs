@@ -779,7 +779,11 @@ impl Insert {
         } = statement
         {
             if *into {
-                infer_sink_schema(source, table_name.to_string(), schema_provider)?;
+                infer_sink_schema(
+                    source.as_ref().unwrap(),
+                    table_name.to_string(),
+                    schema_provider,
+                )?;
             }
         }
 
