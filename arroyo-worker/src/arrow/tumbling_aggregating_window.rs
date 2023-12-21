@@ -21,7 +21,7 @@ use arrow_array::{
     TimestampNanosecondArray,
 };
 use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef, TimeUnit};
-use arroyo_df::{schemas::window_arrow_struct, EmptyPartitionStream};
+use arroyo_df::{physical::SingleLockedBatch, schemas::window_arrow_struct};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{
     api::window::Window, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
@@ -40,16 +40,20 @@ use datafusion::{
         ExecutionPlan,
     },
 };
-use datafusion_common::{DFField, DFSchema, DataFusionError, ScalarValue};
+use datafusion_common::{
+    hash_utils::create_hashes, DFField, DFSchema, DataFusionError, ScalarValue,
+};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     FunctionRegistry, SendableRecordBatchStream, TaskContext,
 };
 use datafusion_expr::{AggregateUDF, ScalarUDF, WindowUDF};
-use datafusion_physical_expr::{expressions::CastExpr, hash_utils::create_hashes, PhysicalExpr};
+use datafusion_physical_expr::{expressions::CastExpr, PhysicalExpr};
 use datafusion_proto::{
     physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan, PhysicalExtensionCodec},
-    protobuf::{PhysicalExprNode, PhysicalPlanNode},
+    protobuf::{
+        physical_plan_node::PhysicalPlanType, AggregateMode, PhysicalExprNode, PhysicalPlanNode,
+    },
 };
 use prost::Message;
 use std::time::Duration;
@@ -59,8 +63,11 @@ use tracing::info;
 pub struct TumblingAggregatingWindowFunc {
     width: Duration,
     binning_function: Arc<dyn PhysicalExpr>,
-    physical_plan: PhysicalPlanNode,
-    receivers: Arc<RwLock<HashMap<usize, UnboundedReceiver<RecordBatch>>>>,
+    partial_aggregation_plan: PhysicalPlanNode,
+    finish_execution_plan: Arc<dyn ExecutionPlan>,
+    // the partial aggregation plan shares a reference to it,
+    // which is only used on the exec()
+    receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
     senders: BTreeMap<usize, UnboundedSender<RecordBatch>>,
     execs: BTreeMap<usize, SendableRecordBatchStream>,
     window_field: FieldRef,
@@ -125,13 +132,19 @@ impl ConverterTools {
         let max_timestamp = from_nanos(kernels::aggregate::max(timestamp_column).unwrap() as u128);
         let key_hash_column = PrimitiveArray::<UInt64Type>::from(hash_buffer);
         let key_column = key_bytes.finish();
+        if value_batch.num_columns() == 0 {
+            for _i in 0..batch.num_rows() {
+                value_bytes.append_value(vec![]);
+            }
+        }
         let value_column = value_bytes.finish();
+
         let min_routing_key = kernels::aggregate::min(&key_hash_column).unwrap();
         let max_routing_key = kernels::aggregate::max(&key_hash_column).unwrap();
         let insert_op = ScalarValue::Binary(Some(
             bincode::encode_to_vec(DataOperation::Insert, config::standard()).unwrap(),
         ));
-        let op_array = insert_op.to_array_of_size(batch.num_rows());
+        let op_array = insert_op.to_array_of_size(batch.num_rows()).unwrap();
         let x = op_array
             .as_any()
             .downcast_ref::<GenericByteArray<GenericBinaryType<i32>>>()
@@ -254,12 +267,68 @@ impl TumblingAggregatingWindowFunc {
             value_converter,
             timestamp_index,
         };
+        let (partial_aggregation_plan, finish_plan) = match physical_plan
+            .physical_plan_type
+            .as_ref()
+            .unwrap()
+        {
+            PhysicalPlanType::ParquetScan(_) => todo!(),
+            PhysicalPlanType::CsvScan(_) => todo!(),
+            PhysicalPlanType::Empty(_) => todo!(),
+            PhysicalPlanType::Projection(_) => todo!(),
+            PhysicalPlanType::GlobalLimit(_) => todo!(),
+            PhysicalPlanType::LocalLimit(_) => todo!(),
+            PhysicalPlanType::Aggregate(aggregate) => {
+                let AggregateMode::Final = aggregate.mode() else {
+                    bail!("expect AggregateMode to be Final so we can decompose it for checkpointing.")
+                };
+                let mut top_level_copy = aggregate.clone();
+                let input = aggregate.input.as_ref().unwrap().as_ref().clone();
+                // TODO: rewrite input for top level plan
+                (
+                    input,
+                    PhysicalPlanNode {
+                        physical_plan_type: Some(PhysicalPlanType::Aggregate(top_level_copy)),
+                    },
+                )
+            }
+            PhysicalPlanType::HashJoin(_) => todo!(),
+            PhysicalPlanType::Sort(_) => todo!(),
+            PhysicalPlanType::CoalesceBatches(_) => todo!(),
+            PhysicalPlanType::Filter(_) => todo!(),
+            PhysicalPlanType::Merge(_) => todo!(),
+            PhysicalPlanType::Repartition(_) => todo!(),
+            PhysicalPlanType::Window(_) => todo!(),
+            PhysicalPlanType::CrossJoin(_) => todo!(),
+            PhysicalPlanType::AvroScan(_) => todo!(),
+            PhysicalPlanType::Extension(_) => todo!(),
+            PhysicalPlanType::Union(_) => todo!(),
+            PhysicalPlanType::Explain(_) => todo!(),
+            PhysicalPlanType::SortPreservingMerge(_) => todo!(),
+            PhysicalPlanType::NestedLoopJoin(_) => todo!(),
+            PhysicalPlanType::Analyze(_) => todo!(),
+            PhysicalPlanType::JsonSink(_) => todo!(),
+            PhysicalPlanType::SymmetricHashJoin(_) => todo!(),
+            PhysicalPlanType::Interleave(_) => todo!(),
+            PhysicalPlanType::PlaceholderRow(_) => todo!(),
+        };
+
+        let receiver = Arc::new(RwLock::new(None));
+        let codec = ArrowPhysicalExtensionCodec {
+            receiver: receiver.clone(),
+        };
+        let finish_execution_plan = finish_plan.try_into_physical_plan(
+            &Registry {},
+            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+            &codec,
+        )?;
 
         Ok(Self {
             width: Duration::from_micros(window.size_micros),
             binning_function,
-            physical_plan,
-            receivers: Arc::new(RwLock::new(HashMap::new())),
+            partial_aggregation_plan,
+            finish_execution_plan,
+            receiver,
             senders: BTreeMap::new(),
             execs: BTreeMap::new(),
             window_field,
@@ -283,8 +352,7 @@ struct BinAggregator {
 
 #[derive(Debug)]
 struct ArrowPhysicalExtensionCodec {
-    bin_id: usize,
-    receivers: Arc<RwLock<HashMap<usize, UnboundedReceiver<RecordBatch>>>>,
+    receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
 }
 
 impl PhysicalExtensionCodec for ArrowPhysicalExtensionCodec {
@@ -295,14 +363,12 @@ impl PhysicalExtensionCodec for ArrowPhysicalExtensionCodec {
         registry: &dyn FunctionRegistry,
     ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
         info!("trying to decode an EmptyPartitionStream");
-        let empty_partition_scheme: EmptyPartitionStream = serde_json::from_slice(buf)
+        let empty_partition_scheme: SingleLockedBatch = serde_json::from_slice(buf)
             .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {}", err)))?;
         let reader = UnboundedRecordBatchReader {
             schema: empty_partition_scheme.schema(),
-            bin_id: self.bin_id,
-            receivers: self.receivers.clone(),
+            receiver: self.receiver.clone(),
         };
-        info!("successfully decoded with bin_id {}", self.bin_id);
         Ok(Arc::new(reader))
     }
 
@@ -318,8 +384,7 @@ impl PhysicalExtensionCodec for ArrowPhysicalExtensionCodec {
 #[derive(Debug)]
 struct UnboundedRecordBatchReader {
     schema: SchemaRef,
-    bin_id: usize,
-    receivers: Arc<RwLock<HashMap<usize, UnboundedReceiver<RecordBatch>>>>,
+    receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
 }
 
 impl DisplayAs for UnboundedRecordBatchReader {
@@ -368,18 +433,18 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
         Ok(Box::pin(RecordBatchStreamAdapter::new(
             self.schema.clone(),
             UnboundedReceiverStream::new(
-                self.receivers
+                self.receiver
                     .write()
                     .unwrap()
-                    .remove(&self.bin_id)
-                    .unwrap(),
+                    .take()
+                    .expect("unbounded receiver should be present before calling exec. In general, set it and then immediately call execute()"),
             )
             .map(Ok),
         )))
     }
 
-    fn statistics(&self) -> datafusion_common::Statistics {
-        datafusion_common::Statistics::default()
+    fn statistics(&self) -> datafusion_common::Result<datafusion_common::Statistics> {
+        Ok(datafusion_common::Statistics::new_unknown(&self.schema))
     }
 }
 
@@ -431,7 +496,8 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
             .binning_function
             .evaluate(&timestamp_batch)
             .unwrap()
-            .into_array(batch.num_rows());
+            .into_array(batch.num_rows())
+            .unwrap();
         let indices = sort_to_indices(bin.as_ref(), None, None).unwrap();
         let columns = batch
             .columns()
@@ -453,26 +519,13 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
             if !self.execs.contains_key(&bin) {
                 info!("no exec for {}, creating", bin);
                 let (unbounded_sender, unbounded_receiver) = unbounded_channel();
-                {
-                    self.receivers
-                        .write()
-                        .unwrap()
-                        .insert(bin, unbounded_receiver)
-                };
                 self.senders.insert(bin, unbounded_sender);
-                let codec = ArrowPhysicalExtensionCodec {
-                    bin_id: bin,
-                    receivers: self.receivers.clone(),
-                };
-                let execution_plan = self
-                    .physical_plan
-                    .try_into_physical_plan(
-                        &Registry {},
-                        &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
-                        &codec,
-                    )
-                    .unwrap();
-                let exec = execution_plan
+                {
+                    let mut internal_receiver = self.receiver.write().unwrap();
+                    *internal_receiver = Some(unbounded_receiver);
+                }
+                let exec = self
+                    .finish_execution_plan
                     .execute(0, SessionContext::new().task_ctx())
                     .unwrap();
                 self.execs.insert(bin, exec);
@@ -489,7 +542,6 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
     ) {
         if let Watermark::EventTime(watermark) = &watermark {
             let bin = (to_nanos(*watermark) / self.width.as_nanos()) as usize;
-            info!("handling watermark for bin {}", bin);
             while !self.execs.is_empty() {
                 let should_pop = {
                     let Some((first_bin, exec)) = self.execs.first_key_value() else {
@@ -514,7 +566,8 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
                         let timestamp = bin_end - 1;
                         let timestamp_array =
                             ScalarValue::TimestampNanosecond(Some(timestamp), None)
-                                .to_array_of_size(batch.num_rows());
+                                .to_array_of_size(batch.num_rows())
+                                .unwrap();
                         let mut fields = batch.schema().fields().as_ref().clone().to_vec();
                         fields.push(Arc::new(Field::new(
                             "_timestamp",
@@ -536,7 +589,7 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
                         );
                         columns.insert(
                             self.window_index,
-                            window_scalar.to_array_of_size(batch.num_rows()),
+                            window_scalar.to_array_of_size(batch.num_rows()).unwrap(),
                         );
 
                         let batch_with_timestamp = RecordBatch::try_new(
@@ -551,7 +604,6 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
                 }
             }
         }
-        info!("sending downstream watermark");
         // by default, just pass watermarks on down
         ctx.broadcast(arroyo_types::Message::Watermark(watermark))
             .await;

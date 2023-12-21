@@ -1,5 +1,5 @@
 use super::FinishedFile;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use arrow::datatypes::Schema;
 use arroyo_storage::{get_current_credentials, StorageProvider};
 use arroyo_types::to_millis;
@@ -71,15 +71,16 @@ async fn create_new_table(
     storage_options: HashMap<String, String>,
     schema: &Schema,
 ) -> Result<deltalake::DeltaTable> {
+    bail!("delta isn't on 49.0.0 yet");
+    /*
     let delta_object_store = DeltaTableBuilder::from_uri(table_path)
         .with_storage_options(storage_options)
-        .build_storage()?;
-    let delta_schema: deltalake::Schema = (schema).try_into()?;
+        .build_storage()?;let delta_schema: deltalake::Schema = (schema).try_into()?;
     CreateBuilder::new()
         .with_object_store(delta_object_store)
         .with_columns(delta_schema.get_fields().clone())
         .await
-        .map_err(Into::into)
+        .map_err(Into::into)*/
 }
 
 async fn configure_storage_options(

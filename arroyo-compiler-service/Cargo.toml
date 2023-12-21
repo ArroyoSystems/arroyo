@@ -10,7 +10,7 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-storage = { path = "../arroyo-storage" }
 
 tonic = {workspace = true}
-prost = "0.11"
+prost = "0.12"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 anyhow = "1.0.75"

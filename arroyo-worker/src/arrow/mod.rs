@@ -1,4 +1,5 @@
 use anyhow::Result;
+use apache_avro::GenericSingleObjectReader;
 use arrow::compute::kernels;
 use arrow::datatypes::Fields;
 use arrow::datatypes::SchemaRef;
@@ -13,7 +14,7 @@ use arrow_json::writer::record_batches_to_json_rows;
 use arrow_schema::DataType;
 use arrow_schema::Field;
 use arrow_schema::Schema;
-use arroyo_df::EmptyPartitionStream;
+use arroyo_df::physical::SingleLockedBatch;
 use arroyo_formats::SchemaData;
 use arroyo_rpc::grpc::api::MemTableScan;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
@@ -36,10 +37,10 @@ use datafusion::physical_plan::memory::MemoryStream;
 use datafusion::physical_plan::streaming::StreamingTableExec;
 use datafusion::physical_plan::DisplayAs;
 use datafusion::physical_plan::ExecutionPlan;
-use datafusion_common::DFSchema;
 use datafusion_common::DFSchemaRef;
 use datafusion_common::DataFusionError;
 use datafusion_common::ScalarValue;
+use datafusion_common::{DFSchema, Result as DFResult};
 use datafusion_execution::runtime_env::RuntimeConfig;
 use datafusion_execution::runtime_env::RuntimeEnv;
 use datafusion_execution::FunctionRegistry;
@@ -48,18 +49,13 @@ use datafusion_expr::AggregateUDF;
 use datafusion_expr::ScalarUDF;
 use datafusion_expr::WindowUDF;
 use datafusion_physical_expr::PhysicalExpr;
-use datafusion_physical_expr::PhysicalSortExpr;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::AsExecutionPlan;
-use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use datafusion_proto::protobuf::PhysicalExprNode;
 use datafusion_proto::protobuf::PhysicalPlanNode;
-use futures::lock;
 use futures::StreamExt;
 use prost::Message as ProstMessage;
-use rand::rngs::SmallRng;
-use rand::SeedableRng;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::marker::PhantomData;
@@ -70,16 +66,7 @@ use std::time::SystemTime;
 use tonic::transport::Channel;
 use tracing::info;
 
-use crate::connectors::nexmark::GeneratorConfig;
-use crate::connectors::nexmark::NexmarkConfig;
-use crate::connectors::nexmark::NexmarkGenerator;
 use crate::{engine::Context, stream_node::ProcessFuncTrait};
-
-pub struct ProjectionOperator {
-    name: String,
-    exprs: Vec<Arc<dyn PhysicalExpr>>,
-    output_schema: SchemaRef,
-}
 
 pub mod tumbling_aggregating_window;
 
@@ -103,95 +90,6 @@ impl FunctionRegistry for Registry {
     }
 }
 
-impl ProjectionOperator {
-    pub fn from_config(name: String, config: Vec<u8>) -> Result<Self> {
-        let proto_config: arroyo_rpc::grpc::api::ProjectionOperator =
-            arroyo_rpc::grpc::api::ProjectionOperator::decode(&mut config.as_slice()).unwrap();
-
-        let registry = Registry {};
-        let input_schema = serde_json::from_slice(&proto_config.input_schema)?;
-        let output_schema = serde_json::from_slice(&proto_config.output_schema)?;
-
-        let exprs: Vec<_> = proto_config
-            .expressions
-            .into_iter()
-            .map(|expr| PhysicalExprNode::decode(&mut expr.as_slice()).unwrap())
-            .map(|expr| parse_physical_expr(&expr, &registry, &input_schema).unwrap())
-            .collect();
-        Ok(Self {
-            name,
-            exprs,
-            output_schema: Arc::new(output_schema),
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl ProcessFuncTrait for ProjectionOperator {
-    type InKey = ();
-    type InT = ();
-    type OutKey = ();
-    type OutT = ();
-
-    fn name(&self) -> String {
-        self.name.clone()
-    }
-
-    async fn process_element(&mut self, record: &Record<(), ()>, ctx: &mut Context<(), ()>) {
-        unimplemented!("only record batches supported");
-    }
-
-    async fn process_record_batch(
-        &mut self,
-        record_batch: &RecordBatchData,
-        ctx: &mut Context<(), ()>,
-    ) {
-        info!("incoming record batch {:?}", record_batch);
-        info!("expressions: {:#?}", self.exprs);
-        info!("output schema {:#?}", self.output_schema);
-        let batch = &record_batch.0;
-        let mut data: KeyValueTimestampRecordBatch = batch.try_into().unwrap();
-        let arrays: Vec<_> = self
-            .exprs
-            .iter()
-            .map(|expr| expr.evaluate(&data.value_batch))
-            .map(|r| r.unwrap().into_array(batch.num_rows()))
-            .collect();
-
-        data.value_batch = if arrays.is_empty() {
-            let options = RecordBatchOptions::new().with_row_count(Some(batch.num_rows()));
-            RecordBatch::try_new_with_options(self.output_schema.clone(), arrays, &options).unwrap()
-        } else {
-            RecordBatch::try_new(self.output_schema.clone(), arrays).unwrap()
-        };
-        ctx.collect_record_batch((&data).into()).await;
-    }
-}
-#[derive(Debug)]
-pub struct MemTablePhysicalExtensionCodec {}
-
-impl PhysicalExtensionCodec for MemTablePhysicalExtensionCodec {
-    fn try_decode(
-        &self,
-        buf: &[u8],
-        inputs: &[Arc<dyn ExecutionPlan>],
-        registry: &dyn FunctionRegistry,
-    ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
-        let mem_table_scan = MemTableScan::decode(buf).map_err(|err| {
-            DataFusionError::Internal(format!("failed to decode mem table {}", err))
-        })?;
-        todo!()
-    }
-
-    fn try_encode(
-        &self,
-        node: Arc<dyn ExecutionPlan>,
-        buf: &mut Vec<u8>,
-    ) -> datafusion_common::Result<()> {
-        todo!()
-    }
-}
-
 pub struct ValueExecutionOperator {
     name: String,
     locked_batch: Arc<RwLock<Option<RecordBatch>>>,
@@ -210,7 +108,7 @@ impl PhysicalExtensionCodec for ArrowPhysicalExtensionCodec {
         inputs: &[Arc<dyn ExecutionPlan>],
         registry: &dyn FunctionRegistry,
     ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
-        let empty_partition_scheme: EmptyPartitionStream = serde_json::from_slice(buf)
+        let empty_partition_scheme: SingleLockedBatch = serde_json::from_slice(buf)
             .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {}", err)))?;
         let reader = RwLockRecordBatchReader {
             schema: empty_partition_scheme.schema(),
@@ -351,7 +249,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         )?))
     }
 
-    fn statistics(&self) -> datafusion_common::Statistics {
+    fn statistics(&self) -> DFResult<datafusion_common::Statistics> {
         todo!()
     }
 }
@@ -628,7 +526,9 @@ impl ProcessFuncTrait for DefaultTimestampWatermark {
             let current_time = to_nanos(SystemTime::now());
             let current_time_scalar =
                 ScalarValue::TimestampNanosecond(Some(current_time as i64), None);
-            let time_column = current_time_scalar.to_array_of_size(record_batch.num_rows());
+            let time_column = current_time_scalar
+                .to_array_of_size(record_batch.num_rows())
+                .unwrap();
             let mut record_batch_columns = record_batch.columns().to_vec();
             record_batch_columns.push(time_column);
             let mut schema_columns = schema.fields().to_vec();

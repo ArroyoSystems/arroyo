@@ -30,11 +30,11 @@ use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
 use tracing::{info, warn};
 
-use crate::QueryToGraphVisitor;
+use crate::{physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor};
 use crate::{
     tables::Table,
     types::{StructDef, StructField, StructPair, TypeDef},
-    ArroyoSchemaProvider, CompiledSql, EmptyPartitionStream, SqlConfig,
+    ArroyoSchemaProvider, CompiledSql, SqlConfig,
 };
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::EdgeType::Forward;
@@ -54,41 +54,6 @@ use datafusion_proto::{
 use petgraph::Direction;
 use prost::Message;
 
-#[derive(Debug)]
-pub struct DebugPhysicalExtensionCodec {}
-
-impl PhysicalExtensionCodec for DebugPhysicalExtensionCodec {
-    fn try_decode(
-        &self,
-        buf: &[u8],
-        inputs: &[Arc<dyn datafusion::physical_plan::ExecutionPlan>],
-        registry: &dyn datafusion::execution::FunctionRegistry,
-    ) -> datafusion_common::Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
-        todo!()
-    }
-
-    fn try_encode(
-        &self,
-        node: Arc<dyn datafusion::physical_plan::ExecutionPlan>,
-        buf: &mut Vec<u8>,
-    ) -> datafusion_common::Result<()> {
-        let mem_table: Option<&EmptyPartitionStream> = node.as_any().downcast_ref();
-        if let Some(table) = mem_table {
-            serde_json::to_writer(buf, table).map_err(|err| {
-                DataFusionError::Internal(format!(
-                    "couldn't serialize empty partition stream {}",
-                    err
-                ))
-            })?;
-            return Ok(());
-        }
-        Err(DataFusionError::Internal(format!(
-            "cannot serialize {:?}",
-            node
-        )))
-    }
-}
-
 pub(crate) async fn get_arrow_program(
     mut rewriter: QueryToGraphVisitor,
     schema_provider: ArroyoSchemaProvider,
@@ -100,14 +65,15 @@ pub(crate) async fn get_arrow_program(
     let mut topo = Topo::new(&rewriter.local_logical_plan_graph);
     let mut program_graph: DiGraph<StreamNode, StreamEdge> = DiGraph::new();
 
-    let planner = DefaultPhysicalPlanner::default();
+    let mut planner = DefaultPhysicalPlanner::default();
     let mut config = SessionConfig::new();
     config
         .options_mut()
         .optimizer
         .enable_round_robin_repartition = false;
     config.options_mut().optimizer.repartition_aggregations = false;
-    let session_state = SessionState::with_config_rt(config, Arc::new(RuntimeEnv::default()));
+    let mut session_state = SessionState::with_config_rt(config, Arc::new(RuntimeEnv::default()))
+        .with_physical_optimizer_rules(vec![]);
 
     let mut node_mapping = HashMap::new();
     while let Some(node_index) = topo.next(&rewriter.local_logical_plan_graph) {
@@ -163,7 +129,7 @@ pub(crate) async fn get_arrow_program(
                 let physical_plan_node: PhysicalPlanNode =
                     PhysicalPlanNode::try_from_physical_plan(
                         physical_plan,
-                        &DebugPhysicalExtensionCodec {},
+                        &ArroyoPhysicalExtensionCodec::default(),
                     )?;
                 let config = ValuePlanOperator {
                     name: "tmp".into(),
@@ -210,7 +176,7 @@ pub(crate) async fn get_arrow_program(
                 let physical_plan_node: PhysicalPlanNode =
                     PhysicalPlanNode::try_from_physical_plan(
                         physical_plan,
-                        &DebugPhysicalExtensionCodec {},
+                        &ArroyoPhysicalExtensionCodec::default(),
                     )?;
                 let config = KeyPlanOperator {
                     name: "tmp".into(),
@@ -252,6 +218,17 @@ pub(crate) async fn get_arrow_program(
                 let LogicalPlan::TableScan(table_scan) = aggregate.aggregate.input.as_ref() else {
                     bail!("expected logical plan")
                 };
+                info!(
+                    "input arrow schema:{:?}\n input df schema:{:?}",
+                    table_scan.source.schema(),
+                    table_scan.projected_schema
+                );
+
+                info!(
+                    "logical plan:{:?}\nlogical plan schema:{:?}\n",
+                    logical_plan,
+                    logical_plan.schema()
+                );
 
                 let physical_plan = planner
                     .create_physical_plan(&logical_plan, &session_state)
@@ -261,7 +238,7 @@ pub(crate) async fn get_arrow_program(
                 let physical_plan_node: PhysicalPlanNode =
                     PhysicalPlanNode::try_from_physical_plan(
                         physical_plan,
-                        &DebugPhysicalExtensionCodec {},
+                        &ArroyoPhysicalExtensionCodec::default(),
                     )?;
 
                 let division = Expr::BinaryExpr(BinaryExpr {

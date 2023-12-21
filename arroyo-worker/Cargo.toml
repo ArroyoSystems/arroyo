@@ -57,7 +57,7 @@ rusoto_core = "0.48.0"
 rusoto_s3 = "0.48.0"
 
 tonic = { workspace = true }
-prost = "0.11"
+prost = "0.12"
 
 governor = "0.6"
 
@@ -81,13 +81,13 @@ memchr = "2.6.3"
 apache-avro = "0.16.0"
 redis = { version = "0.23.3", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
 
-datafusion = "31.0"
-datafusion-proto = "31.0.0"
-datafusion-expr = "31.0.0"
-datafusion-physical-expr = "31.0"
-datafusion-common = "31.0"
-datafusion-execution = "31.0"
-arrow-json = "46.0.0"
+datafusion = "34.0"
+datafusion-proto = "34.0.0"
+datafusion-expr = "34.0.0"
+datafusion-physical-expr = "34.0"
+datafusion-common = "34.0"
+datafusion-execution = "34.0"
+arrow-json = "49.0.0"
 
 [dev-dependencies]
 test-case = "3"
