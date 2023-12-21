@@ -43,6 +43,7 @@ function StringWidget({
   errors,
   onChange,
   readonly,
+  resetField,
 }: {
   path: string;
   title: string;
@@ -56,7 +57,16 @@ function StringWidget({
   errors: any;
   onChange: (e: React.ChangeEvent<any>) => void;
   readonly?: boolean;
+  resetField?: (field: string) => any;
 }) {
+  const onChangeWrapper = (e: React.ChangeEvent<any>) => {
+    onChange(e);
+
+    if (resetField && e.target.value == '') {
+      resetField(path);
+    }
+  };
+
   return (
     <FormControl isRequired={required} isInvalid={errors[path]}>
       <FormLabel>{title}</FormLabel>
@@ -66,7 +76,7 @@ function StringWidget({
           type={password ? 'password' : 'text'}
           placeholder={readonly ? undefined : placeholder}
           value={value || ''}
-          onChange={e => onChange(e)}
+          onChange={onChangeWrapper}
           readOnly={readonly}
         />
       ) : (
@@ -74,7 +84,7 @@ function StringWidget({
           name={path}
           placeholder={placeholder}
           value={value || ''}
-          onChange={e => onChange(e)}
+          onChange={onChangeWrapper}
           resize={'vertical'}
           size={'md'}
           readOnly={readonly}
@@ -659,7 +669,7 @@ export function FormInner({
       // @ts-ignore
       onChange({ target: { name: path, value: {} } });
     }
-  }, [schema]);
+  }, []);
 
   function traversePath(values: any, typeKey: string): any {
     let value = values;
@@ -734,6 +744,7 @@ export function FormInner({
                       errors={errors}
                       onChange={onChange}
                       readonly={readonly}
+                      resetField={resetField}
                     />
                   );
                 }
@@ -811,7 +822,7 @@ export function FormInner({
                           <Box p={4}>
                             <FormInner
                               path={nextPath}
-                              key={key}
+                              key={value}
                               // @ts-ignore
                               schema={inSchema}
                               errors={errors}
@@ -827,25 +838,28 @@ export function FormInner({
                   );
                 } else if (property.properties != undefined) {
                   return (
-                    <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
-                      <legend
-                        style={{ marginLeft: '8px', paddingLeft: '16px', paddingRight: '16px' }}
-                      >
-                        {property.title || key}
-                      </legend>
-                      <Box p={4}>
-                        <FormInner
-                          path={nextPath}
-                          // @ts-ignore
-                          schema={property}
-                          errors={errors}
-                          onChange={onChange}
-                          values={values}
-                          resetField={resetField}
-                          readonly={readonly}
-                        />
-                      </Box>
-                    </fieldset>
+                    <FormControl isInvalid={errors[nextPath]}>
+                      <fieldset key={key} style={{ border: '1px solid #888', borderRadius: '8px' }}>
+                        <legend
+                          style={{ marginLeft: '8px', paddingLeft: '16px', paddingRight: '16px' }}
+                        >
+                          {property.title || key}
+                        </legend>
+                        <Box p={4}>
+                          <FormInner
+                            path={nextPath}
+                            // @ts-ignore
+                            schema={property}
+                            errors={errors}
+                            onChange={onChange}
+                            values={values}
+                            resetField={resetField}
+                            readonly={readonly}
+                          />
+                        </Box>
+                      </fieldset>
+                      <FormErrorMessage>{errors[nextPath] ?? ''}</FormErrorMessage>
+                    </FormControl>
                   );
                 } else if (property.additionalProperties) {
                   return (
