@@ -596,6 +596,7 @@ fn impl_stream_node_type(
                     in_qs.len(),
                     out_qs,
                     tables,
+                    HashMap::new(),
                 ).await;
 
                 Self::on_start(&mut (*self), &mut ctx).await;

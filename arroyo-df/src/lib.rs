@@ -2,21 +2,18 @@
 use anyhow::{anyhow, bail, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
-use arrow_schema::{SchemaRef, TimeUnit};
+use arrow_schema::TimeUnit;
 use arroyo_connectors::Connection;
 use arroyo_datastream::{Program, WindowType};
 
 use datafusion::datasource::{DefaultTableSource, TableProvider};
-use datafusion::execution::context::SessionState;
 use datafusion::physical_plan::functions::make_scalar_function;
-use datafusion::physical_plan::memory::MemoryExec;
-use datafusion::physical_plan::streaming::PartitionStream;
-use datafusion::physical_plan::{DisplayAs, EmptyRecordBatchStream, ExecutionPlan, Partitioning};
 use datafusion_common::{Column, DFField, OwnedTableReference, Result as DFResult, ScalarValue};
 pub mod avro;
 pub mod external;
 pub mod json_schema;
 pub mod logical;
+pub mod meta;
 pub mod physical;
 mod plan_graph;
 pub mod schemas;
@@ -36,15 +33,16 @@ use datafusion_expr::{
     ScalarFunctionDefinition, ScalarUDF, Signature, StateTypeFunction, TableScan, Volatility,
     WindowUDF,
 };
+
 use datafusion_expr::{AggregateUDF, TableSource};
+use logical::LogicalBatchInput;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::IntoNodeReferences;
-use physical::SingleLockedBatch;
 use schemas::{
-    add_timestamp_field, add_timestamp_field_arrow, add_timestamp_field_if_missing_arrow,
-    has_timestamp_field, window_arrow_struct,
+    add_timestamp_field, add_timestamp_field_if_missing_arrow, has_timestamp_field,
+    window_arrow_struct,
 };
-use serde::{Deserialize, Serialize};
+
 use tables::{schema_defs, Insert, Table};
 use types::interval_month_day_nanos_to_duration;
 
@@ -54,7 +52,6 @@ use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion_common::{DFSchema, DFSchemaRef, DataFusionError};
 use prettyplease::unparse;
 use regex::Regex;
-use std::any::Any;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
@@ -291,7 +288,7 @@ impl ArroyoSchemaProvider {
                     )
                 }
                 FnArg::Typed(t) => {
-                    if let Some(vec_type) = Self::vec_inner_type(&*t.ty) {
+                    if let Some(vec_type) = Self::vec_inner_type(&t.ty) {
                         vec_arguments += 1;
                         args.push((&vec_type).try_into().map_err(|_| {
                                 anyhow!(
@@ -375,7 +372,7 @@ impl ArroyoSchemaProvider {
                 args,
                 ret,
                 def: unparse(&file.clone()),
-                dependencies: parse_dependencies(&body)?,
+                dependencies: parse_dependencies(body)?,
             },
         );
 
@@ -386,11 +383,11 @@ impl ArroyoSchemaProvider {
 pub fn parse_dependencies(definition: &str) -> Result<String> {
     // get content of dependencies comment using regex
     let re = Regex::new(r"\/\*\n(\[dependencies\]\n[\s\S]*?)\*\/").unwrap();
-    if re.find_iter(&definition).count() > 1 {
+    if re.find_iter(definition).count() > 1 {
         bail!("Only one dependencies definition is allowed in a UDF");
     }
 
-    return if let Some(captures) = re.captures(&definition) {
+    return if let Some(captures) = re.captures(definition) {
         if captures.len() != 2 {
             bail!("Error parsing dependencies");
         }
@@ -404,7 +401,7 @@ fn create_table_source(table_name: String, fields: Vec<Field>) -> Arc<dyn TableS
     let schema = add_timestamp_field_if_missing_arrow(Arc::new(
         datatypes::Schema::new_with_metadata(fields, HashMap::new()),
     ));
-    let table_provider = SingleLockedBatch { table_name, schema };
+    let table_provider = LogicalBatchInput { table_name, schema };
     let wrapped = Arc::new(table_provider);
     let provider = DefaultTableSource::new(wrapped);
     Arc::new(provider)
@@ -1015,7 +1012,7 @@ pub async fn parse_and_get_arrow_program(
                 if let LogicalPlan::TableScan(table_scan) = logical_plan {
                     let table = schema_provider
                         .tables
-                        .get(&UniCase::new(original_name.to_string()).into())
+                        .get(&UniCase::new(original_name.to_string()))
                         .unwrap();
                     schema_provider.tables.insert(
                         UniCase::new(table_scan.table_name.to_string()),

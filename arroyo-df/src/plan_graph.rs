@@ -1,61 +1,41 @@
-use std::{
-    collections::{HashMap, HashSet},
-    io::sink,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use arrow_schema::{DataType, Schema};
-use arroyo_datastream::{
-    EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program,
-    ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator, Stream, StreamEdge, StreamNode,
-    TumblingTopN, TumblingWindowAggregator, WatermarkStrategy, WindowAgg, WindowType,
-};
+use arroyo_datastream::{EdgeType, Operator, Program, StreamEdge, StreamNode, WindowType};
 
 use datafusion::{
-    datasource::MemTable,
     execution::{
         context::{SessionConfig, SessionState},
         runtime_env::RuntimeEnv,
     },
-    physical_plan::{memory::MemoryExec, streaming::StreamingTableExec, PhysicalExpr},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
 use petgraph::{
     data::Build,
-    graph::{DiGraph, NodeIndex},
+    graph::DiGraph,
     visit::{IntoNeighborsDirected, Topo},
 };
-use quote::{quote, ToTokens};
-use syn::{parse_quote, parse_str, Type};
+
 use tracing::{info, warn};
 
 use crate::{physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor};
-use crate::{
-    tables::Table,
-    types::{StructDef, StructField, StructPair, TypeDef},
-    ArroyoSchemaProvider, CompiledSql, SqlConfig,
-};
+use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
 use anyhow::{anyhow, bail, Context, Result};
-use arroyo_datastream::EdgeType::Forward;
+
 use arroyo_rpc::grpc::api::{
-    window, KeyPlanOperator, MemTableScan, ProjectionOperator, TumblingWindow, ValuePlanOperator,
-    Window, WindowAggregateOperator,
+    window, KeyPlanOperator, TumblingWindow, ValuePlanOperator, Window, WindowAggregateOperator,
 };
-use datafusion_common::{DFField, DFSchema, DFSchemaRef, DataFusionError, ScalarValue};
-use datafusion_expr::{logical_plan, BinaryExpr, Cast, Expr, LogicalPlan};
+use datafusion_common::{DFField, DFSchema, ScalarValue};
+use datafusion_expr::{BinaryExpr, Expr, LogicalPlan};
 use datafusion_proto::{
-    bytes::{physical_plan_to_bytes, Serializeable},
-    physical_plan::{
-        to_proto, AsExecutionPlan, DefaultPhysicalExtensionCodec, PhysicalExtensionCodec,
-    },
+    physical_plan::AsExecutionPlan,
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
 };
 use petgraph::Direction;
 use prost::Message;
 
 pub(crate) async fn get_arrow_program(
-    mut rewriter: QueryToGraphVisitor,
+    rewriter: QueryToGraphVisitor,
     schema_provider: ArroyoSchemaProvider,
 ) -> Result<CompiledSql> {
     warn!(
@@ -65,14 +45,14 @@ pub(crate) async fn get_arrow_program(
     let mut topo = Topo::new(&rewriter.local_logical_plan_graph);
     let mut program_graph: DiGraph<StreamNode, StreamEdge> = DiGraph::new();
 
-    let mut planner = DefaultPhysicalPlanner::default();
+    let planner = DefaultPhysicalPlanner::default();
     let mut config = SessionConfig::new();
     config
         .options_mut()
         .optimizer
         .enable_round_robin_repartition = false;
     config.options_mut().optimizer.repartition_aggregations = false;
-    let mut session_state = SessionState::with_config_rt(config, Arc::new(RuntimeEnv::default()))
+    let session_state = SessionState::with_config_rt(config, Arc::new(RuntimeEnv::default()))
         .with_physical_optimizer_rules(vec![]);
 
     let mut node_mapping = HashMap::new();
@@ -118,7 +98,7 @@ pub(crate) async fn get_arrow_program(
                 node_mapping.insert(node_index, watermark_index);
             }
             crate::LogicalPlanExtension::ValueCalculation(logical_plan) => {
-                let inputs = logical_plan.inputs();
+                let _inputs = logical_plan.inputs();
                 let physical_plan = planner
                     .create_physical_plan(logical_plan, &session_state)
                     .await;
@@ -212,7 +192,7 @@ pub(crate) async fn get_arrow_program(
                 let WindowType::Tumbling { width } = aggregate.window else {
                     bail!("only implemented tumbling windows currently")
                 };
-                let mut my_aggregate = aggregate.aggregate.clone();
+                let my_aggregate = aggregate.aggregate.clone();
                 let logical_plan = LogicalPlan::Aggregate(my_aggregate);
 
                 let LogicalPlan::TableScan(table_scan) = aggregate.aggregate.input.as_ref() else {

@@ -1,10 +1,8 @@
 use crate::types::{StructDef, StructField, TypeDef};
-use anyhow::Result;
+
 use arrow::datatypes::{DataType, TimeUnit};
 use arrow_schema::{Field, Schema, SchemaRef};
-use datafusion_common::{
-    Column, DFField, DFSchema, DFSchemaRef, OwnedTableReference, Result as DFResult, ScalarValue,
-};
+use datafusion_common::{DFField, DFSchema, DFSchemaRef, Result as DFResult};
 use std::{collections::HashMap, sync::Arc};
 
 pub fn window_arrow_struct() -> DataType {

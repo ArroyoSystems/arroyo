@@ -1,21 +1,15 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
-use arrow_array::RecordBatch;
+use arroyo_df::meta::SchemaRefWithMeta;
 use arroyo_rpc::grpc::CheckpointMetadata;
-use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_types::{
-    CheckpointBarrier, Data, Key, Message, Record, RecordBatchData, TaskInfo, Watermark, Window,
-};
-use async_trait::async_trait;
+
+use arroyo_types::{Data, Key, Message, Record, RecordBatchData, TaskInfo, Watermark, Window};
+
 use bincode::config;
 use futures::StreamExt;
-use tokio::select;
-use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::task::JoinHandle;
+
 use tracing::Instrument;
 
-use crate::engine::{OutQueue, QueueItem};
 use crate::{
     engine::{CheckpointCounter, Context, StreamNode},
     ControlOutcome,
@@ -42,7 +36,7 @@ where
         in_qs: Vec<Vec<tokio::sync::mpsc::Receiver<crate::engine::QueueItem>>>,
         out_qs: Vec<Vec<crate::engine::OutQueue>>,
     ) -> tokio::task::JoinHandle<()> {
-        if in_qs.len() < 1usize {
+        if in_qs.is_empty() {
             panic!(
                 "Wrong number of logical inputs for node {} (expected {}, found {})",
                 task_info.operator_name,
@@ -50,7 +44,7 @@ where
                 in_qs.len()
             );
         }
-        let mut in_qs: Vec<_> = in_qs.into_iter().flatten().collect();
+        let in_qs: Vec<_> = in_qs.into_iter().flatten().collect();
         let tables = self.tables();
         tokio::spawn(async move {
             let mut ctx = crate::engine::Context::<T::OutKey, T::OutT>::new(
@@ -61,6 +55,7 @@ where
                 in_qs.len(),
                 out_qs,
                 tables,
+                self.table_schemas(),
             )
             .await;
             Self::on_start(&mut (*self), &mut ctx).await;
@@ -99,17 +94,17 @@ where
                   }p = sel.next() => {
                     match p {
                       Some(((idx,item),s)) => {
-                        match idx/(in_partitions/1usize){
+                        match idx/in_partitions{
                           0usize => {
                             let message = match item {
                               crate::engine::QueueItem::Data(datum) => {
-                                *datum.downcast().expect(&format!("failed to downcast data in {}",self.name()))
+                                *datum.downcast().unwrap_or_else(|_| panic!("failed to downcast data in {}",self.name()))
                               }crate::engine::QueueItem::Bytes(bs) => {
                                 crate::metrics::TaskCounters::BytesReceived.for_task(&ctx.task_info).inc_by(bs.len()as u64);
                                 bincode::decode_from_slice(&bs,config::standard()).expect("Failed to deserialize message (expected <Self::InKey, Self::InT>)").0
                               }
                             };
-                            let local_idx = idx-(in_partitions/1usize)*0usize;
+                            let local_idx = idx-in_partitions*0usize;
                             tracing::debug!("[{}] Received message {}-{}, {:?} [{:?}]",ctx.task_info.operator_name,0usize,local_idx,message,stacker::remaining_stack());
                             match &message {
                               arroyo_types::Message::Record(record) => {
@@ -201,10 +196,10 @@ pub trait ProcessFuncTrait: Send + 'static {
         ctx: &mut Context<Self::OutKey, Self::OutT>,
     ) -> ControlOutcome {
         match message {
-            Message::Record(record) => {
+            Message::Record(_record) => {
                 unreachable!();
             }
-            Message::RecordBatch(batch) => {
+            Message::RecordBatch(_batch) => {
                 unreachable!();
             }
             Message::Barrier(t) => {
@@ -232,7 +227,7 @@ pub trait ProcessFuncTrait: Send + 'static {
                         .unwrap();
                 }
 
-                if counter.mark(idx, &t) {
+                if counter.mark(idx, t) {
                     tracing::debug!(
                         "Checkpointing {}-{}-{}",
                         self.name(),
@@ -355,18 +350,20 @@ pub trait ProcessFuncTrait: Send + 'static {
 
     async fn handle_checkpoint(
         &mut self,
-        checkpoint_barrier: &arroyo_types::CheckpointBarrier,
-        ctx: &mut Context<Self::OutKey, Self::OutT>,
+        _checkpoint_barrier: &arroyo_types::CheckpointBarrier,
+        _ctx: &mut Context<Self::OutKey, Self::OutT>,
     ) {
     }
-    async fn on_close(&mut self, ctx: &mut Context<Self::OutKey, Self::OutT>) {}
+    async fn on_close(&mut self, _ctx: &mut Context<Self::OutKey, Self::OutT>) {}
+
     async fn handle_timer(
         &mut self,
-        key: Self::OutKey,
-        tv: Window,
-        ctx: &mut Context<Self::OutKey, Self::OutT>,
+        _key: Self::OutKey,
+        _tv: Window,
+        _ctx: &mut Context<Self::OutKey, Self::OutT>,
     ) {
     }
+
     async fn handle_watermark(
         &mut self,
         watermark: arroyo_types::Watermark,
@@ -376,17 +373,23 @@ pub trait ProcessFuncTrait: Send + 'static {
         ctx.broadcast(arroyo_types::Message::Watermark(watermark))
             .await;
     }
+
     async fn handle_commit(
         &mut self,
         epoch: u32,
-        commit_data: HashMap<char, HashMap<u32, Vec<u8>>>,
-        ctx: &mut Context<Self::OutKey, Self::OutT>,
+        _commit_data: HashMap<char, HashMap<u32, Vec<u8>>>,
+        _ctx: &mut Context<Self::OutKey, Self::OutT>,
     ) {
         tracing::warn!("default handling of commit with epoch {:?}", epoch);
     }
+
     fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
         vec![]
     }
 
-    async fn on_start(&mut self, ctx: &mut crate::engine::Context<Self::OutKey, Self::OutT>) {}
+    fn table_schemas(&self) -> HashMap<char, SchemaRefWithMeta> {
+        HashMap::new()
+    }
+
+    async fn on_start(&mut self, _ctx: &mut crate::engine::Context<Self::OutKey, Self::OutT>) {}
 }

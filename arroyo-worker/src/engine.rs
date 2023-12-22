@@ -11,6 +11,7 @@ use std::time::SystemTime;
 use anyhow::{bail, Error, Result};
 use arrow_array::RecordBatch;
 use arroyo_datastream::Operator;
+use arroyo_df::meta::SchemaRefWithMeta;
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use bincode::{config, Decode, Encode};
 
@@ -288,6 +289,7 @@ impl<K: Key, T: Data> Context<K, T> {
         input_partitions: usize,
         out_qs: Vec<Vec<OutQueue>>,
         mut tables: Vec<TableDescriptor>,
+        _table_schemas: HashMap<char, SchemaRefWithMeta>,
     ) -> Context<K, T> {
         tables.push(TableDescriptor {
             name: TIMER_TABLE.to_string(),
@@ -379,6 +381,7 @@ impl<K: Key, T: Data> Context<K, T> {
             1,
             vec![vec![out_queue]],
             vec![],
+            HashMap::new(),
         ));
 
         (ctx, data_rx)
@@ -479,14 +482,16 @@ impl<K: Key, T: Data> Context<K, T> {
         rate_limiter: &mut RateLimiter,
     ) -> Result<(), UserError> {
         match value {
-            Ok(value) => Ok(self
-                .collector
-                .collect(Record {
-                    timestamp,
-                    key: None,
-                    value,
-                })
-                .await),
+            Ok(value) => {
+                self.collector
+                    .collect(Record {
+                        timestamp,
+                        key: None,
+                        value,
+                    })
+                    .await;
+                Ok(())
+            }
             Err(SourceError::BadData { details }) => match bad_data {
                 Some(BadData::Drop {}) => {
                     rate_limiter
@@ -502,7 +507,7 @@ impl<K: Key, T: Data> Context<K, T> {
                     TaskCounters::DeserializationErrors
                         .for_task(&self.task_info)
                         .inc();
-                    return Ok(());
+                    Ok(())
                 }
                 Some(BadData::Fail {}) | None => {
                     Err(UserError::new("Deserialization error", details))
