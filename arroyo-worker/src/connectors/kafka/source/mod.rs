@@ -190,6 +190,7 @@ where
 
         // did we restore any partitions?
         let has_state = !state.is_empty();
+        let is_custom_group_id = self.group_id.as_ref().is_empty();
 
         let state: HashMap<i32, KafkaState> = state.iter().map(|s| (s.partition, **s)).collect();
         let metadata = consumer.fetch_metadata(Some(&self.topic), Duration::from_secs(30))?;
@@ -207,11 +208,15 @@ where
                         .get(&p.id())
                         .map(|s| Offset::Offset(s.offset))
                         .unwrap_or_else(|| {
-                            if has_state {
+                            if is_custom_group_id {
+                                // We use the offsets when using custom group
+                                Offset::Stored
+                            } else if has_state{
                                 // if we've restored partitions and we don't know about this one, that means it's
                                 // new, and we want to start from the beginning so we don't drop data
                                 Offset::Beginning
-                            } else {
+                            }
+                            else {
                                 self.offset_mode.get_offset()
                             }
                         });
