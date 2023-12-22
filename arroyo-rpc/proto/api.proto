@@ -134,7 +134,6 @@ message WindowAggregateOperator {
 enum OperatorName {
   STRUCT_TO_RECORD_BATCH = 0;
   RECORD_BATCH_TO_STRUCT = 1;
-  ARROW_PROJECTION = 2;
   ARROW_VALUE_PLAN = 3;
   ARROW_KEY_PLAN = 4;
   RECORD_BATCH_GRPC = 5;

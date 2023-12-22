@@ -18,7 +18,9 @@ use arroyo_rpc::{
     formats::{Format, JsonFormat, TimestampFormat},
     primitive_to_sql,
 };
-use datafusion::sql::sqlparser::ast::{DataType as SQLDataType, ExactNumberInfo, TimezoneInfo};
+use datafusion::sql::sqlparser::ast::{
+    ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
+};
 
 use crate::avro;
 use arroyo_rpc::api_types::connections::{
@@ -1045,7 +1047,7 @@ impl TypeDef {
             }
             ScalarValue::Binary(Some(bin)) => parse_str(&format!("{:?}", bin)).unwrap(),
             ScalarValue::LargeBinary(_) => todo!(),
-            ScalarValue::List(_, _) => todo!(),
+            ScalarValue::List(_) => todo!(),
             ScalarValue::Date32(Some(val)) => parse_str(&format!(
                 "std::time::UNIX_EPOCH + std::time::Duration::from_days({})",
                 val
@@ -1625,15 +1627,16 @@ pub(crate) fn data_type_as_syn_type(data_type: &DataType) -> syn::Type {
 
 pub(crate) fn convert_data_type(sql_type: &SQLDataType) -> Result<DataType> {
     match sql_type {
-        SQLDataType::Array(Some(inner_sql_type)) => {
+        SQLDataType::Array(ArrayElemTypeDef::AngleBracket(inner_sql_type))
+        | SQLDataType::Array(ArrayElemTypeDef::SquareBracket(inner_sql_type)) => {
             let data_type = convert_simple_data_type(inner_sql_type)?;
 
             Ok(DataType::List(Arc::new(Field::new(
                 "field", data_type, true,
             ))))
         }
-        SQLDataType::Array(None) => {
-            bail!("Arrays with unspecified type is not supported".to_string())
+        SQLDataType::Array(ArrayElemTypeDef::None) => {
+            bail!("Arrays with unspecified type is not supported")
         }
         other => convert_simple_data_type(other),
     }
@@ -1641,25 +1644,36 @@ pub(crate) fn convert_data_type(sql_type: &SQLDataType) -> Result<DataType> {
 
 fn convert_simple_data_type(sql_type: &SQLDataType) -> Result<DataType> {
     match sql_type {
-        SQLDataType::Boolean => Ok(DataType::Boolean),
+        SQLDataType::Boolean | SQLDataType::Bool => Ok(DataType::Boolean),
         SQLDataType::TinyInt(_) => Ok(DataType::Int8),
-        SQLDataType::SmallInt(_) => Ok(DataType::Int16),
-        SQLDataType::Int(_) | SQLDataType::Integer(_) => Ok(DataType::Int32),
-        SQLDataType::BigInt(_) => Ok(DataType::Int64),
+        SQLDataType::SmallInt(_) | SQLDataType::Int2(_) => Ok(DataType::Int16),
+        SQLDataType::Int(_) | SQLDataType::Integer(_) | SQLDataType::Int4(_) => Ok(DataType::Int32),
+        SQLDataType::BigInt(_) | SQLDataType::Int8(_) => Ok(DataType::Int64),
         SQLDataType::UnsignedTinyInt(_) => Ok(DataType::UInt8),
-        SQLDataType::UnsignedSmallInt(_) => Ok(DataType::UInt16),
-        SQLDataType::UnsignedInt(_) | SQLDataType::UnsignedInteger(_) => Ok(DataType::UInt32),
-        SQLDataType::UnsignedBigInt(_) => Ok(DataType::UInt64),
+        SQLDataType::UnsignedSmallInt(_) | SQLDataType::UnsignedInt2(_) => Ok(DataType::UInt16),
+        SQLDataType::UnsignedInt(_)
+        | SQLDataType::UnsignedInteger(_)
+        | SQLDataType::UnsignedInt4(_) => Ok(DataType::UInt32),
+        SQLDataType::UnsignedBigInt(_) | SQLDataType::UnsignedInt8(_) => Ok(DataType::UInt64),
         SQLDataType::Float(_) => Ok(DataType::Float32),
-        SQLDataType::Real => Ok(DataType::Float32),
-        SQLDataType::Double | SQLDataType::DoublePrecision => Ok(DataType::Float64),
+        SQLDataType::Real | SQLDataType::Float4 => Ok(DataType::Float32),
+        SQLDataType::Double | SQLDataType::DoublePrecision | SQLDataType::Float8 => {
+            Ok(DataType::Float64)
+        }
         SQLDataType::Char(_)
         | SQLDataType::Varchar(_)
         | SQLDataType::Text
-        | SQLDataType::String => Ok(DataType::Utf8),
+        | SQLDataType::String(_) => Ok(DataType::Utf8),
         SQLDataType::Timestamp(None, TimezoneInfo::None) | SQLDataType::Datetime(_) => {
             Ok(DataType::Timestamp(TimeUnit::Nanosecond, None))
         }
+        SQLDataType::Timestamp(Some(precision), TimezoneInfo::None) => match *precision {
+            0 => Ok(DataType::Timestamp(TimeUnit::Second, None)),
+            3 => Ok(DataType::Timestamp(TimeUnit::Millisecond, None)),
+            6 => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
+            9 => Ok(DataType::Timestamp(TimeUnit::Nanosecond, None)),
+            _ => bail!("unsupported precision {}", precision),
+        },
         SQLDataType::Date => Ok(DataType::Date32),
         SQLDataType::Time(None, tz_info) => {
             if matches!(tz_info, TimezoneInfo::None)
@@ -1668,7 +1682,7 @@ fn convert_simple_data_type(sql_type: &SQLDataType) -> Result<DataType> {
                 Ok(DataType::Time64(TimeUnit::Nanosecond))
             } else {
                 // We dont support TIMETZ and TIME WITH TIME ZONE for now
-                bail!(format!("Unsupported Timestamp SQL type {sql_type:?}"))
+                bail!("Unsupported SQL type {sql_type:?}")
             }
         }
         SQLDataType::Numeric(exact_number_info) | SQLDataType::Decimal(exact_number_info) => {
@@ -1683,8 +1697,10 @@ fn convert_simple_data_type(sql_type: &SQLDataType) -> Result<DataType> {
         }
         SQLDataType::Bytea => Ok(DataType::Binary),
         SQLDataType::Interval => Ok(DataType::Interval(IntervalUnit::MonthDayNano)),
-        SQLDataType::JSON => bail!("JSON data type is not supported yet".to_string()),
-        _ => bail!(format!("Unsupported SQL type {sql_type:?}")),
+        // Explicitly list all other types so that if sqlparser
+        // adds/changes the `SQLDataType` the compiler will tell us on upgrade
+        // and avoid bugs like https://github.com/apache/arrow-datafusion/issues/3059
+        _ => bail!("Unsupported SQL type {sql_type:?}"),
     }
 }
 

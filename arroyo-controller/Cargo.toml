@@ -20,7 +20,7 @@ arroyo-server-common = { path = "../arroyo-server-common" }
 tonic = {workspace = true}
 tonic-reflection = {workspace = true}
 
-prost = "0.11"
+prost = "0.12"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.12"
 rand = "0.8"

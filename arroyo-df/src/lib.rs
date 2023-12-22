@@ -16,6 +16,8 @@ use datafusion_common::{Column, DFField, OwnedTableReference, Result as DFResult
 pub mod avro;
 pub mod external;
 pub mod json_schema;
+pub mod logical;
+pub mod physical;
 mod plan_graph;
 pub mod schemas;
 mod tables;
@@ -28,14 +30,20 @@ use datafusion::sql::sqlparser::parser::Parser;
 use datafusion::sql::{planner::ContextProvider, TableReference};
 
 use datafusion_common::tree_node::{RewriteRecursion, TreeNode, TreeNodeRewriter, TreeNodeVisitor};
+use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{
-    AccumulatorFactoryFunction, Aggregate, Expr, LogicalPlan, ReturnTypeFunction, ScalarUDF,
-    Signature, StateTypeFunction, TableScan, Volatility, WindowUDF,
+    AccumulatorFactoryFunction, Aggregate, Expr, LogicalPlan, ReturnTypeFunction,
+    ScalarFunctionDefinition, ScalarUDF, Signature, StateTypeFunction, TableScan, Volatility,
+    WindowUDF,
 };
 use datafusion_expr::{AggregateUDF, TableSource};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::IntoNodeReferences;
-use schemas::window_arrow_struct;
+use physical::SingleLockedBatch;
+use schemas::{
+    add_timestamp_field, add_timestamp_field_arrow, add_timestamp_field_if_missing_arrow,
+    has_timestamp_field, window_arrow_struct,
+};
 use serde::{Deserialize, Serialize};
 use tables::{schema_defs, Insert, Table};
 use types::interval_month_day_nanos_to_duration;
@@ -393,128 +401,17 @@ pub fn parse_dependencies(definition: &str) -> Result<String> {
 }
 
 fn create_table_source(table_name: String, fields: Vec<Field>) -> Arc<dyn TableSource> {
-    let mut fields = fields.clone();
-    if !fields.iter().any(|f| f.name() == "_timestamp") {
-        fields.push(Field::new(
-            "_timestamp",
-            DataType::Timestamp(TimeUnit::Nanosecond, None),
-            false,
-        ));
-    }
-    let schema = Arc::new(datatypes::Schema::new_with_metadata(fields, HashMap::new()));
-    let table_provider = EmptyPartitionStream { table_name, schema };
+    let schema = add_timestamp_field_if_missing_arrow(Arc::new(
+        datatypes::Schema::new_with_metadata(fields, HashMap::new()),
+    ));
+    let table_provider = SingleLockedBatch { table_name, schema };
     let wrapped = Arc::new(table_provider);
     let provider = DefaultTableSource::new(wrapped);
     Arc::new(provider)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmptyPartitionStream {
-    table_name: String,
-    schema: SchemaRef,
-}
-
-impl DisplayAs for EmptyPartitionStream {
-    fn fmt_as(
-        &self,
-        _t: datafusion::physical_plan::DisplayFormatType,
-        f: &mut std::fmt::Formatter,
-    ) -> std::fmt::Result {
-        write!(f, "EmptyPartitionStream: schema={}", self.schema)
-    }
-}
-
-#[async_trait::async_trait]
-
-impl TableProvider for EmptyPartitionStream {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
-    }
-
-    #[doc = " Get the type of this table for metadata/catalog purposes."]
-    fn table_type(&self) -> datafusion_expr::TableType {
-        datafusion_expr::TableType::Temporary
-    }
-
-    /// Create an ExecutionPlan that will scan the table.
-    /// The table provider will be usually responsible of grouping
-    /// the source data into partitions that can be efficiently
-    /// parallelized or distributed.
-    async fn scan(
-        &self,
-        _state: &SessionState,
-        _projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
-        // limit can be used to reduce the amount scanned
-        // from the datasource as a performance optimization.
-        // If set, it contains the amount of rows needed by the `LogicalPlan`,
-        // The datasource should return *at least* this number of rows if available.
-        _limit: Option<usize>,
-    ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(self.clone()))
-    }
-}
-
-impl ExecutionPlan for EmptyPartitionStream {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
-    }
-
-    fn output_partitioning(&self) -> datafusion::physical_plan::Partitioning {
-        Partitioning::UnknownPartitioning(1)
-    }
-
-    fn output_ordering(&self) -> Option<&[datafusion::physical_expr::PhysicalSortExpr]> {
-        None
-    }
-
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
-        vec![]
-    }
-
-    fn with_new_children(
-        self: Arc<Self>,
-        _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        Err(DataFusionError::Internal("unimplemented".into()))
-    }
-
-    fn execute(
-        &self,
-        partition: usize,
-        context: Arc<datafusion::execution::TaskContext>,
-    ) -> DFResult<datafusion::physical_plan::SendableRecordBatchStream> {
-        MemoryExec::try_new(&vec![], self.schema.clone(), None)?.execute(partition, context)
-    }
-
-    fn statistics(&self) -> datafusion_common::Statistics {
-        datafusion_common::Statistics::default()
-    }
-}
-
-impl PartitionStream for EmptyPartitionStream {
-    fn schema(&self) -> &SchemaRef {
-        &self.schema
-    }
-
-    fn execute(
-        &self,
-        _ctx: Arc<datafusion::execution::TaskContext>,
-    ) -> datafusion::physical_plan::SendableRecordBatchStream {
-        Box::pin(EmptyRecordBatchStream::new(self.schema.clone()))
-    }
-}
-
 impl ContextProvider for ArroyoSchemaProvider {
-    fn get_table_provider(
+    fn get_table_source(
         &self,
         name: TableReference,
     ) -> datafusion_common::Result<Arc<dyn TableSource>> {
@@ -590,12 +487,7 @@ impl TreeNodeRewriter for TimestampRewriter {
     fn mutate(&mut self, mut node: Self::N) -> DFResult<Self::N> {
         match node {
             LogicalPlan::Projection(ref mut projection) => {
-                if !projection
-                    .schema
-                    .fields()
-                    .iter()
-                    .any(|field| field.name() == "_timestamp")
-                {
+                if !has_timestamp_field(projection.schema.clone()) {
                     projection.schema =
                         add_timestamp_field(projection.schema.clone()).expect("in projection");
                     projection.expr.push(Expr::Column(Column {
@@ -612,12 +504,7 @@ impl TreeNodeRewriter for TimestampRewriter {
             }
             LogicalPlan::TableScan(_) => {}
             LogicalPlan::SubqueryAlias(ref mut subquery_alias) => {
-                if !subquery_alias
-                    .schema
-                    .fields()
-                    .iter()
-                    .any(|field| field.name() == "_timestamp")
-                {
+                if !has_timestamp_field(subquery_alias.schema.clone()) {
                     let timestamp_field = DFField::new(
                         Some(subquery_alias.alias.clone()),
                         "_timestamp",
@@ -639,18 +526,6 @@ impl TreeNodeRewriter for TimestampRewriter {
         }
         Ok(node)
     }
-}
-
-fn add_timestamp_field(schema: DFSchemaRef) -> DFResult<DFSchemaRef> {
-    let timestamp_field = DFField::new_unqualified(
-        "_timestamp",
-        DataType::Timestamp(TimeUnit::Nanosecond, None),
-        false,
-    );
-    Ok(Arc::new(schema.join(&DFSchema::new_with_metadata(
-        vec![timestamp_field],
-        HashMap::new(),
-    )?)?))
 }
 
 #[derive(Debug)]
@@ -779,34 +654,39 @@ fn get_duration(expression: &Expr) -> Result<Duration> {
 
 fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
     match expression {
-        Expr::ScalarUDF(datafusion_expr::expr::ScalarUDF { fun, args }) => {
-            match fun.name.as_str() {
-                "hop" => {
-                    if args.len() != 2 {
-                        unreachable!();
-                    }
-                    let slide = get_duration(&args[0])?;
-                    let width = get_duration(&args[1])?;
-                    Ok(Some(WindowType::Sliding { width, slide }))
+        Expr::ScalarFunction(ScalarFunction {
+            func_def: ScalarFunctionDefinition::UDF(fun),
+            args,
+        }) => match fun.name() {
+            "hop" => {
+                if args.len() != 2 {
+                    unreachable!();
                 }
-                "tumble" => {
-                    if args.len() != 1 {
-                        unreachable!("wrong number of arguments for tumble(), expect one");
-                    }
-                    let width = get_duration(&args[0])?;
-                    Ok(Some(WindowType::Tumbling { width }))
-                }
-                "session" => {
-                    if args.len() != 1 {
-                        unreachable!("wrong number of arguments for session(), expected one");
-                    }
-                    let gap = get_duration(&args[0])?;
-                    Ok(Some(WindowType::Session { gap }))
-                }
-                _ => Ok(None),
+                let slide = get_duration(&args[0])?;
+                let width = get_duration(&args[1])?;
+                Ok(Some(WindowType::Sliding { width, slide }))
             }
-        }
-        Expr::Alias(datafusion_expr::expr::Alias { expr, name: _ }) => find_window(expr),
+            "tumble" => {
+                if args.len() != 1 {
+                    unreachable!("wrong number of arguments for tumble(), expect one");
+                }
+                let width = get_duration(&args[0])?;
+                Ok(Some(WindowType::Tumbling { width }))
+            }
+            "session" => {
+                if args.len() != 1 {
+                    unreachable!("wrong number of arguments for session(), expected one");
+                }
+                let gap = get_duration(&args[0])?;
+                Ok(Some(WindowType::Session { gap }))
+            }
+            _ => Ok(None),
+        },
+        Expr::Alias(datafusion_expr::expr::Alias {
+            expr,
+            name: _,
+            relation: _,
+        }) => find_window(expr),
         _ => Ok(None),
     }
 }
@@ -908,7 +788,10 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                         .collect(),
                 );
                 let mut df_fields = key_schema.fields().clone();
-                if !df_fields.iter().any(|field| field.name() == "_timestamp") {
+                if !df_fields
+                    .iter()
+                    .any(|field: &DFField| field.name() == "_timestamp")
+                {
                     df_fields.push(DFField::new_unqualified(
                         "_timestamp",
                         DataType::Timestamp(TimeUnit::Nanosecond, None),
@@ -991,19 +874,11 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
             }
             LogicalPlan::TableScan(table_scan) => {
                 if let Some(projection_indices) = table_scan.projection {
-                    let alias = table_scan
-                        .projected_schema
-                        .fields()
-                        .first()
-                        .unwrap()
-                        .qualifier();
-                    let projected_schema = match alias {
-                        Some(qualifier) => DFSchema::try_from_qualified_schema(
-                            qualifier,
-                            table_scan.source.schema().as_ref(),
-                        )?,
-                        None => DFSchema::try_from(table_scan.source.schema().as_ref().clone())?,
-                    };
+                    let qualifier = table_scan.table_name.clone();
+                    let projected_schema = DFSchema::try_from_qualified_schema(
+                        qualifier.clone(),
+                        table_scan.source.schema().as_ref(),
+                    )?;
                     let input_table_scan = LogicalPlan::TableScan(TableScan {
                         table_name: table_scan.table_name.clone(),
                         source: table_scan.source.clone(),
@@ -1016,7 +891,7 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                         .into_iter()
                         .map(|index| {
                             Expr::Column(Column {
-                                relation: alias.cloned(),
+                                relation: Some(qualifier.clone()),
                                 name: table_scan.source.schema().fields()[index]
                                     .name()
                                     .to_string(),

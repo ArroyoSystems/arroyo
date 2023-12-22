@@ -389,10 +389,6 @@ pub enum Operator {
     RecordBatchToStruct {
         name: String,
     },
-    ArrowProjection {
-        name: String,
-        config: Vec<u8>,
-    },
     ArrowValue {
         name: String,
         config: Vec<u8>,
@@ -534,9 +530,6 @@ impl Debug for Operator {
             } => write!(f, "updating_key<{}>", name),
             Operator::StructToRecordBatch { name } => write!(f, "struct_to_record_batch<{}>", name),
             Operator::RecordBatchToStruct { name } => write!(f, "record_batch_to_struct<{}>", name),
-            Operator::ArrowProjection { name, config: _ } => {
-                write!(f, "arrow_projection<{}>", name)
-            }
             Operator::ArrowValue { name, config: _ } => write!(f, "arrow_value<{}>", name),
             Operator::ArrowKey { name, config: _ } => write!(f, "arrow_key<{}>", name),
             Operator::RecordBatchGrpc => write!(f, "record_batch_sink"),
@@ -1924,13 +1917,6 @@ impl Program {
                             RecordBatchToStruct::<#out_k, #out_t>::new(#name.to_string()))
                     }
                 },
-                Operator::ArrowProjection { name, config } => {
-                    let hex_string = hex::encode(config);
-                    quote! {
-                        Box::new(arroyo_worker::arrow::
-                            ProjectionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
-                    }
-                },
                 Operator::ArrowValue { name, config } => {
                     let hex_string = hex::encode(config);
                     quote! {
@@ -2317,13 +2303,6 @@ impl From<Operator> for GrpcApi::operator::Operator {
                     config: None,
                 })
             }
-            Operator::ArrowProjection { name, config } => {
-                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
-                    name,
-                    operator: GrpcApi::OperatorName::ArrowProjection.into(),
-                    config: Some(config),
-                })
-            }
             Operator::ArrowValue { name, config } => {
                 GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
                     name,
@@ -2673,10 +2652,6 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                         GrpcApi::OperatorName::RecordBatchToStruct => {
                             Operator::RecordBatchToStruct { name }
                         }
-                        GrpcApi::OperatorName::ArrowProjection => Operator::ArrowProjection {
-                            name,
-                            config: named_operator.config.unwrap(),
-                        },
                         GrpcApi::OperatorName::ArrowValuePlan => Operator::ArrowValue {
                             name,
                             config: named_operator.config.unwrap(),

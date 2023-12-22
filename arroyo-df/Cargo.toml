@@ -11,11 +11,11 @@ arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-formats = { path = "../arroyo-formats" }
 
-datafusion = "31.0"
-datafusion-expr = "31.0"
-datafusion-common = "31.0"
-datafusion-proto = "31.0"
-prost = "0.11"
+datafusion = "34.0"
+datafusion-expr = "34.0"
+datafusion-common = "34.0"
+datafusion-proto = "34.0"
+prost = "0.12"
 arrow-schema = {workspace = true, features = ["serde"] }
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"

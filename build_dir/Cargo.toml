@@ -11,20 +11,20 @@ exclude = [
 resolver = "2"
 
 [workspace.dependencies]
-arrow = { version = "46.0.0" }
-arrow-buffer = { version = "46.0.0" }
-arrow-array = { version = "46.0.0" }
-arrow-schema = { version = "46.0.0" }
-parquet = { version = "46.0.0" }
+arrow = { version = "49.0.0" }
+arrow-buffer = { version = "49.0.0" }
+arrow-array = { version = "49.0.0" }
+arrow-schema = { version = "49.0.0" }
+parquet = { version = "49.0.0" }
 
 
 [patch.crates-io]
-parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '46.0.0/parquet_bytes'}
-object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = 'object_store/put_part_api'}
+parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '49.0.0/parquet_bytes'}
+arrow = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '49.0.0/parquet_bytes'}
+arrow-buffer = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '49.0.0/parquet_bytes'}
+arrow-array = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '49.0.0/parquet_bytes'}
+arrow-schema = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '49.0.0/parquet_bytes'}
+object_store = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '0.8.0/put_part_api'}
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
 
 [profile.dev]
