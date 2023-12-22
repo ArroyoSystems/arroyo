@@ -15,6 +15,9 @@ datafusion = "34.0"
 datafusion-expr = "34.0"
 datafusion-common = "34.0"
 datafusion-proto = "34.0"
+datafusion-physical-expr = "34.0"
+datafusion-execution = "34.0"
+
 prost = "0.12"
 arrow-schema = {workspace = true, features = ["serde"] }
 serde = {version = "1", features = ["derive"]}
@@ -23,6 +26,7 @@ serde_json = "1"
 bincode = { version = "2.0.0-rc.3", features = ["serde"]}
 petgraph = "0.6"
 tokio = "1.27"
+tokio-stream = { version = "0.1", features = ["full"] }
 quote = "1.0"
 regex = "1"
 arrow = { workspace = true }

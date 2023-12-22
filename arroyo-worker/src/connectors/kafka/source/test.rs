@@ -2,6 +2,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_state::{BackingStore, StateBackend};
 use rand::Rng;
 
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
@@ -116,6 +117,7 @@ impl KafkaTopicTester {
             1,
             vec![vec![OutQueue::new(data_tx, false)]],
             source::tables(),
+            HashMap::new(),
         )
         .await;
 

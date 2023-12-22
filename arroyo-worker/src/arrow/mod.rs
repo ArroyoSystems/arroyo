@@ -1,46 +1,35 @@
 use anyhow::Result;
-use apache_avro::GenericSingleObjectReader;
 use arrow::compute::kernels;
-use arrow::datatypes::Fields;
 use arrow::datatypes::SchemaRef;
-use arrow_array::builder::PrimitiveBuilder;
 use arrow_array::cast::AsArray;
 use arrow_array::types::TimestampNanosecondType;
 use arrow_array::PrimitiveArray;
 use arrow_array::RecordBatch;
-use arrow_array::RecordBatchOptions;
-use arrow_array::StructArray;
 use arrow_json::writer::record_batches_to_json_rows;
 use arrow_schema::DataType;
 use arrow_schema::Field;
 use arrow_schema::Schema;
-use arroyo_df::physical::SingleLockedBatch;
+use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
+use arroyo_df::physical::DecodingContext;
 use arroyo_formats::SchemaData;
-use arroyo_rpc::grpc::api::MemTableScan;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::SinkDataReq;
 use arroyo_types::from_millis;
 use arroyo_types::from_nanos;
 use arroyo_types::to_micros;
-use arroyo_types::to_millis;
 use arroyo_types::to_nanos;
-use arroyo_types::KeyValueTimestampRecordBatch;
 use arroyo_types::KeyValueTimestampRecordBatchBuilder;
 use arroyo_types::Message;
 use arroyo_types::RecordBatchBuilder;
 use arroyo_types::Watermark;
 use arroyo_types::{Key, Record, RecordBatchData};
-use datafusion::datasource::ViewTable;
 use datafusion::execution::context::SessionContext;
-use datafusion::physical_plan::memory::MemoryExec;
 use datafusion::physical_plan::memory::MemoryStream;
-use datafusion::physical_plan::streaming::StreamingTableExec;
 use datafusion::physical_plan::DisplayAs;
 use datafusion::physical_plan::ExecutionPlan;
-use datafusion_common::DFSchemaRef;
 use datafusion_common::DataFusionError;
+use datafusion_common::Result as DFResult;
 use datafusion_common::ScalarValue;
-use datafusion_common::{DFSchema, Result as DFResult};
 use datafusion_execution::runtime_env::RuntimeConfig;
 use datafusion_execution::runtime_env::RuntimeEnv;
 use datafusion_execution::FunctionRegistry;
@@ -49,10 +38,7 @@ use datafusion_expr::AggregateUDF;
 use datafusion_expr::ScalarUDF;
 use datafusion_expr::WindowUDF;
 use datafusion_physical_expr::PhysicalExpr;
-use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
 use datafusion_proto::physical_plan::AsExecutionPlan;
-use datafusion_proto::physical_plan::PhysicalExtensionCodec;
-use datafusion_proto::protobuf::PhysicalExprNode;
 use datafusion_proto::protobuf::PhysicalPlanNode;
 use futures::StreamExt;
 use prost::Message as ProstMessage;
@@ -64,12 +50,10 @@ use std::sync::RwLock;
 use std::time::Duration;
 use std::time::SystemTime;
 use tonic::transport::Channel;
-use tracing::info;
 
 use crate::{engine::Context, stream_node::ProcessFuncTrait};
 
 pub mod tumbling_aggregating_window;
-
 pub struct Registry {}
 
 impl FunctionRegistry for Registry {
@@ -77,15 +61,15 @@ impl FunctionRegistry for Registry {
         HashSet::new()
     }
 
-    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+    fn udf(&self, _name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
         todo!()
     }
 
-    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+    fn udaf(&self, _name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
         todo!()
     }
 
-    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+    fn udwf(&self, _name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
         todo!()
     }
 }
@@ -94,36 +78,6 @@ pub struct ValueExecutionOperator {
     name: String,
     locked_batch: Arc<RwLock<Option<RecordBatch>>>,
     execution_plan: Arc<dyn ExecutionPlan>,
-}
-
-#[derive(Debug, Default)]
-struct ArrowPhysicalExtensionCodec {
-    locked_batch: Arc<RwLock<Option<RecordBatch>>>,
-}
-
-impl PhysicalExtensionCodec for ArrowPhysicalExtensionCodec {
-    fn try_decode(
-        &self,
-        buf: &[u8],
-        inputs: &[Arc<dyn ExecutionPlan>],
-        registry: &dyn FunctionRegistry,
-    ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
-        let empty_partition_scheme: SingleLockedBatch = serde_json::from_slice(buf)
-            .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {}", err)))?;
-        let reader = RwLockRecordBatchReader {
-            schema: empty_partition_scheme.schema(),
-            locked_batch: self.locked_batch.clone(),
-        };
-        Ok(Arc::new(reader))
-    }
-
-    fn try_encode(
-        &self,
-        node: Arc<dyn ExecutionPlan>,
-        buf: &mut Vec<u8>,
-    ) -> datafusion_common::Result<()> {
-        todo!()
-    }
 }
 
 impl ValueExecutionOperator {
@@ -135,8 +89,8 @@ impl ValueExecutionOperator {
 
         let plan = PhysicalPlanNode::decode(&mut proto_config.physical_plan.as_slice()).unwrap();
         //info!("physical plan is {:#?}", plan);
-        let codec = ArrowPhysicalExtensionCodec {
-            locked_batch: locked_batch.clone(),
+        let codec = ArroyoPhysicalExtensionCodec {
+            context: DecodingContext::SingleLockedBatch(locked_batch.clone()),
         };
 
         let execution_plan = plan.try_into_physical_plan(
@@ -164,7 +118,7 @@ impl ProcessFuncTrait for ValueExecutionOperator {
         self.name.clone()
     }
 
-    async fn process_element(&mut self, record: &Record<(), ()>, ctx: &mut Context<(), ()>) {
+    async fn process_element(&mut self, _record: &Record<(), ()>, _ctx: &mut Context<(), ()>) {
         unimplemented!("only record batches supported");
     }
 
@@ -201,7 +155,7 @@ struct RwLockRecordBatchReader {
 impl DisplayAs for RwLockRecordBatchReader {
     fn fmt_as(
         &self,
-        t: datafusion::physical_plan::DisplayFormatType,
+        _t: datafusion::physical_plan::DisplayFormatType,
         f: &mut std::fmt::Formatter,
     ) -> std::fmt::Result {
         write!(f, "RW Lock RecordBatchReader")
@@ -231,15 +185,15 @@ impl ExecutionPlan for RwLockRecordBatchReader {
 
     fn with_new_children(
         self: Arc<Self>,
-        children: Vec<Arc<dyn ExecutionPlan>>,
+        _children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
         Err(DataFusionError::Internal("not supported".into()))
     }
 
     fn execute(
         &self,
-        partition: usize,
-        context: Arc<TaskContext>,
+        _partition: usize,
+        _context: Arc<TaskContext>,
     ) -> datafusion_common::Result<datafusion_execution::SendableRecordBatchStream> {
         let result = self.locked_batch.read().unwrap().clone().unwrap();
         Ok(Box::pin(MemoryStream::try_new(
@@ -270,8 +224,8 @@ impl KeyExecutionOperator {
 
         let plan = PhysicalPlanNode::decode(&mut proto_config.physical_plan.as_slice()).unwrap();
         //info!("physical plan is {:#?}", plan);
-        let codec = ArrowPhysicalExtensionCodec {
-            locked_batch: locked_batch.clone(),
+        let codec = ArroyoPhysicalExtensionCodec {
+            context: DecodingContext::SingleLockedBatch(locked_batch.clone()),
         };
 
         let execution_plan = plan.try_into_physical_plan(
@@ -304,7 +258,7 @@ impl ProcessFuncTrait for KeyExecutionOperator {
         self.name.clone()
     }
 
-    async fn process_element(&mut self, record: &Record<(), ()>, ctx: &mut Context<(), ()>) {
+    async fn process_element(&mut self, _record: &Record<(), ()>, _ctx: &mut Context<(), ()>) {
         unimplemented!("only record batches supported");
     }
 
@@ -433,7 +387,7 @@ impl<K: SchemaData + Key, T: SchemaData> ProcessFuncTrait for RecordBatchToStruc
         self.name.clone()
     }
 
-    async fn process_element(&mut self, record: &Record<(), ()>, ctx: &mut Context<K, T>) {
+    async fn process_element(&mut self, _record: &Record<(), ()>, _ctx: &mut Context<K, T>) {
         unimplemented!("expect to read record batches");
     }
 
@@ -472,7 +426,7 @@ impl<K: SchemaData + Key, T: SchemaData> ProcessFuncTrait for RecordBatchToStruc
             SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_nanos(v.expect("must have timestamp value") as u64)
         });
-        for i in 0..rows {
+        for _i in 0..rows {
             let key = key_iterator
                 .next()
                 .expect("iterator should be as long as record batch");
@@ -505,7 +459,7 @@ impl ProcessFuncTrait for DefaultTimestampWatermark {
         "Watermark".to_string()
     }
 
-    async fn process_element(&mut self, record: &Record<(), ()>, ctx: &mut Context<(), ()>) {
+    async fn process_element(&mut self, _record: &Record<(), ()>, _ctx: &mut Context<(), ()>) {
         unimplemented!("expect to read record batches");
     }
 
@@ -582,7 +536,7 @@ impl ProcessFuncTrait for GrpcRecordBatchSink {
         "GRPC".to_string()
     }
 
-    async fn process_element(&mut self, record: &Record<(), ()>, ctx: &mut Context<(), ()>) {
+    async fn process_element(&mut self, _record: &Record<(), ()>, _ctx: &mut Context<(), ()>) {
         unimplemented!("expect to read record batches");
     }
 
