@@ -1,5 +1,5 @@
 use crate::connectors::redis::{RedisConfig, RedisConfigConnection, RedisTable, TableType, Target};
-use crate::engine::{Context, ErrorReporter, StreamNode};
+use crate::engine::{ErrorReporter, StreamNode};
 use arroyo_formats::DataSerializer;
 use arroyo_formats::SchemaData;
 use arroyo_macro::process_fn;
@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::info;
+use crate::old::Context;
 
 use super::ListOperation;
 

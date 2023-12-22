@@ -4,58 +4,54 @@ use std::{
     time::SystemTime,
 };
 
-use crate::{
-    engine::{Context, StreamNode},
-    stream_node::ProcessFuncTrait,
-};
 use ahash::RandomState;
 use anyhow::{bail, Context as AnyhowContext, Result};
 use arrow::{
     compute::{kernels, partition, sort_to_indices, take},
-    row::{RowConverter, SortField},
-    tensor::TimestampNanosecondTensor,
+    row::{RowConverter, SortField}
+    ,
 };
 use arrow_array::{
-    types::{GenericBinaryType, Int64Type, TimestampNanosecondType, UInt64Type},
-    Array, ArrayRef, GenericByteArray, NullArray, PrimitiveArray, RecordBatch, StructArray,
-    TimestampNanosecondArray,
+    Array,
+    ArrayRef, GenericByteArray, NullArray, PrimitiveArray, RecordBatch, types::{GenericBinaryType, Int64Type, TimestampNanosecondType, UInt64Type}
+    ,
 };
 use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef, TimeUnit};
-use arroyo_df::{schemas::window_arrow_struct, EmptyPartitionStream};
-use arroyo_macro::process_fn;
-use arroyo_rpc::grpc::{
-    api::window::Window, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
-};
+use arroyo_df::{EmptyPartitionStream, schemas::window_arrow_struct};
+use arroyo_rpc::grpc::api::window::Window;
 use arroyo_state::{
-    hash_key,
-    parquet::{ParquetStats, RecordBatchBuilder},
     DataOperation,
+    parquet::{ParquetStats, RecordBatchBuilder},
 };
-use arroyo_types::{from_nanos, to_nanos, Record, RecordBatchData, Watermark};
+use arroyo_types::{ArrowMessage, from_nanos, Record, RecordBatchData, to_nanos, Watermark};
 use bincode::config;
 use datafusion::{
     execution::context::SessionContext,
     physical_plan::{
-        aggregates::AggregateExec, insert, stream::RecordBatchStreamAdapter, DisplayAs,
-        ExecutionPlan,
+        DisplayAs, ExecutionPlan,
+        stream::RecordBatchStreamAdapter,
     },
 };
-use datafusion_common::{DFField, DFSchema, DataFusionError, ScalarValue};
+use datafusion_common::{DataFusionError, DFField, DFSchema, ScalarValue};
 use datafusion_execution::{
-    runtime_env::{RuntimeConfig, RuntimeEnv},
-    FunctionRegistry, SendableRecordBatchStream, TaskContext,
+    FunctionRegistry,
+    runtime_env::{RuntimeConfig, RuntimeEnv}, SendableRecordBatchStream, TaskContext,
 };
 use datafusion_expr::{AggregateUDF, ScalarUDF, WindowUDF};
-use datafusion_physical_expr::{expressions::CastExpr, hash_utils::create_hashes, PhysicalExpr};
+use datafusion_physical_expr::{hash_utils::create_hashes, PhysicalExpr};
 use datafusion_proto::{
-    physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan, PhysicalExtensionCodec},
+    physical_plan::{AsExecutionPlan, from_proto::parse_physical_expr, PhysicalExtensionCodec},
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
 };
 use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 use tracing::info;
+use crate::engine::ArrowContext;
+use crate::old::Context;
+use crate::operator::ArrowOperator;
+
 pub struct TumblingAggregatingWindowFunc {
     width: Duration,
     binning_function: Arc<dyn PhysicalExpr>,
@@ -385,28 +381,18 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
 
 #[async_trait::async_trait]
 
-impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
-    type InKey = ();
-    type InT = ();
-    type OutKey = ();
-    type OutT = ();
-
+impl ArrowOperator for TumblingAggregatingWindowFunc {
     fn name(&self) -> String {
         "tumbling_window".to_string()
     }
 
-    async fn process_element(&mut self, record: &Record<(), ()>, ctx: &mut Context<(), ()>) {
-        unimplemented!("only record batches supported");
-    }
-
-    async fn process_record_batch(
+    async fn process_batch(
         &mut self,
-        record_batch: &RecordBatchData,
-        ctx: &mut Context<(), ()>,
+        batch: RecordBatch,
+        ctx: &mut ArrowContext,
     ) {
-        let batch = &record_batch.0;
         if batch.num_rows() > 0 {
-            let (record_batch, parquet_stats) = self.converter_tools.get_state_record_batch(batch);
+            let (record_batch, parquet_stats) = self.converter_tools.get_state_record_batch(&batch);
             ctx.state
                 .insert_record_batch('s', record_batch, parquet_stats)
                 .await;
@@ -484,8 +470,8 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
 
     async fn handle_watermark(
         &mut self,
-        watermark: arroyo_types::Watermark,
-        ctx: &mut Context<Self::OutKey, Self::OutT>,
+        watermark: Watermark,
+        ctx: &mut ArrowContext,
     ) {
         if let Watermark::EventTime(watermark) = &watermark {
             let bin = (to_nanos(*watermark) / self.width.as_nanos()) as usize;
@@ -544,7 +530,7 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
                             columns,
                         )
                         .unwrap();
-                        ctx.collect_record_batch(batch_with_timestamp).await;
+                        ctx.collect(batch_with_timestamp).await;
                     }
                 } else {
                     break;
@@ -553,7 +539,7 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
         }
         info!("sending downstream watermark");
         // by default, just pass watermarks on down
-        ctx.broadcast(arroyo_types::Message::Watermark(watermark))
+        ctx.broadcast(ArrowMessage::Watermark(watermark))
             .await;
     }
 }

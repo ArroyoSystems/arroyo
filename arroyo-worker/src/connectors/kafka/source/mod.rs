@@ -1,4 +1,4 @@
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
 use crate::{RateLimiter, SourceFinishType};
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
@@ -6,7 +6,7 @@ use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, FailingSchemaResolver, SchemaResolver};
 use arroyo_rpc::OperatorConfig;
-use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
+use arroyo_rpc::{ControlMessage, ControlResp, grpc::StopMode};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tracing::{debug, error, info, warn};
+use crate::old::Context;
 
 use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, SchemaRegistry, TableType};
 

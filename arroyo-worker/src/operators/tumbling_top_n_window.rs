@@ -1,10 +1,10 @@
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BinaryHeap, HashMap},
+    collections::{BinaryHeap, BTreeMap, HashMap},
     time::SystemTime,
 };
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_state::tables::time_key_map::TimeKeyMap;
@@ -12,6 +12,8 @@ use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_types::*;
 use std::time::Duration;
 use tracing::debug;
+use crate::old::Context;
+
 #[derive(StreamNode)]
 pub struct TumblingTopNWindowFunc<K: Key, T: Data, SK: Ord + Send + 'static, OutT: Data> {
     width: Duration,

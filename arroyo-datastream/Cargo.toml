@@ -8,6 +8,7 @@ edition = "2021"
 arroyo-types = { path = "../arroyo-types" }
 arroyo-macro = { path = "../arroyo-macro" }
 arroyo-rpc = { path = "../arroyo-rpc" }
+arrow-schema = { workspace = true, features = ["serde"] }
 dyn-clone = "1.0.11"
 petgraph = {version = "0.6", features = ["serde-1"]}
 serde = {version = "1", features = ["derive"]}

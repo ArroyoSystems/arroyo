@@ -255,7 +255,7 @@ pub fn derive_stream_node(item: proc_macro::TokenStream) -> proc_macro::TokenStr
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let gen = quote! {
-        impl #impl_generics crate::engine::StreamNode for #name #ty_generics #where_clause {
+        impl #impl_generics crate::old::StreamNode for #name #ty_generics #where_clause {
             fn node_name(&self) -> String {
                 self.name()
             }
@@ -265,8 +265,8 @@ pub fn derive_stream_node(item: proc_macro::TokenStream) -> proc_macro::TokenStr
                 restore_from: Option<arroyo_rpc::grpc::CheckpointMetadata>,
                 control_rx: tokio::sync::mpsc::Receiver<arroyo_rpc::ControlMessage>,
                 control_tx: tokio::sync::mpsc::Sender<arroyo_rpc::ControlResp>,
-                in_qs: Vec<Vec<tokio::sync::mpsc::Receiver<crate::engine::QueueItem>>>,
-                out_qs: Vec<Vec<crate::engine::OutQueue>>) -> tokio::task::JoinHandle<()> {
+                in_qs: Vec<Vec<tokio::sync::mpsc::Receiver<crate::old::QueueItem>>>,
+                out_qs: Vec<Vec<crate::old::OutQueue>>) -> tokio::task::JoinHandle<()> {
 
                 self.start_fn(task_info, restore_from, control_rx, control_tx, in_qs, out_qs)
             }
@@ -414,10 +414,10 @@ fn impl_stream_node_type(
         handle_matchers.push(quote! {
             #i => {
                 let message = match item {
-                    crate::engine::QueueItem::Data(datum) => {
+                    crate::old::QueueItem::Data(datum) => {
                         *datum.downcast().expect(&format!("failed to downcast data in {}", self.name()))
                     }
-                    crate::engine::QueueItem::Bytes(bs) => {
+                    crate::old::QueueItem::Bytes(bs) => {
                         crate::metrics::TaskCounters::BytesReceived.for_task(&ctx.task_info).inc_by(bs.len() as u64);
 
                         bincode::decode_from_slice(&bs, config::standard())
@@ -567,8 +567,8 @@ fn impl_stream_node_type(
             restore_from: Option<arroyo_rpc::grpc::CheckpointMetadata>,
             control_rx: tokio::sync::mpsc::Receiver<arroyo_rpc::ControlMessage>,
             control_tx: tokio::sync::mpsc::Sender<arroyo_rpc::ControlResp>,
-            mut in_qs: Vec<Vec<tokio::sync::mpsc::Receiver<crate::engine::QueueItem>>>,
-            out_qs: Vec<Vec<crate::engine::OutQueue>>,
+            mut in_qs: Vec<Vec<tokio::sync::mpsc::Receiver<crate::old::QueueItem>>>,
+            out_qs: Vec<Vec<crate::old::OutQueue>>,
         ) -> tokio::task::JoinHandle<()> {
             use bincode;
             use bincode::config;
@@ -588,7 +588,7 @@ fn impl_stream_node_type(
 
             let tables = self.tables();
             tokio::spawn(async move {
-                let mut ctx = crate::engine::Context::<#out_k, #out_t>::new(
+                let mut ctx = crate::old::Context::<#out_k, #out_t>::new(
                     task_info,
                     restore_from,
                     control_rx,
@@ -627,7 +627,7 @@ fn impl_stream_node_type(
             counter: &mut crate::engine::CheckpointCounter,
             closed: &mut std::collections::HashSet<usize>,
             in_partitions: usize,
-            ctx: &mut crate::engine::Context<#out_k, #out_t>) -> crate::ControlOutcome {
+            ctx: &mut crate::old::Context<#out_k, #out_t>) -> crate::ControlOutcome {
                 use arroyo_types::*;
                 use tracing::info;
                 use tracing::trace;
@@ -712,7 +712,7 @@ fn impl_stream_node_type(
         #[must_use]
         async fn checkpoint(&mut self,
             checkpoint_barrier: arroyo_types::CheckpointBarrier,
-            ctx: &mut crate::engine::Context<#out_k, #out_t>) -> bool {
+            ctx: &mut crate::old::Context<#out_k, #out_t>) -> bool {
 
             crate::process_fn::ProcessFnUtils::send_checkpoint_event(checkpoint_barrier, ctx, arroyo_rpc::grpc::TaskCheckpointEventType::StartedCheckpointing).await;
 
@@ -732,7 +732,7 @@ fn impl_stream_node_type(
     });
 
     defs.push(quote! {
-        async fn handle_watermark_int(&mut self, watermark: arroyo_types::Watermark, ctx: &mut crate::engine::Context<#out_k, #out_t>) {
+        async fn handle_watermark_int(&mut self, watermark: arroyo_types::Watermark, ctx: &mut crate::old::Context<#out_k, #out_t>) {
             // process timers
             tracing::trace!("handling watermark {:?} for {}-{}", watermark, ctx.task_info.operator_name, ctx.task_info.task_index);
 
@@ -761,7 +761,7 @@ fn impl_stream_node_type(
             async fn handle_checkpoint(
                 &mut self,
                 checkpoint_barrier: &arroyo_types::CheckpointBarrier,
-                ctx: &mut crate::engine::Context<#out_k, #out_t>,
+                ctx: &mut crate::old::Context<#out_k, #out_t>,
             ) {
             }
         });
@@ -769,32 +769,32 @@ fn impl_stream_node_type(
 
     if !methods.contains("on_start") {
         defs.push(quote! {
-            async fn on_start(&mut self, ctx: &mut crate::engine::Context<#out_k, #out_t>) {}
+            async fn on_start(&mut self, ctx: &mut crate::old::Context<#out_k, #out_t>) {}
         })
     }
 
     if !methods.contains("on_close") {
         defs.push(quote! {
-            async fn on_close(&mut self, ctx: &mut crate::engine::Context<#out_k, #out_t>) {}
+            async fn on_close(&mut self, ctx: &mut crate::old::Context<#out_k, #out_t>) {}
         })
     }
 
     if !methods.contains("handle_timer") {
         defs.push(quote! {
-            async fn handle_timer(&mut self, key: #out_k, tv: #timer_t, ctx: &mut crate::engine::Context<#out_k, #out_t>) {}
+            async fn handle_timer(&mut self, key: #out_k, tv: #timer_t, ctx: &mut crate::old::Context<#out_k, #out_t>) {}
         })
     }
 
     if !methods.contains("handle_tick") {
         defs.push(quote! {
-            async fn handle_tick(&mut self, tick: u64, ctx: &mut crate::engine::Context<#out_k, #out_t>) {}
+            async fn handle_tick(&mut self, tick: u64, ctx: &mut crate::old::Context<#out_k, #out_t>) {}
         })
     }
 
     if !methods.contains("handle_watermark") {
         defs.push(quote! {
             async fn handle_watermark(&mut self, watermark: arroyo_types::Watermark,
-                ctx: &mut crate::engine::Context<#out_k, #out_t>) {
+                ctx: &mut crate::old::Context<#out_k, #out_t>) {
                     // by default, just pass watermarks on down
                     ctx.broadcast(arroyo_types::Message::Watermark(watermark)).await;
                 }
@@ -803,7 +803,7 @@ fn impl_stream_node_type(
 
     if !methods.contains("handle_commit") {
         defs.push(quote! {
-            async fn handle_commit(&mut self, epoch: u32, commit_data: std::collections::HashMap<char, std::collections::HashMap<u32, Vec<u8>>>, ctx: &mut Context<#out_k, #out_t>) {
+            async fn handle_commit(&mut self, epoch: u32, commit_data: std::collections::HashMap<char, std::collections::HashMap<u32, Vec<u8>>>, ctx: &mut crate::old::Context<#out_k, #out_t>) {
                 tracing::warn!("default handling of commit with epoch {:?}", epoch);
             }
         })

@@ -1,4 +1,4 @@
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
 use crate::{RateLimiter, SourceFinishType};
 use anyhow::anyhow;
 use arroyo_formats::{DataDeserializer, SchemaData};
@@ -6,7 +6,7 @@ use arroyo_macro::source_fn;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_rpc::OperatorConfig;
-use arroyo_rpc::{grpc::StopMode, ControlMessage};
+use arroyo_rpc::{ControlMessage, grpc::StopMode};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::*;
 use bincode::{Decode, Encode};
@@ -20,6 +20,7 @@ use std::marker::PhantomData;
 use tokio::select;
 use tokio_stream::{Stream, StreamExt, StreamMap};
 use tracing::{debug, error, info, warn};
+use crate::old::Context;
 
 use super::{FluvioTable, SourceOffset, TableType};
 

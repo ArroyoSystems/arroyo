@@ -8,7 +8,7 @@ use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWri
 use arroyo_state::tables::key_time_multi_map::KeyTimeMultiMap;
 use arroyo_types::*;
 
-use crate::engine::Context;
+use crate::old::Context;
 
 #[derive(StreamNode)]
 pub struct JoinWithExpiration<

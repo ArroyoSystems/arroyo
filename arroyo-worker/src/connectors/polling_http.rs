@@ -9,7 +9,7 @@ use std::{marker::PhantomData, time::Duration};
 use arroyo_macro::source_fn;
 use arroyo_rpc::ControlMessage;
 use arroyo_rpc::{grpc::TableDescriptor, OperatorConfig};
-use arroyo_types::{string_to_map, Message, UserError, Watermark};
+use arroyo_types::{Message, string_to_map, UserError, Watermark};
 
 use serde::{Deserialize, Serialize};
 use tokio::select;
@@ -24,9 +24,10 @@ use tracing::{debug, info, warn};
 use typify::import_types;
 
 use crate::{
-    engine::{Context, StreamNode},
+    engine::StreamNode,
     RateLimiter, SourceFinishType,
 };
+use crate::old::Context;
 
 import_types!(
     schema = "../connector-schemas/polling_http/table.json",

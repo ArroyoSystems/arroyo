@@ -1,12 +1,14 @@
 use std::time::SystemTime;
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_types::*;
 use std::time::Duration;
 use tracing::debug;
+use crate::old::Context;
+
 #[derive(StreamNode)]
 pub struct TumblingAggregatingWindowFunc<K: Key, T: Data, BinA: Data, OutT: Data> {
     width: Duration,

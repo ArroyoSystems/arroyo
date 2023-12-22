@@ -1,10 +1,9 @@
 use core::panic;
 use std::future::ready;
 use std::pin::Pin;
-use std::time::SystemTime;
 use std::{collections::HashMap, marker::PhantomData};
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use arrow_array::RecordBatch;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
@@ -26,12 +25,13 @@ use tracing::{info, warn};
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::formats::BadData;
-use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
+use arroyo_rpc::{ControlMessage, grpc::StopMode, OperatorConfig};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{Data, SourceError, UserError};
 use typify::import_types;
 
-use crate::{engine::Context, RateLimiter, SourceFinishType};
+use crate::{RateLimiter, SourceFinishType};
+use crate::old::Context;
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 

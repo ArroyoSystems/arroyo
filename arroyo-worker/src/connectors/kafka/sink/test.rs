@@ -2,7 +2,7 @@
 
 use std::time::{Duration, SystemTime};
 
-use crate::engine::{Context, OutQueue};
+use crate::old::OutQueue;
 use arrow::datatypes::Field;
 use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, JsonFormat};
@@ -13,6 +13,7 @@ use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::producer::Producer;
 use rdkafka::{ClientConfig, Message};
 use tokio::sync::mpsc::channel;
+use crate::old::Context;
 
 use super::KafkaSinkFunc;
 

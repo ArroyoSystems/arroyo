@@ -9,6 +9,7 @@ use std::hash::Hasher;
 use std::marker::PhantomData;
 use std::ops::Add;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
@@ -22,7 +23,7 @@ use quote::format_ident;
 use quote::quote;
 use serde::{Deserialize, Serialize};
 use syn::{parse_quote, parse_str, GenericArgument, PathArguments, Type, TypePath};
-
+use arrow_schema::Schema;
 use anyhow::{anyhow, bail, Result};
 
 use crate::Operator::FusedWasmUDFs;
@@ -35,6 +36,13 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use regex::Regex;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ArrowSchema {
+    pub schema: Arc<Schema>,
+    pub timestamp_col: usize,
+    pub key_col: Option<usize>,
+}
 
 pub fn parse_type(s: &str) -> Type {
     let s = s

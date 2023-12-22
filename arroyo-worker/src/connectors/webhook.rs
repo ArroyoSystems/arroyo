@@ -6,7 +6,7 @@ use std::{
 
 use arroyo_macro::process_fn;
 use arroyo_rpc::ControlResp;
-use arroyo_rpc::{grpc::TableDescriptor, var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{grpc::TableDescriptor, OperatorConfig, var_str::VarStr};
 use arroyo_types::{CheckpointBarrier, Key, Record};
 
 use serde::{Deserialize, Serialize};
@@ -16,8 +16,9 @@ use arroyo_formats::{DataSerializer, SchemaData};
 use tracing::warn;
 use typify::import_types;
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
 use crate::header_map;
+use crate::old::Context;
 
 import_types!(schema = "../connector-schemas/webhook/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
 

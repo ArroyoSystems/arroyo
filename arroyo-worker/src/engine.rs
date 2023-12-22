@@ -1,6 +1,4 @@
 use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
-
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::{mem, thread};
@@ -8,85 +6,33 @@ use std::{mem, thread};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use anyhow::{bail, Error, Result};
-use arrow_array::RecordBatch;
-use arroyo_datastream::Operator;
-use arroyo_state::tables::time_key_map::TimeKeyMap;
-use bincode::{config, Decode, Encode};
+use arrow_array::{ArrayRef, RecordBatch};
+use arroyo_datastream::ArrowSchema;
+use bincode::{Decode, Encode};
+use datafusion_physical_expr::hash_utils;
 
 use tracing::{debug, info, warn};
 
 pub use arroyo_macro::StreamNode;
-use arroyo_rpc::formats::BadData;
-use arroyo_rpc::grpc::{
-    CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
-    TaskAssignment,
-};
+use arroyo_rpc::grpc::{CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior, TaskAssignment, TaskCheckpointEventType};
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
-use arroyo_types::{
-    from_micros, range_for_server, server_for_hash, CheckpointBarrier, Data, Key, Message, Record,
-    RecordBatchData, SourceError, TaskInfo, UserError, Watermark, WorkerId,
-};
+use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, from_micros, Key, range_for_server, SourceError, TaskInfo, UserError, Watermark, WorkerId};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
-use rand::Rng;
+use rand::{random, Rng};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::task::JoinHandle;
-
-use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
+use arroyo_rpc::formats::BadData;
+use crate::metrics::{QueueGauges, register_queue_gauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::{LogicalEdge, LogicalNode, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
-use crate::{RateLimiter, TIMER_TABLE};
-use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
+use crate::{LogicalEdge, LogicalNode, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, RateLimiter, TIMER_TABLE};
+use arroyo_state::{BackingStore, StateBackend, StateStore};
+use crate::operator::{ArrowOperator, server_for_hash};
 
-const QUEUE_SIZE: usize = 4 * 1024;
+pub const QUEUE_SIZE: usize = 4 * 1024;
 
-#[derive(Debug)]
-pub enum QueueItem {
-    Data(Box<dyn Any + Send>),
-    Bytes(Vec<u8>),
-}
-
-impl<K: Key, T: Data> From<QueueItem> for Message<K, T> {
-    fn from(value: QueueItem) -> Self {
-        match value {
-            QueueItem::Data(datum) => *datum.downcast().unwrap(),
-            QueueItem::Bytes(bs) => {
-                bincode::decode_from_slice(&bs, config::standard())
-                    .unwrap()
-                    .0
-            }
-        }
-    }
-}
-
-pub trait StreamNode: Send {
-    fn node_name(&self) -> String;
-    fn start(
-        self: Box<Self>,
-        task_info: TaskInfo,
-        checkpoint_metadata: Option<CheckpointMetadata>,
-        control_rx: Receiver<ControlMessage>,
-        control_tx: Sender<ControlResp>,
-        in_qs: Vec<Vec<Receiver<QueueItem>>>,
-        out_qs: Vec<Vec<OutQueue>>,
-    ) -> JoinHandle<()>;
-}
-
-impl TryFrom<Operator> for Box<dyn StreamNode> {
-    type Error = Error;
-
-    fn try_from(operator: Operator) -> Result<Self> {
-        match operator {
-            operator => bail!(
-                "{:?} requires code generation, cannot instantiate directly",
-                operator
-            ),
-        }
-    }
-}
+pub type QueueItem = ArrowMessage;
 
 pub struct WatermarkHolder {
     // This is the last watermark with an actual value; this helps us keep track of the watermark we're at even
@@ -143,53 +89,22 @@ impl WatermarkHolder {
     }
 }
 
-pub struct Context<K: Key, T: Data, S: BackingStore = StateBackend> {
+pub struct ArrowContext<S: BackingStore = StateBackend> {
     pub task_info: Arc<TaskInfo>,
     pub control_rx: Receiver<ControlMessage>,
     pub control_tx: Sender<ControlResp>,
     pub error_reporter: ErrorReporter,
     pub watermarks: WatermarkHolder,
     pub state: StateStore<S>,
-    pub collector: Collector<K, T>,
-    _ts: PhantomData<(K, T)>,
-}
-
-unsafe impl<K: Key, T: Data, S: BackingStore> Sync for Context<K, T, S> {}
-
-#[derive(Clone)]
-pub struct OutQueue {
-    tx: Sender<QueueItem>,
-    serialize: bool,
-}
-
-impl OutQueue {
-    pub fn new(tx: Sender<QueueItem>, serialize: bool) -> Self {
-        Self { tx, serialize }
-    }
-
-    pub async fn send(&self, task_info: &TaskInfo, message: Message<impl Key, impl Data>) {
-        let is_end = message.is_end();
-        let item = if self.serialize {
-            let bytes = bincode::encode_to_vec(&message, config::standard()).unwrap();
-            TaskCounters::BytesSent
-                .for_task(task_info)
-                .inc_by(bytes.len() as u64);
-
-            QueueItem::Bytes(bytes)
-        } else {
-            QueueItem::Data(Box::new(message))
-        };
-
-        if self.tx.send(item).await.is_err() && !is_end {
-            panic!("Failed to send, queue closed");
-        }
-    }
+    pub in_schemas: Vec<ArrowSchema>,
+    pub out_schema: Option<ArrowSchema>,
+    pub collector: ArrowCollector,
 }
 
 #[derive(Clone)]
 pub struct ErrorReporter {
-    tx: Sender<ControlResp>,
-    task_info: Arc<TaskInfo>,
+    pub tx: Sender<ControlResp>,
+    pub task_info: Arc<TaskInfo>,
 }
 
 impl ErrorReporter {
@@ -207,27 +122,27 @@ impl ErrorReporter {
 }
 
 #[derive(Clone)]
-pub struct Collector<K: Key, T: Data> {
+pub struct ArrowCollector {
     task_info: Arc<TaskInfo>,
-    out_qs: Vec<Vec<OutQueue>>,
-    _ts: PhantomData<(K, T)>,
+    out_qs: Vec<Vec<Sender<ArrowMessage>>>,
     tx_queue_rem_gauges: QueueGauges,
     tx_queue_size_gauges: QueueGauges,
 }
 
-impl<K: Key, T: Data> Collector<K, T> {
-    pub async fn collect_record_batch(&mut self, record_batch: RecordBatch) {
-        let message: Message<K, T> = Message::RecordBatch(RecordBatchData(record_batch));
-        self.out_qs[0][0].send(&self.task_info, message).await;
-    }
+impl ArrowCollector {
+    pub async fn collect(&mut self, record: RecordBatch) {
+        assert_eq!(record.num_rows(), 1);
 
-    pub async fn collect(&mut self, record: Record<K, T>) {
-        fn out_idx<K: Key>(key: &Option<K>, qs: usize) -> usize {
-            let hash = if let Some(key) = &key {
-                hash_key(key)
+        fn out_idx(keys: Option<&ArrayRef>, qs: usize) -> usize {
+            let hash = if let Some(keys) = keys {
+                let mut buf = vec![0];
+                let result =
+                    hash_utils::create_hashes(&[keys.clone()], &ahash::RandomState::new(), &mut buf)
+                        .unwrap();
+                result[0]
             } else {
                 // TODO: do we want this be random or deterministic?
-                rand::thread_rng().gen()
+                random()
             };
 
             server_for_hash(hash, qs)
@@ -235,60 +150,67 @@ impl<K: Key, T: Data> Collector<K, T> {
 
         TaskCounters::MessagesSent.for_task(&self.task_info).inc();
 
+        let keys = Some(record.column(0));
+
+
         if self.out_qs.len() == 1 {
-            let idx = out_idx(&record.key, self.out_qs[0].len());
+            let idx = out_idx(keys, self.out_qs[0].len());
 
             self.tx_queue_rem_gauges[0][idx]
                 .iter()
-                .for_each(|g| g.set(self.out_qs[0][idx].tx.capacity() as i64));
+                .for_each(|g| g.set(self.out_qs[0][idx].capacity() as i64));
 
             self.tx_queue_size_gauges[0][idx]
                 .iter()
                 .for_each(|g| g.set(QUEUE_SIZE as i64));
 
             self.out_qs[0][idx]
-                .send(&self.task_info, Message::Record(record))
-                .await;
+                .send(ArrowMessage::Record(record))
+                .await
+                .unwrap();
         } else {
-            let key = record.key.clone();
-            let message = Message::Record(record);
+            todo!("multi output nodes")
+            // let key = record.key.clone();
+            // let message = Message::Record(record);
 
-            for (i, out_node_qs) in self.out_qs.iter().enumerate() {
-                let idx = out_idx(&key, out_node_qs.len());
-                self.tx_queue_rem_gauges[i][idx]
-                    .iter()
-                    .for_each(|c| c.set(self.out_qs[i][idx].tx.capacity() as i64));
+            // for (i, out_node_qs) in self.out_qs.iter().enumerate() {
+            //     let idx = out_idx(&key, out_node_qs.len());
+            //     self.tx_queue_rem_gauges[i][idx]
+            //         .iter()
+            //         .for_each(|c| c.set(self.out_qs[i][idx].tx.capacity() as i64));
 
-                self.tx_queue_size_gauges[i][idx]
-                    .iter()
-                    .for_each(|c| c.set(QUEUE_SIZE as i64));
+            //     self.tx_queue_size_gauges[i][idx]
+            //         .iter()
+            //         .for_each(|c| c.set(QUEUE_SIZE as i64));
 
-                out_node_qs[idx]
-                    .send(&self.task_info, message.clone())
-                    .await;
-            }
+            //     out_node_qs[idx]
+            //         .send(message.clone(), &self.sent_bytes)
+            //         .await;
+            // }
         }
     }
 
-    pub async fn broadcast(&mut self, message: Message<K, T>) {
+    pub async fn broadcast(&mut self, message: ArrowMessage) {
         for out_node in &self.out_qs {
             for q in out_node {
-                q.send(&self.task_info, message.clone()).await;
+                q.send(message.clone()).await.unwrap()
             }
         }
     }
 }
 
-impl<K: Key, T: Data> Context<K, T> {
+impl ArrowContext {
     pub async fn new(
         task_info: TaskInfo,
         restore_from: Option<CheckpointMetadata>,
         control_rx: Receiver<ControlMessage>,
         control_tx: Sender<ControlResp>,
         input_partitions: usize,
-        out_qs: Vec<Vec<OutQueue>>,
+        in_schemas: Vec<ArrowSchema>,
+        out_schema: Option<ArrowSchema>,
+        out_qs: Vec<Vec<Sender<ArrowMessage>>>,
         mut tables: Vec<TableDescriptor>,
-    ) -> Context<K, T> {
+    ) -> Self {
         tables.push(TableDescriptor {
             name: TIMER_TABLE.to_string(),
             description: "timer state".to_string(),
@@ -305,7 +227,7 @@ impl<K: Key, T: Data> Context<K, T> {
                     &task_info.operator_id,
                     metadata.epoch,
                 )
-                .await;
+                    .await;
                 metadata
                     .expect("require metadata")
                     .min_watermark
@@ -317,7 +239,7 @@ impl<K: Key, T: Data> Context<K, T> {
                 tables,
                 control_tx.clone(),
             )
-            .await;
+                .await;
 
             (state, watermark)
         } else {
@@ -331,7 +253,8 @@ impl<K: Key, T: Data> Context<K, T> {
             register_queue_gauges(&task_info, &out_qs);
 
         let task_info = Arc::new(task_info);
-        Context {
+
+        Self {
             task_info: task_info.clone(),
             control_rx,
             control_tx: control_tx.clone(),
@@ -339,49 +262,49 @@ impl<K: Key, T: Data> Context<K, T> {
                 watermark.map(Watermark::EventTime);
                 input_partitions
             ]),
-            collector: Collector::<K, T> {
+            in_schemas,
+            out_schema,
+            collector: ArrowCollector {
                 task_info: task_info.clone(),
                 out_qs,
                 tx_queue_rem_gauges,
                 tx_queue_size_gauges,
-                _ts: PhantomData,
             },
             error_reporter: ErrorReporter {
                 tx: control_tx,
                 task_info,
             },
             state,
-            _ts: PhantomData,
         }
     }
 
     pub fn new_for_test() -> (Self, Receiver<QueueItem>) {
-        let (_, control_rx) = channel(128);
-        let (command_tx, _) = channel(128);
-        let (data_tx, data_rx) = channel(128);
+        todo!()
 
-        let out_queue = OutQueue::new(data_tx, false);
+        // let (_, control_rx) = channel(128);
+        // let (command_tx, _) = channel(128);
+        // let (data_tx, data_rx) = channel(128);
+        //
+        // let task_info = TaskInfo {
+        //     job_id: "instance-1".to_string(),
+        //     operator_name: "test-operator".to_string(),
+        //     operator_id: "test-operator-1".to_string(),
+        //     task_index: 0,
+        //     parallelism: 1,
+        //     key_range: 0..=0,
+        // };
 
-        let task_info = TaskInfo {
-            job_id: "instance-1".to_string(),
-            operator_name: "test-operator".to_string(),
-            operator_id: "test-operator-1".to_string(),
-            task_index: 0,
-            parallelism: 1,
-            key_range: 0..=0,
-        };
-
-        let ctx = futures::executor::block_on(Context::new(
-            task_info,
-            None,
-            control_rx,
-            command_tx,
-            1,
-            vec![vec![out_queue]],
-            vec![],
-        ));
-
-        (ctx, data_rx)
+        // let ctx = futures::executor::block_on(ArrowContext::new(
+        //     task_info,
+        //     None,
+        //     control_rx,
+        //     command_tx,
+        //     1,
+        //     vec![vec![data_tx]],
+        //     vec![],
+        // ));
+        //
+        // (ctx, data_rx)
     }
 
     pub fn watermark(&self) -> Option<Watermark> {
@@ -392,60 +315,32 @@ impl<K: Key, T: Data> Context<K, T> {
         self.watermarks.last_present_watermark()
     }
 
-    pub async fn schedule_timer<D: Data + PartialEq + Eq>(
+    pub async fn schedule_timer<D: Data + PartialEq + Eq, K: Key>(
         &mut self,
         key: &mut K,
         event_time: SystemTime,
         data: D,
     ) {
-        if let Some(watermark) = self.last_present_watermark() {
-            assert!(watermark < event_time, "Timer scheduled for past");
-        };
-
-        let mut timer_state: TimeKeyMap<K, TimerValue<K, D>, _> =
-            self.state.get_time_key_map(TIMER_TABLE, None).await;
-        let value = TimerValue {
-            time: event_time,
-            key: key.clone(),
-            data,
-        };
-
-        debug!(
-            "[{}] scheduling timer for [{}, {:?}]",
-            self.task_info.task_index,
-            hash_key(key),
-            event_time
-        );
-
-        timer_state.insert(event_time, key.clone(), value);
+        todo!("timer");
     }
 
-    pub async fn cancel_timer<D: Data + PartialEq + Eq>(
+    pub async fn cancel_timer<D: Data + PartialEq + Eq, K: Key>(
         &mut self,
         key: &mut K,
         event_time: SystemTime,
     ) -> Option<D> {
-        let mut timer_state: TimeKeyMap<K, TimerValue<K, D>, _> =
-            self.state.get_time_key_map(TIMER_TABLE, None).await;
-
-        timer_state.remove(event_time, key).await.map(|v| v.data)
+        todo!("timer")
     }
 
     pub async fn flush_timers<D: Data + PartialEq + Eq>(&mut self) {
-        let mut timer_state: TimeKeyMap<K, TimerValue<K, D>, _> =
-            self.state.get_time_key_map(TIMER_TABLE, None).await;
-        timer_state.flush().await;
+        todo!("timer")
     }
 
-    pub async fn collect(&mut self, record: Record<K, T>) {
+    pub async fn collect(&mut self, record: RecordBatch) {
         self.collector.collect(record).await;
     }
 
-    pub async fn collect_record_batch(&mut self, record: RecordBatch) {
-        self.collector.collect_record_batch(record).await;
-    }
-
-    pub async fn broadcast(&mut self, message: Message<K, T>) {
+    pub async fn broadcast(&mut self, message: ArrowMessage) {
         self.collector.broadcast(message).await;
     }
 
@@ -465,6 +360,28 @@ impl<K: Key, T: Data> Context<K, T> {
             .unwrap();
     }
 
+    pub async fn send_checkpoint_event(
+        &mut self,
+        barrier: CheckpointBarrier,
+        event_type: TaskCheckpointEventType,
+    ) {
+        // These messages are received by the engine control thread,
+        // which then sends a TaskCheckpointEventReq to the controller.
+        self.control_tx
+            .send(ControlResp::CheckpointEvent(
+                arroyo_rpc::CheckpointEvent {
+                    checkpoint_epoch: barrier.epoch,
+                    operator_id: self.task_info.operator_id.clone(),
+                    subtask_index: self.task_info.task_index as u32,
+                    time: std::time::SystemTime::now(),
+                    event_type,
+                },
+            ))
+            .await
+            .unwrap();
+    }
+
+
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         self.state.load_compacted(compaction).await;
     }
@@ -474,18 +391,15 @@ impl<K: Key, T: Data> Context<K, T> {
     pub async fn collect_source_record(
         &mut self,
         timestamp: SystemTime,
-        value: Result<T, SourceError>,
+        value: Result<RecordBatch, SourceError>,
         bad_data: &Option<BadData>,
         rate_limiter: &mut RateLimiter,
     ) -> Result<(), UserError> {
+        todo!("collect source record");
         match value {
             Ok(value) => Ok(self
                 .collector
-                .collect(Record {
-                    timestamp,
-                    key: None,
-                    value,
-                })
+                .collect(value)
                 .await),
             Err(SourceError::BadData { details }) => match bad_data {
                 Some(BadData::Drop {}) => {
@@ -496,7 +410,7 @@ impl<K: Key, T: Data> Context<K, T> {
                                 "Dropping invalid data",
                                 details,
                             ))
-                            .await;
+                                .await;
                         })
                         .await;
                     TaskCounters::DeserializationErrors
@@ -512,6 +426,8 @@ impl<K: Key, T: Data> Context<K, T> {
         }
     }
 }
+
+
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
@@ -569,7 +485,9 @@ pub struct SubtaskNode {
     pub id: String,
     pub subtask_idx: usize,
     pub parallelism: usize,
-    pub node: Box<dyn StreamNode>,
+    pub in_schemas: Vec<ArrowSchema>,
+    pub out_schema: Option<ArrowSchema>,
+    pub node: Box<dyn ArrowOperator>,
 }
 
 impl Debug for SubtaskNode {
@@ -577,7 +495,7 @@ impl Debug for SubtaskNode {
         write!(
             f,
             "{}-{}-{}",
-            self.node.node_name(),
+            self.node.name(),
             self.id,
             self.subtask_idx
         )
@@ -633,7 +551,7 @@ impl SubtaskOrQueueNode {
                 let n = SubtaskOrQueueNode::QueueNode(QueueNode {
                     task_info: TaskInfo {
                         job_id,
-                        operator_name: sn.node.node_name(),
+                        operator_name: sn.node.name(),
                         operator_id: sn.id.clone(),
                         task_index: sn.subtask_idx,
                         parallelism: sn.parallelism,
@@ -1112,7 +1030,7 @@ impl Engine {
         info!(
             "[{:?}] Scheduling {}-{}-{} ({}/{})",
             self.worker_id,
-            node.node.node_name(),
+            node.node.name(),
             node.id,
             node.subtask_idx,
             node.subtask_idx + 1,
@@ -1132,7 +1050,7 @@ impl Engine {
             }
         }
 
-        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, OutQueue>> = BTreeMap::new();
+        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, Sender<ArrowMessage>>> = BTreeMap::new();
 
         for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
             // is the target of this edge local or remote?
@@ -1146,11 +1064,10 @@ impl Engine {
             };
 
             let tx = edge.weight().tx.as_ref().unwrap().clone();
-            let sender = OutQueue::new(tx, !local);
             out_qs_map
                 .entry(edge.weight().out_logical_idx)
                 .or_default()
-                .insert(edge.weight().edge_idx, sender);
+                .insert(edge.weight().edge_idx, tx);
         }
 
         let task_info = self
@@ -1169,6 +1086,8 @@ impl Engine {
             checkpoint_metadata.clone(),
             control_rx,
             control_tx.clone(),
+            node.in_schemas,
+            node.out_schema,
             in_qs_map.into_values().collect(),
             out_qs_map
                 .into_values()

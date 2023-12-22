@@ -342,6 +342,22 @@ pub struct Record<K: Key, T: Data> {
     pub value: T,
 }
 
+
+#[derive(Debug, Clone)]
+pub enum ArrowMessage {
+    Record(RecordBatch),
+    Barrier(CheckpointBarrier),
+    Watermark(Watermark),
+    Stop,
+    EndOfData,
+}
+
+impl ArrowMessage {
+    pub fn is_end(&self) -> bool {
+        matches!(self, ArrowMessage::Stop | ArrowMessage::EndOfData)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UserError {
     pub name: String,

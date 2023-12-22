@@ -12,29 +12,30 @@ use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::{
-    grpc::{StopMode, TableDescriptor},
-    ControlMessage, OperatorConfig,
+    ControlMessage,
+    grpc::{StopMode, TableDescriptor}, OperatorConfig,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{from_nanos, Data, UserError};
+use arroyo_types::{Data, from_nanos, UserError};
 use aws_config::from_env;
 use aws_sdk_kinesis::{
+    Client as KinesisClient,
     client::fluent_builders::GetShardIterator,
     model::{Shard, ShardIteratorType},
     output::GetRecordsOutput,
-    types::SdkError,
-    Client as KinesisClient, Region,
+    Region, types::SdkError,
 };
 use bincode::{Decode, Encode};
 use futures::stream::StreamExt;
-use futures::{stream::FuturesUnordered, Future};
+use futures::{Future, stream::FuturesUnordered};
 use tokio::{
     select,
     time::{Duration, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
 
-use crate::{engine::Context, RateLimiter, SourceFinishType};
+use crate::{RateLimiter, SourceFinishType};
+use crate::old::Context;
 
 use super::{KinesisTable, SourceOffset, TableType};
 

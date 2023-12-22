@@ -1,4 +1,4 @@
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
 use arroyo_macro::process_fn;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::*;
@@ -9,6 +9,7 @@ use tracing::info;
 
 use arroyo_types::CheckpointBarrier;
 use serde::Serialize;
+use crate::old::Context;
 
 use super::{FluvioTable, TableType};
 

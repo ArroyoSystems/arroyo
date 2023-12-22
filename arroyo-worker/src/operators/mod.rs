@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::str::FromStr;
 use std::{fmt::Debug, path::PathBuf};
@@ -6,14 +5,12 @@ use std::{fmt::Debug, path::PathBuf};
 use std::marker::PhantomData;
 use std::ops::Add;
 
-use crate::engine::{CheckpointCounter, Collector, Context, StreamNode};
-use crate::stream_node::ProcessFuncTrait;
-use crate::ControlOutcome;
+use crate::engine::StreamNode;
 use arroyo_macro::process_fn;
-use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor};
+use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_types::{
-    from_millis, to_millis, CheckpointBarrier, Data, GlobalKey, Key, Message, Record,
-    RecordBatchData, TaskInfo, UpdatingData, Watermark, Window,
+    CheckpointBarrier, Data, from_millis, GlobalKey, Key, Message, Record, RecordBatchData,
+    TaskInfo, to_millis, UpdatingData, Watermark, Window,
 };
 use bincode::{config, Decode, Encode};
 use std::time::{Duration, SystemTime};
@@ -22,6 +19,8 @@ use wasmtime::{
     Caller, Engine, InstanceAllocationStrategy, Linker, Module, PoolingAllocationConfig, Store,
     TypedFunc,
 };
+use crate::old::{Collector, Context};
+
 pub mod aggregating_window;
 pub mod functions;
 pub mod join_with_expiration;
@@ -37,9 +36,10 @@ pub mod windows;
 #[cfg(test)]
 mod test {
     use crate::operators::WasmOperator;
-    use crate::{engine::Context, operators::TimeWindowAssigner};
-    use arroyo_types::{from_millis, to_millis, Message, Record};
+    use crate::operators::TimeWindowAssigner;
+    use arroyo_types::{from_millis, Message, Record, to_millis};
     use std::time::{Duration, SystemTime};
+    use crate::old::Context;
 
     use super::SlidingWindowAssigner;
 
@@ -552,19 +552,14 @@ impl<K: Key, V: Data> FlattenOperator<K, V> {
         }
     }
 }
+#[derive(StreamNode)]
 pub struct MapOperator<InKey: Key, InT: Data, OutKey: Key, OutT: Data> {
     pub name: String,
     pub map_fn: Box<dyn Fn(&Record<InKey, InT>, &TaskInfo) -> Record<OutKey, OutT> + Send>,
 }
 
-#[async_trait::async_trait]
-impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> ProcessFuncTrait
-    for MapOperator<InKey, InT, OutKey, OutT>
-{
-    type InKey = InKey;
-    type InT = InT;
-    type OutKey = OutKey;
-    type OutT = OutT;
+#[process_fn(in_k = InKey, in_t = InT, out_k = OutKey, out_t = OutT)]
+impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> MapOperator<InKey, InT, OutKey, OutT> {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -576,14 +571,6 @@ impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> ProcessFuncTrait
     ) {
         let record = (self.map_fn)(record, &ctx.task_info);
         ctx.collector.collect(record).await;
-    }
-
-    async fn process_record_batch(
-        &mut self,
-        record_batch: &RecordBatchData,
-        ctx: &mut Context<OutKey, OutT>,
-    ) {
-        unreachable!("process_record_batch not implemented for MapOperator")
     }
 }
 

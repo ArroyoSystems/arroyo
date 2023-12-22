@@ -5,18 +5,19 @@ use rand::Rng;
 use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
-use crate::engine::{Context, OutQueue, QueueItem};
+use crate::old::QueueItem;
 use crate::RateLimiter;
 use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
 use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
-use arroyo_types::{to_micros, CheckpointBarrier, Message, TaskInfo};
+use arroyo_types::{CheckpointBarrier, Message, TaskInfo, to_micros};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use crate::old::{Context, OutQueue};
 
 use super::KafkaSourceFunc;
 

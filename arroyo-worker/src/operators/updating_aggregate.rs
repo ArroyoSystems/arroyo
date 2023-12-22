@@ -1,11 +1,12 @@
 use std::marker::PhantomData;
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_state::tables::keyed_map::KeyedState;
 use arroyo_types::*;
 use std::time::Duration;
+use crate::old::Context;
 
 #[derive(StreamNode)]
 pub struct UpdatingAggregateOperator<K: Key, T: Data, BinA: Data, OutT: Data> {

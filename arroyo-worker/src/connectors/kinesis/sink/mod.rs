@@ -17,7 +17,7 @@ use serde::Serialize;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::engine::Context;
+use crate::old::Context;
 
 use super::{KinesisTable, TableType};
 

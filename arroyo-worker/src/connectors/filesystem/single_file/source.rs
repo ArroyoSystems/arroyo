@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, time::SystemTime};
 
 use arroyo_macro::{source_fn, StreamNode};
-use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
+use arroyo_rpc::{ControlMessage, grpc::StopMode, OperatorConfig};
 use arroyo_types::{Data, Record};
 use serde::de::DeserializeOwned;
 use tokio::{
@@ -10,7 +10,8 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{engine::Context, SourceFinishType};
+use crate::SourceFinishType;
+use crate::old::Context;
 
 use super::SingleFileTable;
 
