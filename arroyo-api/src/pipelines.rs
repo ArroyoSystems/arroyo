@@ -482,34 +482,8 @@ pub async fn validate_query(
             Ok(CompiledSql { mut program, .. }) => {
                 //optimizations::optimize(&mut program.graph);
 
-                let nodes = program
-                    .graph
-                    .node_weights()
-                    .map(|node| PipelineNode {
-                        node_id: node.operator_id.to_string(),
-                        operator: format!("{:?}", node),
-                        parallelism: node.clone().parallelism as u32,
-                    })
-                    .collect();
-
-                let edges = program
-                    .graph
-                    .edge_references()
-                    .map(|edge| {
-                        let src = program.graph.node_weight(edge.source()).unwrap();
-                        let target = program.graph.node_weight(edge.target()).unwrap();
-                        PipelineEdge {
-                            src_id: src.operator_id.to_string(),
-                            dest_id: target.operator_id.to_string(),
-                            key_type: "()".to_string(),
-                            value_type: "()".to_string(),
-                            edge_type: format!("{:?}", edge.weight().edge_type),
-                        }
-                    })
-                    .collect();
-
                 QueryValidationResult {
-                    graph: Some(PipelineGraph { nodes, edges }),
+                    graph: Some(program.as_job_graph().into()),
                     errors: None,
                 }
             }

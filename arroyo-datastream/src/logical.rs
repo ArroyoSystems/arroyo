@@ -176,6 +176,7 @@ impl LogicalProgram {
 
         JobGraph { nodes, edges }
     }
+
 }
 
 impl TryFrom<ArrowProgram> for LogicalProgram {
