@@ -87,6 +87,7 @@ pub const NODE_ID_ENV: &str = "NODE_ID_ENV";
 pub const WORKER_ID_ENV: &str = "WORKER_ID_ENV";
 pub const JOB_ID_ENV: &str = "JOB_ID_ENV";
 pub const RUN_ID_ENV: &str = "RUN_ID_ENV";
+pub const ARROYO_PROGRAM_ENV: &str = "ARROYO_PROGRAM";
 pub const REMOTE_COMPILER_ENDPOINT_ENV: &str = "REMOTE_COMPILER_ENDPOINT";
 pub const NOMAD_ENDPOINT_ENV: &str = "NOMAD_ENDPOINT";
 pub const NOMAD_DC_ENV: &str = "NOMAD_DC";

@@ -7,14 +7,14 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use arrow_array::{ArrayRef, RecordBatch};
-use arroyo_datastream::ArrowSchema;
+use arroyo_datastream::{ArroyoSchema, ConnectorOp};
 use bincode::{Decode, Encode};
-use datafusion_physical_expr::hash_utils;
+use datafusion_common::hash_utils;
 
 use tracing::{debug, info, warn};
 
 pub use arroyo_macro::StreamNode;
-use arroyo_rpc::grpc::{CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior, TaskAssignment, TaskCheckpointEventType};
+use arroyo_rpc::grpc::{api, CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior, TaskAssignment, TaskCheckpointEventType};
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, from_micros, Key, range_for_server, SourceError, TaskInfo, UserError, Watermark, WorkerId};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -23,12 +23,17 @@ use petgraph::Direction;
 use prometheus::labels;
 use rand::{random, Rng};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName};
 use arroyo_rpc::formats::BadData;
 use crate::metrics::{QueueGauges, register_queue_gauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::{LogicalEdge, LogicalNode, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, RateLimiter, TIMER_TABLE};
+use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, RateLimiter, TIMER_TABLE};
 use arroyo_state::{BackingStore, StateBackend, StateStore};
-use crate::operator::{ArrowOperator, server_for_hash};
+use crate::arrow::{DefaultTimestampWatermark, GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
+use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
+use crate::connectors::impulse::ImpulseSourceFunc;
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, server_for_hash};
+use crate::operators::sinks::GrpcSink;
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
 
@@ -96,8 +101,8 @@ pub struct ArrowContext<S: BackingStore = StateBackend> {
     pub error_reporter: ErrorReporter,
     pub watermarks: WatermarkHolder,
     pub state: StateStore<S>,
-    pub in_schemas: Vec<ArrowSchema>,
-    pub out_schema: Option<ArrowSchema>,
+    pub in_schemas: Vec<ArroyoSchema>,
+    pub out_schema: Option<ArroyoSchema>,
     pub collector: ArrowCollector,
 }
 
@@ -206,8 +211,8 @@ impl ArrowContext {
         control_rx: Receiver<ControlMessage>,
         control_tx: Sender<ControlResp>,
         input_partitions: usize,
-        in_schemas: Vec<ArrowSchema>,
-        out_schema: Option<ArrowSchema>,
+        in_schemas: Vec<ArroyoSchema>,
+        out_schema: Option<ArroyoSchema>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
         mut tables: Vec<TableDescriptor>,
     ) -> Self {
@@ -485,8 +490,8 @@ pub struct SubtaskNode {
     pub id: String,
     pub subtask_idx: usize,
     pub parallelism: usize,
-    pub in_schemas: Vec<ArrowSchema>,
-    pub out_schema: Option<ArrowSchema>,
+    pub in_schemas: Vec<ArroyoSchema>,
+    pub out_schema: Option<ArroyoSchema>,
     pub node: Box<dyn ArrowOperator>,
 }
 
@@ -527,7 +532,7 @@ struct PhysicalGraphEdge {
     edge_idx: usize,
     in_logical_idx: usize,
     out_logical_idx: usize,
-    edge: LogicalEdge,
+    edge: LogicalEdgeType,
     tx: Option<Sender<QueueItem>>,
     rx: Option<Receiver<QueueItem>>,
 }
@@ -613,8 +618,8 @@ impl Program {
         let assignments = logical
             .node_weights()
             .flat_map(|weight| {
-                (0..weight.initial_parallelism).map(|index| TaskAssignment {
-                    operator_id: weight.id.clone(),
+                (0..weight.parallelism).map(|index| TaskAssignment {
+                    operator_id: weight.operator_id.clone(),
                     operator_subtask: index as u64,
                     worker_id: 0,
                     worker_addr: "".into(),
@@ -626,7 +631,7 @@ impl Program {
 
     pub fn from_logical(
         name: String,
-        logical: &DiGraph<LogicalNode, LogicalEdge>,
+        logical: &LogicalGraph,
         assignments: &Vec<TaskAssignment>,
     ) -> Program {
         let mut physical = DiGraph::new();
@@ -637,16 +642,30 @@ impl Program {
         }
 
         for idx in logical.node_indices() {
+            let in_schemas: Vec<_> = logical
+                .edges_directed(idx, Direction::Incoming)
+                .map(|edge| edge.weight().schema.clone())
+                .collect();
+
+            let out_schema = logical
+                .edges_directed(idx, Direction::Outgoing)
+                .map(|edge| edge.weight().schema.clone())
+                .next();
+
             let node = logical.node_weight(idx).unwrap();
-            let parallelism = *parallelism_map.get(&node.id).unwrap_or_else(|| {
-                warn!("no assignments for operator {}", node.id);
-                &node.initial_parallelism
+            let parallelism = *parallelism_map.get(&node.operator_id).unwrap_or_else(|| {
+                warn!("no assignments for operator {}", node.operator_id);
+                &node.parallelism
             });
             for i in 0..parallelism {
-                physical.add_node(SubtaskOrQueueNode::SubtaskNode((*node.create_fn)(
-                    i,
+                physical.add_node(SubtaskOrQueueNode::SubtaskNode(SubtaskNode {
+                    id: node.operator_id.clone(),
+                    subtask_idx: i,
                     parallelism,
-                )));
+                    in_schemas: in_schemas.clone(),
+                    out_schema: out_schema.clone(),
+                    node: construct_operator(node.operator_name, node.operator_config.clone()),
+                }));
             }
         }
 
@@ -658,17 +677,17 @@ impl Program {
 
             let from_nodes: Vec<_> = physical
                 .node_indices()
-                .filter(|n| physical.node_weight(*n).unwrap().id() == logical_in_node.id)
+                .filter(|n| physical.node_weight(*n).unwrap().id() == logical_in_node.operator_id)
                 .collect();
             assert_ne!(from_nodes.len(), 0, "failed to find from nodes");
             let to_nodes: Vec<_> = physical
                 .node_indices()
-                .filter(|n| physical.node_weight(*n).unwrap().id() == logical_out_node.id)
+                .filter(|n| physical.node_weight(*n).unwrap().id() == logical_out_node.operator_id)
                 .collect();
             assert_ne!(from_nodes.len(), 0, "failed to find to nodes");
 
-            match edge {
-                LogicalEdge::Forward => {
+            match edge.edge_type {
+                LogicalEdgeType::Forward => {
                     if from_nodes.len() != to_nodes.len() && !from_nodes.is_empty() {
                         panic!("cannot create a forward connection between nodes of different parallelism");
                     }
@@ -678,14 +697,14 @@ impl Program {
                             edge_idx: 0,
                             in_logical_idx: logical_in_node_idx.index(),
                             out_logical_idx: logical_out_node_idx.index(),
-                            edge: edge.clone(),
+                            edge: edge.edge_type,
                             tx: Some(tx),
                             rx: Some(rx),
                         };
                         physical.add_edge(*f, *t, edge);
                     }
                 }
-                LogicalEdge::Shuffle | LogicalEdge::ShuffleJoin(_) => {
+                LogicalEdgeType::Shuffle | LogicalEdgeType::LeftJoin | LogicalEdgeType::RightJoin => {
                     for f in &from_nodes {
                         for (idx, t) in to_nodes.iter().enumerate() {
                             let (tx, rx) = channel(QUEUE_SIZE);
@@ -693,7 +712,7 @@ impl Program {
                                 edge_idx: idx,
                                 in_logical_idx: logical_in_node_idx.index(),
                                 out_logical_idx: logical_out_node_idx.index(),
-                                edge: edge.clone(),
+                                edge: edge.edge_type,
                                 tx: Some(tx),
                                 rx: Some(rx),
                             };
@@ -1037,7 +1056,7 @@ impl Engine {
             node.parallelism
         );
 
-        let mut in_qs_map: BTreeMap<(LogicalEdge, usize), Vec<Receiver<QueueItem>>> =
+        let mut in_qs_map: BTreeMap<(LogicalEdgeType, usize), Vec<Receiver<QueueItem>>> =
             BTreeMap::new();
 
         for edge in self.program.graph.edge_indices() {
@@ -1153,6 +1172,33 @@ impl Engine {
         });
     }
 }
+
+pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn ArrowOperator> {
+    let mut buf = config.as_slice();
+    match operator {
+        OperatorName::Watermark => {
+            Box::new(DefaultTimestampWatermark::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
+        }
+        OperatorName::ArrowValue => {
+            Box::new(ValueExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
+        }
+        OperatorName::ArrowKey => {
+            Box::new(KeyExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
+        }
+        OperatorName::ArrowAggregate => {
+            Box::new(TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
+        }
+        OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
+            let op: api::ConnectorOp = prost::Message::decode(&mut buf).unwrap();
+            match op.operator.as_str() {
+                "connectors::impulse::ImpulseSourceFunc" => Box::new(ImpulseSourceFunc::from_config(op).unwrap()),
+                "GrpcSink" => Box::new(GrpcRecordBatchSink::from_config(op).unwrap()),
+                c => panic!("unknown operator {}", c),
+            }
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

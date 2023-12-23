@@ -12,7 +12,7 @@ use arrow::row::{Row, RowConverter};
 use arrow_array::{Array, ArrayRef, RecordBatch};
 use bincode::{Decode, Encode};
 use datafusion_common::ScalarValue;
-use arroyo_datastream::ArrowSchema;
+use arroyo_datastream::ArroyoSchema;
 use arroyo_metrics::gauge_for_task;
 use arroyo_rpc::{
     grpc::{
@@ -23,7 +23,6 @@ use arroyo_rpc::{
 };
 use arroyo_state::{BackingStore, StateBackend, StateStore};
 use arroyo_types::{from_micros, ArrowMessage, CheckpointBarrier, TaskInfo, Watermark, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT, Key, Data, Window, to_millis, from_millis};
-use datafusion_physical_expr::hash_utils;
 use futures::{FutureExt, StreamExt};
 use prometheus::{labels, IntCounter, IntGauge};
 use rand::{random};
@@ -207,12 +206,8 @@ impl ProcessFnUtils {
     }
 }
 
-
-
-
-
-pub trait ArrowOperatorConstructor<C: prost::Message>: ArrowOperator {
-    fn from_config(config: C) -> Box<dyn ArrowOperator>;
+pub trait ArrowOperatorConstructor<C: prost::Message, T: ArrowOperator>: ArrowOperator {
+    fn from_config(config: C) -> anyhow::Result<T>;
 }
 
 #[async_trait::async_trait]
@@ -223,8 +218,8 @@ pub trait ArrowOperator: Send + 'static {
         restore_from: Option<CheckpointMetadata>,
         control_rx: Receiver<ControlMessage>,
         control_tx: Sender<ControlResp>,
-        in_schemas: Vec<ArrowSchema>,
-        out_schema: Option<ArrowSchema>,
+        in_schemas: Vec<ArroyoSchema>,
+        out_schema: Option<ArroyoSchema>,
         in_qs: Vec<Vec<Receiver<ArrowMessage>>>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
     ) -> tokio::task::JoinHandle<()> {

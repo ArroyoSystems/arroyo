@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::engine::{ArrowContext, StreamNode};
 use crate::SourceFinishType;
-use arroyo_rpc::grpc::{StopMode, TableDescriptor};
+use arroyo_rpc::grpc::{api, StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::*;
 use bincode::{Decode, Encode};
@@ -14,7 +14,7 @@ use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
 use async_trait::async_trait;
 use tracing::{debug, info};
 use typify::import_types;
-use crate::operator::ArrowOperator;
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
 
 import_types!(schema = "../connector-schemas/impulse/table.json");
 
@@ -73,25 +73,6 @@ impl ImpulseSourceFunc {
         }
     }
 
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for ImpulseSource");
-        let table: ImpulseTable =
-            serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
-
-        Self::new(
-            table
-                .event_time_interval
-                .map(|i| Duration::from_micros(i as u64)),
-            ImpulseSpec::EventsPerSecond(table.event_rate as f32),
-            table
-                .message_count
-                .map(|n| n as usize)
-                .unwrap_or(usize::MAX),
-            SystemTime::now(),
-        )
-    }
-
     async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         let delay = match self.spec {
             ImpulseSpec::Delay(d) => d,
@@ -115,11 +96,11 @@ impl ImpulseSourceFunc {
                 .unwrap_or_else(SystemTime::now);
 
             let columns: Vec<ArrayRef> = vec![
+                Arc::new(UInt64Array::from(vec![self.state.counter as u64])),
+                Arc::new(UInt64Array::from(vec![ctx.task_info.task_index as u64])),
                 Arc::new(TimestampNanosecondArray::from(vec![
                     to_nanos(timestamp) as i64
                 ])),
-                Arc::new(UInt64Array::from(vec![self.state.counter as u64])),
-                Arc::new(UInt64Array::from(vec![ctx.task_info.task_index as u64])),
             ];
 
             ctx.collect(RecordBatch::try_new(schema.clone(), columns).unwrap()).await;
@@ -174,6 +155,31 @@ impl ImpulseSourceFunc {
         SourceFinishType::Final
     }
 }
+
+impl ArrowOperatorConstructor<api::ConnectorOp, Self> for ImpulseSourceFunc {
+    fn from_config(config: api::ConnectorOp) -> anyhow::Result<Self> {
+        let config: OperatorConfig =
+            serde_json::from_str(&config.config).expect("Invalid config for ImpulseSource");
+        let table: ImpulseTable =
+            serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
+
+        Ok(ImpulseSourceFunc {
+            interval: table
+                .event_time_interval
+                .map(|i| Duration::from_micros(i as u64)),
+            spec: ImpulseSpec::EventsPerSecond(table.event_rate as f32),
+            limit: table
+                .message_count
+                .map(|n| n as usize)
+                .unwrap_or(usize::MAX),
+            state: ImpulseSourceState {
+                counter: 0,
+                start_time: SystemTime::now(),
+            },
+        })
+    }
+}
+
 
 #[async_trait]
 impl ArrowOperator for ImpulseSourceFunc {

@@ -24,6 +24,7 @@ use datafusion_expr::{
     WriteOp,
 };
 use tracing::info;
+use arroyo_datastream::logical::LogicalNode;
 
 use crate::external::SinkUpdateType;
 use crate::{avro, DEFAULT_IDLE_TIME};
@@ -375,7 +376,7 @@ impl ConnectorTable {
                     .collect(),
                 self.format.clone(),
             ),
-            operator: Operator::ConnectorSource(self.connector_op()),
+            config: self.connector_op(),
             processing_mode: self.processing_mode(),
             idle_time: self.idle_time,
         };

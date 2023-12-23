@@ -6,11 +6,7 @@ use std::{
 };
 
 use arrow_schema::{DataType, Schema};
-use arroyo_datastream::{
-    EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program,
-    ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator, Stream, StreamEdge, StreamNode,
-    TumblingTopN, TumblingWindowAggregator, WatermarkStrategy, WindowAgg, WindowType,
-};
+use arroyo_datastream::{ArroyoSchema, ConnectorOp, EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program, ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator, Stream, StreamEdge, StreamNode, TumblingTopN, TumblingWindowAggregator, WatermarkStrategy, WindowAgg, WindowType};
 
 use datafusion::{
     datasource::MemTable,
@@ -30,7 +26,7 @@ use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
 use tracing::{info, warn};
 
-use crate::{physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor};
+use crate::{physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor, TIMESTAMP_FIELD};
 use crate::{
     tables::Table,
     types::{StructDef, StructField, StructPair, TypeDef},
@@ -53,6 +49,19 @@ use datafusion_proto::{
 };
 use petgraph::Direction;
 use prost::Message;
+use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName};
+use arroyo_rpc::grpc::api;
+
+fn to_arroyo_schema(s: &DFSchemaRef, key_cols: Vec<usize>) -> ArroyoSchema {
+    println!("Converting schema: #{:?}", s);
+    ArroyoSchema {
+        schema: Arc::new(Schema::from(&*(*s))),
+        timestamp_col: s.index_of_column_by_name(None, TIMESTAMP_FIELD)
+            .unwrap()
+            .expect("No timestamp field in schema"),
+        key_cols,
+    }
+}
 
 pub(crate) async fn get_arrow_program(
     mut rewriter: QueryToGraphVisitor,
@@ -63,7 +72,7 @@ pub(crate) async fn get_arrow_program(
         petgraph::dot::Dot::with_config(&rewriter.local_logical_plan_graph, &[])
     );
     let mut topo = Topo::new(&rewriter.local_logical_plan_graph);
-    let mut program_graph: DiGraph<StreamNode, StreamEdge> = DiGraph::new();
+    let mut program_graph: LogicalGraph = DiGraph::new();
 
     let mut planner = DefaultPhysicalPlanner::default();
     let mut config = SessionConfig::new();
@@ -81,6 +90,7 @@ pub(crate) async fn get_arrow_program(
             .local_logical_plan_graph
             .node_weight(node_index)
             .unwrap();
+
         match logical_extension {
             crate::LogicalPlanExtension::TableScan(logical_plan) => {
                 let LogicalPlan::TableScan(table_scan) = logical_plan else {
@@ -95,24 +105,34 @@ pub(crate) async fn get_arrow_program(
                 let Table::ConnectorTable(cn) = source else {
                     bail!("expect connector table")
                 };
+
                 let sql_source = cn.as_sql_source()?;
-                let source_index = program_graph.add_node(StreamNode {
+                let source_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("source_{}", program_graph.node_count()),
-                    operator: sql_source.source.operator,
+                    description: sql_source.source.config.description.clone(),
+                    operator_name: OperatorName::ConnectorSource,
+                    operator_config: api::ConnectorOp::from(sql_source.source.config).encode_to_vec(),
                     parallelism: 1,
                 });
-                let watermark_index = program_graph.add_node(StreamNode {
+
+                let watermark_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("watermark_{}", program_graph.node_count()),
-                    operator: Operator::ArrowWatermark,
+                    description: "watermark".to_string(),
+                    operator_name: OperatorName::Watermark,
                     parallelism: 1,
+                    operator_config: api::PeriodicWatermark {
+                        period_micros: 10_000_000,
+                        max_lateness_micros: 0,
+                        idle_time_micros: None,
+                    }.encode_to_vec()
                 });
+
                 program_graph.add_edge(
                     source_index,
                     watermark_index,
-                    StreamEdge {
-                        key: "()".into(),
-                        value: "()".into(),
-                        typ: EdgeType::Forward,
+                    LogicalEdge {
+                        edge_type: LogicalEdgeType::Forward,
+                        schema: to_arroyo_schema(&table_scan.projected_schema, vec![]),
                     },
                 );
                 node_mapping.insert(node_index, watermark_index);
@@ -131,20 +151,22 @@ pub(crate) async fn get_arrow_program(
                         physical_plan,
                         &ArroyoPhysicalExtensionCodec::default(),
                     )?;
+
                 let config = ValuePlanOperator {
                     name: "tmp".into(),
                     physical_plan: physical_plan_node.encode_to_vec(),
                 };
 
-                let new_node_index = program_graph.add_node(StreamNode {
+                let new_node_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("value_{}", program_graph.node_count()),
-                    operator: Operator::ArrowValue {
-                        name: "arrow_value".into(),
-                        config: config.encode_to_vec(),
-                    },
+                    description: format!("arrow_value<{}>", config.name),
+                    operator_name: OperatorName::ArrowValue,
+                    operator_config: config.encode_to_vec(),
                     parallelism: 1,
                 });
+
                 node_mapping.insert(node_index, new_node_index);
+
                 for upstream in rewriter
                     .local_logical_plan_graph
                     .neighbors_directed(node_index, Direction::Incoming)
@@ -152,10 +174,9 @@ pub(crate) async fn get_arrow_program(
                     program_graph.add_edge(
                         *node_mapping.get(&upstream).unwrap(),
                         new_node_index,
-                        StreamEdge {
-                            key: "()".to_string(),
-                            value: "()".to_string(),
-                            typ: EdgeType::Forward,
+                        LogicalEdge {
+                            edge_type: LogicalEdgeType::Forward,
+                            schema: to_arroyo_schema(logical_plan.schema(), vec![]),
                         },
                     );
                 }
@@ -184,15 +205,16 @@ pub(crate) async fn get_arrow_program(
                     key_fields: key_columns.iter().map(|column| (*column) as u64).collect(),
                 };
 
-                let new_node_index = program_graph.add_node(StreamNode {
+                let new_node_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("key_{}", program_graph.node_count()),
-                    operator: Operator::ArrowKey {
-                        name: "arrow_key".into(),
-                        config: config.encode_to_vec(),
-                    },
+                    operator_name: OperatorName::ArrowKey,
+                    operator_config: config.encode_to_vec(),
+                    description: format!("ArrowKey<{}>", config.name),
                     parallelism: 1,
                 });
+
                 node_mapping.insert(node_index, new_node_index);
+
                 for upstream in rewriter
                     .local_logical_plan_graph
                     .neighbors_directed(node_index, Direction::Incoming)
@@ -200,11 +222,10 @@ pub(crate) async fn get_arrow_program(
                     program_graph.add_edge(
                         *node_mapping.get(&upstream).unwrap(),
                         new_node_index,
-                        StreamEdge {
-                            key: "()".to_string(),
-                            value: "()".to_string(),
-                            typ: EdgeType::Forward,
-                        },
+                        LogicalEdge {
+                            edge_type: LogicalEdgeType::Forward,
+                            schema: to_arroyo_schema(logical_plan.schema(), vec![]),
+                        }
                     );
                 }
             }
@@ -234,7 +255,9 @@ pub(crate) async fn get_arrow_program(
                     .create_physical_plan(&logical_plan, &session_state)
                     .await
                     .context("couldn't create physical plan for aggregate")?;
+
                 println!("physical plan for aggregate: {:#?}", physical_plan);
+
                 let physical_plan_node: PhysicalPlanNode =
                     PhysicalPlanNode::try_from_physical_plan(
                         physical_plan,
@@ -251,6 +274,7 @@ pub(crate) async fn get_arrow_program(
                         width.as_nanos() as i64
                     )))),
                 });
+
                 let timestamp_nanos_field =
                     DFField::new_unqualified("timestamp_nanos", DataType::Int64, false);
                 let binning_df_schema =
@@ -265,6 +289,7 @@ pub(crate) async fn get_arrow_program(
                         &session_state,
                     )
                     .context("couldn't create binning function")?;
+
                 let binning_function_proto = PhysicalExprNode::try_from(binning_function)
                     .context("couldn't encode binning function")?;
                 let input_schema: Schema = aggregate.aggregate.input.schema().as_ref().into();
@@ -288,14 +313,15 @@ pub(crate) async fn get_arrow_program(
                         .map(|field| (*field) as u64)
                         .collect(),
                 };
-                let new_node_index = program_graph.add_node(StreamNode {
+
+                let new_node_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("aggregate_{}", program_graph.node_count()),
-                    operator: Operator::ArrowAggregate {
-                        name: "arrow_aggregate".into(),
-                        config: config.encode_to_vec(),
-                    },
+                    operator_name: OperatorName::ArrowAggregate,
+                    operator_config: config.encode_to_vec(),
                     parallelism: 1,
+                    description: config.name.clone(),
                 });
+
                 node_mapping.insert(node_index, new_node_index);
                 for upstream in rewriter
                     .local_logical_plan_graph
@@ -304,32 +330,34 @@ pub(crate) async fn get_arrow_program(
                     program_graph.add_edge(
                         *node_mapping.get(&upstream).unwrap(),
                         new_node_index,
-                        StreamEdge {
-                            key: "()".into(),
-                            value: "()".into(),
-                            typ: EdgeType::Shuffle,
+                        LogicalEdge {
+                            edge_type: LogicalEdgeType::Shuffle,
+                            schema: to_arroyo_schema(logical_plan.schema(), aggregate.key_fields.clone())
                         },
                     );
                 }
             }
             crate::LogicalPlanExtension::Sink => {
-                let sink_index = program_graph.add_node(StreamNode {
+                let sink_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("sink_{}", program_graph.node_count()),
-                    operator: Operator::RecordBatchGrpc,
+                    operator_name: OperatorName::ConnectorSink,
+                    operator_config: api::ConnectorOp::from(ConnectorOp::web_sink()).encode_to_vec(),
                     parallelism: 1,
+                    description: "GrpcSink".into(),
                 });
                 node_mapping.insert(node_index, sink_index);
                 for upstream in rewriter
                     .local_logical_plan_graph
                     .neighbors_directed(node_index, Direction::Incoming)
                 {
+                    let schema = &rewriter.local_logical_plan_graph.node_weight(upstream).unwrap().outgoing_edge().value_schema;
+
                     program_graph.add_edge(
                         *node_mapping.get(&upstream).unwrap(),
                         sink_index,
-                        StreamEdge {
-                            key: "()".to_string(),
-                            value: "()".to_string(),
-                            typ: EdgeType::Forward,
+                        LogicalEdge {
+                            edge_type: LogicalEdgeType::Forward,
+                            schema: to_arroyo_schema(schema, vec![]),
                         },
                     );
                 }
@@ -337,12 +365,10 @@ pub(crate) async fn get_arrow_program(
         }
     }
 
-    let program = Program {
-        types: vec![],
-        udfs: vec![],
-        other_defs: vec![],
+    let program = LogicalProgram {
         graph: program_graph,
     };
+
     Ok(CompiledSql {
         program,
         connection_ids: vec![],

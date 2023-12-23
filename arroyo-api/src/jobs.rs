@@ -30,6 +30,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
 use tonic::Request;
 use tracing::info;
+use arroyo_datastream::logical::OperatorName;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
 
@@ -483,7 +484,7 @@ pub async fn get_job_output(
         .graph
         .nodes
         .iter()
-        .any(|n| n.operator.contains("WebSink") || n.operator.contains("record_batch_sink"))
+        .any(|n| n.operator.contains("WebSink"))
     {
         // TODO: make this check more robust
         return Err(bad_request("Job does not have a web sink".to_string()));

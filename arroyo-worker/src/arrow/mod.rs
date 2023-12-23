@@ -13,9 +13,9 @@ use arrow_schema::Field;
 use arrow_schema::Schema;
 use arroyo_df::physical::SingleLockedBatch;
 use arroyo_formats::SchemaData;
-use arroyo_rpc::grpc::api::MemTableScan;
+use arroyo_rpc::grpc::api::{ConnectorOp, MemTableScan, PeriodicWatermark};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::SinkDataReq;
+use arroyo_rpc::grpc::{api, SinkDataReq};
 use arroyo_types::{ArrowMessage, from_millis, Record};
 use arroyo_types::from_nanos;
 use arroyo_types::to_micros;
@@ -60,7 +60,7 @@ use tonic::transport::Channel;
 use tracing::info;
 use crate::engine::ArrowContext;
 
-use crate::operator::ArrowOperator;
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
 
 pub mod tumbling_aggregating_window;
 
@@ -146,14 +146,12 @@ impl PhysicalExtensionCodec for ArrowPhysicalExtensionCodec {
     }
 }
 
-impl ValueExecutionOperator {
-    pub fn from_config(name: String, config: Vec<u8>) -> Result<Self> {
-        let proto_config: arroyo_rpc::grpc::api::ValuePlanOperator =
-            arroyo_rpc::grpc::api::ValuePlanOperator::decode(&mut config.as_slice()).unwrap();
+impl ArrowOperatorConstructor<api::ValuePlanOperator, Self> for ValueExecutionOperator {
+    fn from_config(config: api::ValuePlanOperator) -> Result<Self> {
         let locked_batch = Arc::new(RwLock::default());
         let registry = Registry {};
 
-        let plan = PhysicalPlanNode::decode(&mut proto_config.physical_plan.as_slice()).unwrap();
+        let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
         //info!("physical plan is {:#?}", plan);
         let codec = ArrowPhysicalExtensionCodec {
             locked_batch: locked_batch.clone(),
@@ -166,7 +164,7 @@ impl ValueExecutionOperator {
         )?;
 
         Ok(Self {
-            name,
+            name: config.name,
             locked_batch,
             execution_plan,
         })
@@ -272,14 +270,12 @@ pub struct KeyExecutionOperator {
     key_fields: Vec<usize>,
 }
 
-impl KeyExecutionOperator {
-    pub fn from_config(name: String, config: Vec<u8>) -> Result<Self> {
-        let proto_config =
-            arroyo_rpc::grpc::api::KeyPlanOperator::decode(&mut config.as_slice()).unwrap();
+impl ArrowOperatorConstructor<api::KeyPlanOperator, Self> for KeyExecutionOperator {
+    fn from_config(config: api::KeyPlanOperator) -> Result<Self> {
         let locked_batch = Arc::new(RwLock::default());
         let registry = Registry {};
 
-        let plan = PhysicalPlanNode::decode(&mut proto_config.physical_plan.as_slice()).unwrap();
+        let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
         //info!("physical plan is {:#?}", plan);
         let codec = ArrowPhysicalExtensionCodec {
             locked_batch: locked_batch.clone(),
@@ -292,10 +288,10 @@ impl KeyExecutionOperator {
         )?;
 
         Ok(Self {
-            name,
+            name: config.name,
             locked_batch,
             execution_plan,
-            key_fields: proto_config
+            key_fields: config
                 .key_fields
                 .into_iter()
                 .map(|field| field as usize)
@@ -335,7 +331,14 @@ impl ArrowOperator for KeyExecutionOperator {
 }
 
 
-pub struct DefaultTimestampWatermark {}
+pub struct DefaultTimestampWatermark {
+}
+
+impl ArrowOperatorConstructor<api::PeriodicWatermark, Self> for DefaultTimestampWatermark {
+    fn from_config(config: PeriodicWatermark) -> Result<Self> {
+        Ok(DefaultTimestampWatermark { })
+    }
+}
 
 #[async_trait::async_trait]
 impl ArrowOperator for DefaultTimestampWatermark {
@@ -352,24 +355,28 @@ impl ArrowOperator for DefaultTimestampWatermark {
         let output_batch = if schema
             .fields()
             .iter()
-            .any(|field| field.name() == "_timestamp")
+            .any(|field| field.name() == "_timestamp") 
         {
             record_batch.clone()
         } else {
             let current_time = to_nanos(SystemTime::now());
             let current_time_scalar =
                 ScalarValue::TimestampNanosecond(Some(current_time as i64), None);
+            
             let time_column = current_time_scalar
                 .to_array_of_size(record_batch.num_rows())
                 .unwrap();
+            
             let mut record_batch_columns = record_batch.columns().to_vec();
             record_batch_columns.push(time_column);
             let mut schema_columns = schema.fields().to_vec();
+            
             schema_columns.push(Arc::new(Field::new(
                 "_timestamp",
                 DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None),
                 false,
             )));
+            
             let schema = Schema::new_with_metadata(schema_columns, HashMap::new());
             RecordBatch::try_new(Arc::new(schema), record_batch_columns).unwrap()
         };
@@ -402,6 +409,14 @@ impl ArrowOperator for DefaultTimestampWatermark {
 #[derive(Default)]
 pub struct GrpcRecordBatchSink {
     client: Option<ControllerGrpcClient<Channel>>,
+}
+
+impl ArrowOperatorConstructor<api::ConnectorOp, Self> for GrpcRecordBatchSink {
+    fn from_config(_: ConnectorOp) -> Result<Self> {
+        Ok(Self {
+            client: None,
+        })
+    }
 }
 
 #[async_trait::async_trait]

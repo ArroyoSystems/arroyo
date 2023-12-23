@@ -17,9 +17,7 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef, TimeUnit};
 use arroyo_df::{physical::SingleLockedBatch, schemas::window_arrow_struct};
-use arroyo_rpc::grpc::{
-    api::window::Window, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
-};
+use arroyo_rpc::grpc::{api, api::window::Window, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_state::{
     DataOperation,
     parquet::{ParquetStats, RecordBatchBuilder},
@@ -54,7 +52,7 @@ use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 use tracing::info;
 use crate::engine::ArrowContext;
 use crate::old::Context;
-use crate::operator::ArrowOperator;
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
 
 pub struct TumblingAggregatingWindowFunc {
     width: Duration,
@@ -184,10 +182,8 @@ impl FunctionRegistry for Registry {
     }
 }
 
-impl TumblingAggregatingWindowFunc {
-    pub fn from_config(name: String, config: Vec<u8>) -> Result<Self> {
-        let proto_config =
-            arroyo_rpc::grpc::api::WindowAggregateOperator::decode(&mut config.as_slice()).unwrap();
+impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self> for TumblingAggregatingWindowFunc {
+    fn from_config(proto_config: api::WindowAggregateOperator) -> Result<Self> {
         let registry = Registry {};
 
         let binning_function =

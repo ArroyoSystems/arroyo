@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use std::{fmt::Debug, sync::Arc};
 
 use arroyo_datastream::Program;
-use arroyo_rpc::grpc::api::PipelineProgram;
+use arroyo_rpc::grpc::api::{ArrowProgram, PipelineProgram};
 
 use arroyo_server_common::log_event;
 use deadpool_postgres::Pool;
@@ -21,6 +21,7 @@ use crate::queries::controller_queries;
 use crate::types::public::StopMode;
 use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus};
 use prost::Message;
+use arroyo_datastream::logical::LogicalProgram;
 
 use self::checkpoint_stopping::CheckpointStopping;
 use self::compiling::Compiling;
@@ -351,7 +352,7 @@ pub(crate) use stop_if_desired_running;
 pub struct JobContext<'a> {
     config: JobConfig,
     status: &'a mut JobStatus,
-    program: &'a mut Program,
+    program: &'a mut LogicalProgram,
     pool: Pool,
     scheduler: Arc<dyn Scheduler>,
     rx: &'a mut Receiver<JobMessage>,
@@ -543,14 +544,14 @@ pub async fn run_to_completion(
 ) {
     let c = pool.get().await.unwrap();
     let id = config.read().unwrap().pipeline_id;
-    let mut program: Program = {
+    let mut program: LogicalProgram = {
         let res = controller_queries::get_program()
             .bind(&c, &id)
             .one()
             .await
             .unwrap();
 
-        PipelineProgram::decode(&res[..])
+        ArrowProgram::decode(&res[..])
             .unwrap()
             .try_into()
             .unwrap()

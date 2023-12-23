@@ -46,6 +46,7 @@ pub use ordered_float::OrderedFloat;
 
 // re-export avro for use in generated code
 pub use apache_avro;
+use arroyo_datastream::logical::LogicalGraph;
 use arroyo_rpc::var_str::VarStr;
 
 pub mod arrow;
@@ -174,7 +175,7 @@ pub struct WorkerServer {
     name: &'static str,
     hash: &'static str,
     controller_addr: String,
-    logical: DiGraph<LogicalNode, LogicalEdge>,
+    logical: LogicalGraph,
     state: Arc<Mutex<Option<EngineState>>>,
     network: Arc<Mutex<Option<NetworkManager>>>,
 }
@@ -183,7 +184,7 @@ impl WorkerServer {
     pub fn new(
         name: &'static str,
         hash: &'static str,
-        logical: DiGraph<LogicalNode, LogicalEdge>,
+        logical: LogicalGraph,
     ) -> Self {
         let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
             .unwrap_or_else(|_| LOCAL_CONTROLLER_ADDR.clone());

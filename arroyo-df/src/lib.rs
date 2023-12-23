@@ -63,8 +63,11 @@ use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
 use tracing::warn;
 use unicase::UniCase;
+use arroyo_datastream::logical::LogicalProgram;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
+
+const TIMESTAMP_FIELD: &str = "_timestamp";
 
 #[cfg(test)]
 mod test;
@@ -79,7 +82,7 @@ pub struct UdfDef {
 
 #[derive(Clone, Debug)]
 pub struct CompiledSql {
-    pub program: Program,
+    pub program: LogicalProgram,
     pub connection_ids: Vec<i64>,
     pub schemas: HashMap<String, StructDef>,
 }
@@ -458,6 +461,7 @@ impl Default for SqlConfig {
     }
 }
 
+
 pub async fn parse_and_get_program(
     query: &str,
     schema_provider: ArroyoSchemaProvider,
@@ -502,7 +506,7 @@ impl TreeNodeRewriter for TimestampRewriter {
             LogicalPlan::Union(ref mut union) => {
                 union.schema = add_timestamp_field(union.schema.clone())?;
             }
-            LogicalPlan::TableScan(_) => {}
+            LogicalPlan::TableScan(_) => { }
             LogicalPlan::SubqueryAlias(ref mut subquery_alias) => {
                 if !has_timestamp_field(subquery_alias.schema.clone()) {
                     let timestamp_field = DFField::new(

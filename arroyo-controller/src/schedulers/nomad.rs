@@ -138,7 +138,7 @@ impl Scheduler for NomadScheduler {
             for (key, value) in start_pipeline_req.env_vars.iter() {
                 env_vars.insert(key.to_string(), value.to_string());
             }
-
+            let pipeline_path: String = todo!();
             let job = json!({
                 "Job": {
                     "ID": format!("{}-{}-{}", start_pipeline_req.job_id, start_pipeline_req.run_id, worker_id),
@@ -173,7 +173,7 @@ impl Scheduler for NomadScheduler {
                                         "command": "pipeline"
                                     },
                                     "Artifacts": [{
-                                        "GetterSource": start_pipeline_req.pipeline_path,
+                                        "GetterSource": pipeline_path,
                                     }],
                                     "Env": env_vars,
                                     "Resources": {

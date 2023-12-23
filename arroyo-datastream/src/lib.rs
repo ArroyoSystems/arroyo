@@ -1,6 +1,8 @@
 #![allow(clippy::new_without_default)]
 #![allow(clippy::comparison_chain)]
 
+pub mod logical;
+
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -38,10 +40,10 @@ use rand::{Rng, SeedableRng};
 use regex::Regex;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ArrowSchema {
+pub struct ArroyoSchema {
     pub schema: Arc<Schema>,
     pub timestamp_col: usize,
-    pub key_col: Option<usize>,
+    pub key_cols: Vec<usize>,
 }
 
 pub fn parse_type(s: &str) -> Type {
@@ -288,7 +290,7 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-#[derive(Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq)]
 pub struct ConnectorOp {
     // path of the operator that this will compile into (like `crate::sources::kafka::KafkaSource`)
     pub operator: String,
@@ -301,7 +303,7 @@ pub struct ConnectorOp {
 impl ConnectorOp {
     pub fn web_sink() -> Self {
         ConnectorOp {
-            operator: "GrpcSink::<#in_k, #in_t>".to_string(),
+            operator: "GrpcSink".to_string(),
             config: "{\"connection\": {}, \"table\": {}}".to_string(),
             description: "WebSink".to_string(),
         }

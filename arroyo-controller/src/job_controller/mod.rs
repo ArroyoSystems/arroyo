@@ -23,6 +23,7 @@ use arroyo_state::parquet::ParquetBackend;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
+use arroyo_datastream::logical::LogicalProgram;
 
 use crate::types::public::CheckpointState as DbCheckpointState;
 use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
@@ -78,7 +79,7 @@ pub enum JobState {
 pub struct RunningJobModel {
     job_id: String,
     state: JobState,
-    program: Program,
+    program: LogicalProgram,
     checkpoint_state: Option<CheckpointingOrCommittingState>,
     epoch: u32,
     min_epoch: u32,
@@ -544,7 +545,7 @@ impl JobController {
     pub fn new(
         pool: Pool,
         config: JobConfig,
-        program: Program,
+        program: LogicalProgram,
         epoch: u32,
         min_epoch: u32,
         worker_connects: HashMap<WorkerId, WorkerGrpcClient<Channel>>,
