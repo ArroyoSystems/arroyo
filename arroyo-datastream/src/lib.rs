@@ -39,11 +39,35 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use regex::Regex;
 
+pub const TIMESTAMP_FIELD: &str = "_timestamp";
+
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ArroyoSchema {
     pub schema: Arc<Schema>,
     pub timestamp_col: usize,
     pub key_cols: Vec<usize>,
+}
+
+impl ArroyoSchema {
+    pub fn new(schema: Arc<Schema>, timestamp_col: usize, key_cols: Vec<usize>) -> Self {
+        Self {
+            schema,
+            timestamp_col,
+            key_cols,
+        }
+    }
+
+    pub fn from_schema_keys(schema: Arc<Schema>, key_cols: Vec<usize>) -> anyhow::Result<Self> {
+        let timestamp_col = schema.column_with_name(TIMESTAMP_FIELD)
+            .ok_or_else(|| anyhow!("no {} field in schema", TIMESTAMP_FIELD))?.0;
+
+        Ok(Self {
+            schema,
+            timestamp_col,
+            key_cols
+        })
+    }
 }
 
 pub fn parse_type(s: &str) -> Type {

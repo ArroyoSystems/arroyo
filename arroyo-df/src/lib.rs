@@ -67,8 +67,6 @@ use arroyo_datastream::logical::LogicalProgram;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
-const TIMESTAMP_FIELD: &str = "_timestamp";
-
 #[cfg(test)]
 mod test;
 

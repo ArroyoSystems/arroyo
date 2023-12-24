@@ -6,7 +6,7 @@ use std::{
 };
 
 use arrow_schema::{DataType, Schema};
-use arroyo_datastream::{ArroyoSchema, ConnectorOp, EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program, ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator, Stream, StreamEdge, StreamNode, TumblingTopN, TumblingWindowAggregator, WatermarkStrategy, WindowAgg, WindowType};
+use arroyo_datastream::{ArroyoSchema, ConnectorOp, EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program, ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator, Stream, StreamEdge, StreamNode, TIMESTAMP_FIELD, TumblingTopN, TumblingWindowAggregator, WatermarkStrategy, WindowAgg, WindowType};
 
 use datafusion::{
     datasource::MemTable,
@@ -26,7 +26,7 @@ use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
 use tracing::{info, warn};
 
-use crate::{physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor, TIMESTAMP_FIELD};
+use crate::{physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor};
 use crate::{
     tables::Table,
     types::{StructDef, StructField, StructPair, TypeDef},
@@ -233,7 +233,7 @@ pub(crate) async fn get_arrow_program(
                 let WindowType::Tumbling { width } = aggregate.window else {
                     bail!("only implemented tumbling windows currently")
                 };
-                let mut my_aggregate = aggregate.aggregate.clone();
+                let my_aggregate = aggregate.aggregate.clone();
                 let logical_plan = LogicalPlan::Aggregate(my_aggregate);
 
                 let LogicalPlan::TableScan(table_scan) = aggregate.aggregate.input.as_ref() else {
@@ -332,7 +332,7 @@ pub(crate) async fn get_arrow_program(
                         new_node_index,
                         LogicalEdge {
                             edge_type: LogicalEdgeType::Shuffle,
-                            schema: to_arroyo_schema(logical_plan.schema(), aggregate.key_fields.clone())
+                            schema: to_arroyo_schema(aggregate.aggregate.input.schema(), aggregate.key_fields.clone()),
                         },
                     );
                 }
