@@ -164,10 +164,10 @@ impl ArrowCollector {
             record
         };
 
-        if record.schema() != out_schema.schema {
-            panic!("Invalid schema {} output: {:?}\nexpected: {:?}\nprojection: {:?}",
-                   self.task_info.operator_id, record.schema(), out_schema.schema, self.projection);
-        }
+        let record = RecordBatch::try_new(out_schema.schema.clone(), record.columns().to_vec())
+            .unwrap_or_else(|e| {
+                panic!("Data does not match expecte schema for {}: {:?}", self.task_info.operator_id, e);
+            });
 
         let keys = if out_schema.key_cols.is_empty() {
             None

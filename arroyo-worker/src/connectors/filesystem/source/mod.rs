@@ -2,6 +2,7 @@ use core::panic;
 use std::future::ready;
 use std::pin::Pin;
 use std::{collections::HashMap, marker::PhantomData};
+use std::time::SystemTime;
 
 use anyhow::Result;
 use arrow_array::RecordBatch;
@@ -9,6 +10,7 @@ use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use datafusion_common::ScalarValue;
 use futures::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
@@ -29,7 +31,7 @@ use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::{ControlMessage, grpc::StopMode, OperatorConfig};
 use arroyo_storage::StorageProvider;
-use arroyo_types::{ArrowMessage, Data, SourceError, UserError};
+use arroyo_types::{ArrowMessage, Data, SourceError, to_nanos, UserError};
 use typify::import_types;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::ConnectorOp;
@@ -381,15 +383,26 @@ impl FileSystemSourceFunc {
         loop {
             select! {
                 item = reader.next() => {
-                    match item {
-                        Some(value) => {
-                            let batch = RecordBatch::try_new(
+                    match item.transpose()? {
+                        Some(batch) => {
+                            let mut columns = batch.columns().to_vec();
+                            let current_time = to_nanos(SystemTime::now());
+                            let current_time_scalar =
+                                ScalarValue::TimestampNanosecond(Some(current_time as i64), None);
+
+                            let time_column = current_time_scalar
+                                .to_array_of_size(batch.num_rows())
+                                .unwrap();
+
+                            columns.push(time_column);
+
+                            let out_batch = RecordBatch::try_new(
                                 out_schema.schema.clone(),
-                                value?.columns().to_vec()
+                                columns
                             ).map_err(|e| UserError::new("data does not match schema",
                                 format!("The parquet file has a schema that does not match the table schema: {:?}", e)))?;
 
-                            ctx.collect(batch).await;
+                            ctx.collect(out_batch).await;
                             records_read += 1;
                         }
                         None => {
