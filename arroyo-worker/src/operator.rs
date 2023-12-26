@@ -5,12 +5,14 @@ use std::{
 };
 use std::collections::BTreeSet;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::inq_reader::InQReader;
 use arrow::row::{Row, RowConverter};
 use arrow_array::{Array, ArrayRef, PrimitiveArray, RecordBatch};
 use arrow_array::types::TimestampNanosecondType;
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion_common::ScalarValue;
 use arroyo_datastream::ArroyoSchema;
@@ -30,7 +32,7 @@ use rand::{random};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error, Instrument, warn};
 use arroyo_state::tables::time_key_map::TimeKeyMap;
-use crate::ControlOutcome;
+use crate::{ControlOutcome, SourceFinishType};
 use crate::engine::{ArrowContext, CheckpointCounter, WatermarkHolder};
 use crate::metrics::TaskCounters;
 
@@ -209,12 +211,12 @@ impl ProcessFnUtils {
     }
 }
 
-pub trait ArrowOperatorConstructor<C: prost::Message, T: ArrowOperator>: ArrowOperator {
+pub trait ArrowOperatorConstructor<C: prost::Message, T: BaseOperator>: BaseOperator {
     fn from_config(config: C) -> anyhow::Result<T>;
 }
 
-#[async_trait::async_trait]
-pub trait ArrowOperator: Send + 'static {
+#[async_trait]
+pub trait BaseOperator: Send + 'static {
     fn start(
         mut self: Box<Self>,
         task_info: TaskInfo,
@@ -256,33 +258,100 @@ pub trait ArrowOperator: Send + 'static {
 
             self.on_start(&mut ctx).await;
 
-            let task_info = ctx.task_info.clone();
-            let name = self.name();
-            let mut counter = CheckpointCounter::new(in_qs.len());
-            let mut closed: HashSet<usize> = HashSet::new();
-            let mut sel = InQReader::new();
-            let in_partitions = in_qs.len();
 
-            for (i, mut q) in in_qs.into_iter().enumerate() {
-                let stream = async_stream::stream! {
+            let final_message = self.run_behavior(&mut ctx, in_qs).await;
+
+            if let Some(final_message) = final_message {
+                ctx.broadcast(final_message).await;
+            }
+            tracing::info!("Task finished {}-{}", ctx.task_info.operator_name, ctx.task_info.task_index);
+
+            ctx.control_tx
+                .send(ControlResp::TaskFinished {
+                    operator_id: ctx.task_info.operator_id.clone(),
+                    task_index: ctx.task_info.task_index,
+                })
+                .await
+                .expect("control response unwrap");
+        })
+    }
+
+    async fn run_behavior(mut self: Box<Self>, ctx: &mut ArrowContext, in_qs: Vec<Receiver<ArrowMessage>>) -> Option<ArrowMessage>;
+
+    async fn checkpoint(
+        &mut self,
+        checkpoint_barrier: CheckpointBarrier,
+        ctx: &mut ArrowContext,
+    ) -> bool {
+        ctx.send_checkpoint_event(
+            checkpoint_barrier,
+            TaskCheckpointEventType::StartedCheckpointing,
+        ).await;
+
+        self.handle_checkpoint(checkpoint_barrier, ctx).await;
+
+        ctx.send_checkpoint_event(
+            checkpoint_barrier,
+            TaskCheckpointEventType::FinishedOperatorSetup,
+        )
+            .await;
+
+        let watermark = ctx.watermarks.last_present_watermark();
+
+        ctx.state.checkpoint(checkpoint_barrier, watermark).await;
+
+        ctx.send_checkpoint_event(checkpoint_barrier, TaskCheckpointEventType::FinishedSync)
+            .await;
+
+        ctx.broadcast(ArrowMessage::Barrier(checkpoint_barrier))
+            .await;
+
+        checkpoint_barrier.then_stop
+    }
+
+
+    fn name(&self) -> String;
+
+    fn tables(&self) -> Vec<TableDescriptor>;
+
+    async fn on_start(&mut self, ctx: &mut ArrowContext);
+
+    async fn on_close(&mut self, ctx: &mut ArrowContext);
+
+    #[allow(unused)]
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {}
+}
+
+
+#[async_trait]
+impl <T: ArrowOperator> BaseOperator for T {
+    async fn run_behavior(mut self: Box<Self>, ctx: &mut ArrowContext, mut in_qs: Vec<Receiver<ArrowMessage>>) -> Option<ArrowMessage> {
+        let task_info = ctx.task_info.clone();
+        let name = self.name();
+        let mut counter = CheckpointCounter::new(in_qs.len());
+        let mut closed: HashSet<usize> = HashSet::new();
+        let mut sel = InQReader::new();
+        let in_partitions = in_qs.len();
+
+        for (i, mut q) in in_qs.into_iter().enumerate() {
+            let stream = async_stream::stream! {
                   while let Some(item) = q.recv().await {
                     yield(i,item);
                   }
                 };
-                sel.push(Box::pin(stream));
-            }
-            let mut blocked = vec![];
-            let mut final_message = None;
+            sel.push(Box::pin(stream));
+        }
+        let mut blocked = vec![];
+        let mut final_message = None;
 
+        let mut ticks = 0u64;
+        let mut interval = tokio::time::interval(self.tick_interval().unwrap_or(Duration::from_secs(60)));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-            let mut ticks = 0u64;
-            let mut interval = tokio::time::interval(self.tick_interval().unwrap_or(Duration::from_secs(60)));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-            loop {
-                tokio::select! {
+        loop {
+            tokio::select! {
                     Some(control_message) = ctx.control_rx.recv() => {
-                        self.handle_controller_message(control_message, &mut ctx).await;
+                        self.handle_controller_message(control_message, ctx).await;
                     }
 
                     p = sel.next() => {
@@ -295,14 +364,14 @@ pub trait ArrowOperator: Send + 'static {
 
                                 if let ArrowMessage::Record(record) = message {
                                     TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
-                                    Self::process_batch(&mut(*self),record, &mut ctx)
+                                    Self::process_batch(&mut(*self),record, ctx)
                                         .instrument(tracing::trace_span!("handle_fn",
                                             name,
                                             operator_id = task_info.operator_id,
                                             subtask_idx = task_info.task_index)
                                     ).await;
                                 } else {
-                                    match self.handle_control_message(idx, &message, &mut counter, &mut closed, in_partitions, &mut ctx).await {
+                                    match self.handle_control_message(idx, &message, &mut counter, &mut closed, in_partitions, ctx).await {
                                         ControlOutcome::Continue => {}
                                         ControlOutcome::Stop => {
                                             final_message = Some(ArrowMessage::Stop);
@@ -333,26 +402,37 @@ pub trait ArrowOperator: Send + 'static {
                         }
                     }
                     _ = interval.tick() => {
-                        self.handle_tick(ticks, &mut ctx).await;
+                        self.handle_tick(ticks, ctx).await;
                         ticks += 1;
                     }
                 }
-            }
-
-            if let Some(final_message) = final_message {
-                ctx.broadcast(final_message).await;
-            }
-            tracing::info!("Task finished {}-{}", ctx.task_info.operator_name, ctx.task_info.task_index);
-
-            ctx.control_tx
-                .send(arroyo_rpc::ControlResp::TaskFinished {
-                    operator_id: ctx.task_info.operator_id.clone(),
-                    task_index: ctx.task_info.task_index,
-                })
-                .await
-                .expect("control response unwrap");
-        })
+        }
+        final_message
     }
+
+    fn name(&self) -> String {
+        self.name()
+    }
+
+    fn tables(&self) -> Vec<TableDescriptor> {
+        self.tables()
+    }
+
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        self.on_start(ctx).await;
+    }
+
+    async fn on_close(&mut self, ctx: &mut ArrowContext) {
+        self.on_close(ctx).await;
+    }
+
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {
+        self.handle_checkpoint(b, ctx).await;
+    }
+}
+
+#[async_trait::async_trait]
+pub trait ArrowOperator: Send + 'static + Sized {
 
     async fn handle_watermark_int(
         &mut self,
@@ -489,38 +569,6 @@ pub trait ArrowOperator: Send + 'static {
     }
 
 
-    async fn checkpoint(
-        &mut self,
-        checkpoint_barrier: CheckpointBarrier,
-        ctx: &mut ArrowContext,
-    ) -> bool {
-        ctx.send_checkpoint_event(
-            checkpoint_barrier,
-            TaskCheckpointEventType::StartedCheckpointing,
-        )
-            .await;
-
-        self.handle_checkpoint(checkpoint_barrier, ctx).await;
-
-        ctx.send_checkpoint_event(
-            checkpoint_barrier,
-            TaskCheckpointEventType::FinishedOperatorSetup,
-        )
-            .await;
-
-        let watermark = ctx.watermarks.last_present_watermark();
-
-        ctx.state.checkpoint(checkpoint_barrier, watermark).await;
-
-        ctx.send_checkpoint_event(checkpoint_barrier, TaskCheckpointEventType::FinishedSync)
-            .await;
-
-        ctx.broadcast(ArrowMessage::Barrier(checkpoint_barrier))
-            .await;
-
-        checkpoint_barrier.then_stop
-    }
-
     fn name(&self) -> String;
 
     fn tables(&self) -> Vec<TableDescriptor> {
@@ -555,6 +603,7 @@ pub trait ArrowOperator: Send + 'static {
         warn!("default handling of commit with epoch {:?}", epoch);
     }
 
+    #[allow(unused_variables)]
     async fn handle_tick(&mut self, tick: u64, ctx: &mut ArrowContext) {}
 
     #[allow(unused_variables)]

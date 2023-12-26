@@ -26,7 +26,7 @@ use quote::{quote, ToTokens};
 use syn::{parse_quote, parse_str, Type};
 use tracing::{info, warn};
 
-use crate::{physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor};
+use crate::{DataFusionEdge, physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor};
 use crate::{
     tables::Table,
     types::{StructDef, StructField, StructPair, TypeDef},
@@ -119,6 +119,20 @@ pub(crate) async fn get_arrow_program(
                         idle_time_micros: None,
                     }.encode_to_vec()
                 });
+
+                let mut edge: LogicalEdge = (&DataFusionEdge {
+                    schema: table_scan.projected_schema.clone(),
+                    edge_type: LogicalEdgeType::Forward,
+                    key_cols: vec![],
+                }).try_into().unwrap();
+
+                edge.projection = table_scan.projection.clone();
+
+                program_graph.add_edge(
+                    source_index,
+                    watermark_index,
+                    edge,
+                );
 
                 node_mapping.insert(node_index, watermark_index);
                 watermark_index

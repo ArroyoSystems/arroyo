@@ -575,10 +575,20 @@ impl LogicalPlanExtension {
                     key_cols: key_columns.clone(),
                 }
             }
-            LogicalPlanExtension::AggregateCalculation(aggregate_calculation) => DataFusionEdge {
-                schema: aggregate_calculation.aggregate.schema.clone(),
-                edge_type: LogicalEdgeType::Forward,
-                key_cols: vec![],
+            LogicalPlanExtension::AggregateCalculation(aggregate_calculation) => {
+                let aggregate_schema = aggregate_calculation.aggregate.schema.clone();
+                let mut fields = aggregate_schema.fields().clone();
+
+                fields.insert(aggregate_calculation.window_index, aggregate_calculation.window_field.clone());
+
+                let output_schema = add_timestamp_field(Arc::new(
+                    DFSchema::new_with_metadata(fields, aggregate_schema.metadata().clone()).unwrap())).unwrap();
+
+                DataFusionEdge {
+                    schema: output_schema,
+                    edge_type: LogicalEdgeType::Forward,
+                    key_cols: vec![],
+                }
             },
             LogicalPlanExtension::Sink => unreachable!(),
         }
@@ -837,7 +847,8 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                     DataFusionEdge {
                         schema: input_df_schema,
                         edge_type: LogicalEdgeType::Shuffle,
-                        key_cols: (0..key_count).collect(),
+                        // start at 1 to exclude the window
+                        key_cols: (1..key_count).collect(),
                     },
                 );
                 let mut schema_with_timestamp = schema.fields().clone();

@@ -7,6 +7,7 @@ use anyhow::Result;
 use arrow_array::RecordBatch;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
@@ -18,6 +19,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     select,
 };
+use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::Stream;
 use tracing::{info, warn};
@@ -27,22 +29,24 @@ use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::{ControlMessage, grpc::StopMode, OperatorConfig};
 use arroyo_storage::StorageProvider;
-use arroyo_types::{Data, SourceError, UserError};
+use arroyo_types::{ArrowMessage, Data, SourceError, UserError};
 use typify::import_types;
+use arroyo_rpc::grpc::api;
+use arroyo_rpc::grpc::api::ConnectorOp;
 
 use crate::{RateLimiter, SourceFinishType};
+use crate::engine::ArrowContext;
 use crate::old::Context;
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 
-#[derive(StreamNode)]
-pub struct FileSystemSourceFunc<K: Data, T: SchemaData + Data> {
+pub struct FileSystemSourceFunc {
     table: TableType,
-    deserializer: DataDeserializer<T>,
+    deserializer: DataDeserializer<()>,
     bad_data: Option<BadData>,
     rate_limiter: RateLimiter,
     file_states: HashMap<String, FileReadState>,
-    _t: PhantomData<(K, T)>,
 }
 
 #[derive(Encode, Decode, Debug, Clone, PartialEq, PartialOrd)]
@@ -51,28 +55,29 @@ enum FileReadState {
     RecordsRead(usize),
 }
 
-#[source_fn(out_t = T)]
-impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
-    pub fn from_config(config_str: &str) -> Self {
+impl ArrowOperatorConstructor<api::ConnectorOp, Self> for FileSystemSourceFunc {
+    fn from_config(config: ConnectorOp) -> Result<Self> {
         let config: OperatorConfig =
-            serde_json::from_str(config_str).expect("Invalid config for FileSystemSourceFunc");
+            serde_json::from_str(&config.config).expect("Invalid config for FileSystemSourceFunc");
         let table: FileSystemTable = serde_json::from_value(config.table)
             .expect("should be able to deserialize to FileSystemTable");
         let format = config
             .format
             .expect("Format must be set for filesystem source");
 
-        Self {
+        Ok(Self {
             table: table.table_type,
             deserializer: DataDeserializer::new(format, config.framing),
             bad_data: config.bad_data,
             rate_limiter: RateLimiter::new(),
             file_states: HashMap::new(),
-            _t: PhantomData,
-        }
+        })
     }
+}
 
-    pub fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
+#[async_trait]
+impl BaseOperator for FileSystemSourceFunc {
+    fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
         vec![arroyo_state::global_table('a', "fs")]
     }
 
@@ -80,17 +85,26 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
         "FileSystem".to_string()
     }
 
-    async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
+    async fn run_behavior(mut self: Box<Self>, ctx: &mut ArrowContext, _: Vec<Receiver<ArrowMessage>>) -> Option<ArrowMessage> {
         match self.run_int(ctx).await {
-            Ok(r) => r,
+            Ok(s) => s.into(),
             Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
 
                 panic!("{}: {}", e.name, e.details);
             }
         }
+
     }
 
+    async fn on_start(&mut self, _: &mut ArrowContext) {
+    }
+
+    async fn on_close(&mut self, _: &mut ArrowContext) {
+    }
+}
+
+impl FileSystemSourceFunc {
     fn get_compression_format(&self) -> CompressionFormat {
         match &self.table {
             TableType::Source {
@@ -102,7 +116,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
         }
     }
 
-    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
         if ctx.task_info.task_index != 0 {
             return Ok(SourceFinishType::Final);
         }
@@ -235,97 +249,97 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
         }
     }
 
-    async fn get_item_stream(
-        &mut self,
-        storage_provider: &StorageProvider,
-        path: String,
-    ) -> Result<Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>, UserError> {
-        let format = self.deserializer.get_format().clone();
-        match *format {
-            arroyo_rpc::formats::Format::Json(_) => {
-                let deserializer = self.deserializer.clone();
-                let stream_reader = storage_provider.get_as_stream(path).await.unwrap();
-
-                let compression_reader: Box<dyn AsyncRead + Unpin + Send> =
-                    match self.get_compression_format() {
-                        CompressionFormat::Zstd => {
-                            Box::new(ZstdDecoder::new(BufReader::new(stream_reader)))
-                        }
-                        CompressionFormat::Gzip => {
-                            Box::new(GzipDecoder::new(BufReader::new(stream_reader)))
-                        }
-                        CompressionFormat::None => Box::new(BufReader::new(stream_reader)),
-                    };
-                // use line iterators
-                let lines = LinesStream::new(BufReader::new(compression_reader).lines());
-                let x = Box::new(lines.map(move |res| match res {
-                    Ok(line) => deserializer.deserialize_single(line.as_bytes()),
-                    Err(err) => Err(SourceError::other(
-                        "could not read line from stream",
-                        err.to_string(),
-                    )),
-                }))
-                    as Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>;
-                Ok(x as Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>)
-            }
-            arroyo_rpc::formats::Format::Avro(_) => todo!(),
-            arroyo_rpc::formats::Format::Parquet(_) => {
-                let object_meta = storage_provider
-                    .get_backing_store()
-                    .head(&(path.clone().into()))
-                    .await
-                    .map_err(|err| {
-                        UserError::new("could not get object metadata", err.to_string())
-                    })?;
-                let object_reader =
-                    ParquetObjectReader::new(storage_provider.get_backing_store(), object_meta);
-                let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
-                    .await
-                    .map_err(|err| {
-                        UserError::new(
-                            "could not create parquet record batch stream builder",
-                            format!("path:{}, err:{}", path, err),
-                        )
-                    })?;
-                let stream = reader_builder.build().map_err(|err| {
-                    UserError::new(
-                        "could not build parquet record batch stream",
-                        err.to_string(),
-                    )
-                })?;
-                let result = Box::new(stream.flat_map(|res| match res {
-                    Ok(record_batch) => {
-                        let iterator = match T::iterator_from_record_batch(record_batch) {
-                            Ok(iterator) => iterator.map(|item| Ok(item)),
-                            Err(err) => {
-                                return Box::pin(tokio_stream::once(Err(SourceError::other(
-                                    "could not get iterator from parquet record batch",
-                                    err.to_string(),
-                                ))))
-                                    as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>
-                            }
-                        };
-
-                        let stream = futures::stream::iter(iterator);
-                        Box::pin(stream)
-                            as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>
-                    }
-                    Err(err) => Box::pin(tokio_stream::once(Err(SourceError::other(
-                        "could not read record batch from stream",
-                        err.to_string(),
-                    ))))
-                        as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>,
-                }))
-                    as Box<dyn Stream<Item = Result<T, SourceError>> + Send + Unpin>;
-                Ok(result)
-            }
-            arroyo_rpc::formats::Format::RawString(_) => todo!(),
-        }
-    }
+    // async fn get_item_stream(
+    //     &mut self,
+    //     storage_provider: &StorageProvider,
+    //     path: String,
+    // ) -> Result<Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>, UserError> {
+    //     let format = self.deserializer.get_format().clone();
+    //     match *format {
+    //         arroyo_rpc::formats::Format::Json(_) => {
+    //             let deserializer = self.deserializer.clone();
+    //             let stream_reader = storage_provider.get_as_stream(path).await.unwrap();
+    //
+    //             let compression_reader: Box<dyn AsyncRead + Unpin + Send> =
+    //                 match self.get_compression_format() {
+    //                     CompressionFormat::Zstd => {
+    //                         Box::new(ZstdDecoder::new(BufReader::new(stream_reader)))
+    //                     }
+    //                     CompressionFormat::Gzip => {
+    //                         Box::new(GzipDecoder::new(BufReader::new(stream_reader)))
+    //                     }
+    //                     CompressionFormat::None => Box::new(BufReader::new(stream_reader)),
+    //                 };
+    //             // use line iterators
+    //             let lines = LinesStream::new(BufReader::new(compression_reader).lines());
+    //             let x = Box::new(lines.map(move |res| match res {
+    //                 Ok(line) => deserializer.deserialize_single(line.as_bytes()),
+    //                 Err(err) => Err(SourceError::other(
+    //                     "could not read line from stream",
+    //                     err.to_string(),
+    //                 )),
+    //             }))
+    //                 as Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>;
+    //             Ok(x as Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>)
+    //         }
+    //         arroyo_rpc::formats::Format::Avro(_) => todo!(),
+    //         arroyo_rpc::formats::Format::Parquet(_) => {
+    //             let object_meta = storage_provider
+    //                 .get_backing_store()
+    //                 .head(&(path.clone().into()))
+    //                 .await
+    //                 .map_err(|err| {
+    //                     UserError::new("could not get object metadata", err.to_string())
+    //                 })?;
+    //             let object_reader =
+    //                 ParquetObjectReader::new(storage_provider.get_backing_store(), object_meta);
+    //             let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
+    //                 .await
+    //                 .map_err(|err| {
+    //                     UserError::new(
+    //                         "could not create parquet record batch stream builder",
+    //                         format!("path:{}, err:{}", path, err),
+    //                     )
+    //                 })?;
+    //             let stream = reader_builder.build().map_err(|err| {
+    //                 UserError::new(
+    //                     "could not build parquet record batch stream",
+    //                     err.to_string(),
+    //                 )
+    //             })?;
+    //             let result = Box::new(stream.flat_map(|res| match res {
+    //                 Ok(record_batch) => {
+    //                     let iterator = match T::iterator_from_record_batch(record_batch) {
+    //                         Ok(iterator) => iterator.map(|item| Ok(item)),
+    //                         Err(err) => {
+    //                             return Box::pin(tokio_stream::once(Err(SourceError::other(
+    //                                 "could not get iterator from parquet record batch",
+    //                                 err.to_string(),
+    //                             ))))
+    //                                 as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>
+    //                         }
+    //                     };
+    //
+    //                     let stream = futures::stream::iter(iterator);
+    //                     Box::pin(stream)
+    //                         as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>
+    //                 }
+    //                 Err(err) => Box::pin(tokio_stream::once(Err(SourceError::other(
+    //                     "could not read record batch from stream",
+    //                     err.to_string(),
+    //                 ))))
+    //                     as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>,
+    //             }))
+    //                 as Box<dyn Stream<Item = Result<T, SourceError>> + Send + Unpin>;
+    //             Ok(result)
+    //         }
+    //         arroyo_rpc::formats::Format::RawString(_) => todo!(),
+    //     }
+    // }
 
     async fn read_file(
         &mut self,
-        ctx: &mut Context<(), T>,
+        ctx: &mut ArrowContext,
         storage_provider: &StorageProvider,
         obj_key: &String,
     ) -> Result<Option<SourceFinishType>, UserError> {
@@ -342,9 +356,11 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                 ));
             }
         };
+
         let mut reader = self
             .get_record_batch_stream(storage_provider, obj_key.to_string())
             .await?;
+
         if records_read > 0 {
             warn!("skipping {} items", records_read);
             for _ in 0..records_read {
@@ -359,12 +375,21 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
                 })?;
             }
         }
+
+        let out_schema = ctx.out_schema.as_ref().unwrap().clone();
+
         loop {
             select! {
                 item = reader.next() => {
                     match item {
                         Some(value) => {
-                            ctx.collect_record_batch(value?).await;
+                            let batch = RecordBatch::try_new(
+                                out_schema.schema.clone(),
+                                value?.columns().to_vec()
+                            ).map_err(|e| UserError::new("data does not match schema",
+                                format!("The parquet file has a schema that does not match the table schema: {:?}", e)))?;
+
+                            ctx.collect(batch).await;
                             records_read += 1;
                         }
                         None => {
@@ -389,7 +414,7 @@ impl<K: Data, T: SchemaData> FileSystemSourceFunc<K, T> {
 
     async fn process_control_message(
         &mut self,
-        ctx: &mut Context<(), T>,
+        ctx: &mut ArrowContext,
         control_message: ControlMessage,
     ) -> Option<SourceFinishType> {
         match control_message {

@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
 use async_trait::async_trait;
+use tokio::sync::mpsc::Receiver;
 use tracing::{debug, info};
 use typify::import_types;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
 
 import_types!(schema = "../connector-schemas/impulse/table.json");
 
@@ -182,7 +183,7 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for ImpulseSourceFunc {
 
 
 #[async_trait]
-impl ArrowOperator for ImpulseSourceFunc {
+impl BaseOperator for ImpulseSourceFunc {
     fn name(&self) -> String {
         "impulse-source".to_string()
     }
@@ -191,7 +192,7 @@ impl ArrowOperator for ImpulseSourceFunc {
         vec![arroyo_state::global_table("i", "impulse source state")]
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+    async fn run_behavior(mut self: Box<Self>, ctx: &mut ArrowContext, _: Vec<Receiver<ArrowMessage>>) -> Option<ArrowMessage> {
         let s = ctx
             .state
             .get_global_keyed_state::<usize, ImpulseSourceState>('i')
@@ -201,10 +202,12 @@ impl ArrowOperator for ImpulseSourceFunc {
             self.state = *state;
         }
 
-        self.run(ctx).await;
+        self.run(ctx).await.into()
     }
 
-    async fn process_batch(&mut self, _: RecordBatch, _: &mut ArrowContext) {
-        unreachable!("process batch should not be called on a source");
+    async fn on_start(&mut self, _: &mut ArrowContext) {
+    }
+
+    async fn on_close(&mut self, _: &mut ArrowContext) {
     }
 }

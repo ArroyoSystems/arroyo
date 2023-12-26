@@ -17,10 +17,7 @@ use arroyo_rpc::grpc::{
     TaskStartedReq, WorkerErrorReq, WorkerResources,
 };
 use arroyo_server_common::start_admin_server;
-use arroyo_types::{
-    from_millis, grpc_port, ports, string_to_map, to_micros, CheckpointBarrier, NodeId, WorkerId,
-    JOB_ID_ENV, RUN_ID_ENV,
-};
+use arroyo_types::{from_millis, grpc_port, ports, string_to_map, to_micros, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV, ArrowMessage};
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
@@ -77,6 +74,22 @@ pub enum SourceFinishType {
     Immediate,
     // EndOfData messages are propagated, causing MAX_WATERMARK and flushing all timers
     Final,
+}
+
+impl From<SourceFinishType> for Option<ArrowMessage> {
+    fn from(value: SourceFinishType) -> Self {
+        match value {
+            SourceFinishType::Graceful => {
+                Some(ArrowMessage::Stop)
+            }
+            SourceFinishType::Immediate => {
+                None
+            }
+            SourceFinishType::Final => {
+                Some(ArrowMessage::EndOfData)
+            }
+        }
+    }
 }
 
 pub enum ControlOutcome {

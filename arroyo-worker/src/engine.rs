@@ -31,8 +31,9 @@ use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, RateLimiter, TIMER_T
 use arroyo_state::{BackingStore, StateBackend, StateStore};
 use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
 use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
+use crate::connectors::filesystem::source::FileSystemSourceFunc;
 use crate::connectors::impulse::ImpulseSourceFunc;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, server_for_hash};
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator, server_for_hash};
 use crate::operators::PeriodicWatermarkGenerator;
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
@@ -138,13 +139,11 @@ pub struct ArrowCollector {
 
 impl ArrowCollector {
     pub async fn collect(&mut self, record: RecordBatch) {
-        assert_eq!(record.num_rows(), 1);
-
-        fn out_idx(keys: Option<&ArrayRef>, qs: usize) -> usize {
+        fn out_idx(keys: Option<Vec<ArrayRef>>, qs: usize) -> usize {
             let hash = if let Some(keys) = keys {
                 let mut buf = vec![0];
                 let result =
-                    hash_utils::create_hashes(&[keys.clone()], &ahash::RandomState::new(), &mut buf)
+                    hash_utils::create_hashes(&keys[..], &ahash::RandomState::new(), &mut buf)
                         .unwrap();
                 result[0]
             } else {
@@ -170,7 +169,11 @@ impl ArrowCollector {
                    self.task_info.operator_id, record.schema(), out_schema.schema, self.projection);
         }
 
-        let keys = Some(record.column(0));
+        let keys = if out_schema.key_cols.is_empty() {
+            None
+        } else {
+            Some(out_schema.key_cols.iter().map(|i| record.column(*i).clone()).collect())
+        };
 
 
         if self.out_qs.len() == 1 {
@@ -511,7 +514,7 @@ pub struct SubtaskNode {
     pub in_schemas: Vec<ArroyoSchema>,
     pub out_schema: Option<ArroyoSchema>,
     pub projection: Option<Vec<usize>>,
-    pub node: Box<dyn ArrowOperator>,
+    pub node: Box<dyn BaseOperator>,
 }
 
 impl Debug for SubtaskNode {
@@ -1201,7 +1204,7 @@ impl Engine {
     }
 }
 
-pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn ArrowOperator> {
+pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn BaseOperator> {
     let mut buf = config.as_slice();
     match operator {
         OperatorName::Watermark => {
@@ -1220,6 +1223,7 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn Ar
             let op: api::ConnectorOp = prost::Message::decode(&mut buf).unwrap();
             match op.operator.as_str() {
                 "connectors::impulse::ImpulseSourceFunc" => Box::new(ImpulseSourceFunc::from_config(op).unwrap()),
+                "connectors::filesystem::source::FileSystemSourceFunc" => Box::new(FileSystemSourceFunc::from_config(op).unwrap()),
                 "GrpcSink" => Box::new(GrpcRecordBatchSink::from_config(op).unwrap()),
                 c => panic!("unknown operator {}", c),
             }

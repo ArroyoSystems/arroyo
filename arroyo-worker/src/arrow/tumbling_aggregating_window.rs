@@ -203,7 +203,7 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self> for TumblingAg
         let window_field = Arc::new(Field::new(
             proto_config.window_field_name,
             window_arrow_struct(),
-            false,
+            true,
         ));
 
         let key_indices: Vec<_> = proto_config
@@ -556,7 +556,9 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                             DataType::Timestamp(TimeUnit::Nanosecond, None),
                             false,
                         )));
+
                         fields.insert(self.window_index, self.window_field.clone());
+
                         let mut columns = batch.columns().to_vec();
                         columns.push(timestamp_array);
                         let DataType::Struct(struct_fields) = self.window_field.data_type() else {
