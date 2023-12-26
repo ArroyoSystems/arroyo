@@ -29,11 +29,11 @@ use crate::metrics::{QueueGauges, register_queue_gauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, RateLimiter, TIMER_TABLE};
 use arroyo_state::{BackingStore, StateBackend, StateStore};
-use crate::arrow::{DefaultTimestampWatermark, GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
+use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
 use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
 use crate::connectors::impulse::ImpulseSourceFunc;
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, server_for_hash};
-use crate::operators::sinks::GrpcSink;
+use crate::operators::PeriodicWatermarkGenerator;
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
 
@@ -129,6 +129,8 @@ impl ErrorReporter {
 #[derive(Clone)]
 pub struct ArrowCollector {
     task_info: Arc<TaskInfo>,
+    out_schema: Option<ArroyoSchema>,
+    projection: Option<Vec<usize>>,
     out_qs: Vec<Vec<Sender<ArrowMessage>>>,
     tx_queue_rem_gauges: QueueGauges,
     tx_queue_size_gauges: QueueGauges,
@@ -154,6 +156,19 @@ impl ArrowCollector {
         }
 
         TaskCounters::MessagesSent.for_task(&self.task_info).inc();
+
+        let out_schema = self.out_schema.as_ref().unwrap();
+
+        let record = if let Some(projection) = &self.projection {
+            record.project(&projection).unwrap_or_else(|e| panic!("failed to project for operator {}: {}", self.task_info.operator_id, e))
+        } else {
+            record
+        };
+
+        if record.schema() != out_schema.schema {
+            panic!("Invalid schema {} output: {:?}\nexpected: {:?}\nprojection: {:?}",
+                   self.task_info.operator_id, record.schema(), out_schema.schema, self.projection);
+        }
 
         let keys = Some(record.column(0));
 
@@ -213,6 +228,7 @@ impl ArrowContext {
         input_partitions: usize,
         in_schemas: Vec<ArroyoSchema>,
         out_schema: Option<ArroyoSchema>,
+        projection: Option<Vec<usize>>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
         mut tables: Vec<TableDescriptor>,
     ) -> Self {
@@ -268,12 +284,14 @@ impl ArrowContext {
                 input_partitions
             ]),
             in_schemas,
-            out_schema,
+            out_schema: out_schema.clone(),
             collector: ArrowCollector {
                 task_info: task_info.clone(),
                 out_qs,
                 tx_queue_rem_gauges,
                 tx_queue_size_gauges,
+                out_schema,
+                projection,
             },
             error_reporter: ErrorReporter {
                 tx: control_tx,
@@ -492,6 +510,7 @@ pub struct SubtaskNode {
     pub parallelism: usize,
     pub in_schemas: Vec<ArroyoSchema>,
     pub out_schema: Option<ArroyoSchema>,
+    pub projection: Option<Vec<usize>>,
     pub node: Box<dyn ArrowOperator>,
 }
 
@@ -652,6 +671,13 @@ impl Program {
                 .map(|edge| edge.weight().schema.clone())
                 .next();
 
+            let projection = logical
+                .edges_directed(idx, Direction::Outgoing)
+                .map(|edge| edge.weight().projection.clone())
+                .next()
+                .unwrap_or_default();
+
+
             let node = logical.node_weight(idx).unwrap();
             let parallelism = *parallelism_map.get(&node.operator_id).unwrap_or_else(|| {
                 warn!("no assignments for operator {}", node.operator_id);
@@ -665,6 +691,7 @@ impl Program {
                     in_schemas: in_schemas.clone(),
                     out_schema: out_schema.clone(),
                     node: construct_operator(node.operator_name, node.operator_config.clone()),
+                    projection: projection.clone(),
                 }));
             }
         }
@@ -1107,6 +1134,7 @@ impl Engine {
             control_tx.clone(),
             node.in_schemas,
             node.out_schema,
+            node.projection,
             in_qs_map.into_values().collect(),
             out_qs_map
                 .into_values()
@@ -1177,7 +1205,7 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn Ar
     let mut buf = config.as_slice();
     match operator {
         OperatorName::Watermark => {
-            Box::new(DefaultTimestampWatermark::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
+            Box::new(PeriodicWatermarkGenerator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
         }
         OperatorName::ArrowValue => {
             Box::new(ValueExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())

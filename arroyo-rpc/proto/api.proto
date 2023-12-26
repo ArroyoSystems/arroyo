@@ -438,4 +438,5 @@ message ArrowEdge {
   int32 target = 2;
   ArroyoSchema schema = 4;
   EdgeType edge_type = 5;
+  repeated uint32 projection = 6;
 }

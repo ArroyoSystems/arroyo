@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use crate::inq_reader::InQReader;
 use arrow::row::{Row, RowConverter};
-use arrow_array::{Array, ArrayRef, RecordBatch};
+use arrow_array::{Array, ArrayRef, PrimitiveArray, RecordBatch};
+use arrow_array::types::TimestampNanosecondType;
 use bincode::{Decode, Encode};
 use datafusion_common::ScalarValue;
 use arroyo_datastream::ArroyoSchema;
@@ -34,6 +35,7 @@ use crate::engine::{ArrowContext, CheckpointCounter, WatermarkHolder};
 use crate::metrics::TaskCounters;
 
 pub trait TimerT: Data + PartialEq + Eq + 'static {}
+
 impl<T: Data + PartialEq + Eq + 'static> TimerT for T {}
 
 pub fn server_for_hash(x: u64, n: usize) -> usize {
@@ -78,6 +80,7 @@ impl TimeWindowAssigner for TumblingWindowAssigner {
         Some(self.size)
     }
 }
+
 #[derive(Clone, Copy)]
 pub struct InstantWindowAssigner {}
 
@@ -220,6 +223,7 @@ pub trait ArrowOperator: Send + 'static {
         control_tx: Sender<ControlResp>,
         in_schemas: Vec<ArroyoSchema>,
         out_schema: Option<ArroyoSchema>,
+        projection: Option<Vec<usize>>,
         in_qs: Vec<Vec<Receiver<ArrowMessage>>>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
     ) -> tokio::task::JoinHandle<()> {
@@ -244,6 +248,7 @@ pub trait ArrowOperator: Send + 'static {
                 in_qs.len(),
                 in_schemas,
                 out_schema,
+                projection,
                 out_qs,
                 tables,
             )
@@ -267,13 +272,18 @@ pub trait ArrowOperator: Send + 'static {
                 sel.push(Box::pin(stream));
             }
             let mut blocked = vec![];
+            let mut final_message = None;
+
+
+            let mut ticks = 0u64;
+            let mut interval = tokio::time::interval(self.tick_interval().unwrap_or(Duration::from_secs(60)));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             loop {
                 tokio::select! {
                     Some(control_message) = ctx.control_rx.recv() => {
                         self.handle_controller_message(control_message, &mut ctx).await;
                     }
-
 
                     p = sel.next() => {
                         match p {
@@ -295,10 +305,11 @@ pub trait ArrowOperator: Send + 'static {
                                     match self.handle_control_message(idx, &message, &mut counter, &mut closed, in_partitions, &mut ctx).await {
                                         ControlOutcome::Continue => {}
                                         ControlOutcome::Stop => {
-                                            ctx.broadcast(ArrowMessage::Stop).await;
+                                            final_message = Some(ArrowMessage::Stop);
                                             break;
-                                        }crate::ControlOutcome::Finish => {
-                                            ctx.broadcast(ArrowMessage::EndOfData).await;
+                                        }
+                                        ControlOutcome::Finish => {
+                                            final_message = Some(ArrowMessage::EndOfData);
                                             break;
                                         }
                                     }
@@ -319,10 +330,27 @@ pub trait ArrowOperator: Send + 'static {
                                 tracing::info!("[{}] Stream completed",ctx.task_info.operator_name);
                                 break;
                             }
+                        }
+                    }
+                    _ = interval.tick() => {
+                        self.handle_tick(ticks, &mut ctx).await;
+                        ticks += 1;
                     }
                 }
-                }
             }
+
+            if let Some(final_message) = final_message {
+                ctx.broadcast(final_message).await;
+            }
+            tracing::info!("Task finished {}-{}", ctx.task_info.operator_name, ctx.task_info.task_index);
+
+            ctx.control_tx
+                .send(arroyo_rpc::ControlResp::TaskFinished {
+                    operator_id: ctx.task_info.operator_id.clone(),
+                    task_index: ctx.task_info.task_index,
+                })
+                .await
+                .expect("control response unwrap");
         })
     }
 
@@ -351,7 +379,6 @@ pub trait ArrowOperator: Send + 'static {
     }
 
 
-
     async fn handle_controller_message(
         &mut self,
         control_message: ControlMessage,
@@ -370,9 +397,7 @@ pub trait ArrowOperator: Send + 'static {
             ControlMessage::LoadCompacted { compacted } => {
                 ctx.load_compacted(compacted).await;
             }
-            ControlMessage::NoOp => {
-
-            }
+            ControlMessage::NoOp => {}
         }
     }
 
@@ -502,6 +527,10 @@ pub trait ArrowOperator: Send + 'static {
         vec![]
     }
 
+    fn tick_interval(&self) -> Option<Duration> {
+        None
+    }
+
     #[allow(unused_variables)]
     async fn on_start(&mut self, ctx: &mut ArrowContext) {}
 
@@ -526,6 +555,16 @@ pub trait ArrowOperator: Send + 'static {
         warn!("default handling of commit with epoch {:?}", epoch);
     }
 
+    async fn handle_tick(&mut self, tick: u64, ctx: &mut ArrowContext) {}
+
     #[allow(unused_variables)]
     async fn on_close(&mut self, ctx: &mut ArrowContext) {}
+}
+
+pub fn get_timestamp_col<'a, 'b>(batch: &'a RecordBatch, ctx: &'b mut ArrowContext) -> &'a PrimitiveArray<TimestampNanosecondType> {
+    batch
+        .column(ctx.out_schema.as_ref().unwrap().timestamp_col)
+        .as_any()
+        .downcast_ref::<PrimitiveArray<TimestampNanosecondType>>()
+        .unwrap()
 }

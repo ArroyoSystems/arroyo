@@ -71,6 +71,25 @@ impl From<LogicalEdgeType> for api::EdgeType {
 pub struct LogicalEdge {
     pub edge_type: LogicalEdgeType,
     pub schema: ArroyoSchema,
+    pub projection: Option<Vec<usize>>,
+}
+
+impl LogicalEdge {
+    pub fn new(edge_type: LogicalEdgeType, schema: ArroyoSchema, projection: Option<Vec<usize>>) -> Self {
+        LogicalEdge {
+            edge_type,
+            schema,
+            projection
+        }
+    }
+
+    pub fn project_all(edge_type: LogicalEdgeType, schema: ArroyoSchema) -> Self {
+        LogicalEdge {
+            edge_type,
+            schema,
+            projection: None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -215,6 +234,11 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
                         timestamp_col: schema.timestamp_col as usize,
                         key_cols: schema.key_cols.iter().map(|t| *t as usize).collect(),
                     },
+                    projection: if edge.projection.is_empty() {
+                        None
+                    } else {
+                        Some(edge.projection.iter().map(|p| *p as usize).collect())
+                    }
                 },
             );
         }
@@ -254,6 +278,10 @@ impl From<LogicalProgram> for ArrowProgram {
                     key_cols: edge.schema.key_cols.iter().map(|k| *k as u32).collect(),
                 }),
                 edge_type: edge_type as i32,
+                projection: edge.projection
+                    .as_ref()
+                    .map(|p| p.iter().map(|v| *v as u32).collect())
+                    .unwrap_or(vec![])
             }
         }).collect();
 

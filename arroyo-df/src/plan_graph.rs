@@ -33,6 +33,7 @@ use crate::{
     ArroyoSchemaProvider, CompiledSql, SqlConfig,
 };
 use anyhow::{anyhow, bail, Context, Result};
+use datafusion::sql::sqlparser::test_utils::table;
 use arroyo_datastream::EdgeType::Forward;
 use arroyo_rpc::grpc::api::{
     window, KeyPlanOperator, MemTableScan, ProjectionOperator, TumblingWindow, ValuePlanOperator,
@@ -48,20 +49,12 @@ use datafusion_proto::{
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
 };
 use petgraph::Direction;
+use petgraph::prelude::EdgeRef;
 use prost::Message;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName};
 use arroyo_rpc::grpc::api;
+use crate::schemas::add_timestamp_field;
 
-fn to_arroyo_schema(s: &DFSchemaRef, key_cols: Vec<usize>) -> ArroyoSchema {
-    println!("Converting schema: #{:?}", s);
-    ArroyoSchema {
-        schema: Arc::new(Schema::from(&*(*s))),
-        timestamp_col: s.index_of_column_by_name(None, TIMESTAMP_FIELD)
-            .unwrap()
-            .expect("No timestamp field in schema"),
-        key_cols,
-    }
-}
 
 pub(crate) async fn get_arrow_program(
     mut rewriter: QueryToGraphVisitor,
@@ -81,7 +74,7 @@ pub(crate) async fn get_arrow_program(
         .optimizer
         .enable_round_robin_repartition = false;
     config.options_mut().optimizer.repartition_aggregations = false;
-    let mut session_state = SessionState::with_config_rt(config, Arc::new(RuntimeEnv::default()))
+    let session_state = SessionState::with_config_rt(config, Arc::new(RuntimeEnv::default()))
         .with_physical_optimizer_rules(vec![]);
 
     let mut node_mapping = HashMap::new();
@@ -91,10 +84,10 @@ pub(crate) async fn get_arrow_program(
             .node_weight(node_index)
             .unwrap();
 
-        match logical_extension {
+        let new_node = match logical_extension {
             crate::LogicalPlanExtension::TableScan(logical_plan) => {
                 let LogicalPlan::TableScan(table_scan) = logical_plan else {
-                    bail!("expected table scan")
+                    panic!("expected table scan")
                 };
 
                 let table_name = table_scan.table_name.to_string();
@@ -103,7 +96,7 @@ pub(crate) async fn get_arrow_program(
                     .ok_or_else(|| anyhow!("table {} not found", table_scan.table_name))?;
 
                 let Table::ConnectorTable(cn) = source else {
-                    bail!("expect connector table")
+                    panic!("expect connector table")
                 };
 
                 let sql_source = cn.as_sql_source()?;
@@ -121,21 +114,14 @@ pub(crate) async fn get_arrow_program(
                     operator_name: OperatorName::Watermark,
                     parallelism: 1,
                     operator_config: api::PeriodicWatermark {
-                        period_micros: 10_000_000,
+                        period_micros: 1_000_000,
                         max_lateness_micros: 0,
                         idle_time_micros: None,
                     }.encode_to_vec()
                 });
 
-                program_graph.add_edge(
-                    source_index,
-                    watermark_index,
-                    LogicalEdge {
-                        edge_type: LogicalEdgeType::Forward,
-                        schema: to_arroyo_schema(&table_scan.projected_schema, vec![]),
-                    },
-                );
                 node_mapping.insert(node_index, watermark_index);
+                watermark_index
             }
             crate::LogicalPlanExtension::ValueCalculation(logical_plan) => {
                 let inputs = logical_plan.inputs();
@@ -167,19 +153,7 @@ pub(crate) async fn get_arrow_program(
 
                 node_mapping.insert(node_index, new_node_index);
 
-                for upstream in rewriter
-                    .local_logical_plan_graph
-                    .neighbors_directed(node_index, Direction::Incoming)
-                {
-                    program_graph.add_edge(
-                        *node_mapping.get(&upstream).unwrap(),
-                        new_node_index,
-                        LogicalEdge {
-                            edge_type: LogicalEdgeType::Forward,
-                            schema: to_arroyo_schema(logical_plan.schema(), vec![]),
-                        },
-                    );
-                }
+                new_node_index
             }
             crate::LogicalPlanExtension::KeyCalculation {
                 projection: logical_plan,
@@ -215,19 +189,7 @@ pub(crate) async fn get_arrow_program(
 
                 node_mapping.insert(node_index, new_node_index);
 
-                for upstream in rewriter
-                    .local_logical_plan_graph
-                    .neighbors_directed(node_index, Direction::Incoming)
-                {
-                    program_graph.add_edge(
-                        *node_mapping.get(&upstream).unwrap(),
-                        new_node_index,
-                        LogicalEdge {
-                            edge_type: LogicalEdgeType::Forward,
-                            schema: to_arroyo_schema(logical_plan.schema(), vec![]),
-                        }
-                    );
-                }
+                new_node_index
             }
             crate::LogicalPlanExtension::AggregateCalculation(aggregate) => {
                 let WindowType::Tumbling { width } = aggregate.window else {
@@ -323,19 +285,7 @@ pub(crate) async fn get_arrow_program(
                 });
 
                 node_mapping.insert(node_index, new_node_index);
-                for upstream in rewriter
-                    .local_logical_plan_graph
-                    .neighbors_directed(node_index, Direction::Incoming)
-                {
-                    program_graph.add_edge(
-                        *node_mapping.get(&upstream).unwrap(),
-                        new_node_index,
-                        LogicalEdge {
-                            edge_type: LogicalEdgeType::Shuffle,
-                            schema: to_arroyo_schema(aggregate.aggregate.input.schema(), aggregate.key_fields.clone()),
-                        },
-                    );
-                }
+                new_node_index
             }
             crate::LogicalPlanExtension::Sink => {
                 let sink_index = program_graph.add_node(LogicalNode {
@@ -346,23 +296,21 @@ pub(crate) async fn get_arrow_program(
                     description: "GrpcSink".into(),
                 });
                 node_mapping.insert(node_index, sink_index);
-                for upstream in rewriter
-                    .local_logical_plan_graph
-                    .neighbors_directed(node_index, Direction::Incoming)
-                {
-                    let schema = &rewriter.local_logical_plan_graph.node_weight(upstream).unwrap().outgoing_edge().value_schema;
-
-                    program_graph.add_edge(
-                        *node_mapping.get(&upstream).unwrap(),
-                        sink_index,
-                        LogicalEdge {
-                            edge_type: LogicalEdgeType::Forward,
-                            schema: to_arroyo_schema(schema, vec![]),
-                        },
-                    );
-                }
+                sink_index
             }
+        };
+
+        for edge in rewriter
+            .local_logical_plan_graph
+            .edges_directed(node_index, Direction::Incoming)
+        {
+            program_graph.add_edge(
+                *node_mapping.get(&edge.source()).unwrap(),
+                new_node,
+                edge.weight().try_into().unwrap(),
+            );
         }
+
     }
 
     let program = LogicalProgram {
