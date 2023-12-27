@@ -1,24 +1,29 @@
-use arrow_array::RecordBatch;
-use arroyo_state::{BackingStore, hash_key, StateBackend, StateStore};
-use arroyo_types::{Data, from_micros, Key, Message, Record, RecordBatchData, server_for_hash, SourceError, TaskInfo, UserError, Watermark};
-use std::sync::Arc;
-use std::marker::PhantomData;
-use rand::Rng;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
-use arroyo_rpc::grpc::{CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
-use std::time::SystemTime;
-use anyhow::bail;
-use arroyo_state::tables::time_key_map::TimeKeyMap;
-use tracing::{debug, warn};
-use arroyo_rpc::formats::BadData;
-use bincode::config;
-use tokio::task::JoinHandle;
-use arroyo_datastream::Operator;
-use std::any::Any;
-use crate::engine::{ErrorReporter, QUEUE_SIZE, TimerValue, WatermarkHolder};
-use crate::metrics::{QueueGauges, register_queue_gauges, TaskCounters};
+use crate::engine::{ErrorReporter, TimerValue, WatermarkHolder, QUEUE_SIZE};
+use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::{RateLimiter, TIMER_TABLE};
+use anyhow::bail;
+use arrow_array::RecordBatch;
+use arroyo_datastream::Operator;
+use arroyo_rpc::formats::BadData;
+use arroyo_rpc::grpc::{
+    CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
+};
+use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
+use arroyo_state::tables::time_key_map::TimeKeyMap;
+use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
+use arroyo_types::{
+    from_micros, server_for_hash, Data, Key, Message, Record, RecordBatchData, SourceError,
+    TaskInfo, UserError, Watermark,
+};
+use bincode::config;
+use rand::Rng;
+use std::any::Any;
+use std::marker::PhantomData;
+use std::sync::Arc;
+use std::time::SystemTime;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::task::JoinHandle;
+use tracing::{debug, warn};
 
 #[derive(Clone)]
 pub struct Collector<K: Key, T: Data> {

@@ -17,13 +17,13 @@ use arroyo_types::{to_micros, WorkerId};
 use deadpool_postgres::Pool;
 use time::OffsetDateTime;
 
+use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_state::parquet::ParquetBackend;
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
-use arroyo_datastream::logical::LogicalProgram;
 
 use crate::types::public::CheckpointState as DbCheckpointState;
 use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};

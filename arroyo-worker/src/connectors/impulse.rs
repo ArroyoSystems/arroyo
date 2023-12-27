@@ -3,19 +3,19 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::engine::{ArrowContext, StreamNode};
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
 use crate::SourceFinishType;
+use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
 use arroyo_rpc::grpc::{api, StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::*;
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
-use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
-use async_trait::async_trait;
 use tokio::sync::mpsc::Receiver;
 use tracing::{debug, info};
 use typify::import_types;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
 
 import_types!(schema = "../connector-schemas/impulse/table.json");
 
@@ -32,7 +32,7 @@ pub enum ImpulseSpec {
 }
 
 #[derive(Debug)]
-pub struct ImpulseSourceFunc{
+pub struct ImpulseSourceFunc {
     interval: Option<Duration>,
     spec: ImpulseSpec,
     limit: usize,
@@ -104,7 +104,8 @@ impl ImpulseSourceFunc {
                 ])),
             ];
 
-            ctx.collect(RecordBatch::try_new(schema.clone(), columns).unwrap()).await;
+            ctx.collect(RecordBatch::try_new(schema.clone(), columns).unwrap())
+                .await;
 
             self.state.counter += 1;
 
@@ -181,7 +182,6 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for ImpulseSourceFunc {
     }
 }
 
-
 #[async_trait]
 impl BaseOperator for ImpulseSourceFunc {
     fn name(&self) -> String {
@@ -192,7 +192,11 @@ impl BaseOperator for ImpulseSourceFunc {
         vec![arroyo_state::global_table("i", "impulse source state")]
     }
 
-    async fn run_behavior(mut self: Box<Self>, ctx: &mut ArrowContext, _: Vec<Receiver<ArrowMessage>>) -> Option<ArrowMessage> {
+    async fn run_behavior(
+        mut self: Box<Self>,
+        ctx: &mut ArrowContext,
+        _: Vec<Receiver<ArrowMessage>>,
+    ) -> Option<ArrowMessage> {
         let s = ctx
             .state
             .get_global_keyed_state::<usize, ImpulseSourceState>('i')
@@ -205,9 +209,7 @@ impl BaseOperator for ImpulseSourceFunc {
         self.run(ctx).await.into()
     }
 
-    async fn on_start(&mut self, _: &mut ArrowContext) {
-    }
+    async fn on_start(&mut self, _: &mut ArrowContext) {}
 
-    async fn on_close(&mut self, _: &mut ArrowContext) {
-    }
+    async fn on_close(&mut self, _: &mut ArrowContext) {}
 }

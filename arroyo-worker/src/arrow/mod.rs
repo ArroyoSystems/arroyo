@@ -1,3 +1,4 @@
+use crate::engine::ArrowContext;
 use anyhow::Result;
 use arrow::compute::kernels;
 use arrow::datatypes::SchemaRef;
@@ -16,7 +17,6 @@ use arroyo_formats::SchemaData;
 use arroyo_rpc::grpc::api::{ConnectorOp, MemTableScan, PeriodicWatermark};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{api, SinkDataReq};
-use arroyo_types::{ArrowMessage, from_millis};
 use arroyo_types::from_nanos;
 use arroyo_types::to_micros;
 use arroyo_types::to_nanos;
@@ -24,6 +24,7 @@ use arroyo_types::KeyValueTimestampRecordBatchBuilder;
 use arroyo_types::Message;
 use arroyo_types::RecordBatchBuilder;
 use arroyo_types::Watermark;
+use arroyo_types::{from_millis, ArrowMessage};
 use arroyo_types::{Key, Record, RecordBatchData};
 use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::memory::MemoryStream;
@@ -53,7 +54,6 @@ use std::time::Duration;
 use std::time::SystemTime;
 use tonic::transport::Channel;
 use tracing::info;
-use crate::engine::ArrowContext;
 
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
 
@@ -78,14 +78,11 @@ impl FunctionRegistry for Registry {
     }
 }
 
-
-
 pub struct ValueExecutionOperator {
     name: String,
     locked_batch: Arc<RwLock<Option<RecordBatch>>>,
     execution_plan: Arc<dyn ExecutionPlan>,
 }
-
 
 impl ArrowOperatorConstructor<api::ValuePlanOperator, Self> for ValueExecutionOperator {
     fn from_config(config: api::ValuePlanOperator) -> Result<Self> {
@@ -118,11 +115,7 @@ impl ArrowOperator for ValueExecutionOperator {
         self.name.clone()
     }
 
-    async fn process_batch(
-        &mut self,
-        record_batch: RecordBatch,
-        ctx: &mut ArrowContext,
-    ) {
+    async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut ArrowContext) {
         //info!("incoming record batch {:?}", record_batch);
         let batch = record_batch.clone();
         {
@@ -247,11 +240,7 @@ impl ArrowOperator for KeyExecutionOperator {
         self.name.clone()
     }
 
-    async fn process_batch(
-        &mut self,
-        batch: RecordBatch,
-        ctx: &mut ArrowContext,
-    ) {
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
         //info!("incoming record batch {:?}", record_batch);
         {
             let mut writer = self.locked_batch.write().unwrap();
@@ -271,7 +260,6 @@ impl ArrowOperator for KeyExecutionOperator {
     }
 }
 
-
 #[derive(Default)]
 pub struct GrpcRecordBatchSink {
     client: Option<ControllerGrpcClient<Channel>>,
@@ -279,9 +267,7 @@ pub struct GrpcRecordBatchSink {
 
 impl ArrowOperatorConstructor<api::ConnectorOp, Self> for GrpcRecordBatchSink {
     fn from_config(_: ConnectorOp) -> Result<Self> {
-        Ok(Self {
-            client: None,
-        })
+        Ok(Self { client: None })
     }
 }
 
@@ -302,11 +288,7 @@ impl ArrowOperator for GrpcRecordBatchSink {
         );
     }
 
-    async fn process_batch(
-        &mut self,
-        record_batch: RecordBatch,
-        ctx: &mut ArrowContext,
-    ) {
+    async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut ArrowContext) {
         // info!("record batch grpc received batch {:?}", record_batch);
         let json_rows = record_batches_to_json_rows(&[&record_batch]).unwrap();
         for map in json_rows {

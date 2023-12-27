@@ -14,6 +14,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use anyhow::{anyhow, bail, Result};
+use arrow_schema::Schema;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
 use arroyo_types::{Data, GlobalKey, JoinType, Key};
@@ -25,8 +27,6 @@ use quote::format_ident;
 use quote::quote;
 use serde::{Deserialize, Serialize};
 use syn::{parse_quote, parse_str, GenericArgument, PathArguments, Type, TypePath};
-use arrow_schema::Schema;
-use anyhow::{anyhow, bail, Result};
 
 use crate::Operator::FusedWasmUDFs;
 use arroyo_rpc::grpc::api::{
@@ -40,7 +40,6 @@ use rand::{Rng, SeedableRng};
 use regex::Regex;
 
 pub const TIMESTAMP_FIELD: &str = "_timestamp";
-
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ArroyoSchema {
@@ -59,13 +58,15 @@ impl ArroyoSchema {
     }
 
     pub fn from_schema_keys(schema: Arc<Schema>, key_cols: Vec<usize>) -> anyhow::Result<Self> {
-        let timestamp_col = schema.column_with_name(TIMESTAMP_FIELD)
-            .ok_or_else(|| anyhow!("no {} field in schema", TIMESTAMP_FIELD))?.0;
+        let timestamp_col = schema
+            .column_with_name(TIMESTAMP_FIELD)
+            .ok_or_else(|| anyhow!("no {} field in schema", TIMESTAMP_FIELD))?
+            .0;
 
         Ok(Self {
             schema,
             timestamp_col,
-            key_cols
+            key_cols,
         })
     }
 }

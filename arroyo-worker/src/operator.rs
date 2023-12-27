@@ -1,20 +1,20 @@
+use std::collections::BTreeSet;
+use std::fmt::Debug;
 use std::hash::Hash;
+use std::sync::Arc;
+use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
     time::SystemTime,
 };
-use std::collections::BTreeSet;
-use std::fmt::Debug;
-use std::sync::Arc;
-use std::time::Duration;
 
+use crate::engine::{ArrowContext, CheckpointCounter, WatermarkHolder};
 use crate::inq_reader::InQReader;
+use crate::metrics::TaskCounters;
+use crate::{ControlOutcome, SourceFinishType};
 use arrow::row::{Row, RowConverter};
-use arrow_array::{Array, ArrayRef, PrimitiveArray, RecordBatch};
 use arrow_array::types::TimestampNanosecondType;
-use async_trait::async_trait;
-use bincode::{Decode, Encode};
-use datafusion_common::ScalarValue;
+use arrow_array::{Array, ArrayRef, PrimitiveArray, RecordBatch};
 use arroyo_datastream::ArroyoSchema;
 use arroyo_metrics::gauge_for_task;
 use arroyo_rpc::{
@@ -24,17 +24,20 @@ use arroyo_rpc::{
     },
     ControlMessage, ControlResp,
 };
+use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_state::{BackingStore, StateBackend, StateStore};
-use arroyo_types::{from_micros, ArrowMessage, CheckpointBarrier, TaskInfo, Watermark, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT, Key, Data, Window, to_millis, from_millis};
+use arroyo_types::{
+    from_micros, from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, TaskInfo,
+    Watermark, Window, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+};
+use async_trait::async_trait;
+use bincode::{Decode, Encode};
+use datafusion_common::ScalarValue;
 use futures::{FutureExt, StreamExt};
 use prometheus::{labels, IntCounter, IntGauge};
-use rand::{random};
+use rand::random;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{debug, error, Instrument, warn};
-use arroyo_state::tables::time_key_map::TimeKeyMap;
-use crate::{ControlOutcome, SourceFinishType};
-use crate::engine::{ArrowContext, CheckpointCounter, WatermarkHolder};
-use crate::metrics::TaskCounters;
+use tracing::{debug, error, warn, Instrument};
 
 pub trait TimerT: Data + PartialEq + Eq + 'static {}
 
@@ -167,7 +170,6 @@ pub struct ArrowTimerValue {
     pub data: Vec<u8>,
 }
 
-
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
     pub time: SystemTime,
@@ -255,17 +257,20 @@ pub trait BaseOperator: Send + 'static {
                 tables,
                 HashMap::new(),
             )
-                .await;
+            .await;
 
             self.on_start(&mut ctx).await;
-
 
             let final_message = self.run_behavior(&mut ctx, in_qs).await;
 
             if let Some(final_message) = final_message {
                 ctx.broadcast(final_message).await;
             }
-            tracing::info!("Task finished {}-{}", ctx.task_info.operator_name, ctx.task_info.task_index);
+            tracing::info!(
+                "Task finished {}-{}",
+                ctx.task_info.operator_name,
+                ctx.task_info.task_index
+            );
 
             ctx.control_tx
                 .send(ControlResp::TaskFinished {
@@ -277,7 +282,11 @@ pub trait BaseOperator: Send + 'static {
         })
     }
 
-    async fn run_behavior(mut self: Box<Self>, ctx: &mut ArrowContext, in_qs: Vec<Receiver<ArrowMessage>>) -> Option<ArrowMessage>;
+    async fn run_behavior(
+        mut self: Box<Self>,
+        ctx: &mut ArrowContext,
+        in_qs: Vec<Receiver<ArrowMessage>>,
+    ) -> Option<ArrowMessage>;
 
     async fn checkpoint(
         &mut self,
@@ -287,7 +296,8 @@ pub trait BaseOperator: Send + 'static {
         ctx.send_checkpoint_event(
             checkpoint_barrier,
             TaskCheckpointEventType::StartedCheckpointing,
-        ).await;
+        )
+        .await;
 
         self.handle_checkpoint(checkpoint_barrier, ctx).await;
 
@@ -295,7 +305,7 @@ pub trait BaseOperator: Send + 'static {
             checkpoint_barrier,
             TaskCheckpointEventType::FinishedOperatorSetup,
         )
-            .await;
+        .await;
 
         let watermark = ctx.watermarks.last_present_watermark();
 
@@ -310,7 +320,6 @@ pub trait BaseOperator: Send + 'static {
         checkpoint_barrier.then_stop
     }
 
-
     fn name(&self) -> String;
 
     fn tables(&self) -> Vec<TableDescriptor>;
@@ -323,10 +332,13 @@ pub trait BaseOperator: Send + 'static {
     async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {}
 }
 
-
 #[async_trait]
-impl <T: ArrowOperator> BaseOperator for T {
-    async fn run_behavior(mut self: Box<Self>, ctx: &mut ArrowContext, mut in_qs: Vec<Receiver<ArrowMessage>>) -> Option<ArrowMessage> {
+impl<T: ArrowOperator> BaseOperator for T {
+    async fn run_behavior(
+        mut self: Box<Self>,
+        ctx: &mut ArrowContext,
+        mut in_qs: Vec<Receiver<ArrowMessage>>,
+    ) -> Option<ArrowMessage> {
         let task_info = ctx.task_info.clone();
         let name = self.name();
         let mut counter = CheckpointCounter::new(in_qs.len());
@@ -336,77 +348,78 @@ impl <T: ArrowOperator> BaseOperator for T {
 
         for (i, mut q) in in_qs.into_iter().enumerate() {
             let stream = async_stream::stream! {
-                  while let Some(item) = q.recv().await {
-                    yield(i,item);
-                  }
-                };
+              while let Some(item) = q.recv().await {
+                yield(i,item);
+              }
+            };
             sel.push(Box::pin(stream));
         }
         let mut blocked = vec![];
         let mut final_message = None;
 
         let mut ticks = 0u64;
-        let mut interval = tokio::time::interval(self.tick_interval().unwrap_or(Duration::from_secs(60)));
+        let mut interval =
+            tokio::time::interval(self.tick_interval().unwrap_or(Duration::from_secs(60)));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
-                    Some(control_message) = ctx.control_rx.recv() => {
-                        self.handle_controller_message(control_message, ctx).await;
-                    }
+                Some(control_message) = ctx.control_rx.recv() => {
+                    self.handle_controller_message(control_message, ctx).await;
+                }
 
-                    p = sel.next() => {
-                        match p {
-                            Some(((idx, message), s)) => {
-                                let local_idx = idx;
+                p = sel.next() => {
+                    match p {
+                        Some(((idx, message), s)) => {
+                            let local_idx = idx;
 
-                                tracing::debug!("[{}] Handling message {}-{}, {:?}",
-                                    ctx.task_info.operator_name, 0, local_idx, message);
+                            tracing::debug!("[{}] Handling message {}-{}, {:?}",
+                                ctx.task_info.operator_name, 0, local_idx, message);
 
-                                if let ArrowMessage::Record(record) = message {
-                                    TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
-                                    Self::process_batch(&mut(*self),record, ctx)
-                                        .instrument(tracing::trace_span!("handle_fn",
-                                            name,
-                                            operator_id = task_info.operator_id,
-                                            subtask_idx = task_info.task_index)
-                                    ).await;
-                                } else {
-                                    match self.handle_control_message(idx, &message, &mut counter, &mut closed, in_partitions, ctx).await {
-                                        ControlOutcome::Continue => {}
-                                        ControlOutcome::Stop => {
-                                            final_message = Some(ArrowMessage::Stop);
-                                            break;
-                                        }
-                                        ControlOutcome::Finish => {
-                                            final_message = Some(ArrowMessage::EndOfData);
-                                            break;
-                                        }
+                            if let ArrowMessage::Record(record) = message {
+                                TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
+                                Self::process_batch(&mut(*self),record, ctx)
+                                    .instrument(tracing::trace_span!("handle_fn",
+                                        name,
+                                        operator_id = task_info.operator_id,
+                                        subtask_idx = task_info.task_index)
+                                ).await;
+                            } else {
+                                match self.handle_control_message(idx, &message, &mut counter, &mut closed, in_partitions, ctx).await {
+                                    ControlOutcome::Continue => {}
+                                    ControlOutcome::Stop => {
+                                        final_message = Some(ArrowMessage::Stop);
+                                        break;
                                     }
-                                }
-
-                                if counter.is_blocked(idx){
-                                    blocked.push(s);
-                                } else {
-                                    if counter.all_clear() && !blocked.is_empty(){
-                                        for q in blocked.drain(..){
-                                            sel.push(q);
-                                        }
+                                    ControlOutcome::Finish => {
+                                        final_message = Some(ArrowMessage::EndOfData);
+                                        break;
                                     }
-                                    sel.push(s);
                                 }
                             }
-                            None => {
-                                tracing::info!("[{}] Stream completed",ctx.task_info.operator_name);
-                                break;
+
+                            if counter.is_blocked(idx){
+                                blocked.push(s);
+                            } else {
+                                if counter.all_clear() && !blocked.is_empty(){
+                                    for q in blocked.drain(..){
+                                        sel.push(q);
+                                    }
+                                }
+                                sel.push(s);
                             }
                         }
-                    }
-                    _ = interval.tick() => {
-                        self.handle_tick(ticks, ctx).await;
-                        ticks += 1;
+                        None => {
+                            tracing::info!("[{}] Stream completed",ctx.task_info.operator_name);
+                            break;
+                        }
                     }
                 }
+                _ = interval.tick() => {
+                    self.handle_tick(ticks, ctx).await;
+                    ticks += 1;
+                }
+            }
         }
         final_message
     }
@@ -434,12 +447,7 @@ impl <T: ArrowOperator> BaseOperator for T {
 
 #[async_trait::async_trait]
 pub trait ArrowOperator: Send + 'static + Sized {
-
-    async fn handle_watermark_int(
-        &mut self,
-        watermark: Watermark,
-        ctx: &mut ArrowContext,
-    ) {
+    async fn handle_watermark_int(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
         // process timers
         tracing::trace!(
             "handling watermark {:?} for {}-{}",
@@ -458,7 +466,6 @@ pub trait ArrowOperator: Send + 'static + Sized {
 
         self.handle_watermark(watermark, ctx).await;
     }
-
 
     async fn handle_controller_message(
         &mut self,
@@ -506,15 +513,13 @@ pub trait ArrowOperator: Send + 'static + Sized {
 
                 if counter.all_clear() {
                     ctx.control_tx
-                        .send(ControlResp::CheckpointEvent(
-                            arroyo_rpc::CheckpointEvent {
-                                checkpoint_epoch: t.epoch,
-                                operator_id: ctx.task_info.operator_id.clone(),
-                                subtask_index: ctx.task_info.task_index as u32,
-                                time: SystemTime::now(),
-                                event_type: TaskCheckpointEventType::StartedAlignment,
-                            },
-                        ))
+                        .send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
+                            checkpoint_epoch: t.epoch,
+                            operator_id: ctx.task_info.operator_id.clone(),
+                            subtask_index: ctx.task_info.task_index as u32,
+                            time: SystemTime::now(),
+                            event_type: TaskCheckpointEventType::StartedAlignment,
+                        }))
                         .await
                         .unwrap();
                 }
@@ -569,7 +574,6 @@ pub trait ArrowOperator: Send + 'static + Sized {
         ControlOutcome::Continue
     }
 
-
     fn name(&self) -> String;
 
     fn tables(&self) -> Vec<TableDescriptor> {
@@ -588,11 +592,7 @@ pub trait ArrowOperator: Send + 'static + Sized {
     #[allow(unused_variables)]
     async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut ArrowContext) {}
 
-    async fn handle_watermark(
-        &mut self,
-        watermark: Watermark,
-        ctx: &mut ArrowContext,
-    ) {
+    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
         ctx.broadcast(ArrowMessage::Watermark(watermark)).await;
     }
 
@@ -611,7 +611,10 @@ pub trait ArrowOperator: Send + 'static + Sized {
     async fn on_close(&mut self, ctx: &mut ArrowContext) {}
 }
 
-pub fn get_timestamp_col<'a, 'b>(batch: &'a RecordBatch, ctx: &'b mut ArrowContext) -> &'a PrimitiveArray<TimestampNanosecondType> {
+pub fn get_timestamp_col<'a, 'b>(
+    batch: &'a RecordBatch,
+    ctx: &'b mut ArrowContext,
+) -> &'a PrimitiveArray<TimestampNanosecondType> {
     batch
         .column(ctx.out_schema.as_ref().unwrap().timestamp_col)
         .as_any()

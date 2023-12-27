@@ -4,6 +4,7 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
 use arroyo_connectors::{connector_for_type, Connection};
+use arroyo_datastream::logical::LogicalNode;
 use arroyo_datastream::{ConnectorOp, Operator};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
@@ -24,7 +25,6 @@ use datafusion_expr::{
     WriteOp,
 };
 use tracing::info;
-use arroyo_datastream::logical::LogicalNode;
 
 use crate::{avro, DEFAULT_IDLE_TIME};
 use crate::{

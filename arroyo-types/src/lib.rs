@@ -343,7 +343,6 @@ pub struct Record<K: Key, T: Data> {
     pub value: T,
 }
 
-
 #[derive(Debug, Clone)]
 pub enum ArrowMessage {
     Record(RecordBatch),

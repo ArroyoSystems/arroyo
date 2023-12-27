@@ -1,19 +1,18 @@
+use crate::ArroyoSchema;
+use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{ArrowProgram, EdgeType, JobEdge, JobGraph, JobNode};
 use petgraph::graph::DiGraph;
-use std::collections::{HashMap, HashSet};
-use std::collections::hash_map::DefaultHasher;
-use std::fmt::{Debug, Display, Formatter};
-use std::hash::Hasher;
-use petgraph::Direction;
 use petgraph::prelude::EdgeRef;
+use petgraph::Direction;
 use prost::Message;
+use rand::distributions::Alphanumeric;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
-use rand::distributions::Alphanumeric;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Debug, Display, Formatter};
+use std::hash::Hasher;
 use strum::{Display, EnumString};
-use arroyo_rpc::grpc::api;
-use crate::{ArroyoSchema};
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, EnumString, Display)]
 pub enum OperatorName {
@@ -75,11 +74,15 @@ pub struct LogicalEdge {
 }
 
 impl LogicalEdge {
-    pub fn new(edge_type: LogicalEdgeType, schema: ArroyoSchema, projection: Option<Vec<usize>>) -> Self {
+    pub fn new(
+        edge_type: LogicalEdgeType,
+        schema: ArroyoSchema,
+        projection: Option<Vec<usize>>,
+    ) -> Self {
         LogicalEdge {
             edge_type,
             schema,
-            projection
+            projection,
         }
     }
 
@@ -195,7 +198,6 @@ impl LogicalProgram {
 
         JobGraph { nodes, edges }
     }
-
 }
 
 impl TryFrom<ArrowProgram> for LogicalProgram {
@@ -238,56 +240,58 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
                         None
                     } else {
                         Some(edge.projection.iter().map(|p| *p as usize).collect())
-                    }
+                    },
                 },
             );
         }
 
-        Ok(LogicalProgram {
-            graph
-        })
+        Ok(LogicalProgram { graph })
     }
 }
 
 impl From<LogicalProgram> for ArrowProgram {
     fn from(value: LogicalProgram) -> Self {
         let graph = value.graph;
-        let nodes = graph.node_indices().map(|idx| {
-            let node = graph.node_weight(idx).unwrap();
-            api::ArrowNode {
-                node_index: idx.index() as i32,
-                node_id: node.operator_id.clone(),
-                parallelism: node.parallelism as u32,
-                description: node.description.clone(),
-                operator_name: node.operator_name.to_string(),
-                operator_config: node.operator_config.clone(),
-            }
-        }).collect();
+        let nodes = graph
+            .node_indices()
+            .map(|idx| {
+                let node = graph.node_weight(idx).unwrap();
+                api::ArrowNode {
+                    node_index: idx.index() as i32,
+                    node_id: node.operator_id.clone(),
+                    parallelism: node.parallelism as u32,
+                    description: node.description.clone(),
+                    operator_name: node.operator_name.to_string(),
+                    operator_config: node.operator_config.clone(),
+                }
+            })
+            .collect();
 
-        let edges = graph.edge_indices().map(|idx| {
-            let edge = graph.edge_weight(idx).unwrap();
-            let (source, target) = graph.edge_endpoints(idx).unwrap();
+        let edges = graph
+            .edge_indices()
+            .map(|idx| {
+                let edge = graph.edge_weight(idx).unwrap();
+                let (source, target) = graph.edge_endpoints(idx).unwrap();
 
-            let edge_type: api::EdgeType = edge.edge_type.into();
-            api::ArrowEdge {
-                source: source.index() as i32,
-                target: target.index() as i32,
-                schema: Some(api::ArroyoSchema {
-                    arrow_schema: serde_json::to_string(&edge.schema.schema).unwrap(),
-                    timestamp_col: edge.schema.timestamp_col as u32,
-                    key_cols: edge.schema.key_cols.iter().map(|k| *k as u32).collect(),
-                }),
-                edge_type: edge_type as i32,
-                projection: edge.projection
-                    .as_ref()
-                    .map(|p| p.iter().map(|v| *v as u32).collect())
-                    .unwrap_or(vec![])
-            }
-        }).collect();
+                let edge_type: api::EdgeType = edge.edge_type.into();
+                api::ArrowEdge {
+                    source: source.index() as i32,
+                    target: target.index() as i32,
+                    schema: Some(api::ArroyoSchema {
+                        arrow_schema: serde_json::to_string(&edge.schema.schema).unwrap(),
+                        timestamp_col: edge.schema.timestamp_col as u32,
+                        key_cols: edge.schema.key_cols.iter().map(|k| *k as u32).collect(),
+                    }),
+                    edge_type: edge_type as i32,
+                    projection: edge
+                        .projection
+                        .as_ref()
+                        .map(|p| p.iter().map(|v| *v as u32).collect())
+                        .unwrap_or(vec![]),
+                }
+            })
+            .collect();
 
-        api::ArrowProgram {
-            nodes,
-            edges,
-        }
+        api::ArrowProgram { nodes, edges }
     }
 }

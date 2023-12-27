@@ -1,17 +1,15 @@
 use std::str::FromStr;
 use std::{marker::PhantomData, time::SystemTime};
 
-use crate::{
-    engine::StreamNode,
-    header_map, RateLimiter, SourceFinishType,
-};
+use crate::old::Context;
+use crate::{engine::StreamNode, header_map, RateLimiter, SourceFinishType};
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::{
-    ControlMessage,
     grpc::{StopMode, TableDescriptor},
-    OperatorConfig, var_str::VarStr,
+    var_str::VarStr,
+    ControlMessage, OperatorConfig,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::{Data, Message, UserError, Watermark};
@@ -26,7 +24,6 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::{debug, info};
 use tungstenite::http::Request;
 use typify::import_types;
-use crate::old::Context;
 
 import_types!(
     schema = "../connector-schemas/websocket/table.json",

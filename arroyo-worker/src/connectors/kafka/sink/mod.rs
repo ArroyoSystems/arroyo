@@ -6,19 +6,19 @@ use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{CheckpointEvent, ControlMessage, OperatorConfig};
 use arroyo_types::*;
+use rdkafka::error::KafkaError;
+use rdkafka::ClientConfig;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::{Duration, SystemTime};
-use rdkafka::ClientConfig;
-use rdkafka::error::KafkaError;
 
+use super::{client_configs, KafkaConfig, KafkaTable, SinkCommitMode, TableType};
+use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
 use rdkafka_sys::RDKafkaErrorCode;
 use serde::Serialize;
 use tracing::{error, warn};
-use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
-use super::{client_configs, KafkaConfig, KafkaTable, SinkCommitMode, TableType};
 
 #[cfg(test)]
 mod test;

@@ -5,7 +5,6 @@ use prometheus::{
     register_histogram, register_int_gauge, Histogram, HistogramOpts, IntGauge, Opts,
 };
 
-
 pub fn gauge_for_task(
     task_info: &TaskInfo,
     name: &'static str,

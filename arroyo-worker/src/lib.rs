@@ -17,7 +17,10 @@ use arroyo_rpc::grpc::{
     TaskStartedReq, WorkerErrorReq, WorkerResources,
 };
 use arroyo_server_common::start_admin_server;
-use arroyo_types::{from_millis, grpc_port, ports, string_to_map, to_micros, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV, ArrowMessage};
+use arroyo_types::{
+    from_millis, grpc_port, ports, string_to_map, to_micros, ArrowMessage, CheckpointBarrier,
+    NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+};
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
 use petgraph::graph::DiGraph;
@@ -52,10 +55,10 @@ pub mod engine;
 mod inq_reader;
 mod metrics;
 mod network_manager;
+mod old;
 mod operator;
 pub mod operators;
 mod process_fn;
-mod old;
 
 pub const PROMETHEUS_PUSH_GATEWAY: &str = "localhost:9091";
 pub const METRICS_PUSH_INTERVAL: Duration = Duration::from_secs(1);
@@ -79,15 +82,9 @@ pub enum SourceFinishType {
 impl From<SourceFinishType> for Option<ArrowMessage> {
     fn from(value: SourceFinishType) -> Self {
         match value {
-            SourceFinishType::Graceful => {
-                Some(ArrowMessage::Stop)
-            }
-            SourceFinishType::Immediate => {
-                None
-            }
-            SourceFinishType::Final => {
-                Some(ArrowMessage::EndOfData)
-            }
+            SourceFinishType::Graceful => Some(ArrowMessage::Stop),
+            SourceFinishType::Immediate => None,
+            SourceFinishType::Final => Some(ArrowMessage::EndOfData),
         }
     }
 }
@@ -194,11 +191,7 @@ pub struct WorkerServer {
 }
 
 impl WorkerServer {
-    pub fn new(
-        name: &'static str,
-        hash: &'static str,
-        logical: LogicalGraph,
-    ) -> Self {
+    pub fn new(name: &'static str, hash: &'static str, logical: LogicalGraph) -> Self {
         let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
             .unwrap_or_else(|_| LOCAL_CONTROLLER_ADDR.clone());
 

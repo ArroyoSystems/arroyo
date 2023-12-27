@@ -1,5 +1,5 @@
-use std::time::Duration;
 use arroyo_datastream::logical::LogicalNode;
+use std::time::Duration;
 
 use arroyo_datastream::{ConnectorOp, Operator};
 

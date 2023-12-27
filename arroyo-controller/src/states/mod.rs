@@ -20,8 +20,8 @@ use crate::job_controller::JobController;
 use crate::queries::controller_queries;
 use crate::types::public::StopMode;
 use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus};
-use prost::Message;
 use arroyo_datastream::logical::LogicalProgram;
+use prost::Message;
 
 use self::checkpoint_stopping::CheckpointStopping;
 use self::compiling::Compiling;
@@ -551,10 +551,7 @@ pub async fn run_to_completion(
             .await
             .unwrap();
 
-        ArrowProgram::decode(&res[..])
-            .unwrap()
-            .try_into()
-            .unwrap()
+        ArrowProgram::decode(&res[..]).unwrap().try_into().unwrap()
     };
 
     let mut ctx = JobContext {

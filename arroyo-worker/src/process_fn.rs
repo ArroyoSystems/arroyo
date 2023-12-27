@@ -1,10 +1,6 @@
 use std::time::SystemTime;
 
-use crate::{
-    old::Context,
-    engine::{TimerValue},
-    TIMER_TABLE,
-};
+use crate::{engine::TimerValue, old::Context, TIMER_TABLE};
 
 use arroyo_rpc::grpc::TaskCheckpointEventType;
 

@@ -1,45 +1,52 @@
-use std::fmt::{Debug, Formatter};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::{Debug, Formatter};
 use std::{mem, thread};
 
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use arrow_array::{ArrayRef, RecordBatch};
-use arroyo_datastream::{ArroyoSchema, ConnectorOp};
-use bincode::{Decode, Encode};
-use datafusion_common::hash_utils;
 use anyhow::{bail, Error, Result};
+use arrow_array::{ArrayRef, RecordBatch};
 use arroyo_datastream::Operator;
+use arroyo_datastream::{ArroyoSchema, ConnectorOp};
 use arroyo_df::meta::SchemaRefWithMeta;
 use arroyo_state::tables::time_key_map::TimeKeyMap;
-
+use bincode::{Decode, Encode};
+use datafusion_common::hash_utils;
 
 use tracing::{debug, info, warn};
 
+use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
+use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
+use crate::connectors::filesystem::source::FileSystemSourceFunc;
+use crate::connectors::impulse::ImpulseSourceFunc;
+use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
+use crate::network_manager::{NetworkManager, Quad, Senders};
+use crate::operator::{server_for_hash, ArrowOperator, ArrowOperatorConstructor, BaseOperator};
+use crate::operators::PeriodicWatermarkGenerator;
+use crate::{RateLimiter, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, TIMER_TABLE};
+use arroyo_datastream::logical::{
+    LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
+};
 pub use arroyo_macro::StreamNode;
-use arroyo_rpc::grpc::{api, CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior, TaskAssignment, TaskCheckpointEventType};
+use arroyo_rpc::formats::BadData;
+use arroyo_rpc::grpc::{
+    api, CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
+    TaskAssignment, TaskCheckpointEventType,
+};
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
-use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, from_micros, Key, range_for_server, SourceError, TaskInfo, UserError, Watermark, WorkerId};
+use arroyo_state::{BackingStore, StateBackend, StateStore};
+use arroyo_types::{
+    from_micros, range_for_server, ArrowMessage, CheckpointBarrier, Data, Key, SourceError,
+    TaskInfo, UserError, Watermark, WorkerId,
+};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
 use rand::{random, Rng};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName};
-use arroyo_rpc::formats::BadData;
-use crate::metrics::{QueueGauges, register_queue_gauges, TaskCounters};
-use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, RateLimiter, TIMER_TABLE};
-use arroyo_state::{BackingStore, StateBackend, StateStore};
-use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
-use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
-use crate::connectors::filesystem::source::FileSystemSourceFunc;
-use crate::connectors::impulse::ImpulseSourceFunc;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator, server_for_hash};
-use crate::operators::PeriodicWatermarkGenerator;
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
 
@@ -164,22 +171,35 @@ impl ArrowCollector {
         let out_schema = self.out_schema.as_ref().unwrap();
 
         let record = if let Some(projection) = &self.projection {
-            record.project(&projection).unwrap_or_else(|e| panic!("failed to project for operator {}: {}", self.task_info.operator_id, e))
+            record.project(&projection).unwrap_or_else(|e| {
+                panic!(
+                    "failed to project for operator {}: {}",
+                    self.task_info.operator_id, e
+                )
+            })
         } else {
             record
         };
 
         let record = RecordBatch::try_new(out_schema.schema.clone(), record.columns().to_vec())
             .unwrap_or_else(|e| {
-                panic!("Data does not match expecte schema for {}: {:?}", self.task_info.operator_id, e);
+                panic!(
+                    "Data does not match expecte schema for {}: {:?}",
+                    self.task_info.operator_id, e
+                );
             });
 
         let keys = if out_schema.key_cols.is_empty() {
             None
         } else {
-            Some(out_schema.key_cols.iter().map(|i| record.column(*i).clone()).collect())
+            Some(
+                out_schema
+                    .key_cols
+                    .iter()
+                    .map(|i| record.column(*i).clone())
+                    .collect(),
+            )
         };
-
 
         if self.out_qs.len() == 1 {
             let idx = out_idx(keys, self.out_qs[0].len());
@@ -257,7 +277,7 @@ impl ArrowContext {
                     &task_info.operator_id,
                     metadata.epoch,
                 )
-                    .await;
+                .await;
                 metadata
                     .expect("require metadata")
                     .min_watermark
@@ -269,7 +289,7 @@ impl ArrowContext {
                 tables,
                 control_tx.clone(),
             )
-                .await;
+            .await;
 
             (state, watermark)
         } else {
@@ -400,19 +420,16 @@ impl ArrowContext {
         // These messages are received by the engine control thread,
         // which then sends a TaskCheckpointEventReq to the controller.
         self.control_tx
-            .send(ControlResp::CheckpointEvent(
-                arroyo_rpc::CheckpointEvent {
-                    checkpoint_epoch: barrier.epoch,
-                    operator_id: self.task_info.operator_id.clone(),
-                    subtask_index: self.task_info.task_index as u32,
-                    time: std::time::SystemTime::now(),
-                    event_type,
-                },
-            ))
+            .send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
+                checkpoint_epoch: barrier.epoch,
+                operator_id: self.task_info.operator_id.clone(),
+                subtask_index: self.task_info.task_index as u32,
+                time: std::time::SystemTime::now(),
+                event_type,
+            }))
             .await
             .unwrap();
     }
-
 
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         self.state.load_compacted(compaction).await;
@@ -429,10 +446,7 @@ impl ArrowContext {
     ) -> Result<(), UserError> {
         todo!("collect source record");
         match value {
-            Ok(value) => Ok(self
-                .collector
-                .collect(value)
-                .await),
+            Ok(value) => Ok(self.collector.collect(value).await),
             Err(SourceError::BadData { details }) => match bad_data {
                 Some(BadData::Drop {}) => {
                     rate_limiter
@@ -442,7 +456,7 @@ impl ArrowContext {
                                 "Dropping invalid data",
                                 details,
                             ))
-                                .await;
+                            .await;
                         })
                         .await;
                     TaskCounters::DeserializationErrors
@@ -458,8 +472,6 @@ impl ArrowContext {
         }
     }
 }
-
-
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
@@ -525,13 +537,7 @@ pub struct SubtaskNode {
 
 impl Debug for SubtaskNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}-{}-{}",
-            self.node.name(),
-            self.id,
-            self.subtask_idx
-        )
+        write!(f, "{}-{}-{}", self.node.name(), self.id, self.subtask_idx)
     }
 }
 
@@ -686,7 +692,6 @@ impl Program {
                 .next()
                 .unwrap_or_default();
 
-
             let node = logical.node_weight(idx).unwrap();
             let parallelism = *parallelism_map.get(&node.operator_id).unwrap_or_else(|| {
                 warn!("no assignments for operator {}", node.operator_id);
@@ -740,7 +745,9 @@ impl Program {
                         physical.add_edge(*f, *t, edge);
                     }
                 }
-                LogicalEdgeType::Shuffle | LogicalEdgeType::LeftJoin | LogicalEdgeType::RightJoin => {
+                LogicalEdgeType::Shuffle
+                | LogicalEdgeType::LeftJoin
+                | LogicalEdgeType::RightJoin => {
                     for f in &from_nodes {
                         for (idx, t) in to_nodes.iter().enumerate() {
                             let (tx, rx) = channel(QUEUE_SIZE);
@@ -1105,7 +1112,8 @@ impl Engine {
             }
         }
 
-        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, Sender<ArrowMessage>>> = BTreeMap::new();
+        let mut out_qs_map: BTreeMap<usize, BTreeMap<usize, Sender<ArrowMessage>>> =
+            BTreeMap::new();
 
         for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
             // is the target of this edge local or remote?
@@ -1213,30 +1221,35 @@ impl Engine {
 pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn BaseOperator> {
     let mut buf = config.as_slice();
     match operator {
-        OperatorName::Watermark => {
-            Box::new(PeriodicWatermarkGenerator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
-        }
-        OperatorName::ArrowValue => {
-            Box::new(ValueExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
-        }
-        OperatorName::ArrowKey => {
-            Box::new(KeyExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
-        }
-        OperatorName::ArrowAggregate => {
-            Box::new(TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap())
-        }
+        OperatorName::Watermark => Box::new(
+            PeriodicWatermarkGenerator::from_config(prost::Message::decode(&mut buf).unwrap())
+                .unwrap(),
+        ),
+        OperatorName::ArrowValue => Box::new(
+            ValueExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap(),
+        ),
+        OperatorName::ArrowKey => Box::new(
+            KeyExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap(),
+        ),
+        OperatorName::ArrowAggregate => Box::new(
+            TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
+                .unwrap(),
+        ),
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(&mut buf).unwrap();
             match op.operator.as_str() {
-                "connectors::impulse::ImpulseSourceFunc" => Box::new(ImpulseSourceFunc::from_config(op).unwrap()),
-                "connectors::filesystem::source::FileSystemSourceFunc" => Box::new(FileSystemSourceFunc::from_config(op).unwrap()),
+                "connectors::impulse::ImpulseSourceFunc" => {
+                    Box::new(ImpulseSourceFunc::from_config(op).unwrap())
+                }
+                "connectors::filesystem::source::FileSystemSourceFunc" => {
+                    Box::new(FileSystemSourceFunc::from_config(op).unwrap())
+                }
                 "GrpcSink" => Box::new(GrpcRecordBatchSink::from_config(op).unwrap()),
                 c => panic!("unknown operator {}", c),
             }
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

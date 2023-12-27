@@ -1,7 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
 use arrow_schema::{DataType, Schema};
-use arroyo_datastream::{ArroyoSchema, ConnectorOp, EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program, ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator, Stream, StreamEdge, StreamNode, TIMESTAMP_FIELD, TumblingTopN, TumblingWindowAggregator, WatermarkStrategy, WindowAgg, WindowType};
+use arroyo_datastream::{
+    ArroyoSchema, ConnectorOp, EdgeType, ExpressionReturnType, NonWindowAggregator, Operator,
+    PeriodicWatermark, Program, ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator,
+    Stream, StreamEdge, StreamNode, TumblingTopN, TumblingWindowAggregator, WatermarkStrategy,
+    WindowAgg, WindowType, TIMESTAMP_FIELD,
+};
 
 use datafusion::{
     execution::{
@@ -18,31 +23,32 @@ use petgraph::{
 
 use tracing::{info, warn};
 
-use crate::{DataFusionEdge, physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor};
+use crate::schemas::add_timestamp_field;
+use crate::{physical::ArroyoPhysicalExtensionCodec, DataFusionEdge, QueryToGraphVisitor};
 use crate::{
     tables::Table,
     types::{StructDef, StructField, StructPair, TypeDef},
     ArroyoSchemaProvider, CompiledSql, SqlConfig,
 };
 use anyhow::{anyhow, bail, Context, Result};
-use datafusion::sql::sqlparser::test_utils::table;
+use arroyo_datastream::logical::{
+    LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
+};
 use arroyo_datastream::EdgeType::Forward;
+use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{
     window, KeyPlanOperator, TumblingWindow, ValuePlanOperator, Window, WindowAggregateOperator,
 };
+use datafusion::sql::sqlparser::test_utils::table;
 use datafusion_common::{DFField, DFSchema, ScalarValue};
 use datafusion_expr::{BinaryExpr, Expr, LogicalPlan};
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
 };
-use petgraph::Direction;
 use petgraph::prelude::EdgeRef;
+use petgraph::Direction;
 use prost::Message;
-use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName};
-use arroyo_rpc::grpc::api;
-use crate::schemas::add_timestamp_field;
-
 
 pub(crate) async fn get_arrow_program(
     rewriter: QueryToGraphVisitor,
@@ -92,7 +98,8 @@ pub(crate) async fn get_arrow_program(
                     operator_id: format!("source_{}", program_graph.node_count()),
                     description: sql_source.source.config.description.clone(),
                     operator_name: OperatorName::ConnectorSource,
-                    operator_config: api::ConnectorOp::from(sql_source.source.config).encode_to_vec(),
+                    operator_config: api::ConnectorOp::from(sql_source.source.config)
+                        .encode_to_vec(),
                     parallelism: 1,
                 });
 
@@ -105,22 +112,21 @@ pub(crate) async fn get_arrow_program(
                         period_micros: 1_000_000,
                         max_lateness_micros: 0,
                         idle_time_micros: None,
-                    }.encode_to_vec()
+                    }
+                    .encode_to_vec(),
                 });
 
                 let mut edge: LogicalEdge = (&DataFusionEdge {
                     schema: table_scan.projected_schema.clone(),
                     edge_type: LogicalEdgeType::Forward,
                     key_cols: vec![],
-                }).try_into().unwrap();
+                })
+                    .try_into()
+                    .unwrap();
 
                 edge.projection = table_scan.projection.clone();
 
-                program_graph.add_edge(
-                    source_index,
-                    watermark_index,
-                    edge,
-                );
+                program_graph.add_edge(source_index, watermark_index, edge);
 
                 node_mapping.insert(node_index, watermark_index);
                 watermark_index
@@ -293,7 +299,8 @@ pub(crate) async fn get_arrow_program(
                 let sink_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("sink_{}", program_graph.node_count()),
                     operator_name: OperatorName::ConnectorSink,
-                    operator_config: api::ConnectorOp::from(ConnectorOp::web_sink()).encode_to_vec(),
+                    operator_config: api::ConnectorOp::from(ConnectorOp::web_sink())
+                        .encode_to_vec(),
                     parallelism: 1,
                     description: "GrpcSink".into(),
                 });
@@ -312,7 +319,6 @@ pub(crate) async fn get_arrow_program(
                 edge.weight().try_into().unwrap(),
             );
         }
-
     }
 
     let program = LogicalProgram {

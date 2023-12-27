@@ -1,6 +1,7 @@
 use crate::queries::api_queries::{
     DbCheckpoint, DbLogMessage, DbPipelineJob, GetOperatorErrorsParams,
 };
+use arroyo_datastream::logical::OperatorName;
 use arroyo_rpc::api_types::checkpoints::{
     Checkpoint, CheckpointEventSpan, CheckpointSpanType, OperatorCheckpointGroup,
     SubtaskCheckpointGroup,
@@ -30,7 +31,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
 use tonic::Request;
 use tracing::info;
-use arroyo_datastream::logical::OperatorName;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
 

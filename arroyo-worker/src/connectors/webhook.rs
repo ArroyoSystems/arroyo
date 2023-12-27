@@ -6,7 +6,7 @@ use std::{
 
 use arroyo_macro::process_fn;
 use arroyo_rpc::ControlResp;
-use arroyo_rpc::{grpc::TableDescriptor, OperatorConfig, var_str::VarStr};
+use arroyo_rpc::{grpc::TableDescriptor, var_str::VarStr, OperatorConfig};
 use arroyo_types::{CheckpointBarrier, Key, Record};
 
 use serde::{Deserialize, Serialize};

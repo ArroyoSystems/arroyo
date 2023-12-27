@@ -1,8 +1,8 @@
 use core::panic;
 use std::future::ready;
 use std::pin::Pin;
-use std::{collections::HashMap, marker::PhantomData};
 use std::time::SystemTime;
+use std::{collections::HashMap, marker::PhantomData};
 
 use anyhow::Result;
 use arrow_array::RecordBatch;
@@ -17,11 +17,11 @@ use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncRead;
+use tokio::sync::mpsc::Receiver;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     select,
 };
-use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::Stream;
 use tracing::{info, warn};
@@ -29,17 +29,17 @@ use tracing::{info, warn};
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::formats::BadData;
-use arroyo_rpc::{ControlMessage, grpc::StopMode, OperatorConfig};
-use arroyo_storage::StorageProvider;
-use arroyo_types::{ArrowMessage, Data, SourceError, to_nanos, UserError};
-use typify::import_types;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::ConnectorOp;
+use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
+use arroyo_storage::StorageProvider;
+use arroyo_types::{to_nanos, ArrowMessage, Data, SourceError, UserError};
+use typify::import_types;
 
-use crate::{RateLimiter, SourceFinishType};
 use crate::engine::ArrowContext;
 use crate::old::Context;
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
+use crate::{RateLimiter, SourceFinishType};
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 
@@ -87,7 +87,11 @@ impl BaseOperator for FileSystemSourceFunc {
         "FileSystem".to_string()
     }
 
-    async fn run_behavior(mut self: Box<Self>, ctx: &mut ArrowContext, _: Vec<Receiver<ArrowMessage>>) -> Option<ArrowMessage> {
+    async fn run_behavior(
+        mut self: Box<Self>,
+        ctx: &mut ArrowContext,
+        _: Vec<Receiver<ArrowMessage>>,
+    ) -> Option<ArrowMessage> {
         match self.run_int(ctx).await {
             Ok(s) => s.into(),
             Err(e) => {
@@ -96,14 +100,11 @@ impl BaseOperator for FileSystemSourceFunc {
                 panic!("{}: {}", e.name, e.details);
             }
         }
-
     }
 
-    async fn on_start(&mut self, _: &mut ArrowContext) {
-    }
+    async fn on_start(&mut self, _: &mut ArrowContext) {}
 
-    async fn on_close(&mut self, _: &mut ArrowContext) {
-    }
+    async fn on_close(&mut self, _: &mut ArrowContext) {}
 }
 
 impl FileSystemSourceFunc {

@@ -1,28 +1,31 @@
+use std::cmp::max;
 use std::fs;
 use std::str::FromStr;
 use std::{fmt::Debug, path::PathBuf};
-use std::cmp::max;
 
 use std::marker::PhantomData;
 use std::ops::Add;
 
 use crate::engine::{ArrowContext, StreamNode};
-use arroyo_macro::process_fn;
-use arroyo_rpc::grpc::{api, TableDescriptor};
-use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, from_millis, from_nanos, GlobalKey, Key, Message, Record, RecordBatchData, TaskInfo, to_millis, UpdatingData, Watermark, Window};
-use bincode::{config, Decode, Encode};
-use std::time::{Duration, SystemTime};
+use crate::old::{Collector, Context};
+use crate::operator::{get_timestamp_col, ArrowOperator, ArrowOperatorConstructor};
 use arrow::compute::kernels;
 use arrow_array::RecordBatch;
+use arroyo_macro::process_fn;
+use arroyo_rpc::grpc::api::PeriodicWatermark;
+use arroyo_rpc::grpc::{api, TableDescriptor};
+use arroyo_types::{
+    from_millis, from_nanos, to_millis, ArrowMessage, CheckpointBarrier, Data, GlobalKey, Key,
+    Message, Record, RecordBatchData, TaskInfo, UpdatingData, Watermark, Window,
+};
 use async_trait::async_trait;
+use bincode::{config, Decode, Encode};
+use std::time::{Duration, SystemTime};
 use tracing::{debug, info};
 use wasmtime::{
     Caller, Engine, InstanceAllocationStrategy, Linker, Module, PoolingAllocationConfig, Store,
     TypedFunc,
 };
-use arroyo_rpc::grpc::api::PeriodicWatermark;
-use crate::old::{Collector, Context};
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, get_timestamp_col};
 
 pub mod aggregating_window;
 pub mod functions;
@@ -38,11 +41,11 @@ pub mod windows;
 
 #[cfg(test)]
 mod test {
-    use crate::operators::WasmOperator;
-    use crate::operators::TimeWindowAssigner;
-    use arroyo_types::{from_millis, Message, Record, to_millis};
-    use std::time::{Duration, SystemTime};
     use crate::old::Context;
+    use crate::operators::TimeWindowAssigner;
+    use crate::operators::WasmOperator;
+    use arroyo_types::{from_millis, to_millis, Message, Record};
+    use std::time::{Duration, SystemTime};
 
     use super::SlidingWindowAssigner;
 
@@ -236,7 +239,8 @@ impl ArrowOperator for PeriodicWatermarkGenerator {
                     "Setting partition {} to idle after {:?}",
                     ctx.task_info.task_index, idle_time
                 );
-                ctx.broadcast(ArrowMessage::Watermark(Watermark::Idle)).await;
+                ctx.broadcast(ArrowMessage::Watermark(Watermark::Idle))
+                    .await;
                 self.idle = true;
             }
         }

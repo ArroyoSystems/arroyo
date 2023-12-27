@@ -1,9 +1,18 @@
 use anyhow::bail;
+use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::grpc::node_grpc_client::NodeGrpcClient;
-use arroyo_rpc::grpc::{api, HeartbeatNodeReq, RegisterNodeReq, StartWorkerData, StartWorkerHeader, StartWorkerReq, StopWorkerReq, StopWorkerStatus, WorkerFinishedReq};
-use arroyo_types::{NodeId, WorkerId, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV, ARROYO_PROGRAM_ENV};
+use arroyo_rpc::grpc::{
+    api, HeartbeatNodeReq, RegisterNodeReq, StartWorkerData, StartWorkerHeader, StartWorkerReq,
+    StopWorkerReq, StopWorkerStatus, WorkerFinishedReq,
+};
+use arroyo_types::{
+    NodeId, WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV,
+    WORKER_ID_ENV,
+};
+use base64::{engine::general_purpose, Engine as _};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
+use prost::Message;
 use std::collections::HashMap;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::PathBuf;
@@ -15,10 +24,6 @@ use tokio::process::Command;
 use tokio::sync::{oneshot, Mutex};
 use tonic::{Request, Status};
 use tracing::{info, warn};
-use arroyo_datastream::logical::LogicalProgram;
-use base64::{Engine as _, engine::general_purpose};
-use prost::Message;
-
 
 #[cfg(feature = "k8s")]
 pub mod kubernetes;
@@ -154,9 +159,11 @@ impl Scheduler for ProcessScheduler {
                     .env(JOB_ID_ENV, &job_id)
                     .env(NODE_ID_ENV, format!("{}", 1))
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
-                    .env(ARROYO_PROGRAM_ENV, general_purpose::STANDARD_NO_PAD.encode(
-                        api::ArrowProgram::from(program).encode_to_vec()
-                    ))
+                    .env(
+                        ARROYO_PROGRAM_ENV,
+                        general_purpose::STANDARD_NO_PAD
+                            .encode(api::ArrowProgram::from(program).encode_to_vec()),
+                    )
                     .kill_on_drop(true)
                     .spawn()
                     .unwrap();

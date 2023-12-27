@@ -16,9 +16,9 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 
+use crate::engine::QueueItem;
 use tokio::time::{interval, Interval};
 use tokio_stream::StreamExt;
-use crate::engine::QueueItem;
 
 use crate::inq_reader::InQReader;
 

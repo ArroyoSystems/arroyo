@@ -7,9 +7,9 @@ use std::marker::PhantomData;
 
 use tracing::info;
 
+use crate::old::Context;
 use arroyo_types::CheckpointBarrier;
 use serde::Serialize;
-use crate::old::Context;
 
 use super::{FluvioTable, TableType};
 

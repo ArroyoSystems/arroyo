@@ -4,7 +4,7 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::{Schema, TimeUnit};
 use arroyo_connectors::Connection;
-use arroyo_datastream::{ArroyoSchema, TIMESTAMP_FIELD, WindowType};
+use arroyo_datastream::{ArroyoSchema, WindowType, TIMESTAMP_FIELD};
 
 use datafusion::datasource::{DefaultTableSource, TableProvider};
 use datafusion::physical_plan::functions::make_scalar_function;
@@ -55,12 +55,12 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
+use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
 use tracing::warn;
 use unicase::UniCase;
-use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
@@ -456,7 +456,6 @@ impl Default for SqlConfig {
     }
 }
 
-
 pub async fn parse_and_get_program(
     query: &str,
     schema_provider: ArroyoSchemaProvider,
@@ -501,7 +500,7 @@ impl TreeNodeRewriter for TimestampRewriter {
             LogicalPlan::Union(ref mut union) => {
                 union.schema = add_timestamp_field(union.schema.clone())?;
             }
-            LogicalPlan::TableScan(_) => { }
+            LogicalPlan::TableScan(_) => {}
             LogicalPlan::SubqueryAlias(ref mut subquery_alias) => {
                 if !has_timestamp_field(subquery_alias.schema.clone()) {
                     let timestamp_field = DFField::new(
@@ -560,33 +559,37 @@ impl LogicalPlanExtension {
             | LogicalPlanExtension::ValueCalculation(logical_plan) => DataFusionEdge {
                 schema: logical_plan.schema().clone(),
                 edge_type: LogicalEdgeType::Forward,
-                key_cols: vec![]
+                key_cols: vec![],
             },
             LogicalPlanExtension::KeyCalculation {
                 projection: logical_plan,
                 key_columns,
-            } => {
-                DataFusionEdge {
-                    schema: logical_plan.schema().clone(),
-                    edge_type: LogicalEdgeType::Forward,
-                    key_cols: key_columns.clone(),
-                }
-            }
+            } => DataFusionEdge {
+                schema: logical_plan.schema().clone(),
+                edge_type: LogicalEdgeType::Forward,
+                key_cols: key_columns.clone(),
+            },
             LogicalPlanExtension::AggregateCalculation(aggregate_calculation) => {
                 let aggregate_schema = aggregate_calculation.aggregate.schema.clone();
                 let mut fields = aggregate_schema.fields().clone();
 
-                fields.insert(aggregate_calculation.window_index, aggregate_calculation.window_field.clone());
+                fields.insert(
+                    aggregate_calculation.window_index,
+                    aggregate_calculation.window_field.clone(),
+                );
 
                 let output_schema = add_timestamp_field(Arc::new(
-                    DFSchema::new_with_metadata(fields, aggregate_schema.metadata().clone()).unwrap())).unwrap();
+                    DFSchema::new_with_metadata(fields, aggregate_schema.metadata().clone())
+                        .unwrap(),
+                ))
+                .unwrap();
 
                 DataFusionEdge {
                     schema: output_schema,
                     edge_type: LogicalEdgeType::Forward,
                     key_cols: vec![],
                 }
-            },
+            }
             LogicalPlanExtension::Sink => unreachable!(),
         }
     }
@@ -622,7 +625,10 @@ impl TryFrom<&DataFusionEdge> for LogicalEdge {
 
     fn try_from(value: &DataFusionEdge) -> std::result::Result<Self, Self::Error> {
         println!("Converting schema: #{:?}", value.schema);
-        let Some(timestamp_col) = value.schema.index_of_column_by_name(None, TIMESTAMP_FIELD)? else {
+        let Some(timestamp_col) = value
+            .schema
+            .index_of_column_by_name(None, TIMESTAMP_FIELD)?
+        else {
             bail!("no timestamp field found in schema: {:?}", value.schema)
         };
 
@@ -806,7 +812,8 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                         false,
                     ));
                 }
-                let input_df_schema = Arc::new(DFSchema::new_with_metadata(df_fields, HashMap::new())?);
+                let input_df_schema =
+                    Arc::new(DFSchema::new_with_metadata(df_fields, HashMap::new())?);
 
                 let input_table_scan = LogicalPlan::TableScan(TableScan {
                     table_name: OwnedTableReference::parse_str("memory"),

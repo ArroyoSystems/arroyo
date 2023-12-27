@@ -14,17 +14,21 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::{connection_profiles, jobs, pipelines, types};
-use arroyo_datastream::{ConnectorOp};
+use arroyo_datastream::ConnectorOp;
 use arroyo_rpc::api_types::pipelines::{
     Job, Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch, PipelinePost,
     PipelineRestart, QueryValidationResult, StopType, ValidateQueryPost,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
+use arroyo_rpc::grpc::api::{
+    create_pipeline_req, ArrowProgram, CreateJobReq, CreatePipelineReq, CreateSqlJob,
+    PipelineProgram,
+};
 use arroyo_rpc::grpc::{api as api_proto, api};
-use arroyo_rpc::grpc::api::{ArrowProgram, create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, PipelineProgram};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
+use arroyo_datastream::logical::{LogicalProgram, OperatorName};
 use arroyo_df::types::StructDef;
 use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::avro::arrow_to_avro_schema;
@@ -39,7 +43,6 @@ use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
 use tracing::warn;
-use arroyo_datastream::logical::{LogicalProgram, OperatorName};
 
 use crate::jobs::get_action;
 use crate::queries::api_queries;
@@ -334,7 +337,8 @@ pub(crate) async fn create_pipeline<'a>(
         for node in compiled.program.graph.node_weights_mut() {
             // replace all sink connectors with websink for preview
             if node.operator_name == OperatorName::ConnectorSink {
-                node.operator_config = api::ConnectorOp::from(ConnectorOp::web_sink()).encode_to_vec();
+                node.operator_config =
+                    api::ConnectorOp::from(ConnectorOp::web_sink()).encode_to_vec();
             }
         }
     }
@@ -350,8 +354,7 @@ pub(crate) async fn create_pipeline<'a>(
             ),
         })?;
 
-    let proto_program: ArrowProgram =
-        compiled.program.clone().try_into().map_err(log_and_map)?;
+    let proto_program: ArrowProgram = compiled.program.clone().try_into().map_err(log_and_map)?;
 
     let program_bytes = proto_program.encode_to_vec();
 

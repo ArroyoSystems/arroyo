@@ -51,7 +51,10 @@ fn slots_for_job(job: &LogicalProgram) -> usize {
         .unwrap_or(0)
 }
 
-fn compute_assignments(workers: Vec<&WorkerStatus>, program: &LogicalProgram) -> Vec<TaskAssignment> {
+fn compute_assignments(
+    workers: Vec<&WorkerStatus>,
+    program: &LogicalProgram,
+) -> Vec<TaskAssignment> {
     let mut assignments = vec![];
     for node in program.graph.node_weights() {
         let mut worker_idx = 0;
