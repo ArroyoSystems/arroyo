@@ -16,8 +16,9 @@ use arroyo_formats::{DataSerializer, SchemaData};
 use tracing::warn;
 use typify::import_types;
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
 use crate::header_map;
+use crate::old::Context;
 
 import_types!(schema = "../connector-schemas/webhook/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
 

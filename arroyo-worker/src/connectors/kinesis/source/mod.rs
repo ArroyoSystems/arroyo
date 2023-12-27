@@ -34,7 +34,8 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::{engine::Context, RateLimiter, SourceFinishType};
+use crate::old::Context;
+use crate::{RateLimiter, SourceFinishType};
 
 use super::{KinesisTable, SourceOffset, TableType};
 

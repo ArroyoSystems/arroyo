@@ -1,4 +1,5 @@
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
+use crate::old::Context;
 use crate::SourceFinishType;
 use arroyo_macro::source_fn;
 use arroyo_rpc::grpc::{StopMode, TableDescriptor};

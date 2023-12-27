@@ -14,19 +14,20 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::{connection_profiles, jobs, pipelines, types};
-use arroyo_datastream::{ConnectorOp, Operator, Program};
+use arroyo_datastream::ConnectorOp;
 use arroyo_rpc::api_types::pipelines::{
-    Job, Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch, PipelinePost,
-    PipelineRestart, QueryValidationResult, StopType, ValidateQueryPost,
+    Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, QueryValidationResult, StopType,
+    ValidateQueryPost,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
-use arroyo_rpc::grpc::api as api_proto;
 use arroyo_rpc::grpc::api::{
-    create_pipeline_req, CreateJobReq, CreatePipelineReq, CreateSqlJob, PipelineProgram,
+    create_pipeline_req, ArrowProgram, CreateJobReq, CreatePipelineReq, CreateSqlJob,
 };
+use arroyo_rpc::grpc::{api as api_proto, api};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
+use arroyo_datastream::logical::{LogicalProgram, OperatorName};
 use arroyo_df::types::StructDef;
 use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::avro::arrow_to_avro_schema;
@@ -153,7 +154,7 @@ where
     })
 }
 
-fn set_parallelism(program: &mut Program, parallelism: usize) {
+fn set_parallelism(program: &mut LogicalProgram, parallelism: usize) {
     for node in program.graph.node_weights_mut() {
         node.parallelism = parallelism;
     }
@@ -235,15 +236,16 @@ async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> 
             continue;
         };
 
-        let Some(value_schema) = compiled_sql.schemas.get(&input.weight().value) else {
-            continue;
-        };
-
-        let node = compiled_sql.program.graph.node_weight_mut(node).unwrap();
-
-        if let Operator::ConnectorSink(connector) = &mut node.operator {
-            try_register_confluent_schema(connector, value_schema).await?;
-        }
+        // TODO: schema registration
+        // let Some(value_schema) = compiled_sql.schemas.get(&input.weight().value) else {
+        //     continue;
+        // };
+        //
+        // let node = compiled_sql.program.graph.node_weight_mut(node).unwrap();
+        //
+        // if let Operator::ConnectorSink(connector) = &mut node.operator {
+        //     try_register_confluent_schema(connector, value_schema).await?;
+        // }
     }
 
     Ok(())
@@ -254,7 +256,7 @@ pub(crate) async fn create_pipeline<'a>(
     pub_id: &str,
     auth: AuthData,
     tx: &Transaction<'a>,
-) -> Result<(i64, Program), ErrorResp> {
+) -> Result<(i64, LogicalProgram), ErrorResp> {
     let pipeline_type;
     let mut compiled;
     let text;
@@ -270,7 +272,7 @@ pub(crate) async fn create_pipeline<'a>(
             }
             pipeline_type = PipelineType::rust;
             compiled = CompiledSql {
-                program: PipelineProgram::decode(&bytes[..])
+                program: ArrowProgram::decode(&bytes[..])
                     .map_err(log_and_map)?
                     .try_into()
                     .map_err(log_and_map)?,
@@ -308,7 +310,8 @@ pub(crate) async fn create_pipeline<'a>(
         }
     };
 
-    optimizations::optimize(&mut compiled.program.graph);
+    // TODO: graph optimizations?
+    //optimizations::optimize(&mut compiled.program.graph);
 
     if compiled.program.graph.node_count() > auth.org_metadata.max_operators as usize {
         return Err(bad_request(
@@ -316,23 +319,25 @@ pub(crate) async fn create_pipeline<'a>(
                 contact support@arroyo.systems for an increase", auth.org_metadata.max_operators)));
     }
 
-    let errors = compiled.program.validate_graph();
-    if !errors.is_empty() {
-        let errs: Vec<String> = errors.iter().map(|s| format!("  * {}\n", s)).collect();
-
-        return Err(bad_request(format!(
-            "Program validation failed:\n{}",
-            errs.join("")
-        )));
-    }
+    // TODO: graph validation?
+    // let errors = compiled.program.validate_graph();
+    // if !errors.is_empty() {
+    //     let errs: Vec<String> = errors.iter().map(|s| format!("  * {}\n", s)).collect();
+    //
+    //     return Err(bad_request(format!(
+    //         "Program validation failed:\n{}",
+    //         errs.join("")
+    //     )));
+    // }
 
     set_parallelism(&mut compiled.program, 1);
 
     if is_preview {
         for node in compiled.program.graph.node_weights_mut() {
             // replace all sink connectors with websink for preview
-            if let Operator::ConnectorSink { .. } = node.operator {
-                node.operator = Operator::ConnectorSink(ConnectorOp::web_sink());
+            if node.operator_name == OperatorName::ConnectorSink {
+                node.operator_config =
+                    api::ConnectorOp::from(ConnectorOp::web_sink()).encode_to_vec();
             }
         }
     }
@@ -348,8 +353,7 @@ pub(crate) async fn create_pipeline<'a>(
             ),
         })?;
 
-    let proto_program: PipelineProgram =
-        compiled.program.clone().try_into().map_err(log_and_map)?;
+    let proto_program: ArrowProgram = compiled.program.clone().try_into().map_err(log_and_map)?;
 
     let program_bytes = proto_program.encode_to_vec();
 
@@ -399,7 +403,7 @@ impl TryInto<Pipeline> for DbPipeline {
         let state = self.state.unwrap_or_else(|| "Created".to_string());
         let (action_text, action, action_in_progress) = get_action(&state, &running_desired);
 
-        let mut program: Program = PipelineProgram::decode(&self.program[..])
+        let mut program: LogicalProgram = ArrowProgram::decode(&self.program[..])
             .map_err(log_and_map)?
             .try_into()
             .map_err(log_and_map)?;
@@ -478,35 +482,10 @@ pub async fn validate_query(
     let pipeline_graph_validation_result =
         match compile_sql(validate_query_post.query, &udfs, 1, &auth_data, &client).await {
             Ok(CompiledSql { mut program, .. }) => {
-                optimizations::optimize(&mut program.graph);
-                let nodes = program
-                    .graph
-                    .node_weights()
-                    .map(|node| PipelineNode {
-                        node_id: node.operator_id.to_string(),
-                        operator: format!("{:?}", node),
-                        parallelism: node.clone().parallelism as u32,
-                    })
-                    .collect();
-
-                let edges = program
-                    .graph
-                    .edge_references()
-                    .map(|edge| {
-                        let src = program.graph.node_weight(edge.source()).unwrap();
-                        let target = program.graph.node_weight(edge.target()).unwrap();
-                        PipelineEdge {
-                            src_id: src.operator_id.to_string(),
-                            dest_id: target.operator_id.to_string(),
-                            key_type: edge.weight().key.to_string(),
-                            value_type: edge.weight().value.to_string(),
-                            edge_type: format!("{:?}", edge.weight().typ),
-                        }
-                    })
-                    .collect();
+                //optimizations::optimize(&mut program.graph);
 
                 QueryValidationResult {
-                    graph: Some(PipelineGraph { nodes, edges }),
+                    graph: Some(program.as_job_graph().into()),
                     errors: None,
                 }
             }
@@ -599,7 +578,8 @@ pub async fn post_pipeline(
             "parallelism": pipeline_post.parallelism,
             "has_udfs": pipeline_post.udfs.map(|e| !e.is_empty() && !e[0].definition.trim().is_empty())
               .unwrap_or(false),
-            "features": program.features(),
+            // TODO: program features
+            //"features": program.features(),
         }),
     );
 
@@ -666,7 +646,7 @@ pub async fn patch_pipeline(
             .map_err(log_and_map)?
             .ok_or_else(|| not_found("Job"))?;
 
-        let program = PipelineProgram::decode(&res.program[..]).map_err(log_and_map)?;
+        let program = ArrowProgram::decode(&res.program[..]).map_err(log_and_map)?;
         let map: HashMap<String, u32> = program
             .nodes
             .into_iter()

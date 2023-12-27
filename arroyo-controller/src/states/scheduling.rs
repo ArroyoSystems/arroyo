@@ -4,7 +4,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use arroyo_datastream::Program;
 use arroyo_rpc::grpc::{
     worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TableWriteBehavior, TaskAssignment,
 };
@@ -14,6 +13,7 @@ use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
 use anyhow::anyhow;
+use arroyo_datastream::logical::LogicalProgram;
 use arroyo_state::{
     committing_state::CommittingState, parquet::get_storage_env_vars, BackingStore, StateBackend,
 };
@@ -43,7 +43,7 @@ struct WorkerStatus {
 #[derive(Debug)]
 pub struct Scheduling {}
 
-fn slots_for_job(job: &Program) -> usize {
+fn slots_for_job(job: &LogicalProgram) -> usize {
     job.graph
         .node_weights()
         .map(|n| n.parallelism)
@@ -51,7 +51,10 @@ fn slots_for_job(job: &Program) -> usize {
         .unwrap_or(0)
 }
 
-fn compute_assignments(workers: Vec<&WorkerStatus>, program: &Program) -> Vec<TaskAssignment> {
+fn compute_assignments(
+    workers: Vec<&WorkerStatus>,
+    program: &LogicalProgram,
+) -> Vec<TaskAssignment> {
     let mut assignments = vec![];
     for node in program.graph.node_weights() {
         let mut worker_idx = 0;
@@ -166,8 +169,8 @@ impl Scheduling {
             match ctx
                 .scheduler
                 .start_workers(StartPipelineReq {
-                    pipeline_path: ctx.status.pipeline_path.clone().unwrap(),
-                    wasm_path: ctx.status.wasm_path.clone().unwrap(),
+                    program: ctx.program.clone(),
+                    wasm_path: "".to_string(),
                     job_id: ctx.config.id.clone(),
                     run_id: ctx.status.run_id,
                     name: ctx.config.pipeline_name.clone(),

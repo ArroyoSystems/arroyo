@@ -1,10 +1,8 @@
 use std::str::FromStr;
 use std::{marker::PhantomData, time::SystemTime};
 
-use crate::{
-    engine::{Context, StreamNode},
-    header_map, RateLimiter, SourceFinishType,
-};
+use crate::old::Context;
+use crate::{engine::StreamNode, header_map, RateLimiter, SourceFinishType};
 use arroyo_formats::{DataDeserializer, SchemaData};
 use arroyo_macro::source_fn;
 use arroyo_rpc::formats::BadData;

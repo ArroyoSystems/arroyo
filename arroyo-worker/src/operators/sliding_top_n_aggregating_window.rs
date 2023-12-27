@@ -4,7 +4,8 @@ use std::{
     time::SystemTime,
 };
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
+use crate::old::Context;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_state::tables::time_key_map::TimeKeyMap;

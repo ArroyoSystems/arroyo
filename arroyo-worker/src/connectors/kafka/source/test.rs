@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
-use crate::engine::{Context, OutQueue, QueueItem};
+use crate::old::QueueItem;
+use crate::old::{Context, OutQueue};
 use crate::RateLimiter;
 use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, JsonFormat};
@@ -117,7 +118,6 @@ impl KafkaTopicTester {
             1,
             vec![vec![OutQueue::new(data_tx, false)]],
             source::tables(),
-            HashMap::new(),
         )
         .await;
 

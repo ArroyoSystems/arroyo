@@ -2,18 +2,17 @@
 use anyhow::{anyhow, bail, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
-use arrow_schema::TimeUnit;
+use arrow_schema::{Schema, TimeUnit};
 use arroyo_connectors::Connection;
-use arroyo_datastream::{Program, WindowType};
+use arroyo_datastream::{ArroyoSchema, WindowType, TIMESTAMP_FIELD};
 
-use datafusion::datasource::{DefaultTableSource, TableProvider};
+use datafusion::datasource::DefaultTableSource;
 use datafusion::physical_plan::functions::make_scalar_function;
 use datafusion_common::{Column, DFField, OwnedTableReference, Result as DFResult, ScalarValue};
 pub mod avro;
 pub mod external;
 pub mod json_schema;
 pub mod logical;
-pub mod meta;
 pub mod physical;
 mod plan_graph;
 pub mod schemas;
@@ -55,6 +54,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
+use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
@@ -76,7 +76,7 @@ pub struct UdfDef {
 
 #[derive(Clone, Debug)]
 pub struct CompiledSql {
-    pub program: Program,
+    pub program: LogicalProgram,
     pub connection_ids: Vec<i64>,
     pub schemas: HashMap<String, StructDef>,
 }
@@ -551,60 +551,42 @@ impl LogicalPlanExtension {
             LogicalPlanExtension::Sink => None,
         }
     }
+
     fn outgoing_edge(&self) -> DataFusionEdge {
         match self {
             LogicalPlanExtension::TableScan(logical_plan)
-            | LogicalPlanExtension::ValueCalculation(logical_plan) => DataFusionEdge {
-                value_schema: logical_plan.schema().clone(),
-                key_schema: None,
-            },
+            | LogicalPlanExtension::ValueCalculation(logical_plan) => DataFusionEdge::new(
+                logical_plan.schema().clone(),
+                LogicalEdgeType::Forward,
+                vec![],
+            )
+            .unwrap(),
             LogicalPlanExtension::KeyCalculation {
                 projection: logical_plan,
                 key_columns,
-            } => {
-                let value_schema = DFSchema::new_with_metadata(
-                    logical_plan
-                        .schema()
-                        .fields()
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, field)| {
-                            if !key_columns.contains(&i) {
-                                Some(field.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                    logical_plan.schema().metadata().clone(),
-                )
+            } => DataFusionEdge::new(
+                logical_plan.schema().clone(),
+                LogicalEdgeType::Forward,
+                key_columns.clone(),
+            )
+            .unwrap(),
+            LogicalPlanExtension::AggregateCalculation(aggregate_calculation) => {
+                let aggregate_schema = aggregate_calculation.aggregate.schema.clone();
+                let mut fields = aggregate_schema.fields().clone();
+
+                fields.insert(
+                    aggregate_calculation.window_index,
+                    aggregate_calculation.window_field.clone(),
+                );
+
+                let output_schema = add_timestamp_field(Arc::new(
+                    DFSchema::new_with_metadata(fields, aggregate_schema.metadata().clone())
+                        .unwrap(),
+                ))
                 .unwrap();
-                let key_schema = DFSchema::new_with_metadata(
-                    logical_plan
-                        .schema()
-                        .fields()
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, field)| {
-                            if key_columns.contains(&i) {
-                                Some(field.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                    logical_plan.schema().metadata().clone(),
-                )
-                .unwrap();
-                DataFusionEdge {
-                    value_schema: Arc::new(value_schema),
-                    key_schema: Some(Arc::new(key_schema)),
-                }
+
+                DataFusionEdge::new(output_schema, LogicalEdgeType::Forward, vec![]).unwrap()
             }
-            LogicalPlanExtension::AggregateCalculation(aggregate_calculation) => DataFusionEdge {
-                value_schema: aggregate_calculation.aggregate.schema.clone(),
-                key_schema: None,
-            },
             LogicalPlanExtension::Sink => unreachable!(),
         }
     }
@@ -630,8 +612,45 @@ impl Debug for AggregateCalculation {
 
 #[derive(Debug)]
 struct DataFusionEdge {
-    value_schema: DFSchemaRef,
-    key_schema: Option<DFSchemaRef>,
+    schema: DFSchemaRef,
+    edge_type: LogicalEdgeType,
+    timestamp_index: usize,
+    key_indices: Vec<usize>,
+}
+
+impl DataFusionEdge {
+    pub fn new(
+        schema: DFSchemaRef,
+        edge_type: LogicalEdgeType,
+        key_indices: Vec<usize>,
+    ) -> anyhow::Result<Self> {
+        let Some(timestamp_index) = schema.index_of_column_by_name(None, TIMESTAMP_FIELD)? else {
+            bail!("no timestamp field found in schema: {:?}", schema)
+        };
+
+        Ok(DataFusionEdge {
+            schema,
+            edge_type,
+            timestamp_index,
+            key_indices,
+        })
+    }
+}
+
+impl From<&DataFusionEdge> for LogicalEdge {
+    fn from(value: &DataFusionEdge) -> Self {
+        let schema = ArroyoSchema {
+            schema: Arc::new(Schema::from(&*value.schema)),
+            timestamp_index: value.timestamp_index,
+            key_indices: value.key_indices.clone(),
+        };
+
+        LogicalEdge {
+            edge_type: value.edge_type,
+            schema,
+            projection: None,
+        }
+    }
 }
 
 fn get_duration(expression: &Expr) -> Result<Duration> {
@@ -721,11 +740,13 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                     })
                     .collect::<Result<Vec<_>>>()
                     .map_err(|err| DataFusionError::Plan(err.to_string()))?;
+
                 if window_group_expr.len() != 1 {
                     return Err(datafusion_common::DataFusionError::NotImplemented(
                         "require exactly 1 window in group by".to_string(),
                     ));
                 }
+
                 let (window_index, window_type) = window_group_expr.pop().unwrap();
                 let mut key_fields: Vec<DFField> = schema
                     .fields()
@@ -741,7 +762,9 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                         )
                     })
                     .collect::<Vec<_>>();
+
                 group_expr.remove(window_index);
+
                 let window_field = key_fields.remove(window_index);
                 let key_count = key_fields.len();
                 key_fields.extend(input.schema().fields().clone());
@@ -750,6 +773,7 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                     key_fields,
                     schema.metadata().clone(),
                 )?);
+
                 let mut key_projection_expressions = group_expr.clone();
                 key_projection_expressions.extend(input.schema().fields().iter().map(|field| {
                     Expr::Column(Column::new(field.qualifier().cloned(), field.name()))
@@ -795,13 +819,14 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                         false,
                     ));
                 }
-                let input_df_schema = DFSchema::new_with_metadata(df_fields, HashMap::new())?;
+                let input_df_schema =
+                    Arc::new(DFSchema::new_with_metadata(df_fields, HashMap::new())?);
 
                 let input_table_scan = LogicalPlan::TableScan(TableScan {
                     table_name: OwnedTableReference::parse_str("memory"),
                     source: input_source,
                     projection: None,
-                    projected_schema: Arc::new(input_df_schema),
+                    projected_schema: input_df_schema.clone(),
                     filters: vec![],
                     fetch: None,
                 });
@@ -821,17 +846,25 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                     )?,
                     key_fields: (0..key_count).collect(),
                 };
+
                 let aggregate_index = self.local_logical_plan_graph.add_node(
                     LogicalPlanExtension::AggregateCalculation(aggregate_calculation),
                 );
+
                 let table_name = format!("{}", aggregate_index.index());
+                let keys_without_window = (0..key_count)
+                    .into_iter()
+                    .filter(|i| *i == window_index)
+                    .collect();
                 self.local_logical_plan_graph.add_edge(
                     key_index,
                     aggregate_index,
-                    DataFusionEdge {
-                        value_schema: input.schema().clone(),
-                        key_schema: Some(key_schema),
-                    },
+                    DataFusionEdge::new(
+                        input_df_schema,
+                        LogicalEdgeType::Shuffle,
+                        keys_without_window,
+                    )
+                    .unwrap(),
                 );
                 let mut schema_with_timestamp = schema.fields().clone();
                 if !schema_with_timestamp
@@ -991,6 +1024,7 @@ pub async fn parse_and_get_arrow_program(
             )?);
         };
     }
+
     let mut rewriter = QueryToGraphVisitor::default();
     for insert in inserts {
         let plan = match insert {
@@ -1001,8 +1035,12 @@ pub async fn parse_and_get_arrow_program(
             } => logical_plan,
             Insert::Anonymous { logical_plan } => logical_plan,
         };
+
         let plan_with_timestamp = plan.rewrite(&mut TimestampRewriter {})?;
         let plan_rewrite = plan_with_timestamp.rewrite(&mut rewriter).unwrap();
+
+        println!("REWRITE: {}", plan_rewrite.display_graphviz());
+
         for (original_name, index) in &rewriter.table_source_to_nodes {
             let node = rewriter
                 .local_logical_plan_graph
@@ -1021,8 +1059,10 @@ pub async fn parse_and_get_arrow_program(
                 }
             }
         }
+
         let extended_plan_node = LogicalPlanExtension::ValueCalculation(plan_rewrite);
         let edge = extended_plan_node.outgoing_edge();
+
         let plan_index = rewriter
             .local_logical_plan_graph
             .add_node(extended_plan_node);
@@ -1030,6 +1070,7 @@ pub async fn parse_and_get_arrow_program(
         let sink_index = rewriter
             .local_logical_plan_graph
             .add_node(LogicalPlanExtension::Sink);
+
         rewriter
             .local_logical_plan_graph
             .add_edge(plan_index, sink_index, edge);

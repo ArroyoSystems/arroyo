@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData, time::SystemTime};
 
-use crate::engine::Context;
+use crate::old::Context;
 use anyhow::Result;
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::{
@@ -140,7 +140,7 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             .expect("record inserted");
     }
 
-    async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>) {
+    async fn on_close(&mut self, ctx: &mut crate::old::Context<(), ()>) {
         if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
             self.handle_commit(epoch, commit_data, ctx).await;
         } else {
@@ -159,7 +159,7 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
     async fn handle_checkpoint(
         &mut self,
         checkpoint_barrier: &arroyo_types::CheckpointBarrier,
-        ctx: &mut crate::engine::Context<(), ()>,
+        ctx: &mut crate::old::Context<(), ()>,
     ) {
         let (recovery_data, pre_commits) = self
             .committer
@@ -208,7 +208,7 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
         &mut self,
         epoch: u32,
         mut commit_data: HashMap<char, HashMap<u32, Vec<u8>>>,
-        ctx: &mut crate::engine::Context<(), ()>,
+        ctx: &mut crate::old::Context<(), ()>,
     ) {
         let pre_commits = match self.committer.commit_strategy() {
             CommitStrategy::PerSubtask => std::mem::take(&mut self.pre_commits),

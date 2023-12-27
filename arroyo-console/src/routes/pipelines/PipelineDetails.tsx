@@ -174,7 +174,7 @@ export function PipelineDetails() {
   const outputsTab = (
     <TabPanel w={'100%'}>
       {outputs.length == 0 ? (
-        pipeline.graph.nodes.find(n => n.operator.includes('WebSink')) != null ? (
+        pipeline.graph.nodes.find(n => n.operator.includes('GrpcSink')) != null ? (
           <Button isLoading={subscribed} onClick={subscribe} width={150} size="sm">
             Read output
           </Button>

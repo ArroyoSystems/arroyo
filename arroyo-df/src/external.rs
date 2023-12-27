@@ -1,6 +1,7 @@
+use arroyo_datastream::logical::LogicalNode;
 use std::time::Duration;
 
-use arroyo_datastream::Operator;
+use arroyo_datastream::{ConnectorOp, Operator};
 
 use crate::types::StructDef;
 
@@ -14,7 +15,7 @@ pub enum ProcessingMode {
 pub struct SqlSource {
     pub id: Option<i64>,
     pub struct_def: StructDef,
-    pub operator: Operator,
+    pub config: ConnectorOp,
     pub processing_mode: ProcessingMode,
     pub idle_time: Option<Duration>,
 }
@@ -23,7 +24,7 @@ pub struct SqlSource {
 pub struct SqlSink {
     pub id: Option<i64>,
     pub struct_def: StructDef,
-    pub operator: Operator,
+    pub operator: LogicalNode,
     pub updating_type: SinkUpdateType,
 }
 

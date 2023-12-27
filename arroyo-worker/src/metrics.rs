@@ -1,10 +1,10 @@
-use crate::engine::OutQueue;
 use arroyo_metrics::gauge_for_task;
 use arroyo_types::{
     TaskInfo, BYTES_RECV, BYTES_SENT, DESERIALIZATION_ERRORS, MESSAGES_RECV, MESSAGES_SENT,
 };
 use lazy_static::lazy_static;
 use prometheus::{labels, register_int_counter_vec, IntCounter, IntCounterVec, IntGauge};
+use tokio::sync::mpsc::Sender;
 
 lazy_static! {
     pub static ref TASK_METRIC_LABELS: Vec<&'static str> =
@@ -84,9 +84,9 @@ impl TaskCounters {
 
 pub type QueueGauges = Vec<Vec<Option<IntGauge>>>;
 
-pub fn register_queue_gauges(
+pub fn register_queue_gauges<T>(
     task_info: &TaskInfo,
-    out_qs: &Vec<Vec<OutQueue>>,
+    out_qs: &Vec<Vec<T>>,
 ) -> (QueueGauges, QueueGauges) {
     let tx_queue_size_gauges = out_qs
         .iter()

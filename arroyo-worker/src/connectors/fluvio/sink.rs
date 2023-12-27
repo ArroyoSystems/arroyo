@@ -1,4 +1,4 @@
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
 use arroyo_macro::process_fn;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::*;
@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 
 use tracing::info;
 
+use crate::old::Context;
 use arroyo_types::CheckpointBarrier;
 use serde::Serialize;
 

@@ -1,4 +1,5 @@
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
+use crate::old::Context;
 use crate::{RateLimiter, SourceFinishType};
 use anyhow::anyhow;
 use arroyo_formats::{DataDeserializer, SchemaData};

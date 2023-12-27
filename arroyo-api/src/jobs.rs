@@ -1,6 +1,7 @@
 use crate::queries::api_queries::{
     DbCheckpoint, DbLogMessage, DbPipelineJob, GetOperatorErrorsParams,
 };
+use arroyo_datastream::logical::OperatorName;
 use arroyo_rpc::api_types::checkpoints::{
     Checkpoint, CheckpointEventSpan, CheckpointSpanType, OperatorCheckpointGroup,
     SubtaskCheckpointGroup,
@@ -483,7 +484,7 @@ pub async fn get_job_output(
         .graph
         .nodes
         .iter()
-        .any(|n| n.operator.contains("WebSink") || n.operator.contains("record_batch_sink"))
+        .any(|n| n.operator.contains("GrpcSink"))
     {
         // TODO: make this check more robust
         return Err(bad_request("Job does not have a web sink".to_string()));

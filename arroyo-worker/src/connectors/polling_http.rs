@@ -23,10 +23,8 @@ use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use tracing::{debug, info, warn};
 use typify::import_types;
 
-use crate::{
-    engine::{Context, StreamNode},
-    RateLimiter, SourceFinishType,
-};
+use crate::old::Context;
+use crate::{engine::StreamNode, RateLimiter, SourceFinishType};
 
 import_types!(
     schema = "../connector-schemas/polling_http/table.json",

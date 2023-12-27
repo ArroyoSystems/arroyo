@@ -5,10 +5,6 @@ use std::{
     time::SystemTime,
 };
 
-use crate::{
-    engine::{Context, StreamNode},
-    stream_node::ProcessFuncTrait,
-};
 use ahash::RandomState;
 use anyhow::{bail, Context as AnyhowContext, Result};
 use arrow::{
@@ -19,21 +15,29 @@ use arrow_array::{
     types::{GenericBinaryType, Int64Type, TimestampNanosecondType, UInt64Type},
     Array, ArrayRef, GenericByteArray, NullArray, PrimitiveArray, RecordBatch,
 };
-use arrow_schema::{DataType, Field, FieldRef, Schema, TimeUnit};
-use arroyo_df::{
-    physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext},
-    schemas::window_arrow_struct,
+use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef, TimeUnit};
+use arroyo_df::schemas::window_arrow_struct;
+use arroyo_rpc::grpc::{
+    api, api::window::Window, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
 };
-
-use arroyo_rpc::grpc::api::window::Window;
 use arroyo_state::{
     parquet::{ParquetStats, RecordBatchBuilder},
     DataOperation,
 };
-use arroyo_types::{from_nanos, to_nanos, Record, RecordBatchData, Watermark};
+use arroyo_types::{from_nanos, to_nanos, ArrowMessage, Record, RecordBatchData, Watermark};
 use bincode::config;
-use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
-use datafusion_common::{hash_utils::create_hashes, DFField, DFSchema, ScalarValue};
+use datafusion::{
+    execution::context::SessionContext,
+    physical_plan::{stream::RecordBatchStreamAdapter, DisplayAs, ExecutionPlan},
+};
+use datafusion_common::{
+    hash_utils::create_hashes, DFField, DFSchema, DataFusionError, ScalarValue,
+};
+
+use crate::engine::ArrowContext;
+use crate::old::Context;
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
+use arroyo_df::physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     FunctionRegistry, SendableRecordBatchStream,
@@ -49,8 +53,9 @@ use datafusion_proto::{
 use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio_stream::StreamExt;
+use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tracing::info;
+
 pub struct TumblingAggregatingWindowFunc {
     width: Duration,
     binning_function: Arc<dyn PhysicalExpr>,
@@ -186,11 +191,11 @@ impl FunctionRegistry for Registry {
     }
 }
 
-impl TumblingAggregatingWindowFunc {
-    pub fn from_config(_name: String, config: Vec<u8>) -> Result<Self> {
-        let proto_config =
-            arroyo_rpc::grpc::api::WindowAggregateOperator::decode(&mut config.as_slice()).unwrap();
-        let _registry = Registry {};
+impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
+    for TumblingAggregatingWindowFunc
+{
+    fn from_config(proto_config: api::WindowAggregateOperator) -> Result<Self> {
+        let registry = Registry {};
 
         let binning_function =
             PhysicalExprNode::decode(&mut proto_config.binning_function.as_slice()).unwrap();
@@ -209,7 +214,7 @@ impl TumblingAggregatingWindowFunc {
         let window_field = Arc::new(Field::new(
             proto_config.window_field_name,
             window_arrow_struct(),
-            false,
+            true,
         ));
 
         let key_indices: Vec<_> = proto_config
@@ -375,26 +380,12 @@ struct BinAggregator {
 
 #[async_trait::async_trait]
 
-impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
-    type InKey = ();
-    type InT = ();
-    type OutKey = ();
-    type OutT = ();
-
+impl ArrowOperator for TumblingAggregatingWindowFunc {
     fn name(&self) -> String {
         "tumbling_window".to_string()
     }
 
-    async fn process_element(&mut self, _record: &Record<(), ()>, _ctx: &mut Context<(), ()>) {
-        unimplemented!("only record batches supported");
-    }
-
-    async fn process_record_batch(
-        &mut self,
-        record_batch: &RecordBatchData,
-        _ctx: &mut Context<(), ()>,
-    ) {
-        let batch = &record_batch.0;
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
         /*if batch.num_rows() > 0 {
             let (record_batch, parquet_stats) = self.converter_tools.get_state_record_batch(batch);
             ctx.state
@@ -461,11 +452,7 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
         }
     }
 
-    async fn handle_watermark(
-        &mut self,
-        watermark: arroyo_types::Watermark,
-        ctx: &mut Context<Self::OutKey, Self::OutT>,
-    ) {
+    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
         if let Watermark::EventTime(watermark) = &watermark {
             let bin = (to_nanos(*watermark) / self.width.as_nanos()) as usize;
             while !self.execs.is_empty() {
@@ -514,7 +501,9 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
                             DataType::Timestamp(TimeUnit::Nanosecond, None),
                             false,
                         )));
+
                         fields.insert(self.window_index, self.window_field.clone());
+
                         let mut columns = batch.columns().to_vec();
                         columns.push(timestamp_array);
                         let DataType::Struct(struct_fields) = self.window_field.data_type() else {
@@ -537,7 +526,7 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
                             columns,
                         )
                         .unwrap();
-                        ctx.collect_record_batch(batch_with_timestamp).await;
+                        ctx.collect(batch_with_timestamp).await;
                     }
                 } else {
                     break;
@@ -545,7 +534,6 @@ impl ProcessFuncTrait for TumblingAggregatingWindowFunc {
             }
         }
         // by default, just pass watermarks on down
-        ctx.broadcast(arroyo_types::Message::Watermark(watermark))
-            .await;
+        ctx.broadcast(ArrowMessage::Watermark(watermark)).await;
     }
 }

@@ -1,15 +1,19 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::{ArrowContext, StreamNode};
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
 use crate::SourceFinishType;
-use arroyo_macro::source_fn;
-use arroyo_rpc::grpc::{StopMode, TableDescriptor};
+use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
+use arroyo_rpc::grpc::{api, StopMode, TableDescriptor};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::*;
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
+use tokio::sync::mpsc::Receiver;
 use tracing::{debug, info};
 use typify::import_types;
 
@@ -27,17 +31,15 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-#[derive(StreamNode, Debug)]
-pub struct ImpulseSourceFunc<K: Data, T: Data> {
+#[derive(Debug)]
+pub struct ImpulseSourceFunc {
     interval: Option<Duration>,
     spec: ImpulseSpec,
     limit: usize,
     state: ImpulseSourceState,
-    _t: PhantomData<(K, T)>,
 }
 
-#[source_fn(out_t = ImpulseEvent)]
-impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
+impl ImpulseSourceFunc {
     /* This method is mainly useful for testing,
       so you can always ensure it starts at the beginning of an interval.
     */
@@ -69,49 +71,10 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
                 counter: 0,
                 start_time,
             },
-            _t: PhantomData,
         }
     }
 
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for ImpulseSource");
-        let table: ImpulseTable =
-            serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
-
-        Self::new(
-            table
-                .event_time_interval
-                .map(|i| Duration::from_micros(i as u64)),
-            ImpulseSpec::EventsPerSecond(table.event_rate as f32),
-            table
-                .message_count
-                .map(|n| n as usize)
-                .unwrap_or(usize::MAX),
-            SystemTime::now(),
-        )
-    }
-
-    fn name(&self) -> String {
-        "impulse-source".to_string()
-    }
-
-    fn tables(&self) -> Vec<TableDescriptor> {
-        vec![arroyo_state::global_table("i", "impulse source state")]
-    }
-
-    async fn on_start(&mut self, ctx: &mut Context<(), ImpulseEvent>) {
-        let s = ctx
-            .state
-            .get_global_keyed_state::<usize, ImpulseSourceState>('i')
-            .await;
-
-        if let Some(state) = s.get(&ctx.task_info.task_index) {
-            self.state = *state;
-        }
-    }
-
-    async fn run(&mut self, ctx: &mut Context<(), ImpulseEvent>) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         let delay = match self.spec {
             ImpulseSpec::Delay(d) => d,
             ImpulseSpec::EventsPerSecond(eps) => {
@@ -125,20 +88,24 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
 
         let start_time = SystemTime::now() - delay * self.state.counter as u32;
 
+        let schema = ctx.out_schema.as_ref().unwrap().schema.clone();
+
         while self.state.counter < self.limit {
             let timestamp = self
                 .interval
                 .map(|d| self.state.start_time + d * self.state.counter as u32)
                 .unwrap_or_else(SystemTime::now);
-            ctx.collect(Record {
-                timestamp,
-                key: None,
-                value: ImpulseEvent {
-                    counter: self.state.counter as u64,
-                    subtask_index: ctx.task_info.task_index as u64,
-                },
-            })
-            .await;
+
+            let columns: Vec<ArrayRef> = vec![
+                Arc::new(UInt64Array::from(vec![self.state.counter as u64])),
+                Arc::new(UInt64Array::from(vec![ctx.task_info.task_index as u64])),
+                Arc::new(TimestampNanosecondArray::from(vec![
+                    to_nanos(timestamp) as i64
+                ])),
+            ];
+
+            ctx.collect(RecordBatch::try_new(schema.clone(), columns).unwrap())
+                .await;
 
             self.state.counter += 1;
 
@@ -189,4 +156,60 @@ impl<K: Data, T: Data> ImpulseSourceFunc<K, T> {
 
         SourceFinishType::Final
     }
+}
+
+impl ArrowOperatorConstructor<api::ConnectorOp, Self> for ImpulseSourceFunc {
+    fn from_config(config: api::ConnectorOp) -> anyhow::Result<Self> {
+        let config: OperatorConfig =
+            serde_json::from_str(&config.config).expect("Invalid config for ImpulseSource");
+        let table: ImpulseTable =
+            serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
+
+        Ok(ImpulseSourceFunc {
+            interval: table
+                .event_time_interval
+                .map(|i| Duration::from_micros(i as u64)),
+            spec: ImpulseSpec::EventsPerSecond(table.event_rate as f32),
+            limit: table
+                .message_count
+                .map(|n| n as usize)
+                .unwrap_or(usize::MAX),
+            state: ImpulseSourceState {
+                counter: 0,
+                start_time: SystemTime::now(),
+            },
+        })
+    }
+}
+
+#[async_trait]
+impl BaseOperator for ImpulseSourceFunc {
+    fn name(&self) -> String {
+        "impulse-source".to_string()
+    }
+
+    fn tables(&self) -> Vec<TableDescriptor> {
+        vec![arroyo_state::global_table("i", "impulse source state")]
+    }
+
+    async fn run_behavior(
+        mut self: Box<Self>,
+        ctx: &mut ArrowContext,
+        _: Vec<Receiver<ArrowMessage>>,
+    ) -> Option<ArrowMessage> {
+        let s = ctx
+            .state
+            .get_global_keyed_state::<usize, ImpulseSourceState>('i')
+            .await;
+
+        if let Some(state) = s.get(&ctx.task_info.task_index) {
+            self.state = *state;
+        }
+
+        self.run(ctx).await.into()
+    }
+
+    async fn on_start(&mut self, _: &mut ArrowContext) {}
+
+    async fn on_close(&mut self, _: &mut ArrowContext) {}
 }

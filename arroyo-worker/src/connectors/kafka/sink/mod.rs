@@ -1,29 +1,24 @@
-use crate::engine::{Context, StreamNode};
+use crate::old::{Context, StreamNode};
 use anyhow::Result;
 use arroyo_formats::DataSerializer;
 use arroyo_formats::SchemaData;
-use arroyo_macro::process_fn;
+use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
 use arroyo_rpc::{CheckpointEvent, ControlMessage, OperatorConfig};
 use arroyo_types::*;
+use rdkafka::error::KafkaError;
+use rdkafka::ClientConfig;
 use std::collections::HashMap;
 use std::marker::PhantomData;
-
-use tracing::{error, warn};
-
-use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
-use rdkafka::util::Timeout;
-
-use rdkafka::ClientConfig;
-
-use arroyo_types::CheckpointBarrier;
-use rdkafka::error::KafkaError;
-use rdkafka_sys::RDKafkaErrorCode;
-use serde::Serialize;
 use std::time::{Duration, SystemTime};
 
 use super::{client_configs, KafkaConfig, KafkaTable, SinkCommitMode, TableType};
+use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
+use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
+use rdkafka::util::Timeout;
+use rdkafka_sys::RDKafkaErrorCode;
+use serde::Serialize;
+use tracing::{error, warn};
 
 #[cfg(test)]
 mod test;
@@ -255,7 +250,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         &mut self,
         epoch: u32,
         _commit_data: HashMap<char, HashMap<u32, Vec<u8>>>,
-        ctx: &mut crate::engine::Context<(), ()>,
+        ctx: &mut crate::old::Context<(), ()>,
     ) {
         let ConsistencyMode::ExactlyOnce {
             next_transaction_index: _,
@@ -296,7 +291,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
             .expect("sent commit event");
     }
 
-    async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>) {
+    async fn on_close(&mut self, ctx: &mut crate::old::Context<(), ()>) {
         if !self.is_committing() {
             return;
         }

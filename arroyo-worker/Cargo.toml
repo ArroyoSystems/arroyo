@@ -88,6 +88,7 @@ datafusion-physical-expr = "34.0"
 datafusion-common = "34.0"
 datafusion-execution = "34.0"
 arrow-json = "49.0.0"
+base64 = "0.21.5"
 
 [dev-dependencies]
 test-case = "3"

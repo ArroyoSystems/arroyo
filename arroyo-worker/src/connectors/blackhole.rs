@@ -3,7 +3,8 @@ use std::marker::PhantomData;
 use arroyo_macro::process_fn;
 use arroyo_types::{Data, Key, Record};
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
+use crate::old::Context;
 
 #[derive(StreamNode)]
 pub struct BlackholeSinkFunc<K: Key, T: Data> {

@@ -1,15 +1,18 @@
 use anyhow::bail;
+use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::grpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::{
-    HeartbeatNodeReq, RegisterNodeReq, StartWorkerData, StartWorkerHeader, StartWorkerReq,
+    api, HeartbeatNodeReq, RegisterNodeReq, StartWorkerData, StartWorkerHeader, StartWorkerReq,
     StopWorkerReq, StopWorkerStatus, WorkerFinishedReq,
 };
-use arroyo_storage::StorageProvider;
 use arroyo_types::{
-    NodeId, WorkerId, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV,
+    NodeId, WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV,
+    WORKER_ID_ENV,
 };
+use base64::{engine::general_purpose, Engine as _};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
+use prost::Message;
 use std::collections::HashMap;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::PathBuf;
@@ -92,20 +95,13 @@ const SLOTS_PER_NODE: usize = 16;
 
 pub struct StartPipelineReq {
     pub name: String,
-    pub pipeline_path: String,
+    pub program: LogicalProgram,
     pub wasm_path: String,
     pub job_id: String,
     pub hash: String,
     pub run_id: i64,
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
-}
-
-async fn get_binaries(req: &StartPipelineReq) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-    let pipeline = StorageProvider::get_url(&req.pipeline_path).await?;
-    let wasm = StorageProvider::get_url(&req.wasm_path).await?;
-
-    Ok((pipeline.into(), wasm.into()))
 }
 
 #[async_trait::async_trait]
@@ -123,26 +119,6 @@ impl Scheduler for ProcessScheduler {
             start_pipeline_req.job_id
         ))
         .unwrap();
-        tokio::fs::create_dir_all(&base_path).await.unwrap();
-
-        let (pipeline, wasm) = get_binaries(&start_pipeline_req)
-            .await
-            .map_err(|_| SchedulerError::CompilationNeeded)?;
-
-        let pipeline_path = base_path.join("pipeline");
-
-        if !pipeline_path.exists() {
-            tokio::fs::write(&pipeline_path, pipeline).await.unwrap();
-            let file = tokio::fs::File::open(&pipeline_path).await.unwrap();
-
-            let mut perms = file.metadata().await.unwrap().permissions();
-            perms.set_mode(0o776);
-            file.set_permissions(perms).await.unwrap();
-
-            tokio::fs::write(&base_path.join("wasm_fns_bg.wasm"), wasm)
-                .await
-                .unwrap();
-        }
 
         for _ in 0..workers {
             let path = base_path.clone();
@@ -170,19 +146,29 @@ impl Scheduler for ProcessScheduler {
             println!("Starting in path {:?}", path);
             let workers = self.workers.clone();
             let env_map = start_pipeline_req.env_vars.clone();
+            let program = start_pipeline_req.program.clone();
             tokio::spawn(async move {
-                let mut command = Command::new("./pipeline");
+                let mut command = if std::env::var("DEBUG").is_ok() {
+                    Command::new("target/debug/arroyo-worker")
+                } else {
+                    Command::new("target/release/arroyo-worker")
+                };
+
                 for (env, value) in env_map {
                     command.env(env, value);
                 }
                 let mut child = command
-                    .current_dir(&path)
                     .env("RUST_LOG", "info")
                     .env(TASK_SLOTS_ENV, format!("{}", slots_here))
                     .env(WORKER_ID_ENV, format!("{}", worker_id)) // start at 100 to make same length
                     .env(JOB_ID_ENV, &job_id)
                     .env(NODE_ID_ENV, format!("{}", 1))
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
+                    .env(
+                        ARROYO_PROGRAM_ENV,
+                        general_purpose::STANDARD_NO_PAD
+                            .encode(api::ArrowProgram::from(program).encode_to_vec()),
+                    )
                     .kill_on_drop(true)
                     .spawn()
                     .unwrap();
@@ -487,11 +473,12 @@ impl Scheduler for NodeScheduler {
         &self,
         start_pipeline_req: StartPipelineReq,
     ) -> Result<(), SchedulerError> {
-        let (binary, wasm) = get_binaries(&start_pipeline_req)
-            .await
-            .map_err(|_| SchedulerError::CompilationNeeded)?;
-
-        let binary = Arc::new(binary);
+        todo!("node scheduler");
+        // let (binary, wasm) = get_binaries(&start_pipeline_req)
+        //     .await
+        //     .map_err(|_| SchedulerError::CompilationNeeded)?;
+        //
+        // let binary = Arc::new(binary);
 
         // TODO: make this locking more fine-grained
         let mut state = self.state.lock().await;
@@ -557,17 +544,17 @@ impl Scheduler for NodeScheduler {
                     StartWorkerHeader {
                         name: start_pipeline_req.name.clone(),
                         job_id: start_pipeline_req.job_id.clone(),
-                        wasm: wasm.clone(),
+                        wasm: todo!(),
                         slots: slots_for_this_one as u64,
                         node_id: node.id.0,
                         run_id: start_pipeline_req.run_id as u64,
                         env_vars: start_pipeline_req.env_vars.clone(),
-                        binary_size: binary.len() as u64,
+                        binary_size: todo!(),
                     },
                 )),
             };
 
-            let binary = binary.clone();
+            let binary: Vec<u8> = todo!();
             let outbound = async_stream::stream! {
                 yield header;
 

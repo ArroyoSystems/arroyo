@@ -40,23 +40,23 @@ impl Senders {
 
     async fn send(&mut self, header: Header, data: Vec<u8>) {
         let tx = self.senders.get(&header.as_quad()).unwrap();
-
-        if let Err(send_error) = tx.send(QueueItem::Bytes(data)).await {
-            match send_error.0 {
-                QueueItem::Data(_) => unreachable!(),
-                QueueItem::Bytes(data) => {
-                    let message: Message<i64, i64> =
-                        bincode::decode_from_slice(&data, config::standard())
-                            .expect("couldn't decode, probably a record.")
-                            .0;
-                    if !message.is_end() {
-                        panic!("{:?} not sent", message);
-                    } else {
-                        warn!("couldn't send end message");
-                    }
-                }
-            }
-        }
+        todo!("networking");
+        // if let Err(send_error) = tx.send(QueueItem::Bytes(data)).await {
+        //     match send_error.0 {
+        //         QueueItem::Data(_) => unreachable!(),
+        //         QueueItem::Bytes(data) => {
+        //             let message: Message<i64, i64> =
+        //                 bincode::decode_from_slice(&data, config::standard())
+        //                     .expect("couldn't decode, probably a record.")
+        //                     .0;
+        //             if !message.is_end() {
+        //                 panic!("{:?} not sent", message);
+        //             } else {
+        //                 warn!("couldn't send end message");
+        //             }
+        //         }
+        //     }
+        // }
     }
 }
 
@@ -193,22 +193,23 @@ impl OutNetworkLink {
             }
             let mut flush_interval: Interval = interval(Duration::from_millis(100));
 
-            loop {
-                select! {
-                    Some(((quad, msg), s)) = sel.next() => {
-                        let QueueItem::Bytes(data) = msg else {
-                            panic!("non-byte data in network queue")
-                        };
-                        let frame = Header::from_quad(quad, data.len());
-                        frame.write(Pin::new(&mut self.stream)).await;
-                        self.stream.write_all(&data).await.unwrap();
-                        sel.push(s);
-                    }
-                    _ = flush_interval.tick() => {
-                        self.stream.flush().await.unwrap();
-                    }
-                }
-            }
+            todo!("networking");
+            // loop {
+            //     select! {
+            //         Some(((quad, msg), s)) = sel.next() => {
+            //             let QueueItem::Bytes(data) = msg else {
+            //                 panic!("non-byte data in network queue")
+            //             };
+            //             let frame = Header::from_quad(quad, data.len());
+            //             frame.write(Pin::new(&mut self.stream)).await;
+            //             self.stream.write_all(&data).await.unwrap();
+            //             sel.push(s);
+            //         }
+            //         _ = flush_interval.tick() => {
+            //             self.stream.flush().await.unwrap();
+            //         }
+            //     }
+            // }
         });
     }
 }
@@ -311,7 +312,7 @@ impl NetworkManager {
 mod test {
     use std::{pin::Pin, time::Duration};
 
-    use crate::engine::QueueItem;
+    use crate::old::QueueItem;
     use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc::channel, time::timeout};
 
     use crate::network_manager::Quad;
@@ -339,89 +340,91 @@ mod test {
 
     #[tokio::test]
     async fn test_server() {
-        let (tx, mut rx) = channel(10);
-
-        let mut senders = Senders::new();
-        let quad = Quad {
-            src_id: 0,
-            src_idx: 1,
-            dst_id: 2,
-            dst_idx: 3,
-        };
-
-        senders.add(quad, tx);
-
-        let mut nm = NetworkManager::new(0);
-        let port = nm.open_listener().await;
-
-        println!("port: {}", port);
-
-        nm.start(senders).await;
-
-        let mut client = TcpStream::connect(format!("localhost:{}", port))
-            .await
-            .unwrap();
-
-        let message = b"Hello World!";
-
-        let header = Header {
-            src_operator: 0,
-            src_subtask: 1,
-            dst_operator: 2,
-            dst_subtask: 3,
-            len: message.len(),
-        };
-
-        header.write(Pin::new(&mut client)).await;
-        client.write_all(message).await.unwrap();
-
-        let item = rx.recv().await.unwrap();
-        let QueueItem::Bytes(data) = item else {
-            panic!("expected bytes!");
-        };
-
-        assert_eq!(&message[..], &data);
+        todo!();
+        // let (tx, mut rx) = channel(10);
+        //
+        // let mut senders = Senders::new();
+        // let quad = Quad {
+        //     src_id: 0,
+        //     src_idx: 1,
+        //     dst_id: 2,
+        //     dst_idx: 3,
+        // };
+        //
+        // senders.add(quad, tx);
+        //
+        // let mut nm = NetworkManager::new(0);
+        // let port = nm.open_listener().await;
+        //
+        // println!("port: {}", port);
+        //
+        // nm.start(senders).await;
+        //
+        // let mut client = TcpStream::connect(format!("localhost:{}", port))
+        //     .await
+        //     .unwrap();
+        //
+        // let message = b"Hello World!";
+        //
+        // let header = Header {
+        //     src_operator: 0,
+        //     src_subtask: 1,
+        //     dst_operator: 2,
+        //     dst_subtask: 3,
+        //     len: message.len(),
+        // };
+        //
+        // header.write(Pin::new(&mut client)).await;
+        // client.write_all(message).await.unwrap();
+        //
+        // let item = rx.recv().await.unwrap();
+        // let QueueItem::Bytes(data) = item else {
+        //     panic!("expected bytes!");
+        // };
+        //
+        // assert_eq!(&message[..], &data);
     }
 
     #[tokio::test]
     async fn test_client_server() {
-        let (server_tx, mut server_rx) = channel(10);
-
-        let mut senders = Senders::new();
-
-        let quad = Quad {
-            src_id: 50,
-            src_idx: 1,
-            dst_id: 21234,
-            dst_idx: 3,
-        };
-
-        senders.add(quad, server_tx);
-
-        let mut nm = NetworkManager::new(0);
-        let port = nm.open_listener().await;
-
-        let (client_tx, client_rx) = channel(10);
-        nm.connect(format!("localhost:{}", port), quad, client_rx)
-            .await;
-
-        nm.start(senders).await;
-
-        let data = b"this is some data being sent... over the network";
-
-        client_tx
-            .send(QueueItem::Bytes(data.to_vec()))
-            .await
-            .unwrap();
-
-        let result = timeout(Duration::from_secs(1), server_rx.recv())
-            .await
-            .unwrap()
-            .expect("timed out");
-
-        let QueueItem::Bytes(bytes) = result else {
-            panic!("expected bytes");
-        };
-        assert_eq!(&data[..], &bytes);
+        todo!();
+        // let (server_tx, mut server_rx) = channel(10);
+        //
+        // let mut senders = Senders::new();
+        //
+        // let quad = Quad {
+        //     src_id: 50,
+        //     src_idx: 1,
+        //     dst_id: 21234,
+        //     dst_idx: 3,
+        // };
+        //
+        // senders.add(quad, server_tx);
+        //
+        // let mut nm = NetworkManager::new(0);
+        // let port = nm.open_listener().await;
+        //
+        // let (client_tx, client_rx) = channel(10);
+        // nm.connect(format!("localhost:{}", port), quad, client_rx)
+        //     .await;
+        //
+        // nm.start(senders).await;
+        //
+        // let data = b"this is some data being sent... over the network";
+        //
+        // client_tx
+        //     .send(QueueItem::Bytes(data.to_vec()))
+        //     .await
+        //     .unwrap();
+        //
+        // let result = timeout(Duration::from_secs(1), server_rx.recv())
+        //     .await
+        //     .unwrap()
+        //     .expect("timed out");
+        //
+        // let QueueItem::Bytes(bytes) = result else {
+        //     panic!("expected bytes");
+        // };
+        // assert_eq!(&data[..], &bytes);
     }
 }

@@ -5,7 +5,7 @@ use arroyo_macro::{co_process_fn, StreamNode};
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_types::*;
 
-use crate::engine::Context;
+use crate::old::Context;
 
 use super::{
     InstantWindowAssigner, SlidingWindowAssigner, TimeWindowAssigner, TumblingWindowAssigner,

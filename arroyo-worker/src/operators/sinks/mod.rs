@@ -1,6 +1,7 @@
 use std::{marker::PhantomData, time::SystemTime};
 
-use crate::engine::{Context, StreamNode};
+use crate::engine::StreamNode;
+use crate::old::Context;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::SinkDataReq;

@@ -4,6 +4,7 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{anyhow, bail, Result};
 use arrow_schema::{DataType, Field};
 use arroyo_connectors::{connector_for_type, Connection};
+use arroyo_datastream::logical::LogicalNode;
 use arroyo_datastream::{ConnectorOp, Operator};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
@@ -374,7 +375,7 @@ impl ConnectorTable {
                     .collect(),
                 self.format.clone(),
             ),
-            operator: Operator::ConnectorSource(self.connector_op()),
+            config: self.connector_op(),
             processing_mode: self.processing_mode(),
             idle_time: self.idle_time,
         };

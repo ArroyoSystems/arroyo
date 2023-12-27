@@ -17,6 +17,7 @@ use arroyo_types::{to_micros, WorkerId};
 use deadpool_postgres::Pool;
 use time::OffsetDateTime;
 
+use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_state::parquet::ParquetBackend;
@@ -78,7 +79,7 @@ pub enum JobState {
 pub struct RunningJobModel {
     job_id: String,
     state: JobState,
-    program: Program,
+    program: LogicalProgram,
     checkpoint_state: Option<CheckpointingOrCommittingState>,
     epoch: u32,
     min_epoch: u32,
@@ -544,7 +545,7 @@ impl JobController {
     pub fn new(
         pool: Pool,
         config: JobConfig,
-        program: Program,
+        program: LogicalProgram,
         epoch: u32,
         min_epoch: u32,
         worker_connects: HashMap<WorkerId, WorkerGrpcClient<Channel>>,

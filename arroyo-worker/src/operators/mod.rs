@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::cmp::max;
 use std::fs;
 use std::str::FromStr;
 use std::{fmt::Debug, path::PathBuf};
@@ -6,15 +6,19 @@ use std::{fmt::Debug, path::PathBuf};
 use std::marker::PhantomData;
 use std::ops::Add;
 
-use crate::engine::{CheckpointCounter, Collector, Context, StreamNode};
-use crate::stream_node::ProcessFuncTrait;
-use crate::ControlOutcome;
+use crate::engine::{ArrowContext, StreamNode};
+use crate::old::{Collector, Context};
+use crate::operator::{get_timestamp_col, ArrowOperator, ArrowOperatorConstructor};
+use arrow::compute::kernels;
+use arrow_array::RecordBatch;
 use arroyo_macro::process_fn;
-use arroyo_rpc::grpc::{CheckpointMetadata, TableDescriptor};
+use arroyo_rpc::grpc::api::PeriodicWatermark;
+use arroyo_rpc::grpc::{api, TableDescriptor};
 use arroyo_types::{
-    from_millis, to_millis, CheckpointBarrier, Data, GlobalKey, Key, Message, Record,
-    RecordBatchData, TaskInfo, UpdatingData, Watermark, Window,
+    from_millis, from_nanos, to_millis, ArrowMessage, CheckpointBarrier, Data, GlobalKey, Key,
+    Message, Record, RecordBatchData, TaskInfo, UpdatingData, Watermark, Window,
 };
+use async_trait::async_trait;
 use bincode::{config, Decode, Encode};
 use std::time::{Duration, SystemTime};
 use tracing::{debug, info};
@@ -22,6 +26,7 @@ use wasmtime::{
     Caller, Engine, InstanceAllocationStrategy, Linker, Module, PoolingAllocationConfig, Store,
     TypedFunc,
 };
+
 pub mod aggregating_window;
 pub mod functions;
 pub mod join_with_expiration;
@@ -36,8 +41,9 @@ pub mod windows;
 
 #[cfg(test)]
 mod test {
+    use crate::old::Context;
+    use crate::operators::TimeWindowAssigner;
     use crate::operators::WasmOperator;
-    use crate::{engine::Context, operators::TimeWindowAssigner};
     use arroyo_types::{from_millis, to_millis, Message, Record};
     use std::time::{Duration, SystemTime};
 
@@ -104,57 +110,47 @@ pub struct PeriodicWatermarkGeneratorState {
     max_watermark: SystemTime,
 }
 
-#[derive(StreamNode)]
-pub struct PeriodicWatermarkGenerator<K: Key, D: Data> {
+pub struct PeriodicWatermarkGenerator {
     interval: Duration,
-    watermark_function: Box<dyn Fn(&Record<K, D>) -> SystemTime + Send>,
+    max_lateness: Duration,
     state_cache: PeriodicWatermarkGeneratorState,
     idle_time: Option<Duration>,
     last_event: SystemTime,
     idle: bool,
-    _t: PhantomData<(K, D)>,
 }
 
-#[process_fn(in_k=K, in_t=D, out_k=K, out_t=D, tick_ms=1_000)]
-impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
+impl PeriodicWatermarkGenerator {
     pub fn fixed_lateness(
         interval: Duration,
         idle_time: Option<Duration>,
         max_lateness: Duration,
-    ) -> PeriodicWatermarkGenerator<K, D> {
+    ) -> PeriodicWatermarkGenerator {
         PeriodicWatermarkGenerator {
             interval,
-            watermark_function: Box::new(move |record| record.timestamp - max_lateness),
             state_cache: PeriodicWatermarkGeneratorState {
                 last_watermark_emitted_at: SystemTime::UNIX_EPOCH,
                 max_watermark: SystemTime::UNIX_EPOCH,
             },
+            max_lateness,
             idle_time,
             last_event: SystemTime::now(),
             idle: false,
-            _t: PhantomData,
         }
     }
+}
 
-    pub fn watermark_function(
-        interval: Duration,
-        idle_time: Option<Duration>,
-        watermark_function: Box<dyn Fn(&Record<K, D>) -> SystemTime + Send>,
-    ) -> Self {
-        PeriodicWatermarkGenerator {
-            interval,
-            watermark_function,
-            state_cache: PeriodicWatermarkGeneratorState {
-                last_watermark_emitted_at: SystemTime::UNIX_EPOCH,
-                max_watermark: SystemTime::UNIX_EPOCH,
-            },
-            idle_time,
-            last_event: SystemTime::now(),
-            idle: false,
-            _t: PhantomData,
-        }
+impl ArrowOperatorConstructor<api::PeriodicWatermark, Self> for PeriodicWatermarkGenerator {
+    fn from_config(config: PeriodicWatermark) -> anyhow::Result<Self> {
+        Ok(Self::fixed_lateness(
+            Duration::from_micros(config.period_micros),
+            config.idle_time_micros.map(Duration::from_micros),
+            Duration::from_micros(config.max_lateness_micros),
+        ))
     }
+}
 
+#[async_trait]
+impl ArrowOperator for PeriodicWatermarkGenerator {
     fn tables(&self) -> Vec<TableDescriptor> {
         vec![arroyo_state::global_table(
             "s",
@@ -166,7 +162,11 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
         "periodic_watermark_generator".to_string()
     }
 
-    async fn on_start(&mut self, ctx: &mut Context<K, D>) {
+    fn tick_interval(&self) -> Option<Duration> {
+        Some(Duration::from_secs(1))
+    }
+
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
         let gs = ctx.state.get_global_keyed_state('s').await;
         self.last_event = SystemTime::now();
 
@@ -180,25 +180,35 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
         self.state_cache = state;
     }
 
-    async fn on_close(&mut self, ctx: &mut Context<K, D>) {
+    async fn on_close(&mut self, ctx: &mut ArrowContext) {
         // send final watermark on close
         ctx.collector
-            .broadcast(Message::Watermark(Watermark::EventTime(from_millis(
+            .broadcast(ArrowMessage::Watermark(Watermark::EventTime(from_millis(
                 u64::MAX,
             ))))
             .await;
     }
 
-    async fn process_element(&mut self, record: &Record<K, D>, ctx: &mut Context<K, D>) {
+    async fn process_batch(&mut self, record: RecordBatch, ctx: &mut ArrowContext) {
         ctx.collector.collect(record.clone()).await;
         self.last_event = SystemTime::now();
 
-        let watermark = (self.watermark_function)(record);
+        let timestamp_column = get_timestamp_col(&record, ctx);
+
+        let Some(min_timestamp) = kernels::aggregate::min(&timestamp_column) else {
+            return;
+        };
+        let min_timestamp = from_nanos(min_timestamp as u128);
+        let Some(max_timestamp) = kernels::aggregate::max(&timestamp_column) else {
+            return;
+        };
+
+        let max_timestamp = from_nanos(max_timestamp as u128);
+        let watermark = min_timestamp - self.max_lateness;
 
         self.state_cache.max_watermark = self.state_cache.max_watermark.max(watermark);
         if self.idle
-            || record
-                .timestamp
+            || max_timestamp
                 .duration_since(self.state_cache.last_watermark_emitted_at)
                 .unwrap_or(Duration::ZERO)
                 > self.interval
@@ -209,27 +219,28 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
                 to_millis(watermark)
             );
             ctx.collector
-                .broadcast(Message::Watermark(Watermark::EventTime(watermark)))
+                .broadcast(ArrowMessage::Watermark(Watermark::EventTime(watermark)))
                 .await;
-            self.state_cache.last_watermark_emitted_at = record.timestamp;
+            self.state_cache.last_watermark_emitted_at = max_timestamp;
             self.idle = false;
         }
     }
 
-    async fn handle_checkpoint(&mut self, _: &CheckpointBarrier, ctx: &mut Context<K, D>) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
         let mut gs = ctx.state.get_global_keyed_state('s').await;
 
         gs.insert(ctx.task_info.task_index, self.state_cache).await;
     }
 
-    async fn handle_tick(&mut self, _: u64, ctx: &mut Context<K, D>) {
+    async fn handle_tick(&mut self, _: u64, ctx: &mut ArrowContext) {
         if let Some(idle_time) = self.idle_time {
             if self.last_event.elapsed().unwrap_or(Duration::ZERO) > idle_time && !self.idle {
                 info!(
                     "Setting partition {} to idle after {:?}",
                     ctx.task_info.task_index, idle_time
                 );
-                ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
+                ctx.broadcast(ArrowMessage::Watermark(Watermark::Idle))
+                    .await;
                 self.idle = true;
             }
         }
@@ -552,19 +563,14 @@ impl<K: Key, V: Data> FlattenOperator<K, V> {
         }
     }
 }
+#[derive(StreamNode)]
 pub struct MapOperator<InKey: Key, InT: Data, OutKey: Key, OutT: Data> {
     pub name: String,
     pub map_fn: Box<dyn Fn(&Record<InKey, InT>, &TaskInfo) -> Record<OutKey, OutT> + Send>,
 }
 
-#[async_trait::async_trait]
-impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> ProcessFuncTrait
-    for MapOperator<InKey, InT, OutKey, OutT>
-{
-    type InKey = InKey;
-    type InT = InT;
-    type OutKey = OutKey;
-    type OutT = OutT;
+#[process_fn(in_k = InKey, in_t = InT, out_k = OutKey, out_t = OutT)]
+impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> MapOperator<InKey, InT, OutKey, OutT> {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -576,14 +582,6 @@ impl<InKey: Key, InT: Data, OutKey: Key, OutT: Data> ProcessFuncTrait
     ) {
         let record = (self.map_fn)(record, &ctx.task_info);
         ctx.collector.collect(record).await;
-    }
-
-    async fn process_record_batch(
-        &mut self,
-        record_batch: &RecordBatchData,
-        ctx: &mut Context<OutKey, OutT>,
-    ) {
-        unreachable!("process_record_batch not implemented for MapOperator")
     }
 }
 

@@ -131,6 +131,7 @@ message WindowAggregateOperator {
   bytes input_schema = 9;
 }
 
+
 enum OperatorName {
   STRUCT_TO_RECORD_BATCH = 0;
   RECORD_BATCH_TO_STRUCT = 1;
@@ -408,4 +409,34 @@ message OperatorCheckpointDetail {
   optional uint64 finish_time = 3;
   bool has_state = 4;
   map<uint32, TaskCheckpointDetail> tasks = 5;
+}
+
+// Arrow
+message ArrowProgram {
+  repeated ArrowNode nodes = 1;
+  repeated ArrowEdge edges = 2;
+}
+
+message ArroyoSchema {
+  // json-encoded
+  string arrow_schema = 1;
+  uint32 timestamp_index = 2;
+  repeated uint32 key_indices = 3;
+}
+
+message ArrowNode {
+  int32 node_index = 1;
+  string node_id = 2;
+  uint32 parallelism = 3;
+  string description = 4;
+  string operator_name = 5;
+  bytes operator_config = 6;
+}
+
+message ArrowEdge {
+  int32 source = 1;
+  int32 target = 2;
+  ArroyoSchema schema = 4;
+  EdgeType edge_type = 5;
+  repeated uint32 projection = 6;
 }

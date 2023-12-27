@@ -16,6 +16,8 @@ impl State for Compiling {
     }
 
     async fn next(self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+        return Ok(Transition::next(*self, Scheduling {}));
+        /*
         if ctx.status.pipeline_path.is_some() {
             info!(
                 message = "Pipeline already compiled",
@@ -65,5 +67,6 @@ impl State for Compiling {
                 }
             }
         }
+         */
     }
 }

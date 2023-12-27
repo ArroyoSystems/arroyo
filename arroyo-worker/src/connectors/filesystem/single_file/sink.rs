@@ -10,7 +10,7 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use crate::engine::Context;
+use crate::old::Context;
 
 use super::SingleFileTable;
 
@@ -85,7 +85,7 @@ impl<K: Key, T: SchemaData + Serialize> FileSink<K, T> {
     async fn handle_checkpoint(
         &mut self,
         _checkpoint_barrier: &arroyo_types::CheckpointBarrier,
-        ctx: &mut crate::engine::Context<(), ()>,
+        ctx: &mut crate::old::Context<(), ()>,
     ) {
         self.file.as_mut().unwrap().flush().await.unwrap();
         let mut state = ctx.state.get_global_keyed_state('f').await;
