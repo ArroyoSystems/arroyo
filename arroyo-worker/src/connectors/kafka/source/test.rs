@@ -118,7 +118,6 @@ impl KafkaTopicTester {
             1,
             vec![vec![OutQueue::new(data_tx, false)]],
             source::tables(),
-            HashMap::new(),
         )
         .await;
 

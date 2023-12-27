@@ -71,7 +71,6 @@ impl KafkaTopicTester {
             1,
             vec![vec![OutQueue::new(data_tx, false)]],
             vec![],
-            HashMap::new(),
         )
         .await;
         kafka.on_start(&mut ctx).await;
