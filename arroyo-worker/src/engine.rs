@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::{bail, Error, Result};
-use arrow_array::{ArrayRef, RecordBatch};
+use arrow_array::{Array, ArrayRef, RecordBatch};
+use arrow_array::builder::UInt64Builder;
 use arroyo_datastream::Operator;
 use arroyo_datastream::{ArroyoSchema, ConnectorOp};
 use arroyo_df::meta::SchemaRefWithMeta;
@@ -151,19 +152,50 @@ pub struct ArrowCollector {
 
 impl ArrowCollector {
     pub async fn collect(&mut self, record: RecordBatch) {
-        fn out_idx(keys: Option<Vec<ArrayRef>>, qs: usize) -> usize {
-            let hash = if let Some(keys) = keys {
-                let mut buf = vec![0];
-                let result =
-                    hash_utils::create_hashes(&keys[..], &ahash::RandomState::new(), &mut buf)
-                        .unwrap();
-                result[0]
+        fn repartition<'a>(record: &'a RecordBatch, keys: &'a Vec<usize>, qs: usize) -> impl Iterator<Item=(usize, RecordBatch)> + 'a {
+            let mut buf = vec![0; record.num_rows()];
+
+            if !keys.is_empty() {
+                let keys: Vec<_> = keys.iter()
+                    .map(|i| record.column(*i).clone())
+                    .collect();
+
+                hash_utils::create_hashes(&keys[..], &ahash::RandomState::new(), &mut buf)
+                    .unwrap();
             } else {
                 // TODO: do we want this be random or deterministic?
-                random()
+                buf.iter_mut().for_each(|x| *x = random());
             };
 
-            server_for_hash(hash, qs)
+            let mut indices: Vec<_> = (0..qs)
+                .map(|_| UInt64Builder::with_capacity(record.num_rows()))
+                .collect();
+
+            for (index, hash) in buf.into_iter().enumerate() {
+                indices[server_for_hash(hash, qs)].append_value(index as u64);
+            }
+
+            indices
+                .into_iter()
+                .enumerate()
+                .filter_map(|(partition, mut indices)| {
+                    let indices = indices.finish();
+                    (!indices.is_empty()).then_some((partition, indices))
+                })
+                .map(move |(partition, indices)| {
+                    let columns = record
+                        .columns()
+                        .iter()
+                        .map(|c| {
+                            arrow::compute::take(c.as_ref(), &indices, None).unwrap()
+                        })
+                        .collect();
+
+                    let batch =
+                        RecordBatch::try_new(record.schema(), columns).unwrap();
+
+                    (partition, batch)
+                })
         }
 
         TaskCounters::MessagesSent.for_task(&self.task_info).inc();
@@ -184,57 +216,30 @@ impl ArrowCollector {
         let record = RecordBatch::try_new(out_schema.schema.clone(), record.columns().to_vec())
             .unwrap_or_else(|e| {
                 panic!(
-                    "Data does not match expecte schema for {}: {:?}",
+                    "Data does not match expected schema for {}: {:?}",
                     self.task_info.operator_id, e
                 );
             });
 
-        let keys = if out_schema.key_cols.is_empty() {
-            None
-        } else {
-            Some(
-                out_schema
-                    .key_cols
+
+        for (i, out_q) in self.out_qs.iter_mut().enumerate() {
+            let partitions = repartition(&record,
+                                         &self.out_schema.as_ref().unwrap().key_cols, out_q.len());
+
+            for (partition, batch) in partitions {
+                out_q[partition]
+                    .send(ArrowMessage::Record(batch))
+                    .await
+                    .unwrap();
+
+                self.tx_queue_rem_gauges[i][partition]
                     .iter()
-                    .map(|i| record.column(*i).clone())
-                    .collect(),
-            )
-        };
+                    .for_each(|g| g.set(out_q[partition].capacity() as i64));
 
-        if self.out_qs.len() == 1 {
-            let idx = out_idx(keys, self.out_qs[0].len());
-
-            self.tx_queue_rem_gauges[0][idx]
-                .iter()
-                .for_each(|g| g.set(self.out_qs[0][idx].capacity() as i64));
-
-            self.tx_queue_size_gauges[0][idx]
-                .iter()
-                .for_each(|g| g.set(QUEUE_SIZE as i64));
-
-            self.out_qs[0][idx]
-                .send(ArrowMessage::Record(record))
-                .await
-                .unwrap();
-        } else {
-            todo!("multi output nodes")
-            // let key = record.key.clone();
-            // let message = Message::Record(record);
-
-            // for (i, out_node_qs) in self.out_qs.iter().enumerate() {
-            //     let idx = out_idx(&key, out_node_qs.len());
-            //     self.tx_queue_rem_gauges[i][idx]
-            //         .iter()
-            //         .for_each(|c| c.set(self.out_qs[i][idx].tx.capacity() as i64));
-
-            //     self.tx_queue_size_gauges[i][idx]
-            //         .iter()
-            //         .for_each(|c| c.set(QUEUE_SIZE as i64));
-
-            //     out_node_qs[idx]
-            //         .send(message.clone(), &self.sent_bytes)
-            //         .await;
-            // }
+                self.tx_queue_size_gauges[i][partition]
+                    .iter()
+                    .for_each(|g| g.set(QUEUE_SIZE as i64));
+            }
         }
     }
 
@@ -1339,6 +1344,8 @@ mod tests {
         };
 
         collector.collect(record).await;
+
+        drop(collector);
 
         // pull all messages out of the two queues
         let mut q1 = vec![];
