@@ -414,6 +414,7 @@ impl<T: ArrowOperator> BaseOperator for T {
                 }
             }
         }
+        self.on_close(ctx).await;
         final_message
     }
 
