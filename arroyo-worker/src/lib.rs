@@ -92,6 +92,7 @@ impl From<SourceFinishType> for Option<ArrowMessage> {
 pub enum ControlOutcome {
     Continue,
     Stop,
+    StopAndSendStop,
     Finish,
 }
 

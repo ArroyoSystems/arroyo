@@ -148,7 +148,12 @@ impl Scheduler for ProcessScheduler {
             let env_map = start_pipeline_req.env_vars.clone();
             let program = start_pipeline_req.program.clone();
             tokio::spawn(async move {
-                let mut command = Command::new("target/debug/arroyo-worker");
+                let mut command = if std::env::var("DEBUG").is_ok() {
+                    Command::new("target/debug/arroyo-worker")
+                } else {
+                    Command::new("target/release/arroyo-worker")
+                };
+
                 for (env, value) in env_map {
                     command.env(env, value);
                 }

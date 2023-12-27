@@ -1,13 +1,12 @@
 use core::panic;
+use std::collections::HashMap;
 use std::future::ready;
 use std::pin::Pin;
 use std::time::SystemTime;
-use std::{collections::HashMap, marker::PhantomData};
 
 use anyhow::Result;
 use arrow_array::RecordBatch;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use async_compression::tokio::bufread::{GzipDecoder, ZstdDecoder};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion_common::ScalarValue;
@@ -16,28 +15,20 @@ use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncRead;
+use tokio::select;
 use tokio::sync::mpsc::Receiver;
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    select,
-};
-use tokio_stream::wrappers::LinesStream;
 use tokio_stream::Stream;
 use tracing::{info, warn};
 
-use arroyo_formats::{DataDeserializer, SchemaData};
-use arroyo_macro::{source_fn, StreamNode};
+use arroyo_formats::DataDeserializer;
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::grpc::api;
-use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
 use arroyo_storage::StorageProvider;
-use arroyo_types::{to_nanos, ArrowMessage, Data, SourceError, UserError};
+use arroyo_types::{to_nanos, ArrowMessage, UserError};
 use typify::import_types;
 
 use crate::engine::ArrowContext;
-use crate::old::Context;
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
 use crate::{RateLimiter, SourceFinishType};
 
@@ -58,7 +49,7 @@ enum FileReadState {
 }
 
 impl ArrowOperatorConstructor<api::ConnectorOp, Self> for FileSystemSourceFunc {
-    fn from_config(config: ConnectorOp) -> Result<Self> {
+    fn from_config(config: api::ConnectorOp) -> Result<Self> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for FileSystemSourceFunc");
         let table: FileSystemTable = serde_json::from_value(config.table)
@@ -252,94 +243,6 @@ impl FileSystemSourceFunc {
             arroyo_rpc::formats::Format::RawString(_) => todo!(),
         }
     }
-
-    // async fn get_item_stream(
-    //     &mut self,
-    //     storage_provider: &StorageProvider,
-    //     path: String,
-    // ) -> Result<Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>, UserError> {
-    //     let format = self.deserializer.get_format().clone();
-    //     match *format {
-    //         arroyo_rpc::formats::Format::Json(_) => {
-    //             let deserializer = self.deserializer.clone();
-    //             let stream_reader = storage_provider.get_as_stream(path).await.unwrap();
-    //
-    //             let compression_reader: Box<dyn AsyncRead + Unpin + Send> =
-    //                 match self.get_compression_format() {
-    //                     CompressionFormat::Zstd => {
-    //                         Box::new(ZstdDecoder::new(BufReader::new(stream_reader)))
-    //                     }
-    //                     CompressionFormat::Gzip => {
-    //                         Box::new(GzipDecoder::new(BufReader::new(stream_reader)))
-    //                     }
-    //                     CompressionFormat::None => Box::new(BufReader::new(stream_reader)),
-    //                 };
-    //             // use line iterators
-    //             let lines = LinesStream::new(BufReader::new(compression_reader).lines());
-    //             let x = Box::new(lines.map(move |res| match res {
-    //                 Ok(line) => deserializer.deserialize_single(line.as_bytes()),
-    //                 Err(err) => Err(SourceError::other(
-    //                     "could not read line from stream",
-    //                     err.to_string(),
-    //                 )),
-    //             }))
-    //                 as Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>;
-    //             Ok(x as Box<dyn Stream<Item = Result<T, SourceError>> + Unpin + Send>)
-    //         }
-    //         arroyo_rpc::formats::Format::Avro(_) => todo!(),
-    //         arroyo_rpc::formats::Format::Parquet(_) => {
-    //             let object_meta = storage_provider
-    //                 .get_backing_store()
-    //                 .head(&(path.clone().into()))
-    //                 .await
-    //                 .map_err(|err| {
-    //                     UserError::new("could not get object metadata", err.to_string())
-    //                 })?;
-    //             let object_reader =
-    //                 ParquetObjectReader::new(storage_provider.get_backing_store(), object_meta);
-    //             let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
-    //                 .await
-    //                 .map_err(|err| {
-    //                     UserError::new(
-    //                         "could not create parquet record batch stream builder",
-    //                         format!("path:{}, err:{}", path, err),
-    //                     )
-    //                 })?;
-    //             let stream = reader_builder.build().map_err(|err| {
-    //                 UserError::new(
-    //                     "could not build parquet record batch stream",
-    //                     err.to_string(),
-    //                 )
-    //             })?;
-    //             let result = Box::new(stream.flat_map(|res| match res {
-    //                 Ok(record_batch) => {
-    //                     let iterator = match T::iterator_from_record_batch(record_batch) {
-    //                         Ok(iterator) => iterator.map(|item| Ok(item)),
-    //                         Err(err) => {
-    //                             return Box::pin(tokio_stream::once(Err(SourceError::other(
-    //                                 "could not get iterator from parquet record batch",
-    //                                 err.to_string(),
-    //                             ))))
-    //                                 as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>
-    //                         }
-    //                     };
-    //
-    //                     let stream = futures::stream::iter(iterator);
-    //                     Box::pin(stream)
-    //                         as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>
-    //                 }
-    //                 Err(err) => Box::pin(tokio_stream::once(Err(SourceError::other(
-    //                     "could not read record batch from stream",
-    //                     err.to_string(),
-    //                 ))))
-    //                     as Pin<Box<dyn Stream<Item = Result<T, SourceError>> + Send>>,
-    //             }))
-    //                 as Box<dyn Stream<Item = Result<T, SourceError>> + Send + Unpin>;
-    //             Ok(result)
-    //         }
-    //         arroyo_rpc::formats::Format::RawString(_) => todo!(),
-    //     }
-    // }
 
     async fn read_file(
         &mut self,

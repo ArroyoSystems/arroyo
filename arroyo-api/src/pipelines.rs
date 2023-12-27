@@ -16,14 +16,13 @@ use std::time::Duration;
 use crate::{connection_profiles, jobs, pipelines, types};
 use arroyo_datastream::ConnectorOp;
 use arroyo_rpc::api_types::pipelines::{
-    Job, Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelinePatch, PipelinePost,
-    PipelineRestart, QueryValidationResult, StopType, ValidateQueryPost,
+    Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, QueryValidationResult, StopType,
+    ValidateQueryPost,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
 use arroyo_rpc::grpc::api::{
     create_pipeline_req, ArrowProgram, CreateJobReq, CreatePipelineReq, CreateSqlJob,
-    PipelineProgram,
 };
 use arroyo_rpc::grpc::{api as api_proto, api};
 
@@ -647,7 +646,7 @@ pub async fn patch_pipeline(
             .map_err(log_and_map)?
             .ok_or_else(|| not_found("Job"))?;
 
-        let program = PipelineProgram::decode(&res.program[..]).map_err(log_and_map)?;
+        let program = ArrowProgram::decode(&res.program[..]).map_err(log_and_map)?;
         let map: HashMap<String, u32> = program
             .nodes
             .into_iter()

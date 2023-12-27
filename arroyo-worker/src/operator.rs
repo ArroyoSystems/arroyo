@@ -1,43 +1,31 @@
-use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::sync::Arc;
 use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
     time::SystemTime,
 };
 
-use crate::engine::{ArrowContext, CheckpointCounter, WatermarkHolder};
+use crate::engine::{ArrowContext, CheckpointCounter};
 use crate::inq_reader::InQReader;
 use crate::metrics::TaskCounters;
-use crate::{ControlOutcome, SourceFinishType};
-use arrow::row::{Row, RowConverter};
+use crate::ControlOutcome;
 use arrow_array::types::TimestampNanosecondType;
-use arrow_array::{Array, ArrayRef, PrimitiveArray, RecordBatch};
+use arrow_array::{Array, PrimitiveArray, RecordBatch};
 use arroyo_datastream::ArroyoSchema;
-use arroyo_metrics::gauge_for_task;
 use arroyo_rpc::{
-    grpc::{
-        CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
-        TaskCheckpointEventType,
-    },
+    grpc::{CheckpointMetadata, TableDescriptor, TaskCheckpointEventType},
     ControlMessage, ControlResp,
 };
-use arroyo_state::tables::time_key_map::TimeKeyMap;
-use arroyo_state::{BackingStore, StateBackend, StateStore};
+use arroyo_state::BackingStore;
 use arroyo_types::{
-    from_micros, from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, TaskInfo,
-    Watermark, Window, BYTES_RECV, BYTES_SENT, MESSAGES_RECV, MESSAGES_SENT,
+    from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, TaskInfo, Watermark, Window,
 };
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
-use datafusion_common::ScalarValue;
-use futures::{FutureExt, StreamExt};
-use prometheus::{labels, IntCounter, IntGauge};
-use rand::random;
+use futures::StreamExt;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{debug, error, warn, Instrument};
+use tracing::{debug, error, info, warn, Instrument};
 
 pub trait TimerT: Data + PartialEq + Eq + 'static {}
 
@@ -388,11 +376,16 @@ impl<T: ArrowOperator> BaseOperator for T {
                                 match self.handle_control_message(idx, &message, &mut counter, &mut closed, in_partitions, ctx).await {
                                     ControlOutcome::Continue => {}
                                     ControlOutcome::Stop => {
-                                        final_message = Some(ArrowMessage::Stop);
+                                        // just stop; the stop will have already been broadcasted for example by
+                                        // a final checkpoint
                                         break;
                                     }
                                     ControlOutcome::Finish => {
                                         final_message = Some(ArrowMessage::EndOfData);
+                                        break;
+                                    }
+                                    ControlOutcome::StopAndSendStop => {
+                                        final_message = Some(ArrowMessage::Stop);
                                         break;
                                     }
                                 }
@@ -410,7 +403,7 @@ impl<T: ArrowOperator> BaseOperator for T {
                             }
                         }
                         None => {
-                            tracing::info!("[{}] Stream completed",ctx.task_info.operator_name);
+                            info!("[{}] Stream completed",ctx.task_info.operator_name);
                             break;
                         }
                     }
@@ -503,7 +496,7 @@ pub trait ArrowOperator: Send + 'static + Sized {
                 unreachable!();
             }
             ArrowMessage::Barrier(t) => {
-                tracing::debug!(
+                info!(
                     "received barrier in {}-{}-{}-{}",
                     self.name(),
                     ctx.task_info.operator_id,
@@ -525,7 +518,7 @@ pub trait ArrowOperator: Send + 'static + Sized {
                 }
 
                 if counter.mark(idx, &t) {
-                    debug!(
+                    info!(
                         "Checkpointing {}-{}-{}",
                         self.name(),
                         ctx.task_info.operator_id,
@@ -533,7 +526,7 @@ pub trait ArrowOperator: Send + 'static + Sized {
                     );
 
                     if self.checkpoint(*t, ctx).await {
-                        return crate::ControlOutcome::Stop;
+                        return ControlOutcome::Stop;
                     }
                 }
             }
@@ -561,7 +554,7 @@ pub trait ArrowOperator: Send + 'static + Sized {
             ArrowMessage::Stop => {
                 closed.insert(idx);
                 if closed.len() == in_partitions {
-                    return ControlOutcome::Stop;
+                    return ControlOutcome::StopAndSendStop;
                 }
             }
             ArrowMessage::EndOfData => {
@@ -616,7 +609,7 @@ pub fn get_timestamp_col<'a, 'b>(
     ctx: &'b mut ArrowContext,
 ) -> &'a PrimitiveArray<TimestampNanosecondType> {
     batch
-        .column(ctx.out_schema.as_ref().unwrap().timestamp_col)
+        .column(ctx.out_schema.as_ref().unwrap().timestamp_index)
         .as_any()
         .downcast_ref::<PrimitiveArray<TimestampNanosecondType>>()
         .unwrap()

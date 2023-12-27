@@ -420,8 +420,8 @@ message ArrowProgram {
 message ArroyoSchema {
   // json-encoded
   string arrow_schema = 1;
-  uint32 timestamp_col = 2;
-  repeated uint32 key_cols = 3;
+  uint32 timestamp_index = 2;
+  repeated uint32 key_indices = 3;
 }
 
 message ArrowNode {

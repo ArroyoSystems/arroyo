@@ -233,8 +233,8 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
                     edge_type: edge.edge_type().into(),
                     schema: ArroyoSchema {
                         schema: serde_json::from_str(&schema.arrow_schema).unwrap(),
-                        timestamp_col: schema.timestamp_col as usize,
-                        key_cols: schema.key_cols.iter().map(|t| *t as usize).collect(),
+                        timestamp_index: schema.timestamp_index as usize,
+                        key_indices: schema.key_indices.iter().map(|t| *t as usize).collect(),
                     },
                     projection: if edge.projection.is_empty() {
                         None
@@ -279,8 +279,8 @@ impl From<LogicalProgram> for ArrowProgram {
                     target: target.index() as i32,
                     schema: Some(api::ArroyoSchema {
                         arrow_schema: serde_json::to_string(&edge.schema.schema).unwrap(),
-                        timestamp_col: edge.schema.timestamp_col as u32,
-                        key_cols: edge.schema.key_cols.iter().map(|k| *k as u32).collect(),
+                        timestamp_index: edge.schema.timestamp_index as u32,
+                        key_indices: edge.schema.key_indices.iter().map(|k| *k as u32).collect(),
                     }),
                     edge_type: edge_type as i32,
                     projection: edge

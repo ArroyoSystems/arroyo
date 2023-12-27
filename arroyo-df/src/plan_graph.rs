@@ -1,12 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use arrow_schema::{DataType, Schema};
-use arroyo_datastream::{
-    ArroyoSchema, ConnectorOp, EdgeType, ExpressionReturnType, NonWindowAggregator, Operator,
-    PeriodicWatermark, Program, ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator,
-    Stream, StreamEdge, StreamNode, TumblingTopN, TumblingWindowAggregator, WatermarkStrategy,
-    WindowAgg, WindowType, TIMESTAMP_FIELD,
-};
+use arroyo_datastream::{ConnectorOp, WindowType};
 
 use datafusion::{
     execution::{
@@ -15,31 +10,20 @@ use datafusion::{
     },
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
-use petgraph::{
-    data::Build,
-    graph::DiGraph,
-    visit::{IntoNeighborsDirected, Topo},
-};
+use petgraph::{graph::DiGraph, visit::Topo};
 
 use tracing::{info, warn};
 
-use crate::schemas::add_timestamp_field;
 use crate::{physical::ArroyoPhysicalExtensionCodec, DataFusionEdge, QueryToGraphVisitor};
-use crate::{
-    tables::Table,
-    types::{StructDef, StructField, StructPair, TypeDef},
-    ArroyoSchemaProvider, CompiledSql, SqlConfig,
-};
+use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
-use arroyo_datastream::EdgeType::Forward;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{
     window, KeyPlanOperator, TumblingWindow, ValuePlanOperator, Window, WindowAggregateOperator,
 };
-use datafusion::sql::sqlparser::test_utils::table;
 use datafusion_common::{DFField, DFSchema, ScalarValue};
 use datafusion_expr::{BinaryExpr, Expr, LogicalPlan};
 use datafusion_proto::{
@@ -116,13 +100,13 @@ pub(crate) async fn get_arrow_program(
                     .encode_to_vec(),
                 });
 
-                let mut edge: LogicalEdge = (&DataFusionEdge {
-                    schema: table_scan.projected_schema.clone(),
-                    edge_type: LogicalEdgeType::Forward,
-                    key_cols: vec![],
-                })
-                    .try_into()
-                    .unwrap();
+                let mut edge: LogicalEdge = (&DataFusionEdge::new(
+                    table_scan.projected_schema.clone(),
+                    LogicalEdgeType::Forward,
+                    vec![],
+                )
+                .unwrap())
+                    .into();
 
                 edge.projection = table_scan.projection.clone();
 

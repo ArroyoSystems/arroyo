@@ -2,7 +2,7 @@ use arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
 use arrow_array::builder::PrimitiveBuilder;
 use arrow_array::cast::AsArray;
 use arrow_array::types::TimestampNanosecondType;
-use arrow_array::{Array, PrimitiveArray, RecordBatch, RecordBatchOptions, StructArray};
+use arrow_array::{PrimitiveArray, RecordBatch, RecordBatchOptions, StructArray};
 use bincode::{config, BorrowDecode, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -151,6 +151,14 @@ pub fn u32_config(var: &str, default: u32) -> u32 {
         .map(|s| u32::from_str(&s).unwrap_or(default))
         .unwrap_or(default)
 }
+
+// These seeds were randomly generated; changing them will break existing state
+pub const HASH_SEEDS: [u64; 4] = [
+    5093852630788334730,
+    1843948808084437226,
+    8049205638242432149,
+    17942305062735447798,
+];
 
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
@@ -343,7 +351,7 @@ pub struct Record<K: Key, T: Data> {
     pub value: T,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ArrowMessage {
     Record(RecordBatch),
     Barrier(CheckpointBarrier),
@@ -1004,7 +1012,7 @@ pub static TX_QUEUE_SIZE: &str = "arroyo_worker_tx_queue_size";
 pub static TX_QUEUE_REM: &str = "arroyo_worker_tx_queue_rem";
 pub static DESERIALIZATION_ERRORS: &str = "arroyo_worker_deserialization_errors";
 
-#[derive(Debug, Copy, Clone, Encode, Decode)]
+#[derive(Debug, Copy, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct CheckpointBarrier {
     pub epoch: u32,
     pub min_epoch: u32,

@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::{mem, thread};
@@ -6,13 +5,10 @@ use std::{mem, thread};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use anyhow::{bail, Error, Result};
-use arrow_array::{Array, ArrayRef, RecordBatch};
+use anyhow::Result;
 use arrow_array::builder::UInt64Builder;
-use arroyo_datastream::Operator;
-use arroyo_datastream::{ArroyoSchema, ConnectorOp};
-use arroyo_df::meta::SchemaRefWithMeta;
-use arroyo_state::tables::time_key_map::TimeKeyMap;
+use arrow_array::RecordBatch;
+use arroyo_datastream::ArroyoSchema;
 use bincode::{Decode, Encode};
 use datafusion_common::hash_utils;
 
@@ -24,7 +20,7 @@ use crate::connectors::filesystem::source::FileSystemSourceFunc;
 use crate::connectors::impulse::ImpulseSourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operator::{server_for_hash, ArrowOperator, ArrowOperatorConstructor, BaseOperator};
+use crate::operator::{server_for_hash, ArrowOperatorConstructor, BaseOperator};
 use crate::operators::PeriodicWatermarkGenerator;
 use crate::{RateLimiter, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, TIMER_TABLE};
 use arroyo_datastream::logical::{
@@ -40,7 +36,7 @@ use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend, StateStore};
 use arroyo_types::{
     from_micros, range_for_server, ArrowMessage, CheckpointBarrier, Data, Key, SourceError,
-    TaskInfo, UserError, Watermark, WorkerId,
+    TaskInfo, UserError, Watermark, WorkerId, HASH_SEEDS,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -152,16 +148,27 @@ pub struct ArrowCollector {
 
 impl ArrowCollector {
     pub async fn collect(&mut self, record: RecordBatch) {
-        fn repartition<'a>(record: &'a RecordBatch, keys: &'a Vec<usize>, qs: usize) -> impl Iterator<Item=(usize, RecordBatch)> + 'a {
+        fn repartition<'a>(
+            record: &'a RecordBatch,
+            keys: &'a Vec<usize>,
+            qs: usize,
+        ) -> impl Iterator<Item = (usize, RecordBatch)> + 'a {
             let mut buf = vec![0; record.num_rows()];
 
             if !keys.is_empty() {
-                let keys: Vec<_> = keys.iter()
-                    .map(|i| record.column(*i).clone())
-                    .collect();
+                let keys: Vec<_> = keys.iter().map(|i| record.column(*i).clone()).collect();
 
-                hash_utils::create_hashes(&keys[..], &ahash::RandomState::new(), &mut buf)
-                    .unwrap();
+                hash_utils::create_hashes(
+                    &keys[..],
+                    &ahash::RandomState::with_seeds(
+                        HASH_SEEDS[0],
+                        HASH_SEEDS[1],
+                        HASH_SEEDS[2],
+                        HASH_SEEDS[3],
+                    ),
+                    &mut buf,
+                )
+                .unwrap();
             } else {
                 // TODO: do we want this be random or deterministic?
                 buf.iter_mut().for_each(|x| *x = random());
@@ -186,13 +193,10 @@ impl ArrowCollector {
                     let columns = record
                         .columns()
                         .iter()
-                        .map(|c| {
-                            arrow::compute::take(c.as_ref(), &indices, None).unwrap()
-                        })
+                        .map(|c| arrow::compute::take(c.as_ref(), &indices, None).unwrap())
                         .collect();
 
-                    let batch =
-                        RecordBatch::try_new(record.schema(), columns).unwrap();
+                    let batch = RecordBatch::try_new(record.schema(), columns).unwrap();
 
                     (partition, batch)
                 })
@@ -221,10 +225,8 @@ impl ArrowCollector {
                 );
             });
 
-
         for (i, out_q) in self.out_qs.iter_mut().enumerate() {
-            let partitions = repartition(&record,
-                                         &self.out_schema.as_ref().unwrap().key_cols, out_q.len());
+            let partitions = repartition(&record, &out_schema.key_indices, out_q.len());
 
             for (partition, batch) in partitions {
                 out_q[partition]
@@ -246,7 +248,12 @@ impl ArrowCollector {
     pub async fn broadcast(&mut self, message: ArrowMessage) {
         for out_node in &self.out_qs {
             for q in out_node {
-                q.send(message.clone()).await.unwrap()
+                q.send(message.clone()).await.unwrap_or_else(|e| {
+                    panic!(
+                        "failed to broadcast message <{:?}> for operator {}: {}",
+                        message, self.task_info.operator_id, e
+                    )
+                });
             }
         }
     }
@@ -264,7 +271,7 @@ impl ArrowContext {
         projection: Option<Vec<usize>>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
         mut tables: Vec<TableDescriptor>,
-        _table_schemas: HashMap<char, SchemaRefWithMeta>,
+        _table_schemas: HashMap<char, ArroyoSchema>,
     ) -> Self {
         tables.push(TableDescriptor {
             name: TIMER_TABLE.to_string(),
@@ -1258,10 +1265,10 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn Ba
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-    use arrow_array::{TimestampNanosecondArray, UInt64Array};
+    use arrow_array::{ArrayRef, TimestampNanosecondArray, UInt64Array};
     use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_types::to_nanos;
+    use std::time::Duration;
 
     use super::*;
 
@@ -1296,18 +1303,24 @@ mod tests {
     async fn test_shuffles() {
         let timestamp = SystemTime::now();
 
-        let data = vec![0,1,0,1,0,1,0,0];
+        let data = vec![0, 1, 0, 1, 0, 1, 0, 0];
 
         let columns: Vec<ArrayRef> = vec![
             Arc::new(UInt64Array::from(data.clone())),
             Arc::new(TimestampNanosecondArray::from(
-                data.iter().map(|_| to_nanos(timestamp) as i64).collect::<Vec<_>>(),
+                data.iter()
+                    .map(|_| to_nanos(timestamp) as i64)
+                    .collect::<Vec<_>>(),
             )),
         ];
 
         let schema = Arc::new(Schema::new(vec![
             Field::new("key", DataType::UInt64, false),
-            Field::new("time", DataType::Timestamp(TimeUnit::Nanosecond, None), false),
+            Field::new(
+                "time",
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
         ]));
 
         let (tx1, mut rx1) = channel(8);
@@ -1329,13 +1342,12 @@ mod tests {
         let (tx_queue_size_gauges, tx_queue_rem_gauges) =
             register_queue_gauges(&*task_info, &out_qs);
 
-
         let mut collector = ArrowCollector {
             task_info,
             out_schema: Some(ArroyoSchema {
                 schema,
-                timestamp_col: 1,
-                key_cols: vec![0],
+                timestamp_index: 1,
+                key_indices: vec![0],
             }),
             projection: None,
             out_qs,
@@ -1358,7 +1370,14 @@ mod tests {
             q2.push(m);
         }
 
-        println!("{:?}\n{:?}", q1, q2);
+        let v1 = &q1[0];
+        for v in &q1[1..] {
+            assert_eq!(v1, v);
+        }
 
+        let v2 = &q2[0];
+        for v in &q2[1..] {
+            assert_eq!(v2, v);
+        }
     }
 }

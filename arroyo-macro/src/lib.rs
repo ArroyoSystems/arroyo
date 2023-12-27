@@ -442,11 +442,14 @@ fn impl_stream_node_type(
                             // do nothing
                         }
                         crate::ControlOutcome::Stop => {
-                            final_message = Some(arroyo_types::Message::Stop);
                             break;
                         }
                         crate::ControlOutcome::Finish => {
                             final_message = Some(arroyo_types::Message::EndOfData);
+                            break;
+                        }
+                        crate::ControlOutcome::StopAndSendStop => {
+                            final_message = Some(arroyo_types::Message::Stop);
                             break;
                         }
                     }
