@@ -10,6 +10,11 @@ use arrow_array::{ArrayRef, RecordBatch};
 use arroyo_datastream::{ArroyoSchema, ConnectorOp};
 use bincode::{Decode, Encode};
 use datafusion_common::hash_utils;
+use anyhow::{bail, Error, Result};
+use arroyo_datastream::Operator;
+use arroyo_df::meta::SchemaRefWithMeta;
+use arroyo_state::tables::time_key_map::TimeKeyMap;
+
 
 use tracing::{debug, info, warn};
 
@@ -234,6 +239,7 @@ impl ArrowContext {
         projection: Option<Vec<usize>>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
         mut tables: Vec<TableDescriptor>,
+        _table_schemas: HashMap<char, SchemaRefWithMeta>,
     ) -> Self {
         tables.push(TableDescriptor {
             name: TIMER_TABLE.to_string(),
@@ -442,7 +448,7 @@ impl ArrowContext {
                     TaskCounters::DeserializationErrors
                         .for_task(&self.task_info)
                         .inc();
-                    return Ok(());
+                    Ok(())
                 }
                 Some(BadData::Fail {}) | None => {
                     Err(UserError::new("Deserialization error", details))

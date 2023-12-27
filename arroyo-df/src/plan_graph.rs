@@ -1,29 +1,21 @@
-use std::{
-    collections::{HashMap, HashSet},
-    io::sink,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use arrow_schema::{DataType, Schema};
 use arroyo_datastream::{ArroyoSchema, ConnectorOp, EdgeType, ExpressionReturnType, NonWindowAggregator, Operator, PeriodicWatermark, Program, ProgramUdf, SlidingAggregatingTopN, SlidingWindowAggregator, Stream, StreamEdge, StreamNode, TIMESTAMP_FIELD, TumblingTopN, TumblingWindowAggregator, WatermarkStrategy, WindowAgg, WindowType};
 
 use datafusion::{
-    datasource::MemTable,
     execution::{
         context::{SessionConfig, SessionState},
         runtime_env::RuntimeEnv,
     },
-    physical_plan::{memory::MemoryExec, streaming::StreamingTableExec, PhysicalExpr},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
 use petgraph::{
     data::Build,
-    graph::{DiGraph, NodeIndex},
+    graph::DiGraph,
     visit::{IntoNeighborsDirected, Topo},
 };
-use quote::{quote, ToTokens};
-use syn::{parse_quote, parse_str, Type};
+
 use tracing::{info, warn};
 
 use crate::{DataFusionEdge, physical::ArroyoPhysicalExtensionCodec, QueryToGraphVisitor};
@@ -36,16 +28,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use datafusion::sql::sqlparser::test_utils::table;
 use arroyo_datastream::EdgeType::Forward;
 use arroyo_rpc::grpc::api::{
-    window, KeyPlanOperator, MemTableScan, ProjectionOperator, TumblingWindow, ValuePlanOperator,
-    Window, WindowAggregateOperator,
+    window, KeyPlanOperator, TumblingWindow, ValuePlanOperator, Window, WindowAggregateOperator,
 };
-use datafusion_common::{DFField, DFSchema, DFSchemaRef, DataFusionError, ScalarValue};
-use datafusion_expr::{logical_plan, BinaryExpr, Cast, Expr, LogicalPlan};
+use datafusion_common::{DFField, DFSchema, ScalarValue};
+use datafusion_expr::{BinaryExpr, Expr, LogicalPlan};
 use datafusion_proto::{
-    bytes::{physical_plan_to_bytes, Serializeable},
-    physical_plan::{
-        to_proto, AsExecutionPlan, DefaultPhysicalExtensionCodec, PhysicalExtensionCodec,
-    },
+    physical_plan::AsExecutionPlan,
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
 };
 use petgraph::Direction;
@@ -57,7 +45,7 @@ use crate::schemas::add_timestamp_field;
 
 
 pub(crate) async fn get_arrow_program(
-    mut rewriter: QueryToGraphVisitor,
+    rewriter: QueryToGraphVisitor,
     schema_provider: ArroyoSchemaProvider,
 ) -> Result<CompiledSql> {
     warn!(
@@ -67,7 +55,7 @@ pub(crate) async fn get_arrow_program(
     let mut topo = Topo::new(&rewriter.local_logical_plan_graph);
     let mut program_graph: LogicalGraph = DiGraph::new();
 
-    let mut planner = DefaultPhysicalPlanner::default();
+    let planner = DefaultPhysicalPlanner::default();
     let mut config = SessionConfig::new();
     config
         .options_mut()
@@ -138,7 +126,7 @@ pub(crate) async fn get_arrow_program(
                 watermark_index
             }
             crate::LogicalPlanExtension::ValueCalculation(logical_plan) => {
-                let inputs = logical_plan.inputs();
+                let _inputs = logical_plan.inputs();
                 let physical_plan = planner
                     .create_physical_plan(logical_plan, &session_state)
                     .await;

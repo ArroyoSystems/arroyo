@@ -1,7 +1,6 @@
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
-    ptr::null,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -26,7 +25,7 @@ use crate::avro;
 use arroyo_rpc::api_types::connections::{
     FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
-use datafusion_common::{DFField, DFSchemaRef, ScalarValue, ToDFSchema};
+use datafusion_common::{DFField, DFSchemaRef, ScalarValue};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
@@ -119,7 +118,7 @@ impl StructDef {
 
     pub fn struct_name_ident(&self) -> String {
         let name = self.struct_name();
-        name.replace(":", "_")
+        name.replace(':', "_")
     }
 
     pub fn def(&self, is_key: bool) -> String {
@@ -1141,7 +1140,7 @@ impl StructField {
         }
 
         if let TypeDef::DataType(DataType::Timestamp(_, _), nullable) = self.data_type {
-            match format.as_ref().map(|t| &*t) {
+            match format.as_ref() {
                 Some(Format::Json(JsonFormat {
                     timestamp_format: TimestampFormat::UnixMillis,
                     ..
@@ -1170,7 +1169,7 @@ impl StructField {
                     }
                 }
             }
-        } else if let Some("json") = self.original_type.as_ref().map(|i| i.as_str()) {
+        } else if let Some("json") = self.original_type.as_deref() {
             if self.nullable() {
                 attributes.push(quote!(
                     #[serde(default)]

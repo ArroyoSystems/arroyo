@@ -1,5 +1,6 @@
 #![allow(clippy::unnecessary_mut_passed)]
 
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use crate::old::OutQueue;
@@ -70,6 +71,7 @@ impl KafkaTopicTester {
             1,
             vec![vec![OutQueue::new(data_tx, false)]],
             vec![],
+            HashMap::new(),
         )
         .await;
         kafka.on_start(&mut ctx).await;

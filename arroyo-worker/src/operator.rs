@@ -253,6 +253,7 @@ pub trait BaseOperator: Send + 'static {
                 projection,
                 out_qs,
                 tables,
+                HashMap::new(),
             )
                 .await;
 

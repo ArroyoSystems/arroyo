@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::{DataType, Field};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::{ConnectorOp, Operator};
 use arroyo_rpc::api_types::connections::{
@@ -13,7 +13,7 @@ use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
     sql::{
-        planner::{PlannerContext, SqlToRel},
+        planner::SqlToRel,
         sqlparser::ast::{ColumnDef, ColumnOption, Statement, Value},
     },
 };
@@ -26,10 +26,9 @@ use datafusion_expr::{
 use tracing::info;
 use arroyo_datastream::logical::LogicalNode;
 
-use crate::external::SinkUpdateType;
 use crate::{avro, DEFAULT_IDLE_TIME};
 use crate::{
-    external::{ProcessingMode, SqlSink, SqlSource},
+    external::{ProcessingMode, SqlSource},
     json_schema,
     types::{convert_data_type, StructDef, StructField, TypeDef},
     ArroyoSchemaProvider,
@@ -101,9 +100,9 @@ pub fn schema_defs(name: &str, schema: &ConnectionSchema) -> Option<String> {
     let def = &schema.definition.as_ref()?;
 
     match def {
-        SchemaDefinition::JsonSchema(s) => Some(json_schema::get_defs(&name, &s).unwrap()),
+        SchemaDefinition::JsonSchema(s) => Some(json_schema::get_defs(name, s).unwrap()),
         SchemaDefinition::ProtobufSchema(_) => todo!(),
-        SchemaDefinition::AvroSchema(s) => Some(avro::get_defs(&name, &s).unwrap()),
+        SchemaDefinition::AvroSchema(s) => Some(avro::get_defs(name, s).unwrap()),
         SchemaDefinition::RawSchema(_) => None,
     }
 }
@@ -358,7 +357,7 @@ impl ConnectorTable {
             bail!("can't read from a source with virtual fields and update mode.")
         }
 
-        let virtual_field_projection = self.virtual_field_projection()?;
+        let _virtual_field_projection = self.virtual_field_projection()?;
         let timestamp_override = self.timestamp_override()?;
         let watermark_column = self.watermark_column()?;
 
@@ -536,7 +535,7 @@ impl Table {
                 .collect(),
         );
 
-        let physical_schema = DFSchema::new_with_metadata(
+        let _physical_schema = DFSchema::new_with_metadata(
             physical_struct
                 .fields
                 .iter()
@@ -550,11 +549,11 @@ impl Table {
             HashMap::new(),
         )?;
 
-        let sql_to_rel = SqlToRel::new(schema_provider);
+        let _sql_to_rel = SqlToRel::new(schema_provider);
         struct_field_pairs
             .into_iter()
             .map(|(struct_field, generating_expression)| {
-                if let Some(generating_expression) = generating_expression {
+                if let Some(_generating_expression) = generating_expression {
                     // TODO: Implement automatic type coercion here, as we have elsewhere.
                     // It is done by calling the Analyzer which inserts CAST operators where necessary.
                     todo!("support generating expressions");
@@ -599,7 +598,7 @@ impl Table {
             let connector = with_map.remove("connector");
             let fields = Self::schema_from_columns(columns, schema_provider)?;
 
-            match connector.as_ref().map(|c| c.as_str()) {
+            match connector.as_deref() {
                 Some("memory") | None => {
                     if fields.iter().any(|f| f.is_virtual()) {
                         bail!("Virtual fields are not supported in memory tables; instead write a query");
@@ -714,7 +713,7 @@ impl Table {
                 ..
             }) => inferred_fields
                 .as_ref()
-                .map(|fs| fs.iter().map(|f| qualified_field(&*f)).collect())
+                .map(|fs| fs.iter().map(qualified_field).collect())
                 .unwrap_or_else(|| {
                     fields
                         .iter()
@@ -730,10 +729,10 @@ impl Table {
         }
     }
 
-    pub fn as_sql_sink(&self, input: LogicalPlan) -> Result<()> {
+    pub fn as_sql_sink(&self, _input: LogicalPlan) -> Result<()> {
         match self {
             Table::ConnectorTable(c) => c.as_sql_sink(),
-            Table::MemoryTable { name, .. } => {
+            Table::MemoryTable { .. } => {
                 todo!()
                 //Ok(SqlOperator::NamedTable(name.clone(), Box::new(input)))
             }
@@ -762,7 +761,7 @@ fn infer_sink_schema(
         .get_table_mut(&table_name)
         .ok_or_else(|| anyhow!("table {} not found", table_name))?;
 
-    table.set_inferred_fields(plan.schema().fields().iter().map(|f| f.clone()).collect())?;
+    table.set_inferred_fields(plan.schema().fields().to_vec())?;
 
     Ok(())
 }

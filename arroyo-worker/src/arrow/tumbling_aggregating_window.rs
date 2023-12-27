@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    mem,
     sync::{Arc, RwLock},
     time::SystemTime,
 };
@@ -8,19 +9,18 @@ use ahash::RandomState;
 use anyhow::{bail, Context as AnyhowContext, Result};
 use arrow::{
     compute::{kernels, partition, sort_to_indices, take},
-    row::{RowConverter, SortField}
-    ,
+    row::{RowConverter, SortField},
 };
 use arrow_array::{
     Array,
     ArrayRef, GenericByteArray, NullArray, PrimitiveArray, RecordBatch, types::{GenericBinaryType, Int64Type, TimestampNanosecondType, UInt64Type}
 };
 use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef, TimeUnit};
-use arroyo_df::{physical::SingleLockedBatch, schemas::window_arrow_struct};
+use arroyo_df::schemas::window_arrow_struct;
 use arroyo_rpc::grpc::{api, api::window::Window, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior};
 use arroyo_state::{
-    DataOperation,
     parquet::{ParquetStats, RecordBatchBuilder},
+    DataOperation,
 };
 use arroyo_types::{ArrowMessage, from_nanos, Record, RecordBatchData, to_nanos, Watermark};
 use bincode::config;
@@ -34,13 +34,13 @@ use datafusion::{
 use datafusion_common::{hash_utils::create_hashes, DataFusionError, DFField, DFSchema, ScalarValue};
 
 use datafusion_execution::{
-    FunctionRegistry,
-    runtime_env::{RuntimeConfig, RuntimeEnv}, SendableRecordBatchStream, TaskContext,
+    runtime_env::{RuntimeConfig, RuntimeEnv},
+    FunctionRegistry, SendableRecordBatchStream,
 };
 use datafusion_expr::{AggregateUDF, ScalarUDF, WindowUDF};
-use datafusion_physical_expr::{expressions::CastExpr, PhysicalExpr};
+use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
-    physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan, PhysicalExtensionCodec},
+    physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan},
     protobuf::{
         physical_plan_node::PhysicalPlanType, AggregateMode, PhysicalExprNode, PhysicalPlanNode,
     },
@@ -50,6 +50,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::{StreamExt, wrappers::UnboundedReceiverStream};
 use tracing::info;
+use arroyo_df::physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
 use crate::engine::ArrowContext;
 use crate::old::Context;
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
@@ -57,16 +58,23 @@ use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
 pub struct TumblingAggregatingWindowFunc {
     width: Duration,
     binning_function: Arc<dyn PhysicalExpr>,
-    partial_aggregation_plan: PhysicalPlanNode,
+    partial_aggregation_plan: Arc<dyn ExecutionPlan>,
     finish_execution_plan: Arc<dyn ExecutionPlan>,
     // the partial aggregation plan shares a reference to it,
     // which is only used on the exec()
     receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
+    final_batches_passer: Arc<RwLock<Vec<RecordBatch>>>,
     senders: BTreeMap<usize, UnboundedSender<RecordBatch>>,
-    execs: BTreeMap<usize, SendableRecordBatchStream>,
+    execs: BTreeMap<usize, BinComputingHolder>,
     window_field: FieldRef,
     window_index: usize,
     converter_tools: ConverterTools,
+}
+
+#[derive(Default)]
+struct BinComputingHolder {
+    active_exec: Option<SendableRecordBatchStream>,
+    finished_batches: Vec<RecordBatch>,
 }
 
 struct ConverterTools {
@@ -87,7 +95,7 @@ impl ConverterTools {
                 .convert_columns(key_batch.columns())
                 .unwrap()
         } else {
-            let mut null_key_converter =
+            let null_key_converter =
                 RowConverter::new(vec![SortField::new(DataType::Null)]).unwrap();
             let null_array = NullArray::new(key_batch.num_rows());
             let null_array_ref = Arc::new(null_array) as Arc<dyn Array>;
@@ -98,7 +106,7 @@ impl ConverterTools {
         let mut rows = 0;
         if key_batch.num_columns() > 0 {
             for key_row in key_rows.into_iter() {
-                key_bytes.append_value(key_row.as_ref().to_vec());
+                key_bytes.append_value(key_row.as_ref());
                 rows += 1;
             }
         } else {
@@ -117,7 +125,7 @@ impl ConverterTools {
         let mut value_bytes = arrow_array::builder::BinaryBuilder::default();
         value_rows
             .into_iter()
-            .for_each(|row| value_bytes.append_value(row.as_ref().to_vec()));
+            .for_each(|row| value_bytes.append_value(row.as_ref()));
         let timestamp_column = batch
             .column(self.timestamp_index)
             .as_any()
@@ -169,15 +177,15 @@ impl FunctionRegistry for Registry {
         HashSet::new()
     }
 
-    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+    fn udf(&self, _name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
         todo!()
     }
 
-    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+    fn udaf(&self, _name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
         todo!()
     }
 
-    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+    fn udwf(&self, _name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
         todo!()
     }
 }
@@ -212,14 +220,13 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self> for TumblingAg
             .map(|x| x as usize)
             .collect();
         info!("KEY INDICES: {:?}", key_indices);
-        let input_schema: Schema = serde_json::from_slice(&proto_config.input_schema.as_slice())
+        let input_schema: Schema = serde_json::from_slice(proto_config.input_schema.as_slice())
             .context(format!(
                 "failed to deserialize schema of length {}",
                 proto_config.input_schema.len()
             ))?;
         let timestamp_index = input_schema.index_of("_timestamp")?;
         let value_indices: Vec<_> = (0..input_schema.fields().len())
-            .into_iter()
             .filter(|index| !key_indices.contains(index) && timestamp_index != *index)
             .collect();
 
@@ -259,7 +266,11 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self> for TumblingAg
             value_converter,
             timestamp_index,
         };
-        let (partial_aggregation_plan, finish_plan) = match physical_plan
+
+        let receiver = Arc::new(RwLock::new(None));
+        let final_batches_passer = Arc::new(RwLock::new(Vec::new()));
+
+        let (partial_aggregation_plan, finish_execution_plan) = match physical_plan
             .physical_plan_type
             .as_ref()
             .unwrap()
@@ -274,15 +285,46 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self> for TumblingAg
                 let AggregateMode::Final = aggregate.mode() else {
                     bail!("expect AggregateMode to be Final so we can decompose it for checkpointing.")
                 };
-                let mut top_level_copy = aggregate.clone();
-                let input = aggregate.input.as_ref().unwrap().as_ref().clone();
-                // TODO: rewrite input for top level plan
-                (
-                    input,
-                    PhysicalPlanNode {
-                        physical_plan_type: Some(PhysicalPlanType::Aggregate(top_level_copy)),
-                    },
-                )
+                let mut top_level_copy = aggregate.as_ref().clone();
+
+                let partial_aggregation_plan = aggregate.input.as_ref().unwrap().as_ref().clone();
+
+                let codec = ArroyoPhysicalExtensionCodec {
+                    context: DecodingContext::UnboundedBatchStream(receiver.clone()),
+                };
+
+                let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
+                    &Registry {},
+                    &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+                    &codec,
+                )?;
+                let partial_schema = partial_aggregation_plan.schema();
+                let table_provider = ArroyoMemExec {
+                    table_name: "partial".into(),
+                    schema: partial_schema,
+                };
+                let wrapped = Arc::new(table_provider);
+
+                top_level_copy.input = Some(Box::new(PhysicalPlanNode::try_from_physical_plan(
+                    wrapped,
+                    &ArroyoPhysicalExtensionCodec::default(),
+                )?));
+
+                let finish_plan = PhysicalPlanNode {
+                    physical_plan_type: Some(PhysicalPlanType::Aggregate(Box::new(top_level_copy))),
+                };
+
+                let final_codec = ArroyoPhysicalExtensionCodec {
+                    context: DecodingContext::LockedBatchVec(final_batches_passer.clone()),
+                };
+
+                let finish_execution_plan = finish_plan.try_into_physical_plan(
+                    &Registry {},
+                    &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+                    &final_codec,
+                )?;
+
+                (partial_aggregation_plan, finish_execution_plan)
             }
             PhysicalPlanType::HashJoin(_) => todo!(),
             PhysicalPlanType::Sort(_) => todo!(),
@@ -305,22 +347,13 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self> for TumblingAg
             PhysicalPlanType::PlaceholderRow(_) => todo!(),
         };
 
-        let receiver = Arc::new(RwLock::new(None));
-        let codec = ArrowPhysicalExtensionCodec {
-            receiver: receiver.clone(),
-        };
-        let finish_execution_plan = finish_plan.try_into_physical_plan(
-            &Registry {},
-            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
-            &codec,
-        )?;
-
         Ok(Self {
             width: Duration::from_micros(window.size_micros),
             binning_function,
             partial_aggregation_plan,
             finish_execution_plan,
             receiver,
+            final_batches_passer,
             senders: BTreeMap::new(),
             execs: BTreeMap::new(),
             window_field,
@@ -342,104 +375,6 @@ struct BinAggregator {
     aggregate_exec: Arc<dyn ExecutionPlan>,
 }
 
-#[derive(Debug)]
-struct ArrowPhysicalExtensionCodec {
-    receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
-}
-
-impl PhysicalExtensionCodec for ArrowPhysicalExtensionCodec {
-    fn try_decode(
-        &self,
-        buf: &[u8],
-        inputs: &[Arc<dyn ExecutionPlan>],
-        registry: &dyn FunctionRegistry,
-    ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
-        info!("trying to decode an EmptyPartitionStream");
-        let empty_partition_scheme: SingleLockedBatch = serde_json::from_slice(buf)
-            .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {}", err)))?;
-        let reader = UnboundedRecordBatchReader {
-            schema: empty_partition_scheme.schema(),
-            receiver: self.receiver.clone(),
-        };
-        Ok(Arc::new(reader))
-    }
-
-    fn try_encode(
-        &self,
-        node: Arc<dyn ExecutionPlan>,
-        buf: &mut Vec<u8>,
-    ) -> datafusion_common::Result<()> {
-        todo!()
-    }
-}
-
-#[derive(Debug)]
-struct UnboundedRecordBatchReader {
-    schema: SchemaRef,
-    receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
-}
-
-impl DisplayAs for UnboundedRecordBatchReader {
-    fn fmt_as(
-        &self,
-        t: datafusion::physical_plan::DisplayFormatType,
-        f: &mut std::fmt::Formatter,
-    ) -> std::fmt::Result {
-        write!(f, "unbounded record batch reader")
-    }
-}
-
-impl ExecutionPlan for UnboundedRecordBatchReader {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn schema(&self) -> SchemaRef {
-        self.schema.clone()
-    }
-
-    fn output_partitioning(&self) -> datafusion_physical_expr::Partitioning {
-        datafusion_physical_expr::Partitioning::UnknownPartitioning(1)
-    }
-
-    fn output_ordering(&self) -> Option<&[datafusion_physical_expr::PhysicalSortExpr]> {
-        None
-    }
-
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
-        vec![]
-    }
-
-    fn with_new_children(
-        self: Arc<Self>,
-        children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion_common::Result<Arc<dyn ExecutionPlan>> {
-        Err(DataFusionError::Internal("not supported".into()))
-    }
-
-    fn execute(
-        &self,
-        partition: usize,
-        context: Arc<TaskContext>,
-    ) -> datafusion_common::Result<datafusion_execution::SendableRecordBatchStream> {
-        Ok(Box::pin(RecordBatchStreamAdapter::new(
-            self.schema.clone(),
-            UnboundedReceiverStream::new(
-                self.receiver
-                    .write()
-                    .unwrap()
-                    .take()
-                    .expect("unbounded receiver should be present before calling exec. In general, set it and then immediately call execute()"),
-            )
-            .map(Ok),
-        )))
-    }
-
-    fn statistics(&self) -> datafusion_common::Result<datafusion_common::Statistics> {
-        Ok(datafusion_common::Statistics::new_unknown(&self.schema))
-    }
-}
-
 #[async_trait::async_trait]
 
 impl ArrowOperator for TumblingAggregatingWindowFunc {
@@ -452,12 +387,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
         batch: RecordBatch,
         ctx: &mut ArrowContext,
     ) {
-        if batch.num_rows() > 0 {
-            let (record_batch, parquet_stats) = self.converter_tools.get_state_record_batch(&batch);
+        /*if batch.num_rows() > 0 {
+            let (record_batch, parquet_stats) = self.converter_tools.get_state_record_batch(batch);
             ctx.state
                 .insert_record_batch('s', record_batch, parquet_stats)
                 .await;
-        }
+        }*/
         let timestamp_column = batch
             .column_by_name("_timestamp")
             .unwrap()
@@ -466,7 +401,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
             .unwrap();
         let timestamp_nanos_column: PrimitiveArray<Int64Type> = timestamp_column.reinterpret_cast();
         let timestamp_nanos_field =
-            DFField::new_unqualified("timestamp_nanos".into(), DataType::Int64, false);
+            DFField::new_unqualified("timestamp_nanos", DataType::Int64, false);
         let df_schema = DFSchema::new_with_metadata(vec![timestamp_nanos_field], HashMap::new())
             .expect("can't make timestamp nanos schema");
         let timestamp_batch = RecordBatch::try_new(
@@ -484,7 +419,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
         let columns = batch
             .columns()
             .iter()
-            .map(|c| take(&*c, &indices, None).unwrap())
+            .map(|c| take(c, &indices, None).unwrap())
             .collect();
         let sorted = RecordBatch::try_new(batch.schema(), columns).unwrap();
         let sorted_bins = take(&*bin, &indices, None).unwrap();
@@ -497,8 +432,9 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
         //info!("received record batch with {} records and  {:?} partitions", batch.num_rows(), partition.ranges().len());
         for range in partition.ranges() {
             let bin = typed_bin.value(range.start) as usize;
-            let bin_batch = sorted.slice(range.start as usize, range.end - range.start as usize);
-            if !self.execs.contains_key(&bin) {
+            let bin_batch = sorted.slice(range.start, range.end - range.start);
+            let bin_exec = self.execs.entry(bin).or_default();
+            if bin_exec.active_exec.is_none() {
                 info!("no exec for {}, creating", bin);
                 let (unbounded_sender, unbounded_receiver) = unbounded_channel();
                 self.senders.insert(bin, unbounded_sender);
@@ -506,11 +442,11 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
-                let exec = self
-                    .finish_execution_plan
-                    .execute(0, SessionContext::new().task_ctx())
-                    .unwrap();
-                self.execs.insert(bin, exec);
+                bin_exec.active_exec = Some(
+                    self.partial_aggregation_plan
+                        .execute(0, SessionContext::new().task_ctx())
+                        .unwrap(),
+                );
             }
             let sender = self.senders.get(&bin).unwrap();
             sender.send(bin_batch).unwrap();
@@ -526,7 +462,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
             let bin = (to_nanos(*watermark) / self.width.as_nanos()) as usize;
             while !self.execs.is_empty() {
                 let should_pop = {
-                    let Some((first_bin, exec)) = self.execs.first_key_value() else {
+                    let Some((first_bin, _exec)) = self.execs.first_key_value() else {
                         unreachable!("isn't empty")
                     };
                     *first_bin < bin
@@ -535,12 +471,26 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                     let Some((popped_bin, mut exec)) = self.execs.pop_first() else {
                         unreachable!("should have an entry")
                     };
-                    {
+                    if let Some(mut active_exec) = exec.active_exec.take() {
                         self.senders
                             .remove(&popped_bin)
                             .expect("should have sender for bin");
+                        while let Some(batch) = active_exec.next().await {
+                            let batch = batch.expect("should be able to compute batch");
+                            exec.finished_batches.push(batch);
+                        }
                     }
-                    while let Some(batch) = exec.next().await {
+                    {
+                        let mut batches = self.final_batches_passer.write().unwrap();
+                        info!("first batch:{:?}", exec.finished_batches.first());
+                        let finished_batches = mem::take(&mut exec.finished_batches);
+                        *batches = finished_batches;
+                    }
+                    let mut final_exec = self
+                        .finish_execution_plan
+                        .execute(0, SessionContext::new().task_ctx())
+                        .unwrap();
+                    while let Some(batch) = final_exec.next().await {
                         let batch = batch.expect("should be able to compute batch");
                         info!("batch {:?}", batch);
                         let bin_start = ((popped_bin) * (self.width.as_nanos() as usize)) as i64;
@@ -550,7 +500,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                             ScalarValue::TimestampNanosecond(Some(timestamp), None)
                                 .to_array_of_size(batch.num_rows())
                                 .unwrap();
-                        let mut fields = batch.schema().fields().as_ref().clone().to_vec();
+                        let mut fields = batch.schema().fields().as_ref().to_vec();
                         fields.push(Arc::new(Field::new(
                             "_timestamp",
                             DataType::Timestamp(TimeUnit::Nanosecond, None),

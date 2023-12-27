@@ -230,7 +230,8 @@ impl FileSystemSourceFunc {
                             "could not create parquet record batch stream builder",
                             format!("path:{}, err:{}", path, err),
                         )
-                    })?;
+                    })?
+                    .with_batch_size(1024);
                 let stream = reader_builder.build().map_err(|err| {
                     UserError::new(
                         "could not build parquet record batch stream",
