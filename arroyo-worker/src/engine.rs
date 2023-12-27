@@ -1254,6 +1254,9 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn Ba
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+    use arrow_array::{TimestampNanosecondArray, UInt64Array};
+    use arrow_schema::{DataType, Field, Schema, TimeUnit};
+    use arroyo_types::to_nanos;
 
     use super::*;
 
@@ -1282,5 +1285,73 @@ mod tests {
         w.set(1, Watermark::Idle);
         w.set(2, Watermark::Idle);
         assert_eq!(w.watermark(), Some(Watermark::Idle));
+    }
+
+    #[tokio::test]
+    async fn test_shuffles() {
+        let timestamp = SystemTime::now();
+
+        let data = vec![0,1,0,1,0,1,0,0];
+
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(UInt64Array::from(data.clone())),
+            Arc::new(TimestampNanosecondArray::from(
+                data.iter().map(|_| to_nanos(timestamp) as i64).collect::<Vec<_>>(),
+            )),
+        ];
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("key", DataType::UInt64, false),
+            Field::new("time", DataType::Timestamp(TimeUnit::Nanosecond, None), false),
+        ]));
+
+        let (tx1, mut rx1) = channel(8);
+        let (tx2, mut rx2) = channel(8);
+
+        let record = RecordBatch::try_new(schema.clone(), columns).unwrap();
+
+        let task_info = Arc::new(TaskInfo {
+            job_id: "test-job".to_string(),
+            operator_name: "test-operator".to_string(),
+            operator_id: "test-operator-1".to_string(),
+            task_index: 0,
+            parallelism: 1,
+            key_range: 0..=1,
+        });
+
+        let out_qs = vec![vec![tx1, tx2]];
+
+        let (tx_queue_size_gauges, tx_queue_rem_gauges) =
+            register_queue_gauges(&*task_info, &out_qs);
+
+
+        let mut collector = ArrowCollector {
+            task_info,
+            out_schema: Some(ArroyoSchema {
+                schema,
+                timestamp_col: 1,
+                key_cols: vec![0],
+            }),
+            projection: None,
+            out_qs,
+            tx_queue_rem_gauges,
+            tx_queue_size_gauges,
+        };
+
+        collector.collect(record).await;
+
+        // pull all messages out of the two queues
+        let mut q1 = vec![];
+        while let Some(m) = rx1.recv().await {
+            q1.push(m);
+        }
+
+        let mut q2 = vec![];
+        while let Some(m) = rx2.recv().await {
+            q2.push(m);
+        }
+
+        println!("{:?}\n{:?}", q1, q2);
+
     }
 }
