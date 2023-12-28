@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use anyhow::Result;
 use arrow_array::builder::UInt64Builder;
 use arrow_array::RecordBatch;
-use arroyo_datastream::ArroyoSchema;
+use arroyo_rpc::ArroyoSchema;
 use bincode::{Decode, Encode};
 use datafusion_common::hash_utils;
 
@@ -18,6 +18,7 @@ use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
 use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
 use crate::connectors::filesystem::source::FileSystemSourceFunc;
 use crate::connectors::impulse::ImpulseSourceFunc;
+use crate::connectors::sse::SSESourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::operator::{server_for_hash, ArrowOperatorConstructor, BaseOperator};
@@ -453,37 +454,42 @@ impl ArrowContext {
     /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
     pub async fn collect_source_record(
         &mut self,
-        timestamp: SystemTime,
-        value: Result<RecordBatch, SourceError>,
+        batch: RecordBatch,
+        errors: Vec<SourceError>,
         bad_data: &Option<BadData>,
         rate_limiter: &mut RateLimiter,
     ) -> Result<(), UserError> {
-        todo!("collect source record");
-        match value {
-            Ok(value) => Ok(self.collector.collect(value).await),
-            Err(SourceError::BadData { details }) => match bad_data {
-                Some(BadData::Drop {}) => {
-                    rate_limiter
-                        .rate_limit(|| async {
-                            warn!("Dropping invalid data: {}", details.clone());
-                            self.report_user_error(UserError::new(
-                                "Dropping invalid data",
-                                details,
-                            ))
+        self.collector.collect(batch).await;
+
+        for error in errors {
+            match error {
+                SourceError::BadData { details } => match bad_data {
+                    Some(BadData::Drop {}) => {
+                        rate_limiter
+                            .rate_limit(|| async {
+                                warn!("Dropping invalid data: {}", details.clone());
+                                self.report_user_error(UserError::new(
+                                    "Dropping invalid data",
+                                    details,
+                                ))
+                                .await;
+                            })
                             .await;
-                        })
-                        .await;
-                    TaskCounters::DeserializationErrors
-                        .for_task(&self.task_info)
-                        .inc();
-                    Ok(())
+                        TaskCounters::DeserializationErrors
+                            .for_task(&self.task_info)
+                            .inc();
+                    }
+                    Some(BadData::Fail {}) | None => {
+                        return Err(UserError::new("Deserialization error", details));
+                    }
+                },
+                SourceError::Other { name, details } => {
+                    return Err(UserError::new(name, details));
                 }
-                Some(BadData::Fail {}) | None => {
-                    Err(UserError::new("Deserialization error", details))
-                }
-            },
-            Err(SourceError::Other { name, details }) => Err(UserError::new(name, details)),
+            }
         }
+
+        Ok(())
     }
 }
 
@@ -1262,11 +1268,14 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn Ba
                 "connectors::impulse::ImpulseSourceFunc" => {
                     Box::new(ImpulseSourceFunc::from_config(op).unwrap())
                 }
+                "connectors::sse::SSESourceFunc" => {
+                    Box::new(SSESourceFunc::from_config(op).unwrap())
+                }
                 "connectors::filesystem::source::FileSystemSourceFunc" => {
                     Box::new(FileSystemSourceFunc::from_config(op).unwrap())
                 }
                 "GrpcSink" => Box::new(GrpcRecordBatchSink::from_config(op).unwrap()),
-                c => panic!("unknown operator {}", c),
+                c => panic!("unknown connector {}", c),
             }
         }
     }

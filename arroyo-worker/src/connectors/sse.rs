@@ -1,21 +1,21 @@
-use crate::old::Context;
+use crate::engine::ArrowContext;
+use crate::operator::{ArrowOperatorConstructor, BaseOperator};
 use crate::{RateLimiter, SourceFinishType};
-use arroyo_formats::{DataDeserializer, SchemaData};
-use arroyo_macro::{source_fn, StreamNode};
+use arroyo_formats::ArrowDeserializer;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::{StopMode, TableDescriptor};
+use arroyo_rpc::grpc::{api, StopMode, TableDescriptor};
 use arroyo_rpc::{var_str::VarStr, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{string_to_map, Data, Message, UserError, Watermark};
+use arroyo_types::{string_to_map, ArrowMessage, SignalMessage, UserError, Watermark};
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
 use futures::StreamExt;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::marker::PhantomData;
 use std::time::SystemTime;
 use tokio::select;
+use tokio::sync::mpsc::Receiver;
 use tracing::{debug, info};
 use typify::import_types;
 
@@ -28,54 +28,21 @@ pub struct SSESourceState {
     last_id: Option<String>,
 }
 
-#[derive(StreamNode)]
-pub struct SSESourceFunc<K, T>
-where
-    K: DeserializeOwned + Data,
-    T: SchemaData,
-{
+pub struct SSESourceFunc {
     url: String,
     headers: Vec<(String, String)>,
     events: Vec<String>,
-    deserializer: DataDeserializer<T>,
+    format: Format,
+    framing: Option<Framing>,
     bad_data: Option<BadData>,
     rate_limiter: RateLimiter,
     state: SSESourceState,
-    _t: PhantomData<K>,
 }
 
-#[source_fn(out_k = (), out_t = T)]
-impl<K, T> SSESourceFunc<K, T>
-where
-    K: DeserializeOwned + Data,
-    T: SchemaData,
-{
-    pub fn new(
-        url: &str,
-        headers: Vec<(&str, &str)>,
-        events: Vec<&str>,
-        format: Format,
-        bad_data: Option<BadData>,
-        framing: Option<Framing>,
-    ) -> Self {
-        SSESourceFunc {
-            url: url.to_string(),
-            headers: headers
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-            events: events.into_iter().map(|s| s.to_string()).collect(),
-            deserializer: DataDeserializer::new(format, framing),
-            bad_data,
-            rate_limiter: RateLimiter::new(),
-            state: SSESourceState::default(),
-            _t: PhantomData,
-        }
-    }
-
-    pub fn from_config(config: &str) -> Self {
+impl ArrowOperatorConstructor<api::ConnectorOp, Self> for SSESourceFunc {
+    fn from_config(config: api::ConnectorOp) -> anyhow::Result<Self> {
         let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for SSESource");
+            serde_json::from_str(&config.config).expect("Invalid config for SSESource");
         let table: SseTable =
             serde_json::from_value(config.table).expect("Invalid table config for SSESource");
 
@@ -84,7 +51,7 @@ where
             .as_ref()
             .map(|s| s.sub_env_vars().expect("Failed to substitute env vars"));
 
-        Self {
+        Ok(Self {
             url: table.endpoint,
             headers: string_to_map(&headers.unwrap_or("".to_string()))
                 .expect("Invalid header map")
@@ -94,17 +61,17 @@ where
                 .events
                 .map(|e| e.split(',').map(|e| e.to_string()).collect())
                 .unwrap_or_else(std::vec::Vec::new),
-            deserializer: DataDeserializer::new(
-                config.format.expect("SSESource requires a format"),
-                config.framing,
-            ),
+            format: config.format.expect("SSE requires a format"),
+            framing: config.framing,
             bad_data: config.bad_data,
             rate_limiter: RateLimiter::new(),
             state: SSESourceState::default(),
-            _t: PhantomData,
-        }
+        })
     }
+}
 
+#[async_trait]
+impl BaseOperator for SSESourceFunc {
     fn name(&self) -> String {
         "SSESource".to_string()
     }
@@ -113,18 +80,34 @@ where
         vec![arroyo_state::global_table("e", "sse source state")]
     }
 
-    async fn on_start(&mut self, ctx: &mut Context<(), T>) {
+    async fn run_behavior(
+        mut self: Box<Self>,
+        ctx: &mut ArrowContext,
+        _: Vec<Receiver<ArrowMessage>>,
+    ) -> Option<ArrowMessage> {
         let s: GlobalKeyedState<(), SSESourceState, _> =
             ctx.state.get_global_keyed_state('e').await;
 
         if let Some(state) = s.get(&()) {
             self.state = state.clone();
         }
-    }
 
+        match self.run_int(ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.report_error(e.name.clone(), e.details.clone()).await;
+
+                panic!("{}: {}", e.name, e.details);
+            }
+        }
+        .into()
+    }
+}
+
+impl SSESourceFunc {
     async fn our_handle_control_message(
         &mut self,
-        ctx: &mut Context<(), T>,
+        ctx: &mut ArrowContext,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
@@ -161,18 +144,7 @@ where
         None
     }
 
-    async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
-        match self.run_int(ctx).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
-    }
-
-    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
         let mut client = eventsource_client::ClientBuilder::for_url(&self.url).unwrap();
 
         if let Some(id) = &self.state.last_id {
@@ -185,6 +157,17 @@ where
 
         let mut stream = client.build().stream();
         let events: HashSet<_> = self.events.iter().cloned().collect();
+
+        let mut deserializer = ArrowDeserializer::new(
+            self.format.clone(),
+            ctx.out_schema
+                .as_ref()
+                .expect("source must have an out schema")
+                .clone(),
+            self.framing.clone(),
+        );
+
+        let mut builder = deserializer.batch();
 
         // since there's no way to partition across an event source, only read on the first task
         if ctx.task_info.task_index == 0 {
@@ -199,12 +182,13 @@ where
                                             self.state.last_id = Some(id);
                                         }
 
-                                        if events.is_empty() || events.contains(&event.event_type) {
-                                            let iter = self.deserializer.deserialize_slice(&event.data.as_bytes()).await;
 
-                                            for v in iter {
-                                                ctx.collect_source_record(SystemTime::now(), v, &self.bad_data, &mut self.rate_limiter).await?;
-                                            }
+                                        if events.is_empty() || events.contains(&event.event_type) {
+                                            builder.deserialize_slice(&event.data.as_bytes(), SystemTime::now()).await;
+
+                                            let (batch, errors) = builder.finish();
+                                            builder = deserializer.batch();
+                                            ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
                                         }
                                     }
                                     SSE::Comment(s) => {
@@ -237,7 +221,10 @@ where
             }
         } else {
             // otherwise set idle and just process control messages
-            ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
+            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+                Watermark::Idle,
+            )))
+            .await;
 
             loop {
                 let msg = ctx.control_rx.recv().await;

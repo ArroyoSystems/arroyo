@@ -8,7 +8,8 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
-use arroyo_formats::{DataDeserializer, SchemaData};
+use arroyo_formats::old::DataDeserializer;
+use arroyo_formats::SchemaData;
 use arroyo_macro::{source_fn, StreamNode};
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::{

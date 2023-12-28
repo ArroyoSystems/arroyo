@@ -3,7 +3,8 @@ use std::{marker::PhantomData, time::SystemTime};
 
 use crate::old::Context;
 use crate::{engine::StreamNode, header_map, RateLimiter, SourceFinishType};
-use arroyo_formats::{DataDeserializer, SchemaData};
+use arroyo_formats::old::DataDeserializer;
+use arroyo_formats::SchemaData;
 use arroyo_macro::source_fn;
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::{
