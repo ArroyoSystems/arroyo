@@ -42,7 +42,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
-use rand::{random, Rng};
+use rand::{random};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
@@ -230,7 +230,7 @@ impl ArrowCollector {
 
             for (partition, batch) in partitions {
                 out_q[partition]
-                    .send(ArrowMessage::Record(batch))
+                    .send(ArrowMessage::Data(batch))
                     .await
                     .unwrap();
 
@@ -379,6 +379,7 @@ impl ArrowContext {
         self.watermarks.last_present_watermark()
     }
 
+    #[allow(unused)]
     pub async fn schedule_timer<D: Data + PartialEq + Eq, K: Key>(
         &mut self,
         key: &mut K,
@@ -388,6 +389,7 @@ impl ArrowContext {
         todo!("timer");
     }
 
+    #[allow(unused)]
     pub async fn cancel_timer<D: Data + PartialEq + Eq, K: Key>(
         &mut self,
         key: &mut K,
@@ -578,6 +580,7 @@ struct PhysicalGraphEdge {
     edge_idx: usize,
     in_logical_idx: usize,
     out_logical_idx: usize,
+    schema: ArroyoSchema,
     edge: LogicalEdgeType,
     tx: Option<Sender<QueueItem>>,
     rx: Option<Receiver<QueueItem>>,
@@ -750,6 +753,7 @@ impl Program {
                             edge_idx: 0,
                             in_logical_idx: logical_in_node_idx.index(),
                             out_logical_idx: logical_out_node_idx.index(),
+                            schema: edge.schema.clone(),
                             edge: edge.edge_type,
                             tx: Some(tx),
                             rx: Some(rx),
@@ -767,6 +771,7 @@ impl Program {
                                 edge_idx: idx,
                                 in_logical_idx: logical_in_node_idx.index(),
                                 out_logical_idx: logical_out_node_idx.index(),
+                                schema: edge.schema.clone(),
                                 edge: edge.edge_type,
                                 tx: Some(tx),
                                 rx: Some(rx),
@@ -1062,7 +1067,7 @@ impl Engine {
                 dst_idx: target.subtask_idx(),
             };
 
-            senders.add(quad, edge.weight().tx.as_ref().unwrap().clone());
+            senders.add(quad, edge.weight().schema.schema.clone(), edge.weight().tx.as_ref().unwrap().clone());
         }
 
         let mut connects = vec![];

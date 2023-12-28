@@ -14,7 +14,6 @@ use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use prost::Message;
 use std::collections::HashMap;
-use std::os::unix::prelude::PermissionsExt;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -91,7 +90,7 @@ impl ProcessScheduler {
     }
 }
 
-const SLOTS_PER_NODE: usize = 16;
+const SLOTS_PER_NODE: usize = 2;
 
 pub struct StartPipelineReq {
     pub name: String,

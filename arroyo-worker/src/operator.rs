@@ -18,9 +18,7 @@ use arroyo_rpc::{
     ControlMessage, ControlResp,
 };
 use arroyo_state::BackingStore;
-use arroyo_types::{
-    from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, TaskInfo, Watermark, Window,
-};
+use arroyo_types::{from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, TaskInfo, Watermark, Window, SignalMessage};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::StreamExt;
@@ -247,8 +245,6 @@ pub trait BaseOperator: Send + 'static {
             )
             .await;
 
-            self.on_start(&mut ctx).await;
-
             let final_message = self.run_behavior(&mut ctx, in_qs).await;
 
             if let Some(final_message) = final_message {
@@ -302,7 +298,7 @@ pub trait BaseOperator: Send + 'static {
         ctx.send_checkpoint_event(checkpoint_barrier, TaskCheckpointEventType::FinishedSync)
             .await;
 
-        ctx.broadcast(ArrowMessage::Barrier(checkpoint_barrier))
+        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Barrier(checkpoint_barrier)))
             .await;
 
         checkpoint_barrier.then_stop
@@ -311,10 +307,6 @@ pub trait BaseOperator: Send + 'static {
     fn name(&self) -> String;
 
     fn tables(&self) -> Vec<TableDescriptor>;
-
-    async fn on_start(&mut self, ctx: &mut ArrowContext);
-
-    async fn on_close(&mut self, ctx: &mut ArrowContext);
 
     #[allow(unused)]
     async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {}
@@ -327,6 +319,8 @@ impl<T: ArrowOperator> BaseOperator for T {
         ctx: &mut ArrowContext,
         mut in_qs: Vec<Receiver<ArrowMessage>>,
     ) -> Option<ArrowMessage> {
+        self.on_start(ctx).await;
+
         let task_info = ctx.task_info.clone();
         let name = self.name();
         let mut counter = CheckpointCounter::new(in_qs.len());
@@ -364,29 +358,32 @@ impl<T: ArrowOperator> BaseOperator for T {
                             tracing::debug!("[{}] Handling message {}-{}, {:?}",
                                 ctx.task_info.operator_name, 0, local_idx, message);
 
-                            if let ArrowMessage::Record(record) = message {
-                                TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
-                                Self::process_batch(&mut(*self),record, ctx)
-                                    .instrument(tracing::trace_span!("handle_fn",
-                                        name,
-                                        operator_id = task_info.operator_id,
-                                        subtask_idx = task_info.task_index)
-                                ).await;
-                            } else {
-                                match self.handle_control_message(idx, &message, &mut counter, &mut closed, in_partitions, ctx).await {
-                                    ControlOutcome::Continue => {}
-                                    ControlOutcome::Stop => {
-                                        // just stop; the stop will have already been broadcasted for example by
-                                        // a final checkpoint
-                                        break;
-                                    }
-                                    ControlOutcome::Finish => {
-                                        final_message = Some(ArrowMessage::EndOfData);
-                                        break;
-                                    }
-                                    ControlOutcome::StopAndSendStop => {
-                                        final_message = Some(ArrowMessage::Stop);
-                                        break;
+                            match message {
+                                ArrowMessage::Data(record) => {
+                                    TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
+                                    Self::process_batch(&mut(*self), record, ctx)
+                                        .instrument(tracing::trace_span!("handle_fn",
+                                            name,
+                                            operator_id = task_info.operator_id,
+                                            subtask_idx = task_info.task_index)
+                                    ).await;
+                                }
+                                ArrowMessage::Signal(signal) => {
+                                    match self.handle_control_message(idx, &signal, &mut counter, &mut closed, in_partitions, ctx).await {
+                                        ControlOutcome::Continue => {}
+                                        ControlOutcome::Stop => {
+                                            // just stop; the stop will have already been broadcasted for example by
+                                            // a final checkpoint
+                                            break;
+                                        }
+                                        ControlOutcome::Finish => {
+                                            final_message = Some(ArrowMessage::Signal(SignalMessage::EndOfData));
+                                            break;
+                                        }
+                                        ControlOutcome::StopAndSendStop => {
+                                            final_message = Some(ArrowMessage::Signal(SignalMessage::Stop));
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -424,14 +421,6 @@ impl<T: ArrowOperator> BaseOperator for T {
 
     fn tables(&self) -> Vec<TableDescriptor> {
         self.tables()
-    }
-
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
-        self.on_start(ctx).await;
-    }
-
-    async fn on_close(&mut self, ctx: &mut ArrowContext) {
-        self.on_close(ctx).await;
     }
 
     async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {
@@ -486,17 +475,14 @@ pub trait ArrowOperator: Send + 'static + Sized {
     async fn handle_control_message(
         &mut self,
         idx: usize,
-        message: &ArrowMessage,
+        message: &SignalMessage,
         counter: &mut CheckpointCounter,
         closed: &mut HashSet<usize>,
         in_partitions: usize,
         ctx: &mut ArrowContext,
     ) -> ControlOutcome {
         match message {
-            ArrowMessage::Record(record) => {
-                unreachable!();
-            }
-            ArrowMessage::Barrier(t) => {
+            SignalMessage::Barrier(t) => {
                 info!(
                     "received barrier in {}-{}-{}-{}",
                     self.name(),
@@ -531,7 +517,7 @@ pub trait ArrowOperator: Send + 'static + Sized {
                     }
                 }
             }
-            ArrowMessage::Watermark(watermark) => {
+            SignalMessage::Watermark(watermark) => {
                 debug!(
                     "received watermark {:?} in {}-{}",
                     watermark,
@@ -552,13 +538,13 @@ pub trait ArrowOperator: Send + 'static + Sized {
                     self.handle_watermark_int(watermark, ctx).await;
                 }
             }
-            ArrowMessage::Stop => {
+            SignalMessage::Stop => {
                 closed.insert(idx);
                 if closed.len() == in_partitions {
                     return ControlOutcome::StopAndSendStop;
                 }
             }
-            ArrowMessage::EndOfData => {
+            SignalMessage::EndOfData => {
                 closed.insert(idx);
                 if closed.len() == in_partitions {
                     return ControlOutcome::Finish;
@@ -587,7 +573,7 @@ pub trait ArrowOperator: Send + 'static + Sized {
     async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut ArrowContext) {}
 
     async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
-        ctx.broadcast(ArrowMessage::Watermark(watermark)).await;
+        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark))).await;
     }
 
     #[allow(unused_variables)]

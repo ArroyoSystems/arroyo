@@ -1,7 +1,6 @@
 use crate::queries::api_queries::{
     DbCheckpoint, DbLogMessage, DbPipelineJob, GetOperatorErrorsParams,
 };
-use arroyo_datastream::logical::OperatorName;
 use arroyo_rpc::api_types::checkpoints::{
     Checkpoint, CheckpointEventSpan, CheckpointSpanType, OperatorCheckpointGroup,
     SubtaskCheckpointGroup,

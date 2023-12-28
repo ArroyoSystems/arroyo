@@ -24,7 +24,7 @@ use arroyo_state::{
     parquet::{ParquetStats, RecordBatchBuilder},
     DataOperation,
 };
-use arroyo_types::{from_nanos, to_nanos, ArrowMessage, Record, RecordBatchData, Watermark};
+use arroyo_types::{from_nanos, to_nanos, ArrowMessage, Record, RecordBatchData, Watermark, SignalMessage};
 use bincode::config;
 use datafusion::{
     execution::context::SessionContext,
@@ -534,6 +534,6 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
             }
         }
         // by default, just pass watermarks on down
-        ctx.broadcast(ArrowMessage::Watermark(watermark)).await;
+        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark))).await;
     }
 }

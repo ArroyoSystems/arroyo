@@ -66,6 +66,7 @@ const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 #[cfg(test)]
 mod test;
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct UdfDef {
     args: Vec<TypeDef>,

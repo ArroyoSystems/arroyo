@@ -6,7 +6,7 @@ use arroyo_rpc::grpc::{
     TableType, TableWriteBehavior,
 };
 use arroyo_rpc::{CompactionResult, ControlResp};
-use arroyo_types::{CheckpointBarrier, Data, Key, Record, TaskInfo};
+use arroyo_types::{CheckpointBarrier, Data, Key, TaskInfo};
 use async_trait::async_trait;
 use bincode::config::Configuration;
 use bincode::{Decode, Encode};

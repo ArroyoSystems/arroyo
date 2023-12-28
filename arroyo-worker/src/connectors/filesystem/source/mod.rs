@@ -92,10 +92,6 @@ impl BaseOperator for FileSystemSourceFunc {
             }
         }
     }
-
-    async fn on_start(&mut self, _: &mut ArrowContext) {}
-
-    async fn on_close(&mut self, _: &mut ArrowContext) {}
 }
 
 impl FileSystemSourceFunc {
