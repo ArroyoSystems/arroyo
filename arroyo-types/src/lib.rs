@@ -367,7 +367,11 @@ pub enum SignalMessage {
 
 impl ArrowMessage {
     pub fn is_end(&self) -> bool {
-        matches!(self, ArrowMessage::Signal(SignalMessage::Stop) | ArrowMessage::Signal(SignalMessage::EndOfData))
+        matches!(
+            self,
+            ArrowMessage::Signal(SignalMessage::Stop)
+                | ArrowMessage::Signal(SignalMessage::EndOfData)
+        )
     }
 }
 

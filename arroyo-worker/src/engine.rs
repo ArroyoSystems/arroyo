@@ -42,7 +42,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
-use rand::{random};
+use rand::random;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
@@ -1067,7 +1067,11 @@ impl Engine {
                 dst_idx: target.subtask_idx(),
             };
 
-            senders.add(quad, edge.weight().schema.schema.clone(), edge.weight().tx.as_ref().unwrap().clone());
+            senders.add(
+                quad,
+                edge.weight().schema.schema.clone(),
+                edge.weight().tx.as_ref().unwrap().clone(),
+            );
         }
 
         let mut connects = vec![];

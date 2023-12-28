@@ -18,7 +18,10 @@ use arroyo_rpc::{
     ControlMessage, ControlResp,
 };
 use arroyo_state::BackingStore;
-use arroyo_types::{from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, TaskInfo, Watermark, Window, SignalMessage};
+use arroyo_types::{
+    from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, SignalMessage, TaskInfo,
+    Watermark, Window,
+};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::StreamExt;
@@ -298,8 +301,10 @@ pub trait BaseOperator: Send + 'static {
         ctx.send_checkpoint_event(checkpoint_barrier, TaskCheckpointEventType::FinishedSync)
             .await;
 
-        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Barrier(checkpoint_barrier)))
-            .await;
+        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Barrier(
+            checkpoint_barrier,
+        )))
+        .await;
 
         checkpoint_barrier.then_stop
     }
@@ -573,7 +578,8 @@ pub trait ArrowOperator: Send + 'static + Sized {
     async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut ArrowContext) {}
 
     async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
-        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark))).await;
+        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
+            .await;
     }
 
     #[allow(unused_variables)]

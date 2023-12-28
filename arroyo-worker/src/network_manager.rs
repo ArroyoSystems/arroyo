@@ -1,13 +1,13 @@
 #![allow(clippy::redundant_slicing)]
-use arroyo_types::{ArrowMessage};
-use bincode::config;
-use std::{collections::HashMap, mem::size_of, pin::Pin, sync::Arc, time::Duration};
 use anyhow::{anyhow, bail};
 use arrow::buffer::MutableBuffer;
 use arrow::ipc::reader::read_record_batch;
 use arrow::ipc::writer::{DictionaryTracker, EncodedData, IpcDataGenerator, IpcWriteOptions};
 use arrow_array::RecordBatch;
 use arrow_schema::{ArrowError, SchemaRef};
+use arroyo_types::ArrowMessage;
+use bincode::config;
+use std::{collections::HashMap, mem::size_of, pin::Pin, sync::Arc, time::Duration};
 use tokio::{
     io::{self, BufReader, BufWriter},
     select,
@@ -50,24 +50,21 @@ impl Senders {
     }
 
     pub fn add(&mut self, quad: Quad, schema: SchemaRef, tx: Sender<QueueItem>) {
-        self.senders.insert(quad, NetworkSender {
-            tx,
-            schema
-        });
+        self.senders.insert(quad, NetworkSender { tx, schema });
     }
 
     async fn send(&mut self, header: Header, data: Vec<u8>) {
         let sender = self.senders.get(&header.as_quad()).unwrap();
 
         let message = match header.message_type {
-            MessageType::Data => {
-                ArrowMessage::Data(read_message(sender.schema.clone(), data)
-                    .expect("failed to read message"))
-            }
-            MessageType::Signal => {
-                ArrowMessage::Signal(bincode::decode_from_slice(&data, config::standard())
-                    .expect("couldn't decode signal message, probably a record.").0)
-            }
+            MessageType::Data => ArrowMessage::Data(
+                read_message(sender.schema.clone(), data).expect("failed to read message"),
+            ),
+            MessageType::Signal => ArrowMessage::Signal(
+                bincode::decode_from_slice(&data, config::standard())
+                    .expect("couldn't decode signal message, probably a record.")
+                    .0,
+            ),
         };
 
         if let Err(send_error) = sender.tx.send(message).await {
@@ -86,7 +83,7 @@ pub struct InNetworkLink {
     senders: Senders,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, )]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MessageType {
     Data,
     Signal,
@@ -99,7 +96,7 @@ pub struct Header {
     dst_operator: u32,
     dst_subtask: u32,
     len: usize,
-    message_type: MessageType
+    message_type: MessageType,
 }
 
 impl Header {
@@ -134,7 +131,7 @@ impl Header {
                 0 => MessageType::Data,
                 1 => MessageType::Signal,
                 b => panic!("invalid message type: {}", b),
-            }
+            },
         }
     }
 
@@ -230,7 +227,12 @@ impl OutNetworkLink {
     pub fn start(mut self) {
         tokio::spawn(async move {
             let mut sel = InQReader::new();
-            for NetworkReceiver { quad, mut rx, mut dictionary_tracker } in self.receivers {
+            for NetworkReceiver {
+                quad,
+                mut rx,
+                mut dictionary_tracker,
+            } in self.receivers
+            {
                 let stream = async_stream::stream! {
                     while let Some(item) = rx.recv().await {
                         yield (quad, dictionary_tracker.clone(), item);
@@ -372,10 +374,12 @@ fn pad_to_8(len: u32) -> usize {
     (((len + 7) & !7) - len) as usize
 }
 
-
 // Async-ified and modified version of arrow::ipc::writer::write_message
 pub async fn write_message_and_header<W: AsyncWrite + AsyncWriteExt>(
-    writer: &mut Pin<&mut W>, quad: Quad, encoded: EncodedData) -> Result<(), ArrowError> {
+    writer: &mut Pin<&mut W>,
+    quad: Quad,
+    encoded: EncodedData,
+) -> Result<(), ArrowError> {
     let arrow_data_len = encoded.arrow_data.len();
     if arrow_data_len % 8 != 0 {
         return Err(ArrowError::MemoryError(
@@ -397,7 +401,9 @@ pub async fn write_message_and_header<W: AsyncWrite + AsyncWriteExt>(
 
     // write the flatbuf
     if flatbuf_size > 0 {
-        writer.write_all(&(flatbuf_size as u32).to_le_bytes()).await?;
+        writer
+            .write_all(&(flatbuf_size as u32).to_le_bytes())
+            .await?;
         writer.write_all(&buffer).await?;
         bytes_written += buffer.len() + 4;
     }
@@ -415,7 +421,11 @@ pub async fn write_message_and_header<W: AsyncWrite + AsyncWriteExt>(
         }
     }
 
-    assert_eq!(bytes_written, total_size, "Wrote unexpected number of bytes {} != {}", bytes_written, total_size);
+    assert_eq!(
+        bytes_written, total_size,
+        "Wrote unexpected number of bytes {} != {}",
+        bytes_written, total_size
+    );
 
     Ok(())
 }
@@ -424,7 +434,7 @@ fn read_message(schema: SchemaRef, data: Vec<u8>) -> anyhow::Result<RecordBatch>
     let mut buf = &data[..];
 
     // read the header size
-    let meta_size= buf.get_u32_le() as usize;
+    let meta_size = buf.get_u32_le() as usize;
     let mut meta_buffer = vec![0; meta_size];
     std::io::Read::read_exact(&mut buf, &mut meta_buffer)?;
 
@@ -453,17 +463,16 @@ fn read_message(schema: SchemaRef, data: Vec<u8>) -> anyhow::Result<RecordBatch>
     )?)
 }
 
-
 #[cfg(test)]
 mod test {
-    use std::{pin::Pin, time::Duration};
-    use std::sync::Arc;
-    use std::time::SystemTime;
     use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
     use arrow_schema::{Field, Schema, TimeUnit};
+    use std::sync::Arc;
+    use std::time::SystemTime;
+    use std::{pin::Pin, time::Duration};
 
+    use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage};
     use tokio::{sync::mpsc::channel, time::timeout};
-    use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, to_nanos};
 
     use crate::network_manager::{MessageType, Quad};
 
@@ -506,13 +515,18 @@ mod test {
 
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", arrow_schema::DataType::UInt64, false),
-            Field::new("time", arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None), false),
+            Field::new(
+                "time",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
         ]));
 
         let columns: Vec<ArrayRef> = vec![
             Arc::new(UInt64Array::from((0..10).collect::<Vec<_>>())),
             Arc::new(TimestampNanosecondArray::from(vec![
-                to_nanos(time) as i64; 10
+                to_nanos(time) as i64;
+                10
             ])),
         ];
 
@@ -553,12 +567,10 @@ mod test {
             then_stop: false,
         }));
 
-        client_tx
-            .send(message.clone())
-            .await
-            .unwrap();
+        client_tx.send(message.clone()).await.unwrap();
 
-        let result = timeout(Duration::from_secs(1), server_rx.recv()).await
+        let result = timeout(Duration::from_secs(1), server_rx.recv())
+            .await
             .unwrap()
             .expect("timed out");
 
