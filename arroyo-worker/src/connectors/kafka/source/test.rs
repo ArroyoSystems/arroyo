@@ -2,18 +2,22 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_state::{BackingStore, StateBackend};
 use rand::Rng;
 
+use arrow_array::{Array, StringArray};
+use arrow_schema::TimeUnit;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
-use crate::old::QueueItem;
-use crate::old::{Context, OutQueue};
+use crate::engine::{ArrowContext, QueueItem};
+use crate::operator::BaseOperator;
 use crate::RateLimiter;
 use arroyo_formats::SchemaData;
-use arroyo_rpc::formats::{Format, JsonFormat};
+use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
-use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
-use arroyo_types::{to_micros, CheckpointBarrier, Message, TaskInfo};
+use arroyo_rpc::schema_resolver::FailingSchemaResolver;
+use arroyo_rpc::{ArroyoSchema, CheckpointCompleted, ControlMessage, ControlResp};
+use arroyo_types::{to_micros, ArrowMessage, CheckpointBarrier, Message, SignalMessage, TaskInfo};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
@@ -85,18 +89,19 @@ impl KafkaTopicTester {
         task_info: TaskInfo,
         restore_from: Option<u32>,
     ) -> KafkaSourceWithReads {
-        let mut kafka: KafkaSourceFunc<(), TestData> = KafkaSourceFunc::new(
+        let kafka = Box::new(KafkaSourceFunc::new(
             &self.server,
             &self.topic,
             self.group_id.clone(),
             crate::connectors::kafka::SourceOffset::Earliest,
-            Format::Json(JsonFormat::default()),
+            Format::RawString(RawStringFormat {}),
+            Arc::new(FailingSchemaResolver::new()),
             None,
             RateLimiter::new(),
             None,
             100,
             vec![],
-        );
+        ));
         let (to_control_tx, control_rx) = channel(128);
         let (command_tx, from_control_rx) = channel(128);
         let (data_tx, recv) = channel(128);
@@ -110,20 +115,34 @@ impl KafkaTopicTester {
             operator_ids: vec![task_info.operator_id.clone()],
         });
 
-        let mut ctx: Context<(), TestData> = Context::new(
+        let mut ctx = ArrowContext::new(
             task_info,
             checkpoint_metadata,
             control_rx,
             command_tx,
             1,
-            vec![vec![OutQueue::new(data_tx, false)]],
+            vec![],
+            Some(ArroyoSchema::new(
+                Arc::new(Schema::new(vec![
+                    Field::new(
+                        "_timestamp",
+                        DataType::Timestamp(TimeUnit::Nanosecond, None),
+                        false,
+                    ),
+                    Field::new("value", DataType::Utf8, false),
+                ])),
+                0,
+                vec![],
+            )),
+            None,
+            vec![vec![data_tx]],
             source::tables(),
+            HashMap::new(),
         )
         .await;
 
         tokio::spawn(async move {
-            kafka.on_start(&mut ctx).await;
-            kafka.run(&mut ctx).await;
+            kafka.run_behavior(&mut ctx, vec![]).await;
         });
         KafkaSourceWithReads {
             to_control_tx,
@@ -169,29 +188,41 @@ struct KafkaSourceWithReads {
 }
 
 impl KafkaSourceWithReads {
-    async fn assert_next_message_record_value(&mut self, expected_value: u64) {
-        match self.data_recv.recv().await {
-            Some(item) => {
-                let msg: Message<(), TestData> = item.into();
-                if let Message::Record(record) = msg {
-                    assert_eq!(expected_value, record.value.i,);
-                } else {
-                    unreachable!("expected a record, got {:?}", msg);
+    async fn assert_next_message_record_values(&mut self, mut expected_values: Vec<String>) {
+        expected_values.reverse();
+        while !expected_values.is_empty() {
+            match self.data_recv.recv().await {
+                Some(item) => {
+                    if let ArrowMessage::Data(record) = item {
+                        let a = record.columns()[1]
+                            .as_any()
+                            .downcast_ref::<StringArray>()
+                            .unwrap();
+                        for v in a {
+                            assert_eq!(
+                                expected_values
+                                    .pop()
+                                    .expect("found more elements than expected"),
+                                v.unwrap()
+                            );
+                        }
+                    } else {
+                        unreachable!("expected data, got {:?}", item);
+                    }
                 }
-            }
-            None => {
-                unreachable!("option shouldn't be missing")
+                None => {
+                    unreachable!("option shouldn't be missing")
+                }
             }
         }
     }
     async fn assert_next_message_checkpoint(&mut self, expected_epoch: u32) {
         match self.data_recv.recv().await {
             Some(item) => {
-                let msg: Message<(), TestData> = item.into();
-                if let Message::Barrier(barrier) = msg {
+                if let ArrowMessage::Signal(SignalMessage::Barrier(barrier)) = item {
                     assert_eq!(expected_epoch, barrier.epoch);
                 } else {
-                    unreachable!("expected a record, got {:?}", msg);
+                    unreachable!("expected a record, got {:?}", item);
                 }
             }
             None => {
@@ -233,11 +264,15 @@ async fn test_kafka() {
         .await;
     let mut producer = kafka_topic_tester.get_producer();
 
+    let mut expected = vec![];
     for message in 1u64..20 {
         let data = TestData { i: message };
+        expected.push(serde_json::to_string(&data).unwrap());
         producer.send_data(data);
-        reader.assert_next_message_record_value(message).await;
     }
+
+    reader.assert_next_message_record_values(expected).await;
+
     let barrier = ControlMessage::Checkpoint(CheckpointBarrier {
         epoch: 1,
         min_epoch: 0,
@@ -276,7 +311,11 @@ async fn test_kafka() {
     })
     .await;
 
-    reader.assert_next_message_record_value(20).await;
+    reader
+        .assert_next_message_record_values(
+            vec![serde_json::to_string(&TestData { i: 20 }).unwrap()],
+        )
+        .await;
 
     reader
         .to_control_tx
@@ -291,7 +330,16 @@ async fn test_kafka() {
         .await;
 
     // leftover metric
-    reader.assert_next_message_record_value(20).await;
+    reader
+        .assert_next_message_record_values(
+            vec![serde_json::to_string(&TestData { i: 20 }).unwrap()],
+        )
+        .await;
+
     producer.send_data(TestData { i: 21 });
-    reader.assert_next_message_record_value(21).await;
+    reader
+        .assert_next_message_record_values(
+            vec![serde_json::to_string(&TestData { i: 21 }).unwrap()],
+        )
+        .await;
 }

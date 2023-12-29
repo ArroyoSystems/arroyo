@@ -13,9 +13,10 @@ use eventsource_client::{Client, SSE};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tokio::select;
 use tokio::sync::mpsc::Receiver;
+use tokio::time::MissedTickBehavior;
 use tracing::{debug, info};
 use typify::import_types;
 
@@ -169,6 +170,9 @@ impl SSESourceFunc {
 
         let mut builder = deserializer.batch();
 
+        let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
+        flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         // since there's no way to partition across an event source, only read on the first task
         if ctx.task_info.task_index == 0 {
             loop {
@@ -182,13 +186,14 @@ impl SSESourceFunc {
                                             self.state.last_id = Some(id);
                                         }
 
-
                                         if events.is_empty() || events.contains(&event.event_type) {
                                             builder.deserialize_slice(&event.data.as_bytes(), SystemTime::now()).await;
 
-                                            let (batch, errors) = builder.finish();
-                                            builder = deserializer.batch();
-                                            ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
+                                            if builder.should_flush() {
+                                                let (batch, errors) = builder.finish();
+                                                builder = deserializer.batch();
+                                                ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
+                                            }
                                         }
                                     }
                                     SSE::Comment(s) => {
@@ -215,6 +220,13 @@ impl SSESourceFunc {
                     control_message = ctx.control_rx.recv() => {
                         if let Some(r) = self.our_handle_control_message(ctx, control_message).await {
                             return Ok(r);
+                        }
+                    }
+                    _ = flush_ticker.tick() => {
+                        if builder.should_flush() {
+                            let (batch, errors) = builder.finish();
+                            builder = deserializer.batch();
+                            ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
                         }
                     }
                 }

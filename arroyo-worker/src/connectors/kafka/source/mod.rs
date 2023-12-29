@@ -1,27 +1,27 @@
-use crate::engine::StreamNode;
-use crate::old::Context;
+use crate::engine::ArrowContext;
+use crate::operator::{ArrowOperatorConstructor, BaseOperator};
 use crate::{RateLimiter, SourceFinishType};
-use arroyo_formats::old::DataDeserializer;
-use arroyo_formats::SchemaData;
-use arroyo_macro::source_fn;
+use arroyo_formats::ArrowDeserializer;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::TableDescriptor;
+use arroyo_rpc::grpc::api::ConnectorOp;
+use arroyo_rpc::grpc::{api, TableDescriptor};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, FailingSchemaResolver, SchemaResolver};
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
 use arroyo_types::*;
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
 use rdkafka::{ClientConfig, Message as KMessage, Offset, TopicPartitionList};
-use serde::de::DeserializeOwned;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
+use tokio::sync::mpsc::Receiver;
+use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
 
 use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, SchemaRegistry, TableType};
@@ -29,22 +29,18 @@ use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, SchemaRegistry, T
 #[cfg(test)]
 mod test;
 
-#[derive(StreamNode)]
-pub struct KafkaSourceFunc<K, T>
-where
-    K: DeserializeOwned + Data,
-    T: SchemaData + Data,
-{
+pub struct KafkaSourceFunc {
     topic: String,
     bootstrap_servers: String,
     group_id: Option<String>,
     offset_mode: super::SourceOffset,
-    deserializer: DataDeserializer<T>,
+    format: Format,
+    framing: Option<Framing>,
     bad_data: Option<BadData>,
+    schema_resolver: Arc<dyn SchemaResolver + Sync>,
     rate_limiter: RateLimiter,
     client_configs: HashMap<String, String>,
     messages_per_second: NonZeroU32,
-    _t: PhantomData<K>,
 }
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -57,18 +53,14 @@ pub fn tables() -> Vec<TableDescriptor> {
     vec![arroyo_state::global_table("k", "kafka source state")]
 }
 
-#[source_fn(out_k = (), out_t = T)]
-impl<K, T> KafkaSourceFunc<K, T>
-where
-    K: DeserializeOwned + Data,
-    T: SchemaData + Data,
-{
+impl KafkaSourceFunc {
     pub fn new(
         servers: &str,
         topic: &str,
         group: Option<String>,
         offset_mode: super::SourceOffset,
         format: Format,
+        schema_resolver: Arc<dyn SchemaResolver + Sync>,
         bad_data: Option<BadData>,
         rate_limiter: RateLimiter,
         framing: Option<Framing>,
@@ -80,91 +72,20 @@ where
             bootstrap_servers: servers.to_string(),
             group_id: group,
             offset_mode,
+            format,
+            framing,
+            schema_resolver,
             bad_data,
             rate_limiter,
-            deserializer: DataDeserializer::new(format, framing),
             client_configs: client_configs
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
                 .collect(),
             messages_per_second: NonZeroU32::new(messages_per_second).unwrap(),
-            _t: PhantomData,
         }
     }
 
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for KafkaSource");
-        let connection: KafkaConfig = serde_json::from_value(config.connection)
-            .expect("Invalid connection config for KafkaSource");
-        let table: KafkaTable =
-            serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let TableType::Source {
-            offset,
-            read_mode,
-            group_id,
-        } = &table.type_
-        else {
-            panic!("found non-source kafka config in source operator");
-        };
-        let mut client_configs = client_configs(&connection, &table);
-        if let Some(ReadMode::ReadCommitted) = read_mode {
-            client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
-        }
-
-        let schema_resolver: Arc<dyn SchemaResolver + Sync> =
-            if let Some(SchemaRegistry::ConfluentSchemaRegistry {
-                endpoint,
-                api_key,
-                api_secret,
-            }) = &connection.schema_registry_enum
-            {
-                Arc::new(
-                    ConfluentSchemaRegistry::new(
-                        &endpoint,
-                        &table.topic,
-                        api_key.clone(),
-                        api_secret.clone(),
-                    )
-                    .expect("failed to construct confluent schema resolver"),
-                )
-            } else {
-                Arc::new(FailingSchemaResolver::new())
-            };
-
-        Self {
-            topic: table.topic,
-            bootstrap_servers: connection.bootstrap_servers.to_string(),
-            group_id: group_id.clone(),
-            offset_mode: *offset,
-            deserializer: DataDeserializer::with_schema_resolver(
-                config.format.expect("Format must be set for Kafka source"),
-                config.framing,
-                schema_resolver,
-            ),
-            bad_data: config.bad_data,
-            rate_limiter: RateLimiter::new(),
-            client_configs,
-            messages_per_second: NonZeroU32::new(
-                config
-                    .rate_limit
-                    .map(|l| l.messages_per_second)
-                    .unwrap_or(u32::MAX),
-            )
-            .unwrap(),
-            _t: PhantomData,
-        }
-    }
-
-    fn name(&self) -> String {
-        format!("kafka-{}", self.topic)
-    }
-
-    fn tables(&self) -> Vec<TableDescriptor> {
-        tables()
-    }
-
-    async fn get_consumer(&mut self, ctx: &mut Context<(), T>) -> anyhow::Result<StreamConsumer> {
+    async fn get_consumer(&mut self, ctx: &mut ArrowContext) -> anyhow::Result<StreamConsumer> {
         info!("Creating kafka consumer for {}", self.bootstrap_servers);
         let mut client_config = ClientConfig::new();
 
@@ -235,26 +156,7 @@ where
         Ok(consumer)
     }
 
-    async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
-        match self.run_int(ctx).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.control_tx
-                    .send(ControlResp::Error {
-                        operator_id: ctx.task_info.operator_id.clone(),
-                        task_index: ctx.task_info.task_index,
-                        message: e.name.clone(),
-                        details: e.details.clone(),
-                    })
-                    .await
-                    .unwrap();
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
-    }
-
-    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
         let consumer = self
             .get_consumer(ctx)
             .await
@@ -266,8 +168,26 @@ where
         if consumer.assignment().unwrap().count() == 0 {
             warn!("Kafka Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
                 ctx.task_info.operator_id, ctx.task_info.task_index);
-            ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
+            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+                Watermark::Idle,
+            )))
+            .await;
         }
+
+        let mut deserializer = ArrowDeserializer::with_schema_resolver(
+            self.format.clone(),
+            self.framing.clone(),
+            ctx.out_schema
+                .as_ref()
+                .expect("kafka source must have an out schema")
+                .clone(),
+            self.schema_resolver.clone(),
+        );
+
+        let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
+        flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        let mut builder = deserializer.batch();
 
         loop {
             select! {
@@ -279,15 +199,12 @@ where
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                let iter = self.deserializer.deserialize_slice(v).await;
+                                builder.deserialize_slice(&v, from_millis(timestamp as u64)).await;
 
-                                for value in iter {
-                                    ctx.collect_source_record(
-                                        from_millis(timestamp as u64),
-                                        value,
-                                        &self.bad_data,
-                                        &mut self.rate_limiter,
-                                    ).await?;
+                                if builder.should_flush() {
+                                    let (batch, errors) = builder.finish();
+                                    builder = deserializer.batch();
+                                    ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
                                 }
 
                                 offsets.insert(msg.partition(), msg.offset());
@@ -297,6 +214,13 @@ where
                         Err(err) => {
                             error!("encountered error {}", err)
                         }
+                    }
+                }
+                _ = flush_ticker.tick() => {
+                    if builder.should_flush() {
+                        let (batch, errors) = builder.finish();
+                        builder = deserializer.batch();
+                        ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
@@ -350,5 +274,103 @@ where
                 }
             }
         }
+    }
+}
+
+impl ArrowOperatorConstructor<api::ConnectorOp, Self> for KafkaSourceFunc {
+    fn from_config(config: ConnectorOp) -> anyhow::Result<Self> {
+        let config: OperatorConfig =
+            serde_json::from_str(&config.config).expect("Invalid config for KafkaSource");
+        let connection: KafkaConfig = serde_json::from_value(config.connection)
+            .expect("Invalid connection config for KafkaSource");
+        let table: KafkaTable =
+            serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
+        let TableType::Source {
+            offset,
+            read_mode,
+            group_id,
+        } = &table.type_
+        else {
+            panic!("found non-source kafka config in source operator");
+        };
+        let mut client_configs = client_configs(&connection, &table);
+        if let Some(ReadMode::ReadCommitted) = read_mode {
+            client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
+        }
+
+        let schema_resolver: Arc<dyn SchemaResolver + Sync> =
+            if let Some(SchemaRegistry::ConfluentSchemaRegistry {
+                endpoint,
+                api_key,
+                api_secret,
+            }) = &connection.schema_registry_enum
+            {
+                Arc::new(
+                    ConfluentSchemaRegistry::new(
+                        &endpoint,
+                        &table.topic,
+                        api_key.clone(),
+                        api_secret.clone(),
+                    )
+                    .expect("failed to construct confluent schema resolver"),
+                )
+            } else {
+                Arc::new(FailingSchemaResolver::new())
+            };
+
+        Ok(Self {
+            topic: table.topic,
+            bootstrap_servers: connection.bootstrap_servers.to_string(),
+            group_id: group_id.clone(),
+            offset_mode: *offset,
+            format: config.format.expect("Format must be set for Kafka source"),
+            framing: config.framing,
+            schema_resolver,
+            bad_data: config.bad_data,
+            rate_limiter: RateLimiter::new(),
+            client_configs,
+            messages_per_second: NonZeroU32::new(
+                config
+                    .rate_limit
+                    .map(|l| l.messages_per_second)
+                    .unwrap_or(u32::MAX),
+            )
+            .unwrap(),
+        })
+    }
+}
+
+#[async_trait]
+impl BaseOperator for KafkaSourceFunc {
+    async fn run_behavior(
+        mut self: Box<Self>,
+        ctx: &mut ArrowContext,
+        _: Vec<Receiver<ArrowMessage>>,
+    ) -> Option<ArrowMessage> {
+        match self.run_int(ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.control_tx
+                    .send(ControlResp::Error {
+                        operator_id: ctx.task_info.operator_id.clone(),
+                        task_index: ctx.task_info.task_index,
+                        message: e.name.clone(),
+                        details: e.details.clone(),
+                    })
+                    .await
+                    .unwrap();
+
+                panic!("{}: {}", e.name, e.details);
+            }
+        }
+        .into()
+    }
+
+    fn name(&self) -> String {
+        format!("kafka-{}", self.topic)
+    }
+
+    fn tables(&self) -> Vec<TableDescriptor> {
+        tables()
     }
 }

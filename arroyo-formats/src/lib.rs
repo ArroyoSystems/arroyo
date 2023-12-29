@@ -8,14 +8,18 @@ use arrow_array::{Array, RecordBatch, StringArray};
 use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::ArroyoSchema;
-use arroyo_types::{to_nanos, Data, Debezium, RawJson, SourceError};
+use arroyo_types::{
+    duration_millis_config, to_nanos, u32_config, Data, Debezium, RawJson, SourceError,
+    BATCH_LINGER_MS_ENV, BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE, DEFAULT_LINGER,
+};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::env;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
 
 pub mod avro;
@@ -271,12 +275,8 @@ pub struct ArrowDeserializer {
     schema: ArroyoSchema,
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
-}
-
-pub struct ArrowDeserializerBatch<'a> {
-    parent: &'a mut ArrowDeserializer,
-    arrays: Vec<Box<dyn ArrayBuilder>>,
-    errors: Vec<SourceError>,
+    flush_linger: Duration,
+    flush_size: usize,
 }
 
 impl ArrowDeserializer {
@@ -307,12 +307,21 @@ impl ArrowDeserializer {
             schema,
             schema_registry: Arc::new(Mutex::new(HashMap::new())),
             schema_resolver,
+            flush_linger: duration_millis_config(BATCH_LINGER_MS_ENV, DEFAULT_LINGER),
+            flush_size: u32_config(BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE as u32) as usize,
         }
     }
 
     pub fn batch(&mut self) -> ArrowDeserializerBatch {
         ArrowDeserializerBatch::new(self)
     }
+}
+
+pub struct ArrowDeserializerBatch<'a> {
+    parent: &'a mut ArrowDeserializer,
+    arrays: Vec<Box<dyn ArrayBuilder>>,
+    errors: Vec<SourceError>,
+    created: SystemTime,
 }
 
 impl<'a> ArrowDeserializerBatch<'a> {
@@ -329,7 +338,18 @@ impl<'a> ArrowDeserializerBatch<'a> {
             parent,
             arrays,
             errors: vec![],
+            created: SystemTime::now(),
         }
+    }
+
+    pub fn size(&self) -> usize {
+        self.arrays[0].len() + self.errors.len()
+    }
+
+    pub fn should_flush(&self) -> bool {
+        self.size() > 0
+            && (self.size() > self.parent.flush_size
+                || self.created.elapsed().unwrap_or_default() >= self.parent.flush_linger)
     }
 
     pub async fn deserialize_slice(&mut self, msg: &[u8], timestamp: SystemTime) {

@@ -18,6 +18,7 @@ use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
 use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
 use crate::connectors::filesystem::source::FileSystemSourceFunc;
 use crate::connectors::impulse::ImpulseSourceFunc;
+use crate::connectors::kafka::source::KafkaSourceFunc;
 use crate::connectors::sse::SSESourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
@@ -1273,6 +1274,9 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn Ba
                 }
                 "connectors::filesystem::source::FileSystemSourceFunc" => {
                     Box::new(FileSystemSourceFunc::from_config(op).unwrap())
+                }
+                "connectors::kafka::source::KafkaSourceFunc" => {
+                    Box::new(KafkaSourceFunc::from_config(op).unwrap())
                 }
                 "GrpcSink" => Box::new(GrpcRecordBatchSink::from_config(op).unwrap()),
                 c => panic!("unknown connector {}", c),
