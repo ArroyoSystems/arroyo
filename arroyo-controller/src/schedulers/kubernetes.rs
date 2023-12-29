@@ -1,19 +1,21 @@
 use crate::schedulers::{Scheduler, SchedulerError, StartPipelineReq};
 use anyhow::bail;
-use arroyo_rpc::grpc::{HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
+use arroyo_rpc::grpc::{api, HeartbeatNodeReq, RegisterNodeReq, WorkerFinishedReq};
 use arroyo_types::{
-    string_config, u32_config, WorkerId, ADMIN_PORT_ENV, CONTROLLER_ADDR_ENV, GRPC_PORT_ENV,
-    JOB_ID_ENV, K8S_NAMESPACE_ENV, K8S_WORKER_ANNOTATIONS_ENV, K8S_WORKER_CONFIG_MAP_ENV,
-    K8S_WORKER_IMAGE_ENV, K8S_WORKER_IMAGE_PULL_POLICY_ENV, K8S_WORKER_LABELS_ENV,
-    K8S_WORKER_NAME_ENV, K8S_WORKER_RESOURCES_ENV, K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV,
-    K8S_WORKER_SLOTS_ENV, K8S_WORKER_VOLUMES_ENV, K8S_WORKER_VOLUME_MOUNTS_ENV, NODE_ID_ENV,
-    RUN_ID_ENV, TASK_SLOTS_ENV,
+    string_config, u32_config, WorkerId, ADMIN_PORT_ENV, ARROYO_PROGRAM_ENV, CONTROLLER_ADDR_ENV,
+    GRPC_PORT_ENV, JOB_ID_ENV, K8S_NAMESPACE_ENV, K8S_WORKER_ANNOTATIONS_ENV,
+    K8S_WORKER_CONFIG_MAP_ENV, K8S_WORKER_IMAGE_ENV, K8S_WORKER_IMAGE_PULL_POLICY_ENV,
+    K8S_WORKER_LABELS_ENV, K8S_WORKER_NAME_ENV, K8S_WORKER_RESOURCES_ENV,
+    K8S_WORKER_SERVICE_ACCOUNT_NAME_ENV, K8S_WORKER_SLOTS_ENV, K8S_WORKER_VOLUMES_ENV,
+    K8S_WORKER_VOLUME_MOUNTS_ENV, NODE_ID_ENV, RUN_ID_ENV, TASK_SLOTS_ENV,
 };
 use async_trait::async_trait;
+use base64::{engine::general_purpose, Engine as _};
 use k8s_openapi::api::apps::v1::ReplicaSet;
 use k8s_openapi::api::core::v1::{Pod, ResourceRequirements, Volume, VolumeMount};
 use kube::api::{DeleteParams, ListParams};
 use kube::{Api, Client};
+use prost::Message;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -140,8 +142,9 @@ impl KubernetesScheduler {
                 "name": ADMIN_PORT_ENV, "value": "6901",
             },
             {
-                "name": "WORKER_BIN",
-                "value": req.pipeline_path,
+                "name": ARROYO_PROGRAM_ENV,
+                "value": general_purpose::STANDARD_NO_PAD
+                    .encode(api::ArrowProgram::from(req.program).encode_to_vec()),
             },
             {
                 "name": "WASM_BIN",
@@ -327,7 +330,7 @@ mod test {
     fn test_resource_creation() {
         let req = StartPipelineReq {
             name: "test_pipeline".to_string(),
-            pipeline_path: "file:///pipeline".to_string(),
+            program: todo!(),
             wasm_path: "file:///wasm".to_string(),
             job_id: "job123".to_string(),
             hash: "12123123h".to_string(),

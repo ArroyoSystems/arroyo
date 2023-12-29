@@ -166,8 +166,9 @@ impl ConnectionSchema {
                 if self.fields.len() != 1
                     || self.fields.get(0).unwrap().field_type.r#type
                         != FieldType::Primitive(PrimitiveType::String)
+                    || self.fields.get(0).unwrap().field_name != "value"
                 {
-                    bail!("raw_string format requires a schema with a single field of type TEXT");
+                    bail!("raw_string format requires a schema with a single field called `value` of type TEXT");
                 }
             }
             _ => {}
