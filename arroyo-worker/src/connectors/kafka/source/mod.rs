@@ -1,6 +1,6 @@
 use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperatorConstructor, BaseOperator};
-use crate::{RateLimiter, SourceFinishType};
+use crate::SourceFinishType;
 use arroyo_formats::ArrowDeserializer;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::api::ConnectorOp;
@@ -38,7 +38,6 @@ pub struct KafkaSourceFunc {
     framing: Option<Framing>,
     bad_data: Option<BadData>,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
-    rate_limiter: RateLimiter,
     client_configs: HashMap<String, String>,
     messages_per_second: NonZeroU32,
 }
@@ -62,7 +61,6 @@ impl KafkaSourceFunc {
         format: Format,
         schema_resolver: Arc<dyn SchemaResolver + Sync>,
         bad_data: Option<BadData>,
-        rate_limiter: RateLimiter,
         framing: Option<Framing>,
         messages_per_second: u32,
         client_configs: Vec<(&str, &str)>,
@@ -76,7 +74,6 @@ impl KafkaSourceFunc {
             framing,
             schema_resolver,
             bad_data,
-            rate_limiter,
             client_configs: client_configs
                 .iter()
                 .map(|(key, value)| (key.to_string(), value.to_string()))
@@ -187,8 +184,6 @@ impl KafkaSourceFunc {
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
         flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut builder = deserializer.batch();
-
         loop {
             select! {
                 message = consumer.recv() => {
@@ -199,12 +194,11 @@ impl KafkaSourceFunc {
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                builder.deserialize_slice(&v, from_millis(timestamp as u64)).await;
+                                let errors = deserializer.deserialize_slice(ctx.buffer(), &v, from_millis(timestamp as u64)).await;
+                                ctx.collect_source_errors(errors, &self.bad_data).await?;
 
-                                if builder.should_flush() {
-                                    let (batch, errors) = builder.finish();
-                                    builder = deserializer.batch();
-                                    ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
+                                if ctx.should_flush() {
+                                    ctx.flush_buffer().await;
                                 }
 
                                 offsets.insert(msg.partition(), msg.offset());
@@ -217,10 +211,8 @@ impl KafkaSourceFunc {
                     }
                 }
                 _ = flush_ticker.tick() => {
-                    if builder.should_flush() {
-                        let (batch, errors) = builder.finish();
-                        builder = deserializer.batch();
-                        ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
+                    if ctx.should_flush() {
+                        ctx.flush_buffer().await;
                     }
                 }
                 control_message = ctx.control_rx.recv() => {
@@ -327,7 +319,6 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for KafkaSourceFunc {
             framing: config.framing,
             schema_resolver,
             bad_data: config.bad_data,
-            rate_limiter: RateLimiter::new(),
             client_configs,
             messages_per_second: NonZeroU32::new(
                 config

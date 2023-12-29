@@ -1,25 +1,21 @@
 extern crate core;
 
 use anyhow::bail;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use arrow_array::builder::{make_builder, ArrayBuilder, StringBuilder, TimestampNanosecondBuilder};
+use arrow::datatypes::{DataType, Field, Schema};
+use arrow_array::builder::{ArrayBuilder, StringBuilder, TimestampNanosecondBuilder};
 use arrow_array::cast::AsArray;
 use arrow_array::{Array, RecordBatch, StringArray};
 use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::ArroyoSchema;
-use arroyo_types::{
-    duration_millis_config, to_nanos, u32_config, Data, Debezium, RawJson, SourceError,
-    BATCH_LINGER_MS_ENV, BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE, DEFAULT_LINGER,
-};
+use arroyo_types::{to_nanos, Data, Debezium, RawJson, SourceError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::env;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tokio::sync::Mutex;
 
 pub mod avro;
@@ -275,8 +271,6 @@ pub struct ArrowDeserializer {
     schema: ArroyoSchema,
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
-    flush_linger: Duration,
-    flush_size: usize,
 }
 
 impl ArrowDeserializer {
@@ -307,53 +301,16 @@ impl ArrowDeserializer {
             schema,
             schema_registry: Arc::new(Mutex::new(HashMap::new())),
             schema_resolver,
-            flush_linger: duration_millis_config(BATCH_LINGER_MS_ENV, DEFAULT_LINGER),
-            flush_size: u32_config(BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE as u32) as usize,
         }
     }
 
-    pub fn batch(&mut self) -> ArrowDeserializerBatch {
-        ArrowDeserializerBatch::new(self)
-    }
-}
-
-pub struct ArrowDeserializerBatch<'a> {
-    parent: &'a mut ArrowDeserializer,
-    arrays: Vec<Box<dyn ArrayBuilder>>,
-    errors: Vec<SourceError>,
-    created: SystemTime,
-}
-
-impl<'a> ArrowDeserializerBatch<'a> {
-    fn new(parent: &'a mut ArrowDeserializer) -> Self {
-        let arrays = parent
-            .schema
-            .schema
-            .fields
-            .iter()
-            .map(|f| make_builder(f.data_type(), 16))
-            .collect();
-
-        Self {
-            parent,
-            arrays,
-            errors: vec![],
-            created: SystemTime::now(),
-        }
-    }
-
-    pub fn size(&self) -> usize {
-        self.arrays[0].len() + self.errors.len()
-    }
-
-    pub fn should_flush(&self) -> bool {
-        self.size() > 0
-            && (self.size() > self.parent.flush_size
-                || self.created.elapsed().unwrap_or_default() >= self.parent.flush_linger)
-    }
-
-    pub async fn deserialize_slice(&mut self, msg: &[u8], timestamp: SystemTime) {
-        match &*self.parent.format {
+    pub async fn deserialize_slice(
+        &mut self,
+        buffer: &mut Vec<Box<dyn ArrayBuilder>>,
+        msg: &[u8],
+        timestamp: SystemTime,
+    ) -> Vec<SourceError> {
+        match &*self.format {
             Format::Avro(avro) => {
                 // let schema_registry = self.schema_registry.clone();
                 // let schema_resolver = self.schema_resolver.clone();
@@ -371,61 +328,56 @@ impl<'a> ArrowDeserializerBatch<'a> {
                 // }
                 todo!("avro")
             }
-            _ => {
-                FramingIterator::new(self.parent.framing.clone(), msg)
-                    .for_each(|t| self.deserialize_single(t, timestamp));
-            }
+            _ => FramingIterator::new(self.framing.clone(), msg)
+                .map(|t| self.deserialize_single(buffer, t, timestamp))
+                .filter_map(|t| t.err())
+                .collect(),
         }
     }
 
-    pub fn finish(self) -> (RecordBatch, Vec<SourceError>) {
-        (
-            RecordBatch::try_new(
-                self.parent.schema.schema.clone(),
-                self.arrays.into_iter().map(|mut a| a.finish()).collect(),
-            )
-            .unwrap(),
-            self.errors,
-        )
-    }
-
-    fn deserialize_single(&mut self, msg: &[u8], timestamp: SystemTime) {
-        if let Err(e) = match &*self.parent.format {
+    fn deserialize_single(
+        &mut self,
+        buffer: &mut Vec<Box<dyn ArrayBuilder>>,
+        msg: &[u8],
+        timestamp: SystemTime,
+    ) -> Result<(), SourceError> {
+        let result = match &*self.format {
             Format::Json(json) => {
                 todo!("json")
                 //json::deserialize_slice_json(json, msg)
             }
             Format::Avro(_) => unreachable!("avro should be handled by here"),
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
-            Format::RawString(_) => {
-                self.deserialize_raw_string(msg, timestamp);
-                Ok(())
-            }
+            Format::RawString(_) => self.deserialize_raw_string(buffer, msg),
         }
-        .map_err(|e: String| SourceError::bad_data(format!("Failed to deserialize: {:?}", e)))
-        {
-            self.errors.push(e);
-        }
+        .map_err(|e: String| SourceError::bad_data(format!("Failed to deserialize: {:?}", e)))?;
 
-        self.add_timestamp(timestamp);
+        self.add_timestamp(buffer, timestamp);
+
+        Ok(())
     }
 
-    fn deserialize_raw_string(&mut self, msg: &[u8], timestamp: SystemTime) {
+    fn deserialize_raw_string(
+        &mut self,
+        buffer: &mut Vec<Box<dyn ArrayBuilder>>,
+        msg: &[u8],
+    ) -> Result<(), String> {
         let (col, _) = self
-            .parent
             .schema
             .schema
             .column_with_name("value")
             .expect("no 'value' column for RawString format");
-        self.arrays[col]
+        buffer[col]
             .as_any_mut()
             .downcast_mut::<StringBuilder>()
             .expect("'value' column has incorrect type")
             .append_value(String::from_utf8_lossy(msg));
+
+        Ok(())
     }
 
-    fn add_timestamp(&mut self, timestamp: SystemTime) {
-        self.arrays[self.parent.schema.timestamp_index]
+    fn add_timestamp(&mut self, buffer: &mut Vec<Box<dyn ArrayBuilder>>, timestamp: SystemTime) {
+        buffer[self.schema.timestamp_index]
             .as_any_mut()
             .downcast_mut::<TimestampNanosecondBuilder>()
             .expect("_timestamp column has incorrect type")

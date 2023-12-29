@@ -1,6 +1,6 @@
 use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperatorConstructor, BaseOperator};
-use crate::{RateLimiter, SourceFinishType};
+use crate::SourceFinishType;
 use arroyo_formats::ArrowDeserializer;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{api, StopMode, TableDescriptor};
@@ -36,7 +36,6 @@ pub struct SSESourceFunc {
     format: Format,
     framing: Option<Framing>,
     bad_data: Option<BadData>,
-    rate_limiter: RateLimiter,
     state: SSESourceState,
 }
 
@@ -65,7 +64,6 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for SSESourceFunc {
             format: config.format.expect("SSE requires a format"),
             framing: config.framing,
             bad_data: config.bad_data,
-            rate_limiter: RateLimiter::new(),
             state: SSESourceState::default(),
         })
     }
@@ -168,8 +166,6 @@ impl SSESourceFunc {
             self.framing.clone(),
         );
 
-        let mut builder = deserializer.batch();
-
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
         flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -187,12 +183,12 @@ impl SSESourceFunc {
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            builder.deserialize_slice(&event.data.as_bytes(), SystemTime::now()).await;
+                                            let errors = deserializer.deserialize_slice(ctx.buffer(),
+                                                &event.data.as_bytes(), SystemTime::now()).await;
+                                            ctx.collect_source_errors(errors, &self.bad_data).await?;
 
-                                            if builder.should_flush() {
-                                                let (batch, errors) = builder.finish();
-                                                builder = deserializer.batch();
-                                                ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
+                                            if ctx.should_flush() {
+                                                ctx.flush_buffer().await;
                                             }
                                         }
                                     }
@@ -223,10 +219,8 @@ impl SSESourceFunc {
                         }
                     }
                     _ = flush_ticker.tick() => {
-                        if builder.should_flush() {
-                            let (batch, errors) = builder.finish();
-                            builder = deserializer.batch();
-                            ctx.collect_source_record(batch, errors, &self.bad_data, &mut self.rate_limiter).await?;
+                        if ctx.should_flush() {
+                            ctx.flush_buffer().await;
                         }
                     }
                 }

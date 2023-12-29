@@ -1,23 +1,22 @@
 use arrow::datatypes::{DataType, Field, Schema};
 use arroyo_state::{BackingStore, StateBackend};
-use rand::Rng;
+use rand::random;
 
 use arrow_array::{Array, StringArray};
 use arrow_schema::TimeUnit;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
 use crate::engine::{ArrowContext, QueueItem};
 use crate::operator::BaseOperator;
-use crate::RateLimiter;
 use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
 use arroyo_rpc::schema_resolver::FailingSchemaResolver;
 use arroyo_rpc::{ArroyoSchema, CheckpointCompleted, ControlMessage, ControlResp};
-use arroyo_types::{to_micros, ArrowMessage, CheckpointBarrier, Message, SignalMessage, TaskInfo};
+use arroyo_types::{to_micros, ArrowMessage, CheckpointBarrier, SignalMessage, TaskInfo};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
@@ -76,7 +75,7 @@ impl KafkaTopicTester {
             .create_topics(
                 [&NewTopic::new(
                     &self.topic,
-                    2,
+                    1,
                     rdkafka::admin::TopicReplication::Fixed(1),
                 )],
                 &AdminOptions::new(),
@@ -97,7 +96,6 @@ impl KafkaTopicTester {
             Format::RawString(RawStringFormat {}),
             Arc::new(FailingSchemaResolver::new()),
             None,
-            RateLimiter::new(),
             None,
             100,
             vec![],
@@ -188,8 +186,7 @@ struct KafkaSourceWithReads {
 }
 
 impl KafkaSourceWithReads {
-    async fn assert_next_message_record_values(&mut self, mut expected_values: Vec<String>) {
-        expected_values.reverse();
+    async fn assert_next_message_record_values(&mut self, mut expected_values: VecDeque<String>) {
         while !expected_values.is_empty() {
             match self.data_recv.recv().await {
                 Some(item) => {
@@ -198,10 +195,13 @@ impl KafkaSourceWithReads {
                             .as_any()
                             .downcast_ref::<StringArray>()
                             .unwrap();
+
+                        println!("A = {:?}", a);
+
                         for v in a {
                             assert_eq!(
                                 expected_values
-                                    .pop()
+                                    .pop_front()
                                     .expect("found more elements than expected"),
                                 v.unwrap()
                             );
@@ -250,13 +250,13 @@ impl KafkaSourceWithReads {
 #[tokio::test]
 async fn test_kafka() {
     let mut kafka_topic_tester = KafkaTopicTester {
-        topic: "arroyo-source".to_string(),
+        topic: "__arroyo-source-test".to_string(),
         server: "0.0.0.0:9092".to_string(),
         group_id: Some("test-consumer-group".to_string()),
     };
 
     let mut task_info = arroyo_types::get_test_task_info();
-    task_info.job_id = format!("kafka-job-{}", rand::thread_rng().gen::<u64>());
+    task_info.job_id = format!("kafka-job-{}", random::<u64>());
 
     kafka_topic_tester.create_topic().await;
     let mut reader = kafka_topic_tester
@@ -271,7 +271,9 @@ async fn test_kafka() {
         producer.send_data(data);
     }
 
-    reader.assert_next_message_record_values(expected).await;
+    reader
+        .assert_next_message_record_values(expected.into())
+        .await;
 
     let barrier = ControlMessage::Checkpoint(CheckpointBarrier {
         epoch: 1,
@@ -313,7 +315,7 @@ async fn test_kafka() {
 
     reader
         .assert_next_message_record_values(
-            vec![serde_json::to_string(&TestData { i: 20 }).unwrap()],
+            vec![serde_json::to_string(&TestData { i: 20 }).unwrap()].into(),
         )
         .await;
 
@@ -332,14 +334,14 @@ async fn test_kafka() {
     // leftover metric
     reader
         .assert_next_message_record_values(
-            vec![serde_json::to_string(&TestData { i: 20 }).unwrap()],
+            vec![serde_json::to_string(&TestData { i: 20 }).unwrap()].into(),
         )
         .await;
 
     producer.send_data(TestData { i: 21 });
     reader
         .assert_next_message_record_values(
-            vec![serde_json::to_string(&TestData { i: 21 }).unwrap()],
+            vec![serde_json::to_string(&TestData { i: 21 }).unwrap()].into(),
         )
         .await;
 }
