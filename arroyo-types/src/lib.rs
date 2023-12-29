@@ -353,7 +353,12 @@ pub struct Record<K: Key, T: Data> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArrowMessage {
-    Record(RecordBatch),
+    Data(RecordBatch),
+    Signal(SignalMessage),
+}
+
+#[derive(Debug, Clone, PartialEq, Encode, Decode)]
+pub enum SignalMessage {
     Barrier(CheckpointBarrier),
     Watermark(Watermark),
     Stop,
@@ -362,7 +367,11 @@ pub enum ArrowMessage {
 
 impl ArrowMessage {
     pub fn is_end(&self) -> bool {
-        matches!(self, ArrowMessage::Stop | ArrowMessage::EndOfData)
+        matches!(
+            self,
+            ArrowMessage::Signal(SignalMessage::Stop)
+                | ArrowMessage::Signal(SignalMessage::EndOfData)
+        )
     }
 }
 

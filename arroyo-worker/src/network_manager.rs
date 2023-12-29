@@ -1,5 +1,11 @@
 #![allow(clippy::redundant_slicing)]
-use arroyo_types::Message;
+use anyhow::{anyhow, bail};
+use arrow::buffer::MutableBuffer;
+use arrow::ipc::reader::read_record_batch;
+use arrow::ipc::writer::{DictionaryTracker, EncodedData, IpcDataGenerator, IpcWriteOptions};
+use arrow_array::RecordBatch;
+use arrow_schema::{ArrowError, SchemaRef};
+use arroyo_types::ArrowMessage;
 use bincode::config;
 use std::{collections::HashMap, mem::size_of, pin::Pin, sync::Arc, time::Duration};
 use tokio::{
@@ -22,9 +28,18 @@ use tokio_stream::StreamExt;
 
 use crate::inq_reader::InQReader;
 
+const CONTINUATION_MARKER: [u8; 4] = [0xff; 4];
+const ALIGNMENT: usize = 8;
+
+#[derive(Clone)]
+struct NetworkSender {
+    tx: Sender<QueueItem>,
+    schema: SchemaRef,
+}
+
 #[derive(Clone)]
 pub struct Senders {
-    senders: HashMap<Quad, Sender<QueueItem>>,
+    senders: HashMap<Quad, NetworkSender>,
 }
 
 impl Senders {
@@ -34,29 +49,31 @@ impl Senders {
         }
     }
 
-    pub fn add(&mut self, quad: Quad, tx: Sender<QueueItem>) {
-        self.senders.insert(quad, tx);
+    pub fn add(&mut self, quad: Quad, schema: SchemaRef, tx: Sender<QueueItem>) {
+        self.senders.insert(quad, NetworkSender { tx, schema });
     }
 
     async fn send(&mut self, header: Header, data: Vec<u8>) {
-        let tx = self.senders.get(&header.as_quad()).unwrap();
-        todo!("networking");
-        // if let Err(send_error) = tx.send(QueueItem::Bytes(data)).await {
-        //     match send_error.0 {
-        //         QueueItem::Data(_) => unreachable!(),
-        //         QueueItem::Bytes(data) => {
-        //             let message: Message<i64, i64> =
-        //                 bincode::decode_from_slice(&data, config::standard())
-        //                     .expect("couldn't decode, probably a record.")
-        //                     .0;
-        //             if !message.is_end() {
-        //                 panic!("{:?} not sent", message);
-        //             } else {
-        //                 warn!("couldn't send end message");
-        //             }
-        //         }
-        //     }
-        // }
+        let sender = self.senders.get(&header.as_quad()).unwrap();
+
+        let message = match header.message_type {
+            MessageType::Data => ArrowMessage::Data(
+                read_message(sender.schema.clone(), data).expect("failed to read message"),
+            ),
+            MessageType::Signal => ArrowMessage::Signal(
+                bincode::decode_from_slice(&data, config::standard())
+                    .expect("couldn't decode signal message, probably a record.")
+                    .0,
+            ),
+        };
+
+        if let Err(send_error) = sender.tx.send(message).await {
+            if !send_error.0.is_end() {
+                panic!("{:?} not sent", send_error.0);
+            } else {
+                warn!("couldn't send end message");
+            }
+        }
     }
 }
 
@@ -67,22 +84,30 @@ pub struct InNetworkLink {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum MessageType {
+    Data,
+    Signal,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Header {
     src_operator: u32,
     src_subtask: u32,
     dst_operator: u32,
     dst_subtask: u32,
     len: usize,
+    message_type: MessageType,
 }
 
 impl Header {
-    fn from_quad(quad: Quad, len: usize) -> Self {
+    fn from_quad(quad: Quad, len: usize, message_type: MessageType) -> Self {
         Self {
             src_operator: quad.src_id as u32,
             src_subtask: quad.src_idx as u32,
             dst_operator: quad.dst_id as u32,
             dst_subtask: quad.dst_idx as u32,
             len,
+            message_type,
         }
     }
 
@@ -101,18 +126,27 @@ impl Header {
             src_subtask: bytes.get_u32_le(),
             dst_operator: bytes.get_u32_le(),
             dst_subtask: bytes.get_u32_le(),
-            len: bytes.get_u64_le() as usize,
+            len: bytes.get_u32_le() as usize,
+            message_type: match bytes.get_u32_le() {
+                0 => MessageType::Data,
+                1 => MessageType::Signal,
+                b => panic!("invalid message type: {}", b),
+            },
         }
     }
 
-    async fn write<W: AsyncWrite + AsyncWriteExt>(&self, mut writer: Pin<&mut W>) {
+    async fn write<W: AsyncWrite + AsyncWriteExt>(&self, writer: &mut Pin<&mut W>) {
         let mut bytes = [0u8; size_of::<Header>()];
         let mut buf = &mut bytes[..];
         buf.put_u32_le(self.src_operator);
         buf.put_u32_le(self.src_subtask);
         buf.put_u32_le(self.dst_operator);
         buf.put_u32_le(self.dst_subtask);
-        buf.put_u64_le(self.len as u64);
+        buf.put_u32_le(self.len as u32);
+        buf.put_u32_le(match self.message_type {
+            MessageType::Data => 0,
+            MessageType::Signal => 1,
+        });
 
         writer.write_all(&bytes).await.unwrap();
     }
@@ -159,10 +193,16 @@ pub struct Quad {
     pub dst_idx: usize,
 }
 
+struct NetworkReceiver {
+    quad: Quad,
+    rx: Receiver<QueueItem>,
+    dictionary_tracker: Arc<Mutex<DictionaryTracker>>,
+}
+
 struct OutNetworkLink {
     _dest: String,
     stream: BufWriter<TcpStream>,
-    receivers: Vec<(Quad, Receiver<QueueItem>)>,
+    receivers: Vec<NetworkReceiver>,
 }
 
 impl OutNetworkLink {
@@ -177,39 +217,60 @@ impl OutNetworkLink {
     }
 
     pub async fn add_receiver(&mut self, quad: Quad, rx: Receiver<QueueItem>) {
-        self.receivers.push((quad, rx));
+        self.receivers.push(NetworkReceiver {
+            quad,
+            rx,
+            dictionary_tracker: Arc::new(Mutex::new(DictionaryTracker::new(true))),
+        });
     }
 
     pub fn start(mut self) {
         tokio::spawn(async move {
             let mut sel = InQReader::new();
-            for (quad, mut rx) in self.receivers {
+            for NetworkReceiver {
+                quad,
+                mut rx,
+                mut dictionary_tracker,
+            } in self.receivers
+            {
                 let stream = async_stream::stream! {
                     while let Some(item) = rx.recv().await {
-                        yield (quad, item);
+                        yield (quad, dictionary_tracker.clone(), item);
                     }
                 };
                 sel.push(Box::pin(stream));
             }
             let mut flush_interval: Interval = interval(Duration::from_millis(100));
 
-            todo!("networking");
-            // loop {
-            //     select! {
-            //         Some(((quad, msg), s)) = sel.next() => {
-            //             let QueueItem::Bytes(data) = msg else {
-            //                 panic!("non-byte data in network queue")
-            //             };
-            //             let frame = Header::from_quad(quad, data.len());
-            //             frame.write(Pin::new(&mut self.stream)).await;
-            //             self.stream.write_all(&data).await.unwrap();
-            //             sel.push(s);
-            //         }
-            //         _ = flush_interval.tick() => {
-            //             self.stream.flush().await.unwrap();
-            //         }
-            //     }
-            // }
+            let write_options = IpcWriteOptions::default();
+
+            loop {
+                select! {
+                    Some(((quad, dictionary_tracker, msg), s)) = sel.next() => {
+                        match msg {
+                            ArrowMessage::Signal(signal) => {
+                                let data = bincode::encode_to_vec(&signal, config::standard()).unwrap();
+                                let header = Header::from_quad(quad, data.len(), MessageType::Signal);
+                                header.write(&mut Pin::new(&mut self.stream)).await;
+                                self.stream.write_all(&data).await.unwrap();
+                            }
+                            ArrowMessage::Data(data) => {
+                                let (_, encoded_message) = {
+                                    let mut dictionary_tracker = dictionary_tracker.lock().await;
+                                    IpcDataGenerator {}.encoded_batch(&data, &mut *dictionary_tracker, &write_options)
+                                      .expect("failed to encode batch")
+                                };
+                                write_message_and_header(&mut Pin::new(&mut self.stream), quad, encoded_message).await.unwrap();
+                            }
+                        };
+
+                        sel.push(s);
+                    }
+                    _ = flush_interval.tick() => {
+                        self.stream.flush().await.unwrap();
+                    }
+                }
+            }
         });
     }
 }
@@ -308,14 +369,112 @@ impl NetworkManager {
     }
 }
 
+#[inline]
+fn pad_to_8(len: u32) -> usize {
+    (((len + 7) & !7) - len) as usize
+}
+
+// Async-ified and modified version of arrow::ipc::writer::write_message
+pub async fn write_message_and_header<W: AsyncWrite + AsyncWriteExt>(
+    writer: &mut Pin<&mut W>,
+    quad: Quad,
+    encoded: EncodedData,
+) -> Result<(), ArrowError> {
+    let arrow_data_len = encoded.arrow_data.len();
+    if arrow_data_len % 8 != 0 {
+        return Err(ArrowError::MemoryError(
+            "Arrow data not aligned".to_string(),
+        ));
+    }
+
+    let buffer = encoded.ipc_message;
+
+    let prefix_size = 4;
+    let flatbuf_size = buffer.len();
+
+    let total_size = prefix_size + flatbuf_size + arrow_data_len;
+
+    let header = Header::from_quad(quad, total_size, MessageType::Data);
+    header.write(writer).await;
+
+    let mut bytes_written = 0;
+
+    // write the flatbuf
+    if flatbuf_size > 0 {
+        writer
+            .write_all(&(flatbuf_size as u32).to_le_bytes())
+            .await?;
+        writer.write_all(&buffer).await?;
+        bytes_written += buffer.len() + 4;
+    }
+    // write arrow data
+    if arrow_data_len > 0 {
+        let len = encoded.arrow_data.len() as u32;
+        let pad_len = pad_to_8(len);
+
+        // write body buffer
+        writer.write_all(&encoded.arrow_data).await?;
+        bytes_written += encoded.arrow_data.len();
+        if pad_len > 0 {
+            writer.write_all(&vec![0u8; pad_len][..]).await?;
+            bytes_written += pad_len;
+        }
+    }
+
+    assert_eq!(
+        bytes_written, total_size,
+        "Wrote unexpected number of bytes {} != {}",
+        bytes_written, total_size
+    );
+
+    Ok(())
+}
+
+fn read_message(schema: SchemaRef, data: Vec<u8>) -> anyhow::Result<RecordBatch> {
+    let mut buf = &data[..];
+
+    // read the header size
+    let meta_size = buf.get_u32_le() as usize;
+    let mut meta_buffer = vec![0; meta_size];
+    std::io::Read::read_exact(&mut buf, &mut meta_buffer)?;
+
+    let message = arrow::ipc::root_as_message(&meta_buffer)
+        .map_err(|e| anyhow!("Unable to read IPC message: {:?}", e))?;
+
+    let arrow::ipc::MessageHeader::RecordBatch = message.header_type() else {
+        bail!("unexpected message type: {:?}", message.header_type());
+    };
+
+    let Some(batch) = message.header_as_record_batch() else {
+        bail!("Unable to read IPC message as record batch")
+    };
+
+    // read the block that makes up the record batch into a buffer
+    let mut batch_buf = MutableBuffer::from_len_zeroed(message.bodyLength() as usize);
+    std::io::Read::read_exact(&mut buf, &mut batch_buf)?;
+
+    Ok(read_record_batch(
+        &batch_buf.into(),
+        batch,
+        schema,
+        &HashMap::new(),
+        None,
+        &message.version(),
+    )?)
+}
+
 #[cfg(test)]
 mod test {
+    use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
+    use arrow_schema::{Field, Schema, TimeUnit};
+    use std::sync::Arc;
+    use std::time::SystemTime;
     use std::{pin::Pin, time::Duration};
 
-    use crate::old::QueueItem;
-    use tokio::{io::AsyncWriteExt, net::TcpStream, sync::mpsc::channel, time::timeout};
+    use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage};
+    use tokio::{sync::mpsc::channel, time::timeout};
 
-    use crate::network_manager::Quad;
+    use crate::network_manager::{MessageType, Quad};
 
     use super::{Header, NetworkManager, Senders};
 
@@ -329,9 +488,10 @@ mod test {
             dst_operator: 9098,
             dst_subtask: 100,
             len: 30,
+            message_type: MessageType::Signal,
         };
 
-        header.write(Pin::new(&mut buffer)).await;
+        header.write(&mut Pin::new(&mut buffer)).await;
 
         let h2 = Header::from_bytes(&buffer[..]);
 
@@ -339,92 +499,81 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_server() {
-        todo!();
-        // let (tx, mut rx) = channel(10);
-        //
-        // let mut senders = Senders::new();
-        // let quad = Quad {
-        //     src_id: 0,
-        //     src_idx: 1,
-        //     dst_id: 2,
-        //     dst_idx: 3,
-        // };
-        //
-        // senders.add(quad, tx);
-        //
-        // let mut nm = NetworkManager::new(0);
-        // let port = nm.open_listener().await;
-        //
-        // println!("port: {}", port);
-        //
-        // nm.start(senders).await;
-        //
-        // let mut client = TcpStream::connect(format!("localhost:{}", port))
-        //     .await
-        //     .unwrap();
-        //
-        // let message = b"Hello World!";
-        //
-        // let header = Header {
-        //     src_operator: 0,
-        //     src_subtask: 1,
-        //     dst_operator: 2,
-        //     dst_subtask: 3,
-        //     len: message.len(),
-        // };
-        //
-        // header.write(Pin::new(&mut client)).await;
-        // client.write_all(message).await.unwrap();
-        //
-        // let item = rx.recv().await.unwrap();
-        // let QueueItem::Bytes(data) = item else {
-        //     panic!("expected bytes!");
-        // };
-        //
-        // assert_eq!(&message[..], &data);
-    }
-
-    #[tokio::test]
     async fn test_client_server() {
-        todo!();
-        // let (server_tx, mut server_rx) = channel(10);
-        //
-        // let mut senders = Senders::new();
-        //
-        // let quad = Quad {
-        //     src_id: 50,
-        //     src_idx: 1,
-        //     dst_id: 21234,
-        //     dst_idx: 3,
-        // };
-        //
-        // senders.add(quad, server_tx);
-        //
-        // let mut nm = NetworkManager::new(0);
-        // let port = nm.open_listener().await;
-        //
-        // let (client_tx, client_rx) = channel(10);
-        // nm.connect(format!("localhost:{}", port), quad, client_rx)
-        //     .await;
-        //
-        // nm.start(senders).await;
-        //
-        // let data = b"this is some data being sent... over the network";
-        //
-        // client_tx
-        //     .send(QueueItem::Bytes(data.to_vec()))
-        //     .await
-        //     .unwrap();
-        //
-        // let result = timeout(Duration::from_secs(1), server_rx.recv())
-        //     .await
-        //     .unwrap()
-        //     .expect("timed out");
-        //
-        // let QueueItem::Bytes(bytes) = result else {
-        //     panic!("expected bytes");
-        // };
-        // assert_eq!(&data[..], &bytes);
+        let (server_tx, mut server_rx) = channel(10);
+
+        let mut senders = Senders::new();
+
+        let quad = Quad {
+            src_id: 50,
+            src_idx: 1,
+            dst_id: 21234,
+            dst_idx: 3,
+        };
+
+        let time = SystemTime::now();
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", arrow_schema::DataType::UInt64, false),
+            Field::new(
+                "time",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(UInt64Array::from((0..10).collect::<Vec<_>>())),
+            Arc::new(TimestampNanosecondArray::from(vec![
+                to_nanos(time) as i64;
+                10
+            ])),
+        ];
+
+        let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
+
+        senders.add(quad, schema.clone(), server_tx);
+
+        let mut nm = NetworkManager::new(0);
+        let port = nm.open_listener().await;
+
+        let (client_tx, client_rx) = channel(10);
+        nm.connect(format!("localhost:{}", port), quad, client_rx)
+            .await;
+
+        nm.start(senders).await;
+
+        client_tx
+            .send(ArrowMessage::Data(batch.clone()))
+            .await
+            .unwrap();
+
+        let result = timeout(Duration::from_secs(1), server_rx.recv())
+            .await
+            .unwrap()
+            .expect("timed out");
+
+        let ArrowMessage::Data(result) = result else {
+            panic!("expected bytes");
+        };
+
+        assert_eq!(result, batch);
+
+        // test control message
+        let message = ArrowMessage::Signal(SignalMessage::Barrier(CheckpointBarrier {
+            epoch: 5,
+            min_epoch: 3,
+            timestamp: SystemTime::now(),
+            then_stop: false,
+        }));
+
+        client_tx.send(message.clone()).await.unwrap();
+
+        let result = timeout(Duration::from_secs(1), server_rx.recv())
+            .await
+            .unwrap()
+            .expect("timed out");
+
+        assert_eq!(result, message);
     }
 }

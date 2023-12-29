@@ -52,7 +52,7 @@ pub(crate) async fn get_arrow_program(
         .optimizer
         .enable_round_robin_repartition = false;
     config.options_mut().optimizer.repartition_aggregations = false;
-    let session_state = SessionState::with_config_rt(config, Arc::new(RuntimeEnv::default()))
+    let session_state = SessionState::new_with_config_rt(config, Arc::new(RuntimeEnv::default()))
         .with_physical_optimizer_rules(vec![]);
 
     let mut node_mapping = HashMap::new();

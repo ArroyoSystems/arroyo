@@ -19,11 +19,10 @@ use arroyo_rpc::grpc::{
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
     from_millis, grpc_port, ports, string_to_map, to_micros, ArrowMessage, CheckpointBarrier,
-    NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    NodeId, SignalMessage, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
 };
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
-use petgraph::graph::DiGraph;
 use rand::Rng;
 
 use std::collections::{HashMap, HashSet};
@@ -82,9 +81,9 @@ pub enum SourceFinishType {
 impl From<SourceFinishType> for Option<ArrowMessage> {
     fn from(value: SourceFinishType) -> Self {
         match value {
-            SourceFinishType::Graceful => Some(ArrowMessage::Stop),
+            SourceFinishType::Graceful => Some(ArrowMessage::Signal(SignalMessage::Stop)),
             SourceFinishType::Immediate => None,
-            SourceFinishType::Final => Some(ArrowMessage::EndOfData),
+            SourceFinishType::Final => Some(ArrowMessage::Signal(SignalMessage::EndOfData)),
         }
     }
 }

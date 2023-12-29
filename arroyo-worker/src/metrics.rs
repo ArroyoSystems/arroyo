@@ -4,7 +4,6 @@ use arroyo_types::{
 };
 use lazy_static::lazy_static;
 use prometheus::{labels, register_int_counter_vec, IntCounter, IntCounterVec, IntGauge};
-use tokio::sync::mpsc::Sender;
 
 lazy_static! {
     pub static ref TASK_METRIC_LABELS: Vec<&'static str> =

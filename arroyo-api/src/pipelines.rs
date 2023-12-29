@@ -37,7 +37,6 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
 use arroyo_rpc::{error_chain, OperatorConfig};
 use arroyo_server_common::log_event;
-use petgraph::visit::EdgeRef;
 use prost::Message;
 use serde_json::json;
 use time::OffsetDateTime;
@@ -53,7 +52,7 @@ use crate::rest_utils::{
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::{connection_tables, to_micros};
-use crate::{handle_db_error, optimizations, AuthData};
+use crate::{handle_db_error, AuthData};
 use create_pipeline_req::Config::Sql;
 const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
 

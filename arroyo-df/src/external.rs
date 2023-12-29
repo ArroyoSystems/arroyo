@@ -1,7 +1,7 @@
 use arroyo_datastream::logical::LogicalNode;
 use std::time::Duration;
 
-use arroyo_datastream::{ConnectorOp, Operator};
+use arroyo_datastream::ConnectorOp;
 
 use crate::types::StructDef;
 

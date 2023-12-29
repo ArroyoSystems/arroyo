@@ -7,12 +7,10 @@ use std::{
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use datafusion::{
-    datasource::TableProvider,
     execution::TaskContext,
     physical_plan::{
         memory::{MemoryExec, MemoryStream},
         stream::RecordBatchStreamAdapter,
-        streaming::PartitionStream,
         DisplayAs, ExecutionPlan, Partitioning,
     },
 };

@@ -1,4 +1,3 @@
-use std::cmp::max;
 use std::fs;
 use std::str::FromStr;
 use std::{fmt::Debug, path::PathBuf};
@@ -16,7 +15,7 @@ use arroyo_rpc::grpc::api::PeriodicWatermark;
 use arroyo_rpc::grpc::{api, TableDescriptor};
 use arroyo_types::{
     from_millis, from_nanos, to_millis, ArrowMessage, CheckpointBarrier, Data, GlobalKey, Key,
-    Message, Record, RecordBatchData, TaskInfo, UpdatingData, Watermark, Window,
+    Message, Record, RecordBatchData, SignalMessage, TaskInfo, UpdatingData, Watermark, Window,
 };
 use async_trait::async_trait;
 use bincode::{config, Decode, Encode};
@@ -183,9 +182,9 @@ impl ArrowOperator for PeriodicWatermarkGenerator {
     async fn on_close(&mut self, ctx: &mut ArrowContext) {
         // send final watermark on close
         ctx.collector
-            .broadcast(ArrowMessage::Watermark(Watermark::EventTime(from_millis(
-                u64::MAX,
-            ))))
+            .broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+                Watermark::EventTime(from_millis(u64::MAX)),
+            )))
             .await;
     }
 
@@ -219,7 +218,9 @@ impl ArrowOperator for PeriodicWatermarkGenerator {
                 to_millis(watermark)
             );
             ctx.collector
-                .broadcast(ArrowMessage::Watermark(Watermark::EventTime(watermark)))
+                .broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+                    Watermark::EventTime(watermark),
+                )))
                 .await;
             self.state_cache.last_watermark_emitted_at = max_timestamp;
             self.idle = false;
@@ -239,8 +240,10 @@ impl ArrowOperator for PeriodicWatermarkGenerator {
                     "Setting partition {} to idle after {:?}",
                     ctx.task_info.task_index, idle_time
                 );
-                ctx.broadcast(ArrowMessage::Watermark(Watermark::Idle))
-                    .await;
+                ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+                    Watermark::Idle,
+                )))
+                .await;
                 self.idle = true;
             }
         }

@@ -238,12 +238,3 @@ pub(crate) fn add_timestamp_field_if_missing_arrow(schema: SchemaRef) -> SchemaR
         add_timestamp_field_arrow(schema)
     }
 }
-
-pub(crate) fn add_timestamp_field_if_missing(schema: DFSchemaRef) -> DFSchemaRef {
-    if has_timestamp_field(schema.clone()) {
-        schema
-    } else {
-        add_timestamp_field(schema)
-            .expect("shouldn't have a conflict on _timestamp, because we've checked")
-    }
-}
