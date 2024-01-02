@@ -224,7 +224,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         Ok(())
     }
 
-    async fn publish(&mut self, k: Option<String>, v: Vec<u8>, ctx: &mut Context<(), ()>) {
+    async fn publish(&mut self, k: Option<String>, v: Vec<u8>) -> Result<(), UserError> {
         let mut rec = {
             if let Some(k) = k.as_ref() {
                 FutureRecord::to(&self.topic).key(k).payload(&v)
@@ -237,24 +237,13 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
             match self.producer.as_mut().unwrap().send_result(rec) {
                 Ok(future) => {
                     self.write_futures.push(future);
-                    return;
+                    return Ok(());
                 }
                 Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), f)) => {
                     rec = f;
                 }
                 Err((e, _)) => {
-                    let e = UserError::new("Could not write to Kafka", format!("{:?}", e));
-                    ctx.control_tx
-                        .send(ControlResp::Error {
-                            operator_id: ctx.task_info.operator_id.clone(),
-                            task_index: ctx.task_info.task_index,
-                            message: e.name.clone(), 
-                            details: e.details.clone(),
-                        })
-                        .await
-                        .unwrap();
-
-                    panic!("{}: {}", e.name, e.details);
+                    return Err(UserError::new("Could not write to Kafka", format!("{:?}", e)));
                 }
             }
 
@@ -271,7 +260,22 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         let v = self.serializer.to_vec(&record.value);
 
         if let Some(v) = v {
-            self.publish(k, v, ctx).await;
+            match self.publish(k, v).await {
+                Ok(_) => {},
+                Err(e) => {
+                    ctx.control_tx
+                        .send(ControlResp::Error {
+                            operator_id: ctx.task_info.operator_id.clone(),
+                            task_index: ctx.task_info.task_index,
+                            message: e.name.clone(), 
+                            details: e.details.clone(),
+                        })
+                        .await
+                        .unwrap();
+
+                    panic!("{}: {}", e.name, e.details);
+                }
+            };
         }
     }
 
