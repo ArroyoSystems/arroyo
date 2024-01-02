@@ -12,7 +12,7 @@ use crate::metrics::TaskCounters;
 use crate::ControlOutcome;
 use arrow_array::types::TimestampNanosecondType;
 use arrow_array::{Array, PrimitiveArray, RecordBatch};
-use arroyo_datastream::ArroyoSchema;
+use arroyo_rpc::ArroyoSchema;
 use arroyo_rpc::{
     grpc::{CheckpointMetadata, TableDescriptor, TaskCheckpointEventType},
     ControlMessage, ControlResp,

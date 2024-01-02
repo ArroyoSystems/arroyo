@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 
-use arroyo_formats::{DataDeserializer, SchemaData};
+use arroyo_formats::old::DataDeserializer;
+use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::grpc::StopMode;
 use arroyo_rpc::var_str::VarStr;

@@ -281,7 +281,8 @@ pub fn arrow_to_avro_schema(name: &str, fields: &Fields) -> Schema {
 #[cfg(test)]
 mod tests {
     use super::{arrow_to_avro_schema, to_vec};
-    use crate::{DataDeserializer, SchemaData};
+    use crate::old::DataDeserializer;
+    use crate::SchemaData;
     use apache_avro::Schema;
     use arroyo_rpc::formats::{AvroFormat, Format};
     use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver};

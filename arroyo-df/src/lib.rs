@@ -4,7 +4,7 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::{Schema, TimeUnit};
 use arroyo_connectors::Connection;
-use arroyo_datastream::{ArroyoSchema, WindowType, TIMESTAMP_FIELD};
+use arroyo_datastream::WindowType;
 
 use datafusion::datasource::DefaultTableSource;
 use datafusion::physical_plan::functions::make_scalar_function;
@@ -55,6 +55,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
+use arroyo_rpc::{ArroyoSchema, TIMESTAMP_FIELD};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};

@@ -2,21 +2,25 @@ extern crate core;
 
 use anyhow::bail;
 use arrow::datatypes::{DataType, Field, Schema};
+use arrow_array::builder::{ArrayBuilder, StringBuilder, TimestampNanosecondBuilder};
 use arrow_array::cast::AsArray;
 use arrow_array::{Array, RecordBatch, StringArray};
 use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_types::{Data, Debezium, RawJson, SourceError};
+use arroyo_rpc::ArroyoSchema;
+use arroyo_types::{to_nanos, Data, Debezium, RawJson, SourceError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::SystemTime;
 use tokio::sync::Mutex;
 
 pub mod avro;
 pub mod json;
+pub mod old;
 
 pub trait SchemaData: Data + Serialize + DeserializeOwned {
     fn name() -> &'static str;
@@ -209,13 +213,6 @@ where
     Ok(Some(raw.to_string()))
 }
 
-fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> {
-    let json = json! {
-        { "value": String::from_utf8_lossy(msg) }
-    };
-    Ok(serde_json::from_value(json).unwrap())
-}
-
 pub struct FramingIterator<'a> {
     framing: Option<Arc<Framing>>,
     buf: &'a [u8],
@@ -268,16 +265,16 @@ impl<'a> Iterator for FramingIterator<'a> {
 }
 
 #[derive(Clone)]
-pub struct DataDeserializer<T: SchemaData> {
+pub struct ArrowDeserializer {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
+    schema: ArroyoSchema,
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
-    _t: PhantomData<T>,
 }
 
-impl<T: SchemaData> DataDeserializer<T> {
-    pub fn new(format: Format, framing: Option<Framing>) -> Self {
+impl ArrowDeserializer {
+    pub fn new(format: Format, schema: ArroyoSchema, framing: Option<Framing>) -> Self {
         let resolver = if let Format::Avro(AvroFormat {
             reader_schema: Some(schema),
             ..
@@ -289,67 +286,102 @@ impl<T: SchemaData> DataDeserializer<T> {
             Arc::new(FailingSchemaResolver::new()) as Arc<dyn SchemaResolver + Sync>
         };
 
-        Self::with_schema_resolver(format, framing, resolver)
+        Self::with_schema_resolver(format, framing, schema, resolver)
     }
 
     pub fn with_schema_resolver(
         format: Format,
         framing: Option<Framing>,
+        schema: ArroyoSchema,
         schema_resolver: Arc<dyn SchemaResolver + Sync>,
     ) -> Self {
         Self {
             format: Arc::new(format),
             framing: framing.map(|f| Arc::new(f)),
+            schema,
             schema_registry: Arc::new(Mutex::new(HashMap::new())),
             schema_resolver,
-            _t: PhantomData,
         }
     }
 
-    pub async fn deserialize_slice<'a>(
+    pub async fn deserialize_slice(
         &mut self,
-        msg: &'a [u8],
-    ) -> impl Iterator<Item = Result<T, SourceError>> + 'a + Send {
+        buffer: &mut Vec<Box<dyn ArrayBuilder>>,
+        msg: &[u8],
+        timestamp: SystemTime,
+    ) -> Vec<SourceError> {
         match &*self.format {
             Format::Avro(avro) => {
-                let schema_registry = self.schema_registry.clone();
-                let schema_resolver = self.schema_resolver.clone();
-                match avro::deserialize_slice_avro(avro, schema_registry, schema_resolver, msg)
-                    .await
-                {
-                    Ok(iter) => Box::new(iter),
-                    Err(e) => Box::new(
-                        vec![Err(SourceError::other(
-                            "Avro error",
-                            format!("Avro deserialization failed: {}", e),
-                        ))]
-                        .into_iter(),
-                    )
-                        as Box<dyn Iterator<Item = Result<T, SourceError>> + Send>,
-                }
+                // let schema_registry = self.schema_registry.clone();
+                // let schema_resolver = self.schema_resolver.clone();
+                // match avro::deserialize_slice_avro(avro, schema_registry, schema_resolver, msg)
+                //     .await
+                // {
+                //     Ok(data) => data,
+                //     Err(e) => Box::new(
+                //         vec![Err(SourceError::other(
+                //             "Avro error",
+                //             format!("Avro deserialization failed: {}", e),
+                //         ))]
+                //         .into_iter(),
+                //     )
+                // }
+                todo!("avro")
             }
-            _ => {
-                let new_self = self.clone();
-                Box::new(
-                    FramingIterator::new(self.framing.clone(), msg)
-                        .map(move |t| new_self.deserialize_single(t)),
-                ) as Box<dyn Iterator<Item = Result<T, SourceError>> + Send>
-            }
+            _ => FramingIterator::new(self.framing.clone(), msg)
+                .map(|t| self.deserialize_single(buffer, t, timestamp))
+                .filter_map(|t| t.err())
+                .collect(),
         }
     }
 
-    pub fn get_format(&self) -> Arc<Format> {
-        self.format.clone()
-    }
-
-    pub fn deserialize_single(&self, msg: &[u8]) -> Result<T, SourceError> {
-        match &*self.format {
-            Format::Json(json) => json::deserialize_slice_json(json, msg),
+    fn deserialize_single(
+        &mut self,
+        buffer: &mut Vec<Box<dyn ArrayBuilder>>,
+        msg: &[u8],
+        timestamp: SystemTime,
+    ) -> Result<(), SourceError> {
+        let result = match &*self.format {
+            Format::Json(json) => {
+                todo!("json")
+                //json::deserialize_slice_json(json, msg)
+            }
             Format::Avro(_) => unreachable!("avro should be handled by here"),
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
-            Format::RawString(_) => deserialize_raw_string(msg),
+            Format::RawString(_) => self.deserialize_raw_string(buffer, msg),
         }
-        .map_err(|e| SourceError::bad_data(format!("Failed to deserialize: {:?}", e)))
+        .map_err(|e: String| SourceError::bad_data(format!("Failed to deserialize: {:?}", e)))?;
+
+        self.add_timestamp(buffer, timestamp);
+
+        Ok(())
+    }
+
+    fn deserialize_raw_string(
+        &mut self,
+        buffer: &mut Vec<Box<dyn ArrayBuilder>>,
+        msg: &[u8],
+    ) -> Result<(), String> {
+        let (col, _) = self
+            .schema
+            .schema
+            .column_with_name("value")
+            .expect("no 'value' column for RawString format");
+        buffer[col]
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .expect("'value' column has incorrect type")
+            .append_value(String::from_utf8_lossy(msg));
+
+        Ok(())
+    }
+
+    fn add_timestamp(&mut self, buffer: &mut Vec<Box<dyn ArrayBuilder>>, timestamp: SystemTime) {
+        buffer[self.schema.timestamp_index]
+            .as_any_mut()
+            .downcast_mut::<TimestampNanosecondBuilder>()
+            .expect("_timestamp column has incorrect type")
+            .append_value(to_nanos(timestamp) as i64);
     }
 }
 
@@ -439,7 +471,7 @@ mod tests {
             vec![
                 "one block".to_string(),
                 "two block".to_string(),
-                "three block".to_string()
+                "three block".to_string(),
             ],
             result
         );
@@ -455,7 +487,7 @@ mod tests {
             vec![
                 "one block".to_string(),
                 "two block".to_string(),
-                "three block".to_string()
+                "three block".to_string(),
             ],
             result
         );
@@ -478,7 +510,7 @@ mod tests {
             vec![
                 "one b".to_string(),
                 "two b".to_string(),
-                "whole".to_string()
+                "whole".to_string(),
             ],
             result
         );

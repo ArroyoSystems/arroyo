@@ -10,10 +10,13 @@ use std::{fs, time::SystemTime};
 use crate::api_types::connections::PrimitiveType;
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
+use anyhow::anyhow;
+use arrow_schema::Schema;
 use arroyo_types::CheckpointBarrier;
 use grpc::{StopMode, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
 use tonic::{
     metadata::{Ascii, MetadataValue},
     service::Interceptor,
@@ -189,4 +192,36 @@ pub fn error_chain(e: anyhow::Error) -> String {
         .map(|e| e.to_string())
         .collect::<Vec<_>>()
         .join(": ")
+}
+
+pub const TIMESTAMP_FIELD: &str = "_timestamp";
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ArroyoSchema {
+    pub schema: Arc<Schema>,
+    pub timestamp_index: usize,
+    pub key_indices: Vec<usize>,
+}
+
+impl ArroyoSchema {
+    pub fn new(schema: Arc<Schema>, timestamp_index: usize, key_indices: Vec<usize>) -> Self {
+        Self {
+            schema,
+            timestamp_index,
+            key_indices,
+        }
+    }
+
+    pub fn from_schema_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> anyhow::Result<Self> {
+        let timestamp_index = schema
+            .column_with_name(TIMESTAMP_FIELD)
+            .ok_or_else(|| anyhow!("no {} field in schema", TIMESTAMP_FIELD))?
+            .0;
+
+        Ok(Self {
+            schema,
+            timestamp_index,
+            key_indices,
+        })
+    }
 }

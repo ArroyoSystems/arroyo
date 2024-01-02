@@ -20,7 +20,7 @@ use tokio::sync::mpsc::Receiver;
 use tokio_stream::Stream;
 use tracing::{info, warn};
 
-use arroyo_formats::DataDeserializer;
+use arroyo_formats::old::DataDeserializer;
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};

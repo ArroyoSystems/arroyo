@@ -2,13 +2,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::{mem, thread};
 
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
-use arrow_array::builder::UInt64Builder;
+use arrow_array::builder::{make_builder, ArrayBuilder, UInt64Builder};
 use arrow_array::RecordBatch;
-use arroyo_datastream::ArroyoSchema;
+use arrow_schema::SchemaRef;
+use arroyo_rpc::ArroyoSchema;
 use bincode::{Decode, Encode};
 use datafusion_common::hash_utils;
 
@@ -18,6 +19,8 @@ use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
 use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
 use crate::connectors::filesystem::source::FileSystemSourceFunc;
 use crate::connectors::impulse::ImpulseSourceFunc;
+use crate::connectors::kafka::source::KafkaSourceFunc;
+use crate::connectors::sse::SSESourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::operator::{server_for_hash, ArrowOperatorConstructor, BaseOperator};
@@ -35,8 +38,9 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend, StateStore};
 use arroyo_types::{
-    from_micros, range_for_server, ArrowMessage, CheckpointBarrier, Data, Key, SourceError,
-    TaskInfo, UserError, Watermark, WorkerId, HASH_SEEDS,
+    duration_millis_config, from_micros, range_for_server, u32_config, ArrowMessage,
+    CheckpointBarrier, Data, Key, SourceError, TaskInfo, UserError, Watermark, WorkerId,
+    BATCH_LINGER_MS_ENV, BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE, DEFAULT_LINGER, HASH_SEEDS,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -104,6 +108,56 @@ impl WatermarkHolder {
     }
 }
 
+struct ContextBuffer {
+    buffer: Vec<Box<dyn ArrayBuilder>>,
+    created: Instant,
+    schema: SchemaRef,
+}
+
+impl ContextBuffer {
+    fn new(schema: SchemaRef) -> Self {
+        let buffer = schema
+            .fields
+            .iter()
+            .map(|f| make_builder(f.data_type(), 16))
+            .collect();
+
+        Self {
+            buffer,
+            created: Instant::now(),
+            schema,
+        }
+    }
+
+    fn buffer(&mut self) -> &mut Vec<Box<dyn ArrayBuilder>> {
+        &mut self.buffer
+    }
+
+    pub fn size(&self) -> usize {
+        self.buffer[0].len()
+    }
+
+    pub fn should_flush(&self) -> bool {
+        static FLUSH_SIZE: OnceLock<usize> = OnceLock::new();
+        let flush_size = FLUSH_SIZE
+            .get_or_init(|| u32_config(BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE as u32) as usize);
+
+        static FLUSH_LINGER: OnceLock<Duration> = OnceLock::new();
+        let flush_linger = FLUSH_LINGER
+            .get_or_init(|| duration_millis_config(BATCH_LINGER_MS_ENV, DEFAULT_LINGER));
+
+        self.size() > 0 && (self.size() > *flush_size || self.created.elapsed() >= *flush_linger)
+    }
+
+    pub fn finish(self) -> RecordBatch {
+        RecordBatch::try_new(
+            self.schema,
+            self.buffer.into_iter().map(|mut a| a.finish()).collect(),
+        )
+        .unwrap()
+    }
+}
+
 pub struct ArrowContext<S: BackingStore = StateBackend> {
     pub task_info: Arc<TaskInfo>,
     pub control_rx: Receiver<ControlMessage>,
@@ -114,6 +168,8 @@ pub struct ArrowContext<S: BackingStore = StateBackend> {
     pub in_schemas: Vec<ArroyoSchema>,
     pub out_schema: Option<ArroyoSchema>,
     pub collector: ArrowCollector,
+    buffer: Option<ContextBuffer>,
+    error_rate_limiter: RateLimiter,
 }
 
 #[derive(Clone)]
@@ -331,7 +387,7 @@ impl ArrowContext {
                 out_qs,
                 tx_queue_rem_gauges,
                 tx_queue_size_gauges,
-                out_schema,
+                out_schema: out_schema.clone(),
                 projection,
             },
             error_reporter: ErrorReporter {
@@ -339,6 +395,8 @@ impl ArrowContext {
                 task_info,
             },
             state,
+            buffer: out_schema.map(|t| ContextBuffer::new(t.schema)),
+            error_rate_limiter: RateLimiter::new(),
         }
     }
 
@@ -402,11 +460,42 @@ impl ArrowContext {
         todo!("timer")
     }
 
+    pub async fn flush_buffer(&mut self) {
+        let Some(buffer) = self.buffer.take() else {
+            return;
+        };
+
+        if buffer.size() == 0 {
+            self.buffer = Some(buffer);
+            return;
+        }
+
+        self.collector.collect(buffer.finish()).await;
+        self.buffer = Some(ContextBuffer::new(
+            self.out_schema.as_ref().map(|t| t.schema.clone()).unwrap(),
+        ));
+    }
+
     pub async fn collect(&mut self, record: RecordBatch) {
         self.collector.collect(record).await;
     }
 
+    pub fn should_flush(&self) -> bool {
+        self.buffer
+            .as_ref()
+            .map(|b| b.should_flush())
+            .unwrap_or(false)
+    }
+
+    pub fn buffer(&mut self) -> &mut Vec<Box<dyn ArrayBuilder>> {
+        self.buffer
+            .as_mut()
+            .expect("tried to get buffer for node without out schema")
+            .buffer()
+    }
+
     pub async fn broadcast(&mut self, message: ArrowMessage) {
+        self.flush_buffer().await;
         self.collector.broadcast(message).await;
     }
 
@@ -449,41 +538,46 @@ impl ArrowContext {
         self.state.load_compacted(compaction).await;
     }
 
-    /// Collects a source record, handling errors and rate limiting.
+    /// Handling errors and rate limiting error reporting.
     /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
-    pub async fn collect_source_record(
+    pub async fn collect_source_errors(
         &mut self,
-        timestamp: SystemTime,
-        value: Result<RecordBatch, SourceError>,
+        errors: Vec<SourceError>,
         bad_data: &Option<BadData>,
-        rate_limiter: &mut RateLimiter,
     ) -> Result<(), UserError> {
-        todo!("collect source record");
-        match value {
-            Ok(value) => Ok(self.collector.collect(value).await),
-            Err(SourceError::BadData { details }) => match bad_data {
-                Some(BadData::Drop {}) => {
-                    rate_limiter
-                        .rate_limit(|| async {
-                            warn!("Dropping invalid data: {}", details.clone());
-                            self.report_user_error(UserError::new(
-                                "Dropping invalid data",
-                                details,
-                            ))
+        for error in errors {
+            match error {
+                SourceError::BadData { details } => match bad_data {
+                    Some(BadData::Drop {}) => {
+                        self.error_rate_limiter
+                            .rate_limit(|| async {
+                                warn!("Dropping invalid data: {}", details.clone());
+                                self.control_tx
+                                    .send(ControlResp::Error {
+                                        operator_id: self.task_info.operator_id.clone(),
+                                        task_index: self.task_info.task_index,
+                                        message: "Dropping invalid data".to_string(),
+                                        details,
+                                    })
+                                    .await
+                                    .unwrap();
+                            })
                             .await;
-                        })
-                        .await;
-                    TaskCounters::DeserializationErrors
-                        .for_task(&self.task_info)
-                        .inc();
-                    Ok(())
+                        TaskCounters::DeserializationErrors
+                            .for_task(&self.task_info)
+                            .inc();
+                    }
+                    Some(BadData::Fail {}) | None => {
+                        return Err(UserError::new("Deserialization error", details));
+                    }
+                },
+                SourceError::Other { name, details } => {
+                    return Err(UserError::new(name, details));
                 }
-                Some(BadData::Fail {}) | None => {
-                    Err(UserError::new("Deserialization error", details))
-                }
-            },
-            Err(SourceError::Other { name, details }) => Err(UserError::new(name, details)),
+            }
         }
+
+        Ok(())
     }
 }
 
@@ -1262,11 +1356,17 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn Ba
                 "connectors::impulse::ImpulseSourceFunc" => {
                     Box::new(ImpulseSourceFunc::from_config(op).unwrap())
                 }
+                "connectors::sse::SSESourceFunc" => {
+                    Box::new(SSESourceFunc::from_config(op).unwrap())
+                }
                 "connectors::filesystem::source::FileSystemSourceFunc" => {
                     Box::new(FileSystemSourceFunc::from_config(op).unwrap())
                 }
+                "connectors::kafka::source::KafkaSourceFunc" => {
+                    Box::new(KafkaSourceFunc::from_config(op).unwrap())
+                }
                 "GrpcSink" => Box::new(GrpcRecordBatchSink::from_config(op).unwrap()),
-                c => panic!("unknown operator {}", c),
+                c => panic!("unknown connector {}", c),
             }
         }
     }
@@ -1312,7 +1412,7 @@ mod tests {
     async fn test_shuffles() {
         let timestamp = SystemTime::now();
 
-        let data = vec![0, 1, 0, 1, 0, 1, 0, 0];
+        let data = vec![0, 100, 0, 100, 0, 100, 0, 0];
 
         let columns: Vec<ArrayRef> = vec![
             Arc::new(UInt64Array::from(data.clone())),

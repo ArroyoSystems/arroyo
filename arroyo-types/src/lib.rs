@@ -78,6 +78,9 @@ impl Serialize for Window {
     }
 }
 
+pub const DEFAULT_LINGER: Duration = Duration::from_millis(50);
+pub const DEFAULT_BATCH_SIZE: usize = 128;
+
 static BINCODE_CONF: config::Configuration = config::standard();
 
 pub const TASK_SLOTS_ENV: &str = "TASK_SLOTS";
@@ -101,6 +104,9 @@ pub const DATABASE_PASSWORD_ENV: &str = "DATABASE_PASSWORD";
 pub const ADMIN_PORT_ENV: &str = "ADMIN_PORT";
 pub const GRPC_PORT_ENV: &str = "GRPC_PORT";
 pub const HTTP_PORT_ENV: &str = "HTTP_PORT";
+
+pub const BATCH_SIZE_ENV: &str = "BATCH_SIZE";
+pub const BATCH_LINGER_MS_ENV: &str = "BATCH_LINGER_MS";
 
 pub const ASSET_DIR_ENV: &str = "ASSET_DIR";
 // Endpoint that the frontend should query for the API
@@ -149,6 +155,16 @@ pub fn string_config(var: &str, default: &str) -> String {
 pub fn u32_config(var: &str, default: u32) -> u32 {
     env::var(var)
         .map(|s| u32::from_str(&s).unwrap_or(default))
+        .unwrap_or(default)
+}
+
+pub fn duration_millis_config(var: &str, default: Duration) -> Duration {
+    env::var(var)
+        .map(|s| {
+            u64::from_str(&s)
+                .map(Duration::from_millis)
+                .unwrap_or(default)
+        })
         .unwrap_or(default)
 }
 
