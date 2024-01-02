@@ -191,7 +191,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         }
     }
 
-    async fn flush(&mut self, ctx: &mut Context<(), ()>) {
+    async fn flush(&mut self) -> Result<(), UserError> {
         self.producer
             .as_ref()
             .unwrap()
@@ -240,17 +240,18 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
                     rec = f;
                 }
                 Err((e, _)) => {
+                    let e = UserError::new("Could not write to Kafka", format!("{:?}", e));
                     ctx.control_tx
                         .send(ControlResp::Error {
                             operator_id: ctx.task_info.operator_id.clone(),
                             task_index: ctx.task_info.task_index,
-                            message: format!("Unhandled kafka error"),
-                            details: format!("{}", e),
+                            message: e.name.clone(), 
+                            details: e.details.clone(),
                         })
                         .await
                         .unwrap();
 
-                    panic!("Unhandled kafka error: {:?}", e);
+                    panic!("{}: {}", e.name, e.details);
                 }
             }
 
