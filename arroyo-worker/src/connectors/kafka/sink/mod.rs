@@ -5,7 +5,7 @@ use arroyo_formats::SchemaData;
 use arroyo_macro::process_fn;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
-use arroyo_rpc::{CheckpointEvent, ControlMessage, OperatorConfig};
+use arroyo_rpc::{CheckpointEvent, ControlMessage, OperatorConfig, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -174,7 +174,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
     }
 
     async fn handle_checkpoint(&mut self, _: &CheckpointBarrier, ctx: &mut Context<(), ()>) {
-        self.flush().await;
+        self.flush(ctx).await;
         if let ConsistencyMode::ExactlyOnce {
             next_transaction_index,
             producer_to_complete,
@@ -191,7 +191,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         }
     }
 
-    async fn flush(&mut self) {
+    async fn flush(&mut self, ctx: &mut Context<(), ()>) {
         self.producer
             .as_ref()
             .unwrap()
@@ -205,13 +205,23 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
             match future.await.expect("Kafka producer shut down") {
                 Ok(_) => {}
                 Err((e, _)) => {
+                    ctx.control_tx
+                        .send(ControlResp::Error {
+                            operator_id: ctx.task_info.operator_id.clone(),
+                            task_index: ctx.task_info.task_index,
+                            message: format!("{}", e),
+                            details: format!("{}", e),
+                        })
+                        .await
+                        .unwrap();
+
                     panic!("Unhandled kafka error: {:?}", e);
                 }
             }
         }
     }
 
-    async fn publish(&mut self, k: Option<String>, v: Vec<u8>) {
+    async fn publish(&mut self, k: Option<String>, v: Vec<u8>, ctx: &mut Context<(), ()>) {
         let mut rec = {
             if let Some(k) = k.as_ref() {
                 FutureRecord::to(&self.topic).key(k).payload(&v)
@@ -230,6 +240,16 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
                     rec = f;
                 }
                 Err((e, _)) => {
+                    ctx.control_tx
+                        .send(ControlResp::Error {
+                            operator_id: ctx.task_info.operator_id.clone(),
+                            task_index: ctx.task_info.task_index,
+                            message: format!("{}", e),
+                            details: format!("{}", e),
+                        })
+                        .await
+                        .unwrap();
+
                     panic!("Unhandled kafka error: {:?}", e);
                 }
             }
@@ -239,7 +259,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         }
     }
 
-    async fn process_element(&mut self, record: &Record<K, T>, _ctx: &mut Context<(), ()>) {
+    async fn process_element(&mut self, record: &Record<K, T>, ctx: &mut Context<(), ()>) {
         let k = record
             .key
             .as_ref()
@@ -247,7 +267,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         let v = self.serializer.to_vec(&record.value);
 
         if let Some(v) = v {
-            self.publish(k, v).await;
+            self.publish(k, v, ctx).await;
         }
     }
 
