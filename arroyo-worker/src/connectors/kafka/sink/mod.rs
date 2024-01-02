@@ -174,20 +174,37 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
     }
 
     async fn handle_checkpoint(&mut self, _: &CheckpointBarrier, ctx: &mut Context<(), ()>) {
-        self.flush(ctx).await;
-        if let ConsistencyMode::ExactlyOnce {
-            next_transaction_index,
-            producer_to_complete,
-        } = &mut self.consistency_mode
-        {
-            *producer_to_complete = self.producer.take();
-            ctx.state
-                .get_global_keyed_state('i')
-                .await
-                .insert(ctx.task_info.task_index, *next_transaction_index)
-                .await;
-            self.init_producer(&ctx.task_info)
-                .expect("creating new producer during checkpointing");
+        match self.flush().await {
+            Ok(_) => {
+                if let ConsistencyMode::ExactlyOnce {
+                next_transaction_index,
+                producer_to_complete,
+            } = &mut self.consistency_mode
+                {
+                    *producer_to_complete = self.producer.take();
+                    ctx.state
+                        .get_global_keyed_state('i')
+                        .await
+                        .insert(ctx.task_info.task_index, *next_transaction_index)
+                    .await;
+                    self.init_producer(&ctx.task_info)
+                        .expect("creating new producer during checkpointing");
+                }
+            },
+            Err(e) => {
+                ctx.control_tx
+                    .send(ControlResp::Error {
+                        operator_id: ctx.task_info.operator_id.clone(),
+                        task_index: ctx.task_info.task_index,
+                        message: e.name.clone(),
+                        details: e.details.clone(),
+                    })
+                    .await
+                    .unwrap();
+
+                panic!("Unhandled kafka error: {:?}", e);
+
+            }
         }
     }
 
@@ -202,23 +219,9 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
 
         // ensure all messages were delivered before finishing the checkpoint
         for future in self.write_futures.drain(..) {
-            match future.await.expect("Kafka producer shut down") {
-                Ok(_) => {}
-                Err((e, _)) => {
-                    ctx.control_tx
-                        .send(ControlResp::Error {
-                            operator_id: ctx.task_info.operator_id.clone(),
-                            task_index: ctx.task_info.task_index,
-                            message: format!("Unhandled kafka error"),
-                            details: format!("{}", e),
-                        })
-                        .await
-                        .unwrap();
-
-                    panic!("Unhandled kafka error: {:?}", e);
-                }
-            }
+            future.await.expect("").map_err(|e| UserError::new("Kafka producer shut down", format!("{:?}", e)))?;
         }
+        Ok(())
     }
 
     async fn publish(&mut self, k: Option<String>, v: Vec<u8>, ctx: &mut Context<(), ()>) {
