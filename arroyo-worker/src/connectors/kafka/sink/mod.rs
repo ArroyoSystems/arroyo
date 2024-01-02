@@ -209,7 +209,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
                         .send(ControlResp::Error {
                             operator_id: ctx.task_info.operator_id.clone(),
                             task_index: ctx.task_info.task_index,
-                            message: format!("{}", e),
+                            message: format!("Unhandled kafka error"),
                             details: format!("{}", e),
                         })
                         .await
@@ -244,7 +244,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
                         .send(ControlResp::Error {
                             operator_id: ctx.task_info.operator_id.clone(),
                             task_index: ctx.task_info.task_index,
-                            message: format!("{}", e),
+                            message: format!("Unhandled kafka error"),
                             details: format!("{}", e),
                         })
                         .await
