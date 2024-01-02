@@ -219,7 +219,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
 
         // ensure all messages were delivered before finishing the checkpoint
         for future in self.write_futures.drain(..) {
-            future.await.expect("").map_err(|e| UserError::new("Kafka producer shut down", format!("{:?}", e)))?;
+            future.await.unwrap().map_err(|e| UserError::new("Kafka producer shut down", format!("{:?}", e)))?;
         }
         Ok(())
     }
