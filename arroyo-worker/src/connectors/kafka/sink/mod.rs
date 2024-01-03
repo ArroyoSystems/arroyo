@@ -5,7 +5,7 @@ use arroyo_formats::SchemaData;
 use arroyo_macro::process_fn;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::{TableDeleteBehavior, TableDescriptor, TableWriteBehavior};
-use arroyo_rpc::{CheckpointEvent, ControlMessage, OperatorConfig, ControlResp};
+use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_types::*;
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -177,20 +177,20 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
         match self.flush().await {
             Ok(_) => {
                 if let ConsistencyMode::ExactlyOnce {
-                next_transaction_index,
-                producer_to_complete,
-            } = &mut self.consistency_mode
+                    next_transaction_index,
+                    producer_to_complete,
+                } = &mut self.consistency_mode
                 {
                     *producer_to_complete = self.producer.take();
                     ctx.state
                         .get_global_keyed_state('i')
                         .await
                         .insert(ctx.task_info.task_index, *next_transaction_index)
-                    .await;
+                        .await;
                     self.init_producer(&ctx.task_info)
                         .expect("creating new producer during checkpointing");
                 }
-            },
+            }
             Err(e) => {
                 ctx.control_tx
                     .send(ControlResp::Error {
@@ -203,7 +203,6 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
                     .unwrap();
 
                 panic!("Unhandled kafka error: {:?}", e);
-
             }
         }
     }
@@ -219,7 +218,10 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
 
         // ensure all messages were delivered before finishing the checkpoint
         for future in self.write_futures.drain(..) {
-            future.await.unwrap().map_err(|e| UserError::new("Kafka producer shut down", format!("{:?}", e)))?;
+            future
+                .await
+                .unwrap()
+                .map_err(|e| UserError::new("Kafka producer shut down", format!("{:?}", e)))?;
         }
         Ok(())
     }
@@ -243,7 +245,10 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
                     rec = f;
                 }
                 Err((e, _)) => {
-                    return Err(UserError::new("Could not write to Kafka", format!("{:?}", e)));
+                    return Err(UserError::new(
+                        "Could not write to Kafka",
+                        format!("{:?}", e),
+                    ));
                 }
             }
 
@@ -261,13 +266,13 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
 
         if let Some(v) = v {
             match self.publish(k, v).await {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => {
                     ctx.control_tx
                         .send(ControlResp::Error {
                             operator_id: ctx.task_info.operator_id.clone(),
                             task_index: ctx.task_info.task_index,
-                            message: e.name.clone(), 
+                            message: e.name.clone(),
                             details: e.details.clone(),
                         })
                         .await
