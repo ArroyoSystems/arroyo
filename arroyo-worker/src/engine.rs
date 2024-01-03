@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
+use std::io::Write;
 use std::{mem, thread};
 
 use std::sync::{Arc, OnceLock};
@@ -29,16 +30,18 @@ use crate::{RateLimiter, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, TIMER_T
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
+use arroyo_formats::ArrowDeserializer;
 pub use arroyo_macro::StreamNode;
-use arroyo_rpc::formats::BadData;
+use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{
     api, CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
     TaskAssignment, TaskCheckpointEventType,
 };
+use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend, StateStore};
 use arroyo_types::{
-    duration_millis_config, from_micros, range_for_server, u32_config, ArrowMessage,
+    duration_millis_config, from_micros, range_for_server, should_flush, u32_config, ArrowMessage,
     CheckpointBarrier, Data, Key, SourceError, TaskInfo, UserError, Watermark, WorkerId,
     BATCH_LINGER_MS_ENV, BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE, DEFAULT_LINGER, HASH_SEEDS,
 };
@@ -138,15 +141,7 @@ impl ContextBuffer {
     }
 
     pub fn should_flush(&self) -> bool {
-        static FLUSH_SIZE: OnceLock<usize> = OnceLock::new();
-        let flush_size = FLUSH_SIZE
-            .get_or_init(|| u32_config(BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE as u32) as usize);
-
-        static FLUSH_LINGER: OnceLock<Duration> = OnceLock::new();
-        let flush_linger = FLUSH_LINGER
-            .get_or_init(|| duration_millis_config(BATCH_LINGER_MS_ENV, DEFAULT_LINGER));
-
-        self.size() > 0 && (self.size() > *flush_size || self.created.elapsed() >= *flush_linger)
+        should_flush(self.size(), self.created)
     }
 
     pub fn finish(self) -> RecordBatch {
@@ -169,7 +164,9 @@ pub struct ArrowContext<S: BackingStore = StateBackend> {
     pub out_schema: Option<ArroyoSchema>,
     pub collector: ArrowCollector,
     buffer: Option<ContextBuffer>,
+    buffered_error: Option<UserError>,
     error_rate_limiter: RateLimiter,
+    deserializer: Option<ArrowDeserializer>,
 }
 
 #[derive(Clone)]
@@ -397,6 +394,8 @@ impl ArrowContext {
             state,
             buffer: out_schema.map(|t| ContextBuffer::new(t.schema)),
             error_rate_limiter: RateLimiter::new(),
+            deserializer: None,
+            buffered_error: None,
         }
     }
 
@@ -460,20 +459,37 @@ impl ArrowContext {
         todo!("timer")
     }
 
-    pub async fn flush_buffer(&mut self) {
-        let Some(buffer) = self.buffer.take() else {
-            return;
-        };
-
-        if buffer.size() == 0 {
-            self.buffer = Some(buffer);
-            return;
+    pub async fn flush_buffer(&mut self) -> Result<(), UserError> {
+        if self.buffer.is_none() {
+            return Ok(());
         }
 
-        self.collector.collect(buffer.finish()).await;
-        self.buffer = Some(ContextBuffer::new(
-            self.out_schema.as_ref().map(|t| t.schema.clone()).unwrap(),
-        ));
+        if self.buffer.as_ref().unwrap().size() > 0 {
+            let buffer = self.buffer.take().unwrap();
+            self.collector.collect(buffer.finish()).await;
+            self.buffer = Some(ContextBuffer::new(
+                self.out_schema.as_ref().map(|t| t.schema.clone()).unwrap(),
+            ));
+        }
+
+        if let Some(deserializer) = self.deserializer.as_mut() {
+            if let Some(buffer) = deserializer.flush_buffer() {
+                match buffer {
+                    Ok(batch) => {
+                        self.collector.collect(batch).await;
+                    }
+                    Err(e) => {
+                        self.collect_source_errors(vec![e]).await?;
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = self.buffered_error.take() {
+            return Err(error);
+        }
+
+        Ok(())
     }
 
     pub async fn collect(&mut self, record: RecordBatch) {
@@ -485,6 +501,11 @@ impl ArrowContext {
             .as_ref()
             .map(|b| b.should_flush())
             .unwrap_or(false)
+            || self
+                .deserializer
+                .as_ref()
+                .map(|d| d.should_flush())
+                .unwrap_or(false)
     }
 
     pub fn buffer(&mut self) -> &mut Vec<Box<dyn ArrayBuilder>> {
@@ -495,7 +516,9 @@ impl ArrowContext {
     }
 
     pub async fn broadcast(&mut self, message: ArrowMessage) {
-        self.flush_buffer().await;
+        if let Err(e) = self.flush_buffer().await {
+            self.buffered_error.replace(e);
+        }
         self.collector.broadcast(message).await;
     }
 
@@ -527,7 +550,7 @@ impl ArrowContext {
                 checkpoint_epoch: barrier.epoch,
                 operator_id: self.task_info.operator_id.clone(),
                 subtask_index: self.task_info.task_index as u32,
-                time: std::time::SystemTime::now(),
+                time: SystemTime::now(),
                 event_type,
             }))
             .await
@@ -538,17 +561,73 @@ impl ArrowContext {
         self.state.load_compacted(compaction).await;
     }
 
+    pub fn initialize_deserializer(
+        &mut self,
+        format: Format,
+        framing: Option<Framing>,
+        bad_data: Option<BadData>,
+    ) {
+        if self.deserializer.is_some() {
+            panic!("Deserialize already initialized");
+        }
+
+        self.deserializer = Some(ArrowDeserializer::new(
+            format,
+            self.out_schema.as_ref().expect("no out schema").clone(),
+            framing,
+            bad_data.unwrap_or_default(),
+        ));
+    }
+
+    pub fn initialize_deserializer_with_resolver(
+        &mut self,
+        format: Format,
+        framing: Option<Framing>,
+        bad_data: Option<BadData>,
+        schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    ) {
+        self.deserializer = Some(ArrowDeserializer::with_schema_resolver(
+            format,
+            framing,
+            self.out_schema.as_ref().expect("no out schema").clone(),
+            bad_data.unwrap_or_default(),
+            schema_resolver,
+        ));
+    }
+
+    pub async fn deserialize_slice(
+        &mut self,
+        msg: &[u8],
+        time: SystemTime,
+    ) -> Result<(), UserError> {
+        let deserializer = self
+            .deserializer
+            .as_mut()
+            .expect("deserializer not initialized!");
+        let errors = deserializer
+            .deserialize_slice(
+                &mut self.buffer.as_mut().expect("no out schema").buffer,
+                msg,
+                time,
+            )
+            .await;
+        self.collect_source_errors(errors).await?;
+
+        Ok(())
+    }
+
     /// Handling errors and rate limiting error reporting.
     /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
-    pub async fn collect_source_errors(
-        &mut self,
-        errors: Vec<SourceError>,
-        bad_data: &Option<BadData>,
-    ) -> Result<(), UserError> {
+    async fn collect_source_errors(&mut self, errors: Vec<SourceError>) -> Result<(), UserError> {
+        let bad_data = self
+            .deserializer
+            .as_ref()
+            .expect("deserializer not initialized")
+            .bad_data();
         for error in errors {
             match error {
                 SourceError::BadData { details } => match bad_data {
-                    Some(BadData::Drop {}) => {
+                    BadData::Drop {} => {
                         self.error_rate_limiter
                             .rate_limit(|| async {
                                 warn!("Dropping invalid data: {}", details.clone());
@@ -567,7 +646,7 @@ impl ArrowContext {
                             .for_task(&self.task_info)
                             .inc();
                     }
-                    Some(BadData::Fail {}) | None => {
+                    BadData::Fail {} => {
                         return Err(UserError::new("Deserialization error", details));
                     }
                 },

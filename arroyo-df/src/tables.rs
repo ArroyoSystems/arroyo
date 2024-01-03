@@ -1,14 +1,16 @@
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
-use arrow_schema::{DataType, Field};
+use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::ConnectorOp;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
 };
 use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_types::ArroyoExtensionType;
 use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
@@ -53,11 +55,8 @@ pub struct ConnectorTable {
 
 #[derive(Debug, Clone)]
 pub enum FieldSpec {
-    StructField(StructField),
-    VirtualField {
-        field: StructField,
-        expression: Expr,
-    },
+    StructField(Field),
+    VirtualField { field: Field, expression: Expr },
 }
 
 impl FieldSpec {
@@ -67,7 +66,7 @@ impl FieldSpec {
             FieldSpec::VirtualField { .. } => true,
         }
     }
-    fn struct_field(&self) -> &StructField {
+    fn struct_field(&self) -> &Field {
         match self {
             FieldSpec::StructField(f) => f,
             FieldSpec::VirtualField { field, .. } => field,
@@ -75,8 +74,8 @@ impl FieldSpec {
     }
 }
 
-impl From<StructField> for FieldSpec {
-    fn from(value: StructField) -> Self {
+impl From<Field> for FieldSpec {
+    fn from(value: Field) -> Self {
         FieldSpec::StructField(value)
     }
 }
@@ -136,7 +135,8 @@ impl From<Connection> for ConnectorTable {
                 .iter()
                 .map(|f| {
                     let struct_field: StructField = f.clone().into();
-                    struct_field.into()
+                    let field: Field = struct_field.into();
+                    field.into()
                 })
                 .collect(),
             type_name: schema_type(&value.name, &value.schema),
@@ -165,14 +165,11 @@ impl ConnectorTable {
             fields = fields
                 .into_iter()
                 .map(|field_spec| match &field_spec {
-                    FieldSpec::StructField(struct_field) => match struct_field.data_type {
-                        TypeDef::DataType(DataType::Timestamp(_, None), nullable) => {
-                            let mut coerced = struct_field.clone();
-                            coerced.data_type = TypeDef::DataType(
+                    FieldSpec::StructField(struct_field) => match struct_field.data_type() {
+                        DataType::Timestamp(_, None) => {
+                            FieldSpec::StructField(struct_field.clone().with_data_type(
                                 DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
-                                nullable,
-                            );
-                            FieldSpec::StructField(coerced)
+                            ))
                         }
                         _ => field_spec,
                     },
@@ -197,8 +194,8 @@ impl ConnectorTable {
                 struct_field.clone().try_into().map_err(|_| {
                     anyhow!(
                         "field '{}' has a type '{:?}' that cannot be used in a connection table",
-                        struct_field.name,
-                        struct_field.data_type
+                        struct_field.name(),
+                        struct_field.data_type()
                     )
                 })
             })
@@ -277,11 +274,8 @@ impl ConnectorTable {
                 .fields
                 .iter()
                 .find(|f| {
-                    f.struct_field().name == *field_name
-                        && matches!(
-                            f.struct_field().data_type,
-                            TypeDef::DataType(DataType::Timestamp(..), _)
-                        )
+                    f.struct_field().name() == field_name
+                        && matches!(f.struct_field().data_type(), DataType::Timestamp(..))
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -290,8 +284,7 @@ impl ConnectorTable {
                     )
                 })?;
 
-            Ok(Some(Expr::Column(Column::new(
-                field.struct_field().alias.as_ref().cloned(),
+            Ok(Some(Expr::Column(Column::from_name(
                 field.struct_field().name(),
             ))))
         } else {
@@ -306,11 +299,8 @@ impl ConnectorTable {
                 .fields
                 .iter()
                 .find(|f| {
-                    f.struct_field().name == *field_name
-                        && matches!(
-                            f.struct_field().data_type,
-                            TypeDef::DataType(DataType::Timestamp(..), _)
-                        )
+                    f.struct_field().name() == field_name
+                        && matches!(f.struct_field().data_type(), DataType::Timestamp(..))
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -319,8 +309,7 @@ impl ConnectorTable {
                     )
                 })?;
 
-            Ok(Some(Expr::Column(Column::new(
-                field.struct_field().alias.as_ref().cloned(),
+            Ok(Some(Expr::Column(Column::from_name(
                 field.struct_field().name(),
             ))))
         } else {
@@ -362,18 +351,14 @@ impl ConnectorTable {
 
         let source = SqlSource {
             id: self.id,
-            struct_def: StructDef::new(
-                self.type_name.clone(),
-                self.type_name.is_none(),
-                self.fields
-                    .iter()
-                    .filter_map(|field| match field {
-                        FieldSpec::StructField(struct_field) => Some(struct_field.clone()),
-                        FieldSpec::VirtualField { .. } => None,
-                    })
-                    .collect(),
-                self.format.clone(),
-            ),
+            struct_def: self
+                .fields
+                .iter()
+                .filter_map(|field| match field {
+                    FieldSpec::StructField(struct_field) => Some(Arc::new(struct_field.clone())),
+                    FieldSpec::VirtualField { .. } => None,
+                })
+                .collect(),
             config: self.connector_op(),
             processing_mode: self.processing_mode(),
             idle_time: self.idle_time,
@@ -469,7 +454,7 @@ pub enum Table {
     ConnectorTable(ConnectorTable),
     MemoryTable {
         name: String,
-        fields: Vec<StructField>,
+        fields: Vec<FieldRef>,
     },
     TableFromQuery {
         name: String,
@@ -499,14 +484,16 @@ impl Table {
             .iter()
             .map(|column| {
                 let name = column.name.value.to_string();
-                let data_type = convert_data_type(&column.data_type)?;
+                let (data_type, extension) = convert_data_type(&column.data_type)?;
                 let nullable = !column
                     .options
                     .iter()
                     .any(|option| matches!(option.option, ColumnOption::NotNull));
 
-                let struct_field =
-                    StructField::new(name, None, TypeDef::DataType(data_type, nullable));
+                let struct_field = ArroyoExtensionType::add_metadata(
+                    extension,
+                    Field::new(name, data_type, nullable),
+                );
 
                 let generating_expression = column.options.iter().find_map(|option| {
                     if let ColumnOption::Generated {
@@ -522,27 +509,25 @@ impl Table {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let physical_struct: StructDef = StructDef::for_fields(
-            struct_field_pairs
-                .iter()
-                .filter_map(
-                    |(field, generating_expression)| match generating_expression {
-                        Some(_) => None,
-                        None => Some(field.clone()),
-                    },
-                )
-                .collect(),
-        );
+        let physical_fields: Vec<_> = struct_field_pairs
+            .iter()
+            .filter_map(
+                |(field, generating_expression)| match generating_expression {
+                    Some(_) => None,
+                    None => Some(field.clone()),
+                },
+            )
+            .collect();
 
         let _physical_schema = DFSchema::new_with_metadata(
-            physical_struct
-                .fields
+            physical_fields
                 .iter()
                 .map(|f| {
-                    let TypeDef::DataType(data_type, nullable) = f.data_type.clone() else {
-                        bail!("expect data type for generated column")
-                    };
-                    Ok(DFField::new_unqualified(&f.name, data_type, nullable))
+                    Ok(DFField::new_unqualified(
+                        &f.name(),
+                        f.data_type().clone(),
+                        f.is_nullable(),
+                    ))
                 })
                 .collect::<Result<Vec<_>>>()?,
             HashMap::new(),
@@ -615,7 +600,7 @@ impl Table {
                         name,
                         fields: fields
                             .into_iter()
-                            .map(|f| f.struct_field().clone())
+                            .map(|f| Arc::new(f.struct_field().clone()))
                             .collect(),
                     }))
                 }
@@ -701,18 +686,16 @@ impl Table {
         Ok(())
     }
 
-    pub fn get_fields(&self) -> Vec<Field> {
+    pub fn get_fields(&self) -> Vec<FieldRef> {
         match self {
-            Table::MemoryTable { fields, .. } => {
-                fields.iter().map(|field| field.clone().into()).collect()
-            }
+            Table::MemoryTable { fields, .. } => fields.clone(),
             Table::ConnectorTable(ConnectorTable {
                 fields,
                 inferred_fields,
                 ..
             }) => inferred_fields
                 .as_ref()
-                .map(|fs| fs.iter().map(qualified_field).collect())
+                .map(|fs| fs.iter().map(qualified_field).map(Arc::new).collect())
                 .unwrap_or_else(|| {
                     fields
                         .iter()
@@ -724,6 +707,7 @@ impl Table {
                 .fields()
                 .iter()
                 .map(qualified_field)
+                .map(Arc::new)
                 .collect(),
         }
     }

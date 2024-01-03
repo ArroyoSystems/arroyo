@@ -46,10 +46,13 @@ hex = "0.4"
 url = "2.4.0"
 ordered-float = "3"
 deltalake = {version = "=0.16.4", features = ["s3", "arrow"] }
+
 arrow = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
 parquet = { workspace = true, features = ["async"]}
 arrow-array = { workspace = true}
+arrow-json = { workspace = true }
+
 aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
 uuid = {version = "1.4.1", features = ["v4"]}
@@ -87,7 +90,6 @@ datafusion-expr = "34.0.0"
 datafusion-physical-expr = "34.0"
 datafusion-common = "34.0"
 datafusion-execution = "34.0"
-arrow-json = "49.0.0"
 base64 = "0.21.5"
 
 [dev-dependencies]

@@ -224,4 +224,10 @@ impl ArroyoSchema {
             key_indices,
         })
     }
+
+    pub fn schema_without_timestamp(&self) -> Schema {
+        let mut schema = (*self.schema).clone();
+        schema.remove(self.timestamp_index);
+        schema
+    }
 }

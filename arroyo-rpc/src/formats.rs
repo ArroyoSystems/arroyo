@@ -267,6 +267,12 @@ pub enum BadData {
     Drop {},
 }
 
+impl Default for BadData {
+    fn default() -> Self {
+        BadData::Fail {}
+    }
+}
+
 impl BadData {
     pub fn from_opts(opts: &mut HashMap<String, String>) -> Result<Option<Self>, String> {
         let Some(method) = opts.remove("bad_data") else {

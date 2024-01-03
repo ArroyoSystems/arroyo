@@ -1,3 +1,4 @@
+use arrow_schema::FieldRef;
 use arroyo_datastream::logical::LogicalNode;
 use std::time::Duration;
 
@@ -14,7 +15,7 @@ pub enum ProcessingMode {
 #[derive(Clone, Debug)]
 pub struct SqlSource {
     pub id: Option<i64>,
-    pub struct_def: StructDef,
+    pub struct_def: Vec<FieldRef>,
     pub config: ConnectorOp,
     pub processing_mode: ProcessingMode,
     pub idle_time: Option<Duration>,
