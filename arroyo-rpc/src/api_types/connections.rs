@@ -1,5 +1,7 @@
 use crate::formats::{BadData, Format, Framing};
+use crate::primitive_to_sql;
 use anyhow::bail;
+use arrow_schema::{DataType, Field, TimeUnit};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
@@ -68,7 +70,7 @@ impl TryFrom<String> for ConnectionType {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PrimitiveType {
     Int32,
@@ -114,6 +116,63 @@ pub struct SourceField {
     pub field_name: String,
     pub field_type: SourceFieldType,
     pub nullable: bool,
+}
+
+impl TryFrom<Field> for SourceField {
+    type Error = String;
+
+    fn try_from(f: Field) -> Result<Self, Self::Error> {
+        let field_type = match f.data_type() {
+            DataType::Boolean => FieldType::Primitive(PrimitiveType::Bool),
+            DataType::Int32 => FieldType::Primitive(PrimitiveType::Int32),
+            DataType::Int64 => FieldType::Primitive(PrimitiveType::Int64),
+            DataType::UInt32 => FieldType::Primitive(PrimitiveType::UInt32),
+            DataType::UInt64 => FieldType::Primitive(PrimitiveType::UInt64),
+            DataType::Float32 => FieldType::Primitive(PrimitiveType::F32),
+            DataType::Float64 => FieldType::Primitive(PrimitiveType::F64),
+            DataType::Binary | DataType::LargeBinary => FieldType::Primitive(PrimitiveType::Bytes),
+            DataType::Timestamp(TimeUnit::Millisecond, _) => {
+                FieldType::Primitive(PrimitiveType::UnixMillis)
+            }
+            DataType::Timestamp(TimeUnit::Microsecond, _) => {
+                FieldType::Primitive(PrimitiveType::UnixMicros)
+            }
+            DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+                FieldType::Primitive(PrimitiveType::UnixNanos)
+            }
+            DataType::Utf8 => FieldType::Primitive(PrimitiveType::String),
+            DataType::Struct(fields) => {
+                let fields: Result<_, String> = fields
+                    .into_iter()
+                    .map(|f| (**f).clone().try_into())
+                    .collect();
+
+                let st = StructType {
+                    name: None,
+                    fields: fields?,
+                };
+
+                FieldType::Struct(st)
+            }
+            dt => {
+                return Err(format!("Unsupported data type {:?}", dt));
+            }
+        };
+
+        let sql_name = match &field_type {
+            FieldType::Primitive(pt) => Some(primitive_to_sql(*pt).to_string()),
+            _ => None,
+        };
+
+        Ok(SourceField {
+            field_name: f.name().clone(),
+            field_type: SourceFieldType {
+                r#type: field_type,
+                sql_name,
+            },
+            nullable: f.is_nullable(),
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

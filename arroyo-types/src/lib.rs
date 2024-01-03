@@ -13,8 +13,8 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::{Range, RangeInclusive};
 use std::str::FromStr;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Copy, Hash, Debug, Clone, Eq, PartialEq, Encode, Decode, PartialOrd, Ord, Deserialize)]
 pub struct Window {
@@ -1096,6 +1096,37 @@ impl TryFrom<&str> for DatePart {
     }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum ArroyoExtensionType {
+    JSON,
+}
+
+impl ArroyoExtensionType {
+    pub fn from_map(map: &HashMap<String, String>) -> Option<Self> {
+        match map.get("ARROW:extension:name")?.as_str() {
+            "arroyo.json" => Some(Self::JSON),
+            _ => None,
+        }
+    }
+
+    pub fn add_metadata(v: Option<Self>, field: Field) -> Field {
+        if let Some(v) = v {
+            let mut m = HashMap::new();
+            match v {
+                ArroyoExtensionType::JSON => {
+                    m.insert(
+                        "ARROW:extension:name".to_string(),
+                        "arroyo.json".to_string(),
+                    );
+                }
+            }
+            field.with_metadata(m)
+        } else {
+            field
+        }
+    }
+}
+
 impl TryFrom<&str> for DateTruncPrecision {
     type Error = String;
 
@@ -1130,6 +1161,18 @@ pub fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
         start + range_size - 1
     };
     start..=end
+}
+
+pub fn should_flush(size: usize, time: Instant) -> bool {
+    static FLUSH_SIZE: OnceLock<usize> = OnceLock::new();
+    let flush_size =
+        FLUSH_SIZE.get_or_init(|| u32_config(BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE as u32) as usize);
+
+    static FLUSH_LINGER: OnceLock<Duration> = OnceLock::new();
+    let flush_linger =
+        FLUSH_LINGER.get_or_init(|| duration_millis_config(BATCH_LINGER_MS_ENV, DEFAULT_LINGER));
+
+    size > 0 && (size > *flush_size || time.elapsed() >= *flush_linger)
 }
 
 #[cfg(test)]

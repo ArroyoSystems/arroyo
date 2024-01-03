@@ -1,21 +1,22 @@
 extern crate core;
 
 use anyhow::bail;
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType, Field};
 use arrow_array::builder::{ArrayBuilder, StringBuilder, TimestampNanosecondBuilder};
 use arrow_array::cast::AsArray;
 use arrow_array::{Array, RecordBatch, StringArray};
-use arroyo_rpc::formats::{AvroFormat, Format, Framing, FramingMethod};
+use arrow_schema::Schema;
+use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_rpc::ArroyoSchema;
-use arroyo_types::{to_nanos, Data, Debezium, RawJson, SourceError};
+use arroyo_rpc::{ArroyoSchema, TIMESTAMP_FIELD};
+use arroyo_types::{should_flush, to_nanos, Data, Debezium, RawJson, SourceError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
 
 pub mod avro;
@@ -194,25 +195,6 @@ impl SchemaData for () {
     }
 }
 
-// A custom deserializer for json, that takes a json::Value and reserializes it as a string
-// where it can then be accessed using SQL JSON functions -- this is currently a bit inefficient
-// since we need an owned string.
-pub fn deserialize_raw_json<'de, D>(f: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
-    Ok(raw.to_string())
-}
-
-pub fn deserialize_raw_json_opt<'de, D>(f: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let raw: Box<serde_json::value::RawValue> = Box::deserialize(f)?;
-    Ok(Some(raw.to_string()))
-}
-
 pub struct FramingIterator<'a> {
     framing: Option<Arc<Framing>>,
     buf: &'a [u8],
@@ -264,17 +246,25 @@ impl<'a> Iterator for FramingIterator<'a> {
     }
 }
 
-#[derive(Clone)]
 pub struct ArrowDeserializer {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
     schema: ArroyoSchema,
+    bad_data: BadData,
+    json_decoder: Option<(arrow::json::reader::Decoder, TimestampNanosecondBuilder)>,
+    buffered_count: usize,
+    buffered_since: Instant,
     schema_registry: Arc<Mutex<HashMap<u32, apache_avro::schema::Schema>>>,
     schema_resolver: Arc<dyn SchemaResolver + Sync>,
 }
 
 impl ArrowDeserializer {
-    pub fn new(format: Format, schema: ArroyoSchema, framing: Option<Framing>) -> Self {
+    pub fn new(
+        format: Format,
+        schema: ArroyoSchema,
+        framing: Option<Framing>,
+        bad_data: BadData,
+    ) -> Self {
         let resolver = if let Format::Avro(AvroFormat {
             reader_schema: Some(schema),
             ..
@@ -286,21 +276,37 @@ impl ArrowDeserializer {
             Arc::new(FailingSchemaResolver::new()) as Arc<dyn SchemaResolver + Sync>
         };
 
-        Self::with_schema_resolver(format, framing, schema, resolver)
+        Self::with_schema_resolver(format, framing, schema, bad_data, resolver)
     }
 
     pub fn with_schema_resolver(
         format: Format,
         framing: Option<Framing>,
         schema: ArroyoSchema,
+        bad_data: BadData,
         schema_resolver: Arc<dyn SchemaResolver + Sync>,
     ) -> Self {
         Self {
+            json_decoder: matches!(format, Format::Json(..)).then(|| {
+                // exclude the timestamp field
+                (
+                    arrow_json::reader::ReaderBuilder::new(Arc::new(
+                        schema.schema_without_timestamp(),
+                    ))
+                    .with_strict_mode(false)
+                    .build_decoder()
+                    .unwrap(),
+                    TimestampNanosecondBuilder::new(),
+                )
+            }),
             format: Arc::new(format),
             framing: framing.map(|f| Arc::new(f)),
             schema,
             schema_registry: Arc::new(Mutex::new(HashMap::new())),
+            bad_data,
             schema_resolver,
+            buffered_count: 0,
+            buffered_since: Instant::now(),
         }
     }
 
@@ -335,33 +341,65 @@ impl ArrowDeserializer {
         }
     }
 
+    pub fn should_flush(&self) -> bool {
+        should_flush(self.buffered_count, self.buffered_since)
+    }
+
+    pub fn flush_buffer(&mut self) -> Option<Result<RecordBatch, SourceError>> {
+        let (decoder, timestamp) = self.json_decoder.as_mut()?;
+        self.buffered_since = Instant::now();
+        self.buffered_count = 0;
+        Some(
+            decoder
+                .flush()
+                .map_err(|e| SourceError::bad_data(format!("JSON does not match schema: {:?}", e)))
+                .transpose()?
+                .map(|batch| {
+                    let mut columns = batch.columns().to_vec();
+                    columns.insert(self.schema.timestamp_index, Arc::new(timestamp.finish()));
+                    RecordBatch::try_new(self.schema.schema.clone(), columns).unwrap()
+                }),
+        )
+    }
+
     fn deserialize_single(
         &mut self,
         buffer: &mut Vec<Box<dyn ArrayBuilder>>,
         msg: &[u8],
         timestamp: SystemTime,
     ) -> Result<(), SourceError> {
-        let result = match &*self.format {
+        match &*self.format {
+            Format::RawString(_)
+            | Format::Json(JsonFormat {
+                unstructured: true, ..
+            }) => self.deserialize_raw_string(buffer, msg),
             Format::Json(json) => {
-                todo!("json")
-                //json::deserialize_slice_json(json, msg)
+                let msg = if json.confluent_schema_registry {
+                    &msg[5..]
+                } else {
+                    msg
+                };
+
+                let Some((decoder, timestamp_builder)) = &mut self.json_decoder else {
+                    panic!("json decoder not initialized");
+                };
+
+                decoder
+                    .decode(msg)
+                    .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
+                timestamp_builder.append_value(to_nanos(timestamp) as i64);
+                self.buffered_count += 1;
             }
-            Format::Avro(_) => unreachable!("avro should be handled by here"),
+            Format::Avro(_) => unreachable!("this should not be called for avro"),
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
-            Format::RawString(_) => self.deserialize_raw_string(buffer, msg),
         }
-        .map_err(|e: String| SourceError::bad_data(format!("Failed to deserialize: {:?}", e)))?;
 
         self.add_timestamp(buffer, timestamp);
 
         Ok(())
     }
 
-    fn deserialize_raw_string(
-        &mut self,
-        buffer: &mut Vec<Box<dyn ArrayBuilder>>,
-        msg: &[u8],
-    ) -> Result<(), String> {
+    fn deserialize_raw_string(&mut self, buffer: &mut Vec<Box<dyn ArrayBuilder>>, msg: &[u8]) {
         let (col, _) = self
             .schema
             .schema
@@ -372,8 +410,6 @@ impl ArrowDeserializer {
             .downcast_mut::<StringBuilder>()
             .expect("'value' column has incorrect type")
             .append_value(String::from_utf8_lossy(msg));
-
-        Ok(())
     }
 
     fn add_timestamp(&mut self, buffer: &mut Vec<Box<dyn ArrayBuilder>>, timestamp: SystemTime) {
@@ -382,6 +418,10 @@ impl ArrowDeserializer {
             .downcast_mut::<TimestampNanosecondBuilder>()
             .expect("_timestamp column has incorrect type")
             .append_value(to_nanos(timestamp) as i64);
+    }
+
+    pub fn bad_data(&self) -> &BadData {
+        &self.bad_data
     }
 }
 

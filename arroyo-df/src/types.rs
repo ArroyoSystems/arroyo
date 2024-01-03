@@ -25,6 +25,7 @@ use crate::avro;
 use arroyo_rpc::api_types::connections::{
     FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
+use arroyo_types::ArroyoExtensionType;
 use datafusion_common::{DFField, DFSchemaRef, ScalarValue};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
@@ -1624,15 +1625,21 @@ pub(crate) fn data_type_as_syn_type(data_type: &DataType) -> syn::Type {
 
 // Pulled from DataFusion
 
-pub(crate) fn convert_data_type(sql_type: &SQLDataType) -> Result<DataType> {
+pub(crate) fn convert_data_type(
+    sql_type: &SQLDataType,
+) -> Result<(DataType, Option<ArroyoExtensionType>)> {
     match sql_type {
         SQLDataType::Array(ArrayElemTypeDef::AngleBracket(inner_sql_type))
         | SQLDataType::Array(ArrayElemTypeDef::SquareBracket(inner_sql_type)) => {
-            let data_type = convert_simple_data_type(inner_sql_type)?;
+            let (data_type, extension) = convert_simple_data_type(inner_sql_type)?;
 
-            Ok(DataType::List(Arc::new(Field::new(
-                "field", data_type, true,
-            ))))
+            Ok((
+                DataType::List(Arc::new(ArroyoExtensionType::add_metadata(
+                    extension,
+                    Field::new("field", data_type, true),
+                ))),
+                None,
+            ))
         }
         SQLDataType::Array(ArrayElemTypeDef::None) => {
             bail!("Arrays with unspecified type is not supported")
@@ -1641,8 +1648,14 @@ pub(crate) fn convert_data_type(sql_type: &SQLDataType) -> Result<DataType> {
     }
 }
 
-fn convert_simple_data_type(sql_type: &SQLDataType) -> Result<DataType> {
-    match sql_type {
+fn convert_simple_data_type(
+    sql_type: &SQLDataType,
+) -> Result<(DataType, Option<ArroyoExtensionType>)> {
+    if matches!(sql_type, SQLDataType::JSON) {
+        return Ok((DataType::Utf8, Some(ArroyoExtensionType::JSON)));
+    }
+
+    let dt = match sql_type {
         SQLDataType::Boolean | SQLDataType::Bool => Ok(DataType::Boolean),
         SQLDataType::TinyInt(_) => Ok(DataType::Int8),
         SQLDataType::SmallInt(_) | SQLDataType::Int2(_) => Ok(DataType::Int16),
@@ -1700,7 +1713,9 @@ fn convert_simple_data_type(sql_type: &SQLDataType) -> Result<DataType> {
         // adds/changes the `SQLDataType` the compiler will tell us on upgrade
         // and avoid bugs like https://github.com/apache/arrow-datafusion/issues/3059
         _ => bail!("Unsupported SQL type {sql_type:?}"),
-    }
+    };
+
+    Ok((dt?, None))
 }
 
 /// Returns a validated `DataType` for the specified precision and

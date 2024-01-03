@@ -1,7 +1,6 @@
 use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperatorConstructor, BaseOperator};
 use crate::SourceFinishType;
-use arroyo_formats::ArrowDeserializer;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{api, StopMode, TableDescriptor};
 use arroyo_rpc::{var_str::VarStr, ControlMessage, ControlResp, OperatorConfig};
@@ -144,6 +143,12 @@ impl SSESourceFunc {
     }
 
     async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+        ctx.initialize_deserializer(
+            self.format.clone(),
+            self.framing.clone(),
+            self.bad_data.clone(),
+        );
+
         let mut client = eventsource_client::ClientBuilder::for_url(&self.url).unwrap();
 
         if let Some(id) = &self.state.last_id {
@@ -156,15 +161,6 @@ impl SSESourceFunc {
 
         let mut stream = client.build().stream();
         let events: HashSet<_> = self.events.iter().cloned().collect();
-
-        let mut deserializer = ArrowDeserializer::new(
-            self.format.clone(),
-            ctx.out_schema
-                .as_ref()
-                .expect("source must have an out schema")
-                .clone(),
-            self.framing.clone(),
-        );
 
         let mut flush_ticker = tokio::time::interval(Duration::from_millis(50));
         flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -183,12 +179,11 @@ impl SSESourceFunc {
                                         }
 
                                         if events.is_empty() || events.contains(&event.event_type) {
-                                            let errors = deserializer.deserialize_slice(ctx.buffer(),
-                                                &event.data.as_bytes(), SystemTime::now()).await;
-                                            ctx.collect_source_errors(errors, &self.bad_data).await?;
+                                            ctx.deserialize_slice(
+                                                &event.data.as_bytes(), SystemTime::now()).await?;
 
                                             if ctx.should_flush() {
-                                                ctx.flush_buffer().await;
+                                                ctx.flush_buffer().await?;
                                             }
                                         }
                                     }
@@ -220,7 +215,7 @@ impl SSESourceFunc {
                     }
                     _ = flush_ticker.tick() => {
                         if ctx.should_flush() {
-                            ctx.flush_buffer().await;
+                            ctx.flush_buffer().await?;
                         }
                     }
                 }

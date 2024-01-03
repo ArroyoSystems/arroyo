@@ -1,7 +1,6 @@
 use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperatorConstructor, BaseOperator};
 use crate::SourceFinishType;
-use arroyo_formats::ArrowDeserializer;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::grpc::{api, TableDescriptor};
@@ -171,13 +170,10 @@ impl KafkaSourceFunc {
             .await;
         }
 
-        let mut deserializer = ArrowDeserializer::with_schema_resolver(
+        ctx.initialize_deserializer_with_resolver(
             self.format.clone(),
             self.framing.clone(),
-            ctx.out_schema
-                .as_ref()
-                .expect("kafka source must have an out schema")
-                .clone(),
+            self.bad_data.clone(),
             self.schema_resolver.clone(),
         );
 
@@ -194,11 +190,10 @@ impl KafkaSourceFunc {
                                     .ok_or_else(|| UserError::new("Failed to read timestamp from Kafka record",
                                         "The message read from Kafka did not contain a message timestamp"))?;
 
-                                let errors = deserializer.deserialize_slice(ctx.buffer(), &v, from_millis(timestamp as u64)).await;
-                                ctx.collect_source_errors(errors, &self.bad_data).await?;
+                                ctx.deserialize_slice(&v, from_millis(timestamp as u64)).await?;
 
                                 if ctx.should_flush() {
-                                    ctx.flush_buffer().await;
+                                    ctx.flush_buffer().await?;
                                 }
 
                                 offsets.insert(msg.partition(), msg.offset());
@@ -212,7 +207,7 @@ impl KafkaSourceFunc {
                 }
                 _ = flush_ticker.tick() => {
                     if ctx.should_flush() {
-                        ctx.flush_buffer().await;
+                        ctx.flush_buffer().await?;
                     }
                 }
                 control_message = ctx.control_rx.recv() => {

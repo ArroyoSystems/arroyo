@@ -1,13 +1,15 @@
-use arrow::datatypes::{Field, Fields};
+use arrow::datatypes::{Field, Fields, SchemaRef};
+use arrow_array::builder::{ArrayBuilder, StringBuilder};
 use arroyo_rpc::formats::JsonFormat;
-use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-pub fn deserialize_slice_json<T: DeserializeOwned>(
+pub fn deserialize_slice_json(
+    schema: &SchemaRef,
+    buffer: &mut Vec<Box<dyn ArrayBuilder>>,
     format: &JsonFormat,
     msg: &[u8],
-) -> Result<T, String> {
+) -> Result<(), String> {
     let msg = if format.confluent_schema_registry {
         &msg[5..]
     } else {
@@ -15,6 +17,14 @@ pub fn deserialize_slice_json<T: DeserializeOwned>(
     };
 
     if format.unstructured {
+        let (idx, _) = schema
+            .column_with_name("value")
+            .expect("no 'value' column for RawString format");
+        let array = buffer[idx]
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .expect("'value' column has incorrect type");
+
         let j = if format.include_schema {
             // we need to deserialize it to pull out the payload
             let v: Value = serde_json::from_slice(&msg)
@@ -23,23 +33,18 @@ pub fn deserialize_slice_json<T: DeserializeOwned>(
                 "`include_schema` set to true, but record does not have a payload field".to_string()
             })?;
 
-            json! {
-                { "value": serde_json::to_string(payload).unwrap() }
-            }
+            array.append_value(serde_json::to_string(payload).unwrap());
         } else {
-            json! {
-                { "value": String::from_utf8_lossy(msg) }
-            }
+            array.append_value(
+                String::from_utf8(msg.to_vec()).map_err(|_| "data is not valid UTF-8")?,
+            );
         };
-
-        // TODO: this is inefficient, because we know that T is RawJson in this case and can much more directly
-        //  produce that value. However, without specialization I don't know how to get the compiler to emit
-        //  the optimized code for that case.
-        Ok(serde_json::from_value(j).unwrap())
     } else {
         serde_json::from_slice(msg)
-            .map_err(|e| format!("Failed to deserialize JSON into schema: {:?}", e))
+            .map_err(|e| format!("Failed to deserialize JSON into schema: {:?}", e))?;
     }
+
+    Ok(())
 }
 
 #[derive(Debug)]

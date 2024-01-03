@@ -92,7 +92,7 @@ impl<T: SchemaData> DataDeserializer<T> {
 
     pub fn deserialize_single(&self, msg: &[u8]) -> Result<T, SourceError> {
         match &*self.format {
-            Format::Json(json) => json::deserialize_slice_json(json, msg),
+            Format::Json(json) => unimplemented!(),
             Format::Avro(_) => unreachable!("avro should be handled by here"),
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
             Format::RawString(_) => deserialize_raw_string(msg),

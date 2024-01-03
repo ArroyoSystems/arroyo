@@ -2,7 +2,7 @@
 use anyhow::{anyhow, bail, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
-use arrow_schema::{Schema, TimeUnit};
+use arrow_schema::{FieldRef, Schema, TimeUnit};
 use arroyo_connectors::Connection;
 use arroyo_datastream::WindowType;
 
@@ -399,10 +399,11 @@ pub fn parse_dependencies(definition: &str) -> Result<String> {
     };
 }
 
-fn create_table_source(table_name: String, fields: Vec<Field>) -> Arc<dyn TableSource> {
-    let schema = add_timestamp_field_if_missing_arrow(Arc::new(
-        datatypes::Schema::new_with_metadata(fields, HashMap::new()),
-    ));
+fn create_table_source(table_name: String, fields: Vec<FieldRef>) -> Arc<dyn TableSource> {
+    let schema = add_timestamp_field_if_missing_arrow(Arc::new(Schema::new_with_metadata(
+        fields,
+        HashMap::new(),
+    )));
     let table_provider = LogicalBatchInput { table_name, schema };
     let wrapped = Arc::new(table_provider);
     let provider = DefaultTableSource::new(wrapped);
@@ -806,7 +807,11 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                         .fields()
                         .iter()
                         .map(|field| {
-                            Field::new(field.name(), field.data_type().clone(), field.is_nullable())
+                            Arc::new(Field::new(
+                                field.name(),
+                                field.data_type().clone(),
+                                field.is_nullable(),
+                            ))
                         })
                         .collect(),
                 );
@@ -887,11 +892,11 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                             .fields()
                             .iter()
                             .map(|field| {
-                                Field::new(
+                                Arc::new(Field::new(
                                     field.name(),
                                     field.data_type().clone(),
                                     field.is_nullable(),
-                                )
+                                ))
                             })
                             .collect(),
                     ),
@@ -1025,6 +1030,10 @@ pub async fn parse_and_get_arrow_program(
                 &mut schema_provider,
             )?);
         };
+    }
+
+    if inserts.is_empty() {
+        bail!("The provided SQL does not contain a query");
     }
 
     let mut rewriter = QueryToGraphVisitor::default();
