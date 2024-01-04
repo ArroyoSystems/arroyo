@@ -202,7 +202,7 @@ impl<K: Key + Serialize, T: SchemaData + Serialize> KafkaSinkFunc<K, T> {
                     .await
                     .unwrap();
 
-                panic!("Unhandled kafka error: {:?}", e);
+                panic!("{}: {}", e.name, e.details);
             }
         }
     }
