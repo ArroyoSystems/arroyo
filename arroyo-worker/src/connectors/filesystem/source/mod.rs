@@ -7,12 +7,14 @@ use std::time::SystemTime;
 use anyhow::Result;
 use arrow_array::RecordBatch;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+use arroyo_state::{global_table, global_table_config};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion_common::ScalarValue;
 use futures::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use prost::Message;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::select;
@@ -22,7 +24,7 @@ use tracing::{info, warn};
 
 use arroyo_formats::old::DataDeserializer;
 use arroyo_rpc::formats::BadData;
-use arroyo_rpc::grpc::api;
+use arroyo_rpc::grpc::{api, TableConfig, TableEnum};
 use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{to_nanos, ArrowMessage, UserError};
@@ -70,8 +72,10 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for FileSystemSourceFunc {
 
 #[async_trait]
 impl BaseOperator for FileSystemSourceFunc {
-    fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
-        vec![arroyo_state::global_table('a', "fs")]
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        vec![("a".to_string(), global_table_config("a", "fs"))]
+            .into_iter()
+            .collect()
     }
 
     fn name(&self) -> String {
@@ -160,13 +164,15 @@ impl FileSystemSourceFunc {
                 }
             });
 
-        let mut state: GlobalKeyedState<String, (String, FileReadState), _> =
-            ctx.state.get_global_keyed_state('a').await;
-        self.file_states = state
-            .get_all()
-            .into_iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<
+            String,
+            (String, FileReadState),
+        > = ctx
+            .table_manager
+            .get_global_keyed_state("a")
+            .await
+            .expect("should have table");
+        self.file_states = state.get_all().into_values().collect();
 
         while let Some(path) = file_paths.next().await {
             let obj_key = path
@@ -334,9 +340,10 @@ impl FileSystemSourceFunc {
         match control_message {
             ControlMessage::Checkpoint(c) => {
                 for (file, read_state) in &self.file_states {
-                    ctx.state
-                        .get_global_keyed_state('a')
+                    ctx.table_manager
+                        .get_global_keyed_state("a")
                         .await
+                        .unwrap()
                         .insert(file.clone(), (file.clone(), read_state.clone()))
                         .await;
                 }

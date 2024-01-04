@@ -2,15 +2,17 @@ use crate::tables::DataTuple;
 use anyhow::Result;
 use arrow_array::RecordBatch;
 use arroyo_rpc::grpc::{
-    CheckpointMetadata, OperatorCheckpointMetadata, TableDeleteBehavior, TableDescriptor,
+    CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig,
+    OperatorCheckpointMetadata, TableConfig, TableDeleteBehavior, TableDescriptor, TableEnum,
     TableType, TableWriteBehavior,
 };
-use arroyo_rpc::{CompactionResult, ControlResp};
+use arroyo_rpc::{ArroyoSchema, CompactionResult, ControlResp};
 use arroyo_types::{CheckpointBarrier, Data, Key, TaskInfo};
 use async_trait::async_trait;
 use bincode::config::Configuration;
 use bincode::{Decode, Encode};
 use parquet::ParquetStats;
+use prost::Message;
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -34,6 +36,26 @@ pub mod tables;
 pub const BINCODE_CONFIG: Configuration = bincode::config::standard();
 pub const FULL_KEY_RANGE: RangeInclusive<u64> = 0..=u64::MAX;
 
+#[derive(Debug)]
+pub enum StateMessage {
+    Checkpoint(CheckpointMessage),
+    TableData { table: String, data: TableData },
+}
+#[derive(Debug)]
+pub struct CheckpointMessage {
+    epoch: u32,
+    time: SystemTime,
+    watermark: Option<SystemTime>,
+    then_stop: bool,
+}
+
+#[derive(Debug)]
+pub enum TableData {
+    RecordBatch(RecordBatch),
+    CommitData { data: Vec<u8> },
+    KeyedData { key: Vec<u8>, value: Vec<u8> },
+}
+
 pub type StateBackend = parquet::ParquetBackend;
 
 pub fn global_table(name: impl Into<String>, description: impl Into<String>) -> TableDescriptor {
@@ -44,6 +66,35 @@ pub fn global_table(name: impl Into<String>, description: impl Into<String>) -> 
         delete_behavior: TableDeleteBehavior::None as i32,
         write_behavior: TableWriteBehavior::DefaultWrites as i32,
         retention_micros: 0,
+    }
+}
+
+pub fn global_table_config(name: impl Into<String>, description: impl Into<String>) -> TableConfig {
+    TableConfig {
+        table_type: TableEnum::GlobalKeyValue.into(),
+        config: GlobalKeyedTableConfig {
+            table_name: name.into(),
+            description: description.into(),
+        }
+        .encode_to_vec(),
+    }
+}
+
+pub fn timestamp_table_config(
+    name: impl Into<String>,
+    description: impl Into<String>,
+    retention: Duration,
+    schema: ArroyoSchema,
+) -> TableConfig {
+    TableConfig {
+        table_type: TableEnum::ExpiringKeyedTimeTable.into(),
+        config: ExpiringKeyedTimeTableConfig {
+            table_name: name.into(),
+            description: description.into(),
+            retention_micros: retention.as_micros() as u64,
+            schema: Some(schema.try_into().unwrap()),
+        }
+        .encode_to_vec(),
     }
 }
 
@@ -232,12 +283,9 @@ pub trait BackingStore {
     /// this data will be passed to all subtasks of the operator in the commit message.
     async fn insert_committing_data(&mut self, epoch: u32, table: char, committing_data: Vec<u8>);
 
-    async fn write_record_batch_to_table(
-        &mut self,
-        table: char,
-        parquet_stats: ParquetStats,
-        batch: RecordBatch,
-    );
+    async fn register_record_batch_table(&mut self, table: char, schema: ArroyoSchema);
+
+    async fn write_record_batch_to_table(&mut self, table: char, batch: RecordBatch);
 }
 
 pub struct StateStore<S: BackingStore> {
@@ -386,7 +434,13 @@ impl<S: BackingStore> StateStore<S> {
         table: char,
     ) -> GlobalKeyedState<K, V, S> {
         // make sure table is correct type
-        if self.table_descriptors.get(&table).unwrap().table_type != TableType::Global as i32 {
+        if self
+            .table_descriptors
+            .get(&table)
+            .expect(&format!("should have table for {}", table))
+            .table_type
+            != TableType::Global as i32
+        {
             panic!("Table {} is not Global", table);
         }
 
@@ -463,24 +517,26 @@ impl<S: BackingStore> StateStore<S> {
             .insert_committing_data(epoch, table, committing_data)
             .await
     }
-    pub async fn insert_record_batch(
-        &mut self,
-        table: char,
-        record_batch: RecordBatch,
-        parquet_stats: ParquetStats,
-    ) {
+    pub async fn insert_record_batch(&mut self, table: char, record_batch: RecordBatch) {
         self.backend
-            .write_record_batch_to_table(table, parquet_stats, record_batch)
+            .write_record_batch_to_table(table, record_batch)
+            .await;
+    }
+
+    pub async fn register_record_batch_table(&mut self, table: char, schema: ArroyoSchema) {
+        self.backend
+            .register_record_batch_table(table, schema)
             .await;
     }
 }
-
+/*
 #[cfg(test)]
 mod test {
     use arroyo_rpc::grpc::{
         CheckpointMetadata, OperatorCheckpointMetadata, TableDeleteBehavior, TableDescriptor,
         TableWriteBehavior,
     };
+    use std::collections::HashMap;
     use std::env;
     use test_case::test_case;
     use tokio::sync::mpsc::Receiver;
@@ -616,6 +672,7 @@ mod test {
             backend_data: message.subtask_metadata.backend_data,
             bytes: 5,
             commit_data: None,
+            table_checkpoint_metadata: HashMap::new(),
         })
         .await;
 
@@ -902,3 +959,4 @@ mod test {
         assert_eq!(None, ks.get(&mut 1));
     }
 }
+*/

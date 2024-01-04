@@ -818,6 +818,7 @@ dependencies = [
 name = "arroyo-datastream"
 version = "0.9.0-dev"
 dependencies = [
+ "ahash 0.8.7",
  "anyhow",
  "arrow-schema 49.0.0",
  "arroyo-macro",
@@ -1011,10 +1012,13 @@ dependencies = [
 name = "arroyo-state"
 version = "0.9.0-dev"
 dependencies = [
+ "ahash 0.8.7",
  "anyhow",
  "arrow 49.0.0",
  "arrow-array 49.0.0",
  "arrow-schema 49.0.0",
+ "arroyo-datastream",
+ "arroyo-df",
  "arroyo-metrics",
  "arroyo-rpc",
  "arroyo-storage",
@@ -1025,6 +1029,12 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "bytes",
  "ctor",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-execution",
+ "datafusion-expr",
+ "datafusion-physical-expr",
+ "datafusion-proto",
  "futures",
  "lazy_static",
  "once_cell",

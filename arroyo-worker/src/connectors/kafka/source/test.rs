@@ -134,7 +134,6 @@ impl KafkaTopicTester {
             )),
             None,
             vec![vec![data_tx]],
-            source::tables(),
             HashMap::new(),
         )
         .await;
@@ -300,6 +299,8 @@ async fn test_kafka() {
         backend_data: checkpoint_completed.subtask_metadata.backend_data,
         bytes: checkpoint_completed.subtask_metadata.bytes,
         commit_data: None,
+        table_checkpoint_metadata: HashMap::new(),
+        table_configs: HashMap::new(),
     })
     .await;
 

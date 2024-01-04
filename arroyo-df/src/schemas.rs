@@ -221,7 +221,7 @@ pub(crate) fn has_timestamp_field_arrow(schema: SchemaRef) -> bool {
     schema.fields.iter().any(|f| f.name() == "_timestamp")
 }
 
-pub(crate) fn add_timestamp_field_arrow(schema: SchemaRef) -> SchemaRef {
+pub fn add_timestamp_field_arrow(schema: SchemaRef) -> SchemaRef {
     let mut fields = schema.fields().to_vec();
     fields.push(Arc::new(Field::new(
         "_timestamp",

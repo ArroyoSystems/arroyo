@@ -12,6 +12,7 @@ use crate::metrics::TaskCounters;
 use crate::ControlOutcome;
 use arrow_array::types::TimestampNanosecondType;
 use arrow_array::{Array, PrimitiveArray, RecordBatch};
+use arroyo_rpc::grpc::TableConfig;
 use arroyo_rpc::ArroyoSchema;
 use arroyo_rpc::{
     grpc::{CheckpointMetadata, TableDescriptor, TaskCheckpointEventType},
@@ -173,11 +174,13 @@ impl ProcessFnUtils {
         watermark: SystemTime,
         ctx: &mut ArrowContext,
     ) -> Vec<(OutK, TimerValue<OutK, Timer>)> {
+        /* TODO: decide how we want to handle timers in Arrow world.
         let mut state = ctx
-            .state
-            .get_time_key_map(TIMER_TABLE, ctx.last_present_watermark())
-            .await;
-        state.evict_all_before_watermark(watermark)
+           .state
+           .get_time_key_map(TIMER_TABLE, ctx.last_present_watermark())
+           .await;
+        //state.evict_all_before_watermark(watermark)*/
+        vec![]
     }
 
     pub async fn send_checkpoint_event<OutK: Key, OutT: Data>(
@@ -244,7 +247,6 @@ pub trait BaseOperator: Send + 'static {
                 projection,
                 out_qs,
                 tables,
-                HashMap::new(),
             )
             .await;
 
@@ -296,7 +298,9 @@ pub trait BaseOperator: Send + 'static {
 
         let watermark = ctx.watermarks.last_present_watermark();
 
-        ctx.state.checkpoint(checkpoint_barrier, watermark).await;
+        ctx.table_manager
+            .checkpoint(checkpoint_barrier, watermark)
+            .await;
 
         ctx.send_checkpoint_event(checkpoint_barrier, TaskCheckpointEventType::FinishedSync)
             .await;
@@ -311,7 +315,7 @@ pub trait BaseOperator: Send + 'static {
 
     fn name(&self) -> String;
 
-    fn tables(&self) -> Vec<TableDescriptor>;
+    fn tables(&self) -> HashMap<String, TableConfig>;
 
     #[allow(unused)]
     async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {}
@@ -424,7 +428,7 @@ impl<T: ArrowOperator> BaseOperator for T {
         self.name()
     }
 
-    fn tables(&self) -> Vec<TableDescriptor> {
+    fn tables(&self) -> HashMap<String, TableConfig> {
         self.tables()
     }
 
@@ -537,7 +541,7 @@ pub trait ArrowOperator: Send + 'static + Sized {
 
                 if let Some(watermark) = watermark {
                     if let Watermark::EventTime(t) = watermark {
-                        ctx.state.handle_watermark(t);
+                        // TOOD: pass to table_manager
                     }
 
                     self.handle_watermark_int(watermark, ctx).await;
@@ -561,8 +565,8 @@ pub trait ArrowOperator: Send + 'static + Sized {
 
     fn name(&self) -> String;
 
-    fn tables(&self) -> Vec<TableDescriptor> {
-        vec![]
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        HashMap::new()
     }
 
     fn tick_interval(&self) -> Option<Duration> {

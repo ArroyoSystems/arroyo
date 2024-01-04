@@ -94,10 +94,9 @@ impl ArrowOperator for ValueExecutionOperator {
 
     async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut ArrowContext) {
         //info!("incoming record batch {:?}", record_batch);
-        let batch = record_batch.clone();
         {
             let mut writer = self.locked_batch.write().unwrap();
-            *writer = Some(batch);
+            *writer = Some(record_batch);
         }
         let session_context = SessionContext::new();
         let mut records = self

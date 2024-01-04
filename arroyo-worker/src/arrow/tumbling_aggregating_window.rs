@@ -16,16 +16,22 @@ use arrow_array::{
     Array, ArrayRef, GenericByteArray, NullArray, PrimitiveArray, RecordBatch,
 };
 use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef, TimeUnit};
-use arroyo_df::schemas::window_arrow_struct;
-use arroyo_rpc::grpc::{
-    api, api::window::Window, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
+use arroyo_df::schemas::{add_timestamp_field_arrow, window_arrow_struct};
+use arroyo_rpc::{
+    grpc::{
+        api, api::window::Window, TableConfig, TableDeleteBehavior, TableDescriptor, TableType,
+        TableWriteBehavior,
+    },
+    ArroyoSchema,
 };
 use arroyo_state::{
     parquet::{ParquetStats, RecordBatchBuilder},
-    DataOperation,
+    tables::expiring_time_key_map,
+    timestamp_table_config, DataOperation,
 };
 use arroyo_types::{
-    from_nanos, to_nanos, ArrowMessage, Record, RecordBatchData, SignalMessage, Watermark,
+    from_nanos, to_nanos, ArrowMessage, CheckpointBarrier, Record, RecordBatchData, SignalMessage,
+    Watermark,
 };
 use bincode::config;
 use datafusion::{
@@ -62,6 +68,7 @@ pub struct TumblingAggregatingWindowFunc {
     width: Duration,
     binning_function: Arc<dyn PhysicalExpr>,
     partial_aggregation_plan: Arc<dyn ExecutionPlan>,
+    partial_schema: ArroyoSchema,
     finish_execution_plan: Arc<dyn ExecutionPlan>,
     // the partial aggregation plan shares a reference to it,
     // which is only used on the exec()
@@ -71,106 +78,18 @@ pub struct TumblingAggregatingWindowFunc {
     execs: BTreeMap<usize, BinComputingHolder>,
     window_field: FieldRef,
     window_index: usize,
-    converter_tools: ConverterTools,
+}
+
+impl TumblingAggregatingWindowFunc {
+    fn time_to_bin(&self, time: SystemTime) -> usize {
+        (to_nanos(time) / self.width.as_nanos()) as usize
+    }
 }
 
 #[derive(Default)]
 struct BinComputingHolder {
     active_exec: Option<SendableRecordBatchStream>,
     finished_batches: Vec<RecordBatch>,
-}
-
-struct ConverterTools {
-    key_indices: Vec<usize>,
-    key_converter: RowConverter,
-    value_indices: Vec<usize>,
-    value_converter: RowConverter,
-    timestamp_index: usize,
-}
-
-impl ConverterTools {
-    fn get_state_record_batch(&mut self, batch: &RecordBatch) -> (RecordBatch, ParquetStats) {
-        let key_batch = batch.project(&self.key_indices).unwrap();
-        let mut key_bytes = arrow_array::builder::BinaryBuilder::default();
-        let mut hash_buffer = vec![0u64; key_batch.num_rows()];
-        let key_rows = if key_batch.num_columns() > 0 {
-            self.key_converter
-                .convert_columns(key_batch.columns())
-                .unwrap()
-        } else {
-            let null_key_converter =
-                RowConverter::new(vec![SortField::new(DataType::Null)]).unwrap();
-            let null_array = NullArray::new(key_batch.num_rows());
-            let null_array_ref = Arc::new(null_array) as Arc<dyn Array>;
-            let column: Vec<ArrayRef> = vec![null_array_ref];
-            null_key_converter.convert_columns(&column).unwrap()
-        };
-
-        let mut rows = 0;
-        if key_batch.num_columns() > 0 {
-            for key_row in key_rows.into_iter() {
-                key_bytes.append_value(key_row.as_ref());
-                rows += 1;
-            }
-        } else {
-            for _i in 0..batch.num_rows() {
-                key_bytes.append_value(vec![]);
-            }
-        }
-        let random_state = RandomState::with_seeds(2, 4, 19, 90);
-        create_hashes(key_batch.columns(), &random_state, &mut hash_buffer).unwrap();
-
-        let value_batch = batch.project(&self.value_indices).unwrap();
-        let value_rows = self
-            .value_converter
-            .convert_columns(value_batch.columns())
-            .unwrap();
-        let mut value_bytes = arrow_array::builder::BinaryBuilder::default();
-        value_rows
-            .into_iter()
-            .for_each(|row| value_bytes.append_value(row.as_ref()));
-        let timestamp_column = batch
-            .column(self.timestamp_index)
-            .as_any()
-            .downcast_ref::<PrimitiveArray<TimestampNanosecondType>>()
-            .unwrap();
-        let max_timestamp = from_nanos(kernels::aggregate::max(timestamp_column).unwrap() as u128);
-        let key_hash_column = PrimitiveArray::<UInt64Type>::from(hash_buffer);
-        let key_column = key_bytes.finish();
-        if value_batch.num_columns() == 0 {
-            for _i in 0..batch.num_rows() {
-                value_bytes.append_value(vec![]);
-            }
-        }
-        let value_column = value_bytes.finish();
-
-        let min_routing_key = kernels::aggregate::min(&key_hash_column).unwrap();
-        let max_routing_key = kernels::aggregate::max(&key_hash_column).unwrap();
-        let insert_op = ScalarValue::Binary(Some(
-            bincode::encode_to_vec(DataOperation::Insert, config::standard()).unwrap(),
-        ));
-        let op_array = insert_op.to_array_of_size(batch.num_rows()).unwrap();
-        let x = op_array
-            .as_any()
-            .downcast_ref::<GenericByteArray<GenericBinaryType<i32>>>()
-            .unwrap()
-            .clone();
-        let batch = RecordBatchBuilder::get_batch(
-            key_hash_column,
-            timestamp_column.reinterpret_cast(),
-            key_column,
-            value_column,
-            x,
-        );
-        (
-            batch,
-            ParquetStats {
-                max_timestamp,
-                min_routing_key,
-                max_routing_key,
-            },
-        )
-    }
 }
 
 pub struct Registry {}
@@ -224,7 +143,6 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
             .into_iter()
             .map(|x| x as usize)
             .collect();
-        info!("KEY INDICES: {:?}", key_indices);
         let input_schema: Schema = serde_json::from_slice(proto_config.input_schema.as_slice())
             .context(format!(
                 "failed to deserialize schema of length {}",
@@ -234,43 +152,6 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
         let value_indices: Vec<_> = (0..input_schema.fields().len())
             .filter(|index| !key_indices.contains(index) && timestamp_index != *index)
             .collect();
-
-        let key_converter = RowConverter::new(
-            input_schema
-                .fields()
-                .iter()
-                .enumerate()
-                .filter_map(|(i, field)| {
-                    if key_indices.contains(&i) {
-                        Some(SortField::new(field.data_type().clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-        )?;
-        let value_converter = RowConverter::new(
-            input_schema
-                .fields()
-                .iter()
-                .enumerate()
-                .filter_map(|(i, field)| {
-                    if value_indices.contains(&i) {
-                        Some(SortField::new(field.data_type().clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-        )?;
-
-        let converter_tools = ConverterTools {
-            key_indices,
-            key_converter,
-            value_indices,
-            value_converter,
-            timestamp_index,
-        };
 
         let receiver = Arc::new(RwLock::new(None));
         let final_batches_passer = Arc::new(RwLock::new(Vec::new()));
@@ -352,10 +233,20 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
             PhysicalPlanType::PlaceholderRow(_) => todo!(),
         };
 
+        let schema_ref = partial_aggregation_plan.schema();
+        let partial_schema = add_timestamp_field_arrow(schema_ref);
+        let timestamp_index = partial_schema.fields().len() - 1;
+        let partial_schema = ArroyoSchema {
+            schema: partial_schema,
+            timestamp_index: timestamp_index,
+            key_indices,
+        };
+
         Ok(Self {
             width: Duration::from_micros(window.size_micros),
             binning_function,
             partial_aggregation_plan,
+            partial_schema,
             finish_execution_plan,
             receiver,
             final_batches_passer,
@@ -363,7 +254,6 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
             execs: BTreeMap::new(),
             window_field,
             window_index: proto_config.window_index as usize,
-            converter_tools,
         })
     }
 }
@@ -385,6 +275,22 @@ struct BinAggregator {
 impl ArrowOperator for TumblingAggregatingWindowFunc {
     fn name(&self) -> String {
         "tumbling_window".to_string()
+    }
+
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        let watermark = ctx.last_present_watermark();
+        let table = ctx
+            .table_manager
+            .get_expiring_time_key_table("t", watermark)
+            .await
+            .expect("should be able to load table");
+        for (timestamp, batch) in table.all_batches_for_watermark(watermark) {
+            let bin = self.time_to_bin(*timestamp);
+            let holder = self.execs.entry(bin).or_default();
+            batch
+                .iter()
+                .for_each(|batch| holder.finished_batches.push(batch.clone()));
+        }
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
@@ -430,13 +336,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
             .as_any()
             .downcast_ref::<PrimitiveArray<Int64Type>>()
             .unwrap();
-        //info!("received record batch with {} records and  {:?} partitions", batch.num_rows(), partition.ranges().len());
+
         for range in partition.ranges() {
             let bin = typed_bin.value(range.start) as usize;
             let bin_batch = sorted.slice(range.start, range.end - range.start);
             let bin_exec = self.execs.entry(bin).or_default();
             if bin_exec.active_exec.is_none() {
-                info!("no exec for {}, creating", bin);
                 let (unbounded_sender, unbounded_receiver) = unbounded_channel();
                 self.senders.insert(bin, unbounded_sender);
                 {
@@ -479,7 +384,6 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                     }
                     {
                         let mut batches = self.final_batches_passer.write().unwrap();
-                        info!("first batch:{:?}", exec.finished_batches.first());
                         let finished_batches = mem::take(&mut exec.finished_batches);
                         *batches = finished_batches;
                     }
@@ -489,7 +393,6 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                         .unwrap();
                     while let Some(batch) = final_exec.next().await {
                         let batch = batch.expect("should be able to compute batch");
-                        info!("batch {:?}", batch);
                         let bin_start = ((popped_bin) * (self.width.as_nanos() as usize)) as i64;
                         let bin_end = bin_start + (self.width.as_nanos() as i64);
                         let timestamp = bin_end - 1;
@@ -538,5 +441,54 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
         // by default, just pass watermarks on down
         ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
             .await;
+    }
+
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {
+        let keys: Vec<_> = self.senders.keys().cloned().collect();
+        self.senders.clear();
+        let watermark = ctx
+            .watermark()
+            .map(|watermark: Watermark| match watermark {
+                Watermark::EventTime(watermark) => Some(watermark),
+                Watermark::Idle => None,
+            })
+            .flatten();
+        let table = ctx
+            .table_manager
+            .get_expiring_time_key_table("t", watermark)
+            .await
+            .expect("should get table");
+
+        for key in keys {
+            let exec = self.execs.get_mut(&key).unwrap();
+            let bucket_nanos = key as i64 * (self.width.as_nanos() as i64);
+            let mut active_exec = exec.active_exec.take().expect("this should be active");
+            while let Some(batch) = active_exec.next().await {
+                let batch = batch.expect("should be able to compute batch");
+                let bin_start = ScalarValue::TimestampNanosecond(Some(bucket_nanos), None);
+                let timestamp_array = bin_start.to_array_of_size(batch.num_rows()).unwrap();
+                let mut columns = batch.columns().to_vec();
+                columns.push(timestamp_array);
+                let state_batch =
+                    RecordBatch::try_new(self.partial_schema.schema.clone(), columns).unwrap();
+                table.insert(from_nanos(bucket_nanos as u128), state_batch);
+                exec.finished_batches.push(batch);
+            }
+        }
+        table.flush(watermark).await.unwrap();
+    }
+
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        vec![(
+            "t".to_string(),
+            timestamp_table_config(
+                "t",
+                "tumbling_intermediate",
+                self.width,
+                self.partial_schema.clone(),
+            ),
+        )]
+        .into_iter()
+        .collect()
     }
 }

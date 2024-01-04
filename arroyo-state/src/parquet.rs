@@ -1,18 +1,25 @@
 use crate::metrics::CURRENT_FILES_GAUGE;
-use crate::tables::{BlindDataTuple, Compactor, DataTuple};
+use crate::tables::expiring_time_key_map::ExpiringTimeKeyTable;
+use crate::tables::global_keyed_map::GlobalKeyedTable;
+use crate::tables::{BlindDataTuple, Compactor, DataTuple, ErasedTable};
 use crate::{
     hash_key, BackingStore, DataOperation, DeleteKeyOperation, DeleteTimeKeyOperation,
     DeleteTimeRangeOperation, DeleteValueOperation, StateStore, BINCODE_CONFIG,
 };
+use ahash::RandomState;
 use anyhow::{bail, Context, Result};
-use arrow_array::types::GenericBinaryType;
-use arrow_array::{Array, RecordBatch};
+use arrow::compute::kernels;
+use arrow::record_batch;
+use arrow_array::cast::AsArray;
+use arrow_array::types::{GenericBinaryType, TimestampNanosecondType, UInt64Type};
+use arrow_array::{Array, GenericByteArray, PrimitiveArray, RecordBatch, RecordBatchReader};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use arroyo_rpc::grpc::backend_data::BackendData;
 use arroyo_rpc::grpc::{
     backend_data, CheckpointMetadata, OperatorCheckpointMetadata, ParquetStoreData,
     SubtaskCheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType,
 };
-use arroyo_rpc::{grpc, CheckpointCompleted, CompactionResult, ControlResp};
+use arroyo_rpc::{grpc, ArroyoSchema, CheckpointCompleted, CompactionResult, ControlResp};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{
     from_nanos, range_for_server, to_micros, to_nanos, CheckpointBarrier, Data, Key, TaskInfo,
@@ -20,17 +27,26 @@ use arroyo_types::{
 };
 use bincode::config;
 use bytes::Bytes;
+use datafusion::physical_plan::projection::ProjectionExec;
+use datafusion_common::hash_utils::create_hashes;
+use datafusion_common::{DFSchema, ScalarValue};
+use datafusion_execution::object_store;
+use datafusion_physical_expr::PhysicalExpr;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use parquet::arrow::ArrowWriter;
+use parquet::arrow::arrow_reader::{ArrowReaderBuilder, ParquetRecordBatchReaderBuilder};
+use parquet::arrow::{ArrowWriter, AsyncArrowWriter};
 use parquet::basic::ZstdLevel;
 use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use prost::Message;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
+use std::fs::File;
+use std::io::BufReader;
 use std::ops::{Range, RangeInclusive};
+use std::sync::Arc;
 use std::time::SystemTime;
+use tokio::io::AsyncWrite;
 use tokio::sync::mpsc::{self, channel, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
@@ -76,7 +92,12 @@ fn operator_path(job_id: &str, epoch: u32, operator: &str) -> String {
     format!("{}/operator-{}", base_path(job_id, epoch), operator)
 }
 
-fn table_checkpoint_path(task_info: &TaskInfo, table: char, epoch: u32, compacted: bool) -> String {
+pub(crate) fn table_checkpoint_path(
+    task_info: &TaskInfo,
+    table: char,
+    epoch: u32,
+    compacted: bool,
+) -> String {
     format!(
         "{}/table-{}-{:0>3}{}",
         operator_path(&task_info.job_id, epoch, &task_info.operator_id),
@@ -165,6 +186,7 @@ impl BackingStore for ParquetBackend {
                 tables.clone(),
                 storage.clone(),
                 HashMap::new(),
+                1,
             ),
             task_info: task_info.clone(),
             tables: tables
@@ -181,7 +203,7 @@ impl BackingStore for ParquetBackend {
         tables: Vec<TableDescriptor>,
         control_tx: Sender<ControlResp>,
     ) -> Self {
-        let operator_metadata =
+        let operator_metadata: OperatorCheckpointMetadata =
             Self::load_operator_metadata(&task_info.job_id, &task_info.operator_id, metadata.epoch)
                 .await
                 .unwrap_or_else(|| {
@@ -234,6 +256,7 @@ impl BackingStore for ParquetBackend {
                 tables.values().cloned().collect(),
                 storage.clone(),
                 writer_current_files,
+                metadata.epoch,
             ),
             task_info: task_info.clone(),
             tables,
@@ -496,18 +519,19 @@ impl BackingStore for ParquetBackend {
             .await
             .unwrap();
     }
+    async fn register_record_batch_table(&mut self, table: char, schema: ArroyoSchema) {
+        self.writer
+            .sender
+            .send(ParquetQueueItem::RecordBatchInit { table, schema })
+            .await
+            .unwrap();
+    }
 
-    async fn write_record_batch_to_table(
-        &mut self,
-        table: char,
-        parquet_stats: ParquetStats,
-        record_batch: RecordBatch,
-    ) {
+    async fn write_record_batch_to_table(&mut self, table: char, record_batch: RecordBatch) {
         self.writer
             .sender
             .send(ParquetQueueItem::RecordBatch {
                 record_batch,
-                parquet_stats,
                 table,
             })
             .await
@@ -756,20 +780,30 @@ impl ParquetBackend {
         old_min_epoch: u32,
         new_min_epoch: u32,
     ) -> Result<String> {
-        let paths_to_keep: HashSet<String> =
-            Self::load_operator_metadata(&job_id, &operator_id, new_min_epoch)
-                .await
-                .expect("expect new_min_epoch metadata to still be present")
-                .backend_data
-                .iter()
-                .map(|backend_data| {
-                    let Some(BackendData::ParquetStore(parquet_store)) = &backend_data.backend_data
-                    else {
-                        unreachable!("expect parquet backends")
-                    };
-                    parquet_store.file.clone()
-                })
-                .collect();
+        let operator_metadata = Self::load_operator_metadata(&job_id, &operator_id, new_min_epoch)
+            .await
+            .expect("expect new_min_epoch metadata to still be present");
+        let paths_to_keep: HashSet<String> = operator_metadata
+            .table_checkpoint_metadata
+            .iter()
+            .flat_map(|(table_name, metadata)| {
+                let table_config = operator_metadata
+                    .table_configs
+                    .get(table_name)
+                    .unwrap()
+                    .clone();
+                let files = match table_config.table_type() {
+                    grpc::TableEnum::MissingTableType => todo!("should handle error"),
+                    grpc::TableEnum::GlobalKeyValue => {
+                        GlobalKeyedTable::files_to_keep(table_config, metadata.clone()).unwrap()
+                    }
+                    grpc::TableEnum::ExpiringKeyedTimeTable => {
+                        ExpiringTimeKeyTable::files_to_keep(table_config, metadata.clone()).unwrap()
+                    }
+                };
+                files
+            })
+            .collect();
 
         let mut deleted_paths = HashSet::new();
         let storage_client = get_storage_provider().await?;
@@ -782,12 +816,29 @@ impl ParquetBackend {
             };
 
             // delete any files that are not in the new min epoch
-            for backend_data in metadata.backend_data {
-                let Some(BackendData::ParquetStore(parquet_store)) = &backend_data.backend_data
-                else {
-                    unreachable!("expect parquet backends")
-                };
-                let file = parquet_store.file.clone();
+            for file in metadata
+                .table_checkpoint_metadata
+                .iter()
+                // TODO: factor this out
+                .flat_map(|(table_name, metadata)| {
+                    let table_config = operator_metadata
+                        .table_configs
+                        .get(table_name)
+                        .unwrap()
+                        .clone();
+                    let files = match table_config.table_type() {
+                        grpc::TableEnum::MissingTableType => todo!("should handle error"),
+                        grpc::TableEnum::GlobalKeyValue => {
+                            GlobalKeyedTable::files_to_keep(table_config, metadata.clone()).unwrap()
+                        }
+                        grpc::TableEnum::ExpiringKeyedTimeTable => {
+                            ExpiringTimeKeyTable::files_to_keep(table_config, metadata.clone())
+                                .unwrap()
+                        }
+                    };
+                    files
+                })
+            {
                 if !paths_to_keep.contains(&file) && !deleted_paths.contains(&file) {
                     deleted_paths.insert(file.clone());
                     storage_client.delete_if_present(file).await?;
@@ -1031,6 +1082,7 @@ impl ParquetWriter {
         tables: Vec<TableDescriptor>,
         storage: StorageProvider,
         current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>,
+        current_epoch: u32,
     ) -> Self {
         let (tx, rx) = mpsc::channel(1024 * 1024);
         let (finish_tx, finish_rx) = oneshot::channel();
@@ -1047,11 +1099,12 @@ impl ParquetWriter {
                 .map(|table| (table.name.chars().next().unwrap(), table.clone()))
                 .collect(),
             builders: HashMap::new(),
-            batches: HashMap::new(),
+            batch_converters: HashMap::new(),
             commit_data: HashMap::new(),
             current_files,
             load_compacted_tx,
             new_compacted: vec![],
+            current_epoch,
         })
         .start();
 
@@ -1122,9 +1175,12 @@ enum ParquetQueueItem {
         table: char,
         data: Vec<u8>,
     },
+    RecordBatchInit {
+        table: char,
+        schema: ArroyoSchema,
+    },
     RecordBatch {
         record_batch: RecordBatch,
-        parquet_stats: ParquetStats,
         table: char,
     },
 }
@@ -1303,11 +1359,140 @@ struct ParquetFlusher {
     task_info: TaskInfo,
     table_descriptors: HashMap<char, TableDescriptor>,
     builders: HashMap<char, RecordBatchBuilder>,
-    batches: HashMap<char, Vec<(RecordBatch, ParquetStats)>>,
+    batch_converters: HashMap<char, RecordBatchWriter>,
     commit_data: HashMap<char, Vec<u8>>,
     current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>, // table -> epoch -> file
     load_compacted_tx: Receiver<CompactionResult>,
     new_compacted: Vec<ParquetStoreData>,
+    current_epoch: u32,
+}
+
+struct RecordBatchWriter {
+    schema: ArroyoSchema,
+    final_schema: SchemaRef,
+    writer: Option<AsyncArrowWriter<Box<dyn AsyncWrite + Send + Unpin>>>,
+    parquet_stats: Option<ParquetStats>,
+}
+
+unsafe impl Sync for RecordBatchWriter {}
+
+impl RecordBatchWriter {
+    fn new(schema: ArroyoSchema) -> Self {
+        let mut fields = schema.schema.fields().to_vec();
+        //TODO: we could have the additional columns at the start, rather than the end
+        fields.push(Arc::new(Field::new("_key_hash", DataType::UInt64, false)));
+        fields.push(Arc::new(Field::new(
+            "_operation",
+            arrow::datatypes::DataType::Binary,
+            false,
+        )));
+        let final_schema = Arc::new(Schema::new_with_metadata(fields, HashMap::new()));
+
+        Self {
+            schema,
+            final_schema,
+            writer: None,
+            parquet_stats: None,
+        }
+    }
+
+    fn annotate_record_batch(&mut self, record_batch: &RecordBatch) -> (RecordBatch, ParquetStats) {
+        // TODO: figure out if we want a key column if there isn't a key.
+        let key_batch = record_batch.project(&self.schema.key_indices).unwrap();
+
+        let mut hash_buffer = vec![0u64; key_batch.num_rows()];
+        let random_state = RandomState::with_seeds(2, 4, 19, 90);
+        let hashes = create_hashes(key_batch.columns(), &random_state, &mut hash_buffer).unwrap();
+        let hash_array = PrimitiveArray::<UInt64Type>::from(hash_buffer);
+
+        let hash_min = kernels::aggregate::min(&hash_array).unwrap();
+        let hash_max = kernels::aggregate::max(&hash_array).unwrap();
+        let max_timestamp_nanos: i64 = kernels::aggregate::max(
+            record_batch
+                .column(self.schema.timestamp_index)
+                .as_primitive::<TimestampNanosecondType>(),
+        )
+        .unwrap();
+
+        let batch_stats = ParquetStats {
+            max_timestamp: from_nanos(max_timestamp_nanos as u128),
+            min_routing_key: hash_min,
+            max_routing_key: hash_max,
+        };
+
+        let mut columns = record_batch.columns().to_vec();
+        columns.push(Arc::new(hash_array));
+
+        let insert_op = ScalarValue::Binary(Some(
+            bincode::encode_to_vec(DataOperation::Insert, config::standard()).unwrap(),
+        ));
+
+        // TODO: handle other types of updates
+        let op_array = insert_op.to_array_of_size(record_batch.num_rows()).unwrap();
+        columns.push(op_array);
+
+        let annotated_record_batch =
+            RecordBatch::try_new(self.final_schema.clone(), columns).unwrap();
+
+        (annotated_record_batch, batch_stats)
+    }
+
+    fn update_parquet_stats(&mut self, parquet_stats: ParquetStats) {
+        match self.parquet_stats.as_mut() {
+            None => {
+                self.parquet_stats = Some(parquet_stats);
+            }
+            Some(current_stats) => {
+                current_stats.min_routing_key = current_stats
+                    .min_routing_key
+                    .min(parquet_stats.min_routing_key);
+                current_stats.max_routing_key = current_stats
+                    .min_routing_key
+                    .max(parquet_stats.max_routing_key);
+                current_stats.max_timestamp =
+                    current_stats.max_timestamp.max(parquet_stats.max_timestamp);
+            }
+        }
+    }
+
+    async fn init_writer(
+        &mut self,
+        storage_provider: &StorageProvider,
+        path: String,
+    ) -> Result<()> {
+        let (multipart_id, async_writer) = storage_provider
+            .get_backing_store()
+            .put_multipart(&path.into())
+            .await?;
+        let arrow_writer =
+            AsyncArrowWriter::try_new(async_writer, self.final_schema.clone(), 1_000_0000, None)?;
+        self.writer = Some(arrow_writer);
+        Ok(())
+    }
+
+    async fn write_record_batch(&mut self, record_batch: &RecordBatch) {
+        let (annotated_batch, batch_stats) = self.annotate_record_batch(record_batch);
+        info!("WRITING {:?}", annotated_batch);
+        self.update_parquet_stats(batch_stats);
+        self.writer
+            .as_mut()
+            .expect("should have initialized a writer")
+            .write(&annotated_batch)
+            .await
+            .unwrap();
+    }
+}
+
+#[test]
+fn test_read() {
+    let path = "/tmp/arroyo/job_5v1OSdwX09/checkpoints/checkpoint-0000001/operator-aggregate_3/table-t-000";
+    let file = File::open(path).unwrap();
+
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+    assert_eq!("", format!("{:?}", reader.schema()));
 }
 
 impl ParquetFlusher {
@@ -1435,9 +1620,17 @@ impl ParquetFlusher {
                                 commit_epoch = Some(epoch);
                             }
                             self.commit_data.insert(table, data);
+                        },
+                        Some(ParquetQueueItem::RecordBatchInit{table, schema}) => {
+                            self.batch_converters.insert(table, RecordBatchWriter::new(schema));
                         }
-                        Some(ParquetQueueItem::RecordBatch{record_batch, parquet_stats, table}) => {
-                            self.batches.entry(table).or_default().push((record_batch, parquet_stats));
+                        Some(ParquetQueueItem::RecordBatch{record_batch, table}) => {
+                            let writer = self.batch_converters.get_mut(&table).expect("should have initialized record batch");
+                            if writer.writer.is_none() {
+                                let key = table_checkpoint_path(&self.task_info, table, self.current_epoch, false);
+                                writer.init_writer(&self.storage, key).await.expect("should be able to initialize parquet file");
+                            }
+                            writer.write_record_batch(&record_batch).await;
                         }
                         None => {
                             debug!("Parquet flusher closed");
@@ -1468,6 +1661,30 @@ impl ParquetFlusher {
             };
             let s3_key = table_checkpoint_path(&self.task_info, table, cp.epoch, false);
             to_write.push((record_batch, s3_key, table, stats));
+        }
+
+        for (table, builder) in self.batch_converters.iter_mut() {
+            if let Some(writer) = builder.writer.take() {
+                let _result = writer.close().await.unwrap();
+                // TODO: figure out how to get the size of this file.
+                bytes += 1;
+                let parquet_stats = builder.parquet_stats.take().unwrap();
+                self.current_files
+                    .entry(*table)
+                    .or_default()
+                    .entry(cp.epoch)
+                    .or_default()
+                    .push(ParquetStoreData {
+                        epoch: cp.epoch,
+                        file: table_checkpoint_path(&self.task_info, *table, cp.epoch, false),
+                        table: table.to_string(),
+                        min_routing_key: parquet_stats.min_routing_key,
+                        max_routing_key: parquet_stats.max_routing_key,
+                        max_timestamp_micros: to_micros(parquet_stats.max_timestamp),
+                        min_required_timestamp_micros: None,
+                        generation: 0,
+                    })
+            }
         }
 
         // write the files and update current_files
@@ -1566,6 +1783,8 @@ impl ParquetFlusher {
                 .drain()
                 .map(|(table, data)| (table.to_string(), data))
                 .collect(),
+            table_metadata: HashMap::new(),
+            table_configs: HashMap::new(),
         };
         self.control_tx
             .send(ControlResp::CheckpointCompleted(CheckpointCompleted {

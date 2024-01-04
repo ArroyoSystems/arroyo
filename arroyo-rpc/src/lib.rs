@@ -203,6 +203,43 @@ pub struct ArroyoSchema {
     pub key_indices: Vec<usize>,
 }
 
+impl TryFrom<grpc::ArroyoSchema> for ArroyoSchema {
+    type Error = anyhow::Error;
+    fn try_from(schema_proto: grpc::ArroyoSchema) -> anyhow::Result<Self> {
+        let schema: Schema = serde_json::from_str(&schema_proto.arrow_schema)?;
+        let timestamp_index = schema_proto.timestamp_index as usize;
+        let key_indices = schema_proto
+            .key_indices
+            .iter()
+            .map(|index| (*index) as usize)
+            .collect();
+        Ok(Self {
+            schema: Arc::new(schema),
+            timestamp_index,
+            key_indices,
+        })
+    }
+}
+
+impl TryFrom<ArroyoSchema> for grpc::ArroyoSchema {
+    type Error = anyhow::Error;
+
+    fn try_from(schema: ArroyoSchema) -> anyhow::Result<Self> {
+        let arrow_schema = serde_json::to_string(schema.schema.as_ref())?;
+        let timestamp_index = schema.timestamp_index as u32;
+        let key_indices = schema
+            .key_indices
+            .iter()
+            .map(|index| (*index) as u32)
+            .collect();
+        Ok(Self {
+            arrow_schema,
+            timestamp_index,
+            key_indices,
+        })
+    }
+}
+
 impl ArroyoSchema {
     pub fn new(schema: Arc<Schema>, timestamp_index: usize, key_indices: Vec<usize>) -> Self {
         Self {
