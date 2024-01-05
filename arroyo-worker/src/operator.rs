@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::pin::Pin;
 use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
@@ -21,12 +22,13 @@ use arroyo_rpc::{
 use arroyo_state::BackingStore;
 use arroyo_types::{
     from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, SignalMessage, TaskInfo,
-    Watermark, Window,
+    TaskInfoRef, Watermark, Window,
 };
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
-use futures::StreamExt;
+use futures::{Future, StreamExt};
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio_stream::Stream;
 use tracing::{debug, error, info, warn, Instrument};
 
 pub trait TimerT: Data + PartialEq + Eq + 'static {}
@@ -321,6 +323,18 @@ pub trait BaseOperator: Send + 'static {
     async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {}
 }
 
+pub struct RunContext<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync> {
+    task_info: TaskInfoRef,
+    name: String,
+    counter: CheckpointCounter,
+    closed: HashSet<usize>,
+    pub sel: InQReader<St>,
+    in_partitions: usize,
+    blocked: Vec<St>,
+    final_message: Option<ArrowMessage>,
+    // TODO: ticks
+}
+
 #[async_trait]
 impl<T: ArrowOperator> BaseOperator for T {
     async fn run_behavior(
@@ -353,75 +367,24 @@ impl<T: ArrowOperator> BaseOperator for T {
             tokio::time::interval(self.tick_interval().unwrap_or(Duration::from_secs(60)));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+        let mut run_context = RunContext {
+            task_info,
+            name,
+            counter,
+            closed,
+            sel,
+            in_partitions,
+            blocked,
+            final_message,
+        };
+
         loop {
-            tokio::select! {
-                Some(control_message) = ctx.control_rx.recv() => {
-                    self.handle_controller_message(control_message, ctx).await;
-                }
-
-                p = sel.next() => {
-                    match p {
-                        Some(((idx, message), s)) => {
-                            let local_idx = idx;
-
-                            tracing::debug!("[{}] Handling message {}-{}, {:?}",
-                                ctx.task_info.operator_name, 0, local_idx, message);
-
-                            match message {
-                                ArrowMessage::Data(record) => {
-                                    TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
-                                    Self::process_batch(&mut(*self), record, ctx)
-                                        .instrument(tracing::trace_span!("handle_fn",
-                                            name,
-                                            operator_id = task_info.operator_id,
-                                            subtask_idx = task_info.task_index)
-                                    ).await;
-                                }
-                                ArrowMessage::Signal(signal) => {
-                                    match self.handle_control_message(idx, &signal, &mut counter, &mut closed, in_partitions, ctx).await {
-                                        ControlOutcome::Continue => {}
-                                        ControlOutcome::Stop => {
-                                            // just stop; the stop will have already been broadcasted for example by
-                                            // a final checkpoint
-                                            break;
-                                        }
-                                        ControlOutcome::Finish => {
-                                            final_message = Some(ArrowMessage::Signal(SignalMessage::EndOfData));
-                                            break;
-                                        }
-                                        ControlOutcome::StopAndSendStop => {
-                                            final_message = Some(ArrowMessage::Signal(SignalMessage::Stop));
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if counter.is_blocked(idx){
-                                blocked.push(s);
-                            } else {
-                                if counter.all_clear() && !blocked.is_empty(){
-                                    for q in blocked.drain(..){
-                                        sel.push(q);
-                                    }
-                                }
-                                sel.push(s);
-                            }
-                        }
-                        None => {
-                            info!("[{}] Stream completed",ctx.task_info.operator_name);
-                            break;
-                        }
-                    }
-                }
-                _ = interval.tick() => {
-                    self.handle_tick(ticks, ctx).await;
-                    ticks += 1;
-                }
+            if self.select_run(ctx, &mut run_context).await {
+                break;
             }
         }
         self.on_close(ctx).await;
-        final_message
+        run_context.final_message
     }
 
     fn name(&self) -> String {
@@ -599,6 +562,112 @@ pub trait ArrowOperator: Send + 'static + Sized {
 
     #[allow(unused_variables)]
     async fn on_close(&mut self, ctx: &mut ArrowContext) {}
+
+    async fn select_run<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync + Unpin>(
+        &mut self,
+        ctx: &mut ArrowContext,
+        run_context: &mut RunContext<St>,
+    ) -> bool {
+        tokio::select! {
+            Some(control_message) = ctx.control_rx.recv() => {
+                self.handle_controller_message(control_message, ctx).await;
+            }
+
+            p = run_context.sel.next() => {
+                match p {
+                    Some(((idx, message), s)) => {
+                        return self.handle_message(idx, message, s, ctx, run_context).await;
+                    }
+                    None => {
+                        info!("[{}] Stream completed",ctx.task_info.operator_name);
+                        return true;
+                    }
+                }
+            }
+            // TODO:
+            /*_ = interval.tick() => {
+                self.handle_tick(ticks, ctx).await;
+                ticks += 1;
+            }*/
+        }
+        false
+    }
+
+    async fn handle_message<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync + Unpin>(
+        &mut self,
+        idx: usize,
+        message: ArrowMessage,
+        s: St,
+        ctx: &mut ArrowContext,
+        run_context: &mut RunContext<St>,
+    ) -> bool {
+        let local_idx = idx;
+
+        tracing::debug!(
+            "[{}] Handling message {}-{}, {:?}",
+            ctx.task_info.operator_name,
+            0,
+            local_idx,
+            message
+        );
+
+        match message {
+            ArrowMessage::Data(record) => {
+                TaskCounters::MessagesReceived
+                    .for_task(&ctx.task_info)
+                    .inc();
+                Self::process_batch(&mut (*self), record, ctx)
+                    .instrument(tracing::trace_span!(
+                        "handle_fn",
+                        run_context.name,
+                        operator_id = run_context.task_info.operator_id,
+                        subtask_idx = run_context.task_info.task_index
+                    ))
+                    .await;
+            }
+            ArrowMessage::Signal(signal) => {
+                match self
+                    .handle_control_message(
+                        idx,
+                        &signal,
+                        &mut run_context.counter,
+                        &mut run_context.closed,
+                        run_context.in_partitions,
+                        ctx,
+                    )
+                    .await
+                {
+                    ControlOutcome::Continue => {}
+                    ControlOutcome::Stop => {
+                        // just stop; the stop will have already been broadcasted for example by
+                        // a final checkpoint
+                        return true;
+                    }
+                    ControlOutcome::Finish => {
+                        run_context.final_message =
+                            Some(ArrowMessage::Signal(SignalMessage::EndOfData));
+                        return true;
+                    }
+                    ControlOutcome::StopAndSendStop => {
+                        run_context.final_message = Some(ArrowMessage::Signal(SignalMessage::Stop));
+                        return true;
+                    }
+                }
+            }
+        }
+
+        if run_context.counter.is_blocked(idx) {
+            run_context.blocked.push(s);
+        } else {
+            if run_context.counter.all_clear() && !run_context.blocked.is_empty() {
+                for q in run_context.blocked.drain(..) {
+                    run_context.sel.push(q);
+                }
+            }
+            run_context.sel.push(s);
+        }
+        false
+    }
 }
 
 pub fn get_timestamp_col<'a, 'b>(
@@ -610,4 +679,12 @@ pub fn get_timestamp_col<'a, 'b>(
         .as_any()
         .downcast_ref::<PrimitiveArray<TimestampNanosecondType>>()
         .unwrap()
+}
+
+#[async_trait::async_trait]
+pub trait ArrowOperatorWithFuture: ArrowOperator {
+    type Output;
+
+    fn select_term(&mut self) -> Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+    async fn handle_output(&mut self, output: Self::Output);
 }

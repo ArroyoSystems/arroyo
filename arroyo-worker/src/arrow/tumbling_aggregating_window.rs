@@ -1,50 +1,37 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     mem,
+    pin::Pin,
     sync::{Arc, RwLock},
+    task::Poll,
     time::SystemTime,
 };
 
-use ahash::RandomState;
 use anyhow::{bail, Context as AnyhowContext, Result};
-use arrow::{
-    compute::{kernels, partition, sort_to_indices, take},
-    row::{RowConverter, SortField},
-};
+use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{
-    types::{GenericBinaryType, Int64Type, TimestampNanosecondType, UInt64Type},
-    Array, ArrayRef, GenericByteArray, NullArray, PrimitiveArray, RecordBatch,
+    types::{Int64Type, TimestampNanosecondType},
+    Array, PrimitiveArray, RecordBatch,
 };
 use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef, TimeUnit};
 use arroyo_df::schemas::{add_timestamp_field_arrow, window_arrow_struct};
 use arroyo_rpc::{
-    grpc::{
-        api, api::window::Window, TableConfig, TableDeleteBehavior, TableDescriptor, TableType,
-        TableWriteBehavior,
-    },
+    grpc::{api, api::window::Window, TableConfig},
     ArroyoSchema,
 };
-use arroyo_state::{
-    parquet::{ParquetStats, RecordBatchBuilder},
-    tables::expiring_time_key_map,
-    timestamp_table_config, DataOperation,
-};
+use arroyo_state::timestamp_table_config;
 use arroyo_types::{
-    from_nanos, to_nanos, ArrowMessage, CheckpointBarrier, Record, RecordBatchData, SignalMessage,
-    Watermark,
+    from_nanos, to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
 };
-use bincode::config;
-use datafusion::{
-    execution::context::SessionContext,
-    physical_plan::{stream::RecordBatchStreamAdapter, DisplayAs, ExecutionPlan},
-};
-use datafusion_common::{
-    hash_utils::create_hashes, DFField, DFSchema, DataFusionError, ScalarValue,
+use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
+use datafusion_common::{DFField, DFSchema, Result as DFResult, ScalarValue};
+use futures::{
+    stream::{Collect, FuturesUnordered},
+    Future,
 };
 
-use crate::engine::ArrowContext;
-use crate::old::Context;
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
+use crate::{engine::ArrowContext, operator::RunContext};
 use arroyo_df::physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
@@ -60,9 +47,12 @@ use datafusion_proto::{
 };
 use prost::Message;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
-use tracing::info;
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    Mutex,
+};
+use tokio_stream::{wrappers::UnboundedReceiverStream, Stream, StreamExt};
+use tracing::{info, warn};
 
 pub struct TumblingAggregatingWindowFunc {
     width: Duration,
@@ -75,6 +65,7 @@ pub struct TumblingAggregatingWindowFunc {
     receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
     final_batches_passer: Arc<RwLock<Vec<RecordBatch>>>,
     senders: BTreeMap<usize, UnboundedSender<RecordBatch>>,
+    futures: FuturesUnordered<NextBatchFuture>,
     execs: BTreeMap<usize, BinComputingHolder>,
     window_field: FieldRef,
     window_index: usize,
@@ -88,8 +79,54 @@ impl TumblingAggregatingWindowFunc {
 
 #[derive(Default)]
 struct BinComputingHolder {
-    active_exec: Option<SendableRecordBatchStream>,
+    active_exec: Option<NextBatchFuture>,
     finished_batches: Vec<RecordBatch>,
+}
+
+#[derive(Clone)]
+pub struct NextBatchFuture {
+    bin: usize,
+    stream: Arc<Mutex<Option<SendableRecordBatchStream>>>,
+}
+
+impl NextBatchFuture {
+    pub fn new(bin: usize, stream: SendableRecordBatchStream) -> Self {
+        Self {
+            bin,
+            stream: Arc::new(Mutex::new(Some(stream))),
+        }
+    }
+}
+
+/**
+ * This is similar to a StreamFuture, but it i
+ */
+impl Future for NextBatchFuture {
+    type Output = (usize, Option<(DFResult<RecordBatch>, NextBatchFuture)>);
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let mut guard = self.stream.try_lock().unwrap();
+
+        let stream_option = guard.as_mut();
+        if let Some(stream) = stream_option {
+            match Pin::new(stream).poll_next(cx) {
+                Poll::Ready(batch) => match batch {
+                    Some(batch) => {
+                        let next_future = self.clone();
+                        Poll::Ready((self.bin, Some((batch, next_future))))
+                    }
+                    None => {
+                        *guard = None;
+                        Poll::Ready((self.bin, None))
+                    }
+                },
+                Poll::Pending => Poll::Pending,
+            }
+        } else {
+            // Stream is already finished
+            Poll::Ready((self.bin, None))
+        }
+    }
 }
 
 pub struct Registry {}
@@ -251,6 +288,7 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
             receiver,
             final_batches_passer,
             senders: BTreeMap::new(),
+            futures: FuturesUnordered::new(),
             execs: BTreeMap::new(),
             window_field,
             window_index: proto_config.window_index as usize,
@@ -294,12 +332,6 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
-        /*if batch.num_rows() > 0 {
-            let (record_batch, parquet_stats) = self.converter_tools.get_state_record_batch(batch);
-            ctx.state
-                .insert_record_batch('s', record_batch, parquet_stats)
-                .await;
-        }*/
         let timestamp_column = batch
             .column_by_name("_timestamp")
             .unwrap()
@@ -348,11 +380,14 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
-                bin_exec.active_exec = Some(
-                    self.partial_aggregation_plan
-                        .execute(0, SessionContext::new().task_ctx())
-                        .unwrap(),
-                );
+                let new_exec = self
+                    .partial_aggregation_plan
+                    .execute(0, SessionContext::new().task_ctx())
+                    .unwrap();
+                let next_batch_future = NextBatchFuture::new(bin, new_exec);
+                info!("created future for {}", bin);
+                self.futures.push(next_batch_future.clone());
+                bin_exec.active_exec = Some(next_batch_future);
             }
             let sender = self.senders.get(&bin).unwrap();
             sender.send(bin_batch).unwrap();
@@ -370,6 +405,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                     *first_bin < bin
                 };
                 if should_pop {
+                    let start = SystemTime::now();
                     let Some((popped_bin, mut exec)) = self.execs.pop_first() else {
                         unreachable!("should have an entry")
                     };
@@ -377,7 +413,8 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                         self.senders
                             .remove(&popped_bin)
                             .expect("should have sender for bin");
-                        while let Some(batch) = active_exec.next().await {
+                        while let (_bin, Some((batch, new_exec))) = active_exec.await {
+                            active_exec = new_exec;
                             let batch = batch.expect("should be able to compute batch");
                             exec.finished_batches.push(batch);
                         }
@@ -433,6 +470,11 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                         .unwrap();
                         ctx.collect(batch_with_timestamp).await;
                     }
+                    info!(
+                        "flushing bin {} took {:?}",
+                        popped_bin,
+                        start.elapsed().unwrap()
+                    );
                 } else {
                     break;
                 }
@@ -463,7 +505,8 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
             let exec = self.execs.get_mut(&key).unwrap();
             let bucket_nanos = key as i64 * (self.width.as_nanos() as i64);
             let mut active_exec = exec.active_exec.take().expect("this should be active");
-            while let Some(batch) = active_exec.next().await {
+            while let (_bin_, Some((batch, next_exec))) = active_exec.await {
+                active_exec = next_exec;
                 let batch = batch.expect("should be able to compute batch");
                 let bin_start = ScalarValue::TimestampNanosecond(Some(bucket_nanos), None);
                 let timestamp_array = bin_start.to_array_of_size(batch.num_rows()).unwrap();
@@ -490,5 +533,52 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
         )]
         .into_iter()
         .collect()
+    }
+
+    async fn select_run<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync + Unpin>(
+        &mut self,
+        ctx: &mut ArrowContext,
+        run_context: &mut RunContext<St>,
+    ) -> bool {
+        tokio::select! {
+            Some(control_message) = ctx.control_rx.recv() => {
+                self.handle_controller_message(control_message, ctx).await;
+            }
+
+            p = run_context.sel.next() => {
+                match p {
+                    Some(((idx, message), s)) => {
+                        return self.handle_message(idx, message, s, ctx, run_context).await;
+                    }
+                    None => {
+                        info!("[{}] Stream completed",ctx.task_info.operator_name);
+                        return true;
+                    }
+                }
+            }
+            Some((bin, batch_option)) = self.futures.next() => {
+                match batch_option {
+                    None => {
+                            info!("future for {} was finished elsewhere", bin);
+                    }
+                    Some((batch, future)) => {
+                        match self.execs.get_mut(&bin) {
+                            Some(exec) => {
+                                exec.finished_batches.push(batch.expect("should've been able to compute a batch"));
+                                self.futures.push(future);
+                            },
+                            None => unreachable!("FuturesUnordered returned a batch, but we can't find the exec"),
+                        }
+
+                    }
+                }
+            }
+            // TODO:
+            /*_ = interval.tick() => {
+                self.handle_tick(ticks, ctx).await;
+                ticks += 1;
+            }*/
+        }
+        false
     }
 }
