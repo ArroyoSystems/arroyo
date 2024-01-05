@@ -382,6 +382,17 @@ mod tests {
         },
         None
     );
+
+    single_test_codegen!(
+        "to_hex",
+        "to_hex(1)",
+        arroyo_sql::TestStruct {
+            non_nullable_i32: 1i32,
+            ..Default::default()
+        },
+        "1".to_string()
+    );
+
     // BitLength
     single_test_codegen!(
         "bit_length_null",
