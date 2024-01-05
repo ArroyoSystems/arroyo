@@ -64,7 +64,6 @@ pub struct TumblingAggregatingWindowFunc {
     // which is only used on the exec()
     receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
     final_batches_passer: Arc<RwLock<Vec<RecordBatch>>>,
-    senders: BTreeMap<usize, UnboundedSender<RecordBatch>>,
     futures: FuturesUnordered<NextBatchFuture>,
     execs: BTreeMap<usize, BinComputingHolder>,
     window_field: FieldRef,
@@ -81,6 +80,7 @@ impl TumblingAggregatingWindowFunc {
 struct BinComputingHolder {
     active_exec: Option<NextBatchFuture>,
     finished_batches: Vec<RecordBatch>,
+    sender: Option<UnboundedSender<RecordBatch>>,
 }
 
 #[derive(Clone)]
@@ -287,7 +287,6 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
             finish_execution_plan,
             receiver,
             final_batches_passer,
-            senders: BTreeMap::new(),
             futures: FuturesUnordered::new(),
             execs: BTreeMap::new(),
             window_field,
@@ -375,7 +374,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
             let bin_exec = self.execs.entry(bin).or_default();
             if bin_exec.active_exec.is_none() {
                 let (unbounded_sender, unbounded_receiver) = unbounded_channel();
-                self.senders.insert(bin, unbounded_sender);
+                bin_exec.sender = Some(unbounded_sender);
                 {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
@@ -389,8 +388,12 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                 self.futures.push(next_batch_future.clone());
                 bin_exec.active_exec = Some(next_batch_future);
             }
-            let sender = self.senders.get(&bin).unwrap();
-            sender.send(bin_batch).unwrap();
+            bin_exec
+                .sender
+                .as_ref()
+                .expect("just set this")
+                .send(bin_batch)
+                .unwrap();
         }
     }
 
@@ -410,9 +413,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
                         unreachable!("should have an entry")
                     };
                     if let Some(mut active_exec) = exec.active_exec.take() {
-                        self.senders
-                            .remove(&popped_bin)
-                            .expect("should have sender for bin");
+                        exec.sender.take();
                         while let (_bin, Some((batch, new_exec))) = active_exec.await {
                             active_exec = new_exec;
                             let batch = batch.expect("should be able to compute batch");
@@ -486,8 +487,6 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
     }
 
     async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {
-        let keys: Vec<_> = self.senders.keys().cloned().collect();
-        self.senders.clear();
         let watermark = ctx
             .watermark()
             .map(|watermark: Watermark| match watermark {
@@ -501,9 +500,10 @@ impl ArrowOperator for TumblingAggregatingWindowFunc {
             .await
             .expect("should get table");
 
-        for key in keys {
-            let exec = self.execs.get_mut(&key).unwrap();
-            let bucket_nanos = key as i64 * (self.width.as_nanos() as i64);
+        // TODO: this was a separate map just to the active execs, which could, in corner cases, be much smaller.
+        for (bin, exec) in self.execs.iter_mut() {
+            exec.sender.take();
+            let bucket_nanos = (*bin) as i64 * (self.width.as_nanos() as i64);
             let mut active_exec = exec.active_exec.take().expect("this should be active");
             while let (_bin_, Some((batch, next_exec))) = active_exec.await {
                 active_exec = next_exec;
