@@ -36,23 +36,29 @@ use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
 
 pub(crate) mod sync;
 pub mod tumbling_aggregating_window;
-pub struct Registry {}
+pub struct EmptyRegistry {}
 
-impl FunctionRegistry for Registry {
+impl FunctionRegistry for EmptyRegistry {
     fn udfs(&self) -> HashSet<String> {
         HashSet::new()
     }
 
-    fn udf(&self, _name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
-        todo!()
+    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+        DFResult::Err(DataFusionError::NotImplemented(
+            format!("udf {} not implemented", name),
+        ))
     }
 
-    fn udaf(&self, _name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
-        todo!()
+    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+        DFResult::Err(DataFusionError::NotImplemented(
+            format!("udaf {} not implemented", name),
+        ))
     }
 
-    fn udwf(&self, _name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
-        todo!()
+    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+        DFResult::Err(DataFusionError::NotImplemented(
+            format!("udwf {} not implemented", name),
+        ))
     }
 }
 
@@ -65,7 +71,7 @@ pub struct ValueExecutionOperator {
 impl ArrowOperatorConstructor<api::ValuePlanOperator, Self> for ValueExecutionOperator {
     fn from_config(config: api::ValuePlanOperator) -> Result<Self> {
         let locked_batch = Arc::new(RwLock::default());
-        let registry = Registry {};
+        let registry = EmptyRegistry {};
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
         //info!("physical plan is {:#?}", plan);
@@ -184,7 +190,7 @@ pub struct KeyExecutionOperator {
 impl ArrowOperatorConstructor<api::KeyPlanOperator, Self> for KeyExecutionOperator {
     fn from_config(config: api::KeyPlanOperator) -> Result<Self> {
         let locked_batch = Arc::new(RwLock::default());
-        let registry = Registry {};
+        let registry = EmptyRegistry {};
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
         //info!("physical plan is {:#?}", plan);

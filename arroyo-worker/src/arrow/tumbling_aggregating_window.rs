@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     mem,
     pin::Pin,
     sync::{Arc, RwLock},
@@ -23,7 +23,7 @@ use arroyo_state::timestamp_table_config;
 use arroyo_types::{
     from_nanos, to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
 };
-use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
+use datafusion::{execution::context::SessionContext, physical_plan::{ExecutionPlan, aggregates::AggregateExec}};
 use datafusion_common::ScalarValue;
 use futures::stream::FuturesUnordered;
 
@@ -34,7 +34,6 @@ use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     FunctionRegistry, SendableRecordBatchStream,
 };
-use datafusion_expr::{AggregateUDF, ScalarUDF, WindowUDF};
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
     physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan},
@@ -46,9 +45,9 @@ use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::{Stream, StreamExt};
-use tracing::{info, warn};
+use tracing::info;
 
-use super::sync::streams::KeyedCloneableStreamFuture;
+use super::{sync::streams::KeyedCloneableStreamFuture, EmptyRegistry};
 
 pub struct TumblingAggregatingWindowFunc<K: Copy> {
     width: Duration,
@@ -96,26 +95,6 @@ impl<K: Copy> Default for BinComputingHolder<K> {
 
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
-pub struct Registry {}
-
-impl FunctionRegistry for Registry {
-    fn udfs(&self) -> HashSet<String> {
-        HashSet::new()
-    }
-
-    fn udf(&self, _name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
-        todo!()
-    }
-
-    fn udaf(&self, _name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
-        todo!()
-    }
-
-    fn udwf(&self, _name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
-        todo!()
-    }
-}
-
 impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
     for TumblingAggregatingWindowFunc<SystemTime>
 {
@@ -128,7 +107,7 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
                 proto_config.input_schema.len()
             ))?;
 
-        let binning_function = parse_physical_expr(&binning_function, &Registry {}, &input_schema)?;
+        let binning_function = parse_physical_expr(&binning_function, &EmptyRegistry {}, &input_schema)?;
 
         let mut physical_plan =
             PhysicalPlanNode::decode(&mut proto_config.physical_plan.as_slice()).unwrap();
@@ -171,7 +150,7 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
         // this is behind a RwLock and will have a new channel swapped in before computation is initialized
         // for each bin.
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
-            &Registry {},
+            &EmptyRegistry {},
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
@@ -199,7 +178,7 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
 
         // deserialize the finish plan to read directly from a Vec<RecordBatch> behind a RWLock.
         let finish_execution_plan = finish_plan.try_into_physical_plan(
-            &Registry {},
+            &EmptyRegistry {},
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &final_codec,
         )?;

@@ -1111,6 +1111,7 @@ dependencies = [
  "datafusion-execution",
  "datafusion-expr",
  "datafusion-physical-expr",
+ "datafusion-physical-plan",
  "datafusion-proto",
  "deltalake",
  "eventsource-client",
