@@ -11,12 +11,9 @@ use std::hash::Hasher;
 use std::marker::PhantomData;
 use std::ops::Add;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, bail, Result};
-use arrow_schema::Schema;
-use arroyo_rpc::grpc;
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
 use arroyo_types::{Data, GlobalKey, JoinType, Key, HASH_SEEDS};

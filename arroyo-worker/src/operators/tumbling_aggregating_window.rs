@@ -52,7 +52,6 @@ impl<K: Key, T: Data, BinA: Data, OutT: Data> TumblingAggregatingWindowFunc<K, T
         let mut nanos = to_nanos(timestamp);
         nanos -= nanos % self.width.as_nanos();
         let result = from_nanos(nanos);
-        debug!("bin start for {:?} is {:?}", timestamp, result);
         result
     }
 

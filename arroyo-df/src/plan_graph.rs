@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use arrow_array::types::IntervalMonthDayNanoType;
 use arrow_schema::{DataType, Schema};
 use arroyo_datastream::{ConnectorOp, WindowType};
 
@@ -25,7 +26,7 @@ use arroyo_rpc::grpc::api::{
     window, KeyPlanOperator, TumblingWindow, ValuePlanOperator, Window, WindowAggregateOperator,
 };
 use datafusion_common::{DFField, DFSchema, ScalarValue};
-use datafusion_expr::{BinaryExpr, Expr, LogicalPlan};
+use datafusion_expr::{expr::ScalarFunction, BinaryExpr, BuiltinScalarFunction, Expr, LogicalPlan};
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
@@ -218,28 +219,25 @@ pub(crate) async fn get_arrow_program(
                         &ArroyoPhysicalExtensionCodec::default(),
                     )?;
 
-                let division = Expr::BinaryExpr(BinaryExpr {
-                    left: Box::new(Expr::Column(datafusion_common::Column {
-                        relation: None,
-                        name: "timestamp_nanos".into(),
-                    })),
-                    op: datafusion_expr::Operator::Divide,
-                    right: Box::new(Expr::Literal(ScalarValue::Int64(Some(
-                        width.as_nanos() as i64
-                    )))),
+                let date_bin = Expr::ScalarFunction(ScalarFunction {
+                    func_def: datafusion_expr::ScalarFunctionDefinition::BuiltIn(
+                        BuiltinScalarFunction::DateBin,
+                    ),
+                    args: vec![
+                        Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+                            IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
+                        ))),
+                        Expr::Column(datafusion_common::Column {
+                            relation: None,
+                            name: "_timestamp".into(),
+                        }),
+                    ],
                 });
-
-                let timestamp_nanos_field =
-                    DFField::new_unqualified("timestamp_nanos", DataType::Int64, false);
-                let binning_df_schema =
-                    DFSchema::new_with_metadata(vec![timestamp_nanos_field], HashMap::new())
-                        .context("can't make timestamp nanos schema")?;
-                let binning_arrow_schema: Schema = (&binning_df_schema).into();
                 let binning_function = planner
                     .create_physical_expr(
-                        &division,
-                        &binning_df_schema,
-                        &binning_arrow_schema,
+                        &date_bin,
+                        &aggregate.aggregate.input.schema().as_ref(),
+                        &aggregate.aggregate.input.schema().as_ref().into(),
                         &session_state,
                     )
                     .context("couldn't create binning function")?;
@@ -252,7 +250,8 @@ pub(crate) async fn get_arrow_program(
                     name: "window_aggregate".into(),
                     physical_plan: physical_plan_node.encode_to_vec(),
                     binning_function: binning_function_proto.encode_to_vec(),
-                    binning_schema: serde_json::to_vec(&binning_arrow_schema)?,
+                    // unused now
+                    binning_schema: vec![],
                     input_schema: serde_json::to_vec(&input_schema)?,
                     window: Some(Window {
                         window: Some(window::Window::TumblingWindow(TumblingWindow {

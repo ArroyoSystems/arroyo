@@ -34,6 +34,7 @@ use tonic::transport::Channel;
 
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
 
+pub(crate) mod sync;
 pub mod tumbling_aggregating_window;
 pub struct Registry {}
 

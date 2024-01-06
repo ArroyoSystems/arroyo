@@ -6,17 +6,20 @@ use std::sync::Arc;
 use crate::engine::{ArrowContext, StreamNode};
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
 use crate::SourceFinishType;
+use arrow_array::builder::{TimestampNanosecondBuilder, UInt64Builder};
 use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
 use arroyo_rpc::grpc::{api, StopMode, TableConfig, TableDescriptor};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::*;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use datafusion_common::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc::Receiver;
 use tracing::{debug, info};
 use typify::import_types;
+use uuid::timestamp;
 
 import_types!(schema = "../connector-schemas/impulse/table.json");
 
@@ -75,13 +78,26 @@ impl ImpulseSourceFunc {
         }
     }
 
-    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
-        let delay = match self.spec {
+    fn batch_size(&self, ctx: &mut ArrowContext) -> usize {
+        let duration_micros = self.delay(ctx).as_micros();
+        if duration_micros == 0 {
+            return 8192;
+        }
+        let batch_size = Duration::from_millis(100).as_micros() / duration_micros;
+        batch_size.max(1).min(8192) as usize
+    }
+
+    fn delay(&self, ctx: &mut ArrowContext) -> Duration {
+        match self.spec {
             ImpulseSpec::Delay(d) => d,
             ImpulseSpec::EventsPerSecond(eps) => {
                 Duration::from_secs_f32(1.0 / (eps / ctx.task_info.parallelism as f32))
             }
-        };
+        }
+    }
+
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+        let delay = self.delay(ctx);
         info!(
             "Starting impulse source with delay {:?} and limit {}",
             delay, self.limit
@@ -91,22 +107,40 @@ impl ImpulseSourceFunc {
 
         let schema = ctx.out_schema.as_ref().unwrap().schema.clone();
 
+        let batch_size = self.batch_size(ctx);
+
+        let mut items = 0;
+        let mut counter_builder = UInt64Builder::with_capacity(batch_size);
+        let task_index_scalar = ScalarValue::UInt64(Some(ctx.task_info.task_index as u64));
+        let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(batch_size);
+
         while self.state.counter < self.limit {
             let timestamp = self
                 .interval
                 .map(|d| self.state.start_time + d * self.state.counter as u32)
                 .unwrap_or_else(SystemTime::now);
 
-            let columns: Vec<ArrayRef> = vec![
-                Arc::new(UInt64Array::from(vec![self.state.counter as u64])),
-                Arc::new(UInt64Array::from(vec![ctx.task_info.task_index as u64])),
-                Arc::new(TimestampNanosecondArray::from(vec![
-                    to_nanos(timestamp) as i64
-                ])),
-            ];
-
-            ctx.collect(RecordBatch::try_new(schema.clone(), columns).unwrap())
+            counter_builder.append_value(self.state.counter as u64);
+            timestamp_builder.append_value(to_nanos(timestamp) as i64);
+            items += 1;
+            if items == batch_size {
+                let counter_column = counter_builder.finish();
+                let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
+                let timestamp_column = timestamp_builder.finish();
+                ctx.collect(
+                    RecordBatch::try_new(
+                        schema.clone(),
+                        vec![
+                            Arc::new(counter_column),
+                            Arc::new(task_index_column),
+                            Arc::new(timestamp_column),
+                        ],
+                    )
+                    .unwrap(),
+                )
                 .await;
+                items = 0;
+            }
 
             self.state.counter += 1;
 
@@ -154,6 +188,24 @@ impl ImpulseSourceFunc {
                     tokio::time::sleep(sleep_time).await;
                 }
             }
+        }
+        if items > 0 {
+            let counter_column = counter_builder.finish();
+            let task_index_column = task_index_scalar.to_array_of_size(items).unwrap();
+            let timestamp_column = timestamp_builder.finish();
+            ctx.collect(
+                RecordBatch::try_new(
+                    schema.clone(),
+                    vec![
+                        Arc::new(counter_column),
+                        Arc::new(task_index_column),
+                        Arc::new(timestamp_column),
+                    ],
+                )
+                .unwrap(),
+            )
+            .await;
+            items = 0;
         }
 
         SourceFinishType::Final
