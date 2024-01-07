@@ -208,15 +208,13 @@ where
                         .get(&p.id())
                         .map(|s| Offset::Offset(s.offset))
                         .unwrap_or_else(|| {
-                            if offset_mode == Offset::Stored{
+                            if offset_mode == Offset::Stored {
                                 offset_mode
-                            }
-                            else if has_state{
+                            } else if has_state {
                                 // if we've restored partitions and we don't know about this one, that means it's
                                 // new, and we want to start from the beginning so we don't drop data
                                 Offset::Beginning
-                            }
-                            else {
+                            } else {
                                 offset_mode
                             }
                         });
