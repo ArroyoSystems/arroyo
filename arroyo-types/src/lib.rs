@@ -406,7 +406,7 @@ impl UserError {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceError {
     BadData { details: String },
     Other { name: String, details: String },

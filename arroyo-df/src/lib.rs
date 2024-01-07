@@ -9,7 +9,6 @@ use arroyo_datastream::WindowType;
 use datafusion::datasource::DefaultTableSource;
 use datafusion::physical_plan::functions::make_scalar_function;
 use datafusion_common::{Column, DFField, OwnedTableReference, Result as DFResult, ScalarValue};
-pub mod avro;
 pub mod external;
 pub mod json_schema;
 pub mod logical;
@@ -42,7 +41,7 @@ use schemas::{
     window_arrow_struct,
 };
 
-use tables::{schema_defs, Insert, Table};
+use tables::{Insert, Table};
 use types::interval_month_day_nanos_to_duration;
 
 use crate::plan_graph::get_arrow_program;
@@ -221,10 +220,6 @@ impl ArroyoSchemaProvider {
     }
 
     pub fn add_connector_table(&mut self, connection: Connection) {
-        if let Some(def) = schema_defs(&connection.name, &connection.schema) {
-            self.source_defs.insert(connection.name.clone(), def);
-        }
-
         self.tables.insert(
             UniCase::new(connection.name.clone()),
             Table::ConnectorTable(connection.into()),

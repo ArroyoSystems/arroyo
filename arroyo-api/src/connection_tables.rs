@@ -524,7 +524,7 @@ async fn expand_avro_schema(
     let fields: Result<_, String> = avro::convert_avro_schema(&name, &definition)
         .map_err(|e| bad_request(format!("Invalid avro schema: {}", e)))?
         .into_iter()
-        .map(|f| f.try_into())
+        .map(|f| (**f).clone().try_into())
         .collect();
 
     schema.fields = fields.map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;

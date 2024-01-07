@@ -19,13 +19,13 @@ pub fn deserialize_slice_json(
     if format.unstructured {
         let (idx, _) = schema
             .column_with_name("value")
-            .expect("no 'value' column for RawString format");
+            .expect("no 'value' column for unstructured json format");
         let array = buffer[idx]
             .as_any_mut()
             .downcast_mut::<StringBuilder>()
             .expect("'value' column has incorrect type");
 
-        let j = if format.include_schema {
+        if format.include_schema {
             // we need to deserialize it to pull out the payload
             let v: Value = serde_json::from_slice(&msg)
                 .map_err(|e| format!("Failed to deserialize json: {:?}", e))?;
@@ -155,70 +155,6 @@ pub mod opt_timestamp_as_millis {
         {
             Ok(None)
         }
-    }
-}
-
-// Custom deserializer for fields encoded as RFC3339 date time strings, relying on Chrono's deserialization
-// capabilities (note we can't use chrono::DateTime as the field type currently, because all times in SQL-land
-// currently need to be SystemTime)
-pub mod timestamp_as_rfc3339 {
-    use std::time::SystemTime;
-
-    use arroyo_types::from_nanos;
-    use chrono::{DateTime, Utc};
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(t: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let dt: DateTime<Utc> = (*t).into();
-        serializer.serialize_str(&dt.to_rfc3339())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw: chrono::DateTime<Utc> = DateTime::deserialize(deserializer)?;
-        Ok(from_nanos(
-            raw.timestamp_nanos_opt()
-                .expect("could not represent time as a number of nanoseconds") as u128,
-        ))
-    }
-}
-
-pub mod opt_timestamp_as_rfc3339 {
-    use std::time::SystemTime;
-
-    use arroyo_types::from_nanos;
-    use chrono::{DateTime, Utc};
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(t: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        if let Some(t) = *t {
-            let dt: DateTime<Utc> = t.into();
-            serializer.serialize_some(&dt.to_rfc3339())
-        } else {
-            serializer.serialize_none()
-        }
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = Option::<DateTime<Utc>>::deserialize(deserializer)?;
-        Ok(raw.map(|raw| {
-            from_nanos(
-                raw.timestamp_nanos_opt()
-                    .expect("could not represent time as a number of nanoseconds")
-                    as u128,
-            )
-        }))
     }
 }
 

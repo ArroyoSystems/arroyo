@@ -60,21 +60,7 @@ impl<T: SchemaData> DataDeserializer<T> {
     ) -> impl Iterator<Item = Result<T, SourceError>> + 'a + Send {
         match &*self.format {
             Format::Avro(avro) => {
-                let schema_registry = self.schema_registry.clone();
-                let schema_resolver = self.schema_resolver.clone();
-                match avro::deserialize_slice_avro(avro, schema_registry, schema_resolver, msg)
-                    .await
-                {
-                    Ok(iter) => Box::new(iter),
-                    Err(e) => Box::new(
-                        vec![Err(SourceError::other(
-                            "Avro error",
-                            format!("Avro deserialization failed: {}", e),
-                        ))]
-                        .into_iter(),
-                    )
-                        as Box<dyn Iterator<Item = Result<T, SourceError>> + Send>,
-                }
+                unimplemented!()
             }
             _ => {
                 let new_self = self.clone();
