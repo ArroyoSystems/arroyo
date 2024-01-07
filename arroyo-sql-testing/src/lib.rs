@@ -6,6 +6,7 @@ mod smoke_tests;
 mod tests {
     use arroyo_sql_macro::single_test_codegen;
     use arroyo_types;
+    use std::f64::consts::PI;
 
     // Casts
     single_test_codegen!(
@@ -1307,5 +1308,16 @@ mod tests {
             ..Default::default()
         },
         None
+    );
+
+    // PI
+    single_test_codegen!(
+        "pi",
+        "pi()",
+        arroyo_sql::TestStruct {
+            non_nullable_f64: PI,
+            ..Default::default()
+        },
+        PI
     );
 }
