@@ -21,7 +21,8 @@
                             "description": "The offset to start reading from",
                             "enum": [
                                 "latest",
-                                "earliest"
+                                "earliest",
+                                "group"
                             ]
                         },
                         "read_mode": {

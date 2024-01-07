@@ -21,6 +21,7 @@ impl SourceOffset {
         match self {
             SourceOffset::Earliest => Offset::Beginning,
             SourceOffset::Latest => Offset::End,
+            SourceOffset::Group => Offset::Stored,
         }
     }
 }
