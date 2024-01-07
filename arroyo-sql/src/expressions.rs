@@ -51,6 +51,7 @@ pub enum Expression {
     Case(CaseExpression),
     WindowUDF(WindowType),
     Unnest(Box<Expression>, bool),
+    PiConst(PiConstant),
 }
 
 pub struct JoinedPairedStruct {
@@ -252,6 +253,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
+            Expression::PiConst(pi) => pi.generate(input_context),
             Expression::Unnest(_, taken) => {
                 if !taken {
                     panic!("unnest appeared in a non-projection context");
@@ -303,6 +305,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
+            Expression::PiConst(p) => p.expression_type(input_context),
             Expression::Unnest(t, _) => match t.expression_type(input_context) {
                 TypeDef::DataType(DataType::List(inner), _) => {
                     TypeDef::DataType(inner.data_type().clone(), false)
@@ -424,7 +427,8 @@ impl Expression {
             | Expression::RustUdf(_)
             | Expression::WrapType(_)
             | Expression::Unnest(_, _)
-            | Expression::Case(_) => Ok(None),
+            | Expression::Case(_)
+            | Expression::PiConst(_) => Ok(None),
         }
     }
     fn get_duration(expression: &Expr) -> Result<Duration> {
@@ -553,6 +557,7 @@ impl Expression {
                 }
             },
             Expression::WindowUDF(_) => {}
+            Expression::PiConst(_) => {}
             Expression::Unnest(n, _) => {
                 (&mut *n).traverse_mut(context, f);
             }
@@ -755,7 +760,8 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Signum
                     | BuiltinScalarFunction::Trunc
                     | BuiltinScalarFunction::Log2
-                    | BuiltinScalarFunction::Exp => Ok(NumericExpression::new(
+                    | BuiltinScalarFunction::Exp
+                    | BuiltinScalarFunction::Cot => Ok(NumericExpression::new(
                         fun.clone(),
                         Box::new(arg_expressions.remove(0)),
                     )?),
@@ -864,7 +870,7 @@ impl<'a> ExpressionContext<'a> {
                     BuiltinScalarFunction::Uuid => bail!("UUID unimplemented"),
                     BuiltinScalarFunction::Cbrt => bail!("cube root unimplemented"),
                     BuiltinScalarFunction::Degrees => bail!("degrees not implemented yet"),
-                    BuiltinScalarFunction::Pi => bail!("pi not implemented yet"),
+                    BuiltinScalarFunction::Pi => PiConstant::new(),
                     BuiltinScalarFunction::Radians => bail!("radians not implemented yet"),
                     BuiltinScalarFunction::Factorial => bail!("factorial not implemented yet"),
                     BuiltinScalarFunction::Gcd => bail!("gcd not implemented yet"),
@@ -879,7 +885,6 @@ impl<'a> ExpressionContext<'a> {
                     ),
                     BuiltinScalarFunction::Decode => bail!("decode not implemented yet"),
                     BuiltinScalarFunction::Encode => bail!("encode not implemented yet"),
-                    BuiltinScalarFunction::Cot => bail!("cot not implemented yet"),
                     BuiltinScalarFunction::ArrayAppend
                     | BuiltinScalarFunction::ArrayConcat
                     | BuiltinScalarFunction::ArrayDims
@@ -1984,6 +1989,7 @@ enum NumericFunction {
     Trunc,
     Log2,
     Exp,
+    Cot,
 }
 
 impl NumericFunction {
@@ -2013,6 +2019,7 @@ impl NumericFunction {
             NumericFunction::Round => "round",
             NumericFunction::Trunc => "trunc",
             NumericFunction::Signum => "signum",
+            NumericFunction::Cot => "cot",
         };
         format_ident!("{}", name)
     }
@@ -2047,6 +2054,7 @@ impl TryFrom<BuiltinScalarFunction> for NumericFunction {
             BuiltinScalarFunction::Trunc => Ok(Self::Trunc),
             BuiltinScalarFunction::Log2 => Ok(Self::Log2),
             BuiltinScalarFunction::Exp => Ok(Self::Exp),
+            BuiltinScalarFunction::Cot => Ok(Self::Cot),
             _ => bail!("{:?} is not a single argument numeric function", fun),
         }
     }
@@ -4137,5 +4145,24 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DateTimeFunction
                 expr.expression_type(input_context).is_optional(),
             ),
         }
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
+pub struct PiConstant;
+
+impl PiConstant {
+    pub fn new() -> Result<Expression> {
+        Ok(Expression::PiConst(PiConstant {}))
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for PiConstant {
+    fn generate(&self, _input_context: &ValuePointerContext) -> syn::Expr {
+        parse_quote!(std::f64::consts::PI)
+    }
+
+    fn expression_type(&self, _input_context: &ValuePointerContext) -> TypeDef {
+        TypeDef::DataType(DataType::Float64, false)
     }
 }
