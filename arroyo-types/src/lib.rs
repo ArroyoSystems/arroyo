@@ -424,6 +424,12 @@ impl SourceError {
             details: details.into(),
         }
     }
+
+    pub fn details(&self) -> &String {
+        match self {
+            SourceError::BadData { details } | SourceError::Other { details, .. } => details,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Encode, Decode, PartialEq, Serialize, Deserialize)]

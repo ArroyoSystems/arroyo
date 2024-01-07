@@ -7,7 +7,7 @@ use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::ConnectorOp;
 use arroyo_rpc::api_types::connections::{
-    ConnectionProfile, ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
+    ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_types::ArroyoExtensionType;
@@ -27,7 +27,7 @@ use datafusion_expr::{
 };
 use tracing::info;
 
-use crate::{avro, DEFAULT_IDLE_TIME};
+use crate::DEFAULT_IDLE_TIME;
 use crate::{
     external::{ProcessingMode, SqlSource},
     json_schema,

@@ -8,10 +8,10 @@ use arrow_array::{Array, RecordBatch, StringArray};
 use arrow_schema::Schema;
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_rpc::{ArroyoSchema, TIMESTAMP_FIELD};
+use arroyo_rpc::ArroyoSchema;
 use arroyo_types::{should_flush, to_nanos, Data, Debezium, RawJson, SourceError};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -287,7 +287,15 @@ impl ArrowDeserializer {
         schema_resolver: Arc<dyn SchemaResolver + Sync>,
     ) -> Self {
         Self {
-            json_decoder: matches!(format, Format::Json(..) | Format::Avro(AvroFormat { into_unstructured_json: false, .. })).then(|| {
+            json_decoder: matches!(
+                format,
+                Format::Json(..)
+                    | Format::Avro(AvroFormat {
+                        into_unstructured_json: false,
+                        ..
+                    })
+            )
+            .then(|| {
                 // exclude the timestamp field
                 (
                     arrow_json::reader::ReaderBuilder::new(Arc::new(
@@ -317,9 +325,7 @@ impl ArrowDeserializer {
         timestamp: SystemTime,
     ) -> Vec<SourceError> {
         match &*self.format {
-            Format::Avro(avro) => {
-                self.deserialize_slice_avro(buffer, msg, timestamp).await
-            }
+            Format::Avro(_) => self.deserialize_slice_avro(buffer, msg, timestamp).await,
             _ => FramingIterator::new(self.framing.clone(), msg)
                 .map(|t| self.deserialize_single(buffer, t, timestamp))
                 .filter_map(|t| t.err())
@@ -395,8 +401,14 @@ impl ArrowDeserializer {
             unreachable!("not avro");
         };
 
-        let messages = match avro::avro_messages(format, &self.schema_registry,
-                                                 &self.schema_resolver, &mut msg).await {
+        let messages = match avro::avro_messages(
+            format,
+            &self.schema_registry,
+            &self.schema_resolver,
+            &mut msg,
+        )
+        .await
+        {
             Ok(messages) => messages,
             Err(e) => {
                 return vec![e];
@@ -404,42 +416,45 @@ impl ArrowDeserializer {
         };
 
         let into_json = format.into_unstructured_json;
-        let errors = messages.into_iter().map(|record| {
-            let value = record.map_err(|e| {
-                SourceError::bad_data(format!("Failed to deserialize from avro: {:?}", e))
-            })?;
+        let errors = messages
+            .into_iter()
+            .map(|record| {
+                let value = record.map_err(|e| {
+                    SourceError::bad_data(format!("failed to deserialize from avro: {:?}", e))
+                })?;
 
-            if into_json {
-                let (idx, _) = self
-                    .schema
-                    .schema
-                    .column_with_name("value")
-                    .expect("no 'value' column for unstructed avro");
-                let array = builders[idx]
-                    .as_any_mut()
-                    .downcast_mut::<StringBuilder>()
-                    .expect("'value' column has incorrect type");
+                if into_json {
+                    let (idx, _) = self
+                        .schema
+                        .schema
+                        .column_with_name("value")
+                        .expect("no 'value' column for unstructed avro");
+                    let array = builders[idx]
+                        .as_any_mut()
+                        .downcast_mut::<StringBuilder>()
+                        .expect("'value' column has incorrect type");
 
-                array.append_value(avro::avro_to_json(value).to_string());
-                add_timestamp(builders, self.schema.timestamp_index, timestamp);
-                self.buffered_count += 1;
-            } else {
-                // for now round-trip through json in order to handle unsupported avro features
-                // as that allows us to rely on raw json deserialization
-                let json = avro::avro_to_json(value).to_string();
+                    array.append_value(avro::avro_to_json(value).to_string());
+                    add_timestamp(builders, self.schema.timestamp_index, timestamp);
+                    self.buffered_count += 1;
+                } else {
+                    // for now round-trip through json in order to handle unsupported avro features
+                    // as that allows us to rely on raw json deserialization
+                    let json = avro::avro_to_json(value).to_string();
 
-                let Some((decoder, timestamp_builder)) = &mut self.json_decoder else {
-                    panic!("json decoder not initialized");
-                };
+                    let Some((decoder, timestamp_builder)) = &mut self.json_decoder else {
+                        panic!("json decoder not initialized");
+                    };
 
-                decoder
-                    .decode(json.as_bytes())
-                    .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
-                timestamp_builder.append_value(to_nanos(timestamp) as i64);
-            }
+                    decoder
+                        .decode(json.as_bytes())
+                        .map_err(|e| SourceError::bad_data(format!("invalid JSON: {:?}", e)))?;
+                    self.buffered_count += 1;
+                    timestamp_builder.append_value(to_nanos(timestamp) as i64);
+                }
 
-            Ok(())
-        })
+                Ok(())
+            })
             .filter_map(|r: Result<(), SourceError>| r.err())
             .collect();
 
@@ -464,15 +479,17 @@ impl ArrowDeserializer {
     }
 }
 
-
-pub(crate) fn add_timestamp(builder: &mut Vec<Box<dyn ArrayBuilder>>, idx: usize, timestamp: SystemTime) {
-        builder[idx]
+pub(crate) fn add_timestamp(
+    builder: &mut Vec<Box<dyn ArrayBuilder>>,
+    idx: usize,
+    timestamp: SystemTime,
+) {
+    builder[idx]
         .as_any_mut()
         .downcast_mut::<TimestampNanosecondBuilder>()
         .expect("_timestamp column has incorrect type")
         .append_value(to_nanos(timestamp) as i64);
 }
-
 
 pub struct DataSerializer<T: SchemaData> {
     kafka_schema: Value,

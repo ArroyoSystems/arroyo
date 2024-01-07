@@ -21,14 +21,13 @@ use datafusion::sql::sqlparser::ast::{
     ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
 };
 
-use crate::avro;
 use arroyo_rpc::api_types::connections::{
     FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
 use arroyo_types::ArroyoExtensionType;
 use datafusion_common::{DFField, DFSchemaRef, ScalarValue};
 use proc_macro2::{Ident, TokenStream};
-use quote::{format_ident, quote};
+use quote::quote;
 use regex::Regex;
 use syn::PathArguments::AngleBracketed;
 use syn::{parse_quote, parse_str, GenericArgument, Type};

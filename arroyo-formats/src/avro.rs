@@ -1,25 +1,24 @@
-use crate::{add_timestamp, SchemaData};
+use crate::SchemaData;
+use anyhow::{anyhow, bail};
 use apache_avro::types::{Value as AvroValue, Value};
-use apache_avro::{AvroResult, from_avro_datum, Reader, Schema, Writer};
+pub use apache_avro::Schema;
+use apache_avro::{from_avro_datum, AvroResult, Reader, Writer};
 use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
-use arrow_array::builder::{ArrayBuilder, StringBuilder, TimestampNanosecondBuilder};
 use arroyo_rpc::formats::AvroFormat;
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_types::{ArroyoExtensionType, SourceError, to_nanos};
+use arroyo_types::{ArroyoExtensionType, SourceError};
 use serde_json::{json, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::SystemTime;
-use anyhow::{anyhow, bail};
-use arrow_json::reader::Decoder;
 use tokio::sync::Mutex;
 use tracing::info;
-use arroyo_rpc::ArroyoSchema;
 
-
-pub(crate) async fn avro_messages(format: &AvroFormat,
-                       schema_registry: &Arc<Mutex<HashMap<u32, Schema>>>,
-                       resolver: &Arc<dyn SchemaResolver + Sync>, mut msg: &[u8]) -> Result<Vec<AvroResult<Value>>, SourceError> {
+pub(crate) async fn avro_messages(
+    format: &AvroFormat,
+    schema_registry: &Arc<Mutex<HashMap<u32, Schema>>>,
+    resolver: &Arc<dyn SchemaResolver + Sync>,
+    mut msg: &[u8],
+) -> Result<Vec<AvroResult<Value>>, SourceError> {
     let id = if format.confluent_schema_registry {
         let magic_byte = msg[0];
         if magic_byte != 0 {
@@ -59,7 +58,10 @@ pub(crate) async fn avro_messages(format: &AvroFormat,
             let new_schema = Schema::parse_str(&new_schema).map_err(|e| {
                 SourceError::other(
                     "schema registry error",
-                    format!("schema from Confluent Schema registry is not valid: {:?}", e)
+                    format!(
+                        "schema from Confluent Schema registry is not valid: {:?}",
+                        e
+                    ),
                 )
             })?;
 
@@ -256,9 +258,6 @@ fn field_to_avro(name: &str, field: &Field) -> serde_json::value::Value {
 }
 
 /// Computes an avro schema from an arrow schema
-///
-/// Note this must align with the generated code created in
-/// `arroyo_sql::avro::generate_serializer_items`!
 pub fn arrow_to_avro_schema(name: &str, fields: &Fields) -> Schema {
     let fields: Vec<_> = fields.iter().map(|f| field_to_avro(name, &**f)).collect();
 
@@ -286,7 +285,10 @@ pub fn to_arrow(name: &str, schema: &str) -> anyhow::Result<arrow_schema::Schema
     Ok(arrow_schema::Schema::new(fields))
 }
 
-fn to_arrow_datatype(source_name: &str, schema: &Schema) -> (DataType, bool, Option<ArroyoExtensionType>) {
+fn to_arrow_datatype(
+    source_name: &str,
+    schema: &Schema,
+) -> (DataType, bool, Option<ArroyoExtensionType>) {
     match schema {
         Schema::Null => (DataType::Null, false, None),
         Schema::Boolean => (DataType::Boolean, false, None),
@@ -298,12 +300,8 @@ fn to_arrow_datatype(source_name: &str, schema: &Schema) -> (DataType, bool, Opt
         | Schema::LocalTimestampMicros => (DataType::Int64, false, None),
         Schema::Float => (DataType::Float32, false, None),
         Schema::Double => (DataType::Float64, false, None),
-        Schema::Bytes | Schema::Fixed(_) | Schema::Decimal(_) => {
-            (DataType::Binary, false, None)
-        }
-        Schema::String | Schema::Enum(_) | Schema::Uuid => {
-            (DataType::Utf8, false, None)
-        }
+        Schema::Bytes | Schema::Fixed(_) | Schema::Decimal(_) => (DataType::Binary, false, None),
+        Schema::String | Schema::Enum(_) | Schema::Uuid => (DataType::Utf8, false, None),
         Schema::Union(union) => {
             // currently just support unions that have [t, null] as variants, which is the
             // avro way to represent optional fields
@@ -326,32 +324,32 @@ fn to_arrow_datatype(source_name: &str, schema: &Schema) -> (DataType, bool, Opt
                 .iter()
                 .map(|f| {
                     let (dt, nullable, extension) = to_arrow_datatype(source_name, &f.schema);
-                    Arc::new(ArroyoExtensionType::add_metadata(extension, Field::new(&f.name, dt, nullable)))
+                    Arc::new(ArroyoExtensionType::add_metadata(
+                        extension,
+                        Field::new(&f.name, dt, nullable),
+                    ))
                 })
                 .collect();
 
             (DataType::Struct(fields), false, None)
         }
-        _ => (DataType::Utf8, false, Some(ArroyoExtensionType::JSON))
-
+        _ => (DataType::Utf8, false, Some(ArroyoExtensionType::JSON)),
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::{arrow_to_avro_schema, to_arrow, to_vec};
-    use crate::old::DataDeserializer;
-    use crate::{ArrowDeserializer, avro, SchemaData};
+    use crate::{avro, ArrowDeserializer, SchemaData};
+    use arrow_array::builder::{make_builder, ArrayBuilder};
+    use arrow_array::RecordBatch;
+    use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_rpc::formats::{AvroFormat, BadData, Format};
-    use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver};
-    use arroyo_types::RawJson;
+    use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
+    use arroyo_rpc::ArroyoSchema;
     use serde_json::json;
     use std::sync::Arc;
     use std::time::SystemTime;
-    use arrow_array::builder::make_builder;
-    use arrow_schema::{DataType, Field, Schema, TimeUnit};
-    use arroyo_rpc::ArroyoSchema;
 
     const SCHEMA: &str = r#"
         {
@@ -421,6 +419,101 @@ mod tests {
   "type": "record"
 }"#;
 
+    fn deserializer_with_schema(
+        format: AvroFormat,
+        writer_schema: Option<&str>,
+    ) -> (ArrowDeserializer, Vec<Box<dyn ArrayBuilder>>, ArroyoSchema) {
+        let arrow_schema = if format.into_unstructured_json {
+            Schema::new(vec![Field::new("value", DataType::Utf8, false)])
+        } else {
+            to_arrow(
+                "source",
+                &format
+                    .reader_schema
+                    .as_ref()
+                    .expect("no reader schema")
+                    .0
+                    .canonical_form(),
+            )
+            .expect("invalid schema")
+        };
+
+        let arroyo_schema = {
+            let mut fields = arrow_schema.fields.to_vec();
+            fields.push(Arc::new(Field::new(
+                "_timestamp",
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            )));
+            ArroyoSchema::from_schema_keys(Arc::new(Schema::new(fields)), vec![]).unwrap()
+        };
+
+        let builders: Vec<_> = arroyo_schema
+            .schema
+            .fields
+            .iter()
+            .map(|f| make_builder(f.data_type(), 8))
+            .collect();
+
+        let resolver: Arc<dyn SchemaResolver + Sync> = if let Some(schema) = &writer_schema {
+            Arc::new(FixedSchemaResolver::new(
+                if format.confluent_schema_registry {
+                    1
+                } else {
+                    0
+                },
+                avro::Schema::parse_str(schema).unwrap(),
+            ))
+        } else {
+            Arc::new(FailingSchemaResolver::new())
+        };
+
+        (
+            ArrowDeserializer::with_schema_resolver(
+                Format::Avro(format),
+                None,
+                arroyo_schema.clone(),
+                BadData::Fail {},
+                resolver,
+            ),
+            builders,
+            arroyo_schema,
+        )
+    }
+
+    async fn deserialize_with_schema(
+        format: AvroFormat,
+        writer_schema: Option<&str>,
+        message: &[u8],
+    ) -> Vec<serde_json::Map<String, serde_json::Value>> {
+        let (mut deserializer, mut builders, arroyo_schema) =
+            deserializer_with_schema(format.clone(), writer_schema);
+
+        let errors = deserializer
+            .deserialize_slice(&mut builders, &message, SystemTime::now())
+            .await;
+        assert_eq!(errors, vec![]);
+
+        let batch = if format.into_unstructured_json {
+            RecordBatch::try_new(
+                arroyo_schema.schema,
+                builders.into_iter().map(|mut b| b.finish()).collect(),
+            )
+            .unwrap()
+        } else {
+            deserializer.flush_buffer().unwrap().unwrap()
+        };
+
+        arrow_json::writer::record_batches_to_json_rows(&[&batch])
+            .unwrap()
+            .into_iter()
+            .map(|mut r| {
+                r.remove("_timestamp");
+                r
+            })
+            .collect()
+    }
+
     #[tokio::test]
     async fn test_avro_deserialization() {
         let message = [
@@ -430,45 +523,19 @@ mod tests {
             113, 61, 10, 215, 163, 112, 26, 64, 113, 61, 10, 215, 163, 112, 26, 64, 0, 10,
         ];
 
-        let arrow_schema = to_arrow("source", SCHEMA).expect("invalid schema");
-
-        let arroyo_schema = {
-            let mut fields = arrow_schema.fields.to_vec();
-            fields.push(Arc::new(Field::new("_timestamp", DataType::Timestamp(TimeUnit::Nanosecond, None), false)));
-            ArroyoSchema::from_schema_keys(Arc::new(Schema::new(fields)), vec![]).unwrap()
-        };
-
-        let mut deserializer = ArrowDeserializer::with_schema_resolver(
-            Format::Avro(AvroFormat::new(true, false, false)),
-            None,
-            arroyo_schema,
-            BadData::Drop {},
-            Arc::new(FixedSchemaResolver::new(
-                1,
-                avro::Schema::parse_str(SCHEMA).unwrap(),
-            )),
-        );
-
-
-        let mut builders: Vec<_> = arrow_schema.fields.iter().map(|f| {
-            make_builder(f.data_type(), 8)
-        }).collect();
-
-        let errors = deserializer.deserialize_slice(&mut builders, &message, SystemTime::now()).await;
-        assert_eq!(errors, vec![]);
-
-        let batch = deserializer.flush_buffer().unwrap().unwrap();
-
-        let rows = arrow_json::writer::record_batches_to_json_rows(&[&batch]).unwrap();
-
-        let row = &rows[0];
+        let mut format = AvroFormat::new(true, false, false);
+        format.add_reader_schema(avro::Schema::parse_str(SCHEMA).unwrap());
+        let row = deserialize_with_schema(format, Some(SCHEMA), &message)
+            .await
+            .remove(0);
         assert_eq!(*row.get("store_id").unwrap(), json!(4));
         assert_eq!(*row.get("store_order_id").unwrap(), json!(14308));
         assert_eq!(*row.get("coupon_code").unwrap(), json!(1992));
         assert_eq!(*row.get("date").unwrap(), json!("18397"));
         assert_eq!(*row.get("status").unwrap(), json!("accepted"));
 
-        let v: serde_json::Value = serde_json::from_str(&row.get("order_lines").unwrap().as_str().unwrap()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&row.get("order_lines").unwrap().as_str().unwrap()).unwrap();
 
         let order_line_expected = json!(
             [{"category":"pizza","net_price":22.9,"product_id":78,"quantity":2,"unit_price":11.45},{"category":"dessert","net_price":6.61,"product_id":42,"quantity":1,"unit_price":6.61}]
@@ -477,154 +544,182 @@ mod tests {
         assert_eq!(v, order_line_expected);
     }
 
-    // #[tokio::test]
-    // async fn test_backwards_compatible() {
-    //     #[derive(
-    //         Clone,
-    //         Debug,
-    //         bincode::Encode,
-    //         bincode::Decode,
-    //         PartialEq,
-    //         PartialOrd,
-    //         serde::Serialize,
-    //         serde::Deserialize,
-    //     )]
-    //     pub struct ArroyoAvroRoot {
-    //         pub name: String,
-    //         pub favorite_number: Option<i32>,
-    //         pub favorite_color: Option<String>,
-    //         pub new_field: String,
-    //     }
-    //     impl SchemaData for ArroyoAvroRoot {
-    //         fn name() -> &'static str {
-    //             "ArroyoAvroRoot"
-    //         }
-    //         fn schema() -> arrow::datatypes::Schema {
-    //             unimplemented!()
-    //         }
-    //         fn to_raw_string(&self) -> Option<Vec<u8>> {
-    //             unimplemented!("to_raw_string is not implemented for this type")
-    //         }
-    //
-    //         fn to_avro(&self, _schema: &apache_avro::Schema) -> apache_avro::types::Value {
-    //             todo!()
-    //         }
-    //     }
-    //
-    //     // test schema evolution for adding a field (new_field)
-    //     let writer_schema = r#"{"namespace": "example.avro",
-    //         "type": "record",
-    //         "name": "User",
-    //         "fields": [
-    //             {"name": "name", "type": "string"},
-    //             {"name": "favorite_number",  "type": ["int", "null"]},
-    //             {"name": "favorite_color", "type": ["string", "null"]}
-    //         ]
-    //     }"#;
-    //
-    //     let reader_schema = r#"{"namespace": "example.avro",
-    //         "type": "record",
-    //         "name": "User",
-    //         "fields": [
-    //         {"name": "name", "type": "string"},
-    //         {"name": "favorite_number",  "type": ["int", "null"]},
-    //         {"name": "favorite_color", "type": ["string", "null"]},
-    //         {"name": "new_field", "type": "string", "default": "hello!"}
-    //         ]
-    //     }"#;
-    //
-    //     let mut format = AvroFormat::new(true, false, false);
-    //     format.add_reader_schema(Schema::parse_str(reader_schema).unwrap());
-    //
-    //     let mut deserializer = DataDeserializer::with_schema_resolver(
-    //         Format::Avro(format),
-    //         None,
-    //         Arc::new(FixedSchemaResolver::new(
-    //             1,
-    //             Schema::parse_str(writer_schema).unwrap(),
-    //         )),
-    //     );
-    //
-    //     let data = [0, 0, 0, 0, 1, 12, 65, 108, 121, 115, 115, 97, 0, 128, 4, 2];
-    //
-    //     let v: Result<Vec<ArroyoAvroRoot>, _> =
-    //         deserializer.deserialize_slice(&data[..]).await.collect();
-    //
-    //     let v = v.unwrap();
-    //     println!("{:?}", v);
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_embedded() {
-    //     let data = [
-    //         79u8, 98, 106, 1, 4, 20, 97, 118, 114, 111, 46, 99, 111, 100, 101, 99, 8, 110, 117,
-    //         108, 108, 22, 97, 118, 114, 111, 46, 115, 99, 104, 101, 109, 97, 186, 3, 123, 34, 116,
-    //         121, 112, 101, 34, 58, 32, 34, 114, 101, 99, 111, 114, 100, 34, 44, 32, 34, 110, 97,
-    //         109, 101, 34, 58, 32, 34, 85, 115, 101, 114, 34, 44, 32, 34, 110, 97, 109, 101, 115,
-    //         112, 97, 99, 101, 34, 58, 32, 34, 101, 120, 97, 109, 112, 108, 101, 46, 97, 118, 114,
-    //         111, 34, 44, 32, 34, 102, 105, 101, 108, 100, 115, 34, 58, 32, 91, 123, 34, 116, 121,
-    //         112, 101, 34, 58, 32, 34, 115, 116, 114, 105, 110, 103, 34, 44, 32, 34, 110, 97, 109,
-    //         101, 34, 58, 32, 34, 110, 97, 109, 101, 34, 125, 44, 32, 123, 34, 116, 121, 112, 101,
-    //         34, 58, 32, 91, 34, 105, 110, 116, 34, 44, 32, 34, 110, 117, 108, 108, 34, 93, 44, 32,
-    //         34, 110, 97, 109, 101, 34, 58, 32, 34, 102, 97, 118, 111, 114, 105, 116, 101, 95, 110,
-    //         117, 109, 98, 101, 114, 34, 125, 44, 32, 123, 34, 116, 121, 112, 101, 34, 58, 32, 91,
-    //         34, 115, 116, 114, 105, 110, 103, 34, 44, 32, 34, 110, 117, 108, 108, 34, 93, 44, 32,
-    //         34, 110, 97, 109, 101, 34, 58, 32, 34, 102, 97, 118, 111, 114, 105, 116, 101, 95, 99,
-    //         111, 108, 111, 114, 34, 125, 93, 125, 0, 52, 104, 70, 176, 108, 101, 199, 71, 44, 76,
-    //         126, 49, 211, 19, 204, 87, 4, 44, 12, 65, 108, 121, 115, 115, 97, 0, 128, 4, 2, 6, 66,
-    //         101, 110, 0, 14, 0, 6, 114, 101, 100, 52, 104, 70, 176, 108, 101, 199, 71, 44, 76, 126,
-    //         49, 211, 19, 204, 87,
-    //     ];
-    //
-    //     let mut deserializer = DataDeserializer::with_schema_resolver(
-    //         Format::Avro(AvroFormat::new(false, false, true)),
-    //         None,
-    //         Arc::new(FailingSchemaResolver::new()),
-    //     );
-    //
-    //     let v: Result<Vec<RawJson>, _> = deserializer.deserialize_slice(&data[..]).await.collect();
-    //
-    //     let v: Vec<_> = v
-    //         .unwrap()
-    //         .into_iter()
-    //         .map(|t| serde_json::from_str::<serde_json::Value>(&t.value).unwrap())
-    //         .collect();
-    //
-    //     let expected = vec![
-    //         json!({ "name": "Alyssa", "favorite_number": 256, "favorite_color": null }),
-    //         json!({ "name": "Ben", "favorite_number": 7, "favorite_color": "red" }),
-    //     ];
-    //
-    //     assert_eq!(v, expected);
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_datum_static_schema() {
-    //     let data = [12, 65, 108, 121, 115, 115, 97, 0, 128, 4, 2];
-    //
-    //     let schema_str = r#"{"namespace": "example.avro",
-    //         "type": "record",
-    //         "name": "User",
-    //         "fields": [
-    //         {"name": "name", "type": "string"},
-    //         {"name": "favorite_number",  "type": ["int", "null"]},
-    //         {"name": "favorite_color", "type": ["string", "null"]}
-    //         ]
-    //     }"#;
-    //
-    //     let mut format = AvroFormat::new(false, true, true);
-    //     format.add_reader_schema(Schema::parse_str(&schema_str).unwrap());
-    //     let mut deserializer = DataDeserializer::new(Format::Avro(format), None);
-    //
-    //     let v: Result<Vec<RawJson>, _> = deserializer.deserialize_slice(&data[..]).await.collect();
-    //
-    //     let expected = json!({ "name": "Alyssa", "favorite_number": 256, "favorite_color": null });
-    //
-    //     assert_eq!(
-    //         serde_json::from_str::<serde_json::Value>(&v.unwrap()[0].value).unwrap(),
-    //         expected
-    //     );
-    // }
+    #[tokio::test]
+    async fn test_add_field() {
+        // test schema evolution for adding a field (new_field)
+        let reader_schema = r#"{"namespace": "example.avro",
+            "type": "record",
+            "name": "User",
+            "fields": [
+                {"name": "name", "type": "string"},
+                {"name": "favorite_number", "type": "int"},
+                {"name": "favorite_color", "type": ["string", "null"]}
+            ]
+        }"#;
+
+        let writer_schema = r#"{"namespace": "example.avro",
+            "type": "record",
+            "name": "User",
+            "fields": [
+            {"name": "name", "type": "string"},
+            {"name": "favorite_number", "type": "int"},
+            {"name": "favorite_color", "type": ["string", "null"]},
+            {"name": "new_field", "type": "string", "default": "hello!"}
+            ]
+        }"#;
+
+        let mut format = AvroFormat::new(true, false, false);
+        format.add_reader_schema(avro::Schema::parse_str(reader_schema).unwrap());
+
+        let schema = avro::Schema::parse_str(writer_schema).unwrap();
+        let mut value = apache_avro::types::Record::new(&schema).unwrap();
+        value.put(
+            "name",
+            apache_avro::types::Value::String("Alyssa".to_string()),
+        );
+        value.put("favorite_number", apache_avro::types::Value::Int(256));
+        value.put(
+            "favorite_color",
+            apache_avro::types::Value::Union(1, Box::new(apache_avro::types::Value::Null)),
+        );
+        value.put(
+            "new_field",
+            apache_avro::types::Value::String("new".to_string()),
+        );
+
+        let mut bytes = vec![0, 0, 0, 0, 1];
+        bytes.extend_from_slice(
+            &apache_avro::to_avro_datum(&avro::Schema::parse_str(writer_schema).unwrap(), value)
+                .unwrap(),
+        );
+
+        let v = deserialize_with_schema(format, Some(writer_schema), &bytes[..]).await;
+        assert_eq!(
+            serde_json::to_value(v).unwrap(),
+            json!([{
+                "name": "Alyssa",
+                "favorite_number": 256,
+            }])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_remove_field() {
+        // test schema evolution for removing a field with a default value
+        let writer_schema = r#"{"namespace": "example.avro",
+            "type": "record",
+            "name": "User",
+            "fields": [
+            {"name": "name", "type": "string"},
+            {"name": "favorite_number", "type": "int"},
+            {"name": "favorite_color", "type": ["string", "null"]}
+            ]
+        }"#;
+
+        let reader_schema = r#"{"namespace": "example.avro",
+            "type": "record",
+            "name": "User",
+            "fields": [
+                {"name": "name", "type": "string"},
+                {"name": "favorite_number", "type": "int"},
+                {"name": "favorite_color", "type": ["string", "null"]},
+                {"name": "removed_field", "type": "string", "default": "hello!"}
+            ]
+        }"#;
+
+        let schema = avro::Schema::parse_str(writer_schema).unwrap();
+        let mut value = apache_avro::types::Record::new(&schema).unwrap();
+        value.put(
+            "name",
+            apache_avro::types::Value::String("Alyssa".to_string()),
+        );
+        value.put("favorite_number", apache_avro::types::Value::Int(256));
+
+        let mut bytes = vec![0, 0, 0, 0, 1];
+        bytes.extend_from_slice(
+            &apache_avro::to_avro_datum(&avro::Schema::parse_str(writer_schema).unwrap(), value)
+                .unwrap(),
+        );
+
+        let mut format = AvroFormat::new(true, false, false);
+        format.add_reader_schema(avro::Schema::parse_str(reader_schema).unwrap());
+
+        let v = deserialize_with_schema(format, Some(writer_schema), bytes.as_slice()).await;
+        assert_eq!(
+            serde_json::to_value(v).unwrap(),
+            json!([{
+                "name": "Alyssa",
+                "favorite_number": 256,
+                "removed_field": "hello!"
+            }])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_embedded() {
+        let data = [
+            79u8, 98, 106, 1, 4, 20, 97, 118, 114, 111, 46, 99, 111, 100, 101, 99, 8, 110, 117,
+            108, 108, 22, 97, 118, 114, 111, 46, 115, 99, 104, 101, 109, 97, 186, 3, 123, 34, 116,
+            121, 112, 101, 34, 58, 32, 34, 114, 101, 99, 111, 114, 100, 34, 44, 32, 34, 110, 97,
+            109, 101, 34, 58, 32, 34, 85, 115, 101, 114, 34, 44, 32, 34, 110, 97, 109, 101, 115,
+            112, 97, 99, 101, 34, 58, 32, 34, 101, 120, 97, 109, 112, 108, 101, 46, 97, 118, 114,
+            111, 34, 44, 32, 34, 102, 105, 101, 108, 100, 115, 34, 58, 32, 91, 123, 34, 116, 121,
+            112, 101, 34, 58, 32, 34, 115, 116, 114, 105, 110, 103, 34, 44, 32, 34, 110, 97, 109,
+            101, 34, 58, 32, 34, 110, 97, 109, 101, 34, 125, 44, 32, 123, 34, 116, 121, 112, 101,
+            34, 58, 32, 91, 34, 105, 110, 116, 34, 44, 32, 34, 110, 117, 108, 108, 34, 93, 44, 32,
+            34, 110, 97, 109, 101, 34, 58, 32, 34, 102, 97, 118, 111, 114, 105, 116, 101, 95, 110,
+            117, 109, 98, 101, 114, 34, 125, 44, 32, 123, 34, 116, 121, 112, 101, 34, 58, 32, 91,
+            34, 115, 116, 114, 105, 110, 103, 34, 44, 32, 34, 110, 117, 108, 108, 34, 93, 44, 32,
+            34, 110, 97, 109, 101, 34, 58, 32, 34, 102, 97, 118, 111, 114, 105, 116, 101, 95, 99,
+            111, 108, 111, 114, 34, 125, 93, 125, 0, 52, 104, 70, 176, 108, 101, 199, 71, 44, 76,
+            126, 49, 211, 19, 204, 87, 4, 44, 12, 65, 108, 121, 115, 115, 97, 0, 128, 4, 2, 6, 66,
+            101, 110, 0, 14, 0, 6, 114, 101, 100, 52, 104, 70, 176, 108, 101, 199, 71, 44, 76, 126,
+            49, 211, 19, 204, 87,
+        ];
+
+        let format = AvroFormat::new(false, false, true);
+        let vs = deserialize_with_schema(format, None, &data).await;
+
+        let expected = vec![
+            json!({ "name": "Alyssa", "favorite_number": 256, "favorite_color": null }),
+            json!({ "name": "Ben", "favorite_number": 7, "favorite_color": "red" }),
+        ];
+
+        for (a, b) in vs.iter().zip(expected) {
+            let v: serde_json::Value =
+                serde_json::from_str(a.get("value").unwrap().as_str().unwrap()).unwrap();
+            assert_eq!(v, b);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_datum_static_schema() {
+        let data = [12, 65, 108, 121, 115, 115, 97, 0, 128, 4, 2];
+
+        let schema_str = r#"{"namespace": "example.avro",
+            "type": "record",
+            "name": "User",
+            "fields": [
+            {"name": "name", "type": "string"},
+            {"name": "favorite_number",  "type": ["int", "null"]},
+            {"name": "favorite_color", "type": ["string", "null"]}
+            ]
+        }"#;
+
+        let mut format = AvroFormat::new(false, true, true);
+        format.add_reader_schema(avro::Schema::parse_str(&schema_str).unwrap());
+        let vs = deserialize_with_schema(format, Some(schema_str), &data).await;
+
+        let expected = json!({ "name": "Alyssa", "favorite_number": 256, "favorite_color": null });
+
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                vs[0].get("value").unwrap().as_str().unwrap()
+            )
+            .unwrap(),
+            expected
+        );
+    }
 
     #[tokio::test]
     async fn test_writing() {

@@ -963,6 +963,7 @@ version = "0.9.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
+ "arrow-array 49.0.0",
  "arrow-schema 49.0.0",
  "arroyo-types",
  "async-trait",
