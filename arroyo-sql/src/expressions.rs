@@ -446,11 +446,10 @@ impl Expression {
         }
     }
 
-    pub fn traverse_mut<T, F: Fn(&mut T, &mut Expression) -> ()>(
-        &mut self,
-        context: &mut T,
-        f: &F,
-    ) {
+    pub fn traverse_mut<T, F>(&mut self, context: &mut T, f: &F)
+    where
+        F: Fn(&mut T, &mut Expression) -> (),
+    {
         match self {
             Expression::Column(_) => {}
             Expression::UnaryBoolean(e) => {
@@ -796,6 +795,7 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Rpad
                     | BuiltinScalarFunction::Rtrim
                     | BuiltinScalarFunction::RegexpMatch
+                    | BuiltinScalarFunction::ToHex
                     | BuiltinScalarFunction::RegexpReplace => {
                         let string_function: StringFunction =
                             (fun.clone(), arg_expressions).try_into()?;
@@ -866,7 +866,6 @@ impl<'a> ExpressionContext<'a> {
                         fun.clone(),
                         Box::new(arg_expressions.remove(0)),
                     )?),
-                    BuiltinScalarFunction::ToHex => bail!("hex not implemented"),
                     BuiltinScalarFunction::Uuid => bail!("UUID unimplemented"),
                     BuiltinScalarFunction::Cbrt => bail!("cube root unimplemented"),
                     BuiltinScalarFunction::Degrees => bail!("degrees not implemented yet"),
@@ -2257,6 +2256,7 @@ pub enum StringFunction {
     Right(Box<Expression>, Box<Expression>),
     Rpad(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
     Rtrim(Box<Expression>, Option<Box<Expression>>),
+    ToHex(Box<Expression>),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
@@ -2361,6 +2361,9 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
         match (args.len(), func) {
             (1, BuiltinScalarFunction::Ascii) => {
                 Ok(StringFunction::Ascii(Box::new(args.remove(0))))
+            }
+            (1, BuiltinScalarFunction::ToHex) => {
+                Ok(StringFunction::ToHex(Box::new(args.remove(0))))
             }
             (1, BuiltinScalarFunction::BitLength) => {
                 Ok(StringFunction::BitLength(Box::new(args.remove(0))))
@@ -2521,6 +2524,7 @@ impl StringFunction {
     fn expressions(&mut self) -> Vec<&mut Expression> {
         match self {
             StringFunction::Ascii(expr)
+            | StringFunction::ToHex(expr)
             | StringFunction::BitLength(expr)
             | StringFunction::CharacterLength(expr)
             | StringFunction::OctetLength(expr)
@@ -2578,6 +2582,10 @@ impl StringFunction {
             | StringFunction::OctetLength(expr)
             | StringFunction::Reverse(expr) => TypeDef::DataType(
                 DataType::Int32,
+                expr.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::ToHex(expr) => TypeDef::DataType(
+                DataType::Utf8,
                 expr.expression_type(input_context).is_optional(),
             ),
             StringFunction::StartsWith(expr1, expr2) => TypeDef::DataType(
@@ -2646,6 +2654,9 @@ impl StringFunction {
         match self {
             StringFunction::Ascii(_) => {
                 parse_quote!(arroyo_worker::operators::functions::strings::ascii(arg))
+            }
+            StringFunction::ToHex(_) => {
+                parse_quote!(arroyo_worker::operators::functions::strings::to_hex(arg))
             }
             StringFunction::BitLength(_) => {
                 parse_quote!(arroyo_worker::operators::functions::strings::bit_length(
@@ -2789,6 +2800,7 @@ impl StringFunction {
             | StringFunction::Trim(arg, None)
             | StringFunction::Ltrim(arg, None)
             | StringFunction::Rtrim(arg, None)
+            | StringFunction::ToHex(arg)
             | StringFunction::RegexpMatch(arg, _) => {
                 let expr = arg.generate(input_context);
                 match arg.expression_type(input_context).is_optional() {
@@ -3023,6 +3035,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StringFunction {
             | StringFunction::Trim(arg, None)
             | StringFunction::Ltrim(arg, None)
             | StringFunction::Rtrim(arg, None)
+            | StringFunction::ToHex(arg)
             | StringFunction::RegexpMatch(arg, _) => {
                 let expr = arg.generate(input_context);
                 match arg.expression_type(input_context).is_optional() {
@@ -3270,6 +3283,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StringFunction {
             | StringFunction::InitCap(expr)
             | StringFunction::Ltrim(expr, None)
             | StringFunction::Rtrim(expr, None)
+            | StringFunction::ToHex(expr)
             | StringFunction::Trim(expr, None) => TypeDef::DataType(
                 DataType::Utf8,
                 expr.expression_type(input_context).is_optional(),
