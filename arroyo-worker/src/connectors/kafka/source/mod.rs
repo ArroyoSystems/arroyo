@@ -1,9 +1,10 @@
 use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperatorConstructor, BaseOperator};
 use crate::SourceFinishType;
+use anyhow::anyhow;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::api::ConnectorOp;
-use arroyo_rpc::grpc::{api, TableDescriptor};
+use arroyo_rpc::grpc::{api, TableConfig, TableDescriptor};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, FailingSchemaResolver, SchemaResolver};
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
@@ -103,9 +104,12 @@ impl KafkaSourceFunc {
             )
             .create()?;
 
-        let mut s: GlobalKeyedState<i32, KafkaState, _> =
-            ctx.state.get_global_keyed_state('k').await;
-        let state: Vec<&KafkaState> = s.get_all();
+        let mut s: HashMap<u32, KafkaState> = ctx
+            .table_manager
+            .get_global_keyed_state("k")
+            .await?
+            .get_all();
+        let state: Vec<&KafkaState> = s.values().collect();
 
         // did we restore any partitions?
         let has_state = !state.is_empty();
@@ -215,7 +219,8 @@ impl KafkaSourceFunc {
                         Some(ControlMessage::Checkpoint(c)) => {
                             debug!("starting checkpointing {}", ctx.task_info.task_index);
                             let mut topic_partitions = TopicPartitionList::new();
-                            let mut s = ctx.state.get_global_keyed_state('k').await;
+                            let mut s = ctx.table_manager.get_global_keyed_state("k").await
+                            .map_err(|err| UserError::new("failed to get global key value", err.to_string()))?;
                             for (partition, offset) in &offsets {
                                 let partition2 = partition;
                                 s.insert(*partition, KafkaState {
@@ -356,7 +361,12 @@ impl BaseOperator for KafkaSourceFunc {
         format!("kafka-{}", self.topic)
     }
 
-    fn tables(&self) -> Vec<TableDescriptor> {
-        tables()
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        vec![(
+            "k".to_string(),
+            arroyo_state::global_table_config("i", "kafka offsets"),
+        )]
+        .into_iter()
+        .collect()
     }
 }

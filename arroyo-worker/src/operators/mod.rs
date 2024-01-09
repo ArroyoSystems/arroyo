@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::str::FromStr;
 use std::{fmt::Debug, path::PathBuf};
@@ -12,7 +13,8 @@ use arrow::compute::kernels;
 use arrow_array::RecordBatch;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::api::PeriodicWatermark;
-use arroyo_rpc::grpc::{api, TableDescriptor};
+use arroyo_rpc::grpc::{api, TableConfig, TableDescriptor};
+use arroyo_state::global_table_config;
 use arroyo_types::{
     from_millis, from_nanos, to_millis, ArrowMessage, CheckpointBarrier, Data, GlobalKey, Key,
     Message, Record, RecordBatchData, SignalMessage, TaskInfo, UpdatingData, Watermark, Window,
@@ -150,11 +152,13 @@ impl ArrowOperatorConstructor<api::PeriodicWatermark, Self> for PeriodicWatermar
 
 #[async_trait]
 impl ArrowOperator for PeriodicWatermarkGenerator {
-    fn tables(&self) -> Vec<TableDescriptor> {
-        vec![arroyo_state::global_table(
-            "s",
-            "periodic watermark generator state",
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        vec![(
+            "s".to_string(),
+            global_table_config("s", "periodic watermark state"),
         )]
+        .into_iter()
+        .collect()
     }
 
     fn name(&self) -> String {
@@ -166,7 +170,11 @@ impl ArrowOperator for PeriodicWatermarkGenerator {
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {
-        let gs = ctx.state.get_global_keyed_state('s').await;
+        let gs = ctx
+            .table_manager
+            .get_global_keyed_state("s")
+            .await
+            .expect("should have watermark table.");
         self.last_event = SystemTime::now();
 
         let state =
@@ -228,7 +236,11 @@ impl ArrowOperator for PeriodicWatermarkGenerator {
     }
 
     async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
-        let mut gs = ctx.state.get_global_keyed_state('s').await;
+        let mut gs = ctx
+            .table_manager
+            .get_global_keyed_state("s")
+            .await
+            .expect("state");
 
         gs.insert(ctx.task_info.task_index, self.state_cache).await;
     }

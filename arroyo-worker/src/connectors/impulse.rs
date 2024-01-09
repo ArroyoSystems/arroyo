@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -6,7 +7,7 @@ use crate::engine::{ArrowContext, StreamNode};
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
 use crate::SourceFinishType;
 use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
-use arroyo_rpc::grpc::{api, StopMode, TableDescriptor};
+use arroyo_rpc::grpc::{api, StopMode, TableConfig, TableDescriptor};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::*;
 use async_trait::async_trait;
@@ -113,9 +114,10 @@ impl ImpulseSourceFunc {
                 Ok(ControlMessage::Checkpoint(c)) => {
                     // checkpoint our state
                     debug!("starting checkpointing {}", ctx.task_info.task_index);
-                    ctx.state
-                        .get_global_keyed_state('i')
+                    ctx.table_manager
+                        .get_global_keyed_state("i")
                         .await
+                        .unwrap()
                         .insert(ctx.task_info.task_index, self.state)
                         .await;
                     if self.checkpoint(c, ctx).await {
@@ -188,8 +190,13 @@ impl BaseOperator for ImpulseSourceFunc {
         "impulse-source".to_string()
     }
 
-    fn tables(&self) -> Vec<TableDescriptor> {
-        vec![arroyo_state::global_table("i", "impulse source state")]
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        vec![(
+            "i".to_string(),
+            arroyo_state::global_table_config("i", "impulse source state"),
+        )]
+        .into_iter()
+        .collect()
     }
 
     async fn run_behavior(
@@ -198,9 +205,10 @@ impl BaseOperator for ImpulseSourceFunc {
         _: Vec<Receiver<ArrowMessage>>,
     ) -> Option<ArrowMessage> {
         let s = ctx
-            .state
-            .get_global_keyed_state::<usize, ImpulseSourceState>('i')
-            .await;
+            .table_manager
+            .get_global_keyed_state("i")
+            .await
+            .expect("should have table i in impulse source");
 
         if let Some(state) = s.get(&ctx.task_info.task_index) {
             self.state = *state;

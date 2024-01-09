@@ -2,16 +2,16 @@ use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperatorConstructor, BaseOperator};
 use crate::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::{api, StopMode, TableDescriptor};
+use arroyo_rpc::grpc::{api, StopMode, TableConfig, TableDescriptor};
 use arroyo_rpc::{var_str::VarStr, ControlMessage, ControlResp, OperatorConfig};
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::{GlobalKeyedState, GlobalKeyedView};
 use arroyo_types::{string_to_map, ArrowMessage, SignalMessage, UserError, Watermark};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 use tokio::select;
 use tokio::sync::mpsc::Receiver;
@@ -74,8 +74,13 @@ impl BaseOperator for SSESourceFunc {
         "SSESource".to_string()
     }
 
-    fn tables(&self) -> Vec<TableDescriptor> {
-        vec![arroyo_state::global_table("e", "sse source state")]
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        vec![(
+            "e".to_string(),
+            arroyo_state::global_table_config("e", "sse source state"),
+        )]
+        .into_iter()
+        .collect()
     }
 
     async fn run_behavior(
@@ -83,8 +88,11 @@ impl BaseOperator for SSESourceFunc {
         ctx: &mut ArrowContext,
         _: Vec<Receiver<ArrowMessage>>,
     ) -> Option<ArrowMessage> {
-        let s: GlobalKeyedState<(), SSESourceState, _> =
-            ctx.state.get_global_keyed_state('e').await;
+        let s: &mut GlobalKeyedView<(), SSESourceState> = ctx
+            .table_manager
+            .get_global_keyed_state("e")
+            .await
+            .expect("should be able to read SSE state");
 
         if let Some(state) = s.get(&()) {
             self.state = state.clone();
@@ -111,8 +119,11 @@ impl SSESourceFunc {
         match msg? {
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
-                let mut s: GlobalKeyedState<(), SSESourceState, _> =
-                    ctx.state.get_global_keyed_state('e').await;
+                let mut s = ctx
+                    .table_manager
+                    .get_global_keyed_state("e")
+                    .await
+                    .expect("should be able to get SSE state");
                 s.insert((), self.state.clone()).await;
 
                 if self.checkpoint(c, ctx).await {

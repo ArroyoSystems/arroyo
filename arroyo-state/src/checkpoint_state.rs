@@ -1,33 +1,135 @@
-use crate::committing_state::CommittingState;
-use crate::subtask_state::SubtaskState;
-use crate::{BackingStore, StateBackend};
-use anyhow::{anyhow, bail};
-use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
-use arroyo_rpc::grpc::{self, OperatorCommitData, TableCommitData};
-use arroyo_rpc::grpc::{
-    api, backend_data, BackendData, CheckpointMetadata, OperatorCheckpointMetadata,
-    TableDescriptor, TableWriteBehavior, TaskCheckpointCompletedReq, TaskCheckpointEventReq,
-};
-use arroyo_types::to_micros;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::time::SystemTime;
-use tracing::{debug, info, warn};
+use std::{collections::HashMap, time::SystemTime};
 
+use anyhow::{anyhow, bail, Result};
+use arroyo_rpc::grpc::{
+    self,
+    api::{self, OperatorCheckpointDetail},
+    CheckpointMetadata, OperatorCheckpointMetadata, SubtaskCheckpointMetadata,
+    TableCheckpointMetadata, TableConfig, TableEnum, TableSubtaskCheckpointMetadata,
+    TaskCheckpointCompletedReq, TaskCheckpointEventReq,
+};
+use arroyo_types::{from_micros, to_micros};
+use tracing::debug;
+
+use crate::{
+    tables::{
+        expiring_time_key_map::ExpiringTimeKeyTable, global_keyed_map::GlobalKeyedTable,
+        ErasedTable,
+    },
+    BackingStore, StateBackend,
+};
+
+#[derive(Debug, Clone)]
 pub struct CheckpointState {
     job_id: String,
     checkpoint_id: i64,
     epoch: u32,
     min_epoch: u32,
     start_time: SystemTime,
-    tasks_per_operator: HashMap<String, usize>,
-    tasks: HashMap<String, BTreeMap<u32, SubtaskState>>,
-    completed_operators: HashSet<String>,
-    subtasks_to_commit: HashSet<(String, u32)>,
-    committing_backend_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
+    operators: usize,
+    operators_checkpointed: usize,
+    operator_state: HashMap<String, OperatorState>,
 
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
     pub operator_details: HashMap<String, OperatorCheckpointDetail>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OperatorState {
+    subtasks: usize,
+    subtasks_checkpointed: usize,
+    pub start_time: Option<SystemTime>,
+    pub finish_time: Option<SystemTime>,
+    table_state: HashMap<String, TableState>,
+}
+
+impl OperatorState {
+    fn new(subtasks: usize) -> Self {
+        OperatorState {
+            subtasks,
+            subtasks_checkpointed: 0,
+            start_time: None,
+            finish_time: None,
+            table_state: HashMap::new(),
+        }
+    }
+
+    fn finish_subtask(
+        &mut self,
+        c: SubtaskCheckpointMetadata,
+    ) -> Option<(
+        HashMap<String, TableConfig>,
+        HashMap<String, TableCheckpointMetadata>,
+    )> {
+        self.subtasks_checkpointed += 1;
+        self.start_time = match self.start_time {
+            Some(existing_start_time) => Some(existing_start_time.min(from_micros(c.start_time))),
+            None => Some(from_micros(c.start_time)),
+        };
+        self.finish_time = match self.finish_time {
+            Some(existing_finish_time) => {
+                Some(existing_finish_time.max(from_micros(c.finish_time)))
+            }
+            None => Some(from_micros(c.finish_time)),
+        };
+        for (table, table_metadata) in c.table_metadata {
+            self.table_state
+                .entry(table)
+                .or_insert_with_key(|key| TableState {
+                    table_config: c
+                        .table_configs
+                        .get(key)
+                        .expect("should have metadata")
+                        .clone(),
+                    subtask_tables: HashMap::new(),
+                })
+                .subtask_tables
+                .insert(table_metadata.subtask_index, table_metadata);
+        }
+
+        if self.subtasks == self.subtasks_checkpointed {
+            let (table_configs, table_metadatas) = self
+                .table_state
+                .drain()
+                .filter_map(|(table_name, table_state)| {
+                    table_state
+                        .into_table_metadata()
+                        .map(|(table_config, metadata)| {
+                            ((table_name.clone(), table_config), (table_name, metadata))
+                        })
+                })
+                .unzip();
+            Some((table_configs, table_metadatas))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TableState {
+    table_config: TableConfig,
+    subtask_tables: HashMap<u32, TableSubtaskCheckpointMetadata>,
+}
+
+impl TableState {
+    fn into_table_metadata(self) -> Option<(TableConfig, TableCheckpointMetadata)> {
+        match self.table_config.table_type() {
+            TableEnum::MissingTableType => unreachable!(),
+            TableEnum::GlobalKeyValue => GlobalKeyedTable::merge_checkpoint_metadata(
+                self.table_config.clone(),
+                self.subtask_tables,
+            )
+            .expect("should be able to merge checkpoints"),
+            TableEnum::ExpiringKeyedTimeTable => ExpiringTimeKeyTable::merge_checkpoint_metadata(
+                self.table_config.clone(),
+                self.subtask_tables,
+            )
+            .expect("should be able to merge checkpoint metadatas"),
+        }
+        .map(|metadata| (self.table_config, metadata))
+    }
 }
 
 impl CheckpointState {
@@ -44,11 +146,12 @@ impl CheckpointState {
             epoch,
             min_epoch,
             start_time: SystemTime::now(),
-            tasks_per_operator,
-            tasks: HashMap::new(),
-            completed_operators: HashSet::new(),
-            subtasks_to_commit: HashSet::new(),
-            committing_backend_data: HashMap::new(),
+            operators: tasks_per_operator.len(),
+            operators_checkpointed: 0,
+            operator_state: tasks_per_operator
+                .into_iter()
+                .map(|(operator_id, subtasks)| (operator_id, OperatorState::new(subtasks)))
+                .collect(),
             operator_details: HashMap::new(),
         }
     }
@@ -59,25 +162,6 @@ impl CheckpointState {
 
     pub fn start_time(&self) -> SystemTime {
         self.start_time
-    }
-
-    pub async fn start(
-        job_id: String,
-        checkpoint_id: i64,
-        epoch: u32,
-        min_epoch: u32,
-        tasks_per_operator: HashMap<String, usize>,
-    ) -> anyhow::Result<Self> {
-        // Do the db setup
-        info!(message = "Starting checkpointing", job_id, epoch);
-
-        Ok(Self::new(
-            job_id,
-            checkpoint_id,
-            epoch,
-            min_epoch,
-            tasks_per_operator,
-        ))
     }
 
     pub fn checkpoint_event(&mut self, c: TaskCheckpointEventReq) -> anyhow::Result<()> {
@@ -130,230 +214,60 @@ impl CheckpointState {
                     }
                 } as i32,
             });
-
-        // this is for the actual checkpoint management
-        self.tasks
-            .entry(c.operator_id.clone())
-            .or_default()
-            .entry(c.subtask_index)
-            .or_insert_with(SubtaskState::new)
-            .event(c);
         Ok(())
     }
 
-    pub async fn checkpoint_finished(
-        &mut self,
-        c: TaskCheckpointCompletedReq,
-    ) -> anyhow::Result<()> {
-        debug!(message = "Checkpoint finished", checkpoint_id = self.checkpoint_id, job_id = self.job_id, epoch = self.epoch, min_epoch = self.min_epoch, operator_id = %c.operator_id, subtask_index = c.metadata.as_ref().unwrap().subtask_index, time = c.time);
-        // this is just for the UI
-        let metadata = c.metadata.as_ref().unwrap();
-
-        let detail = self
-            .operator_details
-            .entry(c.operator_id.clone())
-            .or_insert_with(|| OperatorCheckpointDetail {
-                operator_id: c.operator_id.clone(),
-                start_time: metadata.start_time,
-                finish_time: None,
-                has_state: metadata.has_state,
-                tasks: HashMap::new(),
-            })
-            .tasks
-            .entry(metadata.subtask_index)
-            .or_insert_with(|| {
-                warn!(
-                    "Received checkpoint completion but no start event {:?}",
-                    metadata
-                );
-                api::TaskCheckpointDetail {
-                    subtask_index: metadata.subtask_index,
-                    start_time: metadata.start_time,
-                    finish_time: None,
-                    bytes: None,
-                    events: vec![],
-                }
-            });
-        detail.bytes = Some(metadata.bytes);
-        detail.finish_time = Some(metadata.finish_time);
-        for (table, committing_data) in &metadata.committing_data {
-            self.committing_backend_data
-                .entry(c.operator_id.clone())
-                .or_default()
-                .entry(table.to_string())
-                .or_default()
-                .insert(metadata.subtask_index, committing_data.clone());
-        }
-
-        // this is for the actual checkpoint management
-
-        if self.completed_operators.contains(&c.operator_id) {
-            warn!(
-                "Received checkpoint completed message for already finished operator {}",
-                c.operator_id
-            );
-            return Ok(());
-        }
-        if metadata.has_state
-            && metadata
-                .tables
-                .iter()
-                .any(|table| table.write_behavior() == TableWriteBehavior::CommitWrites)
-        {
-            self.subtasks_to_commit
-                .insert((c.operator_id.clone(), metadata.subtask_index));
-        }
-
-        let subtasks = self
-            .tasks
+    pub async fn checkpoint_finished(&mut self, c: TaskCheckpointCompletedReq) -> Result<()> {
+        debug!(message = "Checkpoint finished", checkpoint_id = self.checkpoint_id, job_id = self.job_id, 
+        epoch = self.epoch, min_epoch = self.min_epoch, operator_id = %c.operator_id, subtask_index = c.metadata.as_ref().unwrap().subtask_index, time = c.time);
+        // TODO: UI management
+        let operator_state = self
+            .operator_state
             .get_mut(&c.operator_id)
-            .ok_or_else(|| anyhow!("Received finish event without start for {}", c.operator_id))?;
-
-        let total_tasks = *self.tasks_per_operator.get(&c.operator_id).unwrap();
-
-        let operator_id = c.operator_id.clone();
-        let idx = c.metadata.as_ref().unwrap().subtask_index;
-        subtasks
-            .get_mut(&idx)
-            .ok_or_else(|| {
-                anyhow!(
-                    "Received finish event without start for {}-{}",
-                    c.operator_id,
-                    idx
-                )
-            })?
-            .finish(c);
-
-        if subtasks.len() == total_tasks && subtasks.values().all(|c| c.done()) {
-            self.publish_operator_checkpoint(operator_id).await;
+            .ok_or_else(|| anyhow!("unexpected operator checkpoint {}", c.operator_id))?;
+        if let Some((table_configs, table_checkpoint_metadata)) = operator_state.finish_subtask(
+            c.metadata
+                .ok_or_else(|| anyhow!("missing metadata for operator {}", c.operator_id))?,
+        ) {
+            self.operators_checkpointed += 1;
+            StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
+                job_id: self.job_id.to_string(),
+                operator_id: c.operator_id,
+                epoch: self.epoch,
+                start_time: to_micros(operator_state.start_time.unwrap()),
+                finish_time: to_micros(operator_state.finish_time.unwrap()),
+                min_watermark: None,
+                max_watermark: None,
+                has_state: false,
+                tables: vec![],
+                backend_data: vec![],
+                bytes: 0,
+                commit_data: None,
+                table_checkpoint_metadata,
+                table_configs,
+            })
+            .await;
         }
-
-        return Ok(());
-    }
-
-    async fn publish_operator_checkpoint(&mut self, operator_id: String) {
-        let subtasks = self.tasks.get_mut(&operator_id).unwrap();
-
-        let start_time = subtasks
-            .values()
-            .map(|s| s.start_time.unwrap())
-            .min()
-            .unwrap();
-        let finish_time = subtasks
-            .values()
-            .map(|s| s.finish_time.unwrap())
-            .max()
-            .unwrap();
-
-        let min_watermark = subtasks
-            .values()
-            .map(|s| s.metadata.as_ref().unwrap().watermark)
-            .min()
-            .unwrap();
-
-        let max_watermark = subtasks
-            .values()
-            .map(|s| s.metadata.as_ref().unwrap().watermark)
-            .max()
-            .unwrap();
-        let has_state = subtasks
-            .values()
-            .any(|s| s.metadata.as_ref().unwrap().has_state);
-
-        let tables: HashMap<String, TableDescriptor> = subtasks
-            .values()
-            .flat_map(|t| t.metadata.as_ref().unwrap().tables.clone())
-            .map(|t| (t.name.clone(), t))
-            .collect();
-
-        // the sort here is load-bearing
-        let backend_data: BTreeMap<(u32, String), BackendData> = subtasks
-            .values()
-            .map(|s| (s.metadata.as_ref().unwrap()))
-            .filter(|metadata| metadata.has_state)
-            .flat_map(|metadata| metadata.backend_data.clone())
-            .filter_map(Self::backend_data_to_key)
-            .collect();
-
-        let size = subtasks
-            .values()
-            .fold(0, |size, s| size + s.metadata.as_ref().unwrap().bytes);
-
-        StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
-            job_id: self.job_id.to_string(),
-            operator_id: operator_id.clone(),
-            epoch: self.epoch,
-            start_time: to_micros(start_time),
-            finish_time: to_micros(finish_time),
-            min_watermark,
-            max_watermark,
-            has_state,
-            tables: tables.into_values().collect(),
-            backend_data: backend_data.into_values().collect(),
-            bytes: size,
-            commit_data: self
-                .committing_backend_data
-                .get(&operator_id)
-                .map(|commit_data| OperatorCommitData {
-                    committing_data: commit_data
-                        .iter()
-                        .map(|(table_name, subtask_to_commit_data)| {
-                            (
-                                table_name.clone(),
-                                TableCommitData {
-                                    commit_data_by_subtask: subtask_to_commit_data
-                                        .iter()
-                                        .map(|(subtask_index, commit_data)| {
-                                            (*subtask_index, commit_data.clone())
-                                        })
-                                        .collect(),
-                                },
-                            )
-                        })
-                        .collect(),
-                }),
-        })
-        .await;
-
-        if let Some(op) = self.operator_details.get_mut(&operator_id) {
-            op.finish_time = Some(to_micros(finish_time));
-        }
-
-        self.completed_operators.insert(operator_id);
-    }
-
-    fn backend_data_to_key(backend_data: BackendData) -> Option<((u32, String), BackendData)> {
-        let Some(internal_data) = &backend_data.backend_data else {
-            return None;
-        };
-        match &internal_data {
-            backend_data::BackendData::ParquetStore(data) => {
-                Some(((data.epoch, data.file.clone()), backend_data))
-            }
-        }
+        Ok(())
     }
 
     pub fn done(&self) -> bool {
-        self.completed_operators.len() == self.tasks_per_operator.len()
+        self.operators == self.operators_checkpointed
     }
 
-    pub fn committing_state(&self) -> CommittingState {
-        CommittingState::new(
-            self.checkpoint_id,
-            self.subtasks_to_commit.clone(),
-            self.committing_backend_data.clone(),
-        )
-    }
-
-    pub async fn save_state(&self) -> anyhow::Result<()> {
+    pub async fn save_state(&self) -> Result<()> {
         let finish_time = SystemTime::now();
         StateBackend::write_checkpoint_metadata(CheckpointMetadata {
             job_id: self.job_id.clone(),
             epoch: self.epoch,
+            min_epoch: self.min_epoch,
             start_time: to_micros(self.start_time),
             finish_time: to_micros(finish_time),
-            min_epoch: self.min_epoch,
-            operator_ids: self.completed_operators.iter().cloned().collect(),
+            operator_ids: self
+                .operator_state
+                .keys()
+                .map(|key| key.to_string())
+                .collect(),
         })
         .await;
         Ok(())

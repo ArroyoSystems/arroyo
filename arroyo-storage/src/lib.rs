@@ -20,6 +20,9 @@ use regex::{Captures, Regex};
 use thiserror::Error;
 mod aws;
 
+/// A reference-counted reference to a [StorageProvider].
+pub type StorageProviderRef = Arc<StorageProvider>;
+
 #[derive(Clone, Debug)]
 pub struct StorageProvider {
     config: BackendConfig,

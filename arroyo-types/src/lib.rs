@@ -852,6 +852,9 @@ impl<K: Key, T: Data> Record<K, T> {
     }
 }
 
+/// A reference-counted reference to a [TaskInfo].
+pub type TaskInfoRef = Arc<TaskInfo>;
+
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct TaskInfo {
     pub job_id: String,

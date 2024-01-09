@@ -10,7 +10,10 @@ use anyhow::Result;
 use arrow_array::builder::{make_builder, ArrayBuilder, UInt64Builder};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
+use arroyo_datastream::get_hasher;
 use arroyo_rpc::ArroyoSchema;
+use arroyo_state::tables::table_manager;
+use arroyo_state::tables::table_manager::TableManager;
 use bincode::{Decode, Encode};
 use datafusion_common::hash_utils;
 
@@ -34,8 +37,8 @@ use arroyo_formats::ArrowDeserializer;
 pub use arroyo_macro::StreamNode;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{
-    api, CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
-    TaskAssignment, TaskCheckpointEventType,
+    api, CheckpointMetadata, TableConfig, TableDeleteBehavior, TableDescriptor, TableType,
+    TableWriteBehavior, TaskAssignment, TaskCheckpointEventType,
 };
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
@@ -153,13 +156,12 @@ impl ContextBuffer {
     }
 }
 
-pub struct ArrowContext<S: BackingStore = StateBackend> {
+pub struct ArrowContext {
     pub task_info: Arc<TaskInfo>,
     pub control_rx: Receiver<ControlMessage>,
     pub control_tx: Sender<ControlResp>,
     pub error_reporter: ErrorReporter,
     pub watermarks: WatermarkHolder,
-    pub state: StateStore<S>,
     pub in_schemas: Vec<ArroyoSchema>,
     pub out_schema: Option<ArroyoSchema>,
     pub collector: ArrowCollector,
@@ -167,6 +169,7 @@ pub struct ArrowContext<S: BackingStore = StateBackend> {
     buffered_error: Option<UserError>,
     error_rate_limiter: RateLimiter,
     deserializer: Option<ArrowDeserializer>,
+    pub table_manager: TableManager,
 }
 
 #[derive(Clone)]
@@ -199,62 +202,52 @@ pub struct ArrowCollector {
     tx_queue_size_gauges: QueueGauges,
 }
 
-impl ArrowCollector {
-    pub async fn collect(&mut self, record: RecordBatch) {
-        fn repartition<'a>(
-            record: &'a RecordBatch,
-            keys: &'a Vec<usize>,
-            qs: usize,
-        ) -> impl Iterator<Item = (usize, RecordBatch)> + 'a {
-            let mut buf = vec![0; record.num_rows()];
+fn repartition<'a>(
+    record: &'a RecordBatch,
+    keys: &'a Vec<usize>,
+    qs: usize,
+) -> impl Iterator<Item = (usize, RecordBatch)> + 'a {
+    let mut buf = vec![0; record.num_rows()];
 
-            if !keys.is_empty() {
-                let keys: Vec<_> = keys.iter().map(|i| record.column(*i).clone()).collect();
+    if !keys.is_empty() {
+        let keys: Vec<_> = keys.iter().map(|i| record.column(*i).clone()).collect();
 
-                hash_utils::create_hashes(
-                    &keys[..],
-                    &ahash::RandomState::with_seeds(
-                        HASH_SEEDS[0],
-                        HASH_SEEDS[1],
-                        HASH_SEEDS[2],
-                        HASH_SEEDS[3],
-                    ),
-                    &mut buf,
-                )
-                .unwrap();
-            } else {
-                // TODO: do we want this be random or deterministic?
-                buf.iter_mut().for_each(|x| *x = random());
-            };
+        hash_utils::create_hashes(&keys[..], &get_hasher(), &mut buf).unwrap();
+    } else {
+        // TODO: do we want this be random or deterministic?
+        buf.iter_mut().for_each(|x| *x = random());
+    };
 
-            let mut indices: Vec<_> = (0..qs)
-                .map(|_| UInt64Builder::with_capacity(record.num_rows()))
+    let mut indices: Vec<_> = (0..qs)
+        .map(|_| UInt64Builder::with_capacity(record.num_rows()))
+        .collect();
+
+    for (index, hash) in buf.into_iter().enumerate() {
+        indices[server_for_hash(hash, qs)].append_value(index as u64);
+    }
+
+    indices
+        .into_iter()
+        .enumerate()
+        .filter_map(|(partition, mut indices)| {
+            let indices = indices.finish();
+            (!indices.is_empty()).then_some((partition, indices))
+        })
+        .map(move |(partition, indices)| {
+            let columns = record
+                .columns()
+                .iter()
+                .map(|c| arrow::compute::take(c.as_ref(), &indices, None).unwrap())
                 .collect();
 
-            for (index, hash) in buf.into_iter().enumerate() {
-                indices[server_for_hash(hash, qs)].append_value(index as u64);
-            }
+            let batch = RecordBatch::try_new(record.schema(), columns).unwrap();
 
-            indices
-                .into_iter()
-                .enumerate()
-                .filter_map(|(partition, mut indices)| {
-                    let indices = indices.finish();
-                    (!indices.is_empty()).then_some((partition, indices))
-                })
-                .map(move |(partition, indices)| {
-                    let columns = record
-                        .columns()
-                        .iter()
-                        .map(|c| arrow::compute::take(c.as_ref(), &indices, None).unwrap())
-                        .collect();
+            (partition, batch)
+        })
+}
 
-                    let batch = RecordBatch::try_new(record.schema(), columns).unwrap();
-
-                    (partition, batch)
-                })
-        }
-
+impl ArrowCollector {
+    pub async fn collect(&mut self, record: RecordBatch) {
         TaskCounters::MessagesSent.for_task(&self.task_info).inc();
 
         let out_schema = self.out_schema.as_ref().unwrap();
@@ -323,51 +316,34 @@ impl ArrowContext {
         out_schema: Option<ArroyoSchema>,
         projection: Option<Vec<usize>>,
         out_qs: Vec<Vec<Sender<ArrowMessage>>>,
-        mut tables: Vec<TableDescriptor>,
-        _table_schemas: HashMap<char, ArroyoSchema>,
+        tables: HashMap<String, TableConfig>,
     ) -> Self {
-        tables.push(TableDescriptor {
-            name: TIMER_TABLE.to_string(),
-            description: "timer state".to_string(),
-            table_type: TableType::TimeKeyMap as i32,
-            delete_behavior: TableDeleteBehavior::None as i32,
-            write_behavior: TableWriteBehavior::NoWritesBeforeWatermark as i32,
-            retention_micros: 0,
-        });
-
-        let (state, watermark) = if let Some(metadata) = restore_from {
-            let watermark = {
+        let (watermark, metadata) = if let Some(metadata) = restore_from {
+            let (watermark, operator_metadata) = {
                 let metadata = StateBackend::load_operator_metadata(
                     &task_info.job_id,
                     &task_info.operator_id,
                     metadata.epoch,
                 )
-                .await;
-                metadata
-                    .expect("require metadata")
-                    .min_watermark
-                    .map(from_micros)
+                .await
+                .unwrap();
+                (metadata.min_watermark.map(from_micros), metadata)
             };
-            let state = StateStore::<StateBackend>::from_checkpoint(
-                &task_info,
-                metadata,
-                tables,
-                control_tx.clone(),
-            )
-            .await;
 
-            (state, watermark)
+            (watermark, Some(operator_metadata))
         } else {
-            (
-                StateStore::<StateBackend>::new(&task_info, tables, control_tx.clone()).await,
-                None,
-            )
+            (None, None)
         };
 
         let (tx_queue_size_gauges, tx_queue_rem_gauges) =
             register_queue_gauges(&task_info, &out_qs);
 
         let task_info = Arc::new(task_info);
+
+        let table_manager =
+            TableManager::new(task_info.clone(), tables, control_tx.clone(), metadata)
+                .await
+                .expect("should be able to create TableManager");
 
         Self {
             task_info: task_info.clone(),
@@ -391,11 +367,11 @@ impl ArrowContext {
                 tx: control_tx,
                 task_info,
             },
-            state,
             buffer: out_schema.map(|t| ContextBuffer::new(t.schema)),
             error_rate_limiter: RateLimiter::new(),
             deserializer: None,
             buffered_error: None,
+            table_manager,
         }
     }
 
@@ -558,7 +534,8 @@ impl ArrowContext {
     }
 
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
-        self.state.load_compacted(compaction).await;
+        //TODO: support compaction in the table manager
+        // self.state.load_compacted(compaction).await;
     }
 
     pub fn initialize_deserializer(

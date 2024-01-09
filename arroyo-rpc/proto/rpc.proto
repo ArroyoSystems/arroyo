@@ -1,5 +1,4 @@
 syntax = "proto3";
-
 package arroyo_rpc;
 
 // Controller
@@ -227,7 +226,51 @@ message SubtaskCheckpointMetadata {
   // this is data that should be sent along with the commit message
   // to all subtask. The key is the table name.
   map<string,bytes> committing_data = 9;
+
+  map<string, TableSubtaskCheckpointMetadata> table_metadata = 10; 
+  // TODO: move this into plan?
+  map<string, TableConfig> table_configs = 11;
 }
+
+message GlobalKeyedTableConfig {
+  string table_name = 1;
+  string description = 2;
+}
+
+message GlobalKeyedTableTaskCheckpointMetadata {
+  repeated string files = 1;
+}
+
+message GlobalKeyedTableSubtaskCheckpointMetadata {
+  uint32 subtask_index = 1;
+  optional string file = 5;
+}
+
+message ExpiringKeyedTimeTableConfig {
+  string table_name = 1;
+  string description = 2;
+  uint64 retention_micros = 3;
+  ArroyoSchema schema = 4;
+}
+
+message ExpiringKeyedTimeSubtaskCheckpointMetadata {
+  uint32 subtask_index = 1;
+  optional uint64 watermark = 2;
+  repeated ParquetTimeFile files = 3;
+}
+
+message ExpiringKeyedTimeTableCheckpointMetadata {
+  repeated ParquetTimeFile files = 1;
+}
+
+message ParquetTimeFile {
+  uint32 epoch = 1;
+  string file = 2;
+  uint64 min_routing_key = 3;
+  uint64 max_routing_key = 4;
+  uint64 max_timestamp_micros = 5;
+}
+
 
 message BackendData {
   oneof backend_data {
@@ -250,6 +293,32 @@ message OperatorCheckpointMetadata {
   repeated BackendData backend_data = 10;
   uint64 bytes = 11;
   OperatorCommitData commit_data = 12;
+  map<string, TableCheckpointMetadata> table_checkpoint_metadata = 13;
+  map<string, TableConfig> table_configs = 14;
+}
+
+message TableConfig {
+  TableEnum table_type = 1;
+  bytes config = 2;
+}
+
+message TableCheckpointMetadata {
+  TableEnum table_type = 1;
+  // this should be decoded to the appropriate protobuf.
+  bytes data = 2;
+}
+
+message TableSubtaskCheckpointMetadata {
+  uint32 subtask_index = 1;
+  TableEnum table_type = 2;
+  bytes data = 3;
+}
+
+// TODO: call this table type
+enum TableEnum {
+  MissingTableType = 0;
+  GlobalKeyValue = 1;
+  ExpiringKeyedTimeTable = 2;
 }
 
 enum TableType {
@@ -287,6 +356,14 @@ message TableDescriptor {
   TableDeleteBehavior delete_behavior = 4;
   uint64 retention_micros = 5;
   TableWriteBehavior write_behavior = 6;
+}
+
+// TODO: figure out how to share this
+message ArroyoSchema {
+  // json-encoded
+  string arrow_schema = 1;
+  uint32 timestamp_index = 2;
+  repeated uint32 key_indices = 3;
 }
 
 // Worker

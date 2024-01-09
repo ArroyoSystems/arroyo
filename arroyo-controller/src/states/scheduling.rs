@@ -304,7 +304,7 @@ impl State for Scheduling {
         // TODO: better error handling
         let c = ctx.pool.get().await.unwrap();
 
-        #[derive(Clone)]
+        #[derive(Clone, Debug)]
         struct CheckpointInfo {
             epoch: u32,
             min_epoch: u32,
@@ -332,6 +332,8 @@ impl State for Scheduling {
                     needs_commits: r.needs_commits,
                 }
             });
+
+        info!("Restoring from {:?}", checkpoint_info);
 
         {
             // mark in-progress checkpoints as failed

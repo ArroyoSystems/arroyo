@@ -343,14 +343,13 @@ impl RunningJobModel {
                 .await?
         };
 
-        let state = CheckpointState::start(
+        let state = CheckpointState::new(
             self.job_id.clone(),
             checkpoint_id,
             self.epoch,
             self.min_epoch,
             self.program.tasks_per_operator(),
-        )
-        .await?;
+        );
 
         self.checkpoint_state = Some(CheckpointingOrCommittingState::Checkpointing(state));
 
@@ -402,31 +401,28 @@ impl RunningJobModel {
             match state {
                 CheckpointingOrCommittingState::Checkpointing(checkpointing) => {
                     checkpointing.save_state().await?;
-                    let committing_state = checkpointing.committing_state();
+
+                    //let committing_state = checkpointing.committing_state();
                     let duration = checkpointing
                         .start_time()
                         .elapsed()
                         .unwrap_or(Duration::ZERO)
                         .as_secs_f32();
                     // shortcut if committing is unnecessary
-                    if committing_state.done() {
-                        Self::update_checkpoint_in_db(
-                            &checkpointing,
-                            pool,
-                            DbCheckpointState::ready,
-                        )
+                    //if committing_state.done() {
+                    Self::update_checkpoint_in_db(&checkpointing, pool, DbCheckpointState::ready)
                         .await?;
-                        self.last_checkpoint = Instant::now();
-                        self.checkpoint_state = None;
-                        self.compact_state().await?;
+                    self.last_checkpoint = Instant::now();
+                    self.checkpoint_state = None;
+                    self.compact_state().await?;
 
-                        info!(
-                            message = "Finished checkpointing",
-                            job_id = self.job_id,
-                            epoch = self.epoch,
-                            duration
-                        );
-                    } else {
+                    info!(
+                        message = "Finished checkpointing",
+                        job_id = self.job_id,
+                        epoch = self.epoch,
+                        duration
+                    );
+                    /*} else {
                         Self::update_checkpoint_in_db(
                             &checkpointing,
                             pool,
@@ -450,7 +446,7 @@ impl RunningJobModel {
                                 }))
                                 .await?;
                         }
-                    }
+                    }*/
                 }
                 CheckpointingOrCommittingState::Committing(committing) => {
                     Self::finish_committing(committing.checkpoint_id(), pool).await?;
