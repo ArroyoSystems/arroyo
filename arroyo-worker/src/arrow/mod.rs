@@ -5,7 +5,7 @@ use arrow_array::RecordBatch;
 use arrow_json::writer::record_batches_to_json_rows;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
-use arroyo_rpc::grpc::api::ConnectorOp;
+use arroyo_rpc::grpc::api::{ArrowNode, ConnectorOp};
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{api, SinkDataReq};
 use arroyo_types::to_micros;
@@ -32,7 +32,7 @@ use std::sync::RwLock;
 use std::time::SystemTime;
 use tonic::transport::Channel;
 
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 
 pub mod tumbling_aggregating_window;
 pub struct Registry {}
@@ -61,8 +61,8 @@ pub struct ValueExecutionOperator {
     execution_plan: Arc<dyn ExecutionPlan>,
 }
 
-impl ArrowOperatorConstructor<api::ValuePlanOperator, Self> for ValueExecutionOperator {
-    fn from_config(config: api::ValuePlanOperator) -> Result<Self> {
+impl ArrowOperatorConstructor<api::ValuePlanOperator> for ValueExecutionOperator {
+    fn from_config(config: api::ValuePlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
         let registry = Registry {};
 
@@ -78,11 +78,11 @@ impl ArrowOperatorConstructor<api::ValuePlanOperator, Self> for ValueExecutionOp
             &codec,
         )?;
 
-        Ok(Self {
+        Ok(OperatorNode::from_operator(Box::new(Self {
             name: config.name,
             locked_batch,
             execution_plan,
-        })
+        })))
     }
 }
 
@@ -180,8 +180,8 @@ pub struct KeyExecutionOperator {
     key_fields: Vec<usize>,
 }
 
-impl ArrowOperatorConstructor<api::KeyPlanOperator, Self> for KeyExecutionOperator {
-    fn from_config(config: api::KeyPlanOperator) -> Result<Self> {
+impl ArrowOperatorConstructor<api::KeyPlanOperator> for KeyExecutionOperator {
+    fn from_config(config: api::KeyPlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
         let registry = Registry {};
 
@@ -197,7 +197,7 @@ impl ArrowOperatorConstructor<api::KeyPlanOperator, Self> for KeyExecutionOperat
             &codec,
         )?;
 
-        Ok(Self {
+        Ok(OperatorNode::from_operator(Box::new(Self {
             name: config.name,
             locked_batch,
             execution_plan,
@@ -206,7 +206,7 @@ impl ArrowOperatorConstructor<api::KeyPlanOperator, Self> for KeyExecutionOperat
                 .into_iter()
                 .map(|field| field as usize)
                 .collect(),
-        })
+        })))
     }
 }
 
@@ -241,9 +241,9 @@ pub struct GrpcRecordBatchSink {
     client: Option<ControllerGrpcClient<Channel>>,
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp, Self> for GrpcRecordBatchSink {
-    fn from_config(_: ConnectorOp) -> Result<Self> {
-        Ok(Self { client: None })
+impl ArrowOperatorConstructor<api::ConnectorOp> for GrpcRecordBatchSink {
+    fn from_config(_: ConnectorOp) -> Result<OperatorNode> {
+        Ok(OperatorNode::from_operator(Box::new(Self { client: None })))
     }
 }
 

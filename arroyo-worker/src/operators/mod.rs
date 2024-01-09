@@ -8,7 +8,7 @@ use std::ops::Add;
 
 use crate::engine::{ArrowContext, StreamNode};
 use crate::old::{Collector, Context};
-use crate::operator::{get_timestamp_col, ArrowOperator, ArrowOperatorConstructor};
+use crate::operator::{get_timestamp_col, ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 use arrow::compute::kernels;
 use arrow_array::RecordBatch;
 use arroyo_macro::process_fn;
@@ -140,13 +140,13 @@ impl PeriodicWatermarkGenerator {
     }
 }
 
-impl ArrowOperatorConstructor<api::PeriodicWatermark, Self> for PeriodicWatermarkGenerator {
-    fn from_config(config: PeriodicWatermark) -> anyhow::Result<Self> {
-        Ok(Self::fixed_lateness(
+impl ArrowOperatorConstructor<api::PeriodicWatermark> for PeriodicWatermarkGenerator {
+    fn from_config(config: PeriodicWatermark) -> anyhow::Result<OperatorNode> {
+        Ok(OperatorNode::from_operator(Box::new(Self::fixed_lateness(
             Duration::from_micros(config.period_micros),
             config.idle_time_micros.map(Duration::from_micros),
             Duration::from_micros(config.max_lateness_micros),
-        ))
+        ))))
     }
 }
 

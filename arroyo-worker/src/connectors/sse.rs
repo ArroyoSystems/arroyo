@@ -1,5 +1,5 @@
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperatorConstructor, BaseOperator};
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{api, StopMode, TableConfig, TableDescriptor};
@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 use tokio::select;
-use tokio::sync::mpsc::Receiver;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, info};
 use typify::import_types;
@@ -38,8 +37,8 @@ pub struct SSESourceFunc {
     state: SSESourceState,
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp, Self> for SSESourceFunc {
-    fn from_config(config: api::ConnectorOp) -> anyhow::Result<Self> {
+impl ArrowOperatorConstructor<api::ConnectorOp> for SSESourceFunc {
+    fn from_config(config: api::ConnectorOp) -> anyhow::Result<OperatorNode> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for SSESource");
         let table: SseTable =
@@ -50,7 +49,7 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for SSESourceFunc {
             .as_ref()
             .map(|s| s.sub_env_vars().expect("Failed to substitute env vars"));
 
-        Ok(Self {
+        Ok(OperatorNode::from_source(Box::new(Self {
             url: table.endpoint,
             headers: string_to_map(&headers.unwrap_or("".to_string()))
                 .expect("Invalid header map")
@@ -64,12 +63,12 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for SSESourceFunc {
             framing: config.framing,
             bad_data: config.bad_data,
             state: SSESourceState::default(),
-        })
+        })))
     }
 }
 
 #[async_trait]
-impl BaseOperator for SSESourceFunc {
+impl SourceOperator for SSESourceFunc {
     fn name(&self) -> String {
         "SSESource".to_string()
     }
@@ -83,11 +82,7 @@ impl BaseOperator for SSESourceFunc {
         .collect()
     }
 
-    async fn run_behavior(
-        mut self: Box<Self>,
-        ctx: &mut ArrowContext,
-        _: Vec<Receiver<ArrowMessage>>,
-    ) -> Option<ArrowMessage> {
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         let s: &mut GlobalKeyedView<(), SSESourceState> = ctx
             .table_manager
             .get_global_keyed_state("e")
@@ -106,7 +101,6 @@ impl BaseOperator for SSESourceFunc {
                 panic!("{}: {}", e.name, e.details);
             }
         }
-        .into()
     }
 }
 
@@ -126,7 +120,7 @@ impl SSESourceFunc {
                     .expect("should be able to get SSE state");
                 s.insert((), self.state.clone()).await;
 
-                if self.checkpoint(c, ctx).await {
+                if self.start_checkpoint(c, ctx).await {
                     return Some(SourceFinishType::Immediate);
                 }
             }
