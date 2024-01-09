@@ -83,6 +83,7 @@ impl KafkaConnector {
                 TableType::Source {
                     offset: match offset.as_ref().map(|f| f.as_str()) {
                         Some("earliest") => SourceOffset::Earliest,
+                        Some("group") => SourceOffset::Group,
                         None | Some("latest") => SourceOffset::Latest,
                         Some(other) => bail!("invalid value for source.offset '{}'", other),
                     },
