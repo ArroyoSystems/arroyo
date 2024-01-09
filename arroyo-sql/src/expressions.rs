@@ -51,6 +51,7 @@ pub enum Expression {
     Case(CaseExpression),
     WindowUDF(WindowType),
     Unnest(Box<Expression>, bool),
+    PiConst(PiConstant),
 }
 
 pub struct JoinedPairedStruct {
@@ -252,6 +253,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
+            Expression::PiConst(pi) => pi.generate(input_context),
             Expression::Unnest(_, taken) => {
                 if !taken {
                     panic!("unnest appeared in a non-projection context");
@@ -303,6 +305,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
             Expression::WindowUDF(_window_type) => {
                 unreachable!("window functions shouldn't be computed off of a value pointer")
             }
+            Expression::PiConst(p) => p.expression_type(input_context),
             Expression::Unnest(t, _) => match t.expression_type(input_context) {
                 TypeDef::DataType(DataType::List(inner), _) => {
                     TypeDef::DataType(inner.data_type().clone(), false)
@@ -424,7 +427,8 @@ impl Expression {
             | Expression::RustUdf(_)
             | Expression::WrapType(_)
             | Expression::Unnest(_, _)
-            | Expression::Case(_) => Ok(None),
+            | Expression::Case(_)
+            | Expression::PiConst(_) => Ok(None),
         }
     }
     fn get_duration(expression: &Expr) -> Result<Duration> {
@@ -442,11 +446,10 @@ impl Expression {
         }
     }
 
-    pub fn traverse_mut<T, F: Fn(&mut T, &mut Expression) -> ()>(
-        &mut self,
-        context: &mut T,
-        f: &F,
-    ) {
+    pub fn traverse_mut<T, F>(&mut self, context: &mut T, f: &F)
+    where
+        F: Fn(&mut T, &mut Expression) -> (),
+    {
         match self {
             Expression::Column(_) => {}
             Expression::UnaryBoolean(e) => {
@@ -553,6 +556,7 @@ impl Expression {
                 }
             },
             Expression::WindowUDF(_) => {}
+            Expression::PiConst(_) => {}
             Expression::Unnest(n, _) => {
                 (&mut *n).traverse_mut(context, f);
             }
@@ -755,7 +759,8 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Signum
                     | BuiltinScalarFunction::Trunc
                     | BuiltinScalarFunction::Log2
-                    | BuiltinScalarFunction::Exp => Ok(NumericExpression::new(
+                    | BuiltinScalarFunction::Exp
+                    | BuiltinScalarFunction::Cot => Ok(NumericExpression::new(
                         fun.clone(),
                         Box::new(arg_expressions.remove(0)),
                     )?),
@@ -790,6 +795,7 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Rpad
                     | BuiltinScalarFunction::Rtrim
                     | BuiltinScalarFunction::RegexpMatch
+                    | BuiltinScalarFunction::ToHex
                     | BuiltinScalarFunction::RegexpReplace => {
                         let string_function: StringFunction =
                             (fun.clone(), arg_expressions).try_into()?;
@@ -860,11 +866,10 @@ impl<'a> ExpressionContext<'a> {
                         fun.clone(),
                         Box::new(arg_expressions.remove(0)),
                     )?),
-                    BuiltinScalarFunction::ToHex => bail!("hex not implemented"),
                     BuiltinScalarFunction::Uuid => bail!("UUID unimplemented"),
                     BuiltinScalarFunction::Cbrt => bail!("cube root unimplemented"),
                     BuiltinScalarFunction::Degrees => bail!("degrees not implemented yet"),
-                    BuiltinScalarFunction::Pi => bail!("pi not implemented yet"),
+                    BuiltinScalarFunction::Pi => PiConstant::new(),
                     BuiltinScalarFunction::Radians => bail!("radians not implemented yet"),
                     BuiltinScalarFunction::Factorial => bail!("factorial not implemented yet"),
                     BuiltinScalarFunction::Gcd => bail!("gcd not implemented yet"),
@@ -879,7 +884,6 @@ impl<'a> ExpressionContext<'a> {
                     ),
                     BuiltinScalarFunction::Decode => bail!("decode not implemented yet"),
                     BuiltinScalarFunction::Encode => bail!("encode not implemented yet"),
-                    BuiltinScalarFunction::Cot => bail!("cot not implemented yet"),
                     BuiltinScalarFunction::ArrayAppend
                     | BuiltinScalarFunction::ArrayConcat
                     | BuiltinScalarFunction::ArrayDims
@@ -1984,6 +1988,7 @@ enum NumericFunction {
     Trunc,
     Log2,
     Exp,
+    Cot,
 }
 
 impl NumericFunction {
@@ -2013,6 +2018,7 @@ impl NumericFunction {
             NumericFunction::Round => "round",
             NumericFunction::Trunc => "trunc",
             NumericFunction::Signum => "signum",
+            NumericFunction::Cot => "cot",
         };
         format_ident!("{}", name)
     }
@@ -2047,6 +2053,7 @@ impl TryFrom<BuiltinScalarFunction> for NumericFunction {
             BuiltinScalarFunction::Trunc => Ok(Self::Trunc),
             BuiltinScalarFunction::Log2 => Ok(Self::Log2),
             BuiltinScalarFunction::Exp => Ok(Self::Exp),
+            BuiltinScalarFunction::Cot => Ok(Self::Cot),
             _ => bail!("{:?} is not a single argument numeric function", fun),
         }
     }
@@ -2249,6 +2256,7 @@ pub enum StringFunction {
     Right(Box<Expression>, Box<Expression>),
     Rpad(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
     Rtrim(Box<Expression>, Option<Box<Expression>>),
+    ToHex(Box<Expression>),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
@@ -2353,6 +2361,9 @@ impl TryFrom<(BuiltinScalarFunction, Vec<Expression>)> for StringFunction {
         match (args.len(), func) {
             (1, BuiltinScalarFunction::Ascii) => {
                 Ok(StringFunction::Ascii(Box::new(args.remove(0))))
+            }
+            (1, BuiltinScalarFunction::ToHex) => {
+                Ok(StringFunction::ToHex(Box::new(args.remove(0))))
             }
             (1, BuiltinScalarFunction::BitLength) => {
                 Ok(StringFunction::BitLength(Box::new(args.remove(0))))
@@ -2513,6 +2524,7 @@ impl StringFunction {
     fn expressions(&mut self) -> Vec<&mut Expression> {
         match self {
             StringFunction::Ascii(expr)
+            | StringFunction::ToHex(expr)
             | StringFunction::BitLength(expr)
             | StringFunction::CharacterLength(expr)
             | StringFunction::OctetLength(expr)
@@ -2570,6 +2582,10 @@ impl StringFunction {
             | StringFunction::OctetLength(expr)
             | StringFunction::Reverse(expr) => TypeDef::DataType(
                 DataType::Int32,
+                expr.expression_type(input_context).is_optional(),
+            ),
+            StringFunction::ToHex(expr) => TypeDef::DataType(
+                DataType::Utf8,
                 expr.expression_type(input_context).is_optional(),
             ),
             StringFunction::StartsWith(expr1, expr2) => TypeDef::DataType(
@@ -2638,6 +2654,9 @@ impl StringFunction {
         match self {
             StringFunction::Ascii(_) => {
                 parse_quote!(arroyo_worker::operators::functions::strings::ascii(arg))
+            }
+            StringFunction::ToHex(_) => {
+                parse_quote!(arroyo_worker::operators::functions::strings::to_hex(arg))
             }
             StringFunction::BitLength(_) => {
                 parse_quote!(arroyo_worker::operators::functions::strings::bit_length(
@@ -2781,6 +2800,7 @@ impl StringFunction {
             | StringFunction::Trim(arg, None)
             | StringFunction::Ltrim(arg, None)
             | StringFunction::Rtrim(arg, None)
+            | StringFunction::ToHex(arg)
             | StringFunction::RegexpMatch(arg, _) => {
                 let expr = arg.generate(input_context);
                 match arg.expression_type(input_context).is_optional() {
@@ -3015,6 +3035,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StringFunction {
             | StringFunction::Trim(arg, None)
             | StringFunction::Ltrim(arg, None)
             | StringFunction::Rtrim(arg, None)
+            | StringFunction::ToHex(arg)
             | StringFunction::RegexpMatch(arg, _) => {
                 let expr = arg.generate(input_context);
                 match arg.expression_type(input_context).is_optional() {
@@ -3262,6 +3283,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for StringFunction {
             | StringFunction::InitCap(expr)
             | StringFunction::Ltrim(expr, None)
             | StringFunction::Rtrim(expr, None)
+            | StringFunction::ToHex(expr)
             | StringFunction::Trim(expr, None) => TypeDef::DataType(
                 DataType::Utf8,
                 expr.expression_type(input_context).is_optional(),
@@ -4137,5 +4159,24 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for DateTimeFunction
                 expr.expression_type(input_context).is_optional(),
             ),
         }
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
+pub struct PiConstant;
+
+impl PiConstant {
+    pub fn new() -> Result<Expression> {
+        Ok(Expression::PiConst(PiConstant {}))
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for PiConstant {
+    fn generate(&self, _input_context: &ValuePointerContext) -> syn::Expr {
+        parse_quote!(std::f64::consts::PI)
+    }
+
+    fn expression_type(&self, _input_context: &ValuePointerContext) -> TypeDef {
+        TypeDef::DataType(DataType::Float64, false)
     }
 }
