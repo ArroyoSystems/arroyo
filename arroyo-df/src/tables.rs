@@ -7,7 +7,7 @@ use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::ConnectorOp;
 use arroyo_rpc::api_types::connections::{
-    ConnectionProfile, ConnectionSchema, ConnectionType, SchemaDefinition, SourceField,
+    ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_types::ArroyoExtensionType;
@@ -27,7 +27,7 @@ use datafusion_expr::{
 };
 use tracing::info;
 
-use crate::{avro, DEFAULT_IDLE_TIME};
+use crate::DEFAULT_IDLE_TIME;
 use crate::{
     external::{ProcessingMode, SqlSource},
     json_schema,
@@ -41,7 +41,6 @@ pub struct ConnectorTable {
     pub name: String,
     pub connection_type: ConnectionType,
     pub fields: Vec<FieldSpec>,
-    pub type_name: Option<String>,
     pub operator: String,
     pub config: String,
     pub description: String,
@@ -80,31 +79,6 @@ impl From<Field> for FieldSpec {
     }
 }
 
-fn schema_type(name: &str, schema: &ConnectionSchema) -> Option<String> {
-    schema.struct_name.as_ref().cloned().or_else(|| {
-        let def = &schema.definition.as_ref()?;
-        match def {
-            SchemaDefinition::JsonSchema(_) => {
-                Some(format!("{}::{}", name, json_schema::ROOT_NAME))
-            }
-            SchemaDefinition::ProtobufSchema(_) => todo!(),
-            SchemaDefinition::AvroSchema(_) => Some(format!("{}::{}", name, avro::ROOT_NAME)),
-            SchemaDefinition::RawSchema(_) => Some("arroyo_types::RawJson".to_string()),
-        }
-    })
-}
-
-pub fn schema_defs(name: &str, schema: &ConnectionSchema) -> Option<String> {
-    let def = &schema.definition.as_ref()?;
-
-    match def {
-        SchemaDefinition::JsonSchema(s) => Some(json_schema::get_defs(name, s).unwrap()),
-        SchemaDefinition::ProtobufSchema(_) => todo!(),
-        SchemaDefinition::AvroSchema(s) => Some(avro::get_defs(name, s).unwrap()),
-        SchemaDefinition::RawSchema(_) => None,
-    }
-}
-
 fn produce_optimized_plan(
     statement: &Statement,
     schema_provider: &ArroyoSchemaProvider,
@@ -139,7 +113,6 @@ impl From<Connection> for ConnectorTable {
                     field.into()
                 })
                 .collect(),
-            type_name: schema_type(&value.name, &value.schema),
             operator: value.operator,
             config: value.config,
             description: value.description,

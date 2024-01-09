@@ -21,14 +21,13 @@ use datafusion::sql::sqlparser::ast::{
     ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
 };
 
-use crate::avro;
 use arroyo_rpc::api_types::connections::{
     FieldType, PrimitiveType, SourceField, SourceFieldType, StructType,
 };
 use arroyo_types::ArroyoExtensionType;
 use datafusion_common::{DFField, DFSchemaRef, ScalarValue};
 use proc_macro2::{Ident, TokenStream};
-use quote::{format_ident, quote};
+use quote::quote;
 use regex::Regex;
 use syn::PathArguments::AngleBracketed;
 use syn::{parse_quote, parse_str, GenericArgument, Type};
@@ -354,23 +353,6 @@ impl StructDef {
         }
     }
 
-    fn generate_avro_writer(&self) -> TokenStream {
-        let record_ident = format_ident!("self");
-        let body = avro::generate_serializer_item(
-            &record_ident,
-            None,
-            None,
-            &TypeDef::StructDef(self.clone(), false),
-        );
-        parse_quote! {
-            fn to_avro(&self, schema: &arroyo_worker::apache_avro::Schema) -> arroyo_worker::apache_avro::types::Value {
-                use arroyo_worker::apache_avro::types::Value::*;
-
-                #body
-            }
-        }
-    }
-
     // generate a SchemaData impl but only for generated types
     pub fn generate_schema_data(&self) -> Option<TokenStream> {
         if !self.generated {
@@ -412,8 +394,6 @@ impl StructDef {
         let reader_type = self.parquet_reader_type();
         let nullable_reader_type = self.parquet_nullable_reader_type();
 
-        let avro_writer = self.generate_avro_writer();
-
         Some(quote! {
             impl arroyo_formats::SchemaData for #struct_type {
                 fn name() -> &'static str {
@@ -428,8 +408,6 @@ impl StructDef {
                 fn to_raw_string(&self) -> Option<Vec<u8>> {
                     #to_raw_string
                 }
-
-                #avro_writer
 
                 fn iterator_from_record_batch(
                     record_batch: arrow_array::RecordBatch,

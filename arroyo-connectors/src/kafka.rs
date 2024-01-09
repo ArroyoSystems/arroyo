@@ -1,9 +1,9 @@
 use anyhow::{anyhow, bail};
-use arroyo_formats::avro::deserialize_slice_avro;
+use arroyo_formats::{avro, ArrowDeserializer};
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
-use arroyo_rpc::formats::{Format, JsonFormat};
+use arroyo_rpc::formats::{BadData, Format, JsonFormat};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistryClient, FailingSchemaResolver};
-use arroyo_rpc::{schema_resolver, var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{schema_resolver, var_str::VarStr, ArroyoSchema, OperatorConfig};
 use axum::response::sse::Event;
 use futures::TryFutureExt;
 use rdkafka::{
@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, Mutex};
@@ -437,6 +437,7 @@ impl KafkaTester {
     pub async fn validate_schema(
         &self,
         table: &KafkaTable,
+        schema: &ConnectionSchema,
         format: &Format,
         msg: Vec<u8>,
     ) -> anyhow::Result<()> {
@@ -483,24 +484,54 @@ impl KafkaTester {
                         bail!("Message appears to be encoded as normal Avro, rather than SR-Avro, but the schema registry is enabled. Ensure that the format and schema type are correct.");
                     }
 
-                    let schema_registry = Arc::new(Mutex::new(HashMap::new()));
+                    let aschema: ArroyoSchema = schema.clone().into();
+                    let mut deserializer = ArrowDeserializer::with_schema_resolver(
+                        format.clone(),
+                        None,
+                        aschema.clone(),
+                        BadData::Fail {},
+                        Arc::new(schema_resolver),
+                    );
+                    let mut builders = aschema.builders();
 
-                    let _ = deserialize_slice_avro::<Value>(avro, schema_registry, Arc::new(schema_resolver), &msg)
+                    let mut error = deserializer
+                        .deserialize_slice(&mut builders, &msg, SystemTime::now())
                         .await
-                        .map_err(|e|
-                            anyhow!("Failed to parse message as schema-registry Avro (SR-Avro): {:?}. Ensure that the format and schema type are correct.", e))?;
+                        .into_iter()
+                        .next();
+                    if let Some(Err(e)) = deserializer.flush_buffer() {
+                        error.replace(e);
+                    }
+
+                    if let Some(error) = error {
+                        bail!("Failed to parse message as schema-registry Avro (SR-Avro): {:?}. Ensure that the format and schema type are correct.", error.details());
+                    }
                 } else {
-                    let resolver = Arc::new(FailingSchemaResolver::new());
-                    let registry = Arc::new(Mutex::new(HashMap::new()));
+                    let aschema: ArroyoSchema = schema.clone().into();
+                    let mut deserializer = ArrowDeserializer::new(
+                        format.clone(),
+                        aschema.clone(),
+                        None,
+                        BadData::Fail {},
+                    );
+                    let mut builders = aschema.builders();
 
-                    let _ = deserialize_slice_avro::<Value>(avro, registry, resolver, &msg)
+                    let mut error = deserializer
+                        .deserialize_slice(&mut builders, &msg, SystemTime::now())
                         .await
-                        .map_err(|e|
-                            if msg[0] == 0 {
-                                anyhow!("Failed to parse message as regular Avro. It may be encoded as SR-Avro, but the schema registry is not enabled. Ensure that the format and schema type are correct.")
-                            } else {
-                                anyhow!("Failed to parse message as Avro: {:?}. Ensure that the format and schema type are correct.", e)
-                            })?;
+                        .into_iter()
+                        .next();
+                    if let Some(Err(e)) = deserializer.flush_buffer() {
+                        error.replace(e);
+                    }
+
+                    if let Some(error) = error {
+                        if msg[0] == 0 {
+                            bail!("Failed to parse message as regular Avro. It may be encoded as SR-Avro, but the schema registry is not enabled. Ensure that the format and schema type are correct.");
+                        } else {
+                            bail!("Failed to parse message as Avro: {:?}. Ensure that the format and schema type are correct.", error.details());
+                        };
+                    }
                 }
             }
             Format::Parquet(_) => {
@@ -522,7 +553,8 @@ impl KafkaTester {
         mut tx: Sender<Result<Event, Infallible>>,
     ) -> anyhow::Result<()> {
         let format = schema
-            .and_then(|s| s.format)
+            .as_ref()
+            .and_then(|s| s.format.clone())
             .ok_or_else(|| anyhow!("No format defined for Kafka connection"))?;
 
         let client = self.connect().await.map_err(|e| anyhow!("{}", e))?;
@@ -587,6 +619,7 @@ impl KafkaTester {
                         self.info(&mut tx, "Received message from Kafka").await;
                         self.validate_schema(
                             &table,
+                            schema.as_ref().unwrap(),
                             &format,
                             message
                                 .detach()

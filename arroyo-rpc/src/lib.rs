@@ -11,7 +11,8 @@ use crate::api_types::connections::PrimitiveType;
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use anyhow::anyhow;
-use arrow_schema::Schema;
+use arrow_array::builder::{make_builder, ArrayBuilder};
+use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_types::CheckpointBarrier;
 use grpc::{StopMode, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
@@ -249,6 +250,18 @@ impl ArroyoSchema {
         }
     }
 
+    pub fn from_fields(mut fields: Vec<Field>) -> Self {
+        if !fields.iter().any(|f| f.name() == TIMESTAMP_FIELD) {
+            fields.push(Field::new(
+                TIMESTAMP_FIELD,
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ));
+        }
+
+        Self::from_schema_keys(Arc::new(Schema::new(fields)), vec![]).unwrap()
+    }
+
     pub fn from_schema_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> anyhow::Result<Self> {
         let timestamp_index = schema
             .column_with_name(TIMESTAMP_FIELD)
@@ -266,5 +279,13 @@ impl ArroyoSchema {
         let mut schema = (*self.schema).clone();
         schema.remove(self.timestamp_index);
         schema
+    }
+
+    pub fn builders(&self) -> Vec<Box<dyn ArrayBuilder>> {
+        self.schema
+            .fields
+            .iter()
+            .map(|f| make_builder(f.data_type(), 8))
+            .collect()
     }
 }

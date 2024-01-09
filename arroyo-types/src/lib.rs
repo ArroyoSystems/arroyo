@@ -406,7 +406,7 @@ impl UserError {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceError {
     BadData { details: String },
     Other { name: String, details: String },
@@ -422,6 +422,12 @@ impl SourceError {
         SourceError::Other {
             name: name.into(),
             details: details.into(),
+        }
+    }
+
+    pub fn details(&self) -> &String {
+        match self {
+            SourceError::BadData { details } | SourceError::Other { details, .. } => details,
         }
     }
 }

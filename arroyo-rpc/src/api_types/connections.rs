@@ -1,10 +1,12 @@
 use crate::formats::{BadData, Format, Framing};
-use crate::primitive_to_sql;
+use crate::{primitive_to_sql, ArroyoSchema};
 use anyhow::bail;
-use arrow_schema::{DataType, Field, TimeUnit};
+use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use tonic::codegen::Body;
 use utoipa::{IntoParams, ToSchema};
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -116,6 +118,37 @@ pub struct SourceField {
     pub field_name: String,
     pub field_type: SourceFieldType,
     pub nullable: bool,
+}
+
+impl From<SourceField> for Field {
+    fn from(f: SourceField) -> Self {
+        let t = match f.field_type.r#type {
+            FieldType::Primitive(pt) => match pt {
+                PrimitiveType::Int32 => DataType::Int32,
+                PrimitiveType::Int64 => DataType::Int64,
+                PrimitiveType::UInt32 => DataType::UInt32,
+                PrimitiveType::UInt64 => DataType::UInt64,
+                PrimitiveType::F32 => DataType::Float32,
+                PrimitiveType::F64 => DataType::Float64,
+                PrimitiveType::Bool => DataType::Boolean,
+                PrimitiveType::String => DataType::Utf8,
+                PrimitiveType::Bytes => DataType::Binary,
+                PrimitiveType::UnixMillis => DataType::Timestamp(TimeUnit::Millisecond, None),
+                PrimitiveType::UnixMicros => DataType::Timestamp(TimeUnit::Microsecond, None),
+                PrimitiveType::UnixNanos => DataType::Timestamp(TimeUnit::Nanosecond, None),
+                PrimitiveType::DateTime => DataType::Timestamp(TimeUnit::Microsecond, None),
+                PrimitiveType::Json => DataType::Utf8,
+            },
+            FieldType::Struct(s) => DataType::Struct(Fields::from(
+                s.fields
+                    .into_iter()
+                    .map(|t| t.into())
+                    .collect::<Vec<Field>>(),
+            )),
+        };
+
+        Field::new(f.field_name, t, f.nullable)
+    }
 }
 
 impl TryFrom<Field> for SourceField {
@@ -234,6 +267,13 @@ impl ConnectionSchema {
         }
 
         Ok(self)
+    }
+}
+
+impl Into<ArroyoSchema> for ConnectionSchema {
+    fn into(self) -> ArroyoSchema {
+        let fields: Vec<Field> = self.fields.into_iter().map(|f| f.into()).collect();
+        ArroyoSchema::from_fields(fields)
     }
 }
 

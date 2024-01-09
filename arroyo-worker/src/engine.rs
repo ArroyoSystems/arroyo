@@ -44,9 +44,8 @@ use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend, StateStore};
 use arroyo_types::{
-    duration_millis_config, from_micros, range_for_server, should_flush, u32_config, ArrowMessage,
-    CheckpointBarrier, Data, Key, SourceError, TaskInfo, UserError, Watermark, WorkerId,
-    BATCH_LINGER_MS_ENV, BATCH_SIZE_ENV, DEFAULT_BATCH_SIZE, DEFAULT_LINGER, HASH_SEEDS,
+    from_micros, range_for_server, should_flush, ArrowMessage, CheckpointBarrier, Data, Key,
+    SourceError, TaskInfo, UserError, Watermark, WorkerId, HASH_SEEDS,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
