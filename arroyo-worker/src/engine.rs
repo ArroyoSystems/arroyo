@@ -3,8 +3,8 @@ use std::fmt::{Debug, Formatter};
 use std::io::Write;
 use std::{mem, thread};
 
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::sync::Arc;
+use std::time::{Instant, SystemTime};
 
 use anyhow::Result;
 use arrow_array::builder::{make_builder, ArrayBuilder, UInt64Builder};
@@ -16,6 +16,7 @@ use arroyo_state::tables::table_manager;
 use arroyo_state::tables::table_manager::TableManager;
 use bincode::{Decode, Encode};
 use datafusion_common::hash_utils;
+use datafusion_expr::UserDefinedLogicalNode;
 
 use tracing::{debug, info, warn};
 
@@ -27,7 +28,7 @@ use crate::connectors::kafka::source::KafkaSourceFunc;
 use crate::connectors::sse::SSESourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operator::{server_for_hash, ArrowOperatorConstructor, BaseOperator};
+use crate::operator::{server_for_hash, ArrowOperatorConstructor, OperatorNode};
 use crate::operators::PeriodicWatermarkGenerator;
 use crate::{RateLimiter, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, TIMER_TABLE};
 use arroyo_datastream::logical::{
@@ -695,7 +696,7 @@ pub struct SubtaskNode {
     pub in_schemas: Vec<ArroyoSchema>,
     pub out_schema: Option<ArroyoSchema>,
     pub projection: Option<Vec<usize>>,
-    pub node: Box<dyn BaseOperator>,
+    pub node: OperatorNode,
 }
 
 impl Debug for SubtaskNode {
@@ -868,7 +869,8 @@ impl Program {
                     parallelism,
                     in_schemas: in_schemas.clone(),
                     out_schema: out_schema.clone(),
-                    node: construct_operator(node.operator_name, node.operator_config.clone()),
+                    node: construct_operator(node.operator_name, node.operator_config.clone())
+                        .into(),
                     projection: projection.clone(),
                 }));
             }
@@ -1314,20 +1316,31 @@ impl Engine {
 
         let operator_id = task_info.operator_id.clone();
         let task_index = task_info.task_index;
-        let join_task = node.node.start(
+
+        let tables = node.node.tables();
+        let mut in_qs: Vec<_> = in_qs_map.into_values().flatten().collect();
+
+        let ctx = ArrowContext::new(
             task_info,
             checkpoint_metadata.clone(),
             control_rx,
             control_tx.clone(),
+            in_qs.len(),
             node.in_schemas,
             node.out_schema,
             node.projection,
-            in_qs_map.into_values().collect(),
             out_qs_map
                 .into_values()
                 .map(|v| v.into_values().collect())
                 .collect(),
-        );
+            tables,
+        )
+        .await;
+
+        let operator = Box::new(node.node);
+        let join_task = tokio::spawn(async move {
+            operator.start(ctx, in_qs).await;
+        });
 
         let send_copy = control_tx.clone();
         tokio::spawn(async move {
@@ -1388,43 +1401,36 @@ impl Engine {
     }
 }
 
-pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn BaseOperator> {
+pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNode {
     let mut buf = config.as_slice();
     match operator {
-        OperatorName::Watermark => Box::new(
+        OperatorName::Watermark => {
             PeriodicWatermarkGenerator::from_config(prost::Message::decode(&mut buf).unwrap())
-                .unwrap(),
-        ),
-        OperatorName::ArrowValue => Box::new(
-            ValueExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap(),
-        ),
-        OperatorName::ArrowKey => Box::new(
-            KeyExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap(),
-        ),
-        OperatorName::ArrowAggregate => Box::new(
+        }
+        OperatorName::ArrowValue => {
+            ValueExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap())
+        }
+        OperatorName::ArrowKey => {
+            KeyExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap())
+        }
+        OperatorName::ArrowAggregate => {
             TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
-                .unwrap(),
-        ),
+        }
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(&mut buf).unwrap();
             match op.operator.as_str() {
-                "connectors::impulse::ImpulseSourceFunc" => {
-                    Box::new(ImpulseSourceFunc::from_config(op).unwrap())
-                }
-                "connectors::sse::SSESourceFunc" => {
-                    Box::new(SSESourceFunc::from_config(op).unwrap())
-                }
+                "connectors::impulse::ImpulseSourceFunc" => ImpulseSourceFunc::from_config(op),
+                "connectors::sse::SSESourceFunc" => SSESourceFunc::from_config(op),
                 "connectors::filesystem::source::FileSystemSourceFunc" => {
-                    Box::new(FileSystemSourceFunc::from_config(op).unwrap())
+                    FileSystemSourceFunc::from_config(op)
                 }
-                "connectors::kafka::source::KafkaSourceFunc" => {
-                    Box::new(KafkaSourceFunc::from_config(op).unwrap())
-                }
-                "GrpcSink" => Box::new(GrpcRecordBatchSink::from_config(op).unwrap()),
+                "connectors::kafka::source::KafkaSourceFunc" => KafkaSourceFunc::from_config(op),
+                "GrpcSink" => GrpcRecordBatchSink::from_config(op),
                 c => panic!("unknown connector {}", c),
             }
         }
     }
+    .expect(&format!("Failed to construct operator {:?}", operator))
 }
 
 #[cfg(test)]

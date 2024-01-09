@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
-use crate::engine::{ArrowContext, StreamNode};
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
+use crate::engine::ArrowContext;
+use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
 use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
 use arroyo_rpc::grpc::{api, StopMode, TableConfig, TableDescriptor};
@@ -120,7 +119,7 @@ impl ImpulseSourceFunc {
                         .unwrap()
                         .insert(ctx.task_info.task_index, self.state)
                         .await;
-                    if self.checkpoint(c, ctx).await {
+                    if self.start_checkpoint(c, ctx).await {
                         return SourceFinishType::Immediate;
                     }
                 }
@@ -160,14 +159,14 @@ impl ImpulseSourceFunc {
     }
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp, Self> for ImpulseSourceFunc {
-    fn from_config(config: api::ConnectorOp) -> anyhow::Result<Self> {
+impl ArrowOperatorConstructor<api::ConnectorOp> for ImpulseSourceFunc {
+    fn from_config(config: api::ConnectorOp) -> anyhow::Result<OperatorNode> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for ImpulseSource");
         let table: ImpulseTable =
             serde_json::from_value(config.table).expect("Invalid table config for ImpulseSource");
 
-        Ok(ImpulseSourceFunc {
+        Ok(OperatorNode::from_source(Box::new(ImpulseSourceFunc {
             interval: table
                 .event_time_interval
                 .map(|i| Duration::from_micros(i as u64)),
@@ -180,12 +179,12 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for ImpulseSourceFunc {
                 counter: 0,
                 start_time: SystemTime::now(),
             },
-        })
+        })))
     }
 }
 
 #[async_trait]
-impl BaseOperator for ImpulseSourceFunc {
+impl SourceOperator for ImpulseSourceFunc {
     fn name(&self) -> String {
         "impulse-source".to_string()
     }
@@ -199,11 +198,7 @@ impl BaseOperator for ImpulseSourceFunc {
         .collect()
     }
 
-    async fn run_behavior(
-        mut self: Box<Self>,
-        ctx: &mut ArrowContext,
-        _: Vec<Receiver<ArrowMessage>>,
-    ) -> Option<ArrowMessage> {
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
         let s = ctx
             .table_manager
             .get_global_keyed_state("i")
@@ -213,7 +208,9 @@ impl BaseOperator for ImpulseSourceFunc {
         if let Some(state) = s.get(&ctx.task_info.task_index) {
             self.state = *state;
         }
+    }
 
-        self.run(ctx).await.into()
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+        self.run(ctx).await
     }
 }

@@ -1,5 +1,5 @@
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperatorConstructor, BaseOperator};
+use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
 use anyhow::anyhow;
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -20,7 +20,6 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
-use tokio::sync::mpsc::Receiver;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
 
@@ -236,7 +235,7 @@ impl KafkaSourceFunc {
                                 // fails. The actual offset is stored in state.
                                 warn!("Failed to commit offset to Kafka {:?}", e);
                             }
-                            if self.checkpoint(c, ctx).await {
+                            if self.start_checkpoint(c, ctx).await {
                                 return Ok(SourceFinishType::Immediate);
                             }
                         },
@@ -269,8 +268,8 @@ impl KafkaSourceFunc {
     }
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp, Self> for KafkaSourceFunc {
-    fn from_config(config: ConnectorOp) -> anyhow::Result<Self> {
+impl ArrowOperatorConstructor<api::ConnectorOp> for KafkaSourceFunc {
+    fn from_config(config: ConnectorOp) -> anyhow::Result<OperatorNode> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for KafkaSource");
         let connection: KafkaConfig = serde_json::from_value(config.connection)
@@ -310,7 +309,7 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for KafkaSourceFunc {
                 Arc::new(FailingSchemaResolver::new())
             };
 
-        Ok(Self {
+        Ok(OperatorNode::from_source(Box::new(Self {
             topic: table.topic,
             bootstrap_servers: connection.bootstrap_servers.to_string(),
             group_id: group_id.clone(),
@@ -327,17 +326,13 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for KafkaSourceFunc {
                     .unwrap_or(u32::MAX),
             )
             .unwrap(),
-        })
+        })))
     }
 }
 
 #[async_trait]
-impl BaseOperator for KafkaSourceFunc {
-    async fn run_behavior(
-        mut self: Box<Self>,
-        ctx: &mut ArrowContext,
-        _: Vec<Receiver<ArrowMessage>>,
-    ) -> Option<ArrowMessage> {
+impl SourceOperator for KafkaSourceFunc {
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         match self.run_int(ctx).await {
             Ok(r) => r,
             Err(e) => {
@@ -354,7 +349,6 @@ impl BaseOperator for KafkaSourceFunc {
                 panic!("{}: {}", e.name, e.details);
             }
         }
-        .into()
     }
 
     fn name(&self) -> String {

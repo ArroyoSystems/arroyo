@@ -44,7 +44,7 @@ use datafusion_common::{
 
 use crate::engine::ArrowContext;
 use crate::old::Context;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 use arroyo_df::physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
@@ -112,10 +112,8 @@ impl FunctionRegistry for Registry {
     }
 }
 
-impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
-    for TumblingAggregatingWindowFunc
-{
-    fn from_config(proto_config: api::WindowAggregateOperator) -> Result<Self> {
+impl ArrowOperatorConstructor<api::WindowAggregateOperator> for TumblingAggregatingWindowFunc {
+    fn from_config(proto_config: api::WindowAggregateOperator) -> Result<OperatorNode> {
         let registry = Registry {};
 
         let binning_function =
@@ -238,11 +236,11 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
         let timestamp_index = partial_schema.fields().len() - 1;
         let partial_schema = ArroyoSchema {
             schema: partial_schema,
-            timestamp_index: timestamp_index,
+            timestamp_index,
             key_indices,
         };
 
-        Ok(Self {
+        Ok(OperatorNode::from_operator(Box::new(Self {
             width: Duration::from_micros(window.size_micros),
             binning_function,
             partial_aggregation_plan,
@@ -254,7 +252,7 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
             execs: BTreeMap::new(),
             window_field,
             window_index: proto_config.window_index as usize,
-        })
+        })))
     }
 }
 

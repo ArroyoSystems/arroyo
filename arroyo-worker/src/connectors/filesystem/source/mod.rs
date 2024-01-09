@@ -1,7 +1,6 @@
 use core::panic;
 use std::collections::HashMap;
 use std::future::ready;
-use std::pin::Pin;
 use std::time::SystemTime;
 
 use anyhow::Result;
@@ -18,7 +17,6 @@ use prost::Message;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tokio::sync::mpsc::Receiver;
 use tokio_stream::Stream;
 use tracing::{info, warn};
 
@@ -27,11 +25,11 @@ use arroyo_rpc::formats::BadData;
 use arroyo_rpc::grpc::{api, TableConfig, TableEnum};
 use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
 use arroyo_storage::StorageProvider;
-use arroyo_types::{to_nanos, ArrowMessage, UserError};
+use arroyo_types::{to_nanos, UserError};
 use typify::import_types;
 
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, BaseOperator};
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode, SourceOperator};
 use crate::{RateLimiter, SourceFinishType};
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
@@ -50,8 +48,8 @@ enum FileReadState {
     RecordsRead(usize),
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp, Self> for FileSystemSourceFunc {
-    fn from_config(config: api::ConnectorOp) -> Result<Self> {
+impl ArrowOperatorConstructor<api::ConnectorOp> for FileSystemSourceFunc {
+    fn from_config(config: api::ConnectorOp) -> Result<OperatorNode> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for FileSystemSourceFunc");
         let table: FileSystemTable = serde_json::from_value(config.table)
@@ -60,18 +58,18 @@ impl ArrowOperatorConstructor<api::ConnectorOp, Self> for FileSystemSourceFunc {
             .format
             .expect("Format must be set for filesystem source");
 
-        Ok(Self {
+        Ok(OperatorNode::from_source(Box::new(Self {
             table: table.table_type,
             deserializer: DataDeserializer::new(format, config.framing),
             bad_data: config.bad_data,
             rate_limiter: RateLimiter::new(),
             file_states: HashMap::new(),
-        })
+        })))
     }
 }
 
 #[async_trait]
-impl BaseOperator for FileSystemSourceFunc {
+impl SourceOperator for FileSystemSourceFunc {
     fn tables(&self) -> HashMap<String, TableConfig> {
         vec![("a".to_string(), global_table_config("a", "fs"))]
             .into_iter()
@@ -82,13 +80,9 @@ impl BaseOperator for FileSystemSourceFunc {
         "FileSystem".to_string()
     }
 
-    async fn run_behavior(
-        mut self: Box<Self>,
-        ctx: &mut ArrowContext,
-        _: Vec<Receiver<ArrowMessage>>,
-    ) -> Option<ArrowMessage> {
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         match self.run_int(ctx).await {
-            Ok(s) => s.into(),
+            Ok(s) => s,
             Err(e) => {
                 ctx.report_error(e.name.clone(), e.details.clone()).await;
 
@@ -348,7 +342,7 @@ impl FileSystemSourceFunc {
                         .await;
                 }
                 // checkpoint our state
-                if self.checkpoint(c, ctx).await {
+                if self.start_checkpoint(c, ctx).await {
                     Some(SourceFinishType::Immediate)
                 } else {
                     None
