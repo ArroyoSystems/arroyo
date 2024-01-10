@@ -11,9 +11,20 @@
                     "properties": {
                         "address": {
                             "type": "string",
+                            "title": "address",
                             "description": "The address of your Redis server",
                             "examples": ["redis://localhost:6379"],
                             "pattern": "^redis://.*$"
+                        },
+                        "username": {
+                            "title": "Username",
+                            "type": "string",
+                            "description": "The address of your Redis server"
+                        },
+                        "password": {
+                            "title": "Password",
+                            "type": "string",
+                            "description": "The address of your Redis server"
                         }
                     },
                     "additionalProperties": false,
@@ -38,6 +49,16 @@
                                 "examples": ["redis://localhost:6379"],
                                 "pattern": "^redis://.*$"
                             }
+                        },
+                        "username": {
+                            "title": "Username",
+                            "type": "string",
+                            "description": "The address of your Redis server"
+                        },
+                        "password": {
+                            "title": "Password",
+                            "type": "string",
+                            "description": "The address of your Redis server"
                         }
                     },
                     "additionalProperties": false

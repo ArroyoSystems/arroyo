@@ -1,16 +1,19 @@
+use std::collections::HashMap;
+use std::convert::Infallible;
+
 use anyhow::{anyhow, bail};
+use axum::response::sse::Event;
+use redis::cluster::ClusterClient;
+use redis::{Client, ConnectionInfo, IntoConnectionInfo};
+use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot::Receiver;
+use typify::import_types;
+
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, PrimitiveType,
     TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
-use axum::response::sse::Event;
-use redis::cluster::ClusterClient;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::convert::Infallible;
-use tokio::sync::oneshot::Receiver;
-use typify::import_types;
 
 use crate::{pull_opt, pull_option_to_u64, Connection, Connector};
 
@@ -46,7 +49,64 @@ fn validate_column(
 
     Ok(column)
 }
+enum Clients {
+    Standard(Client),
+    Clustered(ClusterClient),
+}
+fn create_redis_client(config: &RedisConfig) -> anyhow::Result<Clients> {
+    match &config.connection {
+        RedisConfigConnection::Standard {
+            address,
+            username,
+            password,
+        } => {
+            let mut info: ConnectionInfo = address
+                .0
+                .clone()
+                .into_connection_info()
+                .expect("invalid address");
+            if info.redis.password.is_none() {
+                info.redis.password = password.clone();
+            }
+            if info.redis.username.is_none() {
+                info.redis.username = username.clone();
+            }
+            let result = redis::Client::open(info).map_err(|e| {
+                anyhow!(
+                    "Failed to construct Redis client for {}: {:?}",
+                    address.0,
+                    e
+                )
+            })?;
+            Ok(Clients::Standard(result))
+        }
+        RedisConfigConnection::Clustered {
+            addresses,
+            username,
+            password,
+        } => {
+            let infos: Vec<ConnectionInfo> = addresses
+                .into_iter()
+                .map(|a| a.0.clone())
+                .map(|x| {
+                    let mut info: ConnectionInfo =
+                        x.into_connection_info().expect("invalid address");
+                    if info.redis.password.is_none() {
+                        info.redis.password = password.clone();
+                    }
+                    if info.redis.username.is_none() {
+                        info.redis.username = username.clone();
+                    }
+                    info
+                })
+                .collect();
 
+            let client = ClusterClient::new(infos)
+                .map_err(|e| anyhow!("Failed to construct Redis Cluster client: {:?}", e))?;
+            Ok(Clients::Clustered(client))
+        }
+    }
+}
 async fn test_inner(
     c: RedisConfig,
     tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
@@ -57,43 +117,13 @@ async fn test_inner(
         .await
         .unwrap();
 
-    match c.connection {
-        RedisConfigConnection::Address(address) => {
-            let client = redis::Client::open(address.0.clone()).map_err(|e| {
-                anyhow!(
-                    "Failed to construct Redis client for {}: {:?}",
-                    address.0,
-                    e
-                )
-            })?;
-
-            let mut connection = client
-                .get_async_connection()
-                .await
-                .map_err(|e| anyhow!("Failed to connect to Redis at {}: {:?}", address.0, e))?;
-
-            tx.send(Ok(Event::default()
-                .json_data(TestSourceMessage::info(
-                    "Connected successfully, sending PING",
-                ))
-                .unwrap()))
-                .await
-                .unwrap();
-
-            redis::cmd("PING")
-                .query_async(&mut connection)
-                .await
-                .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
-        }
-        RedisConfigConnection::Addresses(addresses) => {
-            let client = ClusterClient::new(addresses.into_iter().map(|a| a.0).collect())
-                .map_err(|e| anyhow!("Failed to construct Redis Cluster client: {:?}", e))?;
-
-            let mut connection = client
+    let client = create_redis_client(&c)?;
+    match client {
+        Clients::Standard(c) => {
+            let mut connection = c
                 .get_async_connection()
                 .await
                 .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
-
             tx.send(Ok(Event::default()
                 .json_data(TestSourceMessage::info(
                     "Connected successfully, sending PING",
@@ -107,7 +137,25 @@ async fn test_inner(
                 .await
                 .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
         }
-    };
+        Clients::Clustered(c) => {
+            let mut connection = c
+                .get_async_connection()
+                .await
+                .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
+            tx.send(Ok(Event::default()
+                .json_data(TestSourceMessage::info(
+                    "Connected successfully, sending PING",
+                ))
+                .unwrap()))
+                .await
+                .unwrap();
+
+            redis::cmd("PING")
+                .query_async(&mut connection)
+                .await
+                .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
+        }
+    }
 
     Ok("Received PING response successfully".to_string())
 }
@@ -205,15 +253,19 @@ impl Connector for RedisConnector {
 
                 let cluster_addresses = options.remove("cluster.addresses");
                 let connection_config = match (address, cluster_addresses) {
-                    (Some(address), None) => {
-                        RedisConfigConnection::Address(RedisConfigConnectionAddress(address))
-                    }
-                    (None, Some(cluster_addresses)) => RedisConfigConnection::Addresses(
-                        cluster_addresses
+                    (Some(address), None) => RedisConfigConnection::Standard {
+                        address: Address(address.to_string()),
+                        password: None,
+                        username: None,
+                    },
+                    (None, Some(cluster_addresses)) => RedisConfigConnection::Clustered {
+                        addresses: cluster_addresses
                             .split(",")
                             .map(|s| Address(s.to_string()))
                             .collect(),
-                    ),
+                        password: None,
+                        username: None,
+                    },
                     (Some(_), Some(_)) => {
                         bail!("only one of `address` or `cluster.addresses` may be set");
                     }
@@ -339,22 +391,7 @@ impl Connector for RedisConnector {
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for Redis connection"))?;
 
-        match &config.connection {
-            RedisConfigConnection::Address(address) => {
-                let _ = redis::Client::open(address.0.clone()).map_err(|e| {
-                    anyhow!(
-                        "Failed to construct Redis client for {}: {:?}",
-                        address.0,
-                        e
-                    )
-                })?;
-            }
-            RedisConfigConnection::Addresses(addresses) => {
-                let _ = ClusterClient::new(addresses.into_iter().map(|a| a.0.clone()).collect())
-                    .map_err(|e| anyhow!("Failed to construct Redis Cluster client: {:?}", e))?;
-            }
-        }
-
+        let _ = create_redis_client(&config)?;
         match &table.connector_type {
             TableType::Target(Target::StringTable { key_column, .. }) => {
                 if let Some(key_column) = key_column {
