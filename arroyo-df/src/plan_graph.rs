@@ -21,7 +21,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
-use arroyo_rpc::grpc::api;
+use arroyo_rpc::grpc::api::{self, SlidingWindow};
 use arroyo_rpc::grpc::api::{
     window, KeyPlanOperator, TumblingWindow, ValuePlanOperator, Window, WindowAggregateOperator,
 };
@@ -185,7 +185,7 @@ pub(crate) async fn get_arrow_program(
                 new_node_index
             }
             crate::LogicalPlanExtension::AggregateCalculation(aggregate) => {
-                let WindowType::Tumbling { width } = aggregate.window else {
+                let WindowType::Sliding { width, slide } = aggregate.window else {
                     bail!("only implemented tumbling windows currently")
                 };
                 let my_aggregate = aggregate.aggregate.clone();
@@ -225,7 +225,7 @@ pub(crate) async fn get_arrow_program(
                     ),
                     args: vec![
                         Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
-                            IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
+                            IntervalMonthDayNanoType::make_value(0, 0, slide.as_nanos() as i64),
                         ))),
                         Expr::Column(datafusion_common::Column {
                             relation: None,
@@ -254,7 +254,8 @@ pub(crate) async fn get_arrow_program(
                     binning_schema: vec![],
                     input_schema: serde_json::to_vec(&input_schema)?,
                     window: Some(Window {
-                        window: Some(window::Window::TumblingWindow(TumblingWindow {
+                        window: Some(window::Window::SlidingWindow(SlidingWindow {
+                            slide_micros: slide.as_micros() as u64,
                             size_micros: width.as_micros() as u64,
                         })),
                     }),

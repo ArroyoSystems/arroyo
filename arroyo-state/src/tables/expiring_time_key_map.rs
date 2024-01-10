@@ -464,4 +464,48 @@ impl ExpiringTimeKeyView {
         let buffered_range = self.batches_to_flush.range(cutoff..);
         flushed_range.chain(buffered_range)
     }
+
+    pub fn expire_timestamp(&mut self, timestamp: SystemTime) -> Vec<RecordBatch> {
+        let flushed_batches = self.flushed_batches_by_max_timestamp.remove(&timestamp);
+        let buffered_batches = self.batches_to_flush.remove(&timestamp);
+        match (flushed_batches, buffered_batches) {
+            (None, None) => vec![],
+            (None, Some(batches)) | (Some(batches), None) => batches,
+            (Some(mut flushed_batches), Some(mut buffered_batches)) => {
+                flushed_batches.append(&mut buffered_batches);
+                flushed_batches
+            }
+        }
+    }
+
+    pub async fn flush_timestamp(&mut self, bin_start: SystemTime) -> Result<()> {
+        let Some(batches_to_flush) = self.batches_to_flush.remove(&bin_start) else {
+            return Ok(());
+        };
+        let flushed_vec = self
+            .flushed_batches_by_max_timestamp
+            .entry(bin_start)
+            .or_default();
+        for batch in batches_to_flush {
+            flushed_vec.push(batch.clone());
+            self.state_tx
+                .send(StateMessage::TableData {
+                    table: self.parent.table_name.to_string(),
+                    data: TableData::RecordBatch(batch),
+                })
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub fn get_min_time(&self) -> Option<SystemTime> {
+        match (
+            self.batches_to_flush.keys().next(),
+            self.flushed_batches_by_max_timestamp.keys().next(),
+        ) {
+            (None, None) => None,
+            (None, Some(time)) | (Some(time), None) => Some(*time),
+            (Some(buffered_time), Some(flushed_time)) => Some(*buffered_time.min(flushed_time)),
+        }
+    }
 }

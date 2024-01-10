@@ -7,8 +7,10 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
+use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::builder::{make_builder, ArrayBuilder, UInt64Builder};
-use arrow_array::RecordBatch;
+use arrow_array::types::UInt64Type;
+use arrow_array::{Array, PrimitiveArray, RecordBatch, StructArray};
 use arrow_schema::SchemaRef;
 use arroyo_datastream::get_hasher;
 use arroyo_rpc::ArroyoSchema;
@@ -19,6 +21,7 @@ use datafusion_common::hash_utils;
 
 use tracing::{debug, info, warn};
 
+use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowFunc;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
 use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
 use crate::connectors::filesystem::source::FileSystemSourceFunc;
@@ -27,7 +30,9 @@ use crate::connectors::kafka::source::KafkaSourceFunc;
 use crate::connectors::sse::SSESourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operator::{server_for_hash, ArrowOperatorConstructor, BaseOperator};
+use crate::operator::{
+    server_for_hash, server_for_hash_array, ArrowOperatorConstructor, BaseOperator,
+};
 use crate::operators::PeriodicWatermarkGenerator;
 use crate::{RateLimiter, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, TIMER_TABLE};
 use arroyo_datastream::logical::{
@@ -213,37 +218,46 @@ fn repartition<'a>(
         let keys: Vec<_> = keys.iter().map(|i| record.column(*i).clone()).collect();
 
         hash_utils::create_hashes(&keys[..], &get_hasher(), &mut buf).unwrap();
+        let buf_array = PrimitiveArray::from(buf);
+
+        let servers = server_for_hash_array(&buf_array, qs).unwrap();
+
+        let indices = sort_to_indices(&servers, None, None).unwrap();
+        let columns = record
+            .columns()
+            .iter()
+            .map(|c| take(c, &indices, None).unwrap())
+            .collect();
+        let sorted = RecordBatch::try_new(record.schema(), columns).unwrap();
+        let sorted_keys = take(&servers, &indices, None).unwrap();
+
+        let partition: arrow::compute::Partitions =
+            partition(vec![sorted_keys.clone()].as_slice()).unwrap();
+        let typed_keys: &PrimitiveArray<UInt64Type> = sorted_keys.as_any().downcast_ref().unwrap();
+        let result: Vec<_> = partition
+            .ranges()
+            .into_iter()
+            .map(|range| {
+                let server_batch = sorted.slice(range.start, range.end - range.start);
+                let server_id = typed_keys.value(range.start) as usize;
+                (server_id, server_batch)
+            })
+            .collect();
+        result.into_iter()
     } else {
-        // TODO: do we want this be random or deterministic?
-        buf.iter_mut().for_each(|x| *x = random());
-    };
-
-    let mut indices: Vec<_> = (0..qs)
-        .map(|_| UInt64Builder::with_capacity(record.num_rows()))
-        .collect();
-
-    for (index, hash) in buf.into_iter().enumerate() {
-        indices[server_for_hash(hash, qs)].append_value(index as u64);
+        let range_size = record.num_rows() / qs + 1;
+        let result: Vec<_> = (0..qs)
+            .into_iter()
+            .map(|i| {
+                let start = i * range_size;
+                let end = (i + 1) * range_size;
+                let server_batch = record.slice(start, end.min(record.num_rows()) - start);
+                let server_id = i;
+                (server_id, server_batch)
+            })
+            .collect();
+        result.into_iter()
     }
-
-    indices
-        .into_iter()
-        .enumerate()
-        .filter_map(|(partition, mut indices)| {
-            let indices = indices.finish();
-            (!indices.is_empty()).then_some((partition, indices))
-        })
-        .map(move |(partition, indices)| {
-            let columns = record
-                .columns()
-                .iter()
-                .map(|c| arrow::compute::take(c.as_ref(), &indices, None).unwrap())
-                .collect();
-
-            let batch = RecordBatch::try_new(record.schema(), columns).unwrap();
-
-            (partition, batch)
-        })
 }
 
 impl ArrowCollector {
@@ -1403,7 +1417,7 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> Box<dyn Ba
             KeyExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap()).unwrap(),
         ),
         OperatorName::ArrowAggregate => Box::new(
-            TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
+            SlidingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
                 .unwrap(),
         ),
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {

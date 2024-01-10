@@ -23,7 +23,10 @@ use arroyo_state::timestamp_table_config;
 use arroyo_types::{
     from_nanos, to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
 };
-use datafusion::{execution::context::SessionContext, physical_plan::{ExecutionPlan, aggregates::AggregateExec}};
+use datafusion::{
+    execution::context::SessionContext,
+    physical_plan::{aggregates::AggregateExec, ExecutionPlan},
+};
 use datafusion_common::ScalarValue;
 use futures::stream::FuturesUnordered;
 
@@ -107,7 +110,8 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator, Self>
                 proto_config.input_schema.len()
             ))?;
 
-        let binning_function = parse_physical_expr(&binning_function, &EmptyRegistry {}, &input_schema)?;
+        let binning_function =
+            parse_physical_expr(&binning_function, &EmptyRegistry {}, &input_schema)?;
 
         let mut physical_plan =
             PhysicalPlanNode::decode(&mut proto_config.physical_plan.as_slice()).unwrap();

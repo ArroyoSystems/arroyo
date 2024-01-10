@@ -11,8 +11,9 @@ use crate::engine::{ArrowContext, CheckpointCounter};
 use crate::inq_reader::InQReader;
 use crate::metrics::TaskCounters;
 use crate::ControlOutcome;
-use arrow_array::types::TimestampNanosecondType;
-use arrow_array::{Array, PrimitiveArray, RecordBatch};
+use arrow::compute::kernels::numeric::{div, rem};
+use arrow_array::types::{TimestampNanosecondType, UInt64Type};
+use arrow_array::{Array, Datum, PrimitiveArray, RecordBatch, UInt64Array};
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_rpc::ArroyoSchema;
 use arroyo_rpc::{
@@ -26,6 +27,7 @@ use arroyo_types::{
 };
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use datafusion_common::ScalarValue;
 use futures::{Future, StreamExt};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_stream::Stream;
@@ -37,7 +39,20 @@ impl<T: Data + PartialEq + Eq + 'static> TimerT for T {}
 
 pub fn server_for_hash(x: u64, n: usize) -> usize {
     let range_size = u64::MAX / (n as u64);
-    (n - 1).min((x / range_size) as usize)
+    ((x / range_size) as usize) % n
+}
+
+pub fn server_for_hash_array(
+    hash: &PrimitiveArray<UInt64Type>,
+    n: usize,
+) -> anyhow::Result<PrimitiveArray<UInt64Type>> {
+    let range_size = u64::MAX / (n as u64);
+    let range_scalar = UInt64Array::new_scalar(range_size);
+    let mut server_scalar = UInt64Array::new_scalar(n as u64);
+    let division = div(hash, &range_scalar)?;
+    let mod_array = rem(&division, &mut server_scalar)?;
+    let result: &PrimitiveArray<UInt64Type> = mod_array.as_any().downcast_ref().unwrap();
+    Ok(result.clone())
 }
 
 pub static TIMER_TABLE: char = '[';

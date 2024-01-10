@@ -34,6 +34,7 @@ use tonic::transport::Channel;
 
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
 
+pub mod sliding_aggregating_window;
 pub(crate) mod sync;
 pub mod tumbling_aggregating_window;
 pub struct EmptyRegistry {}
@@ -44,21 +45,24 @@ impl FunctionRegistry for EmptyRegistry {
     }
 
     fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
-        DFResult::Err(DataFusionError::NotImplemented(
-            format!("udf {} not implemented", name),
-        ))
+        DFResult::Err(DataFusionError::NotImplemented(format!(
+            "udf {} not implemented",
+            name
+        )))
     }
 
     fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
-        DFResult::Err(DataFusionError::NotImplemented(
-            format!("udaf {} not implemented", name),
-        ))
+        DFResult::Err(DataFusionError::NotImplemented(format!(
+            "udaf {} not implemented",
+            name
+        )))
     }
 
     fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
-        DFResult::Err(DataFusionError::NotImplemented(
-            format!("udwf {} not implemented", name),
-        ))
+        DFResult::Err(DataFusionError::NotImplemented(format!(
+            "udwf {} not implemented",
+            name
+        )))
     }
 }
 
