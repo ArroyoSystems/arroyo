@@ -1,30 +1,33 @@
-use std::{marker::PhantomData, path::Path};
+use std::{collections::HashMap, marker::PhantomData, path::Path};
 
-use arroyo_formats::{DataSerializer, SchemaData};
-use arroyo_macro::{process_fn, StreamNode};
-use arroyo_rpc::OperatorConfig;
-use arroyo_types::{Key, Record};
-use serde::Serialize;
+use anyhow::Result;
+use arrow_array::RecordBatch;
+use arroyo_rpc::{
+    grpc::{api::ConnectorOp, TableConfig},
+    OperatorConfig,
+};
+use arroyo_types::CheckpointBarrier;
+use async_trait::async_trait;
 use tokio::{
     fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
 };
 
-use crate::old::Context;
+use crate::{
+    engine::ArrowContext,
+    old::Context,
+    operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode},
+};
 
 use super::SingleFileTable;
 
-#[derive(StreamNode)]
-pub struct FileSink<K: Key, T: SchemaData + Serialize> {
+pub struct FileSink {
     output_path: String,
     file: Option<File>,
-    serializer: DataSerializer<T>,
-    _phantom: PhantomData<K>,
 }
 
-#[process_fn(in_k = K, in_t = T)]
-impl<K: Key, T: SchemaData + Serialize> FileSink<K, T> {
-    pub fn from_config(config_str: &str) -> Self {
+impl FileSink {
+    fn from_config(config_str: &str) -> Self {
         let config: OperatorConfig =
             serde_json::from_str(config_str).expect("Invalid config for FileSinkFunc");
         let table: SingleFileTable =
@@ -32,29 +35,64 @@ impl<K: Key, T: SchemaData + Serialize> FileSink<K, T> {
         Self {
             output_path: table.path,
             file: None,
-            serializer: DataSerializer::new(
-                config.format.expect("Format must be defined for FileSinks"),
-            ),
-            _phantom: PhantomData,
         }
-    }
-
-    fn name(&self) -> String {
-        "SingleFileSink".to_string()
     }
 
     fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
         vec![arroyo_state::global_table('f', "file_sink")]
     }
+}
 
-    async fn on_start(&mut self, ctx: &mut Context<(), ()>) {
+impl ArrowOperatorConstructor<ConnectorOp> for FileSink {
+    fn from_config(connector_op: ConnectorOp) -> Result<OperatorNode> {
+        Ok(OperatorNode::from_operator(Box::new(Self::from_config(
+            &connector_op.config,
+        ))))
+    }
+}
+
+#[async_trait]
+impl ArrowOperator for FileSink {
+    fn name(&self) -> String {
+        "SingleFileSink".to_string()
+    }
+
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        vec![(
+            "f".to_string(),
+            arroyo_state::global_table_config("f", "file_sink"),
+        )]
+        .into_iter()
+        .collect()
+    }
+
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+        let json_rows: Vec<_> = arrow_json::writer::record_batches_to_json_rows(&[&batch])
+            .unwrap()
+            .into_iter()
+            .map(|mut r| {
+                r.remove("_timestamp");
+                r
+            })
+            .collect();
+        let file = self.file.as_mut().unwrap();
+        for map in json_rows {
+            let value = serde_json::to_string(&map).unwrap();
+            //info!("sending map {:?}", value);
+            file.write_all(value.as_bytes()).await.unwrap();
+            file.write_all(b"\n").await.unwrap();
+        }
+    }
+
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
         let file_path = Path::new(&self.output_path);
         let parent = file_path.parent().unwrap();
         fs::create_dir_all(&parent).await.unwrap();
         let offset = ctx
-            .state
-            .get_global_keyed_state('f')
+            .table_manager
+            .get_global_keyed_state("f")
             .await
+            .unwrap()
             .get(&self.output_path)
             .cloned()
             .unwrap_or_default();
@@ -72,32 +110,17 @@ impl<K: Key, T: SchemaData + Serialize> FileSink<K, T> {
         }
     }
 
-    async fn process_element(&mut self, record: &Record<K, T>, _ctx: &mut Context<(), ()>) {
-        let Some(row) = self.serializer.to_vec(&record.value) else {
-            return;
-        };
-        // row as a line
-        let file = self.file.as_mut().unwrap();
-        file.write_all(&row).await.unwrap();
-        file.write_all(b"\n").await.unwrap();
+    async fn on_close(&mut self, _ctx: &mut ArrowContext) {
+        self.file.as_mut().unwrap().flush().await.unwrap();
     }
 
-    async fn handle_checkpoint(
-        &mut self,
-        _checkpoint_barrier: &arroyo_types::CheckpointBarrier,
-        ctx: &mut crate::old::Context<(), ()>,
-    ) {
-        self.file.as_mut().unwrap().flush().await.unwrap();
-        let mut state = ctx.state.get_global_keyed_state('f').await;
+    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {
+        let mut state = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
         state
             .insert(
                 self.output_path.clone(),
                 self.file.as_ref().unwrap().metadata().await.unwrap().len(),
             )
             .await;
-    }
-
-    async fn on_close(&mut self, _ctx: &mut Context<(), ()>) {
-        self.file.as_mut().unwrap().flush().await.unwrap();
     }
 }

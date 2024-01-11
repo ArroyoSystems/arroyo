@@ -13,6 +13,7 @@ members = [
     "arroyo-node",
     "arroyo-openapi",
     "arroyo-rpc",
+    "arroyo-sql-testing",
     "arroyo-server-common",
     "arroyo-state",
     "arroyo-storage",

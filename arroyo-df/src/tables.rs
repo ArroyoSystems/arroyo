@@ -685,7 +685,7 @@ impl Table {
         }
     }
 
-    pub fn as_sql_sink(&self, _input: LogicalPlan) -> Result<()> {
+    pub fn as_sql_sink(&self) -> Result<()> {
         match self {
             Table::ConnectorTable(c) => c.as_sql_sink(),
             Table::MemoryTable { .. } => {

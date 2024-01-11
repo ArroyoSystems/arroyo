@@ -1,19 +1,19 @@
 #![allow(warnings)]
+use anyhow::Result;
+use arroyo_datastream::logical::{LogicalEdge, LogicalNode, LogicalProgram};
+use arroyo_df::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
 use arroyo_state::parquet::ParquetBackend;
 use std::collections::HashMap;
+use std::time::Duration;
 use std::{env, fmt::Debug, time::SystemTime};
 use tokio::sync::mpsc::Receiver;
 
 use arroyo_rpc::grpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
 use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_sql_macro::correctness_run_codegen;
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_types::{to_micros, CheckpointBarrier};
+use arroyo_worker::engine::{Engine, StreamConfig};
 use arroyo_worker::engine::{Program, RunningEngine};
-use arroyo_worker::{
-    engine::{Engine, StreamConfig},
-    LogicalEdge, LogicalNode,
-};
 use petgraph::Graph;
 use test_log::test;
 use tokio::fs::read_to_string;
@@ -298,6 +298,129 @@ async fn check_output_files(output_location: String, golden_output_location: Str
             )
         });
 }
+
+pub async fn correctness_run_codegen(
+    test_name: String,
+    query: String,
+    checkpoint_interval: i32,
+) -> Result<()> {
+    let parent_directory = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    // Depending on run location the directory might end with arroyo-sql-testing.
+    // If so, remove it.
+    let parent_directory = if parent_directory.ends_with("arroyo-sql-testing") {
+        parent_directory
+            .strip_suffix("arroyo-sql-testing")
+            .unwrap()
+            .to_string()
+    } else {
+        parent_directory
+    };
+    // replace $input_file with the current directory and then inputs/query_name.json
+    let physical_input_dir = format!("{}/arroyo-sql-testing/inputs/", parent_directory,);
+
+    let query_string = query.replace("$input_dir", &physical_input_dir);
+    // replace $output_file with the current directory and then outputs/query_name.json
+    let physical_output = format!(
+        "{}/arroyo-sql-testing/outputs/{}.json",
+        parent_directory, test_name
+    );
+    let query_string = query_string.replace("$output_path", &physical_output);
+    let golden_output_location = format!(
+        "{}/arroyo-sql-testing/golden_outputs/{}.json",
+        parent_directory, test_name
+    );
+    let logical_program = get_graph(query_string.clone()).await?;
+    run_pipeline_and_assert_outputs(
+        logical_program.graph,
+        test_name,
+        checkpoint_interval,
+        physical_output,
+        golden_output_location,
+    )
+    .await;
+    Ok(())
+}
+
+async fn get_graph(query_string: String) -> Result<LogicalProgram> {
+    let mut schema_provider = ArroyoSchemaProvider::new();
+
+    // TODO: test with higher parallelism
+    let program = parse_and_get_arrow_program(
+        query_string,
+        schema_provider,
+        SqlConfig {
+            default_parallelism: 1,
+        },
+    )
+    .await?
+    .program;
+    Ok(program)
+}
+
+#[tokio::test]
+async fn select_star() -> Result<()> {
+    correctness_run_codegen(
+        "select_star".to_string(),
+        "CREATE TABLE cars (
+      timestamp TIMESTAMP,
+      driver_id BIGINT,
+      event_type TEXT,
+      location TEXT
+    ) WITH (
+      connector = 'single_file',
+      path = '$input_dir/cars.json',
+      format = 'json',
+      type = 'source'
+    );
+    
+    CREATE TABLE cars_output (
+      timestamp TIMESTAMP,
+      driver_id BIGINT,
+      event_type TEXT,
+      location TEXT
+    ) WITH (
+      connector = 'single_file',
+      path = '$output_path',
+      format = 'json',
+      type = 'sink'
+    );
+    INSERT INTO cars_output SELECT * FROM cars"
+            .to_string(),
+        200,
+    )
+    .await?;
+    Ok(())
+}
+
+/*
+
+correctness_run_codegen! {"aggregates", 10,
+"CREATE TABLE impulse_source (
+  timestamp TIMESTAMP,
+  counter bigint unsigned not null,
+  subtask_index bigint unsigned not null
+) WITH (
+  connector = 'impulse',
+  path = '$input_dir/impulse.json',
+  format = 'json',
+  type = 'source'
+);
+CREATE TABLE aggregates (
+  min BIGINT,
+  max BIGINT,
+  sum BIGINT,
+  count BIGINT,
+  avg DOUBLE
+) WITH (
+  connector = 'single_file',
+  path = '$output_path',
+  format = 'debezium_json',
+  type = 'sink'
+);
+INSERT INTO aggregates SELECT min(counter), max(counter), sum(counter), count(*), avg(counter)  FROM impulse_source"}
 
 correctness_run_codegen! {"select_star", 200,
 "CREATE TABLE cars (
@@ -989,3 +1112,4 @@ INSERT INTO output
 select counter as left_counter, counter_mod_2, right_count from impulse full outer join
      (select counter % 2 as counter_mod_2, cast(count(*) as bigint UNSIGNED) as right_count from impulse where counter < 3 group by 1)
     on counter = right_count where counter < 3;"}
+*/
