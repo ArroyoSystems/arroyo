@@ -15,7 +15,6 @@ use tokio::{
 
 use crate::{
     engine::ArrowContext,
-    old::Context,
     operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode},
 };
 

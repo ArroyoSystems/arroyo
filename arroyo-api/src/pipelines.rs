@@ -331,15 +331,15 @@ pub(crate) async fn create_pipeline<'a>(
 
     set_parallelism(&mut compiled.program, 1);
 
-    if is_preview {
-        for node in compiled.program.graph.node_weights_mut() {
-            // replace all sink connectors with websink for preview
-            if node.operator_name == OperatorName::ConnectorSink {
-                node.operator_config =
-                    api::ConnectorOp::from(ConnectorOp::web_sink()).encode_to_vec();
-            }
-        }
-    }
+    // if is_preview {
+    //     for node in compiled.program.graph.node_weights_mut() {
+    //         // replace all sink connectors with websink for preview
+    //         if node.operator_name == OperatorName::ConnectorSink {
+    //             node.operator_config =
+    //                 api::ConnectorOp::from(ConnectorOp::web_sink()).encode_to_vec();
+    //         }
+    //     }
+    // }
 
     register_schemas(&mut compiled)
         .await
