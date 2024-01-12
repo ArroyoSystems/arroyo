@@ -181,6 +181,9 @@ impl FusedRecordTransform {
                 RecordTransform::UnnestProjection(_) => {
                     unreachable!("unnest projection cannot be fused")
                 }
+                RecordTransform::AsyncUdfProjection(_) => {
+                    unreachable!("async udf projection cannot be fused")
+                }
             }
         }
         let combined: syn::Expr = parse_quote!({
@@ -304,6 +307,7 @@ impl PlanNode {
                 input_type.clone()
             }
             RecordTransform::UnnestProjection(p) => input_type.with_value(p.output_struct()),
+            RecordTransform::AsyncUdfProjection(p) => input_type.with_value(p.output_struct()),
         };
         PlanNode {
             operator: PlanOperator::RecordTransform(record_transform),
@@ -1179,6 +1183,9 @@ impl PlanGraph {
         let accumulate_udfs = |ctx: &mut HashSet<String>, e: &mut Expression| match e {
             Expression::RustUdf(r) => {
                 ctx.insert(r.name());
+            }
+            Expression::AsyncUdf(a, _) => {
+                ctx.insert(a.name());
             }
             _ => {}
         };

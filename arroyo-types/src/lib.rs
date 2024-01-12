@@ -301,7 +301,7 @@ impl<K: Key, T: Data> Message<K, T> {
     }
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct Record<K: Key, T: Data> {
     pub timestamp: SystemTime,
     pub key: Option<K>,

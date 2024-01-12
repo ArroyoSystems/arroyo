@@ -152,6 +152,10 @@ impl Optimizer for ExpressionFusionOptimizer {
                 &node.operator,
                 PlanOperator::RecordTransform(RecordTransform::UnnestProjection(_))
             )
+            && !matches!(
+                &node.operator,
+                PlanOperator::RecordTransform(RecordTransform::AsyncUdfProjection(_))
+            )
         {
             if matches!(
                 &node.operator,
@@ -218,6 +222,9 @@ impl FusedExpressionOperatorBuilder {
                     }
                     RecordTransform::Filter(_) => self.add_filter(node.output_type.is_updating()),
                     RecordTransform::UnnestProjection(_) => {
+                        return false;
+                    }
+                    RecordTransform::AsyncUdfProjection(_) => {
                         return false;
                     }
                 }

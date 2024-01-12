@@ -20,6 +20,7 @@ use wasmtime::{
     TypedFunc,
 };
 pub mod aggregating_window;
+pub mod async_map;
 pub mod functions;
 pub mod join_with_expiration;
 pub mod joiners;

@@ -583,28 +583,27 @@ impl Table {
         };
 
         let sql_to_rel = SqlToRel::new(schema_provider);
-        struct_field_pairs
-            .into_iter()
-            .map(|(struct_field, generating_expression)| {
-                if let Some(generating_expression) = generating_expression {
-                    // TODO: Implement automatic type coercion here, as we have elsewhere.
-                    // It is done by calling the Analyzer which inserts CAST operators where necessary.
-
-                    let df_expr = sql_to_rel.sql_to_expr(
-                        generating_expression,
-                        &physical_schema,
-                        &mut PlannerContext::default(),
-                    )?;
-                    let expression = expression_context.compile_expr(&df_expr)?;
-                    Ok(FieldSpec::VirtualField {
-                        field: struct_field,
-                        expression,
-                    })
-                } else {
-                    Ok(FieldSpec::StructField(struct_field))
-                }
-            })
-            .collect::<Result<Vec<_>>>()
+        let mut field_specs = vec![];
+        for (struct_field, generating_expression) in struct_field_pairs.clone().into_iter() {
+            if let Some(generating_expression) = generating_expression {
+                // TODO: Implement automatic type coercion here, as we have elsewhere.
+                // It is done by calling the Analyzer which inserts CAST operators where necessary.
+                let df_expr = sql_to_rel.sql_to_expr(
+                    generating_expression,
+                    &physical_schema,
+                    &mut PlannerContext::default(),
+                )?;
+                let expression = expression_context.compile_expr(&df_expr)?;
+                SqlPipelineBuilder::assert_no_unnest_or_async_udf("virtual field", &expression)?;
+                field_specs.push(FieldSpec::VirtualField {
+                    field: struct_field,
+                    expression,
+                });
+            } else {
+                field_specs.push(FieldSpec::StructField(struct_field));
+            }
+        }
+        Ok(field_specs)
     }
 
     pub fn try_from_statement(

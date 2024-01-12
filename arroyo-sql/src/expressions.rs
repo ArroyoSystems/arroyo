@@ -12,6 +12,7 @@ use anyhow::{anyhow, bail, Ok, Result};
 use arrow::datatypes::DataType;
 use arrow_schema::{Field, TimeUnit};
 use arroyo_datastream::WindowType;
+use arroyo_rpc::UdfOpts;
 use arroyo_types::{DatePart, DateTruncPrecision};
 use datafusion_common::ScalarValue;
 use datafusion_expr::{
@@ -52,6 +53,7 @@ pub enum Expression {
     WindowUDF(WindowType),
     Unnest(Box<Expression>, bool),
     PiConst(PiConstant),
+    AsyncUdf(RustUdfExpression, bool),
 }
 
 pub struct JoinedPairedStruct {
@@ -262,6 +264,14 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
                     parse_quote!(#ident.clone())
                 }
             }
+            Expression::AsyncUdf(_, taken) => {
+                if !taken {
+                    panic!("async udf appeared in a non-projection context");
+                } else {
+                    let ident = input_context.variable_ident();
+                    parse_quote!(#ident.clone())
+                }
+            }
         }
     }
 
@@ -314,6 +324,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
                     unreachable!("unnest argument must be an array");
                 }
             },
+            Expression::AsyncUdf(t, _) => t.expression_type(input_context),
         }
     }
 }
@@ -428,7 +439,8 @@ impl Expression {
             | Expression::WrapType(_)
             | Expression::Unnest(_, _)
             | Expression::Case(_)
-            | Expression::PiConst(_) => Ok(None),
+            | Expression::PiConst(_)
+            | Expression::AsyncUdf(_, _) => Ok(None),
         }
     }
     fn get_duration(expression: &Expr) -> Result<Duration> {
@@ -559,6 +571,11 @@ impl Expression {
             Expression::PiConst(_) => {}
             Expression::Unnest(n, _) => {
                 (&mut *n).traverse_mut(context, f);
+            }
+            Expression::AsyncUdf(u, _) => {
+                for (_, arg) in &mut u.args {
+                    arg.traverse_mut(context, f);
+                }
             }
         }
 
@@ -984,11 +1001,19 @@ impl<'a> ExpressionContext<'a> {
                         );
                     }
 
-                    Ok(Expression::RustUdf(RustUdfExpression {
+                    let exp = RustUdfExpression {
                         name: udf.to_string(),
                         args: def.args.clone().into_iter().zip(inputs).collect(),
                         ret_type: def.ret.clone(),
-                    }))
+                        async_fn: def.async_fn,
+                        opts: def.opts.clone(),
+                    };
+
+                    if def.async_fn {
+                        Ok(Expression::AsyncUdf(exp, false))
+                    } else {
+                        Ok(Expression::RustUdf(exp))
+                    }
                 }
             },
             Expr::InList(InList {
@@ -3660,9 +3685,11 @@ impl JsonExpression {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct RustUdfExpression {
-    name: String,
-    args: Vec<(TypeDef, Expression)>,
-    ret_type: TypeDef,
+    pub name: String,
+    pub args: Vec<(TypeDef, Expression)>,
+    pub ret_type: TypeDef,
+    async_fn: bool,
+    pub opts: UdfOpts,
 }
 
 impl RustUdfExpression {
