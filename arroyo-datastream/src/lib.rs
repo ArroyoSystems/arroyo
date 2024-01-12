@@ -17,7 +17,7 @@ use arroyo_types::{Data, GlobalKey, JoinType, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use proc_macro2::Ident;
+use proc_macro2::{Ident, TokenStream};
 use quote::format_ident;
 use quote::quote;
 use serde::{Deserialize, Serialize};
@@ -375,6 +375,19 @@ pub enum Operator {
         name: String,
         expression: String,
     },
+    AsyncMapOperator {
+        name: String,
+        ordered: bool,
+        fn_name: String,
+        defs: String,
+        args: String,
+        null_output_assignments: String,
+        output_assignments: String,
+        null_handlers: String,
+        return_nullable: bool,
+        timeout_seconds: u64,
+        max_concurrency: u64,
+    },
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -500,6 +513,7 @@ impl Debug for Operator {
                 name,
                 expression: _,
             } => write!(f, "updating_key<{}>", name),
+            Operator::AsyncMapOperator { name, .. } => write!(f, "async_map<{}>", name),
         }
     }
 }
@@ -1368,7 +1382,7 @@ impl Program {
             let input = self.graph.edges_directed(idx, Direction::Incoming).next();
             let output = self.graph.edges_directed(idx, Direction::Outgoing).next();
             let body = match &node.operator {
-                Operator::ConnectorSource(c)  => {
+                Operator::ConnectorSource(c) => {
                     let out_k = parse_type(&output.unwrap().weight().key);
                     let out_t = parse_type(&output.unwrap().weight().value);
 
@@ -1378,7 +1392,7 @@ impl Program {
                         Box::new(#strukt::<#out_k, #out_t>::from_config(#config))
                     }
                 }
-                Operator::ConnectorSink(c)  => {
+                Operator::ConnectorSink(c) => {
                     // In c.operator, replace #in_k and #in_t with the actual types
                     let replaced_type = c.operator.replace("#in_k", &input.unwrap().weight().key);
                     let replaced_type = replaced_type.replace("#in_t", &input.unwrap().weight().value);
@@ -1406,15 +1420,15 @@ impl Program {
                     let out_t = parse_type(&output.unwrap().weight().value);
 
                     let agg = match agg {
-                        None => quote!{ WindowOperation::Aggregate(aggregators::vec_aggregator) },
-                        Some(WindowAgg::Count) => quote!{ WindowOperation::Aggregate(aggregators::count_aggregator) },
-                        Some(WindowAgg::Min) => quote!{ WindowOperation::Aggregate(aggregators::min_aggregator) },
-                        Some(WindowAgg::Max) => quote!{ WindowOperation::Aggregate(aggregators::max_aggregator) },
-                        Some(WindowAgg::Sum) => quote!{ WindowOperation::Aggregate(aggregators::sum_aggregator) },
+                        None => quote! { WindowOperation::Aggregate(aggregators::vec_aggregator) },
+                        Some(WindowAgg::Count) => quote! { WindowOperation::Aggregate(aggregators::count_aggregator) },
+                        Some(WindowAgg::Min) => quote! { WindowOperation::Aggregate(aggregators::min_aggregator) },
+                        Some(WindowAgg::Max) => quote! { WindowOperation::Aggregate(aggregators::max_aggregator) },
+                        Some(WindowAgg::Sum) => quote! { WindowOperation::Aggregate(aggregators::sum_aggregator) },
                         Some(WindowAgg::Expression {
-                            expression,
-                            ..
-                        }) => {
+                                 expression,
+                                 ..
+                             }) => {
                             let expr: syn::Expr = parse_str(expression).unwrap();
                             let operation = if *flatten {
                                 format_ident!("Flatten")
@@ -1427,7 +1441,7 @@ impl Program {
                                     #expr
                                 })
                             }
-                        },
+                        }
                     };
 
                     match typ {
@@ -1490,7 +1504,7 @@ impl Program {
                         }
                         WatermarkStrategy::Expression { expression } => {
                             let expr: syn::Expr = parse_str(&expression).unwrap();
-                            let watermark_function : syn::ExprClosure = parse_quote!(|record| {#expr});
+                            let watermark_function: syn::ExprClosure = parse_quote!(|record| {#expr});
                             quote! {
                                 Box::new(
                                     PeriodicWatermarkGenerator::<#in_k, #in_t>::
@@ -1552,7 +1566,7 @@ impl Program {
                     quote! {
                         Box::new(CountOperator::<#in_k, #in_t>::new())
                     }
-                },
+                }
                 Operator::Aggregate(behavior) => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
@@ -1567,16 +1581,16 @@ impl Program {
                     quote! {
                         Box::new(AggregateOperator::<#in_k, #in_t>::new(AggregateBehavior::#behavior))
                     }
-                },
+                }
                 Operator::FlattenOperator { name } => {
                     let k = parse_type(&output.unwrap().weight().key);
                     let t = parse_type(&output.unwrap().weight().value);
                     quote! {
                         Box::new(FlattenOperator::<#k, #t>::new(#name.to_string()))
                     }
-                },
+                }
                 Operator::ExpressionOperator { name, expression, return_type } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_k = parse_type(&output.unwrap().weight().key);
@@ -1590,15 +1604,15 @@ impl Program {
                                     predicate_fn: Box::new(#func),
                                 })
                             }
-                        },
+                        }
                         ExpressionReturnType::Record => {
-                    quote! {
-                        Box::new(MapOperator::<#in_k, #in_t, #out_k, #out_t> {
-                            name: #name.to_string(),
-                            map_fn: Box::new(#func),
-                        })
-                    }
-                        },
+                            quote! {
+                                Box::new(MapOperator::<#in_k, #in_t, #out_k, #out_t> {
+                                    name: #name.to_string(),
+                                    map_fn: Box::new(#func),
+                                })
+                            }
+                        }
                         ExpressionReturnType::OptionalRecord => {
                             quote! {
                                 Box::new(OptionMapOperator::<#in_k, #in_t, #out_k, #out_t> {
@@ -1606,11 +1620,11 @@ impl Program {
                                     map_fn: Box::new(#func),
                                 })
                             }
-                        },
+                        }
                     }
-                },
+                }
                 Operator::FlatMapOperator { name, expression } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_k = parse_type(&output.unwrap().weight().key);
@@ -1622,9 +1636,75 @@ impl Program {
                             flat_map: Box::new(#func),
                         })
                     }
-                },
+                }
+                Operator::AsyncMapOperator {
+                    name,
+                    ordered,
+                    fn_name,
+                    defs, args,
+                    null_output_assignments,
+                    output_assignments,
+                    null_handlers,
+                    return_nullable,
+                    timeout_seconds,
+                    max_concurrency
+                } => {
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+                    let out_t = parse_type(&output.unwrap().weight().value);
+
+                    let defs: TokenStream = parse_str(defs).expect("defs");
+                    let args: TokenStream = parse_str(args).expect("args");
+                    let fn_name: Ident = parse_str(fn_name).expect("fn_name");
+                    let null_output_assignments: TokenStream = parse_str(null_output_assignments).expect("null_output_assignments");
+                    let output_assignments: TokenStream = parse_str(output_assignments).expect("output_assignments");
+                    let null_handlers: TokenStream = parse_str(null_handlers).expect("null_handlers");
+
+                    let null_output = if *return_nullable {
+                        quote! {
+                            let null_output = (
+                                index.clone(),
+                                Ok(#out_t {
+                                    #null_output_assignments
+                                })
+                            );
+                        }
+                    } else {
+                        quote! ()
+                    };
+
+                    let udf_wrapper = quote!({
+                        use tokio::time::error::Elapsed;
+                        use tokio::time::{timeout, Duration};
+                        async fn wrapper(index: usize, in_data: #in_t) -> (usize, Result<#out_t, Elapsed>) {
+                            #defs
+
+                            #null_output
+
+                            #null_handlers
+
+                            let udf_result = timeout(Duration::from_secs(#timeout_seconds), udfs::#fn_name(#args)).await;
+
+                            let out = udf_result.map(
+                                |udf_result| #out_t {
+                                    #output_assignments
+                                }
+                            );
+
+                            (index, out)
+                        }
+                        wrapper
+                    });
+
+                    quote! {
+                        Box::new(AsyncMapOperator::<#in_k, #in_t, #out_t, _, _>::
+                            new(#name.to_string(), #udf_wrapper, #ordered, #max_concurrency)
+                        )
+                    }
+                }
+
                 Operator::ArrayMapOperator { name, expression, return_type } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let in_t = extract_container_type("Vec", &in_t).expect("Input to aggregate is not a Vec");
@@ -1641,14 +1721,14 @@ impl Program {
                                     }
                                 }
                             }
-                        },
+                        }
                         ExpressionReturnType::Record => {
                             quote! {
                                 |record, _| {
                                     Some(#expr)
                                 }
                             }
-                        },
+                        }
                         ExpressionReturnType::OptionalRecord => {
                             quote! {
                                 |record, _| {
@@ -1664,10 +1744,11 @@ impl Program {
                             map_fn: Box::new(#func),
                         })
                     }
-                },
-                Operator::SlidingWindowAggregator(SlidingWindowAggregator{
-                    width,slide,aggregator,bin_merger,
-                    in_memory_add,in_memory_remove,bin_type,mem_type}) => {
+                }
+                Operator::SlidingWindowAggregator(SlidingWindowAggregator {
+                                                      width, slide, aggregator, bin_merger,
+                                                      in_memory_add, in_memory_remove, bin_type, mem_type
+                                                  }) => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_t = parse_type(&output.unwrap().weight().value);
@@ -1680,7 +1761,7 @@ impl Program {
                     let in_memory_add: syn::ExprClosure = parse_str(in_memory_add).unwrap();
                     let in_memory_remove: syn::ExprClosure = parse_str(in_memory_remove).unwrap();
 
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::aggregating_window::AggregatingWindowFunc::<#in_k, #in_t, #bin_t, #mem_t, #out_t>::
                             new(#width,
                                 #slide,
@@ -1689,7 +1770,7 @@ impl Program {
                                 #in_memory_add,
                                 #in_memory_remove))
                     }
-                },
+                }
                 Operator::TumblingWindowAggregator(TumblingWindowAggregator { width, aggregator, bin_merger, bin_type }) => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
@@ -1698,31 +1779,31 @@ impl Program {
                     let width = duration_to_syn_expr(*width);
                     let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
                     let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::tumbling_aggregating_window::
                             TumblingAggregatingWindowFunc::<#in_k, #in_t, #bin_t, #out_t>::
                         new(#width,
                             #aggregator,
                             #bin_merger))
                     }
-                },
+                }
                 Operator::TumblingTopN(
-                        TumblingTopN {
-                            width,
-                            max_elements,
-                            extractor,
-                            partition_key_type,
-                            converter,
-                        },
-                    ) => {
-                        let in_k = parse_type(&input.unwrap().weight().key);
-                        let in_t = parse_type(&input.unwrap().weight().value);
-                        let out_t = parse_type(&output.unwrap().weight().value);
-                        let pk_type = parse_type(partition_key_type);
-                        let width = duration_to_syn_expr(*width);
-                        let extractor: syn::ExprClosure = parse_str(extractor).expect(extractor);
-                        let converter: syn::ExprClosure = parse_str(converter).unwrap();
-                        quote! {
+                    TumblingTopN {
+                        width,
+                        max_elements,
+                        extractor,
+                        partition_key_type,
+                        converter,
+                    },
+                ) => {
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+                    let out_t = parse_type(&output.unwrap().weight().value);
+                    let pk_type = parse_type(partition_key_type);
+                    let width = duration_to_syn_expr(*width);
+                    let extractor: syn::ExprClosure = parse_str(extractor).expect(extractor);
+                    let converter: syn::ExprClosure = parse_str(converter).unwrap();
+                    quote! {
                             Box::new(arroyo_worker::operators::tumbling_top_n_window::
                                 TumblingTopNWindowFunc::<#in_k, #in_t, #pk_type, #out_t>::
                             new(#width,
@@ -1730,7 +1811,7 @@ impl Program {
                                 #extractor,
                                 #converter))
                         }
-                    }
+                }
 
                 Operator::SlidingAggregatingTopN(
                     SlidingAggregatingTopN {
@@ -1821,24 +1902,23 @@ impl Program {
 
                     let join_fn_name = format_ident!("{}{}", join_fn_head, join_fn_tail);
 
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::joiners::
                             #join_fn_name::<#in_k, #in_t1_inner, #in_t2_inner>(#left_expiration, #right_expiration))
                     }
-
-                },
+                }
                 Operator::UpdatingOperator { name, expression } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_t = parse_type(&output.unwrap().weight().value);
                     let func: syn::ExprClosure = parse_quote!(|arg| {
                         #expr});
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::OptionMapOperator::<#in_k, #in_t, #in_k, #out_t>::
                             updating_operator(#name.to_string(), #func))
                     }
-                },
+                }
                 Operator::NonWindowAggregator(NonWindowAggregator { expiration, aggregator, bin_merger, bin_type }) => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
@@ -1848,25 +1928,25 @@ impl Program {
                     let expiration = duration_to_syn_expr(*expiration);
                     let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
                     let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::updating_aggregate::
                             UpdatingAggregateOperator::<#in_k, #in_t, #bin_t, #out_t>::
                         new(#expiration,
                             #aggregator,
                             #bin_merger))
                     }
-                },
+                }
                 Operator::UpdatingKeyOperator { name, expression } => {
                     let updating_in_t = parse_type(&input.unwrap().weight().value);
                     let in_t = extract_container_type("UpdatingData", &updating_in_t).unwrap();
                     let out_k = parse_type(&output.unwrap().weight().key);
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     quote! {
                         Box::new(arroyo_worker::operators::
                             KeyMapUpdatingOperator::<#in_t, #out_k>::
                         new(#name.to_string(), #expr))
                     }
-                },
+                }
             };
 
             (node.operator_id.clone(), description, body, node.parallelism)
@@ -2099,6 +2179,31 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::FlatMapOperator { name, expression } => {
                 GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression })
             }
+            Operator::AsyncMapOperator {
+                name,
+                ordered,
+                fn_name,
+                defs,
+                args,
+                null_output_assignments,
+                output_assignments,
+                null_handlers,
+                return_nullable,
+                timeout_seconds,
+                max_concurrency,
+            } => GrpcOperator::AsyncMapOperator(GrpcApi::AsyncMapOperator {
+                name,
+                ordered,
+                fn_name,
+                defs,
+                args,
+                null_output_assignments,
+                output_assignments,
+                null_handlers,
+                return_nullable,
+                timeout_seconds,
+                max_concurrency,
+            }),
             Operator::ArrayMapOperator {
                 name,
                 expression,
@@ -2407,6 +2512,31 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                 GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression }) => {
                     Operator::FlatMapOperator { name, expression }
                 }
+                GrpcOperator::AsyncMapOperator(GrpcApi::AsyncMapOperator {
+                    name,
+                    ordered,
+                    fn_name,
+                    defs,
+                    args,
+                    null_output_assignments,
+                    output_assignments,
+                    null_handlers,
+                    return_nullable,
+                    timeout_seconds,
+                    max_concurrency,
+                }) => Operator::AsyncMapOperator {
+                    name,
+                    ordered,
+                    fn_name,
+                    defs,
+                    args,
+                    null_output_assignments,
+                    output_assignments,
+                    null_handlers,
+                    return_nullable,
+                    timeout_seconds,
+                    max_concurrency,
+                },
                 GrpcOperator::FlattenExpressionOperator(flatten_expression) => {
                     let return_type = flatten_expression.return_type().into();
                     Operator::ArrayMapOperator {

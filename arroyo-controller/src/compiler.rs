@@ -106,6 +106,7 @@ impl ProgramCompiler {
             use arroyo_worker::operators::sinks;
             use arroyo_worker::operators::joins::*;
             use arroyo_worker::operators::windows::*;
+            use arroyo_worker::operators::async_map::*;
             use arroyo_worker::engine::{Program, SubtaskNode};
             use arroyo_worker::{LogicalEdge, LogicalNode};
             use types::*;
