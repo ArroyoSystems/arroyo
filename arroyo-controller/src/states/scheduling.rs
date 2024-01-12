@@ -354,13 +354,10 @@ impl State for Scheduling {
         {
             let mut metadata = StateBackend::load_checkpoint_metadata(&ctx.config.id, epoch)
                 .await
-                .ok_or_else(|| {
+                .map_err(|err| {
                     fatal(
                         format!("Failed to restore job; checkpoint {} not found.", epoch),
-                        anyhow!(format!(
-                            "epoch {} not found for job {}",
-                            epoch, ctx.config.id
-                        )),
+                        err,
                     )
                 })?;
 
@@ -374,12 +371,25 @@ impl State for Scheduling {
                 for operator_id in &metadata.operator_ids {
                     let operator_metadata =
                         StateBackend::load_operator_metadata(&ctx.config.id, operator_id, epoch)
-                            .await;
+                            .await
+                            .map_err(|err| {
+                                fatal(
+                                    format!(
+                                "Failed to restore job; operator metadata for {} not found.",
+                                operator_id
+                            ),
+                                    err,
+                                )
+                            })?;
                     let Some(operator_metadata) = operator_metadata else {
-                        panic!(
-                            "operator metadata for {} not found for job {}",
-                            operator_id, ctx.config.id
-                        );
+                        return Err(fatal(
+                            "missing operator metadata",
+                            anyhow!(
+                                "operator metadata for {} not found for job {}",
+                                operator_id,
+                                ctx.config.id
+                            ),
+                        ));
                     };
                     if let Some(commit_data) = operator_metadata.commit_data {
                         committing_data.insert(
@@ -413,7 +423,14 @@ impl State for Scheduling {
                 }
                 committing_state = Some(CommittingState::new(id, commit_subtasks, committing_data));
             }
-            StateBackend::write_checkpoint_metadata(metadata).await;
+            StateBackend::write_checkpoint_metadata(metadata)
+                .await
+                .map_err(|err| {
+                    fatal(
+                        format!("Failed to write checkpoint metadata for epoch {}.", epoch),
+                        err,
+                    )
+                })?;
         }
 
         let assignments = compute_assignments(workers.values().collect(), ctx.program);

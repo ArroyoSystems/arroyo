@@ -95,57 +95,49 @@ impl BackingStore for ParquetBackend {
         &self.task_info
     }
 
-    async fn load_latest_checkpoint_metadata(_job_id: &str) -> Option<CheckpointMetadata> {
-        todo!()
-    }
-
     // TODO: should this be a Result, rather than an option?
-    async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Option<CheckpointMetadata> {
-        let storage_client = get_storage_provider().await.unwrap();
+    async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Result<CheckpointMetadata> {
+        let storage_client = get_storage_provider().await?;
         let data = storage_client
             .get(&metadata_path(&base_path(job_id, epoch)))
-            .await
-            .ok()?;
-        let metadata = CheckpointMetadata::decode(&data[..]).unwrap();
-        Some(metadata)
+            .await?;
+        let metadata = CheckpointMetadata::decode(&data[..])?;
+        Ok(metadata)
     }
 
     async fn load_operator_metadata(
         job_id: &str,
         operator_id: &str,
         epoch: u32,
-    ) -> Option<OperatorCheckpointMetadata> {
-        let storage_client = get_storage_provider().await.unwrap();
-        let data = storage_client
-            .get(&metadata_path(&operator_path(job_id, epoch, operator_id)))
-            .await
-            .ok()?;
-        Some(OperatorCheckpointMetadata::decode(&data[..]).unwrap())
+    ) -> Result<Option<OperatorCheckpointMetadata>> {
+        let storage_client = get_storage_provider().await?;
+        storage_client
+            .get_if_present(&metadata_path(&operator_path(job_id, epoch, operator_id)))
+            .await?
+            .map(|data| Ok(OperatorCheckpointMetadata::decode(&data[..])?))
+            .transpose()
     }
 
-    async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata) {
-        let storage_client = get_storage_provider().await.unwrap();
+    async fn write_operator_checkpoint_metadata(
+        metadata: OperatorCheckpointMetadata,
+    ) -> Result<()> {
+        let storage_client = get_storage_provider().await?;
         let path = metadata_path(&operator_path(
             &metadata.job_id,
             metadata.epoch,
             &metadata.operator_id,
         ));
         // TODO: propagate error
-        storage_client
-            .put(&path, metadata.encode_to_vec())
-            .await
-            .unwrap();
+        storage_client.put(&path, metadata.encode_to_vec()).await?;
+        Ok(())
     }
 
-    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) {
+    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<()> {
         debug!("writing checkpoint {:?}", metadata);
-        let storage_client = get_storage_provider().await.unwrap();
+        let storage_client = get_storage_provider().await?;
         let path = metadata_path(&base_path(&metadata.job_id, metadata.epoch));
-        // TODO: propagate error
-        storage_client
-            .put(&path, metadata.encode_to_vec())
-            .await
-            .unwrap();
+        storage_client.put(&path, metadata.encode_to_vec()).await?;
+        Ok(())
     }
 
     async fn new(
@@ -183,12 +175,9 @@ impl BackingStore for ParquetBackend {
         let operator_metadata =
             Self::load_operator_metadata(&task_info.job_id, &task_info.operator_id, metadata.epoch)
                 .await
-                .unwrap_or_else(|| {
-                    panic!(
-                        "missing metadata for operator {}, epoch {}",
-                        task_info.operator_id, metadata.epoch
-                    )
-                });
+                // the lookup must succeed and be present.
+                .unwrap()
+                .unwrap();
         let mut current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> = HashMap::new();
         let tables: HashMap<char, TableDescriptor> = tables
             .into_iter()
@@ -298,7 +287,7 @@ impl BackingStore for ParquetBackend {
                 .await?;
         }
         metadata.min_epoch = min_epoch;
-        Self::write_checkpoint_metadata(metadata).await;
+        Self::write_checkpoint_metadata(metadata).await?;
         Ok(())
     }
 
@@ -623,18 +612,11 @@ impl ParquetBackend {
             .parse()
             .unwrap();
 
-        let checkpoint_metadata = Self::load_checkpoint_metadata(&job_id, epoch)
-            .await
-            .unwrap_or_else(|| {
-                panic!(
-                    "missing checkpoint metadata for job {}, epoch {}",
-                    job_id, epoch
-                )
-            });
+        let checkpoint_metadata = Self::load_checkpoint_metadata(&job_id, epoch).await?;
 
         let operator_checkpoint_metadata =
             Self::load_operator_metadata(&job_id, &operator_id, epoch)
-                .await
+                .await?
                 .expect("expect operator metadata to still be present");
 
         let mut backend_data_to_drop = HashMap::new();
@@ -740,7 +722,7 @@ impl ParquetBackend {
     ) -> Result<String> {
         let paths_to_keep: HashSet<String> =
             Self::load_operator_metadata(&job_id, &operator_id, new_min_epoch)
-                .await
+                .await?
                 .expect("expect new_min_epoch metadata to still be present")
                 .backend_data
                 .iter()
@@ -758,7 +740,7 @@ impl ParquetBackend {
 
         for epoch_to_remove in old_min_epoch..new_min_epoch {
             let Some(metadata) =
-                Self::load_operator_metadata(&job_id, &operator_id, epoch_to_remove).await
+                Self::load_operator_metadata(&job_id, &operator_id, epoch_to_remove).await?
             else {
                 continue;
             };

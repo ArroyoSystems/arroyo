@@ -123,6 +123,7 @@ impl<K: Key, V: Data> KeyTimeMultiMapCache<K, V> {
             checkpoint_metadata.epoch,
         )
         .await
+        .expect("expect lookup to succeed")
         .expect("expect metadata for restoring from checkpoint");
         let min_valid_time = operator_metadata
             .min_watermark
