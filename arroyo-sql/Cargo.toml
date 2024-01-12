@@ -27,7 +27,7 @@ arrow = { workspace = true }
 anyhow = {version = "1.0.70", features = ["backtrace"]}
 
 proc-macro2 = "1"
-syn = {version = "2", features = ["full", "parsing"]}
+syn = {version = "2", features = ["full", "parsing", "extra-traits"]}
 tracing = "0.1.37"
 
 typify = "0.0.13"
@@ -36,3 +36,4 @@ serde_json_path = "0.6.3"
 apache-avro = "0.16.0"
 prettyplease = "0.2.4"
 unicase = "2.7.0"
+toml = "0.8.8"

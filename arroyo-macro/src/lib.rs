@@ -210,12 +210,14 @@ struct StreamTypesAttr {
     out_t: Option<Type>,
     timer_t: Option<Type>,
     tick_ms: Option<LitInt>,
+    futures: Option<LitStr>, // TODO: should this just be an optional bool?
 }
 
 impl Parse for StreamTypesAttr {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut fields = HashMap::new();
         let mut tick_ms = None;
+        let mut futures = None;
         while !input.is_empty() {
             let k: Ident = input.parse()?;
             input.parse::<Token![=]>()?;
@@ -223,6 +225,8 @@ impl Parse for StreamTypesAttr {
             let k = k.to_string();
             if k == "tick_ms" {
                 tick_ms = Some(input.parse()?);
+            } else if k == "futures" {
+                futures = Some(input.parse()?);
             } else {
                 let v: Type = input.parse()?;
 
@@ -242,6 +246,7 @@ impl Parse for StreamTypesAttr {
             out_t: fields.remove("out_t"),
             timer_t: fields.remove("timer_t"),
             tick_ms,
+            futures,
         })
     }
 }
@@ -309,6 +314,7 @@ pub fn source_fn(
         timer_t,
         stream_types_attr.tick_ms,
         item,
+        stream_types_attr.futures,
     )
 }
 
@@ -335,6 +341,7 @@ pub fn process_fn(
         timer_t,
         stream_types_attr.tick_ms,
         item,
+        stream_types_attr.futures,
     )
 }
 
@@ -367,6 +374,7 @@ pub fn co_process_fn(
         timer_t,
         stream_types_attr.tick_ms,
         item,
+        stream_types_attr.futures,
     )
 }
 
@@ -377,6 +385,7 @@ fn impl_stream_node_type(
     timer_t: Type,
     tick_ms: Option<LitInt>,
     item: proc_macro::TokenStream,
+    futures: Option<LitStr>,
 ) -> proc_macro::TokenStream {
     let mut defs = vec![];
 
@@ -502,6 +511,41 @@ fn impl_stream_node_type(
             }
         });
 
+        let mut input_precondition = quote!(true);
+        let mut future_handler = quote!();
+        if let Some(futures) = futures {
+            let futures_ident = format_ident!("{}", futures.value());
+            future_handler = quote! {
+                Some(f) = self.#futures_ident.next() => {
+                    let (id, value) = f;
+
+                    match value {
+                        Ok(value) => {
+                            let index = self.inputs.len() - (self.next_id - id);
+                            let input = self.inputs[index].clone().unwrap();
+                            ctx.collector.collect(
+                                Record {
+                                    timestamp: input.timestamp,
+                                    key: input.key.clone(),
+                                    value
+                                }
+                            ).await;
+                        }
+                        Err(e) => {
+                            // TODO: trigger a retry
+                            tracing::warn!("Future returned an error: {:?}", e)
+                        }
+                    }
+
+                    self.on_collect(id).await;
+                }
+            };
+
+            input_precondition = quote! {
+                self.futures.len() < self.max_concurrency as usize
+            };
+        }
+
         quote! {
             let mut counter = crate::engine::CheckpointCounter::new(in_qs.len());
             let mut closed: std::collections::HashSet<usize> = std::collections::HashSet::new();
@@ -538,7 +582,7 @@ fn impl_stream_node_type(
                             arroyo_rpc::ControlMessage::NoOp => {}
                         }
                     }
-                    p = sel.next() => {
+                    p = sel.next(), if #input_precondition => {
                         match p {
                             Some(((idx, item), s)) => {
                                 match idx / (in_partitions / #handler_count) {
@@ -553,6 +597,7 @@ fn impl_stream_node_type(
                             }
                         }
                     }
+                    #future_handler
                     #tick_case
                 }
             }

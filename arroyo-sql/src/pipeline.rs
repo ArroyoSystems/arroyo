@@ -15,12 +15,14 @@ use datafusion_expr::{
     BinaryExpr, BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp,
 };
 
-use quote::quote;
+use quote::{format_ident, quote};
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext, VecAggregationContext};
-use crate::expressions::{AggregateComputation, AggregateResultExtraction, ExpressionContext};
+use crate::expressions::{
+    AggregateComputation, AggregateResultExtraction, ExpressionContext, RustUdfExpression,
+};
 use crate::external::{ProcessingMode, SqlSink, SqlSource};
-use crate::operators::{UnnestFieldType, UnnestProjection};
+use crate::operators::{AsyncUdfProjection, UnnestFieldType, UnnestProjection};
 use crate::schemas::window_type_def;
 use crate::tables::{Insert, Table};
 use crate::{
@@ -49,6 +51,7 @@ pub enum RecordTransform {
     UnnestProjection(UnnestProjection),
     TimestampAssignment(Expression),
     Filter(Expression),
+    AsyncUdfProjection(AsyncUdfProjection),
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +96,10 @@ impl RecordTransform {
             RecordTransform::Filter(expression) => {
                 Box::new(once(expression)) as Box<dyn Iterator<Item = &mut Expression>>
             }
+            RecordTransform::AsyncUdfProjection(projection) => {
+                Box::new(once(&mut projection.expression))
+                    as Box<dyn Iterator<Item = &mut Expression>>
+            }
         }
     }
 
@@ -104,6 +111,9 @@ impl RecordTransform {
             RecordTransform::KeyProjection(_) | RecordTransform::Filter(_) => input_struct,
             RecordTransform::TimestampAssignment(_) => input_struct,
             RecordTransform::UnnestProjection(projection) => {
+                projection.expression_type(&ValuePointerContext::new())
+            }
+            RecordTransform::AsyncUdfProjection(projection) => {
                 projection.expression_type(&ValuePointerContext::new())
             }
         }
@@ -167,6 +177,90 @@ impl RecordTransform {
                 let record_expression = ValuePointerContext::new().compile_flatmap_expr(p);
                 MethodCompiler::flatmap_operator("flatmap", record_expression)
             }
+            RecordTransform::AsyncUdfProjection(a) => {
+                let input_context = ValuePointerContext::with_arg("in_data");
+
+                let (defs, args): (Vec<_>, Vec<_>) = a
+                    .async_udf
+                    .args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_, expr))| {
+                        let t = expr.generate(&input_context);
+                        let id = format_ident!("__{}", i);
+                        (quote!(let #id = #t), quote!(#id))
+                    })
+                    .unzip();
+
+                let null_handlers = a
+                    .async_udf
+                    .args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (def, expr))| {
+                        let id = format_ident!("__{}", i);
+                        let handler = match (
+                            expr.expression_type(&input_context).is_optional(),
+                            def.is_optional(),
+                        ) {
+                            (true, false) => {
+                                quote!(
+                                    let #id = match #id {
+                                        Some(x) => x,
+                                        None => return null_output,
+                                    };
+                                )
+                            }
+                            (false, false) => quote!(),
+                            (true, true) => quote!(),
+                            (false, true) => quote!(let #id = Some(#id);),
+                        };
+
+                        handler
+                    })
+                    .collect::<Vec<_>>();
+
+                let null_handlers = quote! {
+                    #(#null_handlers;)*
+                }
+                .to_string();
+
+                let id = format_ident!("{}", a.column.name);
+                let null_output_assignments = quote!(#id: None).to_string();
+
+                let output_assignments = match (
+                    a.async_udf.ret_type.is_optional(),
+                    a.expression.expression_type(&input_context).is_optional(),
+                ) {
+                    (true, true) | (false, false) => quote!(#id: udf_result).to_string(),
+                    (false, true) => quote!(#id: Some(udf_result)).to_string(),
+                    (true, false) => quote!(#id: udf_result.unwrap()).to_string(),
+                };
+
+                let defs = quote! {
+                    #(#defs;)*
+                }
+                .to_string();
+
+                let args = quote! {
+                    #(#args,)*
+                }
+                .to_string();
+
+                MethodCompiler::async_map_operator(
+                    "async_udf",
+                    a.async_udf.name.clone(),
+                    defs,
+                    args,
+                    null_output_assignments,
+                    output_assignments,
+                    null_handlers,
+                    a.expression.expression_type(&input_context).is_optional(),
+                    a.async_udf.opts.async_results_ordered,
+                    a.async_udf.opts.async_timeout_seconds,
+                    a.async_udf.opts.async_max_concurrency,
+                )
+            }
         }
     }
 
@@ -177,6 +271,7 @@ impl RecordTransform {
             RecordTransform::Filter(_) => "filter".into(),
             RecordTransform::TimestampAssignment(_) => "timestamp".into(),
             RecordTransform::UnnestProjection(_) => "unnest_project".into(),
+            RecordTransform::AsyncUdfProjection(_) => "async_udf".into(),
         }
     }
 }
@@ -527,7 +622,7 @@ impl<'a> SqlPipelineBuilder<'a> {
         let ctx = self.ctx(&struct_def);
         let mut predicate = ctx.compile_expr(&filter.predicate)?;
 
-        Self::assert_no_unnest("where", &mut predicate)?;
+        Self::assert_no_unnest_or_async_udf("where", &mut predicate)?;
 
         Ok(SqlOperator::RecordTransform(
             Box::new(input),
@@ -555,15 +650,42 @@ impl<'a> SqlPipelineBuilder<'a> {
         c.transpose()
     }
 
-    fn assert_no_unnest(ctx: &str, expr: &Expression) -> Result<()> {
-        let mut found = false;
+    fn split_async_udf(expr: &mut Expression) -> Result<Option<RustUdfExpression>> {
+        let mut c: Option<Result<RustUdfExpression>> = None;
+
+        expr.traverse_mut(&mut c, &|ctx, e| match e {
+            Expression::AsyncUdf(expr, taken) => {
+                if *taken {
+                    ctx.replace(Err(anyhow!(
+                        "expression contains multiple async udfs, which is not currently supported"
+                    )));
+                } else {
+                    *taken = true;
+                    ctx.replace(Ok(expr.clone()));
+                }
+            }
+            _ => {}
+        });
+
+        c.transpose()
+    }
+
+    pub fn assert_no_unnest_or_async_udf(ctx: &str, expr: &Expression) -> Result<()> {
+        let mut found_unnest = false;
         let mut expr = expr.clone();
-        expr.traverse_mut(&mut found, &|ctx, e| {
+        expr.traverse_mut(&mut found_unnest, &|ctx, e| {
             *ctx = *ctx || matches!(e, Expression::Unnest(_, _));
         });
 
-        if found {
+        let mut found_async_udf = false;
+        expr.traverse_mut(&mut found_async_udf, &|ctx, e| {
+            *ctx = *ctx || matches!(e, Expression::AsyncUdf(_, _));
+        });
+
+        if found_unnest {
             bail!("{} may not include unnest", ctx);
+        } else if found_async_udf {
+            bail!("{} may not include async udf", ctx);
         } else {
             Ok(())
         }
@@ -612,22 +734,51 @@ impl<'a> SqlPipelineBuilder<'a> {
             .collect::<Result<Vec<_>>>()?;
 
         if let Some(unnest_inner) = unnest {
-            Ok(SqlOperator::RecordTransform(
+            return Ok(SqlOperator::RecordTransform(
                 Box::new(input),
                 RecordTransform::UnnestProjection(UnnestProjection {
                     fields,
                     unnest_inner,
                     format: None,
                 }),
-            ))
-        } else {
-            let projection = Projection::new(fields.into_iter().map(|(a, b, _)| (a, b)).collect());
-
-            Ok(SqlOperator::RecordTransform(
-                Box::new(input),
-                RecordTransform::ValueProjection(projection),
-            ))
+            ));
         }
+
+        let mut async_udf = None;
+        let fields = fields
+            .into_iter()
+            .map(|(col, mut expr, _)| {
+                if let Some(e) = Self::split_async_udf(&mut expr)? {
+                    if let Some(prev) = async_udf.replace(e) {
+                        if &prev != async_udf.as_ref().unwrap() {
+                            bail!("multiple async udf values, which is not currently supported");
+                        }
+                    }
+                }
+                Ok((col, expr))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        if let Some(async_udf) = async_udf {
+            if fields.len() != 1 {
+                bail!("async udf must have exactly one field");
+            }
+            let (column, expression) = fields.get(0).unwrap();
+
+            return Ok(SqlOperator::RecordTransform(
+                Box::new(input),
+                RecordTransform::AsyncUdfProjection(AsyncUdfProjection {
+                    column: column.clone(),
+                    expression: expression.clone(),
+                    async_udf,
+                }),
+            ));
+        }
+
+        Ok(SqlOperator::RecordTransform(
+            Box::new(input),
+            RecordTransform::ValueProjection(Projection::new(fields)),
+        ))
     }
 
     fn insert_aggregation(
@@ -657,7 +808,7 @@ impl<'a> SqlPipelineBuilder<'a> {
                 let column = Column::convert(&field.qualified_column());
 
                 let expression = ctx.compile_expr(expr)?;
-                Self::assert_no_unnest("group by", &expression)?;
+                Self::assert_no_unnest_or_async_udf("group by", &expression)?;
 
                 let (data_type, extraction) = if let Some(window) = Self::find_window(expr)? {
                     if let WindowType::Instant = window {
@@ -908,7 +1059,7 @@ impl<'a> SqlPipelineBuilder<'a> {
         left_computations
             .iter()
             .chain(right_computations.iter())
-            .map(|e| Self::assert_no_unnest("join", e))
+            .map(|e| Self::assert_no_unnest_or_async_udf("join", e))
             .collect::<Result<Vec<()>>>()?;
 
         let left_key = Projection::new(
@@ -1045,7 +1196,7 @@ impl<'a> SqlPipelineBuilder<'a> {
                 .iter().skip(1)
                 .map(|expression| {
                     let expr = ctx.compile_expr(expression)?;
-                    Self::assert_no_unnest("window", &expr)?;
+                    Self::assert_no_unnest_or_async_udf("window", &expr)?;
                     if expr.get_window_type(&input)?.is_some() {
                         bail!("window functions can only be partitioned by a window as the first argument");
                     } else {
@@ -1230,6 +1381,34 @@ impl MethodCompiler {
         Operator::UpdatingKeyOperator {
             name: name.to_string(),
             expression: quote!(#key_closure).to_string(),
+        }
+    }
+
+    fn async_map_operator(
+        name: impl ToString,
+        fn_name: String,
+        defs: String,
+        args: String,
+        null_output_assignments: String,
+        output_assignments: String,
+        null_handlers: String,
+        return_nullable: bool,
+        ordered: bool,
+        timeout_seconds: u64,
+        max_concurrency: u64,
+    ) -> Operator {
+        Operator::AsyncMapOperator {
+            name: name.to_string(),
+            ordered,
+            fn_name,
+            defs,
+            args,
+            null_output_assignments,
+            output_assignments,
+            null_handlers,
+            return_nullable,
+            timeout_seconds,
+            max_concurrency,
         }
     }
 }

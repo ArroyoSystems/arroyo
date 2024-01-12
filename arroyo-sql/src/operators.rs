@@ -1,3 +1,4 @@
+use crate::expressions::RustUdfExpression;
 use crate::{
     code_gen::{
         BinAggregatingContext, BinType, CodeGenerator, CombiningContext, MemoryAddingContext,
@@ -156,6 +157,35 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
             .collect();
 
         StructDef::new(None, true, fields, self.format.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AsyncUdfProjection {
+    pub column: Column,
+    pub expression: Expression,
+    pub async_udf: RustUdfExpression,
+}
+
+impl AsyncUdfProjection {
+    pub fn output_struct(&self) -> StructDef {
+        self.expression_type(&ValuePointerContext::new())
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for AsyncUdfProjection {
+    fn generate(&self, _input_context: &ValuePointerContext) -> syn::Expr {
+        unreachable!()
+    }
+
+    fn expression_type(&self, input_context: &ValuePointerContext) -> StructDef {
+        let field = StructField::new(
+            self.column.name.clone(),
+            self.column.relation.clone(),
+            self.expression.expression_type(&input_context),
+        );
+
+        StructDef::new(None, true, vec![field], None)
     }
 }
 

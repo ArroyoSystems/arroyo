@@ -49,10 +49,11 @@ use prettyplease::unparse;
 use regex::Regex;
 use std::collections::HashSet;
 
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::{OperatorConfig, UdfOpts};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, parse_quote, parse_str, FnArg, Item, ReturnType, Visibility};
+use toml::Value;
 use tracing::warn;
 use unicase::UniCase;
 
@@ -67,6 +68,8 @@ pub struct UdfDef {
     ret: TypeDef,
     def: String,
     dependencies: String,
+    opts: UdfOpts,
+    async_fn: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -366,8 +369,10 @@ impl ArroyoSchemaProvider {
             UdfDef {
                 args,
                 ret,
+                async_fn: function.sig.asyncness.is_some(),
                 def: unparse(&file.clone()),
                 dependencies: parse_dependencies(&body)?,
+                opts: parse_udf_opts(&body)?,
             },
         );
 
@@ -375,12 +380,30 @@ impl ArroyoSchemaProvider {
     }
 }
 
-pub fn parse_dependencies(definition: &str) -> Result<String> {
-    // get content of dependencies comment using regex
-    let re = Regex::new(r"\/\*\n(\[dependencies\]\n[\s\S]*?)\*\/").unwrap();
-    if re.find_iter(&definition).count() > 1 {
-        bail!("Only one dependencies definition is allowed in a UDF");
+fn get_toml_value(definition: &str) -> Result<Option<Value>> {
+    // find block comments that contain toml
+    let re = Regex::new(r"\/\*\n(.*\n[\s\S]*?)\*\/").unwrap();
+    let mut toml_comment = None;
+
+    for captures in re.captures_iter(&definition) {
+        let val = captures.get(1).unwrap().as_str();
+        if let Ok(t) = toml::from_str::<Value>(val) {
+            if toml_comment.is_some() {
+                bail!("Only one configuration comment is allowed in a UDF");
+            }
+            toml_comment = Some(t);
+        }
     }
+
+    Ok(toml_comment)
+}
+
+pub fn parse_dependencies(definition: &str) -> Result<String> {
+    // ensure 1 valid toml comment
+    get_toml_value(definition)?;
+
+    // get content of dependencies comment using regex
+    let re = Regex::new(r"\/\*\n[\s\S]*?(\[dependencies\]\n[\s\S]*?)\*\/").unwrap();
 
     return if let Some(captures) = re.captures(&definition) {
         if captures.len() != 2 {
@@ -388,8 +411,18 @@ pub fn parse_dependencies(definition: &str) -> Result<String> {
         }
         Ok(captures.get(1).unwrap().as_str().to_string())
     } else {
-        Ok("[dependencies]\n# none defined\n".to_string())
+        Ok("[dependencies]\n# not defined\n".to_string())
     };
+}
+
+pub fn parse_udf_opts(definition: &str) -> Result<UdfOpts> {
+    if let Some(t) = get_toml_value(definition)? {
+        if let Some(opts) = t.get("udfs") {
+            let u: UdfOpts = opts.clone().try_into()?;
+            return Ok(u);
+        }
+    }
+    Ok(serde_json::from_str("{}")?) // default
 }
 
 fn create_table_source(fields: Vec<Field>) -> Arc<dyn TableSource> {
@@ -815,7 +848,7 @@ pub fn my_udf() -> i64 {
         assert_eq!(
             parse_dependencies(definition).unwrap(),
             r#"[dependencies]
-# none defined
+# not defined
 "#
         );
     }
@@ -835,8 +868,70 @@ serde = "1.0"
 
 pub fn my_udf() -> i64 {
     1
-
+}
         "#;
         assert!(parse_dependencies(definition).is_err());
+    }
+
+    #[test]
+    fn test_parse_multiple_toml() {
+        let definition = r#"
+/*
+[dependencies]
+serde = "1.0"
+*/
+
+/*
+[udfs]
+async_results_ordered = true
+*/
+
+pub fn my_udf() -> i64 {
+    1
+}
+        "#;
+        assert!(parse_dependencies(definition).is_err());
+    }
+
+    #[test]
+    fn test_parse_udf_ops_ordered_true() {
+        let input = r#"
+/*
+[dependencies]
+serde = "1.0"
+
+[udfs]
+async_results_ordered = true
+*/
+
+pub fn my_udf() -> i64 {
+    1
+}
+        "#;
+
+        let opts = parse_udf_opts(input).unwrap();
+
+        assert_eq!(opts.async_results_ordered, true);
+    }
+
+    #[test]
+    fn test_parse_udf_ops_ordered_false() {
+        let input = r#"
+/*
+[dependencies]
+serde = "1.0"
+
+[udfs]
+async_results_ordered = false
+*/
+
+pub fn my_udf() -> i64 {
+    1
+}
+        "#;
+
+        let opts = parse_udf_opts(input).unwrap();
+
+        assert_eq!(opts.async_results_ordered, false);
     }
 }
