@@ -313,7 +313,8 @@ impl CheckpointState {
                         .collect(),
                 }),
         })
-        .await;
+        .await
+        .expect("should be able to write operator checkpoint metadata");
 
         if let Some(op) = self.operator_details.get_mut(&operator_id) {
             op.finish_time = Some(to_micros(finish_time));
@@ -355,7 +356,7 @@ impl CheckpointState {
             min_epoch: self.min_epoch,
             operator_ids: self.completed_operators.iter().cloned().collect(),
         })
-        .await;
+        .await?;
         Ok(())
     }
 }
