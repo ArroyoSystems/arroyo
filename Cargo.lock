@@ -1010,6 +1010,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-sql-testing"
+version = "0.9.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow 49.0.0",
+ "arrow-array 49.0.0",
+ "arrow-schema 49.0.0",
+ "arroyo-datastream",
+ "arroyo-df",
+ "arroyo-formats",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "arroyo-worker",
+ "bincode 2.0.0-rc.3",
+ "bincode_derive",
+ "chrono",
+ "hex",
+ "petgraph",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.46",
+ "test-log",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "arroyo-state"
 version = "0.9.0-dev"
 dependencies = [
@@ -8183,6 +8213,27 @@ dependencies = [
  "quote",
  "syn 2.0.46",
  "test-case-core",
+]
+
+[[package]]
+name = "test-log"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6159ab4116165c99fc88cce31f99fa2c9dbe08d3691cb38da02fc3b45f357d2b"
+dependencies = [
+ "test-log-macros",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "test-log-macros"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ba277e77219e9eea169e8508942db1bf5d8a41ff2db9b20aab5a5aadc9fa25d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.46",
 ]
 
 [[package]]

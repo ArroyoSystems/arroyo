@@ -279,14 +279,14 @@ pub(crate) async fn get_arrow_program(
                 node_mapping.insert(node_index, new_node_index);
                 new_node_index
             }
-            crate::LogicalPlanExtension::Sink => {
+            crate::LogicalPlanExtension::Sink { name, connector_op } => {
+                let connector_op: api::ConnectorOp = connector_op.clone().into();
                 let sink_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("sink_{}", program_graph.node_count()),
                     operator_name: OperatorName::ConnectorSink,
-                    operator_config: api::ConnectorOp::from(ConnectorOp::web_sink())
-                        .encode_to_vec(),
+                    operator_config: connector_op.encode_to_vec(),
                     parallelism: 1,
-                    description: "GrpcSink".into(),
+                    description: connector_op.description.clone(),
                 });
                 node_mapping.insert(node_index, sink_index);
                 sink_index

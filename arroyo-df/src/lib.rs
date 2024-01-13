@@ -4,7 +4,7 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::{FieldRef, Schema, TimeUnit};
 use arroyo_connectors::Connection;
-use arroyo_datastream::WindowType;
+use arroyo_datastream::{ConnectorOp, WindowType};
 
 use datafusion::datasource::DefaultTableSource;
 use datafusion::physical_plan::functions::make_scalar_function;
@@ -532,7 +532,10 @@ enum LogicalPlanExtension {
         key_columns: Vec<usize>,
     },
     AggregateCalculation(AggregateCalculation),
-    Sink,
+    Sink {
+        name: String,
+        connector_op: ConnectorOp,
+    },
 }
 
 impl LogicalPlanExtension {
@@ -546,7 +549,7 @@ impl LogicalPlanExtension {
                 key_columns: _,
             } => Some(inner_plan),
             LogicalPlanExtension::AggregateCalculation(_) => None,
-            LogicalPlanExtension::Sink => None,
+            LogicalPlanExtension::Sink { .. } => None,
         }
     }
 
@@ -585,7 +588,7 @@ impl LogicalPlanExtension {
 
                 DataFusionEdge::new(output_schema, LogicalEdgeType::Forward, vec![]).unwrap()
             }
-            LogicalPlanExtension::Sink => unreachable!(),
+            LogicalPlanExtension::Sink { .. } => unreachable!(),
         }
     }
 }
@@ -1033,13 +1036,13 @@ pub async fn parse_and_get_arrow_program(
 
     let mut rewriter = QueryToGraphVisitor::default();
     for insert in inserts {
-        let plan = match insert {
+        let (plan, sink_name) = match insert {
             // TODO: implement inserts
             Insert::InsertQuery {
-                sink_name: _,
+                sink_name,
                 logical_plan,
-            } => logical_plan,
-            Insert::Anonymous { logical_plan } => logical_plan,
+            } => (logical_plan, Some(sink_name)),
+            Insert::Anonymous { logical_plan } => (logical_plan, None),
         };
 
         let plan_with_timestamp = plan.rewrite(&mut TimestampRewriter {})?;
@@ -1073,9 +1076,31 @@ pub async fn parse_and_get_arrow_program(
             .local_logical_plan_graph
             .add_node(extended_plan_node);
 
-        let sink_index = rewriter
-            .local_logical_plan_graph
-            .add_node(LogicalPlanExtension::Sink);
+        let sink = match sink_name {
+            Some(sink_name) => {
+                let table = schema_provider
+                    .get_table(&sink_name)
+                    .ok_or_else(|| anyhow!("Connection {} not found", sink_name))?;
+                let Table::ConnectorTable(connector_table) = table else {
+                    bail!("expected connector table");
+                };
+
+                LogicalPlanExtension::Sink {
+                    name: sink_name,
+                    connector_op: ConnectorOp {
+                        operator: connector_table.operator.clone(),
+                        config: connector_table.config.clone(),
+                        description: connector_table.description.clone(),
+                    },
+                }
+            }
+            None => LogicalPlanExtension::Sink {
+                name: "grpc_sink".to_string(),
+                connector_op: arroyo_datastream::ConnectorOp::web_sink(),
+            },
+        };
+
+        let sink_index = rewriter.local_logical_plan_graph.add_node(sink);
 
         rewriter
             .local_logical_plan_graph

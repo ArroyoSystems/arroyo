@@ -1,5 +1,4 @@
 #![allow(warnings)]
-use arroyo_sql_macro::full_pipeline_codegen;
 
 full_pipeline_codegen! {"select_star", "SELECT * FROM nexmark"}
 

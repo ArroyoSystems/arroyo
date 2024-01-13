@@ -96,7 +96,7 @@ impl Connector for SingleFileConnector {
                 "connectors::filesystem::single_file::source::FileSourceFunc".to_string()
             }
             ConnectionType::Sink => {
-                "connectors::filesystem::single_file::sink::FileSink::<#in_k, #in_t>".to_string()
+                "connectors::filesystem::single_file::sink::FileSink".to_string()
             }
         };
 

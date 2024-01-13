@@ -1,62 +1,48 @@
-use std::{marker::PhantomData, time::SystemTime};
+use std::{collections::HashMap, io::Cursor, marker::PhantomData, sync::Arc, time::SystemTime};
 
-use arroyo_macro::{source_fn, StreamNode};
-use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
-use arroyo_types::{Data, Record};
-use serde::de::DeserializeOwned;
+use arrow_array::RecordBatch;
+use arroyo_rpc::{
+    grpc::{api, StopMode, TableConfig},
+    ControlMessage, OperatorConfig,
+};
+use arroyo_types::to_nanos;
+use async_trait::async_trait;
+use bincode::{Decode, Encode};
+use datafusion_common::ScalarValue;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
 };
 use tracing::info;
 
-use crate::old::Context;
 use crate::SourceFinishType;
+use crate::{
+    engine::ArrowContext,
+    operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator},
+};
 
 use super::SingleFileTable;
 
-#[derive(StreamNode)]
-pub struct FileSourceFunc<K: Data, T: DeserializeOwned + Data> {
+#[derive(Encode, Decode, Debug, Clone, Eq, PartialEq)]
+pub struct FileSourceFunc {
     input_file: String,
     lines_read: usize,
-    _t: PhantomData<(K, T)>,
 }
 
-#[source_fn(out_t = T)]
-impl<K: Data, T: DeserializeOwned + Data> FileSourceFunc<K, T> {
-    pub fn from_config(config_str: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config_str).expect("Invalid config for FileSourceFunc");
-        let table: SingleFileTable =
-            serde_json::from_value(config.table).expect("Invalid table config for FileSourceFunc");
-        Self {
-            input_file: table.path,
-            lines_read: 0,
-            _t: PhantomData,
-        }
-    }
-    pub fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
-        vec![arroyo_state::global_table('f', "file_source")]
-    }
-
-    fn name(&self) -> String {
-        "SingleFileSource".to_string()
-    }
-
-    async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
+impl FileSourceFunc {
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         if ctx.task_info.task_index != 0 {
             return SourceFinishType::Final;
         }
-        self.lines_read = ctx
-            .state
-            .get_global_keyed_state('f')
-            .await
-            .get(&self.input_file)
-            .map(|v| *v)
-            .unwrap_or_default();
 
-        let file = File::open(&self.input_file).await.unwrap();
+        let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> =
+            ctx.table_manager.get_global_keyed_state("f").await.unwrap();
+
+        self.lines_read = state.get(&self.input_file).map(|v| *v).unwrap_or_default();
+
+        let file = File::open(&self.input_file).await.expect(&self.input_file);
         let mut lines = BufReader::new(file).lines();
+        let schema_ref = Arc::new(ctx.out_schema.as_ref().unwrap().schema_without_timestamp());
 
         let mut i = 0;
 
@@ -65,9 +51,24 @@ impl<K: Data, T: DeserializeOwned + Data> FileSourceFunc<K, T> {
                 i += 1;
                 continue;
             }
-            let value = serde_json::from_str(&s).unwrap();
+
+            let cursor = Cursor::new(s);
+            let reader = std::io::BufReader::new(cursor);
+            let builder = arrow_json::reader::ReaderBuilder::new(schema_ref.clone())
+                .with_batch_size(1)
+                .build(reader)
+                .unwrap();
+            let batch = builder.into_iter().next().unwrap().unwrap();
+            let mut columns = batch.columns().to_vec();
+            let time_scalar =
+                ScalarValue::TimestampNanosecond(Some(to_nanos(SystemTime::now()) as i64), None);
+            columns.push(time_scalar.to_array().unwrap());
+
             ctx.collector
-                .collect(Record::<(), T>::from_value(SystemTime::now(), value).unwrap())
+                .collect(
+                    RecordBatch::try_new(ctx.out_schema.as_ref().unwrap().schema.clone(), columns)
+                        .unwrap(),
+                )
                 .await;
 
             self.lines_read += 1;
@@ -76,13 +77,13 @@ impl<K: Data, T: DeserializeOwned + Data> FileSourceFunc<K, T> {
             // wait for a control message after each line
             match ctx.control_rx.recv().await {
                 Some(ControlMessage::Checkpoint(c)) => {
-                    ctx.state
-                        .get_global_keyed_state('f')
-                        .await
-                        .insert(self.input_file.clone(), self.lines_read)
-                        .await;
+                    let state: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<
+                        String,
+                        usize,
+                    > = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
+                    state.insert(self.input_file.clone(), self.lines_read).await;
                     // checkpoint our state
-                    if self.checkpoint(c, ctx).await {
+                    if self.start_checkpoint(c, ctx).await {
                         return SourceFinishType::Immediate;
                     }
                 }
@@ -106,5 +107,46 @@ impl<K: Data, T: DeserializeOwned + Data> FileSourceFunc<K, T> {
         }
         info!("file source finished");
         SourceFinishType::Final
+    }
+}
+
+impl ArrowOperatorConstructor<api::ConnectorOp> for FileSourceFunc {
+    fn from_config(config: api::ConnectorOp) -> anyhow::Result<crate::operator::OperatorNode> {
+        let config: OperatorConfig = serde_json::from_str(&config.config)?;
+        let table: SingleFileTable = serde_json::from_value(config.table)?;
+        Ok(OperatorNode::from_source(Box::new(Self {
+            input_file: table.path,
+            lines_read: 0,
+        })))
+    }
+}
+
+#[async_trait]
+impl SourceOperator for FileSourceFunc {
+    fn name(&self) -> String {
+        "SingleFileSource".to_string()
+    }
+
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        vec![(
+            "f".to_string(),
+            arroyo_state::global_table_config("f", "file_source"),
+        )]
+        .into_iter()
+        .collect()
+    }
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        let s: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> = ctx
+            .table_manager
+            .get_global_keyed_state("f")
+            .await
+            .expect("should have table f in file source");
+
+        if let Some(state) = s.get(&self.input_file) {
+            self.lines_read = *state;
+        }
+    }
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+        self.run(ctx).await
     }
 }

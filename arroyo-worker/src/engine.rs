@@ -22,6 +22,8 @@ use tracing::{debug, info, warn};
 
 use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
 use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
+use crate::connectors::filesystem::single_file::sink::FileSink;
+use crate::connectors::filesystem::single_file::source::FileSourceFunc;
 use crate::connectors::filesystem::source::FileSystemSourceFunc;
 use crate::connectors::impulse::ImpulseSourceFunc;
 use crate::connectors::kafka::source::KafkaSourceFunc;
@@ -1426,6 +1428,10 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNo
                 }
                 "connectors::kafka::source::KafkaSourceFunc" => KafkaSourceFunc::from_config(op),
                 "GrpcSink" => GrpcRecordBatchSink::from_config(op),
+                "connectors::filesystem::single_file::source::FileSourceFunc" => {
+                    FileSourceFunc::from_config(op)
+                }
+                "connectors::filesystem::single_file::sink::FileSink" => FileSink::from_config(op),
                 c => panic!("unknown connector {}", c),
             }
         }
