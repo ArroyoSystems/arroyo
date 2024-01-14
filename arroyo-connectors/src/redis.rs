@@ -49,10 +49,12 @@ fn validate_column(
 
     Ok(column)
 }
+
 enum Clients {
     Standard(Client),
     Clustered(ClusterClient),
 }
+
 fn create_redis_client(config: &RedisConfig) -> anyhow::Result<Clients> {
     match &config.connection {
         RedisConfigConnection::Standard {
@@ -107,6 +109,7 @@ fn create_redis_client(config: &RedisConfig) -> anyhow::Result<Clients> {
         }
     }
 }
+
 async fn test_inner(
     c: RedisConfig,
     tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
