@@ -762,7 +762,7 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Exp
                     | BuiltinScalarFunction::Cot => Ok(NumericExpression::new(
                         fun.clone(),
-                        Box::new(arg_expressions.remove(0)),
+                        Box::new(arg_expressions),
                     )?),
                     BuiltinScalarFunction::Power | BuiltinScalarFunction::Atan2 => bail!(
                         "multiple argument numeric function {:?} not implemented",
@@ -1989,6 +1989,8 @@ enum NumericFunction {
     Log2,
     Exp,
     Cot,
+    IsZero,
+    IsNanvl,
 }
 
 impl NumericFunction {
@@ -2019,6 +2021,8 @@ impl NumericFunction {
             NumericFunction::Trunc => "trunc",
             NumericFunction::Signum => "signum",
             NumericFunction::Cot => "cot",
+            NumericFunction::IsZero => "iszero",
+            NumericFunction::IsNanvl => "isnanvl",
         };
         format_ident!("{}", name)
     }
@@ -2062,32 +2066,44 @@ impl TryFrom<BuiltinScalarFunction> for NumericFunction {
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
 pub struct NumericExpression {
     function: NumericFunction,
-    input: Box<Expression>,
+    inputs: Box<Vec<Expression>>,
 }
 
 impl NumericExpression {
-    fn new(function: BuiltinScalarFunction, input: Box<Expression>) -> Result<Expression> {
+    fn new(function: BuiltinScalarFunction, inputs: Box<Vec<Expression>>) -> Result<Expression> {
         let function = function.try_into()?;
-        Ok(Expression::Numeric(NumericExpression { function, input }))
+        Ok(Expression::Numeric(NumericExpression { function, inputs }))
     }
 }
 
 impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for NumericExpression {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let function_name = self.function.function_name();
-        let argument_expression = self.input.generate(input_context);
-        if self.input.expression_type(input_context).is_optional() {
-            parse_quote!(#argument_expression.map(|val| (val as f64).#function_name()))
-        } else {
-            parse_quote!((#argument_expression as f64).#function_name())
+        match (self.inputs.len(), *self.function) {
+            (1, _) => {
+                let argument_expression = self.inputs[0].generate(input_context);
+                if self.inputs[0].expression_type(input_context).is_optional() {
+                    parse_quote!(#argument_expression.map(|val| (val as f64).#function_name()))
+                } else {
+                    parse_quote!((#argument_expression as f64).#function_name())
+                }
+            }
+            (2, NumericFunction::IsNanvl) => {
+                let expr1 = self.inputs[0].generate(input_context);
+                let expr2 = self.inputs[1].generate(input_context);
+                parse_quote!(arroyo_worker::operators::functions::numeric::is_nanvl(#expr1,#expr2))
+            }
         }
     }
 
     fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
-        TypeDef::DataType(
-            DataType::Float64,
-            self.input.expression_type(input_context).is_optional(),
-        )
+        for x in self.inputs.iter() {
+            if x.expression_type(input_context).is_optional() {
+                return TypeDef::DataType(DataType::Float64, true);
+            }
+        }
+
+        TypeDef::DataType(DataType::Float64, false)
     }
 }
 
