@@ -17,7 +17,7 @@ use arroyo_types::{Data, GlobalKey, JoinType, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use proc_macro2::{Ident, TokenStream};
+use proc_macro2::Ident;
 use quote::format_ident;
 use quote::quote;
 use serde::{Deserialize, Serialize};
@@ -378,14 +378,7 @@ pub enum Operator {
     AsyncMapOperator {
         name: String,
         ordered: bool,
-        fn_name: String,
-        defs: String,
-        args: String,
-        null_output_assignments: String,
-        output_assignments: String,
-        null_handlers: String,
-        return_nullable: bool,
-        timeout_seconds: u64,
+        function_def: String,
         max_concurrency: u64,
     },
 }
@@ -1640,61 +1633,15 @@ impl Program {
                 Operator::AsyncMapOperator {
                     name,
                     ordered,
-                    fn_name,
-                    defs, args,
-                    null_output_assignments,
-                    output_assignments,
-                    null_handlers,
-                    return_nullable,
-                    timeout_seconds,
-                    max_concurrency
+                    function_def,
+                    max_concurrency,
                 } => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_t = parse_type(&output.unwrap().weight().value);
 
-                    let defs: TokenStream = parse_str(defs).expect("defs");
-                    let args: TokenStream = parse_str(args).expect("args");
-                    let fn_name: Ident = parse_str(fn_name).expect("fn_name");
-                    let null_output_assignments: TokenStream = parse_str(null_output_assignments).expect("null_output_assignments");
-                    let output_assignments: TokenStream = parse_str(output_assignments).expect("output_assignments");
-                    let null_handlers: TokenStream = parse_str(null_handlers).expect("null_handlers");
 
-                    let null_output = if *return_nullable {
-                        quote! {
-                            let null_output = (
-                                index.clone(),
-                                Ok(#out_t {
-                                    #null_output_assignments
-                                })
-                            );
-                        }
-                    } else {
-                        quote! ()
-                    };
-
-                    let udf_wrapper = quote!({
-                        use tokio::time::error::Elapsed;
-                        use tokio::time::{timeout, Duration};
-                        async fn wrapper(index: usize, in_data: #in_t) -> (usize, Result<#out_t, Elapsed>) {
-                            #defs
-
-                            #null_output
-
-                            #null_handlers
-
-                            let udf_result = timeout(Duration::from_secs(#timeout_seconds), udfs::#fn_name(#args)).await;
-
-                            let out = udf_result.map(
-                                |udf_result| #out_t {
-                                    #output_assignments
-                                }
-                            );
-
-                            (index, out)
-                        }
-                        wrapper
-                    });
+                    let udf_wrapper : syn::Expr = parse_str(function_def).unwrap();
 
                     quote! {
                         Box::new(AsyncMapOperator::<#in_k, #in_t, #out_t, _, _>::
@@ -2182,26 +2129,12 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::AsyncMapOperator {
                 name,
                 ordered,
-                fn_name,
-                defs,
-                args,
-                null_output_assignments,
-                output_assignments,
-                null_handlers,
-                return_nullable,
-                timeout_seconds,
+                function_def,
                 max_concurrency,
             } => GrpcOperator::AsyncMapOperator(GrpcApi::AsyncMapOperator {
                 name,
                 ordered,
-                fn_name,
-                defs,
-                args,
-                null_output_assignments,
-                output_assignments,
-                null_handlers,
-                return_nullable,
-                timeout_seconds,
+                function_def,
                 max_concurrency,
             }),
             Operator::ArrayMapOperator {
@@ -2515,26 +2448,12 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                 GrpcOperator::AsyncMapOperator(GrpcApi::AsyncMapOperator {
                     name,
                     ordered,
-                    fn_name,
-                    defs,
-                    args,
-                    null_output_assignments,
-                    output_assignments,
-                    null_handlers,
-                    return_nullable,
-                    timeout_seconds,
+                    function_def,
                     max_concurrency,
                 }) => Operator::AsyncMapOperator {
                     name,
                     ordered,
-                    fn_name,
-                    defs,
-                    args,
-                    null_output_assignments,
-                    output_assignments,
-                    null_handlers,
-                    return_nullable,
-                    timeout_seconds,
+                    function_def,
                     max_concurrency,
                 },
                 GrpcOperator::FlattenExpressionOperator(flatten_expression) => {

@@ -268,8 +268,8 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for Expression {
                 if !taken {
                     panic!("async udf appeared in a non-projection context");
                 } else {
-                    let ident = input_context.variable_ident();
-                    parse_quote!(#ident.clone())
+                    // TODO: the name should be hooked into the code-gen infrastructure instead of hard-coded.
+                    parse_quote!(async_result.clone())
                 }
             }
         }

@@ -196,7 +196,7 @@ fn default_async_timeout_seconds() -> u64 {
 }
 
 fn default_async_max_concurrency() -> u64 {
-    10
+    100
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Deserialize, Serialize)]
