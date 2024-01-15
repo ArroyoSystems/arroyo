@@ -2,12 +2,14 @@ use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::TableDescriptor;
 use arroyo_types::Record;
-use arroyo_types::{CheckpointBarrier, Data, Key};
+use arroyo_types::{CheckpointBarrier, Data, Key, UdfContext};
+use async_trait::async_trait;
 use futures::stream::{FuturesOrdered, FuturesUnordered};
 use futures::StreamExt;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use tokio::time::error::Elapsed;
 use tracing::info;
 
@@ -58,18 +60,20 @@ pub struct AsyncMapOperator<
     InT: Data,
     OutT: Data,
     FutureT: Future<Output = (usize, Result<OutT, Elapsed>)> + Send + 'static,
-    FnT: Fn(usize, InT) -> FutureT + Send + 'static,
+    FnT: Fn(usize, InT, Arc<ContextT>) -> FutureT + Send + 'static,
+    ContextT: UdfContext + Send + 'static,
 > {
     pub name: String,
 
     pub udf: FnT,
     pub futures: FuturesWrapper<FutureT>,
+    udf_context: Arc<ContextT>,
     max_concurrency: u64,
 
     next_id: usize, // i.e. inputs received so far, should start at 0
     inputs: VecDeque<Option<Record<InKey, InT>>>,
 
-    _t: PhantomData<(InKey, InT, OutT)>,
+    _t: PhantomData<(InKey, InT, OutT, ContextT)>,
 }
 
 #[process_fn(in_k = InKey, in_t = InT, out_k = InKey, out_t = OutT, futures = "futures")]
@@ -78,10 +82,17 @@ impl<
         InT: Data,
         OutT: Data,
         FutureT: Future<Output = (usize, Result<OutT, Elapsed>)> + Send + 'static,
-        FnT: Fn(usize, InT) -> FutureT + Send + 'static,
-    > AsyncMapOperator<InKey, InT, OutT, FutureT, FnT>
+        FnT: Fn(usize, InT, Arc<ContextT>) -> FutureT + Send + 'static,
+        ContextT: UdfContext + Send + 'static,
+    > AsyncMapOperator<InKey, InT, OutT, FutureT, FnT, ContextT>
 {
-    pub fn new(name: String, udf: FnT, ordered: bool, max_concurrency: u64) -> Self {
+    pub fn new(
+        name: String,
+        udf: FnT,
+        context: ContextT,
+        ordered: bool,
+        max_concurrency: u64,
+    ) -> Self {
         let futures = if ordered {
             info!("Using ordered futures");
             FuturesWrapper {
@@ -98,6 +109,7 @@ impl<
             name,
             udf,
             futures,
+            udf_context: Arc::new(context),
             max_concurrency,
             next_id: 0,
             inputs: VecDeque::new(),
@@ -110,6 +122,8 @@ impl<
     }
 
     async fn on_start(&mut self, ctx: &mut Context<InKey, OutT>) {
+        self.udf_context.init().await;
+
         let gs = ctx
             .state
             .get_global_keyed_state::<(usize, usize), Record<InKey, InT>>('a')
@@ -123,8 +137,11 @@ impl<
             })
             .for_each(|(_, v)| {
                 self.inputs.insert(self.next_id, Some(v.clone()));
-                self.futures
-                    .push_back((self.udf)(self.next_id, v.value.clone()));
+                self.futures.push_back((self.udf)(
+                    self.next_id,
+                    v.value.clone(),
+                    self.udf_context.clone(),
+                ));
                 self.next_id += 1;
             });
     }
@@ -136,8 +153,11 @@ impl<
     ) {
         self.inputs.push_back(Some(record.clone()));
 
-        self.futures
-            .push_back((self.udf)(self.next_id, record.value.clone()));
+        self.futures.push_back((self.udf)(
+            self.next_id,
+            record.value.clone(),
+            self.udf_context.clone(),
+        ));
         self.next_id += 1;
     }
 
@@ -166,4 +186,13 @@ impl<
     fn tables(&self) -> Vec<TableDescriptor> {
         vec![arroyo_state::global_table("a", "AsyncMapOperator state")]
     }
+
+    async fn on_close(&mut self, _ctx: &mut Context<InKey, OutT>) {
+        self.udf_context.close().await;
+    }
 }
+
+pub struct EmptyContext {}
+
+#[async_trait]
+impl UdfContext for EmptyContext {}

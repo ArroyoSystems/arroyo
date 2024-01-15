@@ -200,6 +200,7 @@ message AsyncMapOperator {
   bool ordered = 2;
   string function_def = 3;
   uint64 max_concurrency = 4;
+  bool has_context = 5;
 }
 
 message SlidingWindowAggregator {

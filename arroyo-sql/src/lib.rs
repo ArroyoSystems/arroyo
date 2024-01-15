@@ -70,6 +70,7 @@ pub struct UdfDef {
     dependencies: String,
     opts: UdfOpts,
     async_fn: bool,
+    has_context: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -275,9 +276,30 @@ impl ArroyoSchemaProvider {
         };
 
         let name = function.sig.ident.to_string();
+        let async_fn = function.sig.asyncness.is_some();
         let mut args: Vec<TypeDef> = vec![];
         let mut vec_arguments = 0;
-        for (i, arg) in function.sig.inputs.iter().enumerate() {
+
+        let inputs = function.sig.inputs.iter();
+        let mut skip = 0;
+        let mut has_context = false;
+
+        if async_fn {
+            // skip the first argument if it is a context
+            if function.sig.inputs.len() >= 1 {
+                if let FnArg::Typed(t) = function.sig.inputs.first().unwrap() {
+                    if let syn::Pat::Ident(i) = &*t.pat {
+                        if i.ident == "context" {
+                            // TODO: how to ensure type is Arc<Context>?
+                            has_context = true;
+                            skip = 1
+                        }
+                    }
+                }
+            }
+        }
+
+        for (i, arg) in inputs.skip(skip).enumerate() {
             match arg {
                 FnArg::Receiver(_) => {
                     bail!(
@@ -369,10 +391,11 @@ impl ArroyoSchemaProvider {
             UdfDef {
                 args,
                 ret,
-                async_fn: function.sig.asyncness.is_some(),
+                async_fn,
                 def: unparse(&file.clone()),
                 dependencies: parse_dependencies(&body)?,
                 opts: parse_udf_opts(&body)?,
+                has_context,
             },
         );
 
@@ -403,7 +426,7 @@ pub fn parse_dependencies(definition: &str) -> Result<String> {
     get_toml_value(definition)?;
 
     // get content of dependencies comment using regex
-    let re = Regex::new(r"\/\*\n[\s\S]*?(\[dependencies\]\n[\s\S]*?)\*\/").unwrap();
+    let re = Regex::new(r"(?m)\*\n[\s\S]*?(\[dependencies\]\n[\s\S]*?)(?:^$|\*/)").unwrap();
 
     return if let Some(captures) = re.captures(&definition) {
         if captures.len() != 2 {
@@ -822,6 +845,31 @@ mod tests {
 /*
 [dependencies]
 serde = "1.0"
+*/
+
+pub fn my_udf() -> i64 {
+    1
+}
+        "#;
+
+        assert_eq!(
+            parse_dependencies(definition).unwrap(),
+            r#"[dependencies]
+serde = "1.0"
+"#
+        );
+    }
+
+    #[test]
+    fn test_parse_dependencies_valid_with_udfs() {
+        let definition = r#"
+/*
+[dependencies]
+serde = "1.0"
+
+[udfs]
+async_results_ordered = true
+
 */
 
 pub fn my_udf() -> i64 {
