@@ -760,6 +760,9 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Trunc
                     | BuiltinScalarFunction::Log2
                     | BuiltinScalarFunction::Exp
+                    | BuiltinScalarFunction::Isnan
+                    | BuiltinScalarFunction::Iszero
+                    | BuiltinScalarFunction::Nanvl
                     | BuiltinScalarFunction::Cot => Ok(NumericExpression::new(
                         fun.clone(),
                         Box::new(arg_expressions),
@@ -911,9 +914,6 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Flatten => {
                         bail!("array functions not implemented yet")
                     }
-                    BuiltinScalarFunction::Isnan => todo!(),
-                    BuiltinScalarFunction::Iszero => todo!(),
-                    BuiltinScalarFunction::Nanvl => todo!(),
                 }
             }
             Expr::ScalarUDF(ScalarUDF { fun, args }) => match fun.name.as_str() {
@@ -2091,7 +2091,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for NumericExpressio
             (2, NumericFunction::IsNanvl) => {
                 let expr1 = self.inputs[0].generate(input_context);
                 let expr2 = self.inputs[1].generate(input_context);
-                parse_quote!(arroyo_worker::operators::functions::numeric::is_nanvl(#expr1,#expr2))
+                parse_quote!(arroyo_worker::operators::functions::numeric::nanvl(#expr1,#expr2))
             }
         }
     }
