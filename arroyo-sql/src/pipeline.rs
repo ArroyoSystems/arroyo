@@ -15,7 +15,7 @@ use datafusion_expr::{
     BinaryExpr, BuiltInWindowFunction, Expr, JoinConstraint, LogicalPlan, Window, WriteOp,
 };
 
-use quote::{format_ident, quote};
+use quote::{quote, ToTokens};
 
 use crate::code_gen::{CodeGenerator, ValuePointerContext, VecAggregationContext};
 use crate::expressions::{
@@ -96,10 +96,13 @@ impl RecordTransform {
             RecordTransform::Filter(expression) => {
                 Box::new(once(expression)) as Box<dyn Iterator<Item = &mut Expression>>
             }
-            RecordTransform::AsyncUdfProjection(projection) => {
-                Box::new(once(&mut projection.expression))
-                    as Box<dyn Iterator<Item = &mut Expression>>
-            }
+            RecordTransform::AsyncUdfProjection(projection) => Box::new(
+                projection
+                    .projection
+                    .expressions()
+                    .chain(projection.async_udf.args.iter_mut().map(|(_, expr)| expr)),
+            )
+                as Box<dyn Iterator<Item = &mut Expression>>,
         }
     }
 
@@ -178,86 +181,14 @@ impl RecordTransform {
                 MethodCompiler::flatmap_operator("flatmap", record_expression)
             }
             RecordTransform::AsyncUdfProjection(a) => {
-                let input_context = ValuePointerContext::with_arg("in_data");
+                let input_context = ValuePointerContext::new();
 
-                let (defs, args): (Vec<_>, Vec<_>) = a
-                    .async_udf
-                    .args
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (_, expr))| {
-                        let t = expr.generate(&input_context);
-                        let id = format_ident!("__{}", i);
-                        (quote!(let #id = #t), quote!(#id))
-                    })
-                    .unzip();
-
-                let null_handlers = a
-                    .async_udf
-                    .args
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (def, expr))| {
-                        let id = format_ident!("__{}", i);
-                        let handler = match (
-                            expr.expression_type(&input_context).is_optional(),
-                            def.is_optional(),
-                        ) {
-                            (true, false) => {
-                                quote!(
-                                    let #id = match #id {
-                                        Some(x) => x,
-                                        None => return null_output,
-                                    };
-                                )
-                            }
-                            (false, false) => quote!(),
-                            (true, true) => quote!(),
-                            (false, true) => quote!(let #id = Some(#id);),
-                        };
-
-                        handler
-                    })
-                    .collect::<Vec<_>>();
-
-                let null_handlers = quote! {
-                    #(#null_handlers;)*
-                }
-                .to_string();
-
-                let id = format_ident!("{}", a.column.name);
-                let null_output_assignments = quote!(#id: None).to_string();
-
-                let output_assignments = match (
-                    a.async_udf.ret_type.is_optional(),
-                    a.expression.expression_type(&input_context).is_optional(),
-                ) {
-                    (true, true) | (false, false) => quote!(#id: udf_result).to_string(),
-                    (false, true) => quote!(#id: Some(udf_result)).to_string(),
-                    (true, false) => quote!(#id: udf_result.unwrap()).to_string(),
-                };
-
-                let defs = quote! {
-                    #(#defs;)*
-                }
-                .to_string();
-
-                let args = quote! {
-                    #(#args,)*
-                }
-                .to_string();
+                let function_def = a.generate(&input_context);
 
                 MethodCompiler::async_map_operator(
                     "async_udf",
-                    a.async_udf.name.clone(),
-                    defs,
-                    args,
-                    null_output_assignments,
-                    output_assignments,
-                    null_handlers,
-                    a.expression.expression_type(&input_context).is_optional(),
                     a.async_udf.opts.async_results_ordered,
-                    a.async_udf.opts.async_timeout_seconds,
+                    function_def.to_token_stream().to_string(),
                     a.async_udf.opts.async_max_concurrency,
                 )
             }
@@ -760,17 +691,12 @@ impl<'a> SqlPipelineBuilder<'a> {
             .collect::<Result<Vec<_>>>()?;
 
         if let Some(async_udf) = async_udf {
-            if fields.len() != 1 {
-                bail!("async udf must have exactly one field");
-            }
-            let (column, expression) = fields.get(0).unwrap();
-
             return Ok(SqlOperator::RecordTransform(
                 Box::new(input),
                 RecordTransform::AsyncUdfProjection(AsyncUdfProjection {
-                    column: column.clone(),
-                    expression: expression.clone(),
+                    input_struct: struct_def,
                     async_udf,
+                    projection: Projection::new(fields),
                 }),
             ));
         }
@@ -1386,28 +1312,14 @@ impl MethodCompiler {
 
     fn async_map_operator(
         name: impl ToString,
-        fn_name: String,
-        defs: String,
-        args: String,
-        null_output_assignments: String,
-        output_assignments: String,
-        null_handlers: String,
-        return_nullable: bool,
         ordered: bool,
-        timeout_seconds: u64,
+        function_def: String,
         max_concurrency: u64,
     ) -> Operator {
         Operator::AsyncMapOperator {
             name: name.to_string(),
             ordered,
-            fn_name,
-            defs,
-            args,
-            null_output_assignments,
-            output_assignments,
-            null_handlers,
-            return_nullable,
-            timeout_seconds,
+            function_def,
             max_concurrency,
         }
     }

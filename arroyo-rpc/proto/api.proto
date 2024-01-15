@@ -198,15 +198,8 @@ message FlatMapOperator {
 message AsyncMapOperator {
   string name = 1;
   bool ordered = 2;
-  string fn_name = 3;
-  string defs = 4;
-  string args = 5;
-  string output_assignments = 6;
-  string null_output_assignments = 7;
-  string null_handlers = 8;
-  bool return_nullable = 9;
-  uint64 timeout_seconds = 10;
-  uint64 max_concurrency = 11;
+  string function_def = 3;
+  uint64 max_concurrency = 4;
 }
 
 message SlidingWindowAggregator {
