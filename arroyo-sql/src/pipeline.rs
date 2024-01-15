@@ -190,6 +190,7 @@ impl RecordTransform {
                     a.async_udf.opts.async_results_ordered,
                     function_def.to_token_stream().to_string(),
                     a.async_udf.opts.async_max_concurrency,
+                    a.async_udf.has_context,
                 )
             }
         }
@@ -1315,12 +1316,14 @@ impl MethodCompiler {
         ordered: bool,
         function_def: String,
         max_concurrency: u64,
+        has_context: bool,
     ) -> Operator {
         Operator::AsyncMapOperator {
             name: name.to_string(),
             ordered,
             function_def,
             max_concurrency,
+            has_context,
         }
     }
 }

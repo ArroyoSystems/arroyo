@@ -1,5 +1,6 @@
 use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
+use async_trait::async_trait;
 use bincode::{config, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -931,4 +932,10 @@ mod tests {
             "u64::MAX is not in the correct range"
         );
     }
+}
+
+#[async_trait]
+pub trait UdfContext: Sync {
+    async fn init(&self) {}
+    async fn close(&self) {}
 }

@@ -207,8 +207,19 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for AsyncUdfProjec
         let (match_terms, ids): (Vec<_>, Vec<_>) = match_term_ids.into_iter().unzip();
 
         let function_name = format_ident!("{}", self.async_udf.name);
-        let args_pattern = quote!((#(#ids),*));
         let timeout_seconds = self.async_udf.opts.async_timeout_seconds;
+
+        let mut context_t = quote! { EmptyContext };
+        let mut context_arg = quote!();
+
+        if self.async_udf.has_context {
+            context_t = quote! { udfs::Context };
+            context_arg = quote! {context.clone(), };
+        }
+
+        let args_pattern = quote!((#(#ids),*));
+        let args = quote!((#context_arg #(#ids),*));
+
         let invocation = if may_not_invoke {
             // turn ids into a tuple
             let match_terms = quote!((#(#match_terms),*));
@@ -220,7 +231,7 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for AsyncUdfProjec
             quote!(
                 match #args_pattern {
                     #match_terms => {
-                        timeout(Duration::from_secs(#timeout_seconds), udfs:: #function_name #args_pattern).await #suffix
+                        timeout(Duration::from_secs(#timeout_seconds), udfs:: #function_name #args).await #suffix
                     }
                     _ => {
                         Ok(None)
@@ -228,14 +239,16 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for AsyncUdfProjec
                 }
             )
         } else {
-            quote!(timeout(Duration::from_secs(#timeout_seconds), udfs:: #function_name #args_pattern).await)
+            quote!(timeout(Duration::from_secs(#timeout_seconds), udfs:: #function_name #args).await)
         };
         parse_quote! {{
             use tokio::time::error::Elapsed;
             use tokio::time::{timeout, Duration};
+            use std::sync::Arc;
             async fn wrapper(
                 index: usize,
                 #input_name: #input_struct,
+                context: Arc<#context_t>
             ) -> (
                 usize,
                 Result<#output_type, Elapsed>,

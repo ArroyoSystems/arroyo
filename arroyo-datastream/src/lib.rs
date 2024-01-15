@@ -380,6 +380,7 @@ pub enum Operator {
         ordered: bool,
         function_def: String,
         max_concurrency: u64,
+        has_context: bool,
     },
 }
 
@@ -1635,17 +1636,25 @@ impl Program {
                     ordered,
                     function_def,
                     max_concurrency,
+                    has_context
                 } => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_t = parse_type(&output.unwrap().weight().value);
 
+                    let mut context_t = quote! { EmptyContext };
+                    let mut context = quote! { EmptyContext {} };
+
+                    if *has_context {
+                        context_t = quote! { udfs::Context };
+                        context = quote! { udfs::Context::new() };
+                    }
 
                     let udf_wrapper : syn::Expr = parse_str(function_def).unwrap();
 
                     quote! {
-                        Box::new(AsyncMapOperator::<#in_k, #in_t, #out_t, _, _>::
-                            new(#name.to_string(), #udf_wrapper, #ordered, #max_concurrency)
+                        Box::new(AsyncMapOperator::<#in_k, #in_t, #out_t, _, _, #context_t>::
+                            new(#name.to_string(), #udf_wrapper, #context, #ordered, #max_concurrency)
                         )
                     }
                 }
@@ -2131,11 +2140,13 @@ impl From<Operator> for GrpcApi::operator::Operator {
                 ordered,
                 function_def,
                 max_concurrency,
+                has_context,
             } => GrpcOperator::AsyncMapOperator(GrpcApi::AsyncMapOperator {
                 name,
                 ordered,
                 function_def,
                 max_concurrency,
+                has_context,
             }),
             Operator::ArrayMapOperator {
                 name,
@@ -2450,11 +2461,13 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     ordered,
                     function_def,
                     max_concurrency,
+                    has_context,
                 }) => Operator::AsyncMapOperator {
                     name,
                     ordered,
                     function_def,
                     max_concurrency,
+                    has_context,
                 },
                 GrpcOperator::FlattenExpressionOperator(flatten_expression) => {
                     let return_type = flatten_expression.return_type().into();

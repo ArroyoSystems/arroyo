@@ -8,3 +8,4 @@ bincode = "2.0.0-rc.3"
 serde = { version = "1.0", features = ["derive"] }
 arrow = { workspace = true }
 arrow-array = { workspace = true }
+async-trait = "0.1.74"

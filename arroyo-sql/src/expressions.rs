@@ -1007,6 +1007,7 @@ impl<'a> ExpressionContext<'a> {
                         ret_type: def.ret.clone(),
                         async_fn: def.async_fn,
                         opts: def.opts.clone(),
+                        has_context: def.has_context,
                     };
 
                     if def.async_fn {
@@ -3689,6 +3690,7 @@ pub struct RustUdfExpression {
     pub args: Vec<(TypeDef, Expression)>,
     pub ret_type: TypeDef,
     async_fn: bool,
+    pub has_context: bool,
     pub opts: UdfOpts,
 }
 
