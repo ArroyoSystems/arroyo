@@ -516,28 +516,8 @@ fn impl_stream_node_type(
         if let Some(futures) = futures {
             let futures_ident = format_ident!("{}", futures.value());
             future_handler = quote! {
-                Some(f) = self.#futures_ident.next() => {
-                    let (id, value) = f;
-
-                    match value {
-                        Ok(value) => {
-                            let index = self.inputs.len() - (self.next_id - id);
-                            let input = self.inputs[index].clone().unwrap();
-                            ctx.collector.collect(
-                                Record {
-                                    timestamp: input.timestamp,
-                                    key: input.key.clone(),
-                                    value
-                                }
-                            ).await;
-                        }
-                        Err(e) => {
-                            // TODO: trigger a retry
-                            tracing::warn!("Future returned an error: {:?}", e)
-                        }
-                    }
-
-                    self.on_collect(id).await;
+                Some((id, value)) = self.#futures_ident.next() => {
+                    self.handle_future(id, value, &mut ctx).await;
                 }
             };
 
@@ -649,7 +629,7 @@ fn impl_stream_node_type(
                 let name = self.name();
                 #handle_body
 
-                Self::on_close(&mut (*self), &mut ctx).await;
+                Self::on_close(&mut (*self), &mut ctx, &final_message).await;
                 if let Some(final_message) = final_message {
                     ctx.broadcast(final_message).await;
                 }
@@ -819,7 +799,7 @@ fn impl_stream_node_type(
 
     if !methods.contains("on_close") {
         defs.push(quote! {
-            async fn on_close(&mut self, ctx: &mut crate::engine::Context<#out_k, #out_t>) {}
+            async fn on_close(&mut self, ctx: &mut crate::engine::Context<#out_k, #out_t>, final_message: &Option<arroyo_types::Message<#out_k, #out_t>>) {}
         })
     }
 

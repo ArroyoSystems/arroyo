@@ -1,8 +1,8 @@
 use crate::engine::{Context, StreamNode};
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::TableDescriptor;
-use arroyo_types::Record;
 use arroyo_types::{CheckpointBarrier, Data, Key, UdfContext};
+use arroyo_types::{Message, Record};
 use async_trait::async_trait;
 use futures::stream::{FuturesOrdered, FuturesUnordered};
 use futures::StreamExt;
@@ -11,7 +11,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use tokio::time::error::Elapsed;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 pub enum FuturesEnum<T>
 where
@@ -52,6 +52,12 @@ where
             FuturesEnum::Unordered(futures) => futures.len(),
         }
     }
+    pub fn is_ordered(&self) -> bool {
+        match &self.futures {
+            FuturesEnum::Ordered(_) => true,
+            FuturesEnum::Unordered(_) => false,
+        }
+    }
 }
 
 #[derive(StreamNode)]
@@ -72,7 +78,7 @@ pub struct AsyncMapOperator<
 
     next_id: usize, // i.e. inputs received so far, should start at 0
     inputs: VecDeque<Option<Record<InKey, InT>>>,
-
+    watermarks: VecDeque<(usize, arroyo_types::Watermark)>,
     _t: PhantomData<(InKey, InT, OutT, ContextT)>,
 }
 
@@ -113,6 +119,7 @@ impl<
             max_concurrency,
             next_id: 0,
             inputs: VecDeque::new(),
+            watermarks: VecDeque::new(),
             _t: PhantomData,
         }
     }
@@ -161,13 +168,22 @@ impl<
         self.next_id += 1;
     }
 
-    async fn on_collect(&mut self, id: usize) {
+    async fn on_collect(&mut self, id: usize, ctx: &mut Context<InKey, OutT>) {
         // mark the input as collected by setting it to None,
         // then pop all the Nones from the front of the queue
         let index = self.inputs.len() - (self.next_id - id);
         self.inputs[index] = None;
         while let Some(None) = self.inputs.front() {
             self.inputs.pop_front();
+            if let Some((index, _watermark)) = self.watermarks.front() {
+                // if index is 3, then that means that the watermark came in after 3 elements.
+                // if we've read in 9 more, then next_id would be 12, and 12 - 3 = 9
+                if *index + self.inputs.len() == self.next_id {
+                    let (_index, watermark) = self.watermarks.pop_front().unwrap();
+                    ctx.broadcast(arroyo_types::Message::Watermark(watermark))
+                        .await;
+                }
+            }
         }
     }
 
@@ -183,12 +199,68 @@ impl<
         }
     }
 
+    async fn handle_watermark(
+        &mut self,
+        watermark: arroyo_types::Watermark,
+        _ctx: &mut crate::engine::Context<InKey, OutT>,
+    ) {
+        self.watermarks.push_back((self.next_id, watermark));
+    }
+
     fn tables(&self) -> Vec<TableDescriptor> {
         vec![arroyo_state::global_table("a", "AsyncMapOperator state")]
     }
 
-    async fn on_close(&mut self, _ctx: &mut Context<InKey, OutT>) {
+    async fn on_close(
+        &mut self,
+        ctx: &mut Context<InKey, OutT>,
+        final_message: &Option<Message<InKey, OutT>>,
+    ) {
+        if let Some(Message::EndOfData) = final_message {
+            debug!(
+                "AsyncMapOperator end of data with {} futures",
+                self.futures.len()
+            );
+            while let Some((id, result)) = self.futures.next().await {
+                self.handle_future(id, result, ctx).await;
+            }
+        }
         self.udf_context.close().await;
+    }
+
+    async fn handle_future(
+        &mut self,
+        id: usize,
+        result: Result<OutT, Elapsed>,
+        ctx: &mut Context<InKey, OutT>,
+    ) {
+        match result {
+            Ok(value) => {
+                let index = self.inputs.len() - (self.next_id - id);
+                let input = self.inputs[index].clone().unwrap();
+                ctx.collector
+                    .collect(Record {
+                        timestamp: input.timestamp,
+                        key: input.key.clone(),
+                        value,
+                    })
+                    .await;
+                self.on_collect(id, ctx).await;
+            }
+            Err(_e) => {
+                if self.futures.is_ordered() {
+                    unimplemented!(
+                        "Ordered Async UDF timed out, currently panic to preserve ordering"
+                    );
+                }
+                warn!("Unordered Async UDF timed out, retrying");
+                self.futures.push_back((self.udf)(
+                    id,
+                    self.inputs[id].clone().unwrap().value.clone(),
+                    self.udf_context.clone(),
+                ));
+            }
+        }
     }
 }
 
