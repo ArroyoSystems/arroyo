@@ -474,7 +474,9 @@ impl Expression {
                 (&mut *e.input).traverse_mut(context, f);
             }
             Expression::Numeric(e) => {
-                (&mut *e.input).traverse_mut(context, f);
+                for x in (&mut *e.inputs) {
+                    x.traverse_mut(context, f);
+                }
             }
             Expression::Date(e) => match e {
                 DateTimeFunction::DatePart(_, e)
