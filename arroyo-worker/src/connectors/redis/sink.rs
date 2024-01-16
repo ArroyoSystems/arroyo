@@ -1,4 +1,4 @@
-use crate::connectors::redis::{RedisConfig, RedisConfigConnection, RedisTable, TableType, Target};
+use crate::connectors::redis::{RedisClient, RedisConfig, RedisTable, TableType, Target};
 use crate::engine::{Context, ErrorReporter, StreamNode};
 
 use arroyo_formats::DataSerializer;
@@ -7,9 +7,8 @@ use arroyo_macro::process_fn;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::{CheckpointBarrier, Key, Record};
 use redis::aio::{ConnectionLike, ConnectionManager};
-use redis::cluster::ClusterClient;
 use redis::cluster_async::ClusterConnection;
-use redis::{Client, Cmd, ConnectionInfo, IntoConnectionInfo, Pipeline, RedisFuture};
+use redis::{Cmd, Pipeline, RedisFuture};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -32,7 +31,7 @@ where
 {
     serializer: DataSerializer<T>,
     table: RedisTable,
-    client: Clients,
+    client: RedisClient,
     cmd_q: Option<(Sender<u32>, Receiver<RedisCmd>)>,
 
     rx: Receiver<u32>,
@@ -60,22 +59,6 @@ enum RedisCmd {
     },
 
     Flush(u32),
-}
-
-enum Clients {
-    Standard(Client),
-    Clustered(ClusterClient),
-}
-
-impl Clients {
-    async fn get_connection(&self) -> Result<GeneralConnection, redis::RedisError> {
-        Ok(match self {
-            Clients::Standard(c) => {
-                GeneralConnection::Standard(ConnectionManager::new(c.clone()).await?)
-            }
-            Clients::Clustered(c) => GeneralConnection::Clustered(c.get_async_connection().await?),
-        })
-    }
 }
 
 pub enum GeneralConnection {
@@ -258,51 +241,7 @@ where
         let table: RedisTable =
             serde_json::from_value(config.table).expect("Invalid table config for Redis");
 
-        let client = match profile.connection {
-            RedisConfigConnection::Standard {
-                address,
-                password,
-                username,
-            } => {
-                let mut info: ConnectionInfo = address
-                    .0
-                    .clone()
-                    .into_connection_info()
-                    .expect("invalid address");
-                if info.redis.password.is_none() {
-                    info.redis.password = password;
-                }
-                if info.redis.username.is_none() {
-                    info.redis.username = username;
-                }
-
-                Clients::Standard(Client::open(info).expect("invalid address"))
-            }
-            RedisConfigConnection::Clustered {
-                addresses,
-                password,
-                username,
-            } => {
-                let infos: Vec<ConnectionInfo> = addresses
-                    .into_iter()
-                    .map(|a| a.0.clone())
-                    .map(|x| {
-                        let mut info: ConnectionInfo =
-                            x.into_connection_info().expect("invalid address");
-                        if info.redis.password.is_none() {
-                            info.redis.password = password.clone();
-                        }
-                        if info.redis.username.is_none() {
-                            info.redis.username = username.clone();
-                        }
-                        info
-                    })
-                    .collect();
-                Clients::Clustered(
-                    ClusterClient::new(infos).expect("failed to construct cluster client"),
-                )
-            }
-        };
+        let client = RedisClient::new(&profile).expect("Unable to construct redis client");
 
         let (tx, cmd_rx) = tokio::sync::mpsc::channel(128);
         let (cmd_tx, rx) = tokio::sync::mpsc::channel(128);

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 
 use anyhow::{anyhow, bail};
+use arroyo_rpc::var_str::VarStr;
 use axum::response::sse::Event;
 use redis::cluster::ClusterClient;
 use redis::{Client, ConnectionInfo, IntoConnectionInfo};
@@ -23,91 +24,64 @@ const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/redis/connecti
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/redis/table.json");
 const ICON: &str = include_str!("../resources/redis.svg");
 
-import_types!(schema = "../connector-schemas/redis/connection.json",);
+import_types!(
+    schema = "../connector-schemas/redis/connection.json",
+    convert = {
+        {type = "string", format = "var-str"} = VarStr
+    }
+);
 import_types!(schema = "../connector-schemas/redis/table.json");
 
-fn validate_column(
-    schema: &ConnectionSchema,
-    column: String,
-    path: &str,
-) -> anyhow::Result<String> {
-    if schema
-        .fields
-        .iter()
-        .find(|f| {
-            f.field_name == column
-                && f.field_type.r#type == FieldType::Primitive(PrimitiveType::String)
-        })
-        .is_none()
-    {
-        bail!(
-            "invalid value '{}' for {}, must be the name of a TEXT column on the table",
-            column,
-            path
-        );
-    }
-
-    Ok(column)
-}
-
-enum Clients {
+enum RedisClient {
     Standard(Client),
     Clustered(ClusterClient),
 }
 
-fn create_redis_client(config: &RedisConfig) -> anyhow::Result<Clients> {
-    match &config.connection {
-        RedisConfigConnection::Standard {
-            address,
-            username,
-            password,
-        } => {
-            let mut info: ConnectionInfo = address
-                .0
-                .clone()
-                .into_connection_info()
-                .expect("invalid address");
-            if info.redis.password.is_none() {
-                info.redis.password = password.clone();
-            }
-            if info.redis.username.is_none() {
-                info.redis.username = username.clone();
-            }
-            let result = redis::Client::open(info).map_err(|e| {
-                anyhow!(
-                    "Failed to construct Redis client for {}: {:?}",
-                    address.0,
-                    e
-                )
-            })?;
-            Ok(Clients::Standard(result))
-        }
-        RedisConfigConnection::Clustered {
-            addresses,
-            username,
-            password,
-        } => {
-            let infos: Vec<ConnectionInfo> = addresses
-                .into_iter()
-                .map(|a| a.0.clone())
-                .map(|x| {
-                    let mut info: ConnectionInfo =
-                        x.into_connection_info().expect("invalid address");
-                    if info.redis.password.is_none() {
-                        info.redis.password = password.clone();
-                    }
-                    if info.redis.username.is_none() {
-                        info.redis.username = username.clone();
-                    }
-                    info
-                })
-                .collect();
+impl RedisClient {
+    pub fn new(config: &RedisConfig) -> anyhow::Result<Self> {
+        Ok(match &config.connection {
+            RedisConfigConnection::Address(address) => {
+                let info = from_address(&config, &address.0)?;
 
-            let client = ClusterClient::new(infos)
-                .map_err(|e| anyhow!("Failed to construct Redis Cluster client: {:?}", e))?;
-            Ok(Clients::Clustered(client))
-        }
+                RedisClient::Standard(Client::open(info).map_err(|e| {
+                    anyhow!(
+                        "Failed to construct Redis client for {}: {:?}",
+                        address.0,
+                        e
+                    )
+                })?)
+            }
+            RedisConfigConnection::Addresses(addresses) => {
+                let infos: anyhow::Result<Vec<ConnectionInfo>> = addresses
+                    .iter()
+                    .map(|address| from_address(&config, address))
+                    .collect();
+
+                RedisClient::Clustered(
+                    ClusterClient::new(infos?).map_err(|e| {
+                        anyhow!("Failed to construct Redis Cluster client: {:?}", e)
+                    })?,
+                )
+            }
+        })
     }
+}
+
+fn from_address(config: &RedisConfig, address: &str) -> anyhow::Result<ConnectionInfo> {
+    let mut info: ConnectionInfo = address
+        .to_string()
+        .into_connection_info()
+        .map_err(|e| anyhow!("invalid redis address: {:?}", e))?;
+
+    if let Some(username) = &config.username {
+        info.redis.username = Some(username.sub_env_vars().map_err(|e| anyhow!("{}", e))?);
+    }
+
+    if let Some(password) = &config.password {
+        info.redis.password = Some(password.sub_env_vars().map_err(|e| anyhow!("{}", e))?);
+    }
+
+    Ok(info)
 }
 
 async fn test_inner(
@@ -120,10 +94,11 @@ async fn test_inner(
         .await
         .unwrap();
 
-    let client = create_redis_client(&c)?;
-    match client {
-        Clients::Standard(c) => {
-            let mut connection = c
+    let client = RedisClient::new(&c)?;
+
+    match &client {
+        RedisClient::Standard(client) => {
+            let mut connection = client
                 .get_async_connection()
                 .await
                 .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
@@ -140,8 +115,8 @@ async fn test_inner(
                 .await
                 .map_err(|e| anyhow!("Received error sending PING command: {:?}", e))?;
         }
-        Clients::Clustered(c) => {
-            let mut connection = c
+        RedisClient::Clustered(client) => {
+            let mut connection = client
                 .get_async_connection()
                 .await
                 .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
@@ -205,7 +180,7 @@ impl Connector for RedisConnector {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         tokio::spawn(async move {
-            let (itx, _) = tokio::sync::mpsc::channel(8);
+            let (itx, _rx) = tokio::sync::mpsc::channel(8);
             let message = match test_inner(profile, itx).await {
                 Ok(_) => TestSourceMessage::done("Successfully connected to Redis"),
                 Err(e) => TestSourceMessage::fail(format!("Failed to connect to Redis: {:?}", e)),
@@ -246,29 +221,23 @@ impl Connector for RedisConnector {
     ) -> anyhow::Result<Connection> {
         let connection_config = match profile {
             Some(connection_profile) => {
-                let config: RedisConfigConnection =
-                    serde_json::from_value(connection_profile.config.clone())
-                        .map_err(|e| anyhow!("Failed to parse connection config: {:?}", e))?;
-                RedisConfig { connection: config }
+                serde_json::from_value(connection_profile.config.clone())
+                    .map_err(|e| anyhow!("Failed to parse connection config: {:?}", e))?
             }
             None => {
                 let address = options.remove("address");
 
                 let cluster_addresses = options.remove("cluster.addresses");
-                let connection_config = match (address, cluster_addresses) {
-                    (Some(address), None) => RedisConfigConnection::Standard {
-                        address: Address(address.to_string()),
-                        password: None,
-                        username: None,
-                    },
-                    (None, Some(cluster_addresses)) => RedisConfigConnection::Clustered {
-                        addresses: cluster_addresses
+                let connection = match (address, cluster_addresses) {
+                    (Some(address), None) => {
+                        RedisConfigConnection::Address(Address(address.to_string()))
+                    }
+                    (None, Some(cluster_addresses)) => RedisConfigConnection::Addresses(
+                        cluster_addresses
                             .split(",")
                             .map(|s| Address(s.to_string()))
                             .collect(),
-                        password: None,
-                        username: None,
-                    },
+                    ),
                     (Some(_), Some(_)) => {
                         bail!("only one of `address` or `cluster.addresses` may be set");
                     }
@@ -276,8 +245,14 @@ impl Connector for RedisConnector {
                         bail!("one of `address` or `cluster.addresses` must be set");
                     }
                 };
+
+                let username = options.remove("username").map(VarStr::new);
+                let password = options.remove("password").map(VarStr::new);
+
                 RedisConfig {
-                    connection: connection_config,
+                    connection,
+                    username,
+                    password,
                 }
             }
         };
@@ -394,36 +369,7 @@ impl Connector for RedisConnector {
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for Redis connection"))?;
 
-        let _ = create_redis_client(&config)?;
-        match &table.connector_type {
-            TableType::Target(Target::StringTable { key_column, .. }) => {
-                if let Some(key_column) = key_column {
-                    validate_column(&schema, key_column.clone(), "connector_type.key_column")?;
-                }
-            }
-            TableType::Target(Target::ListTable {
-                list_key_column, ..
-            }) => {
-                if let Some(n) = list_key_column {
-                    validate_column(&schema, n.clone(), "connector_type.list_key_column")?;
-                }
-            }
-            TableType::Target(Target::HashTable {
-                hash_key_column,
-                hash_field_column,
-                ..
-            }) => {
-                if let Some(n) = hash_key_column {
-                    validate_column(&schema, n.clone(), "connector_type.hash_key_column")?;
-                }
-
-                validate_column(
-                    &schema,
-                    hash_field_column.clone(),
-                    "connector_type.hash_field_column",
-                )?;
-            }
-        };
+        let _ = RedisClient::new(&config)?;
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
