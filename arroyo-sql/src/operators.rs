@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::expressions::RustUdfExpression;
 use crate::{
     code_gen::{
@@ -12,6 +14,7 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use arrow_schema::DataType;
+use arroyo_datastream::duration_to_syn_expr;
 use arroyo_rpc::formats::Format;
 use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
 use proc_macro2::TokenStream;
@@ -207,7 +210,9 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for AsyncUdfProjec
         let (match_terms, ids): (Vec<_>, Vec<_>) = match_term_ids.into_iter().unzip();
 
         let function_name = format_ident!("{}", self.async_udf.name);
-        let timeout_seconds = self.async_udf.opts.async_timeout_seconds;
+        let timeout = duration_to_syn_expr(Duration::from_secs(
+            self.async_udf.opts.async_timeout_seconds,
+        ));
 
         let mut context_t = quote! { EmptyContext };
         let mut context_arg = quote!();
@@ -231,7 +236,7 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for AsyncUdfProjec
             quote!(
                 match #args_pattern {
                     #match_terms => {
-                        timeout(Duration::from_secs(#timeout_seconds), udfs:: #function_name #args).await #suffix
+                        timeout(#timeout, udfs:: #function_name #args).await #suffix
                     }
                     _ => {
                         Ok(None)
@@ -239,7 +244,7 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for AsyncUdfProjec
                 }
             )
         } else {
-            quote!(timeout(Duration::from_secs(#timeout_seconds), udfs:: #function_name #args).await)
+            quote!(timeout(#timeout, udfs:: #function_name #args).await)
         };
         parse_quote! {{
             use tokio::time::error::Elapsed;
