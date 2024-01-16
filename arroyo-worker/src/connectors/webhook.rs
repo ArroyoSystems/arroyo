@@ -62,7 +62,7 @@ where
             .collect();
 
         Self {
-            url: Arc::new(table.endpoint),
+            url: Arc::new(table.endpoint.sub_env_vars().unwrap()),
             client: reqwest::ClientBuilder::new()
                 .default_headers(headers)
                 .timeout(Duration::from_secs(5))
