@@ -686,7 +686,7 @@ impl ControllerServer {
 }
 
 fn cargo_toml(name: &str, dependencies: &str) -> String {
-    let arroyo_types = "arroyo-types = { path = \"../../../arroyo-types\" }";
+    let types_dep = "types = { path = \"../../types\" }";
 
     format!(
         r#"
@@ -698,7 +698,7 @@ edition = "2021"
 {}
 {}
         "#,
-        name, dependencies, arroyo_types
+        name, dependencies, types_dep
     )
 }
 
