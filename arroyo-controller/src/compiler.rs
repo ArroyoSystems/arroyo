@@ -91,6 +91,7 @@ impl ProgramCompiler {
 
         quote! {
             use std::time::SystemTime;
+            pub use arroyo_types::UdfContext;
 
             #(#structs )*
         }
