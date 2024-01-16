@@ -29,7 +29,7 @@ pub struct WebhookConnector {}
 impl WebhookConnector {
     fn construct_test_request(client: &Client, config: &WebhookTable) -> anyhow::Result<Request> {
         let req = client
-            .post(&config.endpoint)
+            .post(&config.endpoint.sub_env_vars()?)
             // TODO: use the schema to construct a correctly-formatted message
             .body(
                 serde_json::to_string(&json! {{
@@ -53,7 +53,7 @@ impl WebhookConnector {
             .map(|s| s.sub_env_vars())
             .transpose()?;
 
-        let client = construct_http_client(&config.endpoint, headers)?;
+        let client = construct_http_client(&config.endpoint.sub_env_vars()?, headers)?;
         let req = Self::construct_test_request(&client, config)?;
 
         tx.send(Ok(Event::default()
@@ -141,7 +141,7 @@ impl Connector for WebhookConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<crate::Connection> {
-        let description = format!("WebhookSource<{}>", table.endpoint);
+        let description = format!("WebhookSink<{}>", table.endpoint.sub_env_vars()?);
 
         let schema = schema
             .map(|s| s.to_owned())
@@ -184,10 +184,13 @@ impl Connector for WebhookConnector {
 
         let headers = options.remove("headers").map(|s| VarStr::new(s));
 
-        let table = WebhookTable { endpoint, headers };
+        let table = WebhookTable {
+            endpoint: VarStr::new(endpoint),
+            headers,
+        };
 
         let client = construct_http_client(
-            &table.endpoint,
+            &table.endpoint.sub_env_vars()?,
             table
                 .headers
                 .as_ref()
