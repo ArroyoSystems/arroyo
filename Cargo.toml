@@ -35,6 +35,7 @@ tonic-build = { version = "0.10" }
 tonic-web = { version = "0.10" }
 tonic-reflection = { version = "0.10" }
 arrow = { version = "49.0.0" }
+arrow-ord = { version = "49.0.0" }
 arrow-array = { version = "49.0.0" }
 arrow-schema = { version = "49.0.0" }
 arrow-json = { version = "49.0.0" }

@@ -282,6 +282,12 @@ pub fn from_nanos(ts: u128) -> SystemTime {
         + Duration::from_nanos((ts % 1_000_000_000) as u64)
 }
 
+pub fn print_time(time: SystemTime) -> String {
+    chrono::DateTime::<chrono::Utc>::from(time)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
+}
+
 // used for avro serialization -- returns the number of days since the UNIX EPOCH
 pub fn days_since_epoch(time: SystemTime) -> i32 {
     time.duration_since(UNIX_EPOCH)

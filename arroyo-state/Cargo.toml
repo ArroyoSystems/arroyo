@@ -24,11 +24,13 @@ ahash = "0.8"
 
 anyhow = "1.0"
 backoff = "0.4.0"
+chrono = "0.4"
 tracing = "0.1"
 rand = "0.8"
 bincode = "2.0.0-rc.3"
 tokio = { version = "1", features = ["full", "tracing"] }
 arrow = { workspace = true }
+arrow-ord = { workspace = true }
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 parquet = { workspace = true }

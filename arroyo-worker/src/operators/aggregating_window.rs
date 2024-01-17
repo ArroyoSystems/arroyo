@@ -173,6 +173,7 @@ impl<K: Key, T: Data, BinA: Data, MemA: Data, OutT: Data>
             }
         }
     }
+
     async fn advance(&mut self, ctx: &mut Context<K, OutT>) {
         let bin_start = match self.state {
             SlidingWindowState::NoData => unreachable!(),
