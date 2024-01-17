@@ -1,5 +1,5 @@
 #![allow(clippy::new_without_default)]
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::{FieldRef, Schema, TimeUnit};
@@ -394,11 +394,15 @@ pub fn parse_dependencies(definition: &str) -> Result<String> {
     };
 }
 
-fn create_table_source(table_name: String, fields: Vec<FieldRef>) -> Arc<dyn TableSource> {
+fn create_table_with_timestamp(table_name: String, fields: Vec<FieldRef>) -> Arc<dyn TableSource> {
     let schema = add_timestamp_field_if_missing_arrow(Arc::new(Schema::new_with_metadata(
         fields,
         HashMap::new(),
     )));
+    create_table(table_name, schema)
+}
+
+fn create_table(table_name: String, schema: Arc<Schema>) -> Arc<dyn TableSource> {
     let table_provider = LogicalBatchInput { table_name, schema };
     let wrapped = Arc::new(table_provider);
     let provider = DefaultTableSource::new(wrapped);
@@ -415,8 +419,8 @@ impl ContextProvider for ArroyoSchemaProvider {
         })?;
 
         let fields = table.get_fields();
-
-        Ok(create_table_source(name.to_string(), fields))
+        let schema = Arc::new(Schema::new_with_metadata(fields, HashMap::new()));
+        Ok(create_table(name.to_string(), schema))
     }
 
     fn get_function_meta(&self, name: &str) -> Option<Arc<ScalarUDF>> {
@@ -497,7 +501,16 @@ impl TreeNodeRewriter for TimestampRewriter {
             LogicalPlan::Union(ref mut union) => {
                 union.schema = add_timestamp_field(union.schema.clone())?;
             }
-            LogicalPlan::TableScan(_) => {}
+            LogicalPlan::TableScan(ref mut table_scan) => {
+                if !has_timestamp_field(table_scan.projected_schema.clone()) {
+                    table_scan.projected_schema =
+                        add_timestamp_field(table_scan.projected_schema.clone())?;
+                    table_scan.source = create_table_with_timestamp(
+                        table_scan.table_name.to_string(),
+                        table_scan.source.schema().fields().to_vec(),
+                    );
+                }
+            }
             LogicalPlan::SubqueryAlias(ref mut subquery_alias) => {
                 if !has_timestamp_field(subquery_alias.schema.clone()) {
                     let timestamp_field = DFField::new(
@@ -799,7 +812,7 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                 // TODO: incorporate the window field in the schema and adjust datafusion.
                 //aggregate_input_schema.push(window_field);
 
-                let input_source = create_table_source(
+                let input_source = create_table_with_timestamp(
                     "memory".into(),
                     key_schema
                         .fields()
@@ -884,7 +897,7 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                 }
                 Ok(LogicalPlan::TableScan(TableScan {
                     table_name: OwnedTableReference::partial("arroyo-virtual", table_name.clone()),
-                    source: create_table_source(
+                    source: create_table_with_timestamp(
                         OwnedTableReference::partial("arroyo-virtual", table_name).to_string(),
                         schema
                             .fields()
@@ -1020,7 +1033,9 @@ pub async fn parse_and_get_arrow_program(
     let dialect = PostgreSqlDialect {};
     let mut inserts = vec![];
     for statement in Parser::parse_sql(&dialect, &query)? {
-        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
+        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)
+            .context("failed in try_from statement")?
+        {
             schema_provider.insert_table(table);
         } else {
             inserts.push(Insert::try_from_statement(

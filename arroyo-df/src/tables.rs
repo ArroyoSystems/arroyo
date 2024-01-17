@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_connectors::{connector_for_type, Connection};
 use arroyo_datastream::ConnectorOp;
@@ -697,6 +697,7 @@ impl Table {
     }
 }
 
+#[derive(Debug)]
 pub enum Insert {
     InsertQuery {
         sink_name: String,
@@ -712,7 +713,8 @@ fn infer_sink_schema(
     table_name: String,
     schema_provider: &mut ArroyoSchemaProvider,
 ) -> Result<()> {
-    let plan = produce_optimized_plan(&Statement::Query(source.clone()), schema_provider)?;
+    let plan = produce_optimized_plan(&Statement::Query(source.clone()), schema_provider)
+        .context("failed to produce optimized plan")?;
     let table = schema_provider
         .get_table_mut(&table_name)
         .ok_or_else(|| anyhow!("table {} not found", table_name))?;
