@@ -1,9 +1,9 @@
+use crate::{avro, json};
 use arrow_array::RecordBatch;
 use arrow_json::writer::record_batches_to_json_rows;
-use serde_json::Value;
-use arroyo_rpc::{TIMESTAMP_FIELD};
 use arroyo_rpc::formats::{Format, JsonFormat};
-use crate::{avro, json};
+use arroyo_rpc::TIMESTAMP_FIELD;
+use serde_json::Value;
 
 pub struct ArrowSerializer {
     kafka_schema: Option<Value>,
@@ -27,23 +27,31 @@ impl ArrowSerializer {
 
     pub fn serialize(&mut self, batch: &RecordBatch) -> Box<dyn Iterator<Item = Vec<u8>> + Send> {
         if self.kafka_schema.is_none() {
-            self.kafka_schema = Some(json::arrow_to_kafka_json("ArroyoJson", batch.schema().fields()));
+            self.kafka_schema = Some(json::arrow_to_kafka_json(
+                "ArroyoJson",
+                batch.schema().fields(),
+            ));
         }
         if self.avro_schema.is_none() {
-            self.avro_schema = Some(avro::arrow_to_avro_schema("ArroyoAvro", batch.schema().fields()));
+            self.avro_schema = Some(avro::arrow_to_avro_schema(
+                "ArroyoAvro",
+                batch.schema().fields(),
+            ));
         }
 
         match &self.format {
-            Format::Json(json) => {
-                self.serialize_json(json, batch)
-            }
+            Format::Json(json) => self.serialize_json(json, batch),
             Format::Avro(_) => todo!("avro"),
             Format::Parquet(_) => todo!("parquet"),
             Format::RawString(_) => todo!("raw string"),
         }
     }
 
-    fn serialize_json(&self, json: &JsonFormat, batch: &RecordBatch) -> Box<dyn Iterator<Item = Vec<u8>> + Send> {
+    fn serialize_json(
+        &self,
+        json: &JsonFormat,
+        batch: &RecordBatch,
+    ) -> Box<dyn Iterator<Item = Vec<u8>> + Send> {
         let header = json.confluent_schema_registry.then(|| {
             if json.include_schema {
                 unreachable!("can't include schema when writing to confluent schema registry, should've been caught when creating JsonFormat");

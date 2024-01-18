@@ -1,13 +1,13 @@
-use crate::{avro, FramingIterator, json, SchemaData};
+use crate::{avro, json, FramingIterator, SchemaData};
 use arroyo_rpc::formats::{AvroFormat, Format, Framing};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_types::SourceError;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use serde_json::Value;
 
 fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> {
     let json = json! {

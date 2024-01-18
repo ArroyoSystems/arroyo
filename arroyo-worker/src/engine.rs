@@ -29,6 +29,7 @@ use crate::connectors::filesystem::single_file::sink::FileSink;
 use crate::connectors::filesystem::single_file::source::FileSourceFunc;
 use crate::connectors::filesystem::source::FileSystemSourceFunc;
 use crate::connectors::impulse::ImpulseSourceFunc;
+use crate::connectors::kafka::sink::KafkaSinkFunc;
 use crate::connectors::kafka::source::KafkaSourceFunc;
 use crate::connectors::sse::SSESourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
@@ -61,7 +62,6 @@ use petgraph::Direction;
 use prometheus::labels;
 use rand::random;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use crate::connectors::kafka::sink::KafkaSinkFunc;
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
 
@@ -1442,7 +1442,9 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNo
                     FileSystemSourceFunc::from_config(op)
                 }
                 "connectors::kafka::source::KafkaSourceFunc" => KafkaSourceFunc::from_config(op),
-                "connectors::kafka::sink::KafkaSinkFunc::<#in_k, #in_t>" => KafkaSinkFunc::from_config(op),
+                "connectors::kafka::sink::KafkaSinkFunc::<#in_k, #in_t>" => {
+                    KafkaSinkFunc::from_config(op)
+                }
                 "GrpcSink" => GrpcRecordBatchSink::from_config(op),
                 "connectors::filesystem::single_file::source::FileSourceFunc" => {
                     FileSourceFunc::from_config(op)

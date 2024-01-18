@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
 use crate::engine::{ArrowContext, QueueItem};
-use crate::operator::OperatorNode;
+use crate::operator::SourceOperator;
 use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
@@ -25,27 +25,9 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use super::KafkaSourceFunc;
 
-#[derive(Debug, Clone, bincode::Encode, bincode::Decode, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct TestData {
     i: u64,
-}
-
-impl SchemaData for TestData {
-    fn name() -> &'static str {
-        "test"
-    }
-
-    fn schema() -> Schema {
-        Schema::new(vec![Field::new("i", DataType::UInt64, false)])
-    }
-
-    fn to_raw_string(&self) -> Option<Vec<u8>> {
-        None
-    }
-
-    fn to_avro(&self, _schema: &apache_avro::Schema) -> apache_avro::types::Value {
-        todo!()
-    }
 }
 
 pub struct KafkaTopicTester {
@@ -88,7 +70,7 @@ impl KafkaTopicTester {
         task_info: TaskInfo,
         restore_from: Option<u32>,
     ) -> KafkaSourceWithReads {
-        let kafka = Box::new(KafkaSourceFunc::new(
+        let mut kafka = Box::new(KafkaSourceFunc::new(
             &self.server,
             &self.topic,
             self.group_id.clone(),
@@ -134,12 +116,12 @@ impl KafkaTopicTester {
             )),
             None,
             vec![vec![data_tx]],
-            HashMap::new(),
+            kafka.tables(),
         )
         .await;
 
         tokio::spawn(async move {
-            kafka.run_behavior(&mut ctx, vec![]).await;
+            kafka.run(&mut ctx).await;
         });
         KafkaSourceWithReads {
             to_control_tx,

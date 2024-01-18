@@ -500,7 +500,7 @@ pub trait ArrowOperator: Send + 'static {
             ControlMessage::Stop { .. } => {
                 error!("shouldn't receive stop")
             }
-            ControlMessage::Commit { epoch, commit_data, } => {
+            ControlMessage::Commit { epoch, commit_data } => {
                 self.handle_commit(epoch, &commit_data, ctx).await;
             }
             ControlMessage::LoadCompacted { compacted } => {
@@ -636,7 +636,12 @@ pub trait ArrowOperator: Send + 'static {
     async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {}
 
     #[allow(unused_variables)]
-    async fn handle_commit(&mut self, epoch: u32, commit_data: &HashMap<char, HashMap<u32, Vec<u8>>>, ctx: &mut ArrowContext) {
+    async fn handle_commit(
+        &mut self,
+        epoch: u32,
+        commit_data: &HashMap<char, HashMap<u32, Vec<u8>>>,
+        ctx: &mut ArrowContext,
+    ) {
         warn!("default handling of commit with epoch {:?}", epoch);
     }
 

@@ -1,19 +1,24 @@
 #![allow(clippy::unnecessary_mut_passed)]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::old::Context;
-use crate::old::OutQueue;
+use crate::engine::ArrowContext;
+use crate::operator::ArrowOperator;
 use arrow::datatypes::Field;
-use arroyo_formats::SchemaData;
+use arrow_array::{RecordBatch, UInt32Array};
+use arrow_schema::{DataType, Schema, SchemaRef};
 use arroyo_rpc::formats::{Format, JsonFormat};
+use arroyo_rpc::ArroyoSchema;
 use arroyo_types::CheckpointBarrier;
 use arroyo_types::*;
+use itertools::Itertools;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::producer::Producer;
 use rdkafka::{ClientConfig, Message};
+use serde::Deserialize;
 use tokio::sync::mpsc::channel;
 
 use super::KafkaSinkFunc;
@@ -21,6 +26,19 @@ use super::KafkaSinkFunc;
 pub struct KafkaTopicTester {
     topic: String,
     server: String,
+}
+
+fn schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![Field::new(
+        "value",
+        DataType::UInt32,
+        false,
+    )]))
+}
+
+#[derive(Deserialize)]
+struct TestData {
+    value: u32,
 }
 
 impl KafkaTopicTester {
@@ -59,20 +77,23 @@ impl KafkaTopicTester {
         );
         let (_, control_rx) = channel(128);
         let (command_tx, _) = channel(128);
-        let (data_tx, _recv) = channel(128);
 
-        let task_info = arroyo_types::get_test_task_info();
+        let task_info = get_test_task_info();
 
-        let mut ctx: Context<(), ()> = Context::new(
+        let mut ctx = ArrowContext::new(
             task_info,
             None,
             control_rx,
             command_tx,
             1,
-            vec![vec![OutQueue::new(data_tx, false)]],
-            vec![],
+            vec![ArroyoSchema::new(schema(), 0, vec![])],
+            None,
+            None,
+            vec![vec![]],
+            HashMap::new(),
         )
         .await;
+
         kafka.on_start(&mut ctx).await;
 
         KafkaSinkWithWrites { sink: kafka, ctx }
@@ -110,50 +131,9 @@ async fn get_data(consumer: &mut StreamConsumer) -> Record<String, String> {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    bincode::Encode,
-    bincode::Decode,
-    PartialEq,
-    PartialOrd,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-struct TestOutStruct {
-    t: String,
-}
-
-impl From<String> for TestOutStruct {
-    fn from(value: String) -> Self {
-        TestOutStruct { t: value }
-    }
-}
-
-impl SchemaData for TestOutStruct {
-    fn name() -> &'static str {
-        "test_out_struct"
-    }
-    fn schema() -> arrow::datatypes::Schema {
-        arrow::datatypes::Schema::new(vec![Field::new(
-            "t",
-            arrow::datatypes::DataType::Utf8,
-            false,
-        )])
-    }
-
-    fn to_raw_string(&self) -> Option<Vec<u8>> {
-        unimplemented!()
-    }
-
-    fn to_avro(&self, _schema: &apache_avro::Schema) -> apache_avro::types::Value {
-        todo!()
-    }
-}
-
 struct KafkaSinkWithWrites {
-    sink: KafkaSinkFunc<String, TestOutStruct>,
-    ctx: Context<(), ()>,
+    sink: KafkaSinkFunc,
+    ctx: ArrowContext,
 }
 
 #[tokio::test]
@@ -167,23 +147,19 @@ async fn test_kafka_checkpoint_flushes() {
     let mut sink_with_writes = kafka_topic_tester.get_sink_with_writes().await;
     let mut consumer = kafka_topic_tester.get_consumer("0");
 
-    for message in 1u32..200 {
-        let payload_and_key = message.to_string();
-        let mut record = Record {
-            timestamp: SystemTime::now(),
-            key: Some(payload_and_key.to_owned()),
-            value: payload_and_key.into(),
-        };
+    for chunk in &(1u32..200).into_iter().chunks(7) {
+        let array = UInt32Array::from_iter_values(chunk.into_iter());
+        let batch = RecordBatch::try_new(schema(), vec![Arc::new(array)]).unwrap();
 
         sink_with_writes
             .sink
-            .process_element(&mut record, &mut sink_with_writes.ctx)
+            .process_batch(batch, &mut sink_with_writes.ctx)
             .await;
     }
-    let barrier = &CheckpointBarrier {
-        epoch: (2),
+    let barrier = CheckpointBarrier {
+        epoch: 2,
         min_epoch: 0,
-        timestamp: (SystemTime::now()),
+        timestamp: SystemTime::now(),
         then_stop: false,
     };
     sink_with_writes
@@ -193,8 +169,8 @@ async fn test_kafka_checkpoint_flushes() {
 
     for message in 1u32..200 {
         let record = get_data(&mut consumer).await.value;
-        let result: TestOutStruct = serde_json::from_str(&record).unwrap();
-        assert_eq!(message.to_string(), result.t, "{} {:?}", message, record);
+        let result: TestData = serde_json::from_str(&record).unwrap();
+        assert_eq!(message, result.value, "{} {:?}", message, record);
     }
 }
 
@@ -210,26 +186,22 @@ async fn test_kafka() {
     let mut consumer = kafka_topic_tester.get_consumer("1");
 
     for message in 1u32..20 {
-        let payload_and_key = message.to_string();
-        let mut record = Record {
-            timestamp: SystemTime::now(),
-            key: Some(payload_and_key.to_owned()),
-            value: payload_and_key.into(),
-        };
+        let data = UInt32Array::from_iter_values(vec![message].into_iter());
+        let batch = RecordBatch::try_new(schema(), vec![Arc::new(data)]).unwrap();
 
         sink_with_writes
             .sink
-            .process_element(&mut record, &mut sink_with_writes.ctx)
+            .process_batch(batch, &mut sink_with_writes.ctx)
             .await;
         sink_with_writes
             .sink
             .producer
             .as_ref()
             .unwrap()
-            .flush(Duration::from_secs(1))
+            .flush(Duration::from_secs(3))
             .unwrap();
-        let result: TestOutStruct =
-            serde_json::from_str(&get_data(&mut consumer).await.value).unwrap();
-        assert_eq!(record.value, result);
+
+        let result: TestData = serde_json::from_str(&get_data(&mut consumer).await.value).unwrap();
+        assert_eq!(message, result.value);
     }
 }

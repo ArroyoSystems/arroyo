@@ -9,7 +9,7 @@ use arrow_schema::Schema;
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, FramingMethod, JsonFormat};
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::ArroyoSchema;
-use arroyo_types::{Data, Debezium, RawJson, should_flush, SourceError, to_nanos};
+use arroyo_types::{should_flush, to_nanos, Data, Debezium, RawJson, SourceError};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::json;

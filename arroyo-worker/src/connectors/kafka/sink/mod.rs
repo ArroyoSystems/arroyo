@@ -1,24 +1,24 @@
 use anyhow::{anyhow, Result};
+use arrow_array::RecordBatch;
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::{CheckpointEvent, ControlMessage, OperatorConfig};
 use arroyo_types::*;
+use async_trait::async_trait;
 use rdkafka::error::KafkaError;
 use rdkafka::ClientConfig;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
-use arrow_array::RecordBatch;
-use async_trait::async_trait;
 
 use super::{client_configs, KafkaConfig, KafkaTable, SinkCommitMode, TableType};
+use crate::engine::ArrowContext;
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
+use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::grpc::{api, TableConfig};
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
 use rdkafka_sys::RDKafkaErrorCode;
 use tracing::{error, warn};
-use arroyo_formats::serialize::ArrowSerializer;
-use arroyo_rpc::grpc::api::ConnectorOp;
-use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 
 #[cfg(test)]
 mod test;
@@ -53,10 +53,10 @@ impl From<SinkCommitMode> for ConsistencyMode {
     }
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp> for KafkaSinkFunc{
+impl ArrowOperatorConstructor<api::ConnectorOp> for KafkaSinkFunc {
     fn from_config(config: ConnectorOp) -> Result<OperatorNode> {
         let config: OperatorConfig =
-            serde_json::from_str(&config.operator).expect("Invalid config for KafkaSink");
+            serde_json::from_str(&config.config).expect("Invalid config for KafkaSink");
         let connection: KafkaConfig = serde_json::from_value(config.connection)
             .expect("Invalid connection config for KafkaSink");
         let table: KafkaTable =
@@ -207,7 +207,6 @@ impl ArrowOperator for KafkaSinkFunc {
         }
     }
 
-
     async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
         self.flush().await;
         if let ConsistencyMode::ExactlyOnce {
@@ -229,15 +228,20 @@ impl ArrowOperator for KafkaSinkFunc {
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
-        let k = batch.project(&ctx.in_schemas[0].key_indices).unwrap();
+        let values = self.serializer.serialize(&batch);
 
-        let items = self.serializer.serialize(&k)
-            .zip(self.serializer.serialize(&batch));
+        let keys = if !ctx.in_schemas[0].key_indices.is_empty() {
+            let k = batch.project(&ctx.in_schemas[0].key_indices).unwrap();
 
-        // TODO: we can probably batch this for better performance
-        for (k, v) in items {
-            self.publish(Some(k), v).await;
-        }
+            // TODO: we can probably batch this for better performance
+            for (k, v) in self.serializer.serialize(&k).zip(values) {
+                self.publish(Some(k), v).await;
+            }
+        } else {
+            for v in values {
+                self.publish(None, v).await;
+            }
+        };
     }
 
     async fn handle_commit(
