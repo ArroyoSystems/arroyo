@@ -1,4 +1,4 @@
-#![allow(clippy::new_without_default)]
+//#![allow(clippy::new_without_default)]
 // TODO: factor out complex types
 #![allow(clippy::type_complexity)]
 

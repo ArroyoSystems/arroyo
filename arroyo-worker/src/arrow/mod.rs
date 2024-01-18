@@ -2,12 +2,14 @@ use crate::engine::ArrowContext;
 use anyhow::Result;
 use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
+use arrow_array::TimestampNanosecondArray;
 use arrow_json::writer::record_batches_to_json_rows;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
-use arroyo_rpc::grpc::api::{ArrowNode, ConnectorOp};
+use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{api, SinkDataReq};
+use arroyo_types::from_nanos;
 use arroyo_types::to_micros;
 use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::memory::MemoryStream;
@@ -34,24 +36,35 @@ use tonic::transport::Channel;
 
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 
+pub mod sliding_aggregating_window;
+pub(crate) mod sync;
 pub mod tumbling_aggregating_window;
-pub struct Registry {}
+pub struct EmptyRegistry {}
 
-impl FunctionRegistry for Registry {
+impl FunctionRegistry for EmptyRegistry {
     fn udfs(&self) -> HashSet<String> {
         HashSet::new()
     }
 
-    fn udf(&self, _name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
-        todo!()
+    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+        DFResult::Err(DataFusionError::NotImplemented(format!(
+            "udf {} not implemented",
+            name
+        )))
     }
 
-    fn udaf(&self, _name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
-        todo!()
+    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+        DFResult::Err(DataFusionError::NotImplemented(format!(
+            "udaf {} not implemented",
+            name
+        )))
     }
 
-    fn udwf(&self, _name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
-        todo!()
+    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+        DFResult::Err(DataFusionError::NotImplemented(format!(
+            "udwf {} not implemented",
+            name
+        )))
     }
 }
 
@@ -64,7 +77,7 @@ pub struct ValueExecutionOperator {
 impl ArrowOperatorConstructor<api::ValuePlanOperator> for ValueExecutionOperator {
     fn from_config(config: api::ValuePlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
-        let registry = Registry {};
+        let registry = EmptyRegistry {};
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
         //info!("physical plan is {:#?}", plan);
@@ -183,7 +196,7 @@ pub struct KeyExecutionOperator {
 impl ArrowOperatorConstructor<api::KeyPlanOperator> for KeyExecutionOperator {
     fn from_config(config: api::KeyPlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
-        let registry = Registry {};
+        let registry = EmptyRegistry {};
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
         //info!("physical plan is {:#?}", plan);
@@ -265,11 +278,17 @@ impl ArrowOperator for GrpcRecordBatchSink {
     }
 
     async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut ArrowContext) {
-        // info!("record batch grpc received batch {:?}", record_batch);
+        let timestamp_column = record_batch
+            .column(ctx.in_schemas[0].timestamp_index)
+            .as_any()
+            .downcast_ref::<TimestampNanosecondArray>()
+            .unwrap();
+
         let json_rows = record_batches_to_json_rows(&[&record_batch]).unwrap();
-        for map in json_rows {
+        for (mut map, timestamp) in json_rows.into_iter().zip(timestamp_column.iter()) {
+            map.remove("_timestamp");
             let value = serde_json::to_string(&map).unwrap();
-            //info!("sending map {:?}", value);
+
             self.client
                 .as_mut()
                 .unwrap()
@@ -277,7 +296,11 @@ impl ArrowOperator for GrpcRecordBatchSink {
                     job_id: ctx.task_info.job_id.clone(),
                     operator_id: ctx.task_info.operator_id.clone(),
                     subtask_index: ctx.task_info.task_index as u32,
-                    timestamp: to_micros(SystemTime::now()),
+                    timestamp: to_micros(
+                        timestamp
+                            .map(|nanos| from_nanos(nanos as u128))
+                            .unwrap_or_else(|| SystemTime::now()),
+                    ),
                     key: value.clone(),
                     value,
                     done: false,
@@ -285,5 +308,21 @@ impl ArrowOperator for GrpcRecordBatchSink {
                 .await
                 .unwrap();
         }
+    }
+    async fn on_close(&mut self, ctx: &mut ArrowContext) {
+        self.client
+            .as_mut()
+            .unwrap()
+            .send_sink_data(SinkDataReq {
+                job_id: ctx.task_info.job_id.clone(),
+                operator_id: ctx.task_info.operator_id.clone(),
+                subtask_index: ctx.task_info.task_index as u32,
+                timestamp: to_micros(SystemTime::now()),
+                key: "".to_string(),
+                value: "".to_string(),
+                done: true,
+            })
+            .await
+            .unwrap();
     }
 }

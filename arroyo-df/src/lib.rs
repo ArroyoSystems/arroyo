@@ -1110,7 +1110,7 @@ pub async fn parse_and_get_arrow_program(
                 }
             }
             None => LogicalPlanExtension::Sink {
-                name: "grpc_sink".to_string(),
+                name: "GrpcSink".to_string(),
                 connector_op: arroyo_datastream::ConnectorOp::web_sink(),
             },
         };

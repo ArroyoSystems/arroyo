@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::connectors::kafka::source;
 use crate::engine::{ArrowContext, QueueItem};
-use crate::operator::BaseOperator;
+use crate::operator::OperatorNode;
 use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};

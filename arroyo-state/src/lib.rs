@@ -30,6 +30,7 @@ pub mod checkpoint_state;
 pub mod committing_state;
 mod metrics;
 pub mod parquet;
+pub(crate) mod schemas;
 mod subtask_state;
 pub mod tables;
 

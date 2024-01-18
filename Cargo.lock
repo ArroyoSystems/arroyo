@@ -1047,6 +1047,7 @@ dependencies = [
  "anyhow",
  "arrow 49.0.0",
  "arrow-array 49.0.0",
+ "arrow-ord 49.0.0",
  "arrow-schema 49.0.0",
  "arroyo-datastream",
  "arroyo-df",
@@ -1059,6 +1060,7 @@ dependencies = [
  "backoff",
  "bincode 2.0.0-rc.3",
  "bytes",
+ "chrono",
  "ctor",
  "datafusion",
  "datafusion-common",
@@ -1104,6 +1106,7 @@ dependencies = [
  "arrow 49.0.0",
  "arrow-array 49.0.0",
  "bincode 2.0.0-rc.3",
+ "chrono",
  "serde",
 ]
 
@@ -1142,6 +1145,7 @@ dependencies = [
  "datafusion-execution",
  "datafusion-expr",
  "datafusion-physical-expr",
+ "datafusion-physical-plan",
  "datafusion-proto",
  "deltalake",
  "eventsource-client",

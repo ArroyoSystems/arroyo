@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use arrow_array::types::IntervalMonthDayNanoType;
 use arrow_schema::{DataType, Schema};
 use arroyo_datastream::{ConnectorOp, WindowType};
 
@@ -20,12 +21,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
-use arroyo_rpc::grpc::api;
+use arroyo_rpc::grpc::api::{self, SlidingWindow};
 use arroyo_rpc::grpc::api::{
     window, KeyPlanOperator, TumblingWindow, ValuePlanOperator, Window, WindowAggregateOperator,
 };
 use datafusion_common::{DFField, DFSchema, ScalarValue};
-use datafusion_expr::{BinaryExpr, Expr, LogicalPlan};
+use datafusion_expr::{expr::ScalarFunction, BinaryExpr, BuiltinScalarFunction, Expr, LogicalPlan};
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
@@ -184,62 +185,49 @@ pub(crate) async fn get_arrow_program(
                 new_node_index
             }
             crate::LogicalPlanExtension::AggregateCalculation(aggregate) => {
-                let WindowType::Tumbling { width } = aggregate.window else {
-                    bail!("only implemented tumbling windows currently")
-                };
                 let my_aggregate = aggregate.aggregate.clone();
                 let logical_plan = LogicalPlan::Aggregate(my_aggregate);
 
                 let LogicalPlan::TableScan(table_scan) = aggregate.aggregate.input.as_ref() else {
                     bail!("expected logical plan")
                 };
-                info!(
-                    "input arrow schema:{:?}\n input df schema:{:?}",
-                    table_scan.source.schema(),
-                    table_scan.projected_schema
-                );
-
-                info!(
-                    "logical plan:{:?}\nlogical plan schema:{:?}\n",
-                    logical_plan,
-                    logical_plan.schema()
-                );
 
                 let physical_plan = planner
                     .create_physical_plan(&logical_plan, &session_state)
                     .await
                     .context("couldn't create physical plan for aggregate")?;
 
-                println!("physical plan for aggregate: {:#?}", physical_plan);
-
                 let physical_plan_node: PhysicalPlanNode =
                     PhysicalPlanNode::try_from_physical_plan(
                         physical_plan,
                         &ArroyoPhysicalExtensionCodec::default(),
                     )?;
+                let slide = match &aggregate.window {
+                    WindowType::Tumbling { width } => width,
+                    WindowType::Sliding { width, slide } => slide,
+                    WindowType::Instant => bail!("instant window not yet implemented"),
+                    WindowType::Session { gap } => bail!("session window not yet implemented"),
+                };
 
-                let division = Expr::BinaryExpr(BinaryExpr {
-                    left: Box::new(Expr::Column(datafusion_common::Column {
-                        relation: None,
-                        name: "timestamp_nanos".into(),
-                    })),
-                    op: datafusion_expr::Operator::Divide,
-                    right: Box::new(Expr::Literal(ScalarValue::Int64(Some(
-                        width.as_nanos() as i64
-                    )))),
+                let date_bin = Expr::ScalarFunction(ScalarFunction {
+                    func_def: datafusion_expr::ScalarFunctionDefinition::BuiltIn(
+                        BuiltinScalarFunction::DateBin,
+                    ),
+                    args: vec![
+                        Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+                            IntervalMonthDayNanoType::make_value(0, 0, slide.as_nanos() as i64),
+                        ))),
+                        Expr::Column(datafusion_common::Column {
+                            relation: None,
+                            name: "_timestamp".into(),
+                        }),
+                    ],
                 });
-
-                let timestamp_nanos_field =
-                    DFField::new_unqualified("timestamp_nanos", DataType::Int64, false);
-                let binning_df_schema =
-                    DFSchema::new_with_metadata(vec![timestamp_nanos_field], HashMap::new())
-                        .context("can't make timestamp nanos schema")?;
-                let binning_arrow_schema: Schema = (&binning_df_schema).into();
                 let binning_function = planner
                     .create_physical_expr(
-                        &division,
-                        &binning_df_schema,
-                        &binning_arrow_schema,
+                        &date_bin,
+                        &aggregate.aggregate.input.schema().as_ref(),
+                        &aggregate.aggregate.input.schema().as_ref().into(),
                         &session_state,
                     )
                     .context("couldn't create binning function")?;
@@ -252,12 +240,11 @@ pub(crate) async fn get_arrow_program(
                     name: "window_aggregate".into(),
                     physical_plan: physical_plan_node.encode_to_vec(),
                     binning_function: binning_function_proto.encode_to_vec(),
-                    binning_schema: serde_json::to_vec(&binning_arrow_schema)?,
+                    // unused now
+                    binning_schema: vec![],
                     input_schema: serde_json::to_vec(&input_schema)?,
                     window: Some(Window {
-                        window: Some(window::Window::TumblingWindow(TumblingWindow {
-                            size_micros: width.as_micros() as u64,
-                        })),
+                        window: Some(aggregate.window.clone().into()),
                     }),
                     window_field_name: aggregate.window_field.name().to_string(),
                     window_index: aggregate.window_index as u64,

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::pin::Pin;
 use std::time::Duration;
 use std::{collections::HashSet, time::SystemTime};
 
@@ -7,20 +8,22 @@ use crate::engine::{ArrowContext, CheckpointCounter};
 use crate::inq_reader::InQReader;
 use crate::metrics::TaskCounters;
 use crate::{ControlOutcome, SourceFinishType};
-use arrow_array::types::TimestampNanosecondType;
-use arrow_array::{Array, PrimitiveArray, RecordBatch};
+use arrow::compute::kernels::numeric::{div, rem};
+use arrow_array::types::{TimestampNanosecondType, UInt64Type};
+use arrow_array::{Array, PrimitiveArray, RecordBatch, UInt64Array};
 use arroyo_rpc::{
     grpc::{TableConfig, TaskCheckpointEventType},
     ControlMessage, ControlResp,
 };
 use arroyo_types::{
-    from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, SignalMessage, Watermark,
-    Window,
+    from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, SignalMessage, TaskInfoRef,
+    Watermark, Window,
 };
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::StreamExt;
 use tokio::sync::mpsc::Receiver;
+use tokio_stream::Stream;
 use tracing::{debug, error, info, warn, Instrument};
 
 pub trait TimerT: Data + PartialEq + Eq + 'static {}
@@ -29,7 +32,20 @@ impl<T: Data + PartialEq + Eq + 'static> TimerT for T {}
 
 pub fn server_for_hash(x: u64, n: usize) -> usize {
     let range_size = u64::MAX / (n as u64);
-    (n - 1).min((x / range_size) as usize)
+    ((x / range_size) as usize) % n
+}
+
+pub fn server_for_hash_array(
+    hash: &PrimitiveArray<UInt64Type>,
+    n: usize,
+) -> anyhow::Result<PrimitiveArray<UInt64Type>> {
+    let range_size = u64::MAX / (n as u64);
+    let range_scalar = UInt64Array::new_scalar(range_size);
+    let mut server_scalar = UInt64Array::new_scalar(n as u64);
+    let division = div(hash, &range_scalar)?;
+    let mod_array = rem(&division, &mut server_scalar)?;
+    let result: &PrimitiveArray<UInt64Type> = mod_array.as_any().downcast_ref().unwrap();
+    Ok(result.clone())
 }
 
 pub static TIMER_TABLE: char = '[';
@@ -114,6 +130,17 @@ impl SlidingWindowAssigner {
 
         from_millis(earliest_window_start - remainder + self.slide.as_millis() as u64)
     }
+}
+pub struct RunContext<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync> {
+    pub task_info: TaskInfoRef,
+    pub name: String,
+    pub counter: CheckpointCounter,
+    pub closed: HashSet<usize>,
+    pub sel: InQReader<St>,
+    pub in_partitions: usize,
+    pub blocked: Vec<St>,
+    pub final_message: Option<ArrowMessage>,
+    // TODO: ticks
 }
 
 impl TimeWindowAssigner for SlidingWindowAssigner {
@@ -255,12 +282,12 @@ impl OperatorNode {
         mut ctx: ArrowContext,
         mut in_qs: Vec<Receiver<ArrowMessage>>,
     ) {
-        let final_message = self.run_behavior(&mut ctx, &mut in_qs).await;
-
         info!(
             "Starting task {}-{}",
             ctx.task_info.operator_name, ctx.task_info.task_index
         );
+
+        let final_message = self.run_behavior(&mut ctx, &mut in_qs).await;
 
         if let Some(final_message) = final_message {
             ctx.broadcast(final_message).await;

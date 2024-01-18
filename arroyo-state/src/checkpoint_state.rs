@@ -42,6 +42,7 @@ pub struct OperatorState {
     pub start_time: Option<SystemTime>,
     pub finish_time: Option<SystemTime>,
     table_state: HashMap<String, TableState>,
+    watermarks: Vec<Option<SystemTime>>,
 }
 
 impl OperatorState {
@@ -52,6 +53,7 @@ impl OperatorState {
             start_time: None,
             finish_time: None,
             table_state: HashMap::new(),
+            watermarks: vec![],
         }
     }
 
@@ -63,6 +65,7 @@ impl OperatorState {
         HashMap<String, TableCheckpointMetadata>,
     )> {
         self.subtasks_checkpointed += 1;
+        self.watermarks.push(c.watermark.map(|w| from_micros(w)));
         self.start_time = match self.start_time {
             Some(existing_start_time) => Some(existing_start_time.min(from_micros(c.start_time))),
             None => Some(from_micros(c.start_time)),
@@ -230,14 +233,32 @@ impl CheckpointState {
                 .ok_or_else(|| anyhow!("missing metadata for operator {}", c.operator_id))?,
         ) {
             self.operators_checkpointed += 1;
+            // watermarks are None if any subtasks are None.
+            let (min_watermark, max_watermark) =
+                if operator_state.watermarks.iter().any(|w| w.is_none()) {
+                    (None, None)
+                } else {
+                    (
+                        operator_state
+                            .watermarks
+                            .iter()
+                            .map(|w| to_micros(w.unwrap()))
+                            .min(),
+                        operator_state
+                            .watermarks
+                            .iter()
+                            .map(|w| to_micros(w.unwrap()))
+                            .max(),
+                    )
+                };
             StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
                 job_id: self.job_id.to_string(),
                 operator_id: c.operator_id,
                 epoch: self.epoch,
                 start_time: to_micros(operator_state.start_time.unwrap()),
                 finish_time: to_micros(operator_state.finish_time.unwrap()),
-                min_watermark: None,
-                max_watermark: None,
+                min_watermark,
+                max_watermark,
                 has_state: false,
                 tables: vec![],
                 backend_data: vec![],

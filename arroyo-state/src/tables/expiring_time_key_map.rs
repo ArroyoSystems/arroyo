@@ -6,12 +6,16 @@ use std::{
 
 use ahash::RandomState;
 use anyhow::{anyhow, bail, Ok, Result};
-use arrow::compute::kernels::{self, aggregate};
+use arrow::compute::{
+    kernels::{self, aggregate},
+    take,
+};
 use arrow_array::{
     cast::AsArray,
     types::{TimestampNanosecondType, UInt64Type},
-    PrimitiveArray, RecordBatch,
+    PrimitiveArray, RecordBatch, UInt64Array,
 };
+use arrow_ord::partition::partition;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use arroyo_datastream::get_hasher;
 use arroyo_rpc::{
@@ -22,7 +26,7 @@ use arroyo_rpc::{
     ArroyoSchema,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{from_nanos, to_micros, to_nanos, TaskInfoRef};
+use arroyo_types::{from_micros, from_nanos, print_time, to_micros, to_nanos, TaskInfoRef};
 use bincode::config;
 use datafusion_common::{hash_utils::create_hashes, ScalarValue};
 use futures::StreamExt;
@@ -31,7 +35,11 @@ use parquet::arrow::{
 };
 use tokio::{io::AsyncWrite, sync::mpsc::Sender};
 
-use crate::{parquet::ParquetStats, CheckpointMessage, DataOperation, StateMessage, TableData};
+use crate::{
+    parquet::ParquetStats, schemas::SchemaWithHashAndOperation, timestamp_table, CheckpointMessage,
+    DataOperation, StateMessage, TableData,
+};
+use tracing::{info, warn};
 
 use super::{table_checkpoint_path, Table, TableEpochCheckpointer};
 
@@ -39,8 +47,7 @@ use super::{table_checkpoint_path, Table, TableEpochCheckpointer};
 pub struct ExpiringTimeKeyTable {
     table_name: String,
     task_info: TaskInfoRef,
-    schema: ArroyoSchema,
-    final_schema: SchemaRef,
+    schema: SchemaWithHashAndOperation,
     retention: Duration,
     storage_provider: StorageProviderRef,
     checkpoint_files: Vec<ParquetTimeFile>,
@@ -53,18 +60,26 @@ impl ExpiringTimeKeyTable {
         watermark: Option<SystemTime>,
     ) -> Result<ExpiringTimeKeyView> {
         let cutoff = watermark
-            .map(|watermark| to_nanos(watermark - self.retention))
-            .unwrap_or_default();
+            .map(|watermark| (watermark - self.retention))
+            .unwrap_or_else(|| SystemTime::UNIX_EPOCH);
+        info!(
+            "watermark is {:?}, cutoff is {:?}",
+            watermark.map(print_time),
+            print_time(cutoff)
+        );
         let files: Vec<_> = self
             .checkpoint_files
             .iter()
             .filter_map(|file| {
                 // file must have some data greater than the cutoff and routing keys within the range.
-                if cutoff <= (file.max_timestamp_micros * 1000) as u128
+                if cutoff <= from_micros(file.max_timestamp_micros)
                     && (file.max_routing_key >= *self.task_info.key_range.start()
                         && *self.task_info.key_range.end() >= file.min_routing_key)
                 {
-                    Some(file.file.clone())
+                    let needs_hash_filtering = *self.task_info.key_range.end()
+                        < file.max_routing_key
+                        || *self.task_info.key_range.start() > file.min_routing_key;
+                    Some((file.file.clone(), needs_hash_filtering))
                 } else {
                     None
                 }
@@ -72,7 +87,7 @@ impl ExpiringTimeKeyTable {
             .collect();
 
         let mut data: BTreeMap<SystemTime, Vec<RecordBatch>> = BTreeMap::new();
-        for file in files {
+        for (file, needs_filtering) in files {
             let object_meta = self
                 .storage_provider
                 .get_backing_store()
@@ -85,17 +100,62 @@ impl ExpiringTimeKeyTable {
             // projection to trim the metadata fields. Should probably be factored out.
             let projection: Vec<_> = (0..(stream.schema().all_fields().len() - 2)).collect();
             while let Some(batch_result) = stream.next().await {
-                let batch = batch_result?;
+                let mut batch = batch_result?;
+                if needs_filtering {
+                    match self
+                        .schema
+                        .filter_by_hash_index(batch, &self.task_info.key_range)?
+                    {
+                        None => continue,
+                        Some(filtered_batch) => batch = filtered_batch,
+                    };
+                }
+                batch = batch.project(&projection)?;
                 let timestamp_array: &PrimitiveArray<TimestampNanosecondType> = batch
-                    .column(self.schema.timestamp_index)
+                    .column(self.schema.timestamp_index())
                     .as_primitive_opt()
                     .ok_or_else(|| anyhow!("failed to find timestamp column"))?;
-                let max_timestamp = aggregate::max(timestamp_array)
-                    .ok_or_else(|| anyhow!("should have max timestamp"))?;
-                if cutoff < (max_timestamp as u128) {
-                    data.entry(from_nanos(max_timestamp as u128))
-                        .or_default()
-                        .push(batch.project(&projection)?);
+                let max_timestamp = from_nanos(
+                    aggregate::max(timestamp_array)
+                        .ok_or_else(|| anyhow!("should have max timestamp"))?
+                        as u128,
+                );
+                let min_timestamp = from_nanos(
+                    aggregate::min(timestamp_array)
+                        .ok_or_else(|| anyhow!("should have min timestamp"))?
+                        as u128,
+                );
+                let batches = if max_timestamp != min_timestamp {
+                    // assume monotonic for now
+                    let partitions = partition(
+                        vec![batch.column(self.schema.timestamp_index()).clone()].as_slice(),
+                    )?;
+                    partitions
+                        .ranges()
+                        .into_iter()
+                        .map(|range| {
+                            let timestamp = from_nanos(timestamp_array.value(range.start) as u128);
+                            (timestamp, batch.slice(range.start, range.end - range.start))
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    vec![(min_timestamp, batch)]
+                };
+                for (timestamp, batch) in batches {
+                    if cutoff <= timestamp {
+                        info!(
+                            "inserting batch {:?} with timestamp {:?}",
+                            batch,
+                            print_time(timestamp)
+                        );
+                        data.entry(timestamp).or_default().push(batch)
+                    } else {
+                        info!(
+                            "filtered batch {:?} with timestamp {:?}",
+                            batch,
+                            print_time(timestamp)
+                        );
+                    }
                 }
             }
         }
@@ -124,17 +184,12 @@ impl Table for ExpiringTimeKeyTable {
         storage_provider: arroyo_storage::StorageProviderRef,
         checkpoint_message: Option<Self::TableCheckpointMessage>,
     ) -> anyhow::Result<Self> {
-        let schema: ArroyoSchema = config.schema.expect("should have schema").try_into()?;
+        let schema: ArroyoSchema = config
+            .schema
+            .ok_or_else(|| anyhow!("should have schema"))?
+            .try_into()?;
 
-        let mut fields = schema.schema.fields().to_vec();
-        //TODO: we could have the additional columns at the start, rather than the end
-        fields.push(Arc::new(Field::new("_key_hash", DataType::UInt64, false)));
-        fields.push(Arc::new(Field::new(
-            "_operation",
-            arrow::datatypes::DataType::Binary,
-            false,
-        )));
-        let final_schema = Arc::new(Schema::new_with_metadata(fields, HashMap::new()));
+        let schema = SchemaWithHashAndOperation::new(schema);
 
         let checkpoint_files = checkpoint_message
             .map(|checkpoint_message| checkpoint_message.files)
@@ -143,7 +198,6 @@ impl Table for ExpiringTimeKeyTable {
             table_name: config.table_name,
             task_info,
             schema,
-            final_schema,
             retention: Duration::from_micros(config.retention_micros),
             storage_provider,
             checkpoint_files,
@@ -269,7 +323,7 @@ impl ExpiringTimeKeyTableCheckpointer {
             .await?;
         self.writer = Some(AsyncArrowWriter::try_new(
             async_writer,
-            self.parent.final_schema.clone(),
+            self.parent.schema.state_schema(),
             1_000_0000,
             None,
         )?);
@@ -288,7 +342,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
         if self.writer.is_none() {
             self.init_writer().await?;
         }
-        let (annotated_batch, batch_stats) = self.annotate_record_batch(&batch);
+        let (annotated_batch, batch_stats) = self.annotate_record_batch(&batch)?;
         self.update_parquet_stats(batch_stats);
         self.writer
             .as_mut()
@@ -351,47 +405,11 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
 }
 
 impl ExpiringTimeKeyTableCheckpointer {
-    fn annotate_record_batch(&mut self, record_batch: &RecordBatch) -> (RecordBatch, ParquetStats) {
-        // TODO: figure out if we want a key column if there isn't a key.
-        let key_batch = record_batch
-            .project(&self.parent.schema.key_indices)
-            .unwrap();
-
-        let mut hash_buffer = vec![0u64; key_batch.num_rows()];
-        let hashes = create_hashes(key_batch.columns(), &get_hasher(), &mut hash_buffer).unwrap();
-        let hash_array = PrimitiveArray::<UInt64Type>::from(hash_buffer);
-
-        let hash_min = kernels::aggregate::min(&hash_array).unwrap();
-        let hash_max = kernels::aggregate::max(&hash_array).unwrap();
-        let max_timestamp_nanos: i64 = kernels::aggregate::max(
-            record_batch
-                .column(self.parent.schema.timestamp_index)
-                .as_primitive::<TimestampNanosecondType>(),
-        )
-        .unwrap();
-
-        let batch_stats = ParquetStats {
-            max_timestamp: from_nanos(max_timestamp_nanos as u128),
-            min_routing_key: hash_min,
-            max_routing_key: hash_max,
-        };
-
-        let mut columns = record_batch.columns().to_vec();
-        columns.push(Arc::new(hash_array));
-
-        // TODO: properly encode updates without using bincode
-        let insert_op = ScalarValue::Binary(Some(
-            bincode::encode_to_vec(DataOperation::Insert, config::standard()).unwrap(),
-        ));
-
-        // TODO: handle other types of updates
-        let op_array = insert_op.to_array_of_size(record_batch.num_rows()).unwrap();
-        columns.push(op_array);
-
-        let annotated_record_batch =
-            RecordBatch::try_new(self.parent.final_schema.clone(), columns).unwrap();
-
-        (annotated_record_batch, batch_stats)
+    fn annotate_record_batch(
+        &mut self,
+        record_batch: &RecordBatch,
+    ) -> Result<(RecordBatch, ParquetStats)> {
+        self.parent.schema.annotate_record_batch(record_batch)
     }
 
     fn update_parquet_stats(&mut self, parquet_stats: ParquetStats) {
@@ -413,6 +431,7 @@ impl ExpiringTimeKeyTableCheckpointer {
     }
 }
 
+#[derive(Debug)]
 pub struct ExpiringTimeKeyView {
     parent: ExpiringTimeKeyTable,
     flushed_batches_by_max_timestamp: BTreeMap<SystemTime, Vec<RecordBatch>>,
@@ -424,7 +443,7 @@ impl ExpiringTimeKeyView {
     pub async fn flush(&mut self, watermark: Option<SystemTime>) -> Result<()> {
         while let Some((max_timestamp, mut batches)) = self.batches_to_flush.pop_first() {
             if watermark
-                .map(|watermark| watermark - self.parent.retention <= max_timestamp)
+                .map(|watermark| watermark - self.parent.retention < max_timestamp)
                 .unwrap_or(true)
             {
                 for batch in &batches {
@@ -440,6 +459,11 @@ impl ExpiringTimeKeyView {
                     .or_default()
                     .append(&mut batches);
             }
+        }
+        if let Some(watermark) = watermark {
+            let cutoff = watermark - self.parent.retention;
+            self.flushed_batches_by_max_timestamp =
+                self.flushed_batches_by_max_timestamp.split_off(&cutoff);
         }
         Ok(())
     }
@@ -460,8 +484,53 @@ impl ExpiringTimeKeyView {
         let cutoff = watermark
             .map(|watermark| watermark - self.parent.retention)
             .unwrap_or_else(|| SystemTime::UNIX_EPOCH);
+        warn!("CUTOFF IS {}", print_time(cutoff));
         let flushed_range = self.flushed_batches_by_max_timestamp.range(cutoff..);
         let buffered_range = self.batches_to_flush.range(cutoff..);
         flushed_range.chain(buffered_range)
+    }
+
+    pub fn expire_timestamp(&mut self, timestamp: SystemTime) -> Vec<RecordBatch> {
+        let flushed_batches = self.flushed_batches_by_max_timestamp.remove(&timestamp);
+        let buffered_batches = self.batches_to_flush.remove(&timestamp);
+        match (flushed_batches, buffered_batches) {
+            (None, None) => vec![],
+            (None, Some(batches)) | (Some(batches), None) => batches,
+            (Some(mut flushed_batches), Some(mut buffered_batches)) => {
+                flushed_batches.append(&mut buffered_batches);
+                flushed_batches
+            }
+        }
+    }
+
+    pub async fn flush_timestamp(&mut self, bin_start: SystemTime) -> Result<()> {
+        let Some(batches_to_flush) = self.batches_to_flush.remove(&bin_start) else {
+            return Ok(());
+        };
+        let flushed_vec = self
+            .flushed_batches_by_max_timestamp
+            .entry(bin_start)
+            .or_default();
+        for batch in batches_to_flush {
+            flushed_vec.push(batch.clone());
+            self.state_tx
+                .send(StateMessage::TableData {
+                    table: self.parent.table_name.to_string(),
+                    data: TableData::RecordBatch(batch),
+                })
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub fn get_min_time(&self) -> Option<SystemTime> {
+        match (
+            self.batches_to_flush.keys().next(),
+            self.flushed_batches_by_max_timestamp.keys().next(),
+        ) {
+            (None, None) => None,
+            (None, Some(time)) | (Some(time), None) => Some(*time),
+            (Some(buffered_time), Some(flushed_time)) => Some(*buffered_time.min(flushed_time)),
+        }
     }
 }
