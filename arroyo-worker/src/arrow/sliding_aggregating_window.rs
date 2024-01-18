@@ -1,20 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fmt::{Display, Formatter},
-    mem,
-    pin::Pin,
     sync::{Arc, RwLock},
-    task::Poll,
     time::SystemTime,
 };
 
 use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
 use arrow::compute::{partition, sort_to_indices, take};
-use arrow_array::{
-    types::{Int64Type, TimestampNanosecondType},
-    Array, PrimitiveArray, RecordBatch,
-};
-use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef, TimeUnit};
+use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
+use arrow_schema::{DataType, Field, FieldRef, Schema, TimeUnit};
 use arroyo_df::schemas::{add_timestamp_field_arrow, window_arrow_struct};
 use arroyo_rpc::{
     grpc::{api, api::window::Window, TableConfig},
@@ -24,20 +18,17 @@ use arroyo_state::timestamp_table_config;
 use arroyo_types::{
     from_nanos, print_time, to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
 };
-use datafusion::{
-    execution::context::SessionContext,
-    physical_plan::{aggregates::AggregateExec, ExecutionPlan},
-};
+use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use datafusion_common::ScalarValue;
-use datafusion_physical_plan::DisplayAs;
+
 use futures::stream::FuturesUnordered;
 
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, RunContext};
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
 use crate::{engine::ArrowContext, operator::OperatorNode};
 use arroyo_df::physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
-    FunctionRegistry, SendableRecordBatchStream,
+    SendableRecordBatchStream,
 };
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
@@ -49,7 +40,7 @@ use datafusion_proto::{
 use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::StreamExt;
 use tracing::info;
 
 use super::{sync::streams::KeyedCloneableStreamFuture, EmptyRegistry};
@@ -716,7 +707,7 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
             .await;
     }
 
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {
+    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
         let watermark = ctx
             .watermark()
             .map(|watermark: Watermark| match watermark {

@@ -4,9 +4,8 @@ use std::{
     task::{Context, Poll},
 };
 
-use arroyo_types::Key;
 use futures::ready;
-use futures::{Future, FutureExt, StreamExt};
+use futures::{Future, StreamExt};
 use tokio_stream::Stream;
 
 pub struct CloneableStreamFuture<St: Stream + Unpin> {

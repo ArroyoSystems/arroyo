@@ -6,7 +6,7 @@ use arrow_array::TimestampNanosecondArray;
 use arrow_json::writer::record_batches_to_json_rows;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
-use arroyo_rpc::grpc::api::{ArrowNode, ConnectorOp};
+use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{api, SinkDataReq};
 use arroyo_types::from_nanos;
