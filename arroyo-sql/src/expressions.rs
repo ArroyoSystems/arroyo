@@ -474,7 +474,7 @@ impl Expression {
                 (&mut *e.input).traverse_mut(context, f);
             }
             Expression::Numeric(e) => {
-                for x in (&mut *e.inputs) {
+                for x in &mut *e.inputs {
                     x.traverse_mut(context, f);
                 }
             }
@@ -1991,8 +1991,9 @@ enum NumericFunction {
     Log2,
     Exp,
     Cot,
-    IsZero,
-    IsNanvl,
+    Iszero,
+    Nanvl,
+    Isnan,
 }
 
 impl NumericFunction {
@@ -2023,8 +2024,9 @@ impl NumericFunction {
             NumericFunction::Trunc => "trunc",
             NumericFunction::Signum => "signum",
             NumericFunction::Cot => "cot",
-            NumericFunction::IsZero => "iszero",
-            NumericFunction::IsNanvl => "isnanvl",
+            NumericFunction::Iszero => "iszero",
+            NumericFunction::Nanvl => "nanvl",
+            NumericFunction::Isnan => "isnan",
         };
         format_ident!("{}", name)
     }
@@ -2060,6 +2062,9 @@ impl TryFrom<BuiltinScalarFunction> for NumericFunction {
             BuiltinScalarFunction::Log2 => Ok(Self::Log2),
             BuiltinScalarFunction::Exp => Ok(Self::Exp),
             BuiltinScalarFunction::Cot => Ok(Self::Cot),
+            BuiltinScalarFunction::Isnan => Ok(Self::Isnan),
+            BuiltinScalarFunction::Iszero => Ok(Self::Iszero),
+            BuiltinScalarFunction::Nanvl => Ok(Self::Nanvl),
             _ => bail!("{:?} is not a single argument numeric function", fun),
         }
     }
@@ -2081,7 +2086,7 @@ impl NumericExpression {
 impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for NumericExpression {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
         let function_name = self.function.function_name();
-        match (self.inputs.len(), *self.function) {
+        match (self.inputs.len(), &self.function) {
             (1, _) => {
                 let argument_expression = self.inputs[0].generate(input_context);
                 if self.inputs[0].expression_type(input_context).is_optional() {
@@ -2090,7 +2095,7 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for NumericExpressio
                     parse_quote!((#argument_expression as f64).#function_name())
                 }
             }
-            (2, NumericFunction::IsNanvl) => {
+            (2, NumericFunction::Nanvl) => {
                 let expr1 = self.inputs[0].generate(input_context);
                 let expr2 = self.inputs[1].generate(input_context);
                 parse_quote!(arroyo_worker::operators::functions::numeric::nanvl(#expr1,#expr2))
