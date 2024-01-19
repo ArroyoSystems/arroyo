@@ -1,19 +1,18 @@
-use core::panic;
 use std::collections::HashMap;
 use std::future::ready;
 use std::time::SystemTime;
 
 use anyhow::Result;
 use arrow_array::RecordBatch;
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_state::{global_table, global_table_config};
+
+use arroyo_state::{global_table_config};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion_common::ScalarValue;
 use futures::StreamExt;
 use parquet::arrow::async_reader::ParquetObjectReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
-use prost::Message;
+
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::select;
@@ -22,18 +21,19 @@ use tracing::{info, warn};
 
 use arroyo_formats::old::DataDeserializer;
 use arroyo_rpc::formats::BadData;
-use arroyo_rpc::grpc::{api, TableConfig, TableEnum};
+use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_rpc::{grpc::StopMode, ControlMessage, OperatorConfig};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{to_nanos, UserError};
 use typify::import_types;
 
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode, SourceOperator};
+use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
 use crate::{RateLimiter, SourceFinishType};
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
 
+#[allow(unused)]
 pub struct FileSystemSourceFunc {
     table: TableType,
     deserializer: DataDeserializer<()>,
@@ -91,6 +91,7 @@ impl SourceOperator for FileSystemSourceFunc {
 }
 
 impl FileSystemSourceFunc {
+    #[allow(unused)]
     fn get_compression_format(&self) -> CompressionFormat {
         match &self.table {
             TableType::Source {

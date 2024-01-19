@@ -2,7 +2,7 @@ use crate::engine::{ErrorReporter, TimerValue, WatermarkHolder, QUEUE_SIZE};
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::{RateLimiter, TIMER_TABLE};
 use anyhow::bail;
-use arrow_array::RecordBatch;
+
 use arroyo_datastream::Operator;
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::grpc::{
@@ -12,7 +12,7 @@ use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
 use arroyo_types::{
-    from_micros, server_for_hash, Data, Key, Message, Record, RecordBatchData, SourceError,
+    from_micros, server_for_hash, Data, Key, Message, Record, SourceError,
     TaskInfo, UserError, Watermark,
 };
 use bincode::config;
@@ -21,7 +21,7 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
@@ -181,35 +181,6 @@ impl<K: Key, T: Data> Context<K, T> {
             state,
             _ts: PhantomData,
         }
-    }
-
-    pub fn new_for_test() -> (Self, Receiver<QueueItem>) {
-        let (_, control_rx) = channel(128);
-        let (command_tx, _) = channel(128);
-        let (data_tx, data_rx) = channel(128);
-
-        let out_queue = OutQueue::new(data_tx, false);
-
-        let task_info = TaskInfo {
-            job_id: "instance-1".to_string(),
-            operator_name: "test-operator".to_string(),
-            operator_id: "test-operator-1".to_string(),
-            task_index: 0,
-            parallelism: 1,
-            key_range: 0..=0,
-        };
-
-        let ctx = futures::executor::block_on(Context::new(
-            task_info,
-            None,
-            control_rx,
-            command_tx,
-            1,
-            vec![vec![out_queue]],
-            vec![],
-        ));
-
-        (ctx, data_rx)
     }
 
     pub fn watermark(&self) -> Option<Watermark> {

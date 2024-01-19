@@ -587,16 +587,6 @@ impl StructDef {
             #parquet_reader_items
         }
     }
-
-    pub(crate) fn field_types_match(&self, other: &StructDef) -> bool {
-        if self.fields.len() != other.fields.len() {
-            return false;
-        }
-        self.fields
-            .iter()
-            .zip(other.fields.iter())
-            .all(|(a, b)| a.data_type == b.data_type)
-    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
@@ -1550,54 +1540,6 @@ impl StructField {
             }
             TypeDef::DataType(_, _) => quote!(std::sync::Arc::new(self.#array_field.finish())),
         }
-    }
-}
-
-pub(crate) fn data_type_as_syn_type(data_type: &DataType) -> syn::Type {
-    match data_type {
-        DataType::Null => parse_quote!(std::option::Option<()>),
-        DataType::Boolean => parse_quote!(bool),
-        DataType::Int8 => parse_quote!(i8),
-        DataType::Int16 => parse_quote!(i16),
-        DataType::Int32 => parse_quote!(i32),
-        DataType::Int64 => parse_quote!(i64),
-        DataType::UInt8 => parse_quote!(u8),
-        DataType::UInt16 => parse_quote!(u16),
-        DataType::UInt32 => parse_quote!(u32),
-        DataType::UInt64 => parse_quote!(u64),
-        DataType::Float16 => parse_quote!(f16),
-        DataType::Float32 => parse_quote!(f32),
-        DataType::Float64 => parse_quote!(f64),
-        DataType::Timestamp(_, _) | DataType::Date32 | DataType::Date64 => {
-            parse_quote!(std::time::SystemTime)
-        }
-        DataType::Time32(_) => todo!(),
-        DataType::Time64(_) => todo!(),
-        DataType::Duration(_) | DataType::Interval(_) => {
-            parse_quote!(std::time::Duration)
-        }
-        DataType::Binary => todo!(),
-        DataType::FixedSizeBinary(_) => todo!(),
-        DataType::LargeBinary => todo!(),
-        DataType::Utf8 => parse_quote!(String),
-        DataType::LargeUtf8 => todo!(),
-        DataType::List(field) => {
-            let list_data_type = data_type_as_syn_type(field.data_type());
-            if field.is_nullable() {
-                parse_quote!(Vec<Option<#list_data_type>>)
-            } else {
-                parse_quote!(Vec<#list_data_type>)
-            }
-        }
-        DataType::FixedSizeList(_, _) => todo!(),
-        DataType::LargeList(_) => todo!(),
-        DataType::Struct(_) => unreachable!(),
-        DataType::Union(_, _) => todo!(),
-        DataType::Dictionary(_, _) => todo!(),
-        DataType::Decimal128(_, _) => todo!(),
-        DataType::Decimal256(_, _) => todo!(),
-        DataType::Map(_, _) => todo!(),
-        DataType::RunEndEncoded(_, _) => todo!(),
     }
 }
 

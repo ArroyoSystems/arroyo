@@ -17,6 +17,7 @@ fn deserialize_raw_string<T: DeserializeOwned>(msg: &[u8]) -> Result<T, String> 
 }
 
 #[derive(Clone)]
+#[allow(unused)]
 pub struct DataDeserializer<T: SchemaData> {
     format: Arc<Format>,
     framing: Option<Arc<Framing>>,
@@ -60,7 +61,7 @@ impl<T: SchemaData> DataDeserializer<T> {
         msg: &'a [u8],
     ) -> impl Iterator<Item = Result<T, SourceError>> + 'a + Send {
         match &*self.format {
-            Format::Avro(avro) => {
+            Format::Avro(_avro) => {
                 unimplemented!()
             }
             _ => {
@@ -79,7 +80,7 @@ impl<T: SchemaData> DataDeserializer<T> {
 
     pub fn deserialize_single(&self, msg: &[u8]) -> Result<T, SourceError> {
         match &*self.format {
-            Format::Json(json) => unimplemented!(),
+            Format::Json(_json) => unimplemented!(),
             Format::Avro(_) => unreachable!("avro should be handled by here"),
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
             Format::RawString(_) => deserialize_raw_string(msg),

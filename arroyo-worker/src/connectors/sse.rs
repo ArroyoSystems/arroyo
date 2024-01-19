@@ -1,10 +1,10 @@
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode, SourceOperator};
+use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::{api, StopMode, TableConfig, TableDescriptor};
+use arroyo_rpc::grpc::{api, StopMode, TableConfig};
 use arroyo_rpc::{var_str::VarStr, ControlMessage, ControlResp, OperatorConfig};
-use arroyo_state::tables::global_keyed_map::{GlobalKeyedState, GlobalKeyedView};
+use arroyo_state::tables::global_keyed_map::{GlobalKeyedView};
 use arroyo_types::{string_to_map, ArrowMessage, SignalMessage, UserError, Watermark};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -108,7 +108,7 @@ impl SSESourceFunc {
         match msg? {
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
-                let mut s = ctx
+                let s = ctx
                     .table_manager
                     .get_global_keyed_state("e")
                     .await

@@ -161,6 +161,7 @@ fn set_parallelism(program: &mut LogicalProgram, parallelism: usize) {
     }
 }
 
+#[allow(unused)]
 async fn try_register_confluent_schema(
     sink: &mut ConnectorOp,
     schema: &StructDef,
@@ -228,7 +229,7 @@ async fn try_register_confluent_schema(
 
 async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> {
     for node in compiled_sql.program.graph.node_indices() {
-        let Some(input) = compiled_sql
+        let Some(_input) = compiled_sql
             .program
             .graph
             .edges_directed(node, Direction::Incoming)
@@ -482,7 +483,7 @@ pub async fn validate_query(
 
     let pipeline_graph_validation_result =
         match compile_sql(validate_query_post.query, &udfs, 1, &auth_data, &client).await {
-            Ok(CompiledSql { mut program, .. }) => {
+            Ok(CompiledSql { program, .. }) => {
                 //optimizations::optimize(&mut program.graph);
 
                 QueryValidationResult {
@@ -545,7 +546,7 @@ pub async fn post_pipeline(
         .await
         .map_err(log_and_map)?;
 
-    let (pipeline_id, program) = pipelines::create_pipeline(
+    let (pipeline_id, _program) = pipelines::create_pipeline(
         &create_pipeline_req,
         &pipeline_pub_id,
         auth_data.clone(),

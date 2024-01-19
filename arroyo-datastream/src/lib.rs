@@ -2413,7 +2413,7 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     }
                 }
                 GrpcOperator::Aggregator(agg) => {
-                    match Aggregator::from_i32(agg).ok_or_else(|| anyhow!("unable to map enum"))? {
+                    match Aggregator::try_from(agg).map_err(|_| anyhow!("unable to map enum"))? {
                         Aggregator::None => panic!(),
                         Aggregator::CountAggregate => Operator::Count,
                         Aggregator::MaxAggregate => Operator::Aggregate(AggregateBehavior::Max),
@@ -2554,12 +2554,12 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                 }) => Operator::JoinWithExpiration {
                     left_expiration: Duration::from_micros(left_expiration_micros),
                     right_expiration: Duration::from_micros(right_expiration_micros),
-                    join_type: match GrpcApi::JoinType::from_i32(join_type) {
-                        Some(GrpcApi::JoinType::Inner) => JoinType::Inner,
-                        Some(GrpcApi::JoinType::Left) => JoinType::Left,
-                        Some(GrpcApi::JoinType::Right) => JoinType::Right,
-                        Some(GrpcApi::JoinType::Full) => JoinType::Full,
-                        None => JoinType::Inner,
+                    join_type: match GrpcApi::JoinType::try_from(join_type) {
+                        Ok(GrpcApi::JoinType::Inner) => JoinType::Inner,
+                        Ok(GrpcApi::JoinType::Left) => JoinType::Left,
+                        Ok(GrpcApi::JoinType::Right) => JoinType::Right,
+                        Ok(GrpcApi::JoinType::Full) => JoinType::Full,
+                        Err(_) => JoinType::Inner,
                     },
                 },
                 GrpcOperator::UpdatingOperator(GrpcApi::UpdatingOperator { name, expression }) => {

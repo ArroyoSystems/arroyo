@@ -1,7 +1,7 @@
 use crate::{CheckpointMessage, DataOperation, TableData};
 use anyhow::{bail, Result};
 use arroyo_rpc::grpc::{
-    SubtaskCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
+    TableCheckpointMetadata, TableConfig, TableEnum,
     TableSubtaskCheckpointMetadata, TableType,
 };
 use arroyo_storage::StorageProviderRef;
@@ -13,7 +13,7 @@ use std::fmt::Display;
 use std::time::SystemTime;
 use tracing::info;
 
-use self::global_keyed_map::GlobalKeyedTable;
+
 
 pub mod expiring_time_key_map;
 pub mod global_keyed_map;

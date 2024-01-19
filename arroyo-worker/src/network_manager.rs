@@ -28,9 +28,6 @@ use tokio_stream::StreamExt;
 
 use crate::inq_reader::InQReader;
 
-const CONTINUATION_MARKER: [u8; 4] = [0xff; 4];
-const ALIGNMENT: usize = 8;
-
 #[derive(Clone)]
 struct NetworkSender {
     tx: Sender<QueueItem>,
@@ -230,7 +227,7 @@ impl OutNetworkLink {
             for NetworkReceiver {
                 quad,
                 mut rx,
-                mut dictionary_tracker,
+                dictionary_tracker,
             } in self.receivers
             {
                 let stream = async_stream::stream! {

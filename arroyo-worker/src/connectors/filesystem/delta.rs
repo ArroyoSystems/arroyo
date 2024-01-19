@@ -4,7 +4,6 @@ use arrow::datatypes::Schema;
 use arroyo_storage::{get_current_credentials, StorageProvider};
 use arroyo_types::to_millis;
 use deltalake::{
-    operations::create::CreateBuilder,
     protocol::{Action, Add, SaveMode},
     table::{builder::s3_storage_options::AWS_S3_ALLOW_UNSAFE_RENAME, PeekCommit},
     DeltaTableBuilder,
@@ -67,9 +66,9 @@ async fn load_or_create_table(
 }
 
 async fn create_new_table(
-    table_path: &str,
-    storage_options: HashMap<String, String>,
-    schema: &Schema,
+    _table_path: &str,
+    _storage_options: HashMap<String, String>,
+    _schema: &Schema,
 ) -> Result<deltalake::DeltaTable> {
     bail!("delta isn't on 49.0.0 yet");
     /*

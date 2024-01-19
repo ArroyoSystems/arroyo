@@ -18,14 +18,14 @@ use arroyo_rpc::{
     ControlMessage, ControlResp,
 };
 use arroyo_types::{
-    from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, Key, SignalMessage, TaskInfoRef,
+    from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfoRef,
     Watermark, Window,
 };
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use futures::future::OptionFuture;
 use futures::StreamExt;
-use tokio::pin;
+
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::Stream;
 use tracing::{debug, error, info, warn, Instrument};
@@ -33,11 +33,6 @@ use tracing::{debug, error, info, warn, Instrument};
 pub trait TimerT: Data + PartialEq + Eq + 'static {}
 
 impl<T: Data + PartialEq + Eq + 'static> TimerT for T {}
-
-pub fn server_for_hash(x: u64, n: usize) -> usize {
-    let range_size = u64::MAX / (n as u64);
-    ((x / range_size) as usize) % n
-}
 
 pub fn server_for_hash_array(
     hash: &PrimitiveArray<UInt64Type>,
@@ -51,8 +46,6 @@ pub fn server_for_hash_array(
     let result: &PrimitiveArray<UInt64Type> = mod_array.as_any().downcast_ref().unwrap();
     Ok(result.clone())
 }
-
-pub static TIMER_TABLE: char = '[';
 
 pub trait TimeWindowAssigner: Send + 'static {
     fn windows(&self, ts: SystemTime) -> Vec<Window>;
@@ -113,28 +106,7 @@ impl TimeWindowAssigner for InstantWindowAssigner {
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct SlidingWindowAssigner {
-    pub size: Duration,
-    pub slide: Duration,
-}
-//  012345678
-//  --x------
-// [--x]
-//  [-x-]
-//   [x--]
-//    [---]
-
-impl SlidingWindowAssigner {
-    fn start(&self, ts: SystemTime) -> SystemTime {
-        let ts_millis = to_millis(ts);
-        let earliest_window_start = ts_millis - self.size.as_millis() as u64;
-
-        let remainder = earliest_window_start % (self.slide.as_millis() as u64);
-
-        from_millis(earliest_window_start - remainder + self.slide.as_millis() as u64)
-    }
-}
+#[allow(unused)]
 pub struct RunContext<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync> {
     pub task_info: TaskInfoRef,
     pub name: String,
@@ -147,87 +119,11 @@ pub struct RunContext<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync> {
     // TODO: ticks
 }
 
-impl TimeWindowAssigner for SlidingWindowAssigner {
-    fn windows(&self, ts: SystemTime) -> Vec<Window> {
-        let mut windows =
-            Vec::with_capacity(self.size.as_millis() as usize / self.slide.as_millis() as usize);
-
-        let mut start = self.start(ts);
-
-        while start <= ts {
-            windows.push(Window {
-                start,
-                end: start + self.size,
-            });
-            start += self.slide;
-        }
-
-        windows
-    }
-
-    fn next(&self, window: Window) -> Window {
-        let start_time = window.start + self.slide;
-        Window {
-            start: start_time,
-            end: start_time + self.size,
-        }
-    }
-
-    fn safe_retention_duration(&self) -> Option<Duration> {
-        Some(self.size)
-    }
-}
-
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct ArrowTimerValue {
     pub time: SystemTime,
     pub key: Vec<u8>,
     pub data: Vec<u8>,
-}
-
-#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
-pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
-    pub time: SystemTime,
-    pub key: K,
-    pub data: T,
-}
-
-pub struct ProcessFnUtils {}
-
-impl ProcessFnUtils {
-    pub async fn finished_timers<OutK: Key, OutT: Data, Timer: Data + Eq + PartialEq>(
-        _watermark: SystemTime,
-        _ctx: &mut ArrowContext,
-    ) -> Vec<(OutK, TimerValue<OutK, Timer>)> {
-        /* TODO: decide how we want to handle timers in Arrow world.
-        let mut state = ctx
-           .state
-           .get_time_key_map(TIMER_TABLE, ctx.last_present_watermark())
-           .await;
-        //state.evict_all_before_watermark(watermark)*/
-        vec![]
-    }
-
-    pub async fn send_checkpoint_event<OutK: Key, OutT: Data>(
-        barrier: arroyo_types::CheckpointBarrier,
-        ctx: &mut ArrowContext,
-        event_type: TaskCheckpointEventType,
-    ) {
-        // These messages are received by the engine control thread,
-        // which then sends a TaskCheckpointEventReq to the controller.
-        ctx.control_tx
-            .send(arroyo_rpc::ControlResp::CheckpointEvent(
-                arroyo_rpc::CheckpointEvent {
-                    checkpoint_epoch: barrier.epoch,
-                    operator_id: ctx.task_info.operator_id.clone(),
-                    subtask_index: ctx.task_info.task_index as u32,
-                    time: std::time::SystemTime::now(),
-                    event_type,
-                },
-            ))
-            .await
-            .unwrap();
-    }
 }
 
 pub trait ArrowOperatorConstructor<C: prost::Message> {
@@ -375,7 +271,7 @@ async fn operator_run_behavior(
     let mut sel = InQReader::new();
     let in_partitions = in_qs.len();
 
-    for (i, mut q) in in_qs.into_iter().enumerate() {
+    for (i, q) in in_qs.into_iter().enumerate() {
         let stream = async_stream::stream! {
           while let Some(item) = q.recv().await {
             yield(i,item);
@@ -477,7 +373,7 @@ pub trait ArrowOperator: Send + 'static {
             ctx.task_info.task_index
         );
 
-        if let Watermark::EventTime(t) = watermark {
+        if let Watermark::EventTime(_t) = watermark {
             // let finished = ProcessFnUtils::finished_timers(t, ctx).await;
             //
             // for (k, tv) in finished {
@@ -577,7 +473,7 @@ pub trait ArrowOperator: Send + 'static {
                     .expect("watermark index is too big");
 
                 if let Some(watermark) = watermark {
-                    if let Watermark::EventTime(t) = watermark {
+                    if let Watermark::EventTime(_t) = watermark {
                         // TOOD: pass to table_manager
                     }
 

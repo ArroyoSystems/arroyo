@@ -30,8 +30,7 @@ use tracing::info;
 use crate::DEFAULT_IDLE_TIME;
 use crate::{
     external::{ProcessingMode, SqlSource},
-    json_schema,
-    types::{convert_data_type, StructDef, StructField, TypeDef},
+    types::{convert_data_type, StructField},
     ArroyoSchemaProvider,
 };
 

@@ -2,8 +2,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 use std::{fmt::Debug, sync::Arc};
 
-use arroyo_datastream::Program;
-use arroyo_rpc::grpc::api::{ArrowProgram, PipelineProgram};
+use arroyo_rpc::grpc::api::ArrowProgram;
 
 use arroyo_server_common::log_event;
 use deadpool_postgres::Pool;

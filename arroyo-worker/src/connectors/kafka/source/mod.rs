@@ -1,14 +1,14 @@
 use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
-use anyhow::anyhow;
+
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::grpc::{api, TableConfig, TableDescriptor};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, FailingSchemaResolver, SchemaResolver};
 use arroyo_rpc::OperatorConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+
 use arroyo_types::*;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -103,7 +103,7 @@ impl KafkaSourceFunc {
             )
             .create()?;
 
-        let mut s: HashMap<i32, KafkaState> = ctx
+        let s: HashMap<i32, KafkaState> = ctx
             .table_manager
             .get_global_keyed_state("k")
             .await?
@@ -218,7 +218,7 @@ impl KafkaSourceFunc {
                         Some(ControlMessage::Checkpoint(c)) => {
                             debug!("starting checkpointing {}", ctx.task_info.task_index);
                             let mut topic_partitions = TopicPartitionList::new();
-                            let mut s = ctx.table_manager.get_global_keyed_state("k").await
+                            let s = ctx.table_manager.get_global_keyed_state("k").await
                                 .map_err(|err| UserError::new("failed to get global key value", err.to_string()))?;
                             for (partition, offset) in &offsets {
                                 s.insert(*partition, KafkaState {

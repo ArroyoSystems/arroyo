@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use arrow_array::types::IntervalMonthDayNanoType;
-use arrow_schema::{DataType, Schema};
-use arroyo_datastream::{ConnectorOp, WindowType};
+use arrow_schema::{Schema};
+use arroyo_datastream::{WindowType};
 
 use datafusion::{
     execution::{
@@ -21,12 +21,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
-use arroyo_rpc::grpc::api::{self, SlidingWindow};
+use arroyo_rpc::grpc::api::{self};
 use arroyo_rpc::grpc::api::{
-    window, KeyPlanOperator, TumblingWindow, ValuePlanOperator, Window, WindowAggregateOperator,
+    KeyPlanOperator, ValuePlanOperator, Window, WindowAggregateOperator,
 };
-use datafusion_common::{DFField, DFSchema, ScalarValue};
-use datafusion_expr::{expr::ScalarFunction, BinaryExpr, BuiltinScalarFunction, Expr, LogicalPlan};
+use datafusion_common::{ScalarValue};
+use datafusion_expr::{expr::ScalarFunction, BuiltinScalarFunction, Expr, LogicalPlan};
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{PhysicalExprNode, PhysicalPlanNode},
@@ -188,7 +188,7 @@ pub(crate) async fn get_arrow_program(
                 let my_aggregate = aggregate.aggregate.clone();
                 let logical_plan = LogicalPlan::Aggregate(my_aggregate);
 
-                let LogicalPlan::TableScan(table_scan) = aggregate.aggregate.input.as_ref() else {
+                let LogicalPlan::TableScan(_table_scan) = aggregate.aggregate.input.as_ref() else {
                     bail!("expected logical plan")
                 };
 
@@ -204,9 +204,9 @@ pub(crate) async fn get_arrow_program(
                     )?;
                 let slide = match &aggregate.window {
                     WindowType::Tumbling { width } => width,
-                    WindowType::Sliding { width, slide } => slide,
+                    WindowType::Sliding { width: _, slide } => slide,
                     WindowType::Instant => bail!("instant window not yet implemented"),
-                    WindowType::Session { gap } => bail!("session window not yet implemented"),
+                    WindowType::Session { gap: _ } => bail!("session window not yet implemented"),
                 };
 
                 let date_bin = Expr::ScalarFunction(ScalarFunction {
@@ -266,7 +266,7 @@ pub(crate) async fn get_arrow_program(
                 node_mapping.insert(node_index, new_node_index);
                 new_node_index
             }
-            crate::LogicalPlanExtension::Sink { name, connector_op } => {
+            crate::LogicalPlanExtension::Sink { name: _, connector_op } => {
                 let connector_op: api::ConnectorOp = connector_op.clone().into();
                 let sink_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("sink_{}", program_graph.node_count()),

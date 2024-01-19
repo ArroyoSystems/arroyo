@@ -45,7 +45,7 @@ use tables::{Insert, Table};
 use types::interval_month_day_nanos_to_duration;
 
 use crate::plan_graph::get_arrow_program;
-use crate::types::{StructDef, StructField, TypeDef};
+use crate::types::{StructDef, TypeDef};
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion_common::{DFSchema, DFSchemaRef, DataFusionError};
 use prettyplease::unparse;
@@ -546,6 +546,7 @@ enum LogicalPlanExtension {
     },
     AggregateCalculation(AggregateCalculation),
     Sink {
+        #[allow(unused)]
         name: String,
         connector_op: ConnectorOp,
     },
@@ -1196,95 +1197,6 @@ impl Default for TestStruct {
         }
     }
 }
-
-fn test_struct_def() -> StructDef {
-    StructDef::for_name(
-        Some("TestStruct".to_string()),
-        vec![
-            StructField::new(
-                "non_nullable_i32".to_string(),
-                None,
-                TypeDef::DataType(DataType::Int32, false),
-            ),
-            StructField::new(
-                "nullable_i32".to_string(),
-                None,
-                TypeDef::DataType(DataType::Int32, true),
-            ),
-            StructField::new(
-                "non_nullable_bool".to_string(),
-                None,
-                TypeDef::DataType(DataType::Boolean, false),
-            ),
-            StructField::new(
-                "nullable_bool".to_string(),
-                None,
-                TypeDef::DataType(DataType::Boolean, true),
-            ),
-            StructField::new(
-                "non_nullable_f32".to_string(),
-                None,
-                TypeDef::DataType(DataType::Float32, false),
-            ),
-            StructField::new(
-                "nullable_f32".to_string(),
-                None,
-                TypeDef::DataType(DataType::Float32, true),
-            ),
-            StructField::new(
-                "non_nullable_f64".to_string(),
-                None,
-                TypeDef::DataType(DataType::Float64, false),
-            ),
-            StructField::new(
-                "nullable_f64".to_string(),
-                None,
-                TypeDef::DataType(DataType::Float64, true),
-            ),
-            StructField::new(
-                "non_nullable_i64".to_string(),
-                None,
-                TypeDef::DataType(DataType::Int64, false),
-            ),
-            StructField::new(
-                "nullable_i64".to_string(),
-                None,
-                TypeDef::DataType(DataType::Int64, true),
-            ),
-            StructField::new(
-                "non_nullable_string".to_string(),
-                None,
-                TypeDef::DataType(DataType::Utf8, false),
-            ),
-            StructField::new(
-                "nullable_string".to_string(),
-                None,
-                TypeDef::DataType(DataType::Utf8, true),
-            ),
-            StructField::new(
-                "non_nullable_timestamp".to_string(),
-                None,
-                TypeDef::DataType(DataType::Timestamp(TimeUnit::Microsecond, None), false),
-            ),
-            StructField::new(
-                "nullable_timestamp".to_string(),
-                None,
-                TypeDef::DataType(DataType::Timestamp(TimeUnit::Microsecond, None), true),
-            ),
-            StructField::new(
-                "non_nullable_bytes".to_string(),
-                None,
-                TypeDef::DataType(DataType::Binary, false),
-            ),
-            StructField::new(
-                "nullable_bytes".to_string(),
-                None,
-                TypeDef::DataType(DataType::Binary, true),
-            ),
-        ],
-    )
-}
-
 pub fn has_duplicate_udf_names<'a>(definitions: impl Iterator<Item = &'a String>) -> bool {
     let mut udf_names = HashSet::new();
     for definition in definitions {

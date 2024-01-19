@@ -1,4 +1,3 @@
-use crate::metrics::CURRENT_FILES_GAUGE;
 use crate::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use crate::tables::global_keyed_map::GlobalKeyedTable;
 use crate::tables::{BlindDataTuple, Compactor, DataTuple, ErasedTable};
@@ -6,47 +5,33 @@ use crate::{
     hash_key, BackingStore, DataOperation, DeleteKeyOperation, DeleteTimeKeyOperation,
     DeleteTimeRangeOperation, DeleteValueOperation, StateStore, BINCODE_CONFIG,
 };
-use ahash::RandomState;
 use anyhow::{bail, Context, Result};
-use arrow::compute::kernels;
-use arrow::record_batch;
-use arrow_array::cast::AsArray;
-use arrow_array::types::{GenericBinaryType, TimestampNanosecondType, UInt64Type};
-use arrow_array::{Array, GenericByteArray, PrimitiveArray, RecordBatch, RecordBatchReader};
-use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use arrow_array::types::{GenericBinaryType};
+use arrow_array::{Array, RecordBatch};
 use arroyo_rpc::grpc::backend_data::BackendData;
 use arroyo_rpc::grpc::{
-    backend_data, CheckpointMetadata, OperatorCheckpointMetadata, ParquetStoreData,
-    SubtaskCheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType,
+    backend_data, CheckpointMetadata, OperatorCheckpointMetadata, ParquetStoreData, TableDescriptor, TableType,
 };
-use arroyo_rpc::{grpc, ArroyoSchema, CheckpointCompleted, CompactionResult, ControlResp};
+use arroyo_rpc::{grpc, ArroyoSchema, CompactionResult, ControlResp};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{
-    from_nanos, range_for_server, to_micros, to_nanos, CheckpointBarrier, Data, Key, TaskInfo,
+    from_nanos, range_for_server, to_nanos, CheckpointBarrier, Data, Key, TaskInfo,
     CHECKPOINT_URL_ENV, S3_ENDPOINT_ENV, S3_REGION_ENV,
 };
 use bincode::config;
 use bytes::Bytes;
-use datafusion::physical_plan::projection::ProjectionExec;
-use datafusion_common::hash_utils::create_hashes;
-use datafusion_common::{DFSchema, ScalarValue};
-use datafusion_execution::object_store;
-use datafusion_physical_expr::PhysicalExpr;
+
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use parquet::arrow::arrow_reader::{ArrowReaderBuilder, ParquetRecordBatchReaderBuilder};
-use parquet::arrow::{ArrowWriter, AsyncArrowWriter};
+use parquet::arrow::arrow_reader::{ParquetRecordBatchReaderBuilder};
+use parquet::arrow::{ArrowWriter};
 use parquet::basic::ZstdLevel;
 use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use prost::Message;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
-use std::fs::File;
-use std::io::BufReader;
 use std::ops::{Range, RangeInclusive};
-use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::io::AsyncWrite;
 use tokio::sync::mpsc::{self, channel, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
@@ -1151,21 +1136,25 @@ impl ParquetWriter {
 enum ParquetQueueItem {
     Write(ParquetWrite),
     Checkpoint(ParquetCheckpoint),
+    #[allow(unused)]
     CommitData {
         epoch: u32,
         table: char,
         data: Vec<u8>,
     },
+    #[allow(unused)]
     RecordBatchInit {
         table: char,
         schema: ArroyoSchema,
     },
+    #[allow(unused)]
     RecordBatch {
         record_batch: RecordBatch,
         table: char,
     },
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 struct ParquetWrite {
     table: char,
@@ -1176,6 +1165,7 @@ struct ParquetWrite {
     operation: DataOperation,
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 struct ParquetCheckpoint {
     epoch: u32,
@@ -1332,6 +1322,7 @@ impl Default for RecordBatchBuilder {
     }
 }
 
+#[allow(unused)]
 struct ParquetFlusher {
     queue: Receiver<ParquetQueueItem>,
     storage: StorageProvider,
@@ -1347,6 +1338,7 @@ struct ParquetFlusher {
     current_epoch: u32,
 }
 
+#[allow(unused)]
 impl ParquetFlusher {
     fn start(mut self) {
         tokio::spawn(async move {
