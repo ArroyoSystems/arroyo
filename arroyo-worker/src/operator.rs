@@ -1,5 +1,7 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use std::{collections::HashSet, time::SystemTime};
@@ -21,7 +23,9 @@ use arroyo_types::{
 };
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use futures::future::OptionFuture;
 use futures::StreamExt;
+use tokio::pin;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::Stream;
 use tracing::{debug, error, info, warn, Instrument};
@@ -388,6 +392,7 @@ async fn operator_run_behavior(
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
+        let operator_future: OptionFuture<_> = this.future_to_poll().into();
         tokio::select! {
             Some(control_message) = ctx.control_rx.recv() => {
                 this.handle_controller_message(control_message, ctx).await;
@@ -447,6 +452,9 @@ async fn operator_run_behavior(
                         break;
                     }
                 }
+            }
+            Some(val) = operator_future => {
+                this.handle_future_result(val, ctx).await;
             }
             _ = interval.tick() => {
                 this.handle_tick(ticks, ctx).await;
@@ -606,6 +614,15 @@ pub trait ArrowOperator: Send + 'static {
     async fn on_start(&mut self, ctx: &mut ArrowContext) {}
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext);
+
+    fn future_to_poll(
+        &mut self,
+    ) -> Option<Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>> {
+        None
+    }
+
+    #[allow(unused_variables)]
+    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, ctx: &mut ArrowContext) {}
 
     #[allow(unused_variables)]
     async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut ArrowContext) {}

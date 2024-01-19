@@ -1,3 +1,6 @@
+use std::any::Any;
+use std::future::Future;
+use std::pin::Pin;
 use std::{
     collections::{BTreeMap, HashMap},
     mem,
@@ -15,9 +18,9 @@ use arroyo_rpc::{
     ArroyoSchema,
 };
 use arroyo_state::timestamp_table_config;
-use arroyo_types::{from_nanos, to_nanos, CheckpointBarrier, Watermark};
+use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
-use datafusion_common::ScalarValue;
+use datafusion_common::{DataFusionError, ScalarValue};
 use futures::stream::FuturesUnordered;
 
 use crate::engine::ArrowContext;
@@ -26,7 +29,7 @@ use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 use arroyo_df::physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
-    SendableRecordBatchStream,
+    RecordBatchStream, SendableRecordBatchStream,
 };
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
@@ -38,6 +41,7 @@ use datafusion_proto::{
 use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 use tracing::info;
 
@@ -57,7 +61,7 @@ pub struct TumblingAggregatingWindowFunc<K: Copy> {
     // which is only used on the exec()
     receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
     final_batches_passer: Arc<RwLock<Vec<RecordBatch>>>,
-    futures: FuturesUnordered<NextBatchFuture<K>>,
+    futures: Arc<Mutex<FuturesUnordered<NextBatchFuture<K>>>>,
     execs: BTreeMap<K, BinComputingHolder<K>>,
     window_field: FieldRef,
     window_index: usize,
@@ -90,6 +94,8 @@ impl<K: Copy> Default for BinComputingHolder<K> {
         }
     }
 }
+
+type PolledFutureT = <NextBatchFuture<SystemTime> as Future>::Output;
 
 impl TumblingAggregatingWindowFunc<SystemTime> {}
 
@@ -221,7 +227,7 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator>
             finish_execution_plan,
             receiver,
             final_batches_passer,
-            futures: FuturesUnordered::new(),
+            futures: Arc::new(Mutex::new(FuturesUnordered::new())),
             execs: BTreeMap::new(),
             window_field,
             window_index: proto_config.window_index as usize,
@@ -297,7 +303,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                     .execute(0, SessionContext::new().task_ctx())
                     .unwrap();
                 let next_batch_future = NextBatchFuture::new(bin_start, new_exec);
-                self.futures.push(next_batch_future.clone());
+                self.futures.lock().await.push(next_batch_future.clone());
                 bin_exec.active_exec = Some(next_batch_future);
             }
             bin_exec
@@ -392,6 +398,38 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                     break;
                 }
             }
+        }
+    }
+
+    fn future_to_poll(
+        &mut self,
+    ) -> Option<Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>> {
+        let future = self.futures.clone();
+        Some(Box::pin(async move {
+            let result: Option<PolledFutureT> = future.lock().await.next().await;
+            Box::new(result) as Box<dyn Any + Send>
+        }))
+    }
+
+    async fn handle_future_result(&mut self, result: Box<dyn Any + Send>, _: &mut ArrowContext) {
+        let data: Box<Option<PolledFutureT>> = result.downcast().expect("invalid data in future");
+        match *data {
+            Some((bin, batch_option)) => match batch_option {
+                None => {
+                    info!("future for {} was finished elsewhere", print_time(bin));
+                }
+                Some((batch, future)) => match self.execs.get_mut(&bin) {
+                    Some(exec) => {
+                        exec.finished_batches
+                            .push(batch.expect("should've been able to compute a batch"));
+                        self.futures.lock().await.push(future);
+                    }
+                    None => unreachable!(
+                        "FuturesUnordered returned a batch, but we can't find the exec"
+                    ),
+                },
+            },
+            None => {}
         }
     }
 
