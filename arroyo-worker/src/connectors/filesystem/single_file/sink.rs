@@ -57,12 +57,7 @@ impl ArrowOperator for FileSink {
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
-        vec![(
-            "f".to_string(),
-            arroyo_state::global_table_config("f", "file_sink"),
-        )]
-        .into_iter()
-        .collect()
+        arroyo_state::global_table_config("f", "file_sink")
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {

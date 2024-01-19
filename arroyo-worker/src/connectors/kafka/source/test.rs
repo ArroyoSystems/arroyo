@@ -1,4 +1,7 @@
 use arrow::datatypes::{DataType, Field, Schema};
+use arroyo_formats::SchemaData;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
+use arroyo_state::tables::ErasedTable;
 use arroyo_state::{BackingStore, StateBackend};
 use rand::random;
 
@@ -11,12 +14,13 @@ use std::time::{Duration, SystemTime};
 use crate::connectors::kafka::source;
 use crate::engine::{ArrowContext, QueueItem};
 use crate::operator::SourceOperator;
-use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
 use arroyo_rpc::schema_resolver::FailingSchemaResolver;
 use arroyo_rpc::{ArroyoSchema, CheckpointCompleted, ControlMessage, ControlResp};
-use arroyo_types::{to_micros, ArrowMessage, CheckpointBarrier, SignalMessage, TaskInfo};
+use arroyo_types::{
+    single_item_hash_map, to_micros, ArrowMessage, CheckpointBarrier, SignalMessage, TaskInfo,
+};
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
@@ -267,6 +271,16 @@ async fn test_kafka() {
     producer.send_data(TestData { i: 20 });
 
     reader.assert_next_message_checkpoint(1).await;
+    let subtask_metadata = checkpoint_completed.subtask_metadata;
+    let table_metadata = GlobalKeyedTable::merge_checkpoint_metadata(
+        subtask_metadata.table_configs.get("k").unwrap().clone(),
+        single_item_hash_map(
+            0u32,
+            subtask_metadata.table_metadata.get("k").unwrap().clone(),
+        ),
+    )
+    .unwrap()
+    .unwrap();
 
     StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
         job_id: task_info.job_id.clone(),
@@ -278,11 +292,11 @@ async fn test_kafka() {
         max_watermark: Some(0),
         has_state: true,
         tables: source::tables(),
-        backend_data: checkpoint_completed.subtask_metadata.backend_data,
-        bytes: checkpoint_completed.subtask_metadata.bytes,
+        backend_data: subtask_metadata.backend_data,
+        bytes: subtask_metadata.bytes,
         commit_data: None,
-        table_checkpoint_metadata: HashMap::new(),
-        table_configs: HashMap::new(),
+        table_checkpoint_metadata: single_item_hash_map("k", table_metadata),
+        table_configs: subtask_metadata.table_configs,
     })
     .await;
 

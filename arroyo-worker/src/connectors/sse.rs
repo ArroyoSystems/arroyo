@@ -74,12 +74,7 @@ impl SourceOperator for SSESourceFunc {
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
-        vec![(
-            "e".to_string(),
-            arroyo_state::global_table_config("e", "sse source state"),
-        )]
-        .into_iter()
-        .collect()
+        arroyo_state::global_table_config("e", "sse source state")
     }
 
     async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {

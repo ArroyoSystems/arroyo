@@ -275,12 +275,7 @@ impl SourceOperator for ImpulseSourceFunc {
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
-        vec![(
-            "i".to_string(),
-            arroyo_state::global_table_config("i", "impulse source state"),
-        )]
-        .into_iter()
-        .collect()
+        arroyo_state::global_table_config("i", "impulse source state")
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {

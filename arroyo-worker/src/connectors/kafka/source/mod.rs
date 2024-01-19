@@ -355,11 +355,6 @@ impl SourceOperator for KafkaSourceFunc {
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
-        vec![(
-            "k".to_string(),
-            arroyo_state::global_table_config("k", "kafka offsets"),
-        )]
-        .into_iter()
-        .collect()
+        arroyo_state::global_table_config("k", "kafka offsets")
     }
 }

@@ -153,12 +153,7 @@ impl ArrowOperatorConstructor<api::PeriodicWatermark> for PeriodicWatermarkGener
 #[async_trait]
 impl ArrowOperator for PeriodicWatermarkGenerator {
     fn tables(&self) -> HashMap<String, TableConfig> {
-        vec![(
-            "s".to_string(),
-            global_table_config("s", "periodic watermark state"),
-        )]
-        .into_iter()
-        .collect()
+        global_table_config("s", "periodic watermark state")
     }
 
     fn name(&self) -> String {

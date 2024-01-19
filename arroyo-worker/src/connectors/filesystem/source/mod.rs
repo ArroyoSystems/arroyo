@@ -71,9 +71,7 @@ impl ArrowOperatorConstructor<api::ConnectorOp> for FileSystemSourceFunc {
 #[async_trait]
 impl SourceOperator for FileSystemSourceFunc {
     fn tables(&self) -> HashMap<String, TableConfig> {
-        vec![("a".to_string(), global_table_config("a", "fs"))]
-            .into_iter()
-            .collect()
+        global_table_config("a", "fs")
     }
 
     fn name(&self) -> String {
