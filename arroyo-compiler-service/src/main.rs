@@ -355,6 +355,13 @@ impl CompilerGrpc for CompileService {
             .await
             .map_err(|e| Status::internal(format!("Writing UDFs failed: {}", e)))?;
 
+        // udfs depend on arroyo-types::UdfContext, so the types crate needs to export it
+        tokio::fs::write(
+            self.build_dir.join("types/src/lib.rs"),
+            "pub use arroyo_types::UdfContext;",
+        )
+        .await?;
+
         let output = Command::new("cargo")
             .current_dir(&udf_build_dir)
             .arg("check")

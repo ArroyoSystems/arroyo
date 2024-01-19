@@ -2,12 +2,16 @@ use std::{collections::HashMap, marker::PhantomData, path::Path};
 
 use anyhow::Result;
 use arrow_array::RecordBatch;
+use arroyo_formats::SchemaData;
+use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::{
     grpc::{api::ConnectorOp, TableConfig},
     OperatorConfig,
 };
-use arroyo_types::CheckpointBarrier;
+use arroyo_types::{CheckpointBarrier, SignalMessage};
+use arroyo_types::{Key, Message, Record};
 use async_trait::async_trait;
+use serde::Serialize;
 use tokio::{
     fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
@@ -104,8 +108,10 @@ impl ArrowOperator for FileSink {
         }
     }
 
-    async fn on_close(&mut self, _ctx: &mut ArrowContext) {
-        self.file.as_mut().unwrap().flush().await.unwrap();
+    async fn on_close(&mut self, final_message: &Option<SignalMessage>, _ctx: &mut ArrowContext) {
+        if let Some(SignalMessage::EndOfData) = final_message {
+            self.file.as_mut().unwrap().flush().await.unwrap();
+        }
     }
 
     async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {

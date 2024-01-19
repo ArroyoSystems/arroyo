@@ -61,7 +61,11 @@ impl<K: Key, T: Data + Serialize> GrpcSink<K, T> {
             .unwrap();
     }
 
-    async fn on_close(&mut self, ctx: &mut Context<(), ()>) {
+    async fn on_close(
+        &mut self,
+        ctx: &mut Context<(), ()>,
+        _final_message: &Option<Message<(), ()>>,
+    ) {
         self.client
             .as_mut()
             .unwrap()

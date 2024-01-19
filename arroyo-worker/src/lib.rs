@@ -78,12 +78,12 @@ pub enum SourceFinishType {
     Final,
 }
 
-impl From<SourceFinishType> for Option<ArrowMessage> {
+impl From<SourceFinishType> for Option<SignalMessage> {
     fn from(value: SourceFinishType) -> Self {
         match value {
-            SourceFinishType::Graceful => Some(ArrowMessage::Signal(SignalMessage::Stop)),
+            SourceFinishType::Graceful => Some(SignalMessage::Stop),
             SourceFinishType::Immediate => None,
-            SourceFinishType::Final => Some(ArrowMessage::Signal(SignalMessage::EndOfData)),
+            SourceFinishType::Final => Some(SignalMessage::EndOfData),
         }
     }
 }

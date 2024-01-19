@@ -367,22 +367,10 @@ impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(Option<T
                         ))
                     }
                 }
-                None => {
-                    if left_count == 1 {
-                        Some((
-                            left_timestamp,
-                            UpdatingData::Update {
-                                old: (Some(left.clone()), None),
-                                new: (None, None),
-                            },
-                        ))
-                    } else {
-                        Some((
-                            left_timestamp,
-                            UpdatingData::Retract((Some(left.clone()), None)),
-                        ))
-                    }
-                }
+                None => Some((
+                    left_timestamp,
+                    UpdatingData::Retract((Some(left.clone()), None)),
+                )),
             },
         }
     }
@@ -450,22 +438,10 @@ impl<K: Key, T1: Data, T2: Data> JoinProcessor<K, T1, T2, UpdatingData<(Option<T
                         ))
                     }
                 }
-                None => {
-                    if right_count == 1 {
-                        Some((
-                            right_timestamp,
-                            UpdatingData::Update {
-                                old: (None, Some(right.clone())),
-                                new: (None, None),
-                            },
-                        ))
-                    } else {
-                        Some((
-                            right_timestamp,
-                            UpdatingData::Retract((None, Some(right.clone()))),
-                        ))
-                    }
-                }
+                None => Some((
+                    right_timestamp,
+                    UpdatingData::Retract((None, Some(right.clone()))),
+                )),
             },
         }
     }

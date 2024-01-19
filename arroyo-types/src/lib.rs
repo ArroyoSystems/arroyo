@@ -1,8 +1,6 @@
-use arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
-use arrow_array::builder::PrimitiveBuilder;
-use arrow_array::cast::AsArray;
-use arrow_array::types::TimestampNanosecondType;
-use arrow_array::{PrimitiveArray, RecordBatch, RecordBatchOptions, StructArray};
+use arrow::datatypes::{Field, SchemaRef};
+use arrow_array::RecordBatch;
+use async_trait::async_trait;
 use bincode::{config, BorrowDecode, Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -330,7 +328,6 @@ pub enum Watermark {
 #[derive(Debug, Clone, Encode, Decode)]
 pub enum Message<K: Key, T: Data> {
     Record(Record<K, T>),
-    RecordBatch(RecordBatchData),
     Barrier(CheckpointBarrier),
     Watermark(Watermark),
     Stop,
@@ -372,7 +369,7 @@ impl<K: Key, T: Data> Message<K, T> {
     }
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct Record<K: Key, T: Data> {
     pub timestamp: SystemTime,
     pub key: Option<K>,
@@ -1080,4 +1077,10 @@ mod tests {
             "u64::MAX is not in the correct range"
         );
     }
+}
+
+#[async_trait]
+pub trait UdfContext: Sync {
+    async fn init(&self) {}
+    async fn close(&self) {}
 }

@@ -9,7 +9,7 @@
             "examples": [
                 "https://yourdomain.com/api/v1/webhooks"
             ],
-            "format": "uri"
+            "format": "var-str"
         },
         "headers": {
             "title": "Headers",

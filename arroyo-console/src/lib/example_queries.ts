@@ -20,7 +20,7 @@ export const exampleQueries: ExampleQuery[] = [
       ') WITH (\n' +
       "    connector = 'sse',\n" +
       "    format = 'raw_string',\n" +
-      "    endpoint = 'https://mstdn.party/api/v1/streaming/public',\n" +
+      "    endpoint = 'http://mastodon.arroyo.dev/api/v1/streaming/public',\n" +
       "    events = 'update'\n" +
       ');\n' +
       '\n' +

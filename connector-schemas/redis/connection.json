@@ -11,6 +11,7 @@
                     "properties": {
                         "address": {
                             "type": "string",
+                            "title": "address",
                             "description": "The address of your Redis server",
                             "examples": ["redis://localhost:6379"],
                             "pattern": "^redis://.*$"
@@ -43,8 +44,24 @@
                     "additionalProperties": false
                 }
             ]
+        },
+
+        "username": {
+            "title": "Username",
+            "type": "string",
+            "description": "The username for your redis cluster (if using auth)",
+            "format": "var-str"
+        },
+        "password": {
+            "title": "Password",
+            "type": "string",
+            "description": "The password for your redis cluster (if using auth)",
+            "format": "var-str"
         }
     },
+    "sensitive": [
+        "password"
+    ],
     "required": [
         "connection"
     ]

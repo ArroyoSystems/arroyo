@@ -762,11 +762,7 @@ impl JobController {
         let cur_epoch = self.model.epoch;
 
         tokio::spawn(async move {
-            let checkpoint = StateBackend::load_checkpoint_metadata(&job_id, cur_epoch)
-                .await
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Couldn't find checkpoint for job during cleaning")
-                })?;
+            let checkpoint = StateBackend::load_checkpoint_metadata(&job_id, cur_epoch).await?;
 
             let c = pool.get().await?;
             controller_queries::mark_compacting()

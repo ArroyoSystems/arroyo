@@ -35,11 +35,6 @@ pub struct Collector<K: Key, T: Data> {
 }
 
 impl<K: Key, T: Data> Collector<K, T> {
-    pub async fn collect_record_batch(&mut self, record_batch: RecordBatch) {
-        let message: Message<K, T> = Message::RecordBatch(RecordBatchData(record_batch));
-        self.out_qs[0][0].send(&self.task_info, message).await;
-    }
-
     pub async fn collect(&mut self, record: Record<K, T>) {
         fn out_idx<K: Key>(key: &Option<K>, qs: usize) -> usize {
             let hash = if let Some(key) = &key {
@@ -139,7 +134,8 @@ impl<K: Key, T: Data> Context<K, T> {
                 )
                 .await;
                 metadata
-                    .expect("require metadata")
+                    .expect("failed to read")
+                    .expect("no metadata")
                     .min_watermark
                     .map(from_micros)
             };
@@ -271,10 +267,6 @@ impl<K: Key, T: Data> Context<K, T> {
 
     pub async fn collect(&mut self, record: Record<K, T>) {
         self.collector.collect(record).await;
-    }
-
-    pub async fn collect_record_batch(&mut self, record: RecordBatch) {
-        self.collector.collect_record_batch(record).await;
     }
 
     pub async fn broadcast(&mut self, message: Message<K, T>) {
