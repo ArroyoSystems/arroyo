@@ -4,7 +4,8 @@ use std::{
 };
 
 use anyhow::Result;
-use arroyo_formats::{DataSerializer, SchemaData};
+use arroyo_formats::old::DataSerializer;
+use arroyo_formats::SchemaData;
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::{CheckpointBarrier, Key, Record};

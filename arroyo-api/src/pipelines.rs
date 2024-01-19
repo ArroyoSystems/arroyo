@@ -10,6 +10,7 @@ use http::StatusCode;
 
 use petgraph::Direction;
 use std::collections::HashMap;
+use std::env;
 
 use std::time::Duration;
 
@@ -331,7 +332,7 @@ pub(crate) async fn create_pipeline<'a>(
 
     set_parallelism(&mut compiled.program, 1);
 
-    if is_preview {
+    if is_preview && !env::var("PREVIEW_SINKS").is_ok_and(|s| s == "true") {
         for node in compiled.program.graph.node_weights_mut() {
             // replace all sink connectors with websink for preview
             if node.operator_name == OperatorName::ConnectorSink {

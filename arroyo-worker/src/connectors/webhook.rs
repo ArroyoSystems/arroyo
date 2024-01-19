@@ -12,7 +12,8 @@ use arroyo_types::{CheckpointBarrier, Key, Record};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Semaphore};
 
-use arroyo_formats::{DataSerializer, SchemaData};
+use arroyo_formats::old::DataSerializer;
+use arroyo_formats::SchemaData;
 use tracing::warn;
 use typify::import_types;
 

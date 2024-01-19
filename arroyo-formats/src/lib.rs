@@ -12,9 +12,8 @@ use arroyo_rpc::ArroyoSchema;
 use arroyo_types::{should_flush, to_nanos, Data, Debezium, RawJson, SourceError};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::Mutex;
@@ -22,6 +21,7 @@ use tokio::sync::Mutex;
 pub mod avro;
 pub mod json;
 pub mod old;
+pub mod serialize;
 
 pub trait SchemaData: Data + Serialize + DeserializeOwned {
     fn name() -> &'static str;
@@ -489,61 +489,6 @@ pub(crate) fn add_timestamp(
         .downcast_mut::<TimestampNanosecondBuilder>()
         .expect("_timestamp column has incorrect type")
         .append_value(to_nanos(timestamp) as i64);
-}
-
-pub struct DataSerializer<T: SchemaData> {
-    kafka_schema: Value,
-    #[allow(unused)]
-    json_schema: Value,
-    avro_schema: apache_avro::schema::Schema,
-    schema_id: Option<u32>,
-    format: Format,
-    _t: PhantomData<T>,
-}
-
-impl<T: SchemaData> DataSerializer<T> {
-    pub fn new(format: Format) -> Self {
-        Self {
-            kafka_schema: json::arrow_to_kafka_json(T::name(), T::schema().fields()),
-            json_schema: json::arrow_to_json_schema(T::schema().fields()),
-            avro_schema: avro::arrow_to_avro_schema(T::name(), T::schema().fields()),
-            schema_id: match &format {
-                Format::Avro(avro) => avro.schema_id,
-                _ => None,
-            },
-            format,
-            _t: PhantomData,
-        }
-    }
-
-    pub fn to_vec(&self, record: &T) -> Option<Vec<u8>> {
-        match &self.format {
-            Format::Json(json) => {
-                let mut writer: Vec<u8> = Vec::with_capacity(128);
-                if json.confluent_schema_registry {
-                    if json.include_schema {
-                        unreachable!("can't include schema when writing to confluent schema registry, should've been caught when creating JsonFormat");
-                    }
-                    writer.push(0);
-                    writer.extend(json.schema_id.expect("must have computed id version to write using confluent schema registry").to_be_bytes());
-                }
-                if json.include_schema {
-                    let record = json! {{
-                        "schema": self.kafka_schema,
-                        "payload": record
-                    }};
-
-                    serde_json::to_writer(&mut writer, &record).unwrap();
-                } else {
-                    serde_json::to_writer(&mut writer, record).unwrap();
-                };
-                Some(writer)
-            }
-            Format::Avro(f) => Some(avro::to_vec(record, f, &self.avro_schema, self.schema_id)),
-            Format::Parquet(_) => todo!(),
-            Format::RawString(_) => record.to_raw_string(),
-        }
-    }
 }
 
 #[cfg(test)]
