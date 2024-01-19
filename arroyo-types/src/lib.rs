@@ -288,6 +288,12 @@ pub fn print_time(time: SystemTime) -> String {
         .to_string()
 }
 
+pub fn single_item_hash_map<I: Into<K>, K: Hash + Eq, V>(key: I, value: V) -> HashMap<K, V> {
+    let mut map = HashMap::new();
+    map.insert(key.into(), value);
+    map
+}
+
 // used for avro serialization -- returns the number of days since the UNIX EPOCH
 pub fn days_since_epoch(time: SystemTime) -> i32 {
     time.duration_since(UNIX_EPOCH)

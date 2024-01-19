@@ -128,13 +128,9 @@ impl SourceOperator for FileSourceFunc {
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
-        vec![(
-            "f".to_string(),
-            arroyo_state::global_table_config("f", "file_source"),
-        )]
-        .into_iter()
-        .collect()
+        arroyo_state::global_table_config("f", "file_source")
     }
+
     async fn on_start(&mut self, ctx: &mut ArrowContext) {
         let s: &mut arroyo_state::tables::global_keyed_map::GlobalKeyedView<String, usize> = ctx
             .table_manager

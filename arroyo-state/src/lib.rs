@@ -7,7 +7,7 @@ use arroyo_rpc::grpc::{
     TableType, TableWriteBehavior,
 };
 use arroyo_rpc::{ArroyoSchema, CompactionResult, ControlResp};
-use arroyo_types::{CheckpointBarrier, Data, Key, TaskInfo};
+use arroyo_types::{single_item_hash_map, CheckpointBarrier, Data, Key, TaskInfo};
 use async_trait::async_trait;
 use bincode::config::Configuration;
 use bincode::{Decode, Encode};
@@ -70,15 +70,22 @@ pub fn global_table(name: impl Into<String>, description: impl Into<String>) -> 
     }
 }
 
-pub fn global_table_config(name: impl Into<String>, description: impl Into<String>) -> TableConfig {
-    TableConfig {
-        table_type: TableEnum::GlobalKeyValue.into(),
-        config: GlobalKeyedTableConfig {
-            table_name: name.into(),
-            description: description.into(),
-        }
-        .encode_to_vec(),
-    }
+pub fn global_table_config(
+    name: impl Into<String>,
+    description: impl Into<String>,
+) -> HashMap<String, TableConfig> {
+    let name = name.into();
+    single_item_hash_map(
+        name.clone(),
+        TableConfig {
+            table_type: TableEnum::GlobalKeyValue.into(),
+            config: GlobalKeyedTableConfig {
+                table_name: name,
+                description: description.into(),
+            }
+            .encode_to_vec(),
+        },
+    )
 }
 
 pub fn timestamp_table_config(
