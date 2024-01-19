@@ -23,6 +23,7 @@ arrow-array = { workspace = true}
 arroyo-types = { path = "../../arroyo-types" }
 arroyo-worker = { path = "../../arroyo-worker" }
 arroyo-formats = { path = "../../arroyo-formats" }
+tokio = "1.35.1"
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

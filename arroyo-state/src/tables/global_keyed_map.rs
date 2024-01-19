@@ -78,6 +78,10 @@ impl<'a, K: Key, V: Data, S: BackingStore> GlobalKeyedState<'a, K, V, S> {
     pub fn get(&self, key: &K) -> Option<&V> {
         self.cache.values.get(key)
     }
+
+    pub fn get_key_values(&self) -> Vec<(&K, &V)> {
+        self.cache.values.iter().collect()
+    }
 }
 
 pub struct GlobalKeyedStateCache<K: Key, V: Data> {

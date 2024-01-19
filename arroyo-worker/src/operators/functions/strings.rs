@@ -187,3 +187,7 @@ pub fn rtrim(string: String, trimming_characters: String) -> String {
     let char_slice: &[char] = &chars;
     string.trim_end_matches(char_slice).to_string()
 }
+
+pub fn to_hex(string: String) -> String {
+    hex::encode(string)
+}

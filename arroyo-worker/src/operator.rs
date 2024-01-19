@@ -266,7 +266,7 @@ impl OperatorNode {
         &mut self,
         ctx: &mut ArrowContext,
         in_qs: &mut Vec<Receiver<ArrowMessage>>,
-    ) -> Option<ArrowMessage> {
+    ) -> Option<SignalMessage> {
         match self {
             OperatorNode::Source(s) => {
                 s.on_start(ctx).await;
@@ -294,7 +294,7 @@ impl OperatorNode {
         let final_message = self.run_behavior(&mut ctx, &mut in_qs).await;
 
         if let Some(final_message) = final_message {
-            ctx.broadcast(final_message).await;
+            ctx.broadcast(ArrowMessage::Signal(final_message)).await;
         }
 
         info!(
@@ -365,7 +365,7 @@ async fn operator_run_behavior(
     this: &mut Box<dyn ArrowOperator>,
     ctx: &mut ArrowContext,
     in_qs: &mut Vec<Receiver<ArrowMessage>>,
-) -> Option<ArrowMessage> {
+) -> Option<SignalMessage> {
     this.on_start(ctx).await;
 
     let task_info = ctx.task_info.clone();
@@ -425,11 +425,11 @@ async fn operator_run_behavior(
                                         break;
                                     }
                                     ControlOutcome::Finish => {
-                                        final_message = Some(ArrowMessage::Signal(SignalMessage::EndOfData));
+                                        final_message = Some(SignalMessage::EndOfData);
                                         break;
                                     }
                                     ControlOutcome::StopAndSendStop => {
-                                        final_message = Some(ArrowMessage::Signal(SignalMessage::Stop));
+                                        final_message = Some(SignalMessage::Stop);
                                         break;
                                     }
                                 }
@@ -462,7 +462,7 @@ async fn operator_run_behavior(
             }
         }
     }
-    this.on_close(ctx).await;
+    this.on_close(&final_message, ctx).await;
     final_message
 }
 
@@ -649,7 +649,7 @@ pub trait ArrowOperator: Send + 'static {
     async fn handle_tick(&mut self, tick: u64, ctx: &mut ArrowContext) {}
 
     #[allow(unused_variables)]
-    async fn on_close(&mut self, ctx: &mut ArrowContext) {}
+    async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {}
 }
 
 pub fn get_timestamp_col<'a, 'b>(

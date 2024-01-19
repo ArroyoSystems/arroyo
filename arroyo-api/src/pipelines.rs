@@ -55,6 +55,7 @@ use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::{connection_tables, to_micros};
 use crate::{handle_db_error, AuthData};
 use create_pipeline_req::Config::Sql;
+
 const DEFAULT_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10);
 
 async fn compile_sql<'e, E>(

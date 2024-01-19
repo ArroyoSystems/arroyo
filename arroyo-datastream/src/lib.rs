@@ -376,26 +376,13 @@ pub enum Operator {
         name: String,
         expression: String,
     },
-    StructToRecordBatch {
+    AsyncMapOperator {
         name: String,
+        ordered: bool,
+        function_def: String,
+        max_concurrency: u64,
+        has_context: bool,
     },
-    RecordBatchToStruct {
-        name: String,
-    },
-    ArrowValue {
-        name: String,
-        config: Vec<u8>,
-    },
-    ArrowKey {
-        name: String,
-        config: Vec<u8>,
-    },
-    RecordBatchGrpc,
-    ArrowAggregate {
-        name: String,
-        config: Vec<u8>,
-    },
-    ArrowWatermark,
 }
 
 #[derive(Clone, Encode, Decode, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -521,13 +508,7 @@ impl Debug for Operator {
                 name,
                 expression: _,
             } => write!(f, "updating_key<{}>", name),
-            Operator::StructToRecordBatch { name } => write!(f, "struct_to_record_batch<{}>", name),
-            Operator::RecordBatchToStruct { name } => write!(f, "record_batch_to_struct<{}>", name),
-            Operator::ArrowValue { name, config: _ } => write!(f, "arrow_value<{}>", name),
-            Operator::ArrowKey { name, config: _ } => write!(f, "arrow_key<{}>", name),
-            Operator::RecordBatchGrpc => write!(f, "record_batch_sink"),
-            Operator::ArrowAggregate { name, config: _ } => write!(f, "arrow_aggregate<{}>", name),
-            Operator::ArrowWatermark => write!(f, "arrow_watermark"),
+            Operator::AsyncMapOperator { name, .. } => write!(f, "async_map<{}>", name),
         }
     }
 }
@@ -1396,7 +1377,7 @@ impl Program {
             let input = self.graph.edges_directed(idx, Direction::Incoming).next();
             let output = self.graph.edges_directed(idx, Direction::Outgoing).next();
             let body = match &node.operator {
-                Operator::ConnectorSource(c)  => {
+                Operator::ConnectorSource(c) => {
                     let out_k = parse_type(&output.unwrap().weight().key);
                     let out_t = parse_type(&output.unwrap().weight().value);
 
@@ -1406,7 +1387,7 @@ impl Program {
                         Box::new(#strukt::<#out_k, #out_t>::from_config(#config))
                     }
                 }
-                Operator::ConnectorSink(c)  => {
+                Operator::ConnectorSink(c) => {
                     // In c.operator, replace #in_k and #in_t with the actual types
                     let replaced_type = c.operator.replace("#in_k", &input.unwrap().weight().key);
                     let replaced_type = replaced_type.replace("#in_t", &input.unwrap().weight().value);
@@ -1434,15 +1415,15 @@ impl Program {
                     let out_t = parse_type(&output.unwrap().weight().value);
 
                     let agg = match agg {
-                        None => quote!{ WindowOperation::Aggregate(aggregators::vec_aggregator) },
-                        Some(WindowAgg::Count) => quote!{ WindowOperation::Aggregate(aggregators::count_aggregator) },
-                        Some(WindowAgg::Min) => quote!{ WindowOperation::Aggregate(aggregators::min_aggregator) },
-                        Some(WindowAgg::Max) => quote!{ WindowOperation::Aggregate(aggregators::max_aggregator) },
-                        Some(WindowAgg::Sum) => quote!{ WindowOperation::Aggregate(aggregators::sum_aggregator) },
+                        None => quote! { WindowOperation::Aggregate(aggregators::vec_aggregator) },
+                        Some(WindowAgg::Count) => quote! { WindowOperation::Aggregate(aggregators::count_aggregator) },
+                        Some(WindowAgg::Min) => quote! { WindowOperation::Aggregate(aggregators::min_aggregator) },
+                        Some(WindowAgg::Max) => quote! { WindowOperation::Aggregate(aggregators::max_aggregator) },
+                        Some(WindowAgg::Sum) => quote! { WindowOperation::Aggregate(aggregators::sum_aggregator) },
                         Some(WindowAgg::Expression {
-                            expression,
-                            ..
-                        }) => {
+                                 expression,
+                                 ..
+                             }) => {
                             let expr: syn::Expr = parse_str(expression).unwrap();
                             let operation = if *flatten {
                                 format_ident!("Flatten")
@@ -1455,7 +1436,7 @@ impl Program {
                                     #expr
                                 })
                             }
-                        },
+                        }
                     };
 
                     match typ {
@@ -1517,7 +1498,7 @@ impl Program {
                         }
                         WatermarkStrategy::Expression { expression } => {
                             let expr: syn::Expr = parse_str(&expression).unwrap();
-                            let watermark_function : syn::ExprClosure = parse_quote!(|record| {#expr});
+                            let watermark_function: syn::ExprClosure = parse_quote!(|record| {#expr});
                             quote! {
                                 Box::new(
                                     PeriodicWatermarkGenerator::<#in_k, #in_t>::
@@ -1579,7 +1560,7 @@ impl Program {
                     quote! {
                         Box::new(CountOperator::<#in_k, #in_t>::new())
                     }
-                },
+                }
                 Operator::Aggregate(behavior) => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
@@ -1594,16 +1575,16 @@ impl Program {
                     quote! {
                         Box::new(AggregateOperator::<#in_k, #in_t>::new(AggregateBehavior::#behavior))
                     }
-                },
+                }
                 Operator::FlattenOperator { name } => {
                     let k = parse_type(&output.unwrap().weight().key);
                     let t = parse_type(&output.unwrap().weight().value);
                     quote! {
                         Box::new(FlattenOperator::<#k, #t>::new(#name.to_string()))
                     }
-                },
+                }
                 Operator::ExpressionOperator { name, expression, return_type } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_k = parse_type(&output.unwrap().weight().key);
@@ -1617,15 +1598,15 @@ impl Program {
                                     predicate_fn: Box::new(#func),
                                 })
                             }
-                        },
+                        }
                         ExpressionReturnType::Record => {
-                    quote! {
-                        Box::new(MapOperator::<#in_k, #in_t, #out_k, #out_t> {
-                            name: #name.to_string(),
-                            map_fn: Box::new(#func),
-                        })
-                    }
-                        },
+                            quote! {
+                                Box::new(MapOperator::<#in_k, #in_t, #out_k, #out_t> {
+                                    name: #name.to_string(),
+                                    map_fn: Box::new(#func),
+                                })
+                            }
+                        }
                         ExpressionReturnType::OptionalRecord => {
                             quote! {
                                 Box::new(OptionMapOperator::<#in_k, #in_t, #out_k, #out_t> {
@@ -1633,11 +1614,11 @@ impl Program {
                                     map_fn: Box::new(#func),
                                 })
                             }
-                        },
+                        }
                     }
-                },
+                }
                 Operator::FlatMapOperator { name, expression } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_k = parse_type(&output.unwrap().weight().key);
@@ -1649,9 +1630,37 @@ impl Program {
                             flat_map: Box::new(#func),
                         })
                     }
-                },
+                }
+                Operator::AsyncMapOperator {
+                    name,
+                    ordered,
+                    function_def,
+                    max_concurrency,
+                    has_context
+                } => {
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+                    let out_t = parse_type(&output.unwrap().weight().value);
+
+                    let mut context_t = quote! { EmptyContext };
+                    let mut context = quote! { EmptyContext {} };
+
+                    if *has_context {
+                        context_t = quote! { udfs::Context };
+                        context = quote! { udfs::Context::new() };
+                    }
+
+                    let udf_wrapper : syn::Expr = parse_str(function_def).unwrap();
+
+                    quote! {
+                        Box::new(AsyncMapOperator::<#in_k, #in_t, #out_t, _, _, #context_t>::
+                            new(#name.to_string(), #udf_wrapper, #context, #ordered, #max_concurrency)
+                        )
+                    }
+                }
+
                 Operator::ArrayMapOperator { name, expression, return_type } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let in_t = extract_container_type("Vec", &in_t).expect("Input to aggregate is not a Vec");
@@ -1668,14 +1677,14 @@ impl Program {
                                     }
                                 }
                             }
-                        },
+                        }
                         ExpressionReturnType::Record => {
                             quote! {
                                 |record, _| {
                                     Some(#expr)
                                 }
                             }
-                        },
+                        }
                         ExpressionReturnType::OptionalRecord => {
                             quote! {
                                 |record, _| {
@@ -1691,10 +1700,11 @@ impl Program {
                             map_fn: Box::new(#func),
                         })
                     }
-                },
-                Operator::SlidingWindowAggregator(SlidingWindowAggregator{
-                    width,slide,aggregator,bin_merger,
-                    in_memory_add,in_memory_remove,bin_type,mem_type}) => {
+                }
+                Operator::SlidingWindowAggregator(SlidingWindowAggregator {
+                                                      width, slide, aggregator, bin_merger,
+                                                      in_memory_add, in_memory_remove, bin_type, mem_type
+                                                  }) => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_t = parse_type(&output.unwrap().weight().value);
@@ -1707,7 +1717,7 @@ impl Program {
                     let in_memory_add: syn::ExprClosure = parse_str(in_memory_add).unwrap();
                     let in_memory_remove: syn::ExprClosure = parse_str(in_memory_remove).unwrap();
 
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::aggregating_window::AggregatingWindowFunc::<#in_k, #in_t, #bin_t, #mem_t, #out_t>::
                             new(#width,
                                 #slide,
@@ -1716,7 +1726,7 @@ impl Program {
                                 #in_memory_add,
                                 #in_memory_remove))
                     }
-                },
+                }
                 Operator::TumblingWindowAggregator(TumblingWindowAggregator { width, aggregator, bin_merger, bin_type }) => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
@@ -1725,31 +1735,31 @@ impl Program {
                     let width = duration_to_syn_expr(*width);
                     let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
                     let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::tumbling_aggregating_window::
                             TumblingAggregatingWindowFunc::<#in_k, #in_t, #bin_t, #out_t>::
                         new(#width,
                             #aggregator,
                             #bin_merger))
                     }
-                },
+                }
                 Operator::TumblingTopN(
-                        TumblingTopN {
-                            width,
-                            max_elements,
-                            extractor,
-                            partition_key_type,
-                            converter,
-                        },
-                    ) => {
-                        let in_k = parse_type(&input.unwrap().weight().key);
-                        let in_t = parse_type(&input.unwrap().weight().value);
-                        let out_t = parse_type(&output.unwrap().weight().value);
-                        let pk_type = parse_type(partition_key_type);
-                        let width = duration_to_syn_expr(*width);
-                        let extractor: syn::ExprClosure = parse_str(extractor).expect(extractor);
-                        let converter: syn::ExprClosure = parse_str(converter).unwrap();
-                        quote! {
+                    TumblingTopN {
+                        width,
+                        max_elements,
+                        extractor,
+                        partition_key_type,
+                        converter,
+                    },
+                ) => {
+                    let in_k = parse_type(&input.unwrap().weight().key);
+                    let in_t = parse_type(&input.unwrap().weight().value);
+                    let out_t = parse_type(&output.unwrap().weight().value);
+                    let pk_type = parse_type(partition_key_type);
+                    let width = duration_to_syn_expr(*width);
+                    let extractor: syn::ExprClosure = parse_str(extractor).expect(extractor);
+                    let converter: syn::ExprClosure = parse_str(converter).unwrap();
+                    quote! {
                             Box::new(arroyo_worker::operators::tumbling_top_n_window::
                                 TumblingTopNWindowFunc::<#in_k, #in_t, #pk_type, #out_t>::
                             new(#width,
@@ -1757,7 +1767,7 @@ impl Program {
                                 #extractor,
                                 #converter))
                         }
-                    }
+                }
 
                 Operator::SlidingAggregatingTopN(
                     SlidingAggregatingTopN {
@@ -1848,24 +1858,23 @@ impl Program {
 
                     let join_fn_name = format_ident!("{}{}", join_fn_head, join_fn_tail);
 
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::joiners::
                             #join_fn_name::<#in_k, #in_t1_inner, #in_t2_inner>(#left_expiration, #right_expiration))
                     }
-
-                },
+                }
                 Operator::UpdatingOperator { name, expression } => {
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
                     let out_t = parse_type(&output.unwrap().weight().value);
                     let func: syn::ExprClosure = parse_quote!(|arg| {
                         #expr});
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::OptionMapOperator::<#in_k, #in_t, #in_k, #out_t>::
                             updating_operator(#name.to_string(), #func))
                     }
-                },
+                }
                 Operator::NonWindowAggregator(NonWindowAggregator { expiration, aggregator, bin_merger, bin_type }) => {
                     let in_k = parse_type(&input.unwrap().weight().key);
                     let in_t = parse_type(&input.unwrap().weight().value);
@@ -1875,70 +1884,25 @@ impl Program {
                     let expiration = duration_to_syn_expr(*expiration);
                     let aggregator: syn::ExprClosure = parse_str(aggregator).unwrap();
                     let bin_merger: syn::ExprClosure = parse_str(bin_merger).unwrap();
-                    quote!{
+                    quote! {
                         Box::new(arroyo_worker::operators::updating_aggregate::
                             UpdatingAggregateOperator::<#in_k, #in_t, #bin_t, #out_t>::
                         new(#expiration,
                             #aggregator,
                             #bin_merger))
                     }
-                },
+                }
                 Operator::UpdatingKeyOperator { name, expression } => {
                     let updating_in_t = parse_type(&input.unwrap().weight().value);
                     let in_t = extract_container_type("UpdatingData", &updating_in_t).unwrap();
                     let out_k = parse_type(&output.unwrap().weight().key);
-                    let expr : syn::Expr = parse_str(expression).expect(expression);
+                    let expr: syn::Expr = parse_str(expression).expect(expression);
                     quote! {
                         Box::new(arroyo_worker::operators::
                             KeyMapUpdatingOperator::<#in_t, #out_k>::
                         new(#name.to_string(), #expr))
                     }
-                },
-                Operator::StructToRecordBatch { name } => {
-                    let value_builder_name = parse_type(&format!("{}RecordBatchBuilder", input.unwrap().weight().value.replace(":", "_")));
-                    quote! {
-                        Box::new(arroyo_worker::arrow::
-                            StructToRecordBatch::<#value_builder_name>::
-                        new(#name.to_string()))
-                    }
-                },
-                Operator::RecordBatchToStruct { name } => {
-                    let out_k = parse_type(&output.unwrap().weight().key);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-                    quote! {
-                        Box::new(arroyo_worker::arrow::
-                            RecordBatchToStruct::<#out_k, #out_t>::new(#name.to_string()))
-                    }
-                },
-                Operator::ArrowValue { name, config } => {
-                    let hex_string = hex::encode(config);
-                    quote! {
-                        Box::new(arroyo_worker::arrow::
-                            ValueExecutionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
-                    }
-                },
-                Operator::ArrowKey { name, config } => {
-                    let hex_string = hex::encode(config);
-                    quote! {
-                        Box::new(arroyo_worker::arrow::
-                            KeyExecutionOperator::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
-                    }
-                },
-                Operator::RecordBatchGrpc => quote! {
-                    Box::new(arroyo_worker::arrow::GrpcRecordBatchSink::default())
-                },
-                Operator::ArrowAggregate { name, config } => {
-                    let hex_string = hex::encode(config);
-                    quote! {
-                        Box::new(arroyo_worker::arrow::tumbling_aggregating_window::
-                            TumblingAggregatingWindowFunc::from_config(#name.to_string(), hex::decode(#hex_string).unwrap()).unwrap())
-                    }
-                },
-                Operator::ArrowWatermark => {
-                    quote!{
-                        Box::new(arroyo_worker::arrow::DefaultTimestampWatermark{})
-                    }
-                },
+                }
             };
 
             (node.operator_id.clone(), description, body, node.parallelism)
@@ -2171,6 +2135,19 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::FlatMapOperator { name, expression } => {
                 GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression })
             }
+            Operator::AsyncMapOperator {
+                name,
+                ordered,
+                function_def,
+                max_concurrency,
+                has_context,
+            } => GrpcOperator::AsyncMapOperator(GrpcApi::AsyncMapOperator {
+                name,
+                ordered,
+                function_def,
+                max_concurrency,
+                has_context,
+            }),
             Operator::ArrayMapOperator {
                 name,
                 expression,
@@ -2282,51 +2259,6 @@ impl From<Operator> for GrpcApi::operator::Operator {
             Operator::UpdatingKeyOperator { name, expression } => {
                 GrpcOperator::UpdatingKeyOperator(GrpcApi::UpdatingKeyOperator { name, expression })
             }
-            Operator::StructToRecordBatch { name } => {
-                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
-                    name,
-                    operator: GrpcApi::OperatorName::StructToRecordBatch.into(),
-                    config: None,
-                })
-            }
-            Operator::RecordBatchToStruct { name } => {
-                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
-                    name,
-                    operator: GrpcApi::OperatorName::RecordBatchToStruct.into(),
-                    config: None,
-                })
-            }
-            Operator::ArrowValue { name, config } => {
-                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
-                    name,
-                    operator: GrpcApi::OperatorName::ArrowValuePlan.into(),
-                    config: Some(config),
-                })
-            }
-            Operator::ArrowKey { name, config } => {
-                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
-                    name,
-                    operator: GrpcApi::OperatorName::ArrowKeyPlan.into(),
-                    config: Some(config),
-                })
-            }
-            Operator::RecordBatchGrpc => GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
-                name: "sink".into(),
-                operator: GrpcApi::OperatorName::RecordBatchGrpc.into(),
-                ..Default::default()
-            }),
-            Operator::ArrowAggregate { name, config } => {
-                GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
-                    name,
-                    operator: GrpcApi::OperatorName::ArrowAggregate.into(),
-                    config: Some(config),
-                })
-            }
-            Operator::ArrowWatermark => GrpcOperator::NamedOperator(GrpcApi::NamedOperator {
-                name: "arrow_watermark".into(),
-                operator: GrpcApi::OperatorName::ArrowWatermark.into(),
-                config: None,
-            }),
         }
     }
 }
@@ -2524,6 +2456,19 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                 GrpcOperator::FlatMapOperator(GrpcApi::FlatMapOperator { name, expression }) => {
                     Operator::FlatMapOperator { name, expression }
                 }
+                GrpcOperator::AsyncMapOperator(GrpcApi::AsyncMapOperator {
+                    name,
+                    ordered,
+                    function_def,
+                    max_concurrency,
+                    has_context,
+                }) => Operator::AsyncMapOperator {
+                    name,
+                    ordered,
+                    function_def,
+                    max_concurrency,
+                    has_context,
+                },
                 GrpcOperator::FlattenExpressionOperator(flatten_expression) => {
                     let return_type = flatten_expression.return_type().into();
                     Operator::ArrayMapOperator {
@@ -2635,32 +2580,6 @@ impl TryFrom<arroyo_rpc::grpc::api::Operator> for Operator {
                     name,
                     expression,
                 }) => Operator::UpdatingKeyOperator { name, expression },
-                GrpcOperator::NamedOperator(named_operator) => {
-                    let operator = named_operator.operator();
-                    let name = named_operator.name;
-                    match operator {
-                        GrpcApi::OperatorName::StructToRecordBatch => {
-                            Operator::StructToRecordBatch { name }
-                        }
-                        GrpcApi::OperatorName::RecordBatchToStruct => {
-                            Operator::RecordBatchToStruct { name }
-                        }
-                        GrpcApi::OperatorName::ArrowValuePlan => Operator::ArrowValue {
-                            name,
-                            config: named_operator.config.unwrap(),
-                        },
-                        GrpcApi::OperatorName::ArrowKeyPlan => Operator::ArrowKey {
-                            name,
-                            config: named_operator.config.unwrap(),
-                        },
-                        GrpcApi::OperatorName::RecordBatchGrpc => Operator::RecordBatchGrpc,
-                        GrpcApi::OperatorName::ArrowAggregate => Operator::ArrowAggregate {
-                            name,
-                            config: named_operator.config.unwrap(),
-                        },
-                        GrpcApi::OperatorName::ArrowWatermark => Operator::ArrowWatermark,
-                    }
-                }
             },
             None => bail!("unset on operator {:?}", operator),
         };

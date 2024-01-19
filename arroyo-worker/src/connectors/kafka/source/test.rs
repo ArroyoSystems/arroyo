@@ -298,7 +298,8 @@ async fn test_kafka() {
         table_checkpoint_metadata: single_item_hash_map("k", table_metadata),
         table_configs: subtask_metadata.table_configs,
     })
-    .await;
+    .await
+    .unwrap();
 
     StateBackend::write_checkpoint_metadata(CheckpointMetadata {
         job_id: task_info.job_id.clone(),
@@ -308,7 +309,8 @@ async fn test_kafka() {
         finish_time: 0,
         operator_ids: vec![task_info.operator_id.clone()],
     })
-    .await;
+    .await
+    .unwrap();
 
     reader
         .assert_next_message_record_values(

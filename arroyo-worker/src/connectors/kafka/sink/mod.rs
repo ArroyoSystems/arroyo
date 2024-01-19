@@ -1,24 +1,33 @@
-use anyhow::{anyhow, Result};
-use arrow_array::RecordBatch;
+use anyhow::Result;
+use arroyo_formats::SchemaData;
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::{CheckpointEvent, ControlMessage, OperatorConfig};
+use arroyo_rpc::grpc::{
+    api, TableConfig, TableDeleteBehavior, TableDescriptor, TableWriteBehavior,
+};
+use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_types::*;
+use std::collections::HashMap;
+
+use tracing::{error, warn};
+
+use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
+use rdkafka::util::Timeout;
+
+use rdkafka::ClientConfig;
+
+use crate::engine::ArrowContext;
+use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
+use arrow_array::RecordBatch;
+use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_rpc::grpc::api::ConnectorOp;
+use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
 use rdkafka::error::KafkaError;
-use rdkafka::ClientConfig;
-use std::collections::HashMap;
+use rdkafka_sys::RDKafkaErrorCode;
+use serde::Serialize;
 use std::time::{Duration, SystemTime};
 
 use super::{client_configs, KafkaConfig, KafkaTable, SinkCommitMode, TableType};
-use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
-use arroyo_formats::serialize::ArrowSerializer;
-use arroyo_rpc::grpc::api::ConnectorOp;
-use arroyo_rpc::grpc::{api, TableConfig};
-use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
-use rdkafka::util::Timeout;
-use rdkafka_sys::RDKafkaErrorCode;
-use tracing::{error, warn};
 
 #[cfg(test)]
 mod test;
@@ -139,7 +148,7 @@ impl KafkaSinkFunc {
         Ok(())
     }
 
-    async fn flush(&mut self) {
+    async fn flush(&mut self, ctx: &mut ArrowContext) {
         self.producer
             .as_ref()
             .unwrap()
@@ -150,16 +159,16 @@ impl KafkaSinkFunc {
 
         // ensure all messages were delivered before finishing the checkpoint
         for future in self.write_futures.drain(..) {
-            match future.await.expect("Kafka producer shut down") {
-                Ok(_) => {}
-                Err((e, _)) => {
-                    panic!("Unhandled kafka error: {:?}", e);
-                }
+            if let Err((e, _)) = future.await.unwrap() {
+                ctx.error_reporter
+                    .report_error("Kafka producer shut down", e.to_string())
+                    .await;
+                panic!("Kafka producer shut down: {:?}", e);
             }
         }
     }
 
-    async fn publish(&mut self, k: Option<Vec<u8>>, v: Vec<u8>) {
+    async fn publish(&mut self, k: Option<Vec<u8>>, v: Vec<u8>, ctx: &mut ArrowContext) {
         let mut rec = {
             if let Some(k) = k.as_ref() {
                 FutureRecord::to(&self.topic).key(k).payload(&v)
@@ -178,7 +187,11 @@ impl KafkaSinkFunc {
                     rec = f;
                 }
                 Err((e, _)) => {
-                    panic!("Unhandled kafka error: {:?}", e);
+                    ctx.error_reporter
+                        .report_error("Could not write to Kafka", format!("{:?}", e))
+                        .await;
+
+                    panic!("Failed to write to kafka: {:?}", e);
                 }
             }
 
@@ -208,7 +221,7 @@ impl ArrowOperator for KafkaSinkFunc {
     }
 
     async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
-        self.flush().await;
+        self.flush(ctx).await;
         if let ConsistencyMode::ExactlyOnce {
             next_transaction_index,
             producer_to_complete,
@@ -230,16 +243,16 @@ impl ArrowOperator for KafkaSinkFunc {
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
         let values = self.serializer.serialize(&batch);
 
-        let keys = if !ctx.in_schemas[0].key_indices.is_empty() {
+        if !ctx.in_schemas[0].key_indices.is_empty() {
             let k = batch.project(&ctx.in_schemas[0].key_indices).unwrap();
 
             // TODO: we can probably batch this for better performance
             for (k, v) in self.serializer.serialize(&k).zip(values) {
-                self.publish(Some(k), v).await;
+                self.publish(Some(k), v, ctx).await;
             }
         } else {
             for v in values {
-                self.publish(None, v).await;
+                self.publish(None, v, ctx).await;
             }
         };
     }
@@ -276,7 +289,7 @@ impl ArrowOperator for KafkaSinkFunc {
                 commits_attempted += 1;
             }
         }
-        let checkpoint_event = arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
+        let checkpoint_event = ControlResp::CheckpointEvent(CheckpointEvent {
             checkpoint_epoch: epoch,
             operator_id: ctx.task_info.operator_id.clone(),
             subtask_index: ctx.task_info.task_index as u32,
@@ -289,7 +302,7 @@ impl ArrowOperator for KafkaSinkFunc {
             .expect("sent commit event");
     }
 
-    async fn on_close(&mut self, ctx: &mut ArrowContext) {
+    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
         if !self.is_committing() {
             return;
         }

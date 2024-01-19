@@ -524,6 +524,29 @@ impl StorageProvider {
         Ok(bytes)
     }
 
+    pub async fn get_if_present<P: Into<String>>(
+        &self,
+        path: P,
+    ) -> Result<Option<Bytes>, StorageError> {
+        let path: String = path.into();
+        match self
+            .object_store
+            .get(&self.qualify_path(&path.into()))
+            .await
+        {
+            Ok(obj) => {
+                let bytes = obj.bytes().await?;
+                Ok(Some(bytes))
+            }
+            Err(err) => {
+                if let object_store::Error::NotFound { .. } = &err {
+                    return Ok(None);
+                }
+                Err(err.into())
+            }
+        }
+    }
+
     pub async fn get_as_stream<P: Into<String>>(
         &self,
         path: P,

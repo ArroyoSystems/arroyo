@@ -343,7 +343,8 @@ impl ArrowContext {
                     metadata.epoch,
                 )
                 .await
-                .unwrap();
+                .expect("lookup should succeed")
+                .expect("require metadata");
                 (metadata.min_watermark.map(from_micros), metadata)
             };
 
@@ -1133,9 +1134,10 @@ impl Engine {
             Some(
                 StateBackend::load_checkpoint_metadata(&self.job_id, epoch)
                     .await
-                    .unwrap_or_else(|| {
-                        panic!("failed to load checkpoint metadata for epoch {}", epoch)
-                    }),
+                    .expect(&format!(
+                        "failed to load checkpoint metadata for epoch {}",
+                        epoch
+                    )),
             )
         } else {
             None

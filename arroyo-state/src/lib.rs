@@ -178,18 +178,15 @@ pub trait BackingStore {
     /// prepares a checkpoint to be loaded, e.g., by deleting future data
     async fn prepare_checkpoint_load(metadata: &CheckpointMetadata) -> Result<()>;
 
-    /// loads the latest checkpoint metadata for a given job id
-    async fn load_latest_checkpoint_metadata(job_id: &str) -> Option<CheckpointMetadata>;
-
     /// loads the checkpoint metadata for a given job id and epoch
-    async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Option<CheckpointMetadata>;
+    async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Result<CheckpointMetadata>;
 
     /// loads the operator checkpoint metadata for a given job id, operator id, and epoch
     async fn load_operator_metadata(
         job_id: &str,
         operator_id: &str,
         epoch: u32,
-    ) -> Option<OperatorCheckpointMetadata>;
+    ) -> Result<Option<OperatorCheckpointMetadata>>;
 
     /// creates a new instance of the BackingStore for the given task info.
     async fn new(
@@ -213,10 +210,11 @@ pub trait BackingStore {
     fn task_info(&self) -> &TaskInfo;
 
     /// writes the operator checkpoint metadata to the backing store
-    async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata);
+    async fn write_operator_checkpoint_metadata(metadata: OperatorCheckpointMetadata)
+        -> Result<()>;
 
     /// writes the checkpoint metadata to the backing store
-    async fn write_checkpoint_metadata(metadata: CheckpointMetadata);
+    async fn write_checkpoint_metadata(metadata: CheckpointMetadata) -> Result<()>;
 
     /// cleans up a checkpoint by deleting data that is no longer needed
     async fn cleanup_checkpoint(
@@ -682,7 +680,8 @@ mod test {
             commit_data: None,
             table_checkpoint_metadata: HashMap::new(),
         })
-        .await;
+        .await
+        .unwrap();
 
         let checkpoint_metadata: CheckpointMetadata = CheckpointMetadata {
             job_id: job_id.to_string(),
@@ -693,7 +692,9 @@ mod test {
             operator_ids: vec![operator_id.to_string()],
         };
 
-        ParquetBackend::write_checkpoint_metadata(checkpoint_metadata.clone()).await;
+        ParquetBackend::write_checkpoint_metadata(checkpoint_metadata.clone())
+            .await
+            .unwrap();
 
         checkpoint_metadata
     }

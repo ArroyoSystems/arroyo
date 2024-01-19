@@ -1,15 +1,15 @@
-use crate::connectors::redis::{RedisConfig, RedisConfigConnection, RedisTable, TableType, Target};
+use crate::connectors::redis::{RedisClient, RedisConfig, RedisTable, TableType, Target};
 use crate::engine::{ErrorReporter, StreamNode};
 use crate::old::Context;
+
 use arroyo_formats::old::DataSerializer;
 use arroyo_formats::SchemaData;
 use arroyo_macro::process_fn;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::{CheckpointBarrier, Key, Record};
 use redis::aio::{ConnectionLike, ConnectionManager};
-use redis::cluster::ClusterClient;
 use redis::cluster_async::ClusterConnection;
-use redis::{Client, Cmd, Pipeline, RedisFuture};
+use redis::{Cmd, Pipeline, RedisFuture};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -32,7 +32,7 @@ where
 {
     serializer: DataSerializer<T>,
     table: RedisTable,
-    client: Clients,
+    client: RedisClient,
     cmd_q: Option<(Sender<u32>, Receiver<RedisCmd>)>,
 
     rx: Receiver<u32>,
@@ -60,22 +60,6 @@ enum RedisCmd {
     },
 
     Flush(u32),
-}
-
-enum Clients {
-    Standard(Client),
-    Clustered(ClusterClient),
-}
-
-impl Clients {
-    async fn get_connection(&self) -> Result<GeneralConnection, redis::RedisError> {
-        Ok(match self {
-            Clients::Standard(c) => {
-                GeneralConnection::Standard(ConnectionManager::new(c.clone()).await?)
-            }
-            Clients::Clustered(c) => GeneralConnection::Clustered(c.get_async_connection().await?),
-        })
-    }
 }
 
 pub enum GeneralConnection {
@@ -258,15 +242,7 @@ where
         let table: RedisTable =
             serde_json::from_value(config.table).expect("Invalid table config for Redis");
 
-        let client = match profile.connection {
-            RedisConfigConnection::Address(address) => {
-                Clients::Standard(Client::open(address.0).expect("invalid address"))
-            }
-            RedisConfigConnection::Addresses(addresses) => Clients::Clustered(
-                ClusterClient::new(addresses.into_iter().map(|e| e.0).collect())
-                    .expect("failed to construct cluster client"),
-            ),
-        };
+        let client = RedisClient::new(&profile).expect("Unable to construct redis client");
 
         let (tx, cmd_rx) = tokio::sync::mpsc::channel(128);
         let (cmd_tx, rx) = tokio::sync::mpsc::channel(128);

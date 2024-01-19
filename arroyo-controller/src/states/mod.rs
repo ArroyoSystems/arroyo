@@ -668,6 +668,8 @@ impl StateMachine {
             if self.send(update).await.is_err() {
                 self.start(status).await;
             }
+        } else {
+            self.restart_if_needed(status).await;
         }
     }
 
@@ -684,6 +686,20 @@ impl StateMachine {
             tx.is_closed()
         } else {
             true
+        }
+    }
+
+    // for states that should be running, check them and restart if needed
+    async fn restart_if_needed(&mut self, status: JobStatus) {
+        match status.state.as_str() {
+            "Running" | "Recovering" | "Rescaling" => {
+                // done() means there isn't a task running, but these states
+                // need to be advanced.
+                if self.done() {
+                    self.start(status).await;
+                }
+            }
+            _ => {}
         }
     }
 }

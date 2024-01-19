@@ -9,8 +9,8 @@ use arroyo_df::physical::DecodingContext;
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{api, SinkDataReq};
-use arroyo_types::from_nanos;
 use arroyo_types::to_micros;
+use arroyo_types::{from_nanos, SignalMessage};
 use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::memory::MemoryStream;
 use datafusion::physical_plan::DisplayAs;
@@ -309,7 +309,7 @@ impl ArrowOperator for GrpcRecordBatchSink {
                 .unwrap();
         }
     }
-    async fn on_close(&mut self, ctx: &mut ArrowContext) {
+    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
         self.client
             .as_mut()
             .unwrap()

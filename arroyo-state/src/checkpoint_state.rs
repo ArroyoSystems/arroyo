@@ -267,7 +267,8 @@ impl CheckpointState {
                 table_checkpoint_metadata,
                 table_configs,
             })
-            .await;
+            .await
+            .expect("Should be able to write operator checkpoint metadata");
         }
         Ok(())
     }
@@ -290,7 +291,7 @@ impl CheckpointState {
                 .map(|key| key.to_string())
                 .collect(),
         })
-        .await;
+        .await?;
         Ok(())
     }
 }

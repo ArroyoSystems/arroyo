@@ -91,7 +91,7 @@ message Operator {
     UpdatingOperator updating_operator = 24;
     NonWindowAggregator non_window_aggregator = 25;
     UpdatingKeyOperator updating_key_operator = 26;
-    NamedOperator named_operator = 28;
+    AsyncMapOperator async_map_operator = 28;
   }
 }
 
@@ -243,6 +243,14 @@ message FlattenExpressionOperator {
 message FlatMapOperator {
   string name = 1;
   string expression = 2;
+}
+
+message AsyncMapOperator {
+  string name = 1;
+  bool ordered = 2;
+  string function_def = 3;
+  uint64 max_concurrency = 4;
+  bool has_context = 5;
 }
 
 message SlidingWindowAggregator {
