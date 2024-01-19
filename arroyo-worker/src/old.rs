@@ -2,7 +2,7 @@ use crate::engine::{ErrorReporter, TimerValue, WatermarkHolder, QUEUE_SIZE};
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::{RateLimiter, TIMER_TABLE};
 use anyhow::bail;
-use arrow_array::RecordBatch;
+
 use arroyo_datastream::Operator;
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::grpc::{
@@ -12,8 +12,8 @@ use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
 use arroyo_types::{
-    from_micros, server_for_hash, Data, Key, Message, Record, RecordBatchData, SourceError,
-    TaskInfo, UserError, Watermark,
+    from_micros, server_for_hash, Data, Key, Message, Record, SourceError, TaskInfo, UserError,
+    Watermark,
 };
 use bincode::config;
 use rand::Rng;
@@ -183,6 +183,7 @@ impl<K: Key, T: Data> Context<K, T> {
         }
     }
 
+    #[allow(unused)]
     pub fn new_for_test() -> (Self, Receiver<QueueItem>) {
         let (_, control_rx) = channel(128);
         let (command_tx, _) = channel(128);

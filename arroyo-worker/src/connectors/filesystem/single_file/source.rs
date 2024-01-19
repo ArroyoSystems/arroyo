@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Cursor, marker::PhantomData, sync::Arc, time::SystemTime};
+use std::{collections::HashMap, io::Cursor, sync::Arc, time::SystemTime};
 
 use arrow_array::RecordBatch;
 use arroyo_rpc::{

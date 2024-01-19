@@ -1,9 +1,7 @@
 use anyhow::Result;
-use arroyo_formats::SchemaData;
+
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::grpc::{
-    api, TableConfig, TableDeleteBehavior, TableDescriptor, TableWriteBehavior,
-};
+use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_types::*;
 use std::collections::HashMap;
@@ -24,7 +22,6 @@ use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
 use rdkafka::error::KafkaError;
 use rdkafka_sys::RDKafkaErrorCode;
-use serde::Serialize;
 use std::time::{Duration, SystemTime};
 
 use super::{client_configs, KafkaConfig, KafkaTable, SinkCommitMode, TableType};

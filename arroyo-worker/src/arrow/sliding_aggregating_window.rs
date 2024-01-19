@@ -329,6 +329,7 @@ impl RecordBatchTier {
 }
 
 impl TieredRecordBatchHolder {
+    #[allow(unused)]
     fn print_tier_contents(&self) {
         for (i, tier) in self.tiers.iter().enumerate() {
             info!(

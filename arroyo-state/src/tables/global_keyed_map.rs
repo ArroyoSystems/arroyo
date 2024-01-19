@@ -1,33 +1,31 @@
-use crate::{metrics::TABLE_SIZE_GAUGE, parquet::ParquetBackend};
+use crate::metrics::TABLE_SIZE_GAUGE;
 use crate::{BackingStore, CheckpointMessage, StateMessage, TableData};
 use anyhow::{anyhow, bail, Result};
-use arrow_array::{BinaryArray, GenericBinaryArray, RecordBatch};
+use arrow_array::{BinaryArray, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use arroyo_rpc::grpc::{
-    GlobalKeyedTableConfig, GlobalKeyedTableSubtaskCheckpointMetadata,
-    GlobalKeyedTableTaskCheckpointMetadata, TableEnum,
+    GlobalKeyedTableSubtaskCheckpointMetadata, GlobalKeyedTableTaskCheckpointMetadata, TableEnum,
 };
-use arroyo_storage::{StorageProvider, StorageProviderRef};
-use arroyo_types::{to_micros, Data, Key, TaskInfo, TaskInfoRef};
+use arroyo_storage::StorageProviderRef;
+use arroyo_types::{to_micros, Data, Key, TaskInfoRef};
 use bincode::config;
-use datafusion::optimizer::analyzer::AnalyzerRule;
+
 use once_cell::sync::Lazy;
-use parquet::arrow::arrow_reader::{ArrowReaderBuilder, ParquetRecordBatchReaderBuilder};
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::{
     arrow::ArrowWriter,
     basic::ZstdLevel,
     file::properties::{EnabledStatistics, WriterProperties},
 };
-use std::alloc::System;
+
 use std::iter::Zip;
-use std::marker::PhantomData;
+
 use std::time::SystemTime;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
 use tokio::sync::mpsc::Sender;
-use tracing::{info, Value};
 
 use super::{table_checkpoint_path, Table, TableEpochCheckpointer};
 static GLOBAL_KEY_VALUE_SCHEMA: Lazy<Arc<Schema>> = Lazy::new(|| {
@@ -179,7 +177,7 @@ impl Table for GlobalKeyedTable {
     fn epoch_checkpointer(
         &self,
         epoch: u32,
-        previous_metadata: Option<Self::TableSubtaskCheckpointMetadata>,
+        _previous_metadata: Option<Self::TableSubtaskCheckpointMetadata>,
     ) -> Result<Self::Checkpointer> {
         Ok(Self::Checkpointer {
             table_name: self.table_name.clone(),
@@ -207,7 +205,7 @@ impl Table for GlobalKeyedTable {
     }
 
     fn merge_checkpoint_metadata(
-        config: Self::ConfigMessage,
+        _config: Self::ConfigMessage,
         subtask_metadata: HashMap<u32, Self::TableSubtaskCheckpointMetadata>,
     ) -> Result<Option<Self::TableCheckpointMessage>> {
         if subtask_metadata.is_empty() {
@@ -225,7 +223,7 @@ impl Table for GlobalKeyedTable {
 
     fn subtask_metadata_from_table(
         &self,
-        table_metadata: Self::TableCheckpointMessage,
+        _table_metadata: Self::TableCheckpointMessage,
     ) -> Result<Option<Self::TableSubtaskCheckpointMetadata>> {
         // this method is to inherit data dependencies from previous epochs, but this table is regenerated every epoch.
         Ok(None)
@@ -240,7 +238,7 @@ impl Table for GlobalKeyedTable {
     }
 
     fn files_to_keep(
-        config: Self::ConfigMessage,
+        _config: Self::ConfigMessage,
         checkpoint: Self::TableCheckpointMessage,
     ) -> Result<std::collections::HashSet<String>> {
         Ok(checkpoint.files.into_iter().collect())
@@ -278,7 +276,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         self,
         _checkpoint: &CheckpointMessage,
     ) -> Result<Option<Self::SubTableCheckpointMessage>> {
-        let start_time = to_micros(SystemTime::now());
+        let _start_time = to_micros(SystemTime::now());
         let (keys, values): (Vec<_>, Vec<_>) = self
             .latest_values
             .iter()
@@ -300,10 +298,10 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         writer.write(&batch)?;
         writer.flush()?;
         let parquet_bytes = writer.into_inner().unwrap();
-        let bytes = parquet_bytes.len() as u64;
+        let _bytes = parquet_bytes.len() as u64;
         let path = table_checkpoint_path(&self.task_info, &self.table_name, self.epoch, false);
         self.storage_provider.put(&path, parquet_bytes).await?;
-        let finish_time = to_micros(SystemTime::now());
+        let _finish_time = to_micros(SystemTime::now());
         Ok(Some(GlobalKeyedTableSubtaskCheckpointMetadata {
             subtask_index: self.task_info.task_index as u32,
             file: Some(path),

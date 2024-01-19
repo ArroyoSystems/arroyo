@@ -48,7 +48,7 @@ mod states;
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
-use crate::schedulers::{nomad::NomadScheduler, NodeScheduler, ProcessScheduler, Scheduler};
+use crate::schedulers::{NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::LogLevel;
 use types::public::{RestartMode, StopMode};
 
@@ -492,10 +492,6 @@ impl ControllerServer {
             Some("node") => {
                 info!("Using node scheduler");
                 Arc::new(NodeScheduler::new())
-            }
-            Some("nomad") => {
-                info!("Using nomad scheduler");
-                Arc::new(NomadScheduler::new())
             }
             Some("kubernetes") | Some("k8s") => {
                 #[cfg(feature = "k8s")]

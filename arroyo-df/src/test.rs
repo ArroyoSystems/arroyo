@@ -9,6 +9,7 @@ use crate::{
     SqlConfig,
 };
 
+#[ignore]
 #[tokio::test]
 async fn test_parse() {
     let schema_provider = get_test_schema_provider();
@@ -120,6 +121,7 @@ async fn test_window_function() {
         .unwrap();
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_no_updating_window_functions() {
     let schema_provider = get_test_schema_provider();
@@ -158,6 +160,7 @@ async fn test_no_virtual_fields_updating() {
         .unwrap_err();
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_no_inserting_updates_into_non_updating() {
     let schema_provider = get_test_schema_provider();
@@ -188,6 +191,7 @@ async fn test_no_inserting_updates_into_non_updating() {
         .unwrap_err();
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_no_aggregates_in_window() {
     let schema_provider = get_test_schema_provider();

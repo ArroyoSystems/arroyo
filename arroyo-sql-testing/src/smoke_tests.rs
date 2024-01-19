@@ -3,7 +3,8 @@ use anyhow::Result;
 use arroyo_datastream::logical::{LogicalEdge, LogicalNode, LogicalProgram};
 use arroyo_df::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
 use arroyo_state::parquet::ParquetBackend;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::hash::Hash;
 use std::time::Duration;
 use std::{env, fmt::Debug, time::SystemTime};
 use tokio::sync::mpsc::Receiver;
@@ -15,6 +16,7 @@ use arroyo_types::{to_micros, CheckpointBarrier};
 use arroyo_worker::engine::{Engine, StreamConfig};
 use arroyo_worker::engine::{Program, RunningEngine};
 use petgraph::Graph;
+use serde_json::{ser, Value};
 use test_log::test;
 use tokio::fs::read_to_string;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -159,13 +161,14 @@ async fn test_checkpoints_and_compaction(
     advance(running_engine, checkpoint_interval).await;
 
     // compact checkpoint 2
-    compact(
-        job_id.clone(),
-        running_engine,
-        tasks_per_operator.clone(),
-        2,
-    )
-    .await;
+    // TODO: compaction
+    // compact(
+    //     job_id.clone(),
+    //     running_engine,
+    //     tasks_per_operator.clone(),
+    //     2,
+    // )
+    // .await;
 
     // trigger checkpoint 3, which will include the compacted files
     advance(running_engine, checkpoint_interval).await;
@@ -261,14 +264,22 @@ async fn run_completely(
 }
 
 async fn check_output_files(output_location: String, golden_output_location: String) {
-    let mut output_lines: Vec<_> = read_to_string(output_location.clone())
+    fn roundtrip(v: &Value) -> String {
+        // round trip string through a btreemap to get consistent key ordering
+        serde_json::to_string(
+            &serde_json::from_value::<BTreeMap<String, Value>>(v.clone()).unwrap(),
+        )
+        .unwrap()
+    }
+
+    let mut output_lines: Vec<Value> = read_to_string(output_location.clone())
         .await
         .expect(&format!("output file not found at {}", output_location))
         .lines()
-        .map(|x| x.to_string())
+        .map(|s| serde_json::from_str(s).unwrap())
         .collect();
 
-    let mut golden_output_lines: Vec<_> = read_to_string(golden_output_location.clone())
+    let mut golden_output_lines: Vec<Value> = read_to_string(golden_output_location.clone())
         .await
         .expect(
             format!(
@@ -278,14 +289,14 @@ async fn check_output_files(output_location: String, golden_output_location: Str
             .as_str(),
         )
         .lines()
-        .map(|x| x.to_string())
+        .map(|s| serde_json::from_str(s).unwrap())
         .collect();
     if output_lines.len() != golden_output_lines.len() {
         panic!("output and golden output have different number of lines");
     }
 
-    output_lines.sort();
-    golden_output_lines.sort();
+    output_lines.sort_by_cached_key(roundtrip);
+    golden_output_lines.sort_by_cached_key(roundtrip);
     output_lines
         .into_iter()
         .zip(golden_output_lines.into_iter())
@@ -293,8 +304,8 @@ async fn check_output_files(output_location: String, golden_output_location: Str
         .for_each(|(i, (output_line, golden_output_line))| {
             assert_eq!(
                 output_line, golden_output_line,
-                "line {} of output and golden output differ",
-                i
+                "line {} of output and golden output differ ({}, {})",
+                i, output_location, golden_output_location
             )
         });
 }

@@ -6,17 +6,16 @@ use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
 use arrow_array::builder::{TimestampNanosecondBuilder, UInt64Builder};
-use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
-use arroyo_rpc::grpc::{api, StopMode, TableConfig, TableDescriptor};
+use arrow_array::RecordBatch;
+use arroyo_rpc::grpc::{api, StopMode, TableConfig};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::*;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion_common::ScalarValue;
-use futures::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
-use tokio::sync::mpsc::Receiver;
+
 use tracing::{debug, info};
 use typify::import_types;
 
@@ -237,7 +236,6 @@ impl ImpulseSourceFunc {
                 .unwrap(),
             )
             .await;
-            items = 0;
         }
 
         SourceFinishType::Final

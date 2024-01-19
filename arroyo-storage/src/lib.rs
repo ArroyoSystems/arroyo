@@ -9,7 +9,7 @@ use std::{
 use arroyo_types::{S3_ENDPOINT_ENV, S3_REGION_ENV};
 use aws::ArroyoCredentialProvider;
 use bytes::Bytes;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt};
 use object_store::aws::{AmazonS3ConfigKey, AwsCredential};
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::PartId;

@@ -1,23 +1,13 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    sync::Arc,
+    collections::{BTreeMap, HashMap, HashSet},
     time::{Duration, SystemTime},
 };
 
-use ahash::RandomState;
 use anyhow::{anyhow, bail, Ok, Result};
-use arrow::compute::{
-    kernels::{self, aggregate},
-    take,
-};
-use arrow_array::{
-    cast::AsArray,
-    types::{TimestampNanosecondType, UInt64Type},
-    PrimitiveArray, RecordBatch, UInt64Array,
-};
+use arrow::compute::kernels::aggregate;
+use arrow_array::{cast::AsArray, types::TimestampNanosecondType, PrimitiveArray, RecordBatch};
 use arrow_ord::partition::partition;
-use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use arroyo_datastream::get_hasher;
+
 use arroyo_rpc::{
     grpc::{
         ExpiringKeyedTimeSubtaskCheckpointMetadata, ExpiringKeyedTimeTableCheckpointMetadata,
@@ -26,9 +16,8 @@ use arroyo_rpc::{
     ArroyoSchema,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{from_micros, from_nanos, print_time, to_micros, to_nanos, TaskInfoRef};
-use bincode::config;
-use datafusion_common::{hash_utils::create_hashes, ScalarValue};
+use arroyo_types::{from_micros, from_nanos, print_time, to_micros, TaskInfoRef};
+
 use futures::StreamExt;
 use parquet::arrow::{
     async_reader::ParquetObjectReader, AsyncArrowWriter, ParquetRecordBatchStreamBuilder,
@@ -36,8 +25,8 @@ use parquet::arrow::{
 use tokio::{io::AsyncWrite, sync::mpsc::Sender};
 
 use crate::{
-    parquet::ParquetStats, schemas::SchemaWithHashAndOperation, timestamp_table, CheckpointMessage,
-    DataOperation, StateMessage, TableData,
+    parquet::ParquetStats, schemas::SchemaWithHashAndOperation, CheckpointMessage, StateMessage,
+    TableData,
 };
 use tracing::{info, warn};
 
@@ -227,7 +216,7 @@ impl Table for ExpiringTimeKeyTable {
             .values()
             .filter_map(|metadata| metadata.watermark)
             .min();
-        let max_watermark = subtask_metadata
+        let _max_watermark = subtask_metadata
             .values()
             .filter_map(|metadata| metadata.watermark)
             .min();

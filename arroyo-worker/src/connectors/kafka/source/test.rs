@@ -1,5 +1,5 @@
 use arrow::datatypes::{DataType, Field, Schema};
-use arroyo_formats::SchemaData;
+
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::{BackingStore, StateBackend};
@@ -7,7 +7,7 @@ use rand::random;
 
 use arrow_array::{Array, StringArray};
 use arrow_schema::TimeUnit;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 

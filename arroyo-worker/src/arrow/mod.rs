@@ -190,6 +190,7 @@ pub struct KeyExecutionOperator {
     name: String,
     locked_batch: Arc<RwLock<Option<RecordBatch>>>,
     execution_plan: Arc<dyn ExecutionPlan>,
+    #[allow(unused)]
     key_fields: Vec<usize>,
 }
 

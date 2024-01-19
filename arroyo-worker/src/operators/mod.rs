@@ -13,11 +13,11 @@ use arrow::compute::kernels;
 use arrow_array::RecordBatch;
 use arroyo_macro::process_fn;
 use arroyo_rpc::grpc::api::PeriodicWatermark;
-use arroyo_rpc::grpc::{api, TableConfig, TableDescriptor};
+use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_state::global_table_config;
 use arroyo_types::{
     from_millis, from_nanos, to_millis, ArrowMessage, CheckpointBarrier, Data, GlobalKey, Key,
-    Message, Record, RecordBatchData, SignalMessage, TaskInfo, UpdatingData, Watermark, Window,
+    Record, SignalMessage, TaskInfo, UpdatingData, Watermark, Window,
 };
 use async_trait::async_trait;
 use bincode::{config, Decode, Encode};
@@ -234,7 +234,7 @@ impl ArrowOperator for PeriodicWatermarkGenerator {
     }
 
     async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
-        let mut gs = ctx
+        let gs = ctx
             .table_manager
             .get_global_keyed_state("s")
             .await

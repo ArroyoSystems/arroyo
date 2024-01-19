@@ -8,7 +8,6 @@ use serde_json::Value;
 pub struct ArrowSerializer {
     kafka_schema: Option<Value>,
     avro_schema: Option<apache_avro::schema::Schema>,
-    schema_id: Option<u32>,
     format: Format,
 }
 
@@ -17,10 +16,6 @@ impl ArrowSerializer {
         Self {
             kafka_schema: None,
             avro_schema: None,
-            schema_id: match &format {
-                Format::Avro(avro) => avro.schema_id,
-                _ => None,
-            },
             format,
         }
     }

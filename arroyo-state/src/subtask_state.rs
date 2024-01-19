@@ -5,12 +5,14 @@ use arroyo_rpc::grpc::{
 use arroyo_types::from_micros;
 use std::time::SystemTime;
 
+#[allow(unused)]
 pub struct SubtaskState {
     pub start_time: Option<SystemTime>,
     pub finish_time: Option<SystemTime>,
     pub metadata: Option<SubtaskCheckpointMetadata>,
 }
 
+#[allow(unused)]
 impl SubtaskState {
     pub fn new() -> Self {
         Self {

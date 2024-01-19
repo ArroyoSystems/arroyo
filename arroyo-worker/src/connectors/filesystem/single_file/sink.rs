@@ -1,17 +1,16 @@
-use std::{collections::HashMap, marker::PhantomData, path::Path};
+use std::{collections::HashMap, path::Path};
 
 use anyhow::Result;
 use arrow_array::RecordBatch;
-use arroyo_formats::SchemaData;
-use arroyo_macro::{process_fn, StreamNode};
+
 use arroyo_rpc::{
     grpc::{api::ConnectorOp, TableConfig},
     OperatorConfig,
 };
 use arroyo_types::{CheckpointBarrier, SignalMessage};
-use arroyo_types::{Key, Message, Record};
+
 use async_trait::async_trait;
-use serde::Serialize;
+
 use tokio::{
     fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
@@ -40,10 +39,6 @@ impl FileSink {
             file: None,
         }
     }
-
-    fn tables(&self) -> Vec<arroyo_rpc::grpc::TableDescriptor> {
-        vec![arroyo_state::global_table('f', "file_sink")]
-    }
 }
 
 impl ArrowOperatorConstructor<ConnectorOp> for FileSink {
@@ -64,7 +59,7 @@ impl ArrowOperator for FileSink {
         arroyo_state::global_table_config("f", "file_sink")
     }
 
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut ArrowContext) {
         let json_rows: Vec<_> = arrow_json::writer::record_batches_to_json_rows(&[&batch])
             .unwrap()
             .into_iter()
@@ -114,8 +109,8 @@ impl ArrowOperator for FileSink {
         }
     }
 
-    async fn handle_checkpoint(&mut self, b: CheckpointBarrier, ctx: &mut ArrowContext) {
-        let mut state = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
+    async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
+        let state = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
         state
             .insert(
                 self.output_path.clone(),

@@ -27,8 +27,6 @@ use tracing::{info, warn};
 #[cfg(feature = "k8s")]
 pub mod kubernetes;
 
-pub mod nomad;
-
 lazy_static! {
     static ref FREE_SLOTS: Gauge =
         register_gauge!("arroyo_controller_free_slots", "number of free task slots").unwrap();
@@ -468,6 +466,7 @@ impl Scheduler for NodeScheduler {
             .collect())
     }
 
+    #[allow(unreachable_code, unused)]
     async fn start_workers(
         &self,
         start_pipeline_req: StartPipelineReq,

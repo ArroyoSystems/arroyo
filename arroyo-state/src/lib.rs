@@ -11,7 +11,7 @@ use arroyo_types::{single_item_hash_map, CheckpointBarrier, Data, Key, TaskInfo}
 use async_trait::async_trait;
 use bincode::config::Configuration;
 use bincode::{Decode, Encode};
-use parquet::ParquetStats;
+
 use prost::Message;
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;

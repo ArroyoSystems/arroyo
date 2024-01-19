@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
-use std::io::Write;
 use std::{mem, thread};
 
 use std::sync::Arc;
@@ -8,21 +7,19 @@ use std::time::{Instant, SystemTime};
 
 use anyhow::Result;
 use arrow::compute::{partition, sort_to_indices, take};
-use arrow_array::builder::{make_builder, ArrayBuilder, UInt64Builder};
+use arrow_array::builder::{make_builder, ArrayBuilder};
 use arrow_array::types::UInt64Type;
-use arrow_array::{Array, PrimitiveArray, RecordBatch, StructArray};
+use arrow_array::{Array, PrimitiveArray, RecordBatch};
 use arrow_schema::SchemaRef;
 use arroyo_datastream::get_hasher;
 use arroyo_rpc::ArroyoSchema;
-use arroyo_state::tables::table_manager;
+
 use arroyo_state::tables::table_manager::TableManager;
 use bincode::{Decode, Encode};
 use datafusion_common::hash_utils;
-use datafusion_expr::UserDefinedLogicalNode;
 
 use tracing::{debug, info, warn};
 
-use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowFunc;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
 use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
 use crate::connectors::filesystem::single_file::sink::FileSink;
@@ -34,11 +31,9 @@ use crate::connectors::kafka::source::KafkaSourceFunc;
 use crate::connectors::sse::SSESourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operator::{
-    server_for_hash, server_for_hash_array, ArrowOperatorConstructor, OperatorNode,
-};
+use crate::operator::{server_for_hash_array, ArrowOperatorConstructor, OperatorNode};
 use crate::operators::PeriodicWatermarkGenerator;
-use crate::{RateLimiter, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY, TIMER_TABLE};
+use crate::{RateLimiter, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
@@ -46,21 +41,20 @@ use arroyo_formats::ArrowDeserializer;
 pub use arroyo_macro::StreamNode;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{
-    api, CheckpointMetadata, TableConfig, TableDeleteBehavior, TableDescriptor, TableType,
-    TableWriteBehavior, TaskAssignment, TaskCheckpointEventType,
+    api, CheckpointMetadata, TableConfig, TaskAssignment, TaskCheckpointEventType,
 };
 use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
-use arroyo_state::{BackingStore, StateBackend, StateStore};
+use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{
     from_micros, range_for_server, should_flush, ArrowMessage, CheckpointBarrier, Data, Key,
-    SourceError, TaskInfo, UserError, Watermark, WorkerId, HASH_SEEDS,
+    SourceError, TaskInfo, UserError, Watermark, WorkerId,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
-use rand::random;
+
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
@@ -551,7 +545,7 @@ impl ArrowContext {
             .unwrap();
     }
 
-    pub async fn load_compacted(&mut self, compaction: CompactionResult) {
+    pub async fn load_compacted(&mut self, _compaction: CompactionResult) {
         //TODO: support compaction in the table manager
         // self.state.load_compacted(compaction).await;
     }
@@ -1308,7 +1302,7 @@ impl Engine {
 
         for edge in self.program.graph.edges_directed(idx, Direction::Outgoing) {
             // is the target of this edge local or remote?
-            let local = {
+            let _local = {
                 let target = self.program.graph.node_weight(edge.target()).unwrap();
                 self.assignments
                     .get(&(target.id().to_string(), target.subtask_idx()))
@@ -1337,7 +1331,7 @@ impl Engine {
         let task_index = task_info.task_index;
 
         let tables = node.node.tables();
-        let mut in_qs: Vec<_> = in_qs_map.into_values().flatten().collect();
+        let in_qs: Vec<_> = in_qs_map.into_values().flatten().collect();
 
         let ctx = ArrowContext::new(
             task_info,
@@ -1499,7 +1493,7 @@ mod tests {
     async fn test_shuffles() {
         let timestamp = SystemTime::now();
 
-        let data = vec![0, 100, 0, 100, 0, 100, 0, 0];
+        let data = vec![0, 101, 0, 101, 0, 101, 0, 0];
 
         let columns: Vec<ArrayRef> = vec![
             Arc::new(UInt64Array::from(data.clone())),

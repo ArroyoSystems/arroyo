@@ -18,6 +18,7 @@ use tracing::warn;
 
 use crate::{parquet::ParquetStats, DataOperation};
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct SchemaWithHashAndOperation {
     state_schema: SchemaRef,
@@ -26,6 +27,7 @@ pub struct SchemaWithHashAndOperation {
     operation_index: usize,
 }
 
+#[allow(unused)]
 impl SchemaWithHashAndOperation {
     pub(crate) fn new(memory_schema: ArroyoSchema) -> Self {
         let mut fields = memory_schema.schema.fields().to_vec();
@@ -117,7 +119,7 @@ impl SchemaWithHashAndOperation {
             .unwrap();
 
         let mut hash_buffer = vec![0u64; key_batch.num_rows()];
-        let hashes = create_hashes(key_batch.columns(), &get_hasher(), &mut hash_buffer)?;
+        let _hashes = create_hashes(key_batch.columns(), &get_hasher(), &mut hash_buffer)?;
         let hash_array = PrimitiveArray::<UInt64Type>::from(hash_buffer);
 
         let hash_min = min(&hash_array).unwrap();
