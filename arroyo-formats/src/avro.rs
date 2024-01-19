@@ -531,17 +531,14 @@ mod tests {
         assert_eq!(*row.get("store_id").unwrap(), json!(4));
         assert_eq!(*row.get("store_order_id").unwrap(), json!(14308));
         assert_eq!(*row.get("coupon_code").unwrap(), json!(1992));
-        assert_eq!(*row.get("date").unwrap(), json!("18397"));
+        assert_eq!(*row.get("date").unwrap(), json!(18397));
         assert_eq!(*row.get("status").unwrap(), json!("accepted"));
-
-        let v: serde_json::Value =
-            serde_json::from_str(&row.get("order_lines").unwrap().as_str().unwrap()).unwrap();
 
         let order_line_expected = json!(
             [{"category":"pizza","net_price":22.9,"product_id":78,"quantity":2,"unit_price":11.45},{"category":"dessert","net_price":6.61,"product_id":42,"quantity":1,"unit_price":6.61}]
         );
 
-        assert_eq!(v, order_line_expected);
+        assert_eq!(*row.get("order_lines").unwrap(), order_line_expected);
     }
 
     #[tokio::test]

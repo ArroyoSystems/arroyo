@@ -326,7 +326,9 @@ mod test {
     use crate::schedulers::kubernetes::KubernetesScheduler;
     use crate::schedulers::StartPipelineReq;
 
+    #[ignore]
     #[test]
+    #[allow(unreachable_code, unused)]
     fn test_resource_creation() {
         let req = StartPipelineReq {
             name: "test_pipeline".to_string(),

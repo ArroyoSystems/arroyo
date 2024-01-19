@@ -21,7 +21,7 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
@@ -181,6 +181,36 @@ impl<K: Key, T: Data> Context<K, T> {
             state,
             _ts: PhantomData,
         }
+    }
+
+    #[allow(unused)]
+    pub fn new_for_test() -> (Self, Receiver<QueueItem>) {
+        let (_, control_rx) = channel(128);
+        let (command_tx, _) = channel(128);
+        let (data_tx, data_rx) = channel(128);
+
+        let out_queue = OutQueue::new(data_tx, false);
+
+        let task_info = TaskInfo {
+            job_id: "instance-1".to_string(),
+            operator_name: "test-operator".to_string(),
+            operator_id: "test-operator-1".to_string(),
+            task_index: 0,
+            parallelism: 1,
+            key_range: 0..=0,
+        };
+
+        let ctx = futures::executor::block_on(Context::new(
+            task_info,
+            None,
+            control_rx,
+            command_tx,
+            1,
+            vec![vec![out_queue]],
+            vec![],
+        ));
+
+        (ctx, data_rx)
     }
 
     pub fn watermark(&self) -> Option<Watermark> {
