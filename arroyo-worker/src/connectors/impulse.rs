@@ -6,7 +6,7 @@ use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
 use arrow_array::builder::{TimestampNanosecondBuilder, UInt64Builder};
-use arrow_array::{RecordBatch};
+use arrow_array::RecordBatch;
 use arroyo_rpc::grpc::{api, StopMode, TableConfig};
 use arroyo_rpc::{ControlMessage, OperatorConfig};
 use arroyo_types::*;

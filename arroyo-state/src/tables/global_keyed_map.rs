@@ -1,18 +1,17 @@
-use crate::{metrics::TABLE_SIZE_GAUGE};
+use crate::metrics::TABLE_SIZE_GAUGE;
 use crate::{BackingStore, CheckpointMessage, StateMessage, TableData};
 use anyhow::{anyhow, bail, Result};
 use arrow_array::{BinaryArray, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use arroyo_rpc::grpc::{
-    GlobalKeyedTableSubtaskCheckpointMetadata,
-    GlobalKeyedTableTaskCheckpointMetadata, TableEnum,
+    GlobalKeyedTableSubtaskCheckpointMetadata, GlobalKeyedTableTaskCheckpointMetadata, TableEnum,
 };
-use arroyo_storage::{StorageProviderRef};
+use arroyo_storage::StorageProviderRef;
 use arroyo_types::{to_micros, Data, Key, TaskInfoRef};
 use bincode::config;
 
 use once_cell::sync::Lazy;
-use parquet::arrow::arrow_reader::{ParquetRecordBatchReaderBuilder};
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::{
     arrow::ArrowWriter,
     basic::ZstdLevel,
@@ -27,7 +26,6 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::mpsc::Sender;
-
 
 use super::{table_checkpoint_path, Table, TableEpochCheckpointer};
 static GLOBAL_KEY_VALUE_SCHEMA: Lazy<Arc<Schema>> = Lazy::new(|| {

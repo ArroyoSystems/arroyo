@@ -16,7 +16,8 @@ use arroyo_rpc::grpc::api::PeriodicWatermark;
 use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_state::global_table_config;
 use arroyo_types::{
-    from_millis, from_nanos, to_millis, ArrowMessage, CheckpointBarrier, Data, GlobalKey, Key, Record, SignalMessage, TaskInfo, UpdatingData, Watermark, Window,
+    from_millis, from_nanos, to_millis, ArrowMessage, CheckpointBarrier, Data, GlobalKey, Key,
+    Record, SignalMessage, TaskInfo, UpdatingData, Watermark, Window,
 };
 use async_trait::async_trait;
 use bincode::{config, Decode, Encode};

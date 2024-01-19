@@ -1,9 +1,7 @@
 use anyhow::Result;
 
 use arroyo_rpc::formats::Format;
-use arroyo_rpc::grpc::{
-    api, TableConfig,
-};
+use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp, OperatorConfig};
 use arroyo_types::*;
 use std::collections::HashMap;

@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use arrow_array::types::IntervalMonthDayNanoType;
-use arrow_schema::{Schema};
-use arroyo_datastream::{WindowType};
+use arrow_schema::Schema;
+use arroyo_datastream::WindowType;
 
 use datafusion::{
     execution::{
@@ -22,10 +22,8 @@ use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
 use arroyo_rpc::grpc::api::{self};
-use arroyo_rpc::grpc::api::{
-    KeyPlanOperator, ValuePlanOperator, Window, WindowAggregateOperator,
-};
-use datafusion_common::{ScalarValue};
+use arroyo_rpc::grpc::api::{KeyPlanOperator, ValuePlanOperator, Window, WindowAggregateOperator};
+use datafusion_common::ScalarValue;
 use datafusion_expr::{expr::ScalarFunction, BuiltinScalarFunction, Expr, LogicalPlan};
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
@@ -266,7 +264,10 @@ pub(crate) async fn get_arrow_program(
                 node_mapping.insert(node_index, new_node_index);
                 new_node_index
             }
-            crate::LogicalPlanExtension::Sink { name: _, connector_op } => {
+            crate::LogicalPlanExtension::Sink {
+                name: _,
+                connector_op,
+            } => {
                 let connector_op: api::ConnectorOp = connector_op.clone().into();
                 let sink_index = program_graph.add_node(LogicalNode {
                     operator_id: format!("sink_{}", program_graph.node_count()),

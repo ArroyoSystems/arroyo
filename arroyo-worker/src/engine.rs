@@ -20,7 +20,6 @@ use datafusion_common::hash_utils;
 
 use tracing::{debug, info, warn};
 
-
 use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
 use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
 use crate::connectors::filesystem::single_file::sink::FileSink;
@@ -32,9 +31,7 @@ use crate::connectors::kafka::source::KafkaSourceFunc;
 use crate::connectors::sse::SSESourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operator::{
-    server_for_hash_array, ArrowOperatorConstructor, OperatorNode,
-};
+use crate::operator::{server_for_hash_array, ArrowOperatorConstructor, OperatorNode};
 use crate::operators::PeriodicWatermarkGenerator;
 use crate::{RateLimiter, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
@@ -1496,7 +1493,7 @@ mod tests {
     async fn test_shuffles() {
         let timestamp = SystemTime::now();
 
-        let data = vec![0, 100, 0, 100, 0, 100, 0, 0];
+        let data = vec![0, 101, 0, 101, 0, 101, 0, 0];
 
         let columns: Vec<ArrayRef> = vec![
             Arc::new(UInt64Array::from(data.clone())),

@@ -12,8 +12,8 @@ use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
 use arroyo_types::{
-    from_micros, server_for_hash, Data, Key, Message, Record, SourceError,
-    TaskInfo, UserError, Watermark,
+    from_micros, server_for_hash, Data, Key, Message, Record, SourceError, TaskInfo, UserError,
+    Watermark,
 };
 use bincode::config;
 use rand::Rng;

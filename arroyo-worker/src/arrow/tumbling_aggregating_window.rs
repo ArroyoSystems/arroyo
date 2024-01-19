@@ -20,7 +20,7 @@ use arroyo_rpc::{
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
-use datafusion_common::{ScalarValue};
+use datafusion_common::ScalarValue;
 use futures::stream::FuturesUnordered;
 
 use crate::engine::ArrowContext;

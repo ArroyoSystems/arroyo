@@ -6,11 +6,12 @@ use crate::{
     DeleteTimeRangeOperation, DeleteValueOperation, StateStore, BINCODE_CONFIG,
 };
 use anyhow::{bail, Context, Result};
-use arrow_array::types::{GenericBinaryType};
+use arrow_array::types::GenericBinaryType;
 use arrow_array::{Array, RecordBatch};
 use arroyo_rpc::grpc::backend_data::BackendData;
 use arroyo_rpc::grpc::{
-    backend_data, CheckpointMetadata, OperatorCheckpointMetadata, ParquetStoreData, TableDescriptor, TableType,
+    backend_data, CheckpointMetadata, OperatorCheckpointMetadata, ParquetStoreData,
+    TableDescriptor, TableType,
 };
 use arroyo_rpc::{grpc, ArroyoSchema, CompactionResult, ControlResp};
 use arroyo_storage::StorageProvider;
@@ -23,8 +24,8 @@ use bytes::Bytes;
 
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use parquet::arrow::arrow_reader::{ParquetRecordBatchReaderBuilder};
-use parquet::arrow::{ArrowWriter};
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use parquet::arrow::ArrowWriter;
 use parquet::basic::ZstdLevel;
 use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use prost::Message;

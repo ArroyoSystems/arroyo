@@ -5,16 +5,13 @@ use std::{collections::HashMap, env, sync::Arc, time::SystemTime};
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_rpc::{
     grpc::{
-        OperatorCheckpointMetadata,
-        SubtaskCheckpointMetadata, TableConfig, TableEnum,
+        OperatorCheckpointMetadata, SubtaskCheckpointMetadata, TableConfig, TableEnum,
         TableSubtaskCheckpointMetadata,
     },
     CheckpointCompleted, ControlResp,
 };
 use arroyo_storage::{StorageProvider, StorageProviderRef};
-use arroyo_types::{
-    to_micros, CheckpointBarrier, Data, Key, TaskInfoRef, CHECKPOINT_URL_ENV,
-};
+use arroyo_types::{to_micros, CheckpointBarrier, Data, Key, TaskInfoRef, CHECKPOINT_URL_ENV};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
@@ -23,17 +20,10 @@ use tokio::sync::{
 use tracing::{debug, info, warn};
 
 use crate::CheckpointMessage;
-use crate::{
-    tables::{global_keyed_map::GlobalKeyedTable},
-    StateMessage,
-};
+use crate::{tables::global_keyed_map::GlobalKeyedTable, StateMessage};
 
-use super::expiring_time_key_map::{
-    ExpiringTimeKeyTable, ExpiringTimeKeyView,
-};
-use super::{
-    global_keyed_map::{GlobalKeyedView},
-};
+use super::expiring_time_key_map::{ExpiringTimeKeyTable, ExpiringTimeKeyView};
+use super::global_keyed_map::GlobalKeyedView;
 use super::{ErasedCheckpointer, ErasedTable};
 
 #[allow(unused)]

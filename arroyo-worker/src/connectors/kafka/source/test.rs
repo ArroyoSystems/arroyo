@@ -7,7 +7,7 @@ use rand::random;
 
 use arrow_array::{Array, StringArray};
 use arrow_schema::TimeUnit;
-use std::collections::{VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 

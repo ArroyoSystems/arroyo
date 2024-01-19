@@ -3,7 +3,6 @@ use std::{collections::HashMap, path::Path};
 use anyhow::Result;
 use arrow_array::RecordBatch;
 
-
 use arroyo_rpc::{
     grpc::{api::ConnectorOp, TableConfig},
     OperatorConfig,

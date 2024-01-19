@@ -48,9 +48,9 @@ mod states;
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
+use crate::schedulers::{NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::LogLevel;
 use types::public::{RestartMode, StopMode};
-use crate::schedulers::{NodeScheduler, ProcessScheduler, Scheduler};
 
 pub const CHECKPOINTS_TO_KEEP: u32 = 5;
 

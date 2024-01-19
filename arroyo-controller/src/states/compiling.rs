@@ -1,5 +1,4 @@
-
-use crate::states::{StateError};
+use crate::states::StateError;
 
 use super::{scheduling::Scheduling, JobContext, State, Transition};
 

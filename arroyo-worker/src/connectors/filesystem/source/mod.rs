@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use anyhow::Result;
 use arrow_array::RecordBatch;
 
-use arroyo_state::{global_table_config};
+use arroyo_state::global_table_config;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion_common::ScalarValue;

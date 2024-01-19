@@ -3,18 +3,10 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-
 use anyhow::{anyhow, bail, Ok, Result};
-use arrow::compute::{
-    kernels::{aggregate},
-};
-use arrow_array::{
-    cast::AsArray,
-    types::{TimestampNanosecondType},
-    PrimitiveArray, RecordBatch,
-};
+use arrow::compute::kernels::aggregate;
+use arrow_array::{cast::AsArray, types::TimestampNanosecondType, PrimitiveArray, RecordBatch};
 use arrow_ord::partition::partition;
-
 
 use arroyo_rpc::{
     grpc::{
@@ -26,7 +18,6 @@ use arroyo_rpc::{
 use arroyo_storage::StorageProviderRef;
 use arroyo_types::{from_micros, from_nanos, print_time, to_micros, TaskInfoRef};
 
-
 use futures::StreamExt;
 use parquet::arrow::{
     async_reader::ParquetObjectReader, AsyncArrowWriter, ParquetRecordBatchStreamBuilder,
@@ -34,7 +25,8 @@ use parquet::arrow::{
 use tokio::{io::AsyncWrite, sync::mpsc::Sender};
 
 use crate::{
-    parquet::ParquetStats, schemas::SchemaWithHashAndOperation, CheckpointMessage, StateMessage, TableData,
+    parquet::ParquetStats, schemas::SchemaWithHashAndOperation, CheckpointMessage, StateMessage,
+    TableData,
 };
 use tracing::{info, warn};
 
