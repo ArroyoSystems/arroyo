@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "bollard",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-api"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-compiler-service"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-rpc",
@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-connectors"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-datastream",
@@ -765,7 +765,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-controller"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "arrow-schema 49.0.0",
@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-datastream"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "ahash 0.8.7",
  "anyhow",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-formats"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-macro"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-metrics"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "arroyo-types",
  "prometheus",
@@ -925,7 +925,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-node"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-rpc",
@@ -946,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-openapi"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "arroyo-api",
  "reqwest",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-rpc"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-server-common"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "arroyo-types",
  "axum",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-sql-testing"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "arrow 49.0.0",
@@ -1042,7 +1042,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-state"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "ahash 0.8.7",
  "anyhow",
@@ -1084,7 +1084,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-storage"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "arroyo-types",
  "async-trait",
@@ -1102,7 +1102,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-types"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "arrow 49.0.0",
  "arrow-array 49.0.0",
@@ -1114,7 +1114,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-worker"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "ahash 0.8.7",
  "anyhow",
@@ -2436,7 +2436,7 @@ dependencies = [
 
 [[package]]
 name = "copy-artifacts"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "arroyo-storage",
  "regex",
@@ -4624,7 +4624,7 @@ dependencies = [
 
 [[package]]
 name = "integ"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-openapi",
