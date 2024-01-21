@@ -10,7 +10,6 @@ use datafusion::datasource::DefaultTableSource;
 use datafusion::physical_plan::functions::make_scalar_function;
 use datafusion_common::{Column, DFField, OwnedTableReference, Result as DFResult, ScalarValue};
 pub mod external;
-pub mod json_schema;
 pub mod logical;
 pub mod physical;
 mod plan_graph;
@@ -42,10 +41,8 @@ use schemas::{
 };
 
 use tables::{Insert, Table};
-use types::interval_month_day_nanos_to_duration;
 
 use crate::plan_graph::get_arrow_program;
-use crate::types::{StructDef, TypeDef};
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion_common::{DFSchema, DFSchemaRef, DataFusionError};
 use prettyplease::unparse;
@@ -53,6 +50,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
+use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use arroyo_rpc::{ArroyoSchema, TIMESTAMP_FIELD};
 use std::time::{Duration, SystemTime};
@@ -69,8 +67,8 @@ mod test;
 #[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct UdfDef {
-    args: Vec<TypeDef>,
-    ret: TypeDef,
+    args: Vec<NullableType>,
+    ret: NullableType,
     def: String,
     dependencies: String,
 }
@@ -79,7 +77,7 @@ pub struct UdfDef {
 pub struct CompiledSql {
     pub program: LogicalProgram,
     pub connection_ids: Vec<i64>,
-    pub schemas: HashMap<String, StructDef>,
+    pub schemas: HashMap<String, Schema>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -274,7 +272,7 @@ impl ArroyoSchemaProvider {
         };
 
         let name = function.sig.ident.to_string();
-        let mut args: Vec<TypeDef> = vec![];
+        let mut args = vec![];
         let mut vec_arguments = 0;
         for (i, arg) in function.sig.inputs.iter().enumerate() {
             match arg {
@@ -287,7 +285,7 @@ impl ArroyoSchemaProvider {
                 FnArg::Typed(t) => {
                     if let Some(vec_type) = Self::vec_inner_type(&t.ty) {
                         vec_arguments += 1;
-                        args.push((&vec_type).try_into().map_err(|_| {
+                        args.push(rust_to_arrow(&vec_type).ok_or_else(|| {
                                 anyhow!(
                                     "Could not convert function {} inner vector arg {} into a SQL data type",
                                     name,
@@ -295,7 +293,7 @@ impl ArroyoSchemaProvider {
                                 )
                             })?);
                     } else {
-                        args.push((&*t.ty).try_into().map_err(|_| {
+                        args.push(rust_to_arrow(&*t.ty).ok_or_else(|| {
                             anyhow!(
                                 "Could not convert function {} arg {} into a SQL data type",
                                 name,
@@ -307,25 +305,24 @@ impl ArroyoSchemaProvider {
             }
         }
 
-        let ret: TypeDef = match &function.sig.output {
+        let ret = match &function.sig.output {
             ReturnType::Default => bail!("Function {} return type must be specified", name),
-            ReturnType::Type(_, t) => (&**t).try_into().map_err(|_| {
+            ReturnType::Type(_, t) => rust_to_arrow(&**t).ok_or_else(|| {
                 anyhow!(
                     "Could not convert function {} return type into a SQL data type",
                     name
                 )
             })?,
         };
+
         if vec_arguments > 0 && vec_arguments != args.len() {
             bail!("Function {} arguments must be vectors or none", name);
         }
         if vec_arguments > 0 {
-            let return_type = Arc::new(ret.as_datatype().unwrap().clone());
+            let return_type = Arc::new(ret.data_type.clone());
             let name = function.sig.ident.to_string();
             let signature = Signature::exact(
-                args.iter()
-                    .map(|t| t.as_datatype().unwrap().clone())
-                    .collect(),
+                args.iter().map(|t| t.data_type.clone()).collect(),
                 Volatility::Volatile,
             );
             let return_type: ReturnTypeFunction = Arc::new(move |_| Ok(return_type.clone()));
@@ -344,10 +341,8 @@ impl ArroyoSchemaProvider {
                     function.sig.ident.to_string(),
                     Arc::new(create_udf(
                         &function.sig.ident.to_string(),
-                        args.iter()
-                            .map(|t| t.as_datatype().unwrap().clone())
-                            .collect(),
-                        Arc::new(ret.as_datatype().unwrap().clone()),
+                        args.iter().map(|t| t.data_type.clone()).collect(),
+                        Arc::new(ret.data_type.clone()),
                         Volatility::Volatile,
                         make_scalar_function(fn_impl),
                     )),

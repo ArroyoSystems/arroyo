@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context};
-use arrow_schema::Field;
+use arrow_schema::SchemaRef;
 use arroyo_connectors::connector_for_type;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -29,7 +29,6 @@ use arroyo_rpc::grpc::{api as api_proto, api};
 
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{LogicalProgram, OperatorName};
-use arroyo_df::types::StructDef;
 use arroyo_df::{has_duplicate_udf_names, ArroyoSchemaProvider, CompiledSql, SqlConfig};
 use arroyo_formats::avro::arrow_to_avro_schema;
 use arroyo_formats::json::arrow_to_json_schema;
@@ -164,7 +163,7 @@ fn set_parallelism(program: &mut LogicalProgram, parallelism: usize) {
 #[allow(unused)]
 async fn try_register_confluent_schema(
     sink: &mut ConnectorOp,
-    schema: &StructDef,
+    schema: &SchemaRef,
 ) -> anyhow::Result<()> {
     let mut config: OperatorConfig = serde_json::from_str(&sink.config).unwrap();
 
@@ -191,12 +190,10 @@ async fn try_register_confluent_schema(
     match config.format.clone() {
         Some(Format::Avro(mut avro)) => {
             if avro.confluent_schema_registry && avro.schema_id.is_none() {
-                let fields: Vec<Field> = schema.fields.iter().map(|f| f.clone().into()).collect();
-
-                let schema = arrow_to_avro_schema(&schema.struct_name_ident(), &fields.into());
+                let avro_schema = arrow_to_avro_schema("avro_root", schema.fields());
 
                 let id = schema_registry
-                    .write_schema(schema.canonical_form(), ConfluentSchemaType::Avro)
+                    .write_schema(avro_schema.canonical_form(), ConfluentSchemaType::Avro)
                     .await?;
 
                 avro.schema_id = Some(id as u32);
@@ -205,12 +202,10 @@ async fn try_register_confluent_schema(
         }
         Some(Format::Json(mut json)) => {
             if json.confluent_schema_registry && json.schema_id.is_none() {
-                let fields: Vec<Field> = schema.fields.iter().map(|f| f.clone().into()).collect();
-
-                let schema = arrow_to_json_schema(&fields.into());
+                let json_schema = arrow_to_json_schema(schema.fields());
 
                 let id = schema_registry
-                    .write_schema(schema.to_string(), ConfluentSchemaType::Json)
+                    .write_schema(json_schema.to_string(), ConfluentSchemaType::Json)
                     .await?;
 
                 json.schema_id = Some(id as u32);

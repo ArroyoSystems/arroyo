@@ -1,4 +1,4 @@
-use arrow::datatypes::{Field, SchemaRef};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
 use async_trait::async_trait;
 use bincode::{config, BorrowDecode, Decode, Encode};
@@ -772,6 +772,10 @@ pub struct ImpulseEvent {
 #[derive(Encode, Decode, Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RawJson {
     pub value: String,
+}
+
+pub fn raw_schema() -> Schema {
+    Schema::new(vec![Field::new("value", DataType::Utf8, false)])
 }
 
 pub mod nexmark {

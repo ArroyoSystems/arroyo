@@ -4,10 +4,8 @@ use arroyo_connectors::{
     Connector, EmptyConfig,
 };
 
-use crate::{
-    parse_and_get_arrow_program, parse_and_get_program, types::TypeDef, ArroyoSchemaProvider,
-    SqlConfig,
-};
+use crate::types::NullableType;
+use crate::{parse_and_get_arrow_program, parse_and_get_program, ArroyoSchemaProvider, SqlConfig};
 
 #[ignore]
 #[tokio::test]
@@ -231,10 +229,17 @@ async fn test_udf() {
         .add_rust_udf("fn my_sqr(x: i64) -> i64 { x * x }")
         .unwrap();
 
-    let def = schema_provider.udf_defs.get("my_sqr").unwrap();
-    assert_eq!(def.ret, TypeDef::DataType(DataType::Int64, false));
+    schema_provider
+        .add_rust_udf("fn my_sqr_opt(x: i64) -> Option<i64> { Some(x * x) }")
+        .unwrap();
 
-    let sql = "SELECT my_sqr(bid.auction) FROM nexmark";
+    let def = schema_provider.udf_defs.get("my_sqr").unwrap();
+    assert_eq!(def.ret, NullableType::not_null(DataType::Int64));
+
+    let def = schema_provider.udf_defs.get("my_sqr_opt").unwrap();
+    assert_eq!(def.ret, NullableType::null(DataType::Int64));
+
+    let sql = "SELECT my_sqr(bid.auction), my_sqr_opt(bid.auction) FROM nexmark";
     parse_and_get_program(sql, schema_provider, SqlConfig::default())
         .await
         .unwrap();

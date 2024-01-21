@@ -4,8 +4,6 @@ use std::time::Duration;
 
 use arroyo_datastream::ConnectorOp;
 
-use crate::types::StructDef;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProcessingMode {
     Append,
@@ -24,7 +22,7 @@ pub struct SqlSource {
 #[derive(Clone, Debug)]
 pub struct SqlSink {
     pub id: Option<i64>,
-    pub struct_def: StructDef,
+    pub struct_def: Vec<FieldRef>,
     pub operator: LogicalNode,
     pub updating_type: SinkUpdateType,
 }
@@ -34,10 +32,4 @@ pub enum SinkUpdateType {
     Allow,
     Disallow,
     Force,
-}
-
-#[derive(Clone, Debug)]
-pub struct SqlTable {
-    pub struct_def: StructDef,
-    pub name: String,
 }

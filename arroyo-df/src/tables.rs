@@ -27,10 +27,10 @@ use datafusion_expr::{
 };
 use tracing::info;
 
+use crate::types::convert_data_type;
 use crate::DEFAULT_IDLE_TIME;
 use crate::{
     external::{ProcessingMode, SqlSource},
-    types::{convert_data_type, StructField},
     ArroyoSchemaProvider,
 };
 
@@ -106,11 +106,7 @@ impl From<Connection> for ConnectorTable {
                 .schema
                 .fields
                 .iter()
-                .map(|f| {
-                    let struct_field: StructField = f.clone().into();
-                    let field: Field = struct_field.into();
-                    field.into()
-                })
+                .map(|f| FieldSpec::StructField(f.clone().into()))
                 .collect(),
             operator: value.operator,
             config: value.config,

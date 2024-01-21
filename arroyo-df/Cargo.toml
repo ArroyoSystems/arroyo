@@ -38,8 +38,6 @@ proc-macro2 = "1"
 syn = {version = "2", features = ["full", "parsing", "extra-traits"]}
 tracing = "0.1.37"
 
-typify = "0.0.13"
-schemars = "0.8"
 serde_json_path = "0.6.3"
 apache-avro = "0.16.0"
 prettyplease = "0.2.4"

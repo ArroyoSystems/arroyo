@@ -871,7 +871,6 @@ dependencies = [
  "prost 0.12.3",
  "quote",
  "regex",
- "schemars",
  "serde",
  "serde_json",
  "serde_json_path",
@@ -880,7 +879,6 @@ dependencies = [
  "tokio-stream",
  "toml 0.8.8",
  "tracing",
- "typify",
  "unicase",
 ]
 
@@ -899,10 +897,12 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "chrono",
  "memchr",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
+ "typify",
  "utoipa 3.5.0",
 ]
 
