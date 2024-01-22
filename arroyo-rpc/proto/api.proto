@@ -156,6 +156,16 @@ message SlidingWindowAggregateOperator {
   bytes final_aggregation_plan = 10;
 }
 
+message SessionWindowAggregateOperator {
+  string name = 1;
+  uint64 gap_micros = 2;
+  string window_field_name = 3;
+  uint64 window_index = 4;
+  ArroyoSchema input_schema = 5;
+  ArroyoSchema unkeyed_aggregate_schema = 6;
+  bytes partial_aggregation_plan = 7;
+  bytes final_aggregation_plan = 8;
+}
 
 enum OperatorName {
   STRUCT_TO_RECORD_BATCH = 0;

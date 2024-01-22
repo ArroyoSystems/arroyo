@@ -4,7 +4,7 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
+use anyhow::{anyhow, bail, Result};
 use arrow::{
     compute::{
         concat_batches, filter_record_batch, kernels::cmp::gt_eq, lexsort_to_indices, partition,
@@ -16,11 +16,11 @@ use arrow_array::{
     types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch, StructArray,
     TimestampNanosecondArray,
 };
-use arrow_schema::{DataType, Field, FieldRef, Schema};
-use arroyo_df::{physical::ArroyoMemExec, schemas::window_arrow_struct};
+use arrow_schema::{DataType, Field, FieldRef};
+use arroyo_df::schemas::window_arrow_struct;
 use arroyo_rpc::{
-    grpc::{api, api::window::Window, TableConfig},
-    ArroyoSchema, ArroyoSchemaRef, TIMESTAMP_FIELD,
+    grpc::{api, TableConfig},
+    ArroyoSchema, ArroyoSchemaRef,
 };
 use arroyo_state::{
     global_table_config, tables::global_keyed_map::GlobalKeyedView, timestamp_table_config,
@@ -37,10 +37,7 @@ use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
 };
-use datafusion_proto::{
-    physical_plan::AsExecutionPlan,
-    protobuf::{physical_plan_node::PhysicalPlanType, AggregateMode, PhysicalPlanNode},
-};
+use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -354,11 +351,11 @@ impl SessionAggregatingWindowFunc {
 struct SessionWindowConfig {
     gap: Duration,
     input_schema_ref: ArroyoSchemaRef,
-    unkeyed_aggregate_schema_ref: ArroyoSchemaRef,
     window_field: FieldRef,
     window_index: usize,
-    //TODO: perform partial aggregations and checkpoint those.
-    //partial_physical_exec: Arc<dyn ExecutionPlan>,
+    // TODO: perform partial aggregations and checkpoint those.
+    // unkeyed_aggregate_schema_ref: ArroyoSchemaRef,
+    // partial_physical_exec: Arc<dyn ExecutionPlan>,
     final_physical_exec: Arc<dyn ExecutionPlan>,
     receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
 }
@@ -600,9 +597,7 @@ impl KeyComputingHolder {
                 if let Some((start_time, batch)) = active_session.add_batch(
                     batch,
                     self.session_window_config.gap,
-                    self.session_window_config
-                        .unkeyed_aggregate_schema_ref
-                        .timestamp_index,
+                    self.session_window_config.input_schema_ref.timestamp_index,
                 )? {
                     self.batches_by_start_time
                         .entry(start_time)
@@ -619,10 +614,8 @@ impl KeyComputingHolder {
             warn!("was asked to add an empty batch, should be impossible");
             return Ok(());
         }
-        let start_time = start_time_for_sorted_batch(
-            &batch,
-            &self.session_window_config.unkeyed_aggregate_schema_ref,
-        );
+        let start_time =
+            start_time_for_sorted_batch(&batch, &self.session_window_config.input_schema_ref);
         let Some(watermark) = watermark else {
             // no watermark, so we can't start an active session yet, just put it in the buffer.
             self.batches_by_start_time
@@ -674,119 +667,46 @@ fn start_time_for_sorted_batch(batch: &RecordBatch, schema: &ArroyoSchema) -> Sy
     from_nanos(min_timestamp as u128)
 }
 
-impl ArrowOperatorConstructor<api::WindowAggregateOperator> for SessionAggregatingWindowFunc {
-    fn from_config(proto_config: api::WindowAggregateOperator) -> Result<OperatorNode> {
-        let input_schema: Schema = serde_json::from_slice(proto_config.input_schema.as_slice())
-            .context(format!(
-                "failed to deserialize schema of length {}",
-                proto_config.input_schema.len()
-            ))?;
-
-        let mut physical_plan =
-            PhysicalPlanNode::decode(&mut proto_config.physical_plan.as_slice()).unwrap();
-
-        let Some(arroyo_rpc::grpc::api::Window {
-            window: Some(Window::SessionWindow(window)),
-        }) = proto_config.window
-        else {
-            bail!("expected Session window")
-        };
+impl ArrowOperatorConstructor<api::SessionWindowAggregateOperator>
+    for SessionAggregatingWindowFunc
+{
+    fn from_config(config: api::SessionWindowAggregateOperator) -> anyhow::Result<OperatorNode> {
         let window_field = Arc::new(Field::new(
-            proto_config.window_field_name,
+            config.window_field_name,
             window_arrow_struct(),
             true,
         ));
 
-        // Calculate the partial schema so that it can be saved to state.
-        let key_indices: Vec<_> = proto_config
-            .key_fields
-            .into_iter()
-            .map(|x| x as usize)
-            .collect();
-
         let receiver = Arc::new(RwLock::new(None));
-        let PhysicalPlanType::Aggregate(mut aggregate) = physical_plan
-            .physical_plan_type
-            .take()
-            .ok_or_else(|| anyhow!("missing physical plan"))?
-        else {
-            bail!("expected aggregate physical plan, not {:?}", physical_plan);
-        };
-
-        let AggregateMode::Final = aggregate.mode() else {
-            bail!("expect AggregateMode to start as Final in session window. Currently is switched to Single")
-        };
-
-        if aggregate.group_expr.len() != key_indices.len() {
-            bail!(
-                "expected {} group expressions, got {}",
-                key_indices.len(),
-                aggregate.group_expr.len()
-            );
-        }
-        // Remove the key fields from the group expression, as we decompose incoming data into key-specific aggregates.
-        // TODO: move into planning?
-        aggregate.group_expr.clear();
-        aggregate.group_expr_name.clear();
-        aggregate.groups.clear();
-        aggregate.mode = AggregateMode::Single.into();
-
-        let table_provider = ArroyoMemExec {
-            table_name: "input".into(),
-            schema: Arc::new(input_schema.clone()),
-        };
-
-        // swap in an ArroyoMemExec as the source.
-        // This is a flexible table source that can be decoded in various ways depending on what is needed.
-        aggregate.input = Some(Box::new(PhysicalPlanNode::try_from_physical_plan(
-            Arc::new(table_provider),
-            &ArroyoPhysicalExtensionCodec::default(),
-        )?));
 
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::UnboundedBatchStream(receiver.clone()),
         };
-
-        let final_plan = PhysicalPlanNode {
-            physical_plan_type: Some(PhysicalPlanType::Aggregate(aggregate)),
-        };
-
-        debug!("physical plan: {:#?}", final_plan);
-
-        // deserialize the finish plan to read directly from a Vec<RecordBatch> behind a RWLock.
+        let final_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
         let final_execution_plan = final_plan.try_into_physical_plan(
             &EmptyRegistry {},
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
-        let Some((timestamp_field_index, _)) = input_schema.column_with_name(TIMESTAMP_FIELD)
-        else {
-            bail!("input schema does not have a timestamp field")
-        };
+
+        let input_schema: ArroyoSchema = config
+            .input_schema
+            .ok_or_else(|| anyhow!("missing input schema"))?
+            .try_into()?;
         let row_converter = RowConverter::new(
             input_schema
+                .schema
                 .fields()
                 .into_iter()
-                .take(key_indices.len())
+                .take(input_schema.key_indices.len())
                 .map(|field| SortField::new(field.data_type().clone()))
                 .collect(),
         )?;
-        debug!(
-            "output aggregate schema is {:#?}",
-            final_execution_plan.schema()
-        );
-        let input_schema_ref = Arc::new(ArroyoSchema::new(
-            Arc::new(input_schema),
-            timestamp_field_index,
-            key_indices.clone(),
-        ));
-        let unkeyed_aggregate_schema_ref = input_schema_ref.clone();
         let config = SessionWindowConfig {
-            gap: Duration::from_micros(window.gap_micros),
+            gap: Duration::from_micros(config.gap_micros),
             window_field,
-            window_index: proto_config.window_index as usize,
-            input_schema_ref,
-            unkeyed_aggregate_schema_ref,
+            window_index: config.window_index as usize,
+            input_schema_ref: Arc::new(input_schema),
             final_physical_exec: final_execution_plan,
             receiver,
         };

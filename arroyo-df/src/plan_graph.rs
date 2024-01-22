@@ -26,12 +26,15 @@ use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
-use arroyo_rpc::grpc::api::{KeyPlanOperator, SlidingWindowAggregateOperator, ValuePlanOperator};
+use arroyo_rpc::grpc::api::{
+    KeyPlanOperator, SessionWindowAggregateOperator, SlidingWindowAggregateOperator,
+    ValuePlanOperator,
+};
 use arroyo_rpc::{
     grpc::api::{self, TumblingWindowAggregateOperator},
     ArroyoSchema,
 };
-use datafusion_common::{DFSchemaRef, ScalarValue};
+use datafusion_common::{DFSchema, DFSchemaRef, ScalarValue};
 use datafusion_expr::{expr::ScalarFunction, BuiltinScalarFunction, Expr, LogicalPlan};
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
@@ -220,7 +223,7 @@ impl Planner {
                                 logical_node.operator_id,
                                 program_graph.node_count()
                             );
-                            Some(logical_node)
+                            logical_node
                         }
                         WindowType::Sliding { width: _, slide: _ } => {
                             let mut logical_node = self.sliding_window_config(aggregate).await?;
@@ -229,12 +232,19 @@ impl Planner {
                                 logical_node.operator_id,
                                 program_graph.node_count()
                             );
-                            Some(logical_node)
+                            logical_node
                         }
-                        WindowType::Instant => None,
-                        WindowType::Session { gap: _ } => None,
-                    }
-                    .expect("only support tumbling windows for now");
+                        WindowType::Instant => bail!("instant windows not supported yet"),
+                        WindowType::Session { gap: _ } => {
+                            let mut logical_node = self.session_window_config(aggregate).await?;
+                            logical_node.operator_id = format!(
+                                "{}_{}",
+                                logical_node.operator_id,
+                                program_graph.node_count()
+                            );
+                            logical_node
+                        }
+                    };
 
                     let new_node_index = program_graph.add_node(logical_node);
                     node_mapping.insert(node_index, new_node_index);
@@ -550,6 +560,79 @@ impl Planner {
             operator_id: config.name.clone(),
             description: "sliding window".to_string(),
             operator_name: OperatorName::SlidingWindowAggregate,
+            operator_config: config.encode_to_vec(),
+            parallelism: 1,
+        })
+    }
+
+    async fn session_window_config(&self, aggregate: &AggregateCalculation) -> Result<LogicalNode> {
+        let WindowType::Session { gap } = aggregate.window else {
+            bail!("expected tumbling window")
+        };
+        let input_schema = self.input_schema(aggregate);
+        let key_count = input_schema.key_indices.len();
+        let unkeyed_aggregate_schema = ArroyoSchema::new(
+            Arc::new(Schema::new(&input_schema.schema.fields[key_count..])),
+            input_schema.timestamp_index - key_count,
+            vec![],
+        );
+        let mut agg = aggregate.aggregate.clone();
+        agg.group_expr = vec![];
+        let output_schema = agg.schema;
+        agg.schema = Arc::new(DFSchema::new_with_metadata(
+            output_schema.fields()[key_count..].to_vec(),
+            output_schema.metadata().clone(),
+        )?);
+
+        let codec = ArroyoPhysicalExtensionCodec {
+            context: DecodingContext::Planning,
+        };
+
+        let physical_plan = self
+            .planner
+            .create_physical_plan(&LogicalPlan::Aggregate(agg), &self.session_state)
+            .await?;
+
+        let mut physical_plan_node: PhysicalPlanNode =
+            PhysicalPlanNode::try_from_physical_plan(physical_plan.clone(), &codec)?;
+
+        let PhysicalPlanType::Aggregate(mut aggregate_exec_node) = physical_plan_node
+            .physical_plan_type
+            .take()
+            .ok_or_else(|| anyhow!("missing physical plan"))?
+        else {
+            bail!("expected aggregate physical plan, not {:?}", physical_plan);
+        };
+        aggregate_exec_node.mode = AggregateMode::Single.into();
+        let table_provider = ArroyoMemExec {
+            table_name: "session".into(),
+            schema: input_schema.schema.clone(),
+        };
+
+        aggregate_exec_node.input = Some(Box::new(PhysicalPlanNode::try_from_physical_plan(
+            Arc::new(table_provider),
+            &codec,
+        )?));
+
+        let finish_plan = PhysicalPlanNode {
+            physical_plan_type: Some(PhysicalPlanType::Aggregate(aggregate_exec_node)),
+        };
+
+        let config = SessionWindowAggregateOperator {
+            name: format!("SessionWindow<{:?}>", gap),
+            gap_micros: gap.as_micros() as u64,
+            window_field_name: aggregate.window_field.name().to_string(),
+            window_index: aggregate.window_index as u64,
+            input_schema: Some(input_schema.try_into()?),
+            unkeyed_aggregate_schema: Some(unkeyed_aggregate_schema.try_into()?),
+            partial_aggregation_plan: vec![],
+            final_aggregation_plan: finish_plan.encode_to_vec(),
+        };
+
+        Ok(LogicalNode {
+            operator_id: config.name.clone(),
+            description: "session window".to_string(),
+            operator_name: OperatorName::SessionWindowAggregate,
             operator_config: config.encode_to_vec(),
             parallelism: 1,
         })
