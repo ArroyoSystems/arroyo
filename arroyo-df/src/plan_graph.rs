@@ -201,41 +201,47 @@ pub(crate) async fn get_arrow_program(
                         &ArroyoPhysicalExtensionCodec::default(),
                     )?;
                 let slide = match &aggregate.window {
-                    WindowType::Tumbling { width } => width,
-                    WindowType::Sliding { width: _, slide } => slide,
+                    WindowType::Tumbling { width } => Some(width),
+                    WindowType::Sliding { width:_, slide } => Some(slide),
                     WindowType::Instant => bail!("instant window not yet implemented"),
-                    WindowType::Session { gap: _ } => bail!("session window not yet implemented"),
+                    WindowType::Session { gap:_ } => None,
                 };
 
-                let date_bin = Expr::ScalarFunction(ScalarFunction {
-                    func_def: datafusion_expr::ScalarFunctionDefinition::BuiltIn(
-                        BuiltinScalarFunction::DateBin,
-                    ),
-                    args: vec![
-                        Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
-                            IntervalMonthDayNanoType::make_value(0, 0, slide.as_nanos() as i64),
-                        ))),
-                        Expr::Column(datafusion_common::Column {
-                            relation: None,
-                            name: "_timestamp".into(),
-                        }),
-                    ],
+                let date_bin = slide.map(|slide| {
+                    Expr::ScalarFunction(ScalarFunction {
+                        func_def: datafusion_expr::ScalarFunctionDefinition::BuiltIn(
+                            BuiltinScalarFunction::DateBin,
+                        ),
+                        args: vec![
+                            Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+                                IntervalMonthDayNanoType::make_value(0, 0, slide.as_nanos() as i64),
+                            ))),
+                            Expr::Column(datafusion_common::Column {
+                                relation: None,
+                                name: "_timestamp".into(),
+                            }),
+                        ],
+                    })
                 });
-                let binning_function = planner
-                    .create_physical_expr(
-                        &date_bin,
-                        &aggregate.aggregate.input.schema().as_ref(),
-                        &aggregate.aggregate.input.schema().as_ref().into(),
-                        &session_state,
-                    )
-                    .context("couldn't create binning function")?;
+                let binning_function = date_bin
+                    .map(|date_bin| {
+                        planner.create_physical_expr(
+                            &date_bin,
+                            &aggregate.aggregate.input.schema().as_ref(),
+                            &aggregate.aggregate.input.schema().as_ref().into(),
+                            &session_state,
+                        )
+                    })
+                    .transpose()?;
 
-                let binning_function_proto = PhysicalExprNode::try_from(binning_function)
-                    .context("couldn't encode binning function")?;
+                let binning_function_proto = binning_function
+                    .map(|binning_function| PhysicalExprNode::try_from(binning_function))
+                    .transpose()?
+                    .unwrap_or_default();
                 let input_schema: Schema = aggregate.aggregate.input.schema().as_ref().into();
 
                 let config = WindowAggregateOperator {
-                    name: "window_aggregate".into(),
+                    name: format!("windo_aggregate<{:?}>", aggregate.window),
                     physical_plan: physical_plan_node.encode_to_vec(),
                     binning_function: binning_function_proto.encode_to_vec(),
                     // unused now

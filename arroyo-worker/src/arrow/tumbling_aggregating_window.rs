@@ -21,7 +21,7 @@ use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use datafusion_common::ScalarValue;
-use futures::stream::FuturesUnordered;
+use futures::{stream::FuturesUnordered, StreamExt};
 
 use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
@@ -42,10 +42,10 @@ use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
-use tokio_stream::StreamExt;
 use tracing::info;
 
 use super::{
+    session_aggregating_window::SessionAggregatingWindowFunc,
     sliding_aggregating_window::SlidingAggregatingWindowFunc,
     sync::streams::KeyedCloneableStreamFuture, EmptyRegistry,
 };
@@ -109,13 +109,17 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator>
         else {
             bail!("expected a window")
         };
+        info!("window is {:?}", window);
         match window {
             Window::SlidingWindow(_) => {
                 return SlidingAggregatingWindowFunc::from_config(proto_config)
             }
             Window::TumblingWindow(_) => {}
             Window::InstantWindow(_) => bail!("instant window unsupported"),
-            Window::SessionWindow(_) => bail!("session window unsupported"),
+            Window::SessionWindow(_) => {
+                info!("session window");
+                return SessionAggregatingWindowFunc::from_config(proto_config)
+            }
         }
         let binning_function =
             PhysicalExprNode::decode(&mut proto_config.binning_function.as_slice()).unwrap();

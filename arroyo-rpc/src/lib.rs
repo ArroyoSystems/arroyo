@@ -197,6 +197,8 @@ pub fn error_chain(e: anyhow::Error) -> String {
 
 pub const TIMESTAMP_FIELD: &str = "_timestamp";
 
+pub type ArroyoSchemaRef = Arc<ArroyoSchema>;
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ArroyoSchema {
     pub schema: Arc<Schema>,

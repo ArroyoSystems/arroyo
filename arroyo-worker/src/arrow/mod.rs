@@ -36,6 +36,7 @@ use tonic::transport::Channel;
 
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 
+pub mod session_aggregating_window;
 pub mod sliding_aggregating_window;
 pub(crate) mod sync;
 pub mod tumbling_aggregating_window;

@@ -365,11 +365,11 @@ impl TableManager {
                 .tables
                 .get(table_name)
                 .ok_or_else(|| anyhow!("no registered table {}", table_name))?;
-            let global_keyed_table = table_implementation
+            let expiring_time_key_table = table_implementation
                 .as_any()
                 .downcast_ref::<ExpiringTimeKeyTable>()
                 .ok_or_else(|| anyhow!("wrong table type for table {}", table_name))?;
-            let saved_data = global_keyed_table
+            let saved_data = expiring_time_key_table
                 .get_view(self.writer.sender.clone(), watermark)
                 .await?;
             let cache: Box<dyn Any + Send> = Box::new(saved_data);

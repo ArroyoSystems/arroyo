@@ -1427,6 +1427,7 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNo
             KeyExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap())
         }
         OperatorName::ArrowAggregate => {
+            // TODO: this should not be in a specific window.
             TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
         }
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
