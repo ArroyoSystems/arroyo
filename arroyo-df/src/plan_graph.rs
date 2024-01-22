@@ -19,14 +19,14 @@ use tracing::info;
 use crate::{
     physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext, EmptyRegistry},
     schemas::add_timestamp_field_arrow,
-    DataFusionEdge, QueryToGraphVisitor,
+    AggregateCalculation, DataFusionEdge, QueryToGraphVisitor,
 };
 use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
 };
-use arroyo_rpc::grpc::api::{KeyPlanOperator, ValuePlanOperator, Window, WindowAggregateOperator};
+use arroyo_rpc::grpc::api::{KeyPlanOperator, SlidingWindowAggregateOperator, ValuePlanOperator};
 use arroyo_rpc::{
     grpc::api::{self, TumblingWindowAggregateOperator},
     ArroyoSchema,
@@ -208,15 +208,12 @@ impl Planner {
                     new_node_index
                 }
                 crate::LogicalPlanExtension::AggregateCalculation(aggregate) => {
-                    let my_aggregate = aggregate.aggregate.clone();
-                    let logical_plan = LogicalPlan::Aggregate(my_aggregate);
-
                     let LogicalPlan::TableScan(_table_scan) = aggregate.aggregate.input.as_ref()
                     else {
                         bail!("expected logical plan")
                     };
                     let logical_node = match &aggregate.window {
-                        WindowType::Tumbling { width } => {
+                        WindowType::Tumbling { width: _ } => {
                             let mut logical_node = self.tumbling_window_config(aggregate).await?;
                             logical_node.operator_id = format!(
                                 "{}_{}",
@@ -225,7 +222,15 @@ impl Planner {
                             );
                             Some(logical_node)
                         }
-                        WindowType::Sliding { width: _, slide } => None,
+                        WindowType::Sliding { width: _, slide: _ } => {
+                            let mut logical_node = self.sliding_window_config(aggregate).await?;
+                            logical_node.operator_id = format!(
+                                "{}_{}",
+                                logical_node.operator_id,
+                                program_graph.node_count()
+                            );
+                            Some(logical_node)
+                        }
                         WindowType::Instant => None,
                         WindowType::Session { gap: _ } => None,
                     }
@@ -361,108 +366,6 @@ impl Planner {
         })
     }
 
-    async fn tumbling_window_config(
-        &self,
-        aggregate: &crate::AggregateCalculation,
-    ) -> Result<LogicalNode> {
-        let WindowType::Tumbling { width } = aggregate.window else {
-            bail!("expected tumbling window")
-        };
-        let binning_function_proto =
-            self.binning_function_proto(width, aggregate.aggregate.input.schema().clone())?;
-        let input_schema: Schema = aggregate.aggregate.input.schema().as_ref().into();
-
-        let input_schema = ArroyoSchema {
-            schema: Arc::new(input_schema),
-            timestamp_index: aggregate.aggregate.input.schema().fields().len() - 1,
-            key_indices: aggregate.key_fields.clone(),
-        };
-
-        let my_aggregate = aggregate.aggregate.clone();
-        let logical_plan = LogicalPlan::Aggregate(my_aggregate);
-
-        let LogicalPlan::TableScan(_table_scan) = aggregate.aggregate.input.as_ref() else {
-            bail!("expected logical plan");
-        };
-
-        let physical_plan = self
-            .planner
-            .create_physical_plan(&logical_plan, &self.session_state)
-            .await
-            .context("couldn't create physical plan for aggregate")?;
-
-        let codec = ArroyoPhysicalExtensionCodec {
-            context: DecodingContext::Planning,
-        };
-
-        let mut physical_plan_node: PhysicalPlanNode =
-            PhysicalPlanNode::try_from_physical_plan(physical_plan.clone(), &codec)?;
-
-        let PhysicalPlanType::Aggregate(mut final_aggregate_proto) = physical_plan_node
-            .physical_plan_type
-            .take()
-            .ok_or_else(|| anyhow!("missing physical plan"))?
-        else {
-            bail!("expected aggregate physical plan, not {:?}", physical_plan);
-        };
-
-        let AggregateMode::Final = final_aggregate_proto.mode() else {
-            bail!("expect AggregateMode to be Final so we can decompose it for checkpointing.")
-        };
-
-        // pull the input out to be computed separately for each bin.
-        let partial_aggregation_plan = final_aggregate_proto
-            .input
-            .take()
-            .expect("should have input");
-
-        // need to convert to ExecutionPlan to get the partial schema.
-        let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
-            &EmptyRegistry {},
-            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
-            &codec,
-        )?;
-        let partial_schema = partial_aggregation_exec_plan.schema();
-
-        let final_input_table_provider = ArroyoMemExec {
-            table_name: "partial".into(),
-            schema: partial_schema.clone(),
-        };
-
-        final_aggregate_proto.input = Some(Box::new(PhysicalPlanNode::try_from_physical_plan(
-            Arc::new(final_input_table_provider),
-            &codec,
-        )?));
-
-        let finish_plan = PhysicalPlanNode {
-            physical_plan_type: Some(PhysicalPlanType::Aggregate(final_aggregate_proto)),
-        };
-
-        let partial_schema = ArroyoSchema::new(
-            add_timestamp_field_arrow(partial_schema.clone()),
-            partial_schema.fields().len(),
-            aggregate.key_fields.clone(),
-        );
-        let config = TumblingWindowAggregateOperator {
-            name: format!("TumblingWindow<{:?}>", width),
-            width_micros: width.as_micros() as u64,
-            binning_function: binning_function_proto.encode_to_vec(),
-            window_field_name: aggregate.window_field.name().to_string(),
-            window_index: aggregate.window_index as u64,
-            input_schema: Some(input_schema.try_into()?),
-            partial_schema: Some(partial_schema.try_into()?),
-            partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
-            final_aggregation_plan: finish_plan.encode_to_vec(),
-        };
-        Ok(LogicalNode {
-            operator_id: config.name.clone(),
-            description: "tumbling window".to_string(),
-            operator_name: OperatorName::TumblingWindowAggregate,
-            operator_config: config.encode_to_vec(),
-            parallelism: 1,
-        })
-    }
-
     fn binning_function_proto(
         &self,
         duration: Duration,
@@ -491,4 +394,170 @@ impl Planner {
         )?;
         Ok(PhysicalExprNode::try_from(binning_function)?)
     }
+
+    fn input_schema(&self, aggregate: &AggregateCalculation) -> ArroyoSchema {
+        let input_schema: Schema = aggregate.aggregate.input.schema().as_ref().into();
+
+        ArroyoSchema {
+            schema: Arc::new(input_schema),
+            timestamp_index: aggregate.aggregate.input.schema().fields().len() - 1,
+            key_indices: aggregate.key_fields.clone(),
+        }
+    }
+
+    /* Splits an aggregate into two physical plan nodes, one for the partial and one for the final.
+     */
+    async fn split_physical_plan(
+        &self,
+        aggregate: &crate::AggregateCalculation,
+    ) -> Result<SplitPlanOutput> {
+        let key_indices = aggregate.key_fields.clone();
+        let physical_plan = self
+            .planner
+            .create_physical_plan(
+                &LogicalPlan::Aggregate(aggregate.aggregate.clone()),
+                &self.session_state,
+            )
+            .await
+            .context("couldn't create physical plan for aggregate")?;
+
+        let codec = ArroyoPhysicalExtensionCodec {
+            context: DecodingContext::Planning,
+        };
+
+        let mut physical_plan_node: PhysicalPlanNode =
+            PhysicalPlanNode::try_from_physical_plan(physical_plan.clone(), &codec)?;
+
+        let PhysicalPlanType::Aggregate(mut final_aggregate_proto) = physical_plan_node
+            .physical_plan_type
+            .take()
+            .ok_or_else(|| anyhow!("missing physical plan"))?
+        else {
+            bail!("expected aggregate physical plan, not {:?}", physical_plan);
+        };
+
+        let AggregateMode::Final = final_aggregate_proto.mode() else {
+            bail!("expect AggregateMode to be Final so we can decompose it for checkpointing.")
+        };
+
+        // pull out the partial aggregation, so we can checkpoint it.
+        let partial_aggregation_plan = *final_aggregate_proto
+            .input
+            .take()
+            .expect("should have input");
+
+        // need to convert to ExecutionPlan to get the partial schema.
+        let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
+            &EmptyRegistry {},
+            &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
+            &codec,
+        )?;
+
+        let partial_schema = partial_aggregation_exec_plan.schema();
+
+        let final_input_table_provider = ArroyoMemExec {
+            table_name: "partial".into(),
+            schema: partial_schema.clone(),
+        };
+
+        final_aggregate_proto.input = Some(Box::new(PhysicalPlanNode::try_from_physical_plan(
+            Arc::new(final_input_table_provider),
+            &codec,
+        )?));
+
+        let finish_plan = PhysicalPlanNode {
+            physical_plan_type: Some(PhysicalPlanType::Aggregate(final_aggregate_proto)),
+        };
+
+        let partial_schema = ArroyoSchema::new(
+            add_timestamp_field_arrow(partial_schema.clone()),
+            partial_schema.fields().len(),
+            key_indices,
+        );
+
+        Ok(SplitPlanOutput {
+            partial_aggregation_plan,
+            partial_schema,
+            finish_plan,
+        })
+    }
+
+    async fn tumbling_window_config(
+        &self,
+        aggregate: &crate::AggregateCalculation,
+    ) -> Result<LogicalNode> {
+        let WindowType::Tumbling { width } = aggregate.window else {
+            bail!("expected tumbling window")
+        };
+        let binning_function_proto =
+            self.binning_function_proto(width, aggregate.aggregate.input.schema().clone())?;
+
+        let input_schema = self.input_schema(aggregate);
+        let SplitPlanOutput {
+            partial_aggregation_plan,
+            partial_schema,
+            finish_plan,
+        } = self.split_physical_plan(&aggregate).await?;
+        let config = TumblingWindowAggregateOperator {
+            name: format!("TumblingWindow<{:?}>", width),
+            width_micros: width.as_micros() as u64,
+            binning_function: binning_function_proto.encode_to_vec(),
+            window_field_name: aggregate.window_field.name().to_string(),
+            window_index: aggregate.window_index as u64,
+            input_schema: Some(input_schema.try_into()?),
+            partial_schema: Some(partial_schema.try_into()?),
+            partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
+            final_aggregation_plan: finish_plan.encode_to_vec(),
+        };
+        Ok(LogicalNode {
+            operator_id: config.name.clone(),
+            description: "tumbling window".to_string(),
+            operator_name: OperatorName::TumblingWindowAggregate,
+            operator_config: config.encode_to_vec(),
+            parallelism: 1,
+        })
+    }
+
+    async fn sliding_window_config(
+        &self,
+        aggregate: &crate::AggregateCalculation,
+    ) -> Result<LogicalNode> {
+        let WindowType::Sliding { width, slide } = aggregate.window else {
+            bail!("expected tumbling window")
+        };
+        let binning_function_proto =
+            self.binning_function_proto(width, aggregate.aggregate.input.schema().clone())?;
+
+        let input_schema = self.input_schema(aggregate);
+        let SplitPlanOutput {
+            partial_aggregation_plan,
+            partial_schema,
+            finish_plan,
+        } = self.split_physical_plan(&aggregate).await?;
+        let config = SlidingWindowAggregateOperator {
+            name: format!("TumblingWindow<{:?}>", width),
+            width_micros: width.as_micros() as u64,
+            slide_micros: slide.as_micros() as u64,
+            binning_function: binning_function_proto.encode_to_vec(),
+            window_field_name: aggregate.window_field.name().to_string(),
+            window_index: aggregate.window_index as u64,
+            input_schema: Some(input_schema.try_into()?),
+            partial_schema: Some(partial_schema.try_into()?),
+            partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
+            final_aggregation_plan: finish_plan.encode_to_vec(),
+        };
+        Ok(LogicalNode {
+            operator_id: config.name.clone(),
+            description: "sliding window".to_string(),
+            operator_name: OperatorName::SlidingWindowAggregate,
+            operator_config: config.encode_to_vec(),
+            parallelism: 1,
+        })
+    }
+}
+
+struct SplitPlanOutput {
+    partial_aggregation_plan: PhysicalPlanNode,
+    partial_schema: ArroyoSchema,
+    finish_plan: PhysicalPlanNode,
 }

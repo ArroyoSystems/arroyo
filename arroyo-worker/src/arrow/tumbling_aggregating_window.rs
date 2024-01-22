@@ -8,13 +8,13 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
+use anyhow::{anyhow, Result};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
 use arrow_schema::{DataType, Field, FieldRef, Schema, TimeUnit};
-use arroyo_df::schemas::{add_timestamp_field_arrow, window_arrow_struct};
+use arroyo_df::schemas::window_arrow_struct;
 use arroyo_rpc::{
-    grpc::{api, api::window::Window, TableConfig},
+    grpc::{api, TableConfig},
     ArroyoSchema,
 };
 use arroyo_state::timestamp_table_config;
@@ -26,7 +26,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 
-use arroyo_df::physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -34,9 +34,7 @@ use datafusion_execution::{
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
     physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan},
-    protobuf::{
-        physical_plan_node::PhysicalPlanType, AggregateMode, PhysicalExprNode, PhysicalPlanNode,
-    },
+    protobuf::{PhysicalExprNode, PhysicalPlanNode},
 };
 use prost::Message;
 use std::time::Duration;
@@ -44,11 +42,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tracing::info;
 
-use super::{
-    session_aggregating_window::SessionAggregatingWindowFunc,
-    sliding_aggregating_window::SlidingAggregatingWindowFunc,
-    sync::streams::KeyedCloneableStreamFuture, EmptyRegistry,
-};
+use super::{sync::streams::KeyedCloneableStreamFuture, EmptyRegistry};
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
 pub struct TumblingAggregatingWindowFunc<K: Copy> {
@@ -102,7 +96,7 @@ impl TumblingAggregatingWindowFunc<SystemTime> {}
 impl ArrowOperatorConstructor<api::TumblingWindowAggregateOperator>
     for TumblingAggregatingWindowFunc<SystemTime>
 {
-    fn from_config(config: api::TumblingWindowAggregateOperator) -> anyhow::Result<OperatorNode> {
+    fn from_config(config: api::TumblingWindowAggregateOperator) -> Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config
             .input_schema
