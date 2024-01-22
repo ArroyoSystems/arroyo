@@ -924,7 +924,8 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             .get_global_keyed_state("e")
             .await
             .unwrap()
-            .insert(ctx.task_info.task_index, self.earliest_batch_time()).await;
+            .insert(ctx.task_info.task_index, self.earliest_batch_time())
+            .await;
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {

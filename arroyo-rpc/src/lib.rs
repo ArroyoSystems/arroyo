@@ -14,7 +14,7 @@ use anyhow::anyhow;
 use arrow_array::builder::{make_builder, ArrayBuilder};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_types::CheckpointBarrier;
-use grpc::{StopMode, TaskCheckpointEventType};
+use grpc::{api, StopMode, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -225,6 +225,43 @@ impl TryFrom<grpc::ArroyoSchema> for ArroyoSchema {
 }
 
 impl TryFrom<ArroyoSchema> for grpc::ArroyoSchema {
+    type Error = anyhow::Error;
+
+    fn try_from(schema: ArroyoSchema) -> anyhow::Result<Self> {
+        let arrow_schema = serde_json::to_string(schema.schema.as_ref())?;
+        let timestamp_index = schema.timestamp_index as u32;
+        let key_indices = schema
+            .key_indices
+            .iter()
+            .map(|index| (*index) as u32)
+            .collect();
+        Ok(Self {
+            arrow_schema,
+            timestamp_index,
+            key_indices,
+        })
+    }
+}
+
+impl TryFrom<api::ArroyoSchema> for ArroyoSchema {
+    type Error = anyhow::Error;
+    fn try_from(schema_proto: api::ArroyoSchema) -> anyhow::Result<Self> {
+        let schema: Schema = serde_json::from_str(&schema_proto.arrow_schema)?;
+        let timestamp_index = schema_proto.timestamp_index as usize;
+        let key_indices = schema_proto
+            .key_indices
+            .iter()
+            .map(|index| (*index) as usize)
+            .collect();
+        Ok(Self {
+            schema: Arc::new(schema),
+            timestamp_index,
+            key_indices,
+        })
+    }
+}
+
+impl TryFrom<ArroyoSchema> for api::ArroyoSchema {
     type Error = anyhow::Error;
 
     fn try_from(schema: ArroyoSchema) -> anyhow::Result<Self> {

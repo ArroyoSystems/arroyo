@@ -1,5 +1,6 @@
 use std::{
     any::Any,
+    collections::HashSet,
     mem,
     sync::{Arc, RwLock},
 };
@@ -16,10 +17,41 @@ use datafusion::{
 };
 use datafusion_common::{DataFusionError, Result as DFResult, Statistics};
 
+use datafusion_execution::FunctionRegistry;
+use datafusion_expr::{AggregateUDF, ScalarUDF, WindowUDF};
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
+
+pub struct EmptyRegistry {}
+
+impl FunctionRegistry for EmptyRegistry {
+    fn udfs(&self) -> HashSet<String> {
+        HashSet::new()
+    }
+
+    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
+        DFResult::Err(DataFusionError::NotImplemented(format!(
+            "udf {} not implemented",
+            name
+        )))
+    }
+
+    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
+        DFResult::Err(DataFusionError::NotImplemented(format!(
+            "udaf {} not implemented",
+            name
+        )))
+    }
+
+    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
+        DFResult::Err(DataFusionError::NotImplemented(format!(
+            "udwf {} not implemented",
+            name
+        )))
+    }
+}
 
 #[derive(Debug)]
 pub struct ArroyoPhysicalExtensionCodec {
@@ -36,6 +68,7 @@ impl Default for ArroyoPhysicalExtensionCodec {
 #[derive(Debug)]
 pub enum DecodingContext {
     None,
+    Planning,
     SingleLockedBatch(Arc<RwLock<Option<RecordBatch>>>),
     UnboundedBatchStream(Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>),
     LockedBatchVec(Arc<RwLock<Vec<RecordBatch>>>),
@@ -66,6 +99,10 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             DecodingContext::LockedBatchVec(locked_batches) => Ok(Arc::new(RecordBatchVecReader {
                 schema: mem_exec.schema(),
                 receiver: locked_batches.clone(),
+            })),
+            DecodingContext::Planning => Ok(Arc::new(ArroyoMemExec {
+                table_name: mem_exec.table_name,
+                schema: mem_exec.schema.clone(),
             })),
             DecodingContext::None => Err(DataFusionError::Internal(
                 "Need an internal context to decode".into(),

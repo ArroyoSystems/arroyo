@@ -131,6 +131,18 @@ message WindowAggregateOperator {
   bytes input_schema = 9;
 }
 
+message TumblingWindowAggregateOperator {
+  string name = 1;
+  uint64 width_micros = 2;
+  bytes binning_function = 3;
+  string window_field_name = 4;
+  uint64 window_index = 5;
+  ArroyoSchema input_schema = 6;
+  ArroyoSchema partial_schema = 7;
+  bytes partial_aggregation_plan = 8;
+  bytes final_aggregation_plan = 9;
+}
+
 
 enum OperatorName {
   STRUCT_TO_RECORD_BATCH = 0;

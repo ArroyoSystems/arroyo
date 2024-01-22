@@ -35,6 +35,7 @@ use datafusion_expr::{AggregateUDF, TableSource};
 use logical::LogicalBatchInput;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::IntoNodeReferences;
+use plan_graph::Planner;
 use schemas::{
     add_timestamp_field, add_timestamp_field_if_missing_arrow, has_timestamp_field,
     window_arrow_struct,
@@ -1147,7 +1148,8 @@ pub async fn parse_and_get_arrow_program(
             rewriter.local_logical_plan_graph.add_edge(a, b, weight);
         }
     }
-    get_arrow_program(rewriter, schema_provider).await
+    let planner = Planner::new(schema_provider);
+    planner.get_arrow_program(rewriter).await
 }
 
 #[derive(Clone)]
