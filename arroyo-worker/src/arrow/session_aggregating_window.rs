@@ -4,17 +4,17 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use arrow::{
     compute::{
         concat_batches, filter_record_batch, kernels::cmp::gt_eq, lexsort_to_indices, partition,
         take, SortColumn,
     },
-    row::{OwnedRow, RowConverter, SortField},
+    row::{OwnedRow, RowConverter, Rows, SortField},
 };
 use arrow_array::{
-    types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch, StructArray,
-    TimestampNanosecondArray,
+    types::TimestampNanosecondType, Array, ArrayRef, BooleanArray, PrimitiveArray, RecordBatch,
+    StructArray, TimestampNanosecondArray,
 };
 use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_df::schemas::window_arrow_struct;
@@ -42,7 +42,7 @@ use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use super::EmptyRegistry;
 
@@ -53,7 +53,31 @@ pub struct SessionAggregatingWindowFunc {
     keys_by_next_watermark_action: BTreeMap<SystemTime, HashSet<OwnedRow>>,
     key_computations: HashMap<OwnedRow, KeyComputingHolder>,
     keys_by_start_time: BTreeMap<SystemTime, HashSet<OwnedRow>>,
-    row_converter: RowConverter,
+    row_converter: Converter,
+}
+
+// need to handle the empty case as a row converter without sort fields emits empty Rows.
+enum Converter {
+    RowConverter(RowConverter),
+    Empty(RowConverter, Arc<dyn Array>),
+}
+
+impl Converter {
+    fn convert_columns(&self, columns: &[Arc<dyn Array>]) -> Result<Rows> {
+        match self {
+            Converter::RowConverter(row_converter) => Ok(row_converter.convert_columns(columns)?),
+            Converter::Empty(row_converter, array) => {
+                Ok(row_converter.convert_columns(&vec![array.clone()])?)
+            }
+        }
+    }
+
+    fn convert_rows(&self, rows: Vec<arrow::row::Row<'_>>) -> Result<Vec<ArrayRef>> {
+        match self {
+            Converter::RowConverter(row_converter) => Ok(row_converter.convert_rows(rows)?),
+            Converter::Empty(_row_converter, _array) => Ok(vec![]),
+        }
+    }
 }
 
 impl SessionAggregatingWindowFunc {
@@ -151,18 +175,24 @@ impl SessionAggregatingWindowFunc {
         sorted_batch: RecordBatch,
         watermark: Option<SystemTime>,
     ) -> Result<()> {
-        let partition = partition(
-            sorted_batch
-                .columns()
-                .into_iter()
-                .take(self.config.input_schema_ref.key_indices.len())
-                .map(|column| column.clone())
-                .collect::<Vec<_>>()
-                .as_slice(),
-        )
-        .unwrap();
+        let has_keys = !self.config.input_schema_ref.key_indices.is_empty();
+        let partition = if !has_keys {
+            // if we don't have keys, we can just partition by the whole batch.
+            vec![0..sorted_batch.num_rows()]
+        } else {
+            partition(
+                sorted_batch
+                    .columns()
+                    .into_iter()
+                    .take(self.config.input_schema_ref.key_indices.len())
+                    .map(|column| column.clone())
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )?
+            .ranges()
+        };
 
-        for range in partition.ranges() {
+        for range in partition {
             let key_batch = sorted_batch.slice(range.start, range.end - range.start);
             let first_row = self
                 .row_converter
@@ -170,7 +200,7 @@ impl SessionAggregatingWindowFunc {
                     &key_batch.slice(0, 1).columns()
                         [0..(self.config.input_schema_ref.key_indices.len())],
                 )
-                .unwrap();
+                .context("failed to convert rows")?;
             let row = first_row.row(0);
             let key_computation =
                 self.key_computations
@@ -693,15 +723,24 @@ impl ArrowOperatorConstructor<api::SessionWindowAggregateOperator>
             .input_schema
             .ok_or_else(|| anyhow!("missing input schema"))?
             .try_into()?;
-        let row_converter = RowConverter::new(
-            input_schema
-                .schema
-                .fields()
-                .into_iter()
-                .take(input_schema.key_indices.len())
-                .map(|field| SortField::new(field.data_type().clone()))
-                .collect(),
-        )?;
+        let row_converter = if input_schema.key_indices.is_empty() {
+            let array = Arc::new(BooleanArray::from(vec![false]));
+            Converter::Empty(
+                RowConverter::new(vec![SortField::new(DataType::Boolean)])?,
+                array,
+            )
+        } else {
+            Converter::RowConverter(RowConverter::new(
+                input_schema
+                    .schema
+                    .fields()
+                    .into_iter()
+                    .take(input_schema.key_indices.len())
+                    .map(|field| SortField::new(field.data_type().clone()))
+                    .collect(),
+            )?)
+        };
+
         let config = SessionWindowConfig {
             gap: Duration::from_micros(config.gap_micros),
             window_field,
@@ -740,7 +779,6 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             // each subtask only writes None if it has no data at all, e.g. key_computations is empty.
             return;
         };
-        info!("restoring from state at {:?}", start_time);
 
         let table = ctx
             .table_manager

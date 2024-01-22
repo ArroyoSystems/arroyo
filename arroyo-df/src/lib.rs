@@ -43,7 +43,6 @@ use schemas::{
 
 use tables::{Insert, Table};
 
-use crate::plan_graph::get_arrow_program;
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion_common::{DFSchema, DFSchemaRef, DataFusionError};
 use prettyplease::unparse;
