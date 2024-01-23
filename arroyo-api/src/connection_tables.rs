@@ -1,6 +1,5 @@
 use crate::queries::api_queries::GetConnectionTablesParams;
 use anyhow::anyhow;
-use arrow_schema::DataType;
 use axum::extract::{Path, Query, State};
 use axum::response::sse::Event;
 use axum::response::Sse;
@@ -18,9 +17,8 @@ use tracing::warn;
 use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_connectors::{connector_for_type, ErasedConnector};
-use arroyo_df::json_schema::convert_json_schema;
-use arroyo_df::types::{StructField, TypeDef};
 use arroyo_formats::avro;
+use arroyo_formats::json_schema::to_arrow;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, ConnectionType,
     SchemaDefinition,
@@ -31,6 +29,7 @@ use arroyo_rpc::public_ids::{generate_id, IdTypes};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaSubjectResponse, ConfluentSchemaType,
 };
+use arroyo_types::raw_schema;
 
 use crate::rest::AppState;
 use crate::rest_utils::{
@@ -572,18 +571,18 @@ async fn expand_json_schema(
     }
 
     if let Some(d) = &schema.definition {
-        let fields = match d {
-            SchemaDefinition::JsonSchema(json) => convert_json_schema(&name, &json)
+        let arrow = match d {
+            SchemaDefinition::JsonSchema(json) => to_arrow(&name, &json)
                 .map_err(|e| bad_request(format!("Invalid json-schema: {}", e)))?,
-            SchemaDefinition::RawSchema(_) => vec![StructField::new(
-                "value".to_string(),
-                None,
-                TypeDef::DataType(DataType::Utf8, false),
-            )],
+            SchemaDefinition::RawSchema(_) => raw_schema(),
             _ => return Err(bad_request("Invalid schema type for json format")),
         };
 
-        let fields: Result<_, String> = fields.into_iter().map(|f| f.try_into()).collect();
+        let fields: Result<_, String> = arrow
+            .fields
+            .into_iter()
+            .map(|f| (**f).clone().try_into())
+            .collect();
 
         schema.fields =
             fields.map_err(|e| bad_request(format!("Failed to convert schema: {}", e)))?;
@@ -668,8 +667,8 @@ pub(crate) async fn test_schema(
 
     match schema_def {
         SchemaDefinition::JsonSchema(schema) => {
-            if let Err(e) = convert_json_schema(&"test", &schema) {
-                Err(bad_request(e))
+            if let Err(e) = to_arrow(&"test", &schema) {
+                Err(bad_request(e.to_string()))
             } else {
                 Ok(())
             }

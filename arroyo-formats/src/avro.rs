@@ -243,7 +243,7 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
 
 fn field_to_avro(name: &str, field: &Field) -> serde_json::value::Value {
     let next_name = format!("{}_{}", name, &field.name());
-    let mut schema = arrow_to_avro(&AvroFormat::sanitize_field(&next_name), field.data_type());
+    let mut schema = arrow_to_avro(&next_name, field.data_type());
 
     if field.is_nullable() {
         schema = json!({
