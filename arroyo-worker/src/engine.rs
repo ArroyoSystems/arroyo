@@ -20,6 +20,8 @@ use datafusion_common::hash_utils;
 
 use tracing::{debug, info, warn};
 
+use crate::arrow::session_aggregating_window::SessionAggregatingWindowFunc;
+use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowFunc;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
 use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
 use crate::connectors::filesystem::single_file::sink::FileSink;
@@ -1427,7 +1429,17 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNo
             KeyExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap())
         }
         OperatorName::ArrowAggregate => {
+            // TODO: this should not be in a specific window.
             TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
+        }
+        OperatorName::TumblingWindowAggregate => {
+            TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
+        }
+        OperatorName::SlidingWindowAggregate => {
+            SlidingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
+        }
+        OperatorName::SessionWindowAggregate => {
+            SessionAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
         }
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(&mut buf).unwrap();

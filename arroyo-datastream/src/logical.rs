@@ -20,6 +20,9 @@ pub enum OperatorName {
     ArrowValue,
     ArrowKey,
     ArrowAggregate,
+    TumblingWindowAggregate,
+    SlidingWindowAggregate,
+    SessionWindowAggregate,
     ConnectorSource,
     ConnectorSink,
 }

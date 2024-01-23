@@ -8,25 +8,25 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{anyhow, bail, Context as AnyhowContext, Result};
+use anyhow::{anyhow, Result};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
 use arrow_schema::{DataType, Field, FieldRef, Schema, TimeUnit};
-use arroyo_df::schemas::{add_timestamp_field_arrow, window_arrow_struct};
+use arroyo_df::schemas::window_arrow_struct;
 use arroyo_rpc::{
-    grpc::{api, api::window::Window, TableConfig},
+    grpc::{api, TableConfig},
     ArroyoSchema,
 };
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use datafusion_common::ScalarValue;
-use futures::stream::FuturesUnordered;
+use futures::{stream::FuturesUnordered, StreamExt};
 
 use crate::engine::ArrowContext;
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 
-use arroyo_df::physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -34,21 +34,15 @@ use datafusion_execution::{
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_proto::{
     physical_plan::{from_proto::parse_physical_expr, AsExecutionPlan},
-    protobuf::{
-        physical_plan_node::PhysicalPlanType, AggregateMode, PhysicalExprNode, PhysicalPlanNode,
-    },
+    protobuf::{PhysicalExprNode, PhysicalPlanNode},
 };
 use prost::Message;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
-use tokio_stream::StreamExt;
 use tracing::info;
 
-use super::{
-    sliding_aggregating_window::SlidingAggregatingWindowFunc,
-    sync::streams::KeyedCloneableStreamFuture, EmptyRegistry,
-};
+use super::{sync::streams::KeyedCloneableStreamFuture, EmptyRegistry};
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
 pub struct TumblingAggregatingWindowFunc<K: Copy> {
@@ -99,71 +93,28 @@ type PolledFutureT = <NextBatchFuture<SystemTime> as Future>::Output;
 
 impl TumblingAggregatingWindowFunc<SystemTime> {}
 
-impl ArrowOperatorConstructor<api::WindowAggregateOperator>
+impl ArrowOperatorConstructor<api::TumblingWindowAggregateOperator>
     for TumblingAggregatingWindowFunc<SystemTime>
 {
-    fn from_config(proto_config: api::WindowAggregateOperator) -> Result<OperatorNode> {
-        let Some(arroyo_rpc::grpc::api::Window {
-            window: Some(window),
-        }) = &proto_config.window
-        else {
-            bail!("expected a window")
-        };
-        match window {
-            Window::SlidingWindow(_) => {
-                return SlidingAggregatingWindowFunc::from_config(proto_config)
-            }
-            Window::TumblingWindow(_) => {}
-            Window::InstantWindow(_) => bail!("instant window unsupported"),
-            Window::SessionWindow(_) => bail!("session window unsupported"),
-        }
+    fn from_config(config: api::TumblingWindowAggregateOperator) -> Result<OperatorNode> {
+        let width = Duration::from_micros(config.width_micros);
+        let input_schema: ArroyoSchema = config
+            .input_schema
+            .ok_or_else(|| anyhow!("requires input schema"))?
+            .try_into()?;
+        let binning_function = PhysicalExprNode::decode(&mut config.binning_function.as_slice())?;
         let binning_function =
-            PhysicalExprNode::decode(&mut proto_config.binning_function.as_slice()).unwrap();
-        let input_schema: Schema = serde_json::from_slice(proto_config.input_schema.as_slice())
-            .context(format!(
-                "failed to deserialize schema of length {}",
-                proto_config.input_schema.len()
-            ))?;
-
-        let binning_function =
-            parse_physical_expr(&binning_function, &EmptyRegistry {}, &input_schema)?;
-
-        let mut physical_plan =
-            PhysicalPlanNode::decode(&mut proto_config.physical_plan.as_slice()).unwrap();
-
-        let Some(arroyo_rpc::grpc::api::Window {
-            window: Some(Window::TumblingWindow(window)),
-        }) = proto_config.window
-        else {
-            bail!("expected tumbling window")
-        };
-        let window_field = Arc::new(Field::new(
-            proto_config.window_field_name,
-            window_arrow_struct(),
-            true,
-        ));
+            parse_physical_expr(&binning_function, &EmptyRegistry {}, &input_schema.schema)?;
 
         let receiver = Arc::new(RwLock::new(None));
         let final_batches_passer = Arc::new(RwLock::new(Vec::new()));
 
-        let PhysicalPlanType::Aggregate(mut aggregate) = physical_plan
-            .physical_plan_type
-            .take()
-            .ok_or_else(|| anyhow!("missing physical plan"))?
-        else {
-            bail!("expected aggregate physical plan, not {:?}", physical_plan);
-        };
-
-        let AggregateMode::Final = aggregate.mode() else {
-            bail!("expect AggregateMode to be Final so we can decompose it for checkpointing.")
-        };
-
-        // pull the input out to be computed separately for each bin.
-        let partial_aggregation_plan = aggregate.input.as_ref().unwrap();
-
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::UnboundedBatchStream(receiver.clone()),
         };
+
+        let partial_aggregation_plan =
+            PhysicalPlanNode::decode(&mut config.partial_aggregation_plan.as_slice())?;
 
         // deserialize partial aggregation into execution plan with an UnboundedBatchStream source.
         // this is behind a RwLock and will have a new channel swapped in before computation is initialized
@@ -174,22 +125,12 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator>
             &codec,
         )?;
 
-        let partial_schema = partial_aggregation_plan.schema();
-        let table_provider = ArroyoMemExec {
-            table_name: "partial".into(),
-            schema: partial_schema,
-        };
+        let partial_schema = config
+            .partial_schema
+            .ok_or_else(|| anyhow!("requires partial schema"))?
+            .try_into()?;
 
-        // swap in an ArroyoMemExec as the source.
-        // This is a flexible table source that can be decoded in various ways depending on what is needed.
-        aggregate.input = Some(Box::new(PhysicalPlanNode::try_from_physical_plan(
-            Arc::new(table_provider),
-            &ArroyoPhysicalExtensionCodec::default(),
-        )?));
-
-        let finish_plan = PhysicalPlanNode {
-            physical_plan_type: Some(PhysicalPlanType::Aggregate(aggregate)),
-        };
+        let finish_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
 
         let final_codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::LockedBatchVec(final_batches_passer.clone()),
@@ -201,26 +142,14 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator>
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &final_codec,
         )?;
-
-        // Calculate the partial schema so that it can be saved to state.
-        let key_indices: Vec<_> = proto_config
-            .key_fields
-            .into_iter()
-            .map(|x| x as usize)
-            .collect();
-
-        let schema_ref = partial_aggregation_plan.schema();
-        // timestamp is stored in the bin, will be appended prior to writing to state.
-        let partial_schema = add_timestamp_field_arrow(schema_ref);
-        let timestamp_index = partial_schema.fields().len() - 1;
-        let partial_schema = ArroyoSchema {
-            schema: partial_schema,
-            timestamp_index,
-            key_indices,
-        };
+        let window_field = Arc::new(Field::new(
+            config.window_field_name,
+            window_arrow_struct(),
+            true,
+        ));
 
         Ok(OperatorNode::from_operator(Box::new(Self {
-            width: Duration::from_micros(window.size_micros),
+            width,
             binning_function,
             partial_aggregation_plan,
             partial_schema,
@@ -230,7 +159,7 @@ impl ArrowOperatorConstructor<api::WindowAggregateOperator>
             futures: Arc::new(Mutex::new(FuturesUnordered::new())),
             execs: BTreeMap::new(),
             window_field,
-            window_index: proto_config.window_index as usize,
+            window_index: config.window_index as usize,
         })))
     }
 }
@@ -282,7 +211,6 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         for range in partition.ranges() {
             // the binning function already rounded down to the bin start.
             let bin_start = from_nanos(typed_bin.value(range.start) as u128);
-
             let watermark = ctx.last_present_watermark();
 
             if watermark.is_some() && bin_start < self.bin_start(watermark.unwrap()) {
@@ -349,9 +277,10 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                         .unwrap();
                     while let Some(batch) = final_exec.next().await {
                         let batch = batch.expect("should be able to compute batch");
-                        let bin_start = to_nanos(bin) as i64;
-                        let bin_end = to_nanos(bin + self.width) as i64;
+                        let bin_start = to_nanos(popped_bin) as i64;
+                        let bin_end = to_nanos(popped_bin + self.width) as i64;
                         let timestamp = bin_end - 1;
+
                         let timestamp_array =
                             ScalarValue::TimestampNanosecond(Some(timestamp), None)
                                 .to_array_of_size(batch.num_rows())

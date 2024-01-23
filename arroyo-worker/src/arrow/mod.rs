@@ -6,6 +6,7 @@ use arrow_array::TimestampNanosecondArray;
 use arrow_json::writer::record_batches_to_json_rows;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
+use arroyo_df::physical::EmptyRegistry;
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{api, SinkDataReq};
@@ -19,16 +20,11 @@ use datafusion_common::DataFusionError;
 use datafusion_common::Result as DFResult;
 use datafusion_execution::runtime_env::RuntimeConfig;
 use datafusion_execution::runtime_env::RuntimeEnv;
-use datafusion_execution::FunctionRegistry;
 use datafusion_execution::TaskContext;
-use datafusion_expr::AggregateUDF;
-use datafusion_expr::ScalarUDF;
-use datafusion_expr::WindowUDF;
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
 use futures::StreamExt;
 use prost::Message as ProstMessage;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::SystemTime;
@@ -36,37 +32,10 @@ use tonic::transport::Channel;
 
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 
+pub mod session_aggregating_window;
 pub mod sliding_aggregating_window;
 pub(crate) mod sync;
 pub mod tumbling_aggregating_window;
-pub struct EmptyRegistry {}
-
-impl FunctionRegistry for EmptyRegistry {
-    fn udfs(&self) -> HashSet<String> {
-        HashSet::new()
-    }
-
-    fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
-        DFResult::Err(DataFusionError::NotImplemented(format!(
-            "udf {} not implemented",
-            name
-        )))
-    }
-
-    fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {
-        DFResult::Err(DataFusionError::NotImplemented(format!(
-            "udaf {} not implemented",
-            name
-        )))
-    }
-
-    fn udwf(&self, name: &str) -> datafusion_common::Result<Arc<WindowUDF>> {
-        DFResult::Err(DataFusionError::NotImplemented(format!(
-            "udwf {} not implemented",
-            name
-        )))
-    }
-}
 
 pub struct ValueExecutionOperator {
     name: String,

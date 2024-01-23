@@ -132,18 +132,7 @@ impl ExpiringTimeKeyTable {
                 };
                 for (timestamp, batch) in batches {
                     if cutoff <= timestamp {
-                        info!(
-                            "inserting batch {:?} with timestamp {:?}",
-                            batch,
-                            print_time(timestamp)
-                        );
                         data.entry(timestamp).or_default().push(batch)
-                    } else {
-                        info!(
-                            "filtered batch {:?} with timestamp {:?}",
-                            batch,
-                            print_time(timestamp)
-                        );
                     }
                 }
             }

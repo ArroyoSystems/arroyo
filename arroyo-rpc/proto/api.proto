@@ -131,6 +131,41 @@ message WindowAggregateOperator {
   bytes input_schema = 9;
 }
 
+message TumblingWindowAggregateOperator {
+  string name = 1;
+  uint64 width_micros = 2;
+  bytes binning_function = 3;
+  string window_field_name = 4;
+  uint64 window_index = 5;
+  ArroyoSchema input_schema = 6;
+  ArroyoSchema partial_schema = 7;
+  bytes partial_aggregation_plan = 8;
+  bytes final_aggregation_plan = 9;
+}
+
+message SlidingWindowAggregateOperator {
+  string name = 1;
+  uint64 width_micros = 2;
+  uint64 slide_micros = 3;
+  bytes binning_function = 4;
+  string window_field_name = 5;
+  uint64 window_index = 6;
+  ArroyoSchema input_schema = 7;
+  ArroyoSchema partial_schema = 8;
+  bytes partial_aggregation_plan = 9;
+  bytes final_aggregation_plan = 10;
+}
+
+message SessionWindowAggregateOperator {
+  string name = 1;
+  uint64 gap_micros = 2;
+  string window_field_name = 3;
+  uint64 window_index = 4;
+  ArroyoSchema input_schema = 5;
+  ArroyoSchema unkeyed_aggregate_schema = 6;
+  bytes partial_aggregation_plan = 7;
+  bytes final_aggregation_plan = 8;
+}
 
 enum OperatorName {
   STRUCT_TO_RECORD_BATCH = 0;
