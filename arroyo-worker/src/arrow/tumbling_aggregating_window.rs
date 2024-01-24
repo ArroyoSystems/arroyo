@@ -23,9 +23,6 @@ use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPla
 use datafusion_common::ScalarValue;
 use futures::{stream::FuturesUnordered, StreamExt};
 
-use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
-
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
@@ -41,6 +38,8 @@ use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tracing::info;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 
 use super::{sync::streams::KeyedCloneableStreamFuture, EmptyRegistry};
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
@@ -93,10 +92,11 @@ type PolledFutureT = <NextBatchFuture<SystemTime> as Future>::Output;
 
 impl TumblingAggregatingWindowFunc<SystemTime> {}
 
-impl ArrowOperatorConstructor<api::TumblingWindowAggregateOperator>
+impl OperatorConstructor
     for TumblingAggregatingWindowFunc<SystemTime>
 {
-    fn from_config(config: api::TumblingWindowAggregateOperator) -> Result<OperatorNode> {
+    type ConfigT = api::TumblingWindowAggregateOperator;
+    fn with_config(&self, config: api::TumblingWindowAggregateOperator) -> Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config
             .input_schema

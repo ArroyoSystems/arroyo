@@ -13,7 +13,7 @@ use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
 use anyhow::anyhow;
 use arrow_array::builder::{make_builder, ArrayBuilder};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
-use arroyo_types::CheckpointBarrier;
+use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use grpc::{api, StopMode, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -345,4 +345,8 @@ pub struct UdfOpts {
     pub async_timeout_seconds: u64,
     #[serde(default = "default_async_max_concurrency")]
     pub async_max_concurrency: u64,
+}
+
+pub fn get_hasher() -> ahash::RandomState {
+    ahash::RandomState::with_seeds(HASH_SEEDS[0], HASH_SEEDS[1], HASH_SEEDS[2], HASH_SEEDS[3])
 }

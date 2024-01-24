@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
+use crate::operator::{OperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
 use arrow_array::builder::{TimestampNanosecondBuilder, UInt64Builder};
 use arrow_array::RecordBatch;
@@ -242,7 +242,7 @@ impl ImpulseSourceFunc {
     }
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp> for ImpulseSourceFunc {
+impl OperatorConstructor<api::ConnectorOp> for ImpulseSourceFunc {
     fn from_config(config: api::ConnectorOp) -> anyhow::Result<OperatorNode> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for ImpulseSource");

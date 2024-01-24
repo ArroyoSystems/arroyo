@@ -23,8 +23,7 @@ use datafusion_common::ScalarValue;
 
 use futures::stream::FuturesUnordered;
 
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
-use crate::{engine::ArrowContext, operator::OperatorNode};
+use arroyo_operator::{context::ArrowContext, operator::{ArrowOperator, OperatorConstructor, OperatorNode}};
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
@@ -446,10 +445,11 @@ impl<K: Copy> Default for BinComputingHolder<K> {
 
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
-impl ArrowOperatorConstructor<api::SlidingWindowAggregateOperator>
+impl OperatorConstructor
     for SlidingAggregatingWindowFunc<SystemTime>
 {
-    fn from_config(config: api::SlidingWindowAggregateOperator) -> anyhow::Result<OperatorNode> {
+    type ConfigT = api::SlidingWindowAggregateOperator;
+    fn with_config(&self, config: api::SlidingWindowAggregateOperator) -> anyhow::Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
         let slide = Duration::from_micros(config.slide_micros);
         let input_schema: ArroyoSchema = config

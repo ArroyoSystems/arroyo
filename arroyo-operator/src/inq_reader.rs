@@ -1,14 +1,9 @@
-use futures::{
-    ready,
-    stream::{FusedStream, FuturesUnordered, StreamFuture},
-    Stream, StreamExt,
-};
+use futures::{ready, Stream, StreamExt};
+use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use std::fmt::Debug;
-use std::{
-    fmt,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::fmt;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 pub struct InQReader<St> {
     inner: FuturesUnordered<StreamFuture<St>>,

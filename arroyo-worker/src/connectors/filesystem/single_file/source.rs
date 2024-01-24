@@ -18,7 +18,7 @@ use tracing::info;
 use crate::SourceFinishType;
 use crate::{
     engine::ArrowContext,
-    operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator},
+    operator::{OperatorConstructor, OperatorNode, SourceOperator},
 };
 
 use super::SingleFileTable;
@@ -110,7 +110,7 @@ impl FileSourceFunc {
     }
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp> for FileSourceFunc {
+impl OperatorConstructor<api::ConnectorOp> for FileSourceFunc {
     fn from_config(config: api::ConnectorOp) -> anyhow::Result<crate::operator::OperatorNode> {
         let config: OperatorConfig = serde_json::from_str(&config.config)?;
         let table: SingleFileTable = serde_json::from_value(config.table)?;

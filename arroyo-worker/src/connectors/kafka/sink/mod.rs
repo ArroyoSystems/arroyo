@@ -14,7 +14,7 @@ use rdkafka::util::Timeout;
 use rdkafka::ClientConfig;
 
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
+use crate::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use arrow_array::RecordBatch;
 use arroyo_formats::serialize::ArrowSerializer;
 use arroyo_rpc::grpc::api::ConnectorOp;
@@ -59,7 +59,7 @@ impl From<SinkCommitMode> for ConsistencyMode {
     }
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp> for KafkaSinkFunc {
+impl OperatorConstructor<api::ConnectorOp> for KafkaSinkFunc {
     fn from_config(config: ConnectorOp) -> Result<OperatorNode> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for KafkaSink");

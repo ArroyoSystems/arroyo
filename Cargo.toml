@@ -20,7 +20,7 @@ members = [
     "arroyo-types",
     "arroyo-worker",
     "copy-artifacts",
-    "integ",
+    "integ", "arroyo-operator",
 ]
 
 resolver = "2"

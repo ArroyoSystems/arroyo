@@ -1,133 +1,25 @@
-use std::any::Any;
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::future::Future;
+use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
+use arroyo_metrics::TaskCounters;
+use tracing::{debug, error, info, Instrument, warn};
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, SystemTime};
+use arrow::array::RecordBatch;
+use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
 use std::pin::Pin;
-use std::time::Duration;
-use std::{collections::HashSet, time::SystemTime};
-
-use crate::engine::{ArrowContext, CheckpointCounter};
-use crate::inq_reader::InQReader;
-use crate::metrics::TaskCounters;
-use crate::{ControlOutcome, SourceFinishType};
-use arrow::compute::kernels::numeric::{div, rem};
-use arrow_array::types::{TimestampNanosecondType, UInt64Type};
-use arrow_array::{Array, PrimitiveArray, RecordBatch, UInt64Array};
-use arroyo_rpc::{
-    grpc::{TableConfig, TaskCheckpointEventType},
-    ControlMessage, ControlResp,
-};
-use arroyo_types::{
-    from_millis, to_millis, ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfoRef,
-    Watermark, Window,
-};
-use async_trait::async_trait;
-use bincode::{Decode, Encode};
-use futures::future::OptionFuture;
-use futures::StreamExt;
-
+use std::future::Future;
+use std::any::Any;
 use tokio::sync::mpsc::Receiver;
-use tokio_stream::Stream;
-use tracing::{debug, error, info, warn, Instrument};
+use futures::future::OptionFuture;
+use async_trait::async_trait;
+use tokio_stream::StreamExt;
+use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
+use crate::context::ArrowContext;
+use crate::inq_reader::InQReader;
 
-pub trait TimerT: Data + PartialEq + Eq + 'static {}
-
-impl<T: Data + PartialEq + Eq + 'static> TimerT for T {}
-
-pub fn server_for_hash_array(
-    hash: &PrimitiveArray<UInt64Type>,
-    n: usize,
-) -> anyhow::Result<PrimitiveArray<UInt64Type>> {
-    let range_size = u64::MAX / (n as u64);
-    let range_scalar = UInt64Array::new_scalar(range_size);
-    let mut server_scalar = UInt64Array::new_scalar(n as u64);
-    let division = div(hash, &range_scalar)?;
-    let mod_array = rem(&division, &mut server_scalar)?;
-    let result: &PrimitiveArray<UInt64Type> = mod_array.as_any().downcast_ref().unwrap();
-    Ok(result.clone())
-}
-
-pub trait TimeWindowAssigner: Send + 'static {
-    fn windows(&self, ts: SystemTime) -> Vec<Window>;
-
-    fn next(&self, window: Window) -> Window;
-
-    fn safe_retention_duration(&self) -> Option<Duration>;
-}
-
-pub trait WindowAssigner: Send + 'static {}
-
-#[derive(Clone, Copy)]
-pub struct TumblingWindowAssigner {
-    pub size: Duration,
-}
-
-impl TimeWindowAssigner for TumblingWindowAssigner {
-    fn windows(&self, ts: SystemTime) -> Vec<Window> {
-        let key = to_millis(ts) / (self.size.as_millis() as u64);
-        vec![Window {
-            start: from_millis(key * self.size.as_millis() as u64),
-            end: from_millis((key + 1) * (self.size.as_millis() as u64)),
-        }]
-    }
-
-    fn next(&self, window: Window) -> Window {
-        Window {
-            start: window.end,
-            end: window.end + self.size,
-        }
-    }
-
-    fn safe_retention_duration(&self) -> Option<Duration> {
-        Some(self.size)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct InstantWindowAssigner {}
-
-impl TimeWindowAssigner for InstantWindowAssigner {
-    fn windows(&self, ts: SystemTime) -> Vec<Window> {
-        vec![Window {
-            start: ts,
-            end: ts + Duration::from_nanos(1),
-        }]
-    }
-
-    fn next(&self, window: Window) -> Window {
-        Window {
-            start: window.start + Duration::from_micros(1),
-            end: window.end + Duration::from_micros(1),
-        }
-    }
-
-    fn safe_retention_duration(&self) -> Option<Duration> {
-        Some(Duration::ZERO)
-    }
-}
-
-#[allow(unused)]
-pub struct RunContext<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync> {
-    pub task_info: TaskInfoRef,
-    pub name: String,
-    pub counter: CheckpointCounter,
-    pub closed: HashSet<usize>,
-    pub sel: InQReader<St>,
-    pub in_partitions: usize,
-    pub blocked: Vec<St>,
-    pub final_message: Option<ArrowMessage>,
-    // TODO: ticks
-}
-
-#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
-pub struct ArrowTimerValue {
-    pub time: SystemTime,
-    pub key: Vec<u8>,
-    pub data: Vec<u8>,
-}
-
-pub trait ArrowOperatorConstructor<C: prost::Message> {
-    fn from_config(config: C) -> anyhow::Result<OperatorNode>;
+pub trait OperatorConstructor: Send {
+    type ConfigT: prost::Message + Default;
+    fn with_config(&self, config: Self::ConfigT) -> anyhow::Result<OperatorNode>;
 }
 
 pub enum OperatorNode {
@@ -299,7 +191,7 @@ async fn operator_run_behavior(
                     Some(((idx, message), s)) => {
                         let local_idx = idx;
 
-                        tracing::debug!("[{}] Handling message {}-{}, {:?}",
+                        debug!("[{}] Handling message {}-{}, {:?}",
                             ctx.task_info.operator_name, 0, local_idx, message);
 
                         match message {
@@ -546,15 +438,4 @@ pub trait ArrowOperator: Send + 'static {
 
     #[allow(unused_variables)]
     async fn on_close(&mut self, final_mesage: &Option<SignalMessage>, ctx: &mut ArrowContext) {}
-}
-
-pub fn get_timestamp_col<'a, 'b>(
-    batch: &'a RecordBatch,
-    ctx: &'b mut ArrowContext,
-) -> &'a PrimitiveArray<TimestampNanosecondType> {
-    batch
-        .column(ctx.out_schema.as_ref().unwrap().timestamp_index)
-        .as_any()
-        .downcast_ref::<PrimitiveArray<TimestampNanosecondType>>()
-        .unwrap()
 }

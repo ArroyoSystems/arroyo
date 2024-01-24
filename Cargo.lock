@@ -920,6 +920,7 @@ name = "arroyo-metrics"
 version = "0.10.0-dev"
 dependencies = [
  "arroyo-types",
+ "lazy_static",
  "prometheus",
 ]
 
@@ -959,9 +960,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-operator"
+version = "0.1.0"
+dependencies = [
+ "ahash 0.8.7",
+ "anyhow",
+ "arrow 49.0.0",
+ "arroyo-formats",
+ "arroyo-metrics",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-stream",
+ "async-trait",
+ "bincode 2.0.0-rc.3",
+ "datafusion",
+ "futures",
+ "prost 0.12.3",
+ "rand",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
 name = "arroyo-rpc"
 version = "0.10.0-dev"
 dependencies = [
+ "ahash 0.8.7",
  "anyhow",
  "apache-avro",
  "arrow-array 49.0.0",
@@ -1128,6 +1154,7 @@ dependencies = [
  "arroyo-formats",
  "arroyo-macro",
  "arroyo-metrics",
+ "arroyo-operator",
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-state",

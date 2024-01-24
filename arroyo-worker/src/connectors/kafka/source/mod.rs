@@ -1,5 +1,5 @@
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
+use crate::operator::{OperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
 
 use arroyo_rpc::formats::{BadData, Format, Framing};
@@ -267,7 +267,7 @@ impl KafkaSourceFunc {
     }
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp> for KafkaSourceFunc {
+impl OperatorConstructor<api::ConnectorOp> for KafkaSourceFunc {
     fn from_config(config: ConnectorOp) -> anyhow::Result<OperatorNode> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for KafkaSource");

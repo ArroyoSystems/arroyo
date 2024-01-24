@@ -17,7 +17,8 @@ arroyo-storage = { path = "../arroyo-storage" }
 arroyo-metrics =  { path = "../arroyo-metrics" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-datastream = { path = "../arroyo-datastream" }
-arroyo-df = {path = "../arroyo-df" }
+arroyo-df = { path = "../arroyo-df" }
+arroyo-operator = { path = "../arroyo-operator" }
 
 ahash = "0.8"
 rand = "0.8"

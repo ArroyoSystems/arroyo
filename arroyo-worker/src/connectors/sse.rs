@@ -1,5 +1,5 @@
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
+use crate::operator::{OperatorConstructor, OperatorNode, SourceOperator};
 use crate::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{api, StopMode, TableConfig};
@@ -37,7 +37,7 @@ pub struct SSESourceFunc {
     state: SSESourceState,
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp> for SSESourceFunc {
+impl OperatorConstructor<api::ConnectorOp> for SSESourceFunc {
     fn from_config(config: api::ConnectorOp) -> anyhow::Result<OperatorNode> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for SSESource");

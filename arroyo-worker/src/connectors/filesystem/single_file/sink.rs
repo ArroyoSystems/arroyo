@@ -15,11 +15,8 @@ use tokio::{
     fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
 };
-
-use crate::{
-    engine::ArrowContext,
-    operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode},
-};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 
 use super::SingleFileTable;
 
@@ -41,7 +38,7 @@ impl FileSink {
     }
 }
 
-impl ArrowOperatorConstructor<ConnectorOp> for FileSink {
+impl OperatorConstructor<ConnectorOp> for FileSink {
     fn from_config(connector_op: ConnectorOp) -> Result<OperatorNode> {
         Ok(OperatorNode::from_operator(Box::new(Self::from_config(
             &connector_op.config,

@@ -5,7 +5,6 @@
 use crate::engine::{Engine, Program, StreamConfig, SubtaskNode};
 use crate::network_manager::NetworkManager;
 use anyhow::Result;
-use std::ops::Sub;
 
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
@@ -19,7 +18,7 @@ use arroyo_rpc::grpc::{
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
     from_millis, grpc_port, ports, string_to_map, to_micros, CheckpointBarrier, NodeId,
-    SignalMessage, WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    WorkerId, JOB_ID_ENV, RUN_ID_ENV,
 };
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
@@ -27,11 +26,10 @@ use rand::Rng;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
-use std::future::Future;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::sync::broadcast;
@@ -49,13 +47,10 @@ use arroyo_datastream::logical::LogicalGraph;
 use arroyo_rpc::var_str::VarStr;
 
 pub mod arrow;
-pub mod connectors;
+//pub mod connectors;
 pub mod engine;
-mod inq_reader;
-mod metrics;
 mod network_manager;
 mod old;
-mod operator;
 pub mod operators;
 mod process_fn;
 
@@ -69,31 +64,6 @@ lazy_static! {
 
 pub static TIMER_TABLE: char = '[';
 
-pub enum SourceFinishType {
-    // stop messages should be propagated through the dataflow
-    Graceful,
-    // shuts down the operator immediately, triggering immediate shut-downs across the dataflow
-    Immediate,
-    // EndOfData messages are propagated, causing MAX_WATERMARK and flushing all timers
-    Final,
-}
-
-impl From<SourceFinishType> for Option<SignalMessage> {
-    fn from(value: SourceFinishType) -> Self {
-        match value {
-            SourceFinishType::Graceful => Some(SignalMessage::Stop),
-            SourceFinishType::Immediate => None,
-            SourceFinishType::Final => Some(SignalMessage::EndOfData),
-        }
-    }
-}
-
-pub enum ControlOutcome {
-    Continue,
-    Stop,
-    StopAndSendStop,
-    Finish,
-}
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum LogicalEdge {
@@ -643,27 +613,4 @@ pub fn header_map(headers: Option<VarStr>) -> HashMap<String, String> {
             .unwrap_or("".to_string()),
     )
     .expect("Invalid header map")
-}
-
-pub struct RateLimiter {
-    last: Instant,
-}
-
-impl RateLimiter {
-    pub fn new() -> Self {
-        RateLimiter {
-            last: Instant::now().sub(Duration::from_secs(60)),
-        }
-    }
-
-    pub async fn rate_limit<F, Fut>(&mut self, f: F)
-    where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = ()> + Send,
-    {
-        if self.last.elapsed() > Duration::from_secs(5) {
-            f().await;
-            self.last = Instant::now();
-        }
-    }
 }

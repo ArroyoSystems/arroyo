@@ -1,4 +1,3 @@
-use crate::engine::ArrowContext;
 use anyhow::Result;
 use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
@@ -29,8 +28,8 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::SystemTime;
 use tonic::transport::Channel;
-
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 
 pub mod session_aggregating_window;
 pub mod sliding_aggregating_window;
@@ -43,8 +42,9 @@ pub struct ValueExecutionOperator {
     execution_plan: Arc<dyn ExecutionPlan>,
 }
 
-impl ArrowOperatorConstructor<api::ValuePlanOperator> for ValueExecutionOperator {
-    fn from_config(config: api::ValuePlanOperator) -> Result<OperatorNode> {
+impl OperatorConstructor for ValueExecutionOperator {
+    type ConfigT = api::ValuePlanOperator;
+    fn with_config(&self, config: api::ValuePlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
         let registry = EmptyRegistry {};
 
@@ -163,8 +163,10 @@ pub struct KeyExecutionOperator {
     key_fields: Vec<usize>,
 }
 
-impl ArrowOperatorConstructor<api::KeyPlanOperator> for KeyExecutionOperator {
-    fn from_config(config: api::KeyPlanOperator) -> Result<OperatorNode> {
+impl OperatorConstructor for KeyExecutionOperator {
+    type ConfigT = api::KeyPlanOperator;
+
+    fn with_config(&self, config: api::KeyPlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
         let registry = EmptyRegistry {};
 
@@ -224,8 +226,10 @@ pub struct GrpcRecordBatchSink {
     client: Option<ControllerGrpcClient<Channel>>,
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp> for GrpcRecordBatchSink {
-    fn from_config(_: ConnectorOp) -> Result<OperatorNode> {
+impl OperatorConstructor for GrpcRecordBatchSink {
+    type ConfigT = api::ConnectorOp;
+
+    fn with_config(&self, _: ConnectorOp) -> Result<OperatorNode> {
         Ok(OperatorNode::from_operator(Box::new(Self { client: None })))
     }
 }

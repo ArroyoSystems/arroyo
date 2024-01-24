@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
-use arroyo_types::{Data, GlobalKey, JoinType, Key, HASH_SEEDS};
+use arroyo_types::{Data, GlobalKey, JoinType, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -2689,8 +2689,4 @@ mod tests {
         let t = extract_container_type("Vec", &parse_str("HashMap<String, u8>").unwrap());
         assert!(t.is_none())
     }
-}
-
-pub fn get_hasher() -> ahash::RandomState {
-    ahash::RandomState::with_seeds(HASH_SEEDS[0], HASH_SEEDS[1], HASH_SEEDS[2], HASH_SEEDS[3])
 }

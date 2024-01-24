@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::{marker::PhantomData, time::SystemTime};
 
 use crate::old::Context;
-use crate::{engine::StreamNode, header_map, RateLimiter, SourceFinishType};
+use crate::{engine::StreamNode, header_map};
 use arroyo_formats::old::DataDeserializer;
 use arroyo_formats::SchemaData;
 use arroyo_macro::source_fn;
@@ -25,6 +25,7 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::{debug, info};
 use tungstenite::http::Request;
 use typify::import_types;
+use arroyo_operator::RateLimiter;
 
 import_types!(
     schema = "../connector-schemas/websocket/table.json",

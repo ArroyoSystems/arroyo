@@ -22,11 +22,11 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 
-use crate::engine::QueueItem;
 use tokio::time::{interval, Interval};
 use tokio_stream::StreamExt;
+use arroyo_operator::context::QueueItem;
 
-use crate::inq_reader::InQReader;
+use arroyo_operator::inq_reader::InQReader;
 
 #[derive(Clone)]
 struct NetworkSender {
@@ -468,7 +468,7 @@ mod test {
     use std::time::SystemTime;
     use std::{pin::Pin, time::Duration};
 
-    use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage};
+    use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, to_nanos};
     use tokio::{sync::mpsc::channel, time::timeout};
 
     use crate::network_manager::{MessageType, Quad};

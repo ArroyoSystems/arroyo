@@ -166,6 +166,8 @@ pub fn duration_millis_config(var: &str, default: Duration) -> Duration {
         .unwrap_or(default)
 }
 
+pub const QUEUE_SIZE: usize = 4 * 1024;
+
 // These seeds were randomly generated; changing them will break existing state
 pub const HASH_SEEDS: [u64; 4] = [
     5093852630788334730,
