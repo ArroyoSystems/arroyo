@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
+use arroyo_operator::connector::{Connection, Connector};
 
-use crate::{pull_opt, Connection, ConnectionType, Connector, EmptyConfig};
+use crate::{ConnectionType, EmptyConfig, pull_opt};
 
 pub struct FluvioConnector {}
 
@@ -63,7 +64,7 @@ impl Connector for FluvioConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -71,7 +72,7 @@ impl Connector for FluvioConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
+            tx.send(message)
                 .await
                 .unwrap();
         });

@@ -9,10 +9,11 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
+use arroyo_operator::connector::Connection;
 
-use crate::{pull_opt, Connection, EmptyConfig};
+use crate::{EmptyConfig, pull_opt};
 
-use super::Connector;
+use arroyo_operator::connector::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/single_file/table.json");
 
@@ -52,7 +53,7 @@ impl Connector for SingleFileConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -60,7 +61,7 @@ impl Connector for SingleFileConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
+            tx.send(message)
                 .await
                 .unwrap();
         });
@@ -80,7 +81,7 @@ impl Connector for SingleFileConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
+    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let schema = schema
             .map(|s| s.to_owned())
             .ok_or_else(|| anyhow!("no schema defined for Single File Source connection"))?;

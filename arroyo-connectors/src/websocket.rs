@@ -19,10 +19,11 @@ use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::{connect_async, tungstenite};
 use tungstenite::http::Request;
 use typify::import_types;
+use arroyo_operator::connector::Connection;
 
-use crate::{pull_opt, Connection, EmptyConfig};
+use crate::{EmptyConfig, pull_opt};
 
-use super::Connector;
+use arroyo_operator::connector::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/websocket/table.json");
 
@@ -63,7 +64,7 @@ impl Connector for WebsocketConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: Sender<Result<Event, Infallible>>,
+        tx: Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let send = |error: bool, done: bool, message: String| {
@@ -74,7 +75,7 @@ impl Connector for WebsocketConnector {
                         done,
                         message,
                     };
-                    tx.send(Ok(Event::default().json_data(msg).unwrap()))
+                    tx.send(msg)
                         .await
                         .unwrap();
                 }
@@ -219,7 +220,7 @@ impl Connector for WebsocketConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
+    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let description = format!("WebsocketSource<{}>", table.endpoint);
 
         if let Some(headers) = &table.headers {

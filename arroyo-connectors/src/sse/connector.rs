@@ -1,26 +1,22 @@
-use crate::engine::ArrowContext;
-use crate::operator::{OperatorConstructor, OperatorNode, SourceOperator};
-use crate::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::{api, StopMode, TableConfig};
-use arroyo_rpc::{var_str::VarStr, ControlMessage, ControlResp, OperatorConfig};
+use arroyo_rpc::grpc::{StopMode, TableConfig};
+use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::{string_to_map, ArrowMessage, SignalMessage, UserError, Watermark};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use eventsource_client::{Client, SSE};
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, info};
-use typify::import_types;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{OperatorNode, SourceOperator};
+use arroyo_operator::SourceFinishType;
+use crate::sse::SseTable;
 
-import_types!(
-    schema = "../connector-schemas/sse/table.json",
-    convert = { {type = "string", format = "var-str"} = VarStr });
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
 pub struct SSESourceState {
@@ -37,19 +33,14 @@ pub struct SSESourceFunc {
     state: SSESourceState,
 }
 
-impl OperatorConstructor<api::ConnectorOp> for SSESourceFunc {
-    fn from_config(config: api::ConnectorOp) -> anyhow::Result<OperatorNode> {
-        let config: OperatorConfig =
-            serde_json::from_str(&config.config).expect("Invalid config for SSESource");
-        let table: SseTable =
-            serde_json::from_value(config.table).expect("Invalid table config for SSESource");
-
+impl SSESourceFunc {
+    pub fn new(table: SseTable, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
         let headers = table
             .headers
             .as_ref()
             .map(|s| s.sub_env_vars().expect("Failed to substitute env vars"));
 
-        Ok(OperatorNode::from_source(Box::new(Self {
+        Ok(OperatorNode::from_source(Box::new(SSESourceFunc {
             url: table.endpoint,
             headers: string_to_map(&headers.unwrap_or("".to_string()))
                 .expect("Invalid header map")
@@ -64,6 +55,7 @@ impl OperatorConstructor<api::ConnectorOp> for SSESourceFunc {
             bad_data: config.bad_data,
             state: SSESourceState::default(),
         })))
+        
     }
 }
 
@@ -225,7 +217,7 @@ impl SSESourceFunc {
             ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
                 Watermark::Idle,
             )))
-            .await;
+                .await;
 
             loop {
                 let msg = ctx.control_rx.recv().await;

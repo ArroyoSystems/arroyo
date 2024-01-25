@@ -13,6 +13,7 @@ arroyo-types = { path = "../arroyo-types" }
 arroyo-df = { path = "../arroyo-df" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
+arroyo-operator = { path = "../arroyo-operator" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-state = { path = "../arroyo-state" }

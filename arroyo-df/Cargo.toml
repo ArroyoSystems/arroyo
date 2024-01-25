@@ -10,6 +10,7 @@ arroyo-rpc = {path = "../arroyo-rpc"}
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-formats = { path = "../arroyo-formats" }
+arroyo-operator = { path = "../arroyo-operator" }
 
 datafusion = "34.0"
 datafusion-expr = "34.0"

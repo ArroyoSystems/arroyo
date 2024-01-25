@@ -11,8 +11,9 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use typify::import_types;
+use arroyo_operator::connector::{Connection, Connector};
 
-use crate::{nullable_field, pull_opt, source_field, Connection, Connector, EmptyConfig};
+use crate::{EmptyConfig, nullable_field, pull_opt, source_field};
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/nexmark/table.json");
 const ICON: &str = include_str!("../resources/nexmark.svg");
@@ -137,7 +138,7 @@ impl Connector for NexmarkConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -145,7 +146,7 @@ impl Connector for NexmarkConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
+            tx.send(message)
                 .await
                 .unwrap();
         });

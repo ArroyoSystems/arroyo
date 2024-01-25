@@ -8,12 +8,12 @@ use arroyo_rpc::ArroyoSchema;
 use bincode::{Decode, Encode};
 use tracing::{debug, info, warn};
 
-use crate::arrow::session_aggregating_window::SessionAggregatingWindowFunc;
-use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowFunc;
-use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
-use crate::arrow::{GrpcRecordBatchSink, KeyExecutionOperator, ValueExecutionOperator};
+use crate::arrow::session_aggregating_window::{SessionAggregatingWindowConstructor};
+use crate::arrow::sliding_aggregating_window::{SlidingAggregatingWindowConstructor};
+use crate::arrow::tumbling_aggregating_window::{TumblingAggregateWindowConstructor};
+use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operators::PeriodicWatermarkGenerator;
+use crate::operators::{PeriodicWatermarkGeneratorConstructor};
 use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
@@ -31,7 +31,9 @@ use petgraph::Direction;
 use prometheus::labels;
 
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use arroyo_connectors::connectors;
 use arroyo_operator::context::{ArrowContext, QueueItem};
+use arroyo_operator::ErasedConstructor;
 use arroyo_operator::operator::OperatorNode;
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
@@ -755,51 +757,28 @@ impl Engine {
 }
 
 pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNode {
-    todo!()
-    // let mut buf = config.as_slice();
-    // match operator {
-    //     OperatorName::Watermark => {
-    //         PeriodicWatermarkGenerator::from_config(prost::Message::decode(&mut buf).unwrap())
-    //     }
-    //     OperatorName::ArrowValue => {
-    //         ValueExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap())
-    //     }
-    //     OperatorName::ArrowKey => {
-    //         KeyExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap())
-    //     }
-    //     OperatorName::ArrowAggregate => {
-    //         // TODO: this should not be in a specific window.
-    //         TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
-    //     }
-    //     OperatorName::TumblingWindowAggregate => {
-    //         TumblingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
-    //     }
-    //     OperatorName::SlidingWindowAggregate => {
-    //         SlidingAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
-    //     }
-    //     OperatorName::SessionWindowAggregate => {
-    //         SessionAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
-    //     }
-    //     OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
-    //         let op: api::ConnectorOp = prost::Message::decode(&mut buf).unwrap();
-    //         match op.operator.as_str() {
-    //             "connectors::impulse::ImpulseSourceFunc" => ImpulseSourceFunc::from_config(op),
-    //             "connectors::sse::SSESourceFunc" => SSESourceFunc::from_config(op),
-    //             "connectors::filesystem::source::FileSystemSourceFunc" => {
-    //                 FileSystemSourceFunc::from_config(op)
-    //             }
-    //             "connectors::kafka::source::KafkaSourceFunc" => KafkaSourceFunc::from_config(op),
-    //             "connectors::kafka::sink::KafkaSinkFunc::<#in_k, #in_t>" => {
-    //                 KafkaSinkFunc::from_config(op)
-    //             }
-    //             "GrpcSink" => GrpcRecordBatchSink::from_config(op),
-    //             "connectors::filesystem::single_file::source::FileSourceFunc" => {
-    //                 FileSourceFunc::from_config(op)
-    //             }
-    //             "connectors::filesystem::single_file::sink::FileSink" => FileSink::from_config(op),
-    //             c => panic!("unknown connector {}", c),
-    //         }
-    //     }
-    // }
-    // .expect(&format!("Failed to construct operator {:?}", operator))
+    let ctor: Box<dyn ErasedConstructor> = match operator {
+        OperatorName::Watermark => Box::new(PeriodicWatermarkGeneratorConstructor),
+        OperatorName::ArrowValue => Box::new(ValueExecutionConstructor),
+        OperatorName::ArrowKey => Box::new(KeyExecutionConstructor),
+        OperatorName::ArrowAggregate => {
+            // TODO: this should not be in a specific window.
+            Box::new(TumblingAggregateWindowConstructor)
+        }
+        OperatorName::TumblingWindowAggregate => Box::new(TumblingAggregateWindowConstructor),
+        OperatorName::SlidingWindowAggregate => Box::new(SlidingAggregatingWindowConstructor),
+        OperatorName::SessionWindowAggregate => Box::new(SessionAggregatingWindowConstructor),
+        OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
+            let op: api::ConnectorOp = prost::Message::decode(&mut config.as_slice()).unwrap();
+            return connectors()
+                .get(op.connector.as_str())
+                .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
+                .make_operator(serde_json::from_str(&op.config)
+                   .unwrap_or_else(|e| panic!("invalid operator config: {:?}", e)))
+                .unwrap_or_else(|e| panic!("Failed to construct connector {}: {:?}", op.connector, e));
+        }
+    };
+
+    ctor.with_config(config)
+        .expect(&format!("Failed to construct operator {:?}", operator))
 }

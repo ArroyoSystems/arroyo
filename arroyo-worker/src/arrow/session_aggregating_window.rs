@@ -697,7 +697,9 @@ fn start_time_for_sorted_batch(batch: &RecordBatch, schema: &ArroyoSchema) -> Sy
     from_nanos(min_timestamp as u128)
 }
 
-impl OperatorConstructor for SessionAggregatingWindowFunc {
+pub struct SessionAggregatingWindowConstructor;
+
+impl OperatorConstructor for SessionAggregatingWindowConstructor {
     type ConfigT = api::SessionWindowAggregateOperator;
     fn with_config(&self, config: api::SessionWindowAggregateOperator) -> anyhow::Result<OperatorNode> {
         let window_field = Arc::new(Field::new(
@@ -749,7 +751,7 @@ impl OperatorConstructor for SessionAggregatingWindowFunc {
             receiver,
         };
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
+        Ok(OperatorNode::from_operator(Box::new(SessionAggregatingWindowFunc {
             config: Arc::new(config),
             keys_by_next_watermark_action: BTreeMap::new(),
             keys_by_start_time: BTreeMap::new(),

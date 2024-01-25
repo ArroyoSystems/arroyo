@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 
 use anyhow::anyhow;
-use arroyo_rpc::{var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{OperatorConfig, var_str::VarStr};
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
 use reqwest::{Client, Request};
@@ -13,10 +13,11 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use serde::{Deserialize, Serialize};
+use arroyo_operator::connector::Connection;
 
-use crate::{construct_http_client, pull_opt, pull_option_to_i64, Connection, EmptyConfig};
+use crate::{construct_http_client, EmptyConfig, pull_opt, pull_option_to_i64};
 
-use super::Connector;
+use arroyo_operator::connector::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/polling_http/table.json");
 
@@ -56,7 +57,7 @@ impl PollingHTTPConnector {
 
     async fn test_int(
         config: &PollingHttpTable,
-        tx: Sender<Result<Event, Infallible>>,
+        tx: Sender<TestSourceMessage>,
     ) -> anyhow::Result<()> {
         let headers = config
             .headers
@@ -67,13 +68,11 @@ impl PollingHTTPConnector {
         let client = construct_http_client(&config.endpoint, headers)?;
         let req = Self::construct_test_request(&client, config)?;
 
-        tx.send(Ok(Event::default()
-            .json_data(TestSourceMessage {
+        tx.send(TestSourceMessage {
                 error: false,
                 done: false,
                 message: "Requesting data".to_string(),
             })
-            .unwrap()))
             .await
             .unwrap();
 
@@ -122,7 +121,7 @@ impl Connector for PollingHTTPConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: Sender<Result<Event, Infallible>>,
+        tx: Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = match Self::test_int(&table, tx.clone()).await {
@@ -138,7 +137,7 @@ impl Connector for PollingHTTPConnector {
                 },
             };
 
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
+            tx.send(message)
                 .await
                 .unwrap();
         });
@@ -191,7 +190,7 @@ impl Connector for PollingHTTPConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
+    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let description = format!("PollingHTTPSource<{}>", table.endpoint);
 
         if let Some(headers) = &table.headers {

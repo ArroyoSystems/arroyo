@@ -42,7 +42,8 @@ pub struct ValueExecutionOperator {
     execution_plan: Arc<dyn ExecutionPlan>,
 }
 
-impl OperatorConstructor for ValueExecutionOperator {
+pub struct ValueExecutionConstructor;
+impl OperatorConstructor for ValueExecutionConstructor {
     type ConfigT = api::ValuePlanOperator;
     fn with_config(&self, config: api::ValuePlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
@@ -60,7 +61,7 @@ impl OperatorConstructor for ValueExecutionOperator {
             &codec,
         )?;
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
+        Ok(OperatorNode::from_operator(Box::new(ValueExecutionOperator {
             name: config.name,
             locked_batch,
             execution_plan,
@@ -163,7 +164,9 @@ pub struct KeyExecutionOperator {
     key_fields: Vec<usize>,
 }
 
-impl OperatorConstructor for KeyExecutionOperator {
+pub struct KeyExecutionConstructor;
+
+impl OperatorConstructor for KeyExecutionConstructor {
     type ConfigT = api::KeyPlanOperator;
 
     fn with_config(&self, config: api::KeyPlanOperator) -> Result<OperatorNode> {
@@ -182,7 +185,7 @@ impl OperatorConstructor for KeyExecutionOperator {
             &codec,
         )?;
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
+        Ok(OperatorNode::from_operator(Box::new(KeyExecutionOperator {
             name: config.name,
             locked_batch,
             execution_plan,

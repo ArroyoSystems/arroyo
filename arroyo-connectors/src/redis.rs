@@ -9,6 +9,7 @@ use redis::{Client, ConnectionInfo, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
+use arroyo_operator::connector::{Connection, Connector};
 
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, PrimitiveType,
@@ -16,7 +17,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::OperatorConfig;
 
-use crate::{pull_opt, pull_option_to_u64, Connection, Connector};
+use crate::{pull_opt, pull_option_to_u64};
 
 pub struct RedisConnector {}
 
@@ -86,11 +87,9 @@ fn from_address(config: &RedisConfig, address: &str) -> anyhow::Result<Connectio
 
 async fn test_inner(
     c: RedisConfig,
-    tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+    tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
 ) -> anyhow::Result<String> {
-    tx.send(Ok(Event::default()
-        .json_data(TestSourceMessage::info("Connecting to Redis"))
-        .unwrap()))
+    tx.send(TestSourceMessage::info("Connecting to Redis"))
         .await
         .unwrap();
 
@@ -102,11 +101,7 @@ async fn test_inner(
                 .get_async_connection()
                 .await
                 .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
-            tx.send(Ok(Event::default()
-                .json_data(TestSourceMessage::info(
-                    "Connected successfully, sending PING",
-                ))
-                .unwrap()))
+            tx.send(TestSourceMessage::info("Connected successfully, sending PING"))
                 .await
                 .unwrap();
 
@@ -120,11 +115,9 @@ async fn test_inner(
                 .get_async_connection()
                 .await
                 .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
-            tx.send(Ok(Event::default()
-                .json_data(TestSourceMessage::info(
+            tx.send(TestSourceMessage::info(
                     "Connected successfully, sending PING",
                 ))
-                .unwrap()))
                 .await
                 .unwrap();
 
@@ -198,7 +191,7 @@ impl Connector for RedisConnector {
         c: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let resp = match test_inner(c, tx.clone()).await {
@@ -206,7 +199,7 @@ impl Connector for RedisConnector {
                 Err(e) => TestSourceMessage::fail(e.to_string()),
             };
 
-            tx.send(Ok(Event::default().json_data(resp).unwrap()))
+            tx.send(resp)
                 .await
                 .unwrap();
         });

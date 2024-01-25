@@ -3,7 +3,6 @@ use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::{FieldRef, Schema, TimeUnit};
-use arroyo_connectors::Connection;
 use arroyo_datastream::{ConnectorOp, WindowType};
 
 use datafusion::datasource::DefaultTableSource;
@@ -44,20 +43,21 @@ use schemas::{
 use tables::{Insert, Table};
 
 use arroyo_rpc::api_types::connections::ConnectionProfile;
-use datafusion_common::{DFSchema, DFSchemaRef, DataFusionError};
+use datafusion_common::{DataFusionError, DFSchema, DFSchemaRef};
 use prettyplease::unparse;
 use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
-use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
+use crate::types::{interval_month_day_nanos_to_duration, NullableType, rust_to_arrow};
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use arroyo_rpc::{ArroyoSchema, TIMESTAMP_FIELD};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
-use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
+use syn::{FnArg, Item, parse_file, ReturnType, Visibility};
 use tracing::warn;
 use unicase::UniCase;
+use arroyo_operator::connector::Connection;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 

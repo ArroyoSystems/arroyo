@@ -3,11 +3,10 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
-use axum::response::sse::Event;
 use std::collections::HashMap;
-use std::convert::Infallible;
+use arroyo_operator::connector::{Connection, Connector};
 
-use crate::{Connection, Connector, EmptyConfig};
+use crate::EmptyConfig;
 
 pub struct BlackholeConnector {}
 
@@ -57,7 +56,7 @@ impl Connector for BlackholeConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -65,7 +64,7 @@ impl Connector for BlackholeConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
+            tx.send(message)
                 .await
                 .unwrap();
         });

@@ -92,8 +92,9 @@ type PolledFutureT = <NextBatchFuture<SystemTime> as Future>::Output;
 
 impl TumblingAggregatingWindowFunc<SystemTime> {}
 
-impl OperatorConstructor
-    for TumblingAggregatingWindowFunc<SystemTime>
+pub struct TumblingAggregateWindowConstructor; 
+
+impl OperatorConstructor for TumblingAggregateWindowConstructor
 {
     type ConfigT = api::TumblingWindowAggregateOperator;
     fn with_config(&self, config: api::TumblingWindowAggregateOperator) -> Result<OperatorNode> {
@@ -148,7 +149,7 @@ impl OperatorConstructor
             true,
         ));
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
+        Ok(OperatorNode::from_operator(Box::new(TumblingAggregatingWindowFunc {
             width,
             binning_function,
             partial_aggregation_plan,

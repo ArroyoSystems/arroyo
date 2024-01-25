@@ -445,8 +445,9 @@ impl<K: Copy> Default for BinComputingHolder<K> {
 
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
-impl OperatorConstructor
-    for SlidingAggregatingWindowFunc<SystemTime>
+pub struct SlidingAggregatingWindowConstructor;
+
+impl OperatorConstructor for SlidingAggregatingWindowConstructor
 {
     type ConfigT = api::SlidingWindowAggregateOperator;
     fn with_config(&self, config: api::SlidingWindowAggregateOperator) -> anyhow::Result<OperatorNode> {
@@ -496,7 +497,7 @@ impl OperatorConstructor
             true,
         ));
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
+        Ok(OperatorNode::from_operator(Box::new(SlidingAggregatingWindowFunc {
             slide,
             width,
             binning_function,

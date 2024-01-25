@@ -3,12 +3,12 @@ use arroyo_formats::ArrowDeserializer;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::formats::{BadData, Format, JsonFormat};
 use arroyo_rpc::schema_resolver::ConfluentSchemaRegistryClient;
-use arroyo_rpc::{schema_resolver, var_str::VarStr, ArroyoSchema, OperatorConfig};
+use arroyo_rpc::{ArroyoSchema, OperatorConfig, schema_resolver, var_str::VarStr};
 use axum::response::sse::Event;
 use futures::TryFutureExt;
 use rdkafka::{
-    consumer::{BaseConsumer, Consumer},
-    ClientConfig, Message, Offset, TopicPartitionList,
+    ClientConfig,
+    consumer::{BaseConsumer, Consumer}, Message, Offset, TopicPartitionList,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,10 +22,11 @@ use tokio::sync::oneshot::Receiver;
 use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
+use arroyo_operator::connector::Connection;
 
-use crate::{pull_opt, send, Connection, ConnectionType};
+use crate::{ConnectionType, pull_opt, send};
 
-use super::Connector;
+use arroyo_operator::connector::Connector;
 
 const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/kafka/connection.json");
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/kafka/table.json");
@@ -267,7 +268,7 @@ impl Connector for KafkaConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        tx: Sender<Result<Event, Infallible>>,
+        tx: Sender<TestSourceMessage>,
     ) {
         let tester = KafkaTester { connection: config };
 
@@ -551,7 +552,7 @@ impl KafkaTester {
         &self,
         table: KafkaTable,
         schema: Option<ConnectionSchema>,
-        mut tx: Sender<Result<Event, Infallible>>,
+        mut tx: Sender<TestSourceMessage>,
     ) -> anyhow::Result<()> {
         let format = schema
             .as_ref()
@@ -654,7 +655,7 @@ impl KafkaTester {
         Ok(())
     }
 
-    async fn info(&self, tx: &mut Sender<Result<Event, Infallible>>, s: impl Into<String>) {
+    async fn info(&self, tx: &mut Sender<TestSourceMessage>, s: impl Into<String>) {
         send(
             tx,
             TestSourceMessage {
@@ -686,7 +687,7 @@ impl KafkaTester {
         self,
         table: KafkaTable,
         schema: Option<ConnectionSchema>,
-        mut tx: Sender<Result<Event, Infallible>>,
+        mut tx: Sender<TestSourceMessage>,
     ) {
         tokio::spawn(async move {
             info!("Started kafka tester");

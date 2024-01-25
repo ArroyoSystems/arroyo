@@ -304,7 +304,7 @@ impl ConnectorOp {
 impl From<GrpcApi::ConnectorOp> for ConnectorOp {
     fn from(c: GrpcApi::ConnectorOp) -> Self {
         ConnectorOp {
-            operator: c.operator,
+            operator: c.connector,
             config: c.config,
             description: c.description,
         }
@@ -314,7 +314,7 @@ impl From<GrpcApi::ConnectorOp> for ConnectorOp {
 impl From<ConnectorOp> for GrpcApi::ConnectorOp {
     fn from(c: ConnectorOp) -> Self {
         GrpcApi::ConnectorOp {
-            operator: c.operator,
+            connector: c.operator,
             config: c.config,
             description: c.description,
         }

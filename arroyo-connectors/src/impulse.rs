@@ -10,8 +10,9 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use typify::import_types;
+use arroyo_operator::connector::{Connection, Connector};
 
-use crate::{pull_opt, source_field, Connection, ConnectionType, Connector, EmptyConfig};
+use crate::{ConnectionType, EmptyConfig, pull_opt, source_field};
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/impulse/table.json");
 
@@ -79,7 +80,7 @@ impl Connector for ImpulseConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -87,7 +88,7 @@ impl Connector for ImpulseConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
+            tx.send(message)
                 .await
                 .unwrap();
         });

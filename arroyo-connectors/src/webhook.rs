@@ -14,10 +14,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
+use arroyo_operator::connector::Connection;
 
-use crate::{construct_http_client, pull_opt, Connection, EmptyConfig};
+use crate::{construct_http_client, EmptyConfig, pull_opt};
 
-use super::Connector;
+use arroyo_operator::connector::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/webhook/table.json");
 
@@ -45,7 +46,7 @@ impl WebhookConnector {
 
     async fn test_int(
         config: &WebhookTable,
-        tx: Sender<Result<Event, Infallible>>,
+        tx: Sender<TestSourceMessage>,
     ) -> anyhow::Result<()> {
         let headers = config
             .headers
@@ -56,13 +57,11 @@ impl WebhookConnector {
         let client = construct_http_client(&config.endpoint.sub_env_vars()?, headers)?;
         let req = Self::construct_test_request(&client, config)?;
 
-        tx.send(Ok(Event::default()
-            .json_data(TestSourceMessage {
+        tx.send(TestSourceMessage {
                 error: false,
                 done: false,
                 message: "Sending websink message".to_string(),
             })
-            .unwrap()))
             .await
             .unwrap();
 
@@ -107,7 +106,7 @@ impl Connector for WebhookConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: Sender<Result<Event, Infallible>>,
+        tx: Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = match Self::test_int(&table, tx.clone()).await {
@@ -123,7 +122,7 @@ impl Connector for WebhookConnector {
                 },
             };
 
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
+            tx.send(message)
                 .await
                 .unwrap();
         });
@@ -140,7 +139,7 @@ impl Connector for WebhookConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
+    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let description = format!("WebhookSink<{}>", table.endpoint.sub_env_vars()?);
 
         let schema = schema

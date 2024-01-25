@@ -1,19 +1,18 @@
 use crate::kafka::{
     KafkaConfig, KafkaConfigAuthentication, KafkaConnector, KafkaTable, KafkaTester, TableType,
 };
-use crate::{kafka, pull_opt, Connection, Connector};
+use crate::{kafka, pull_opt};
 use anyhow::anyhow;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
-use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
+use arroyo_operator::connector::{Connection, Connector};
 
 const CLIENT_ID: &str = "cwc|0014U00003Df8ZvQAJ";
 
@@ -137,7 +136,7 @@ impl Connector for ConfluentConnector {
         config: Self::ProfileT,
         mut table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-        tx: Sender<Result<Event, Infallible>>,
+        tx: Sender<TestSourceMessage>,
     ) {
         table
             .client_configs

@@ -1,8 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
-use axum::response::sse::Event;
 use std::collections::HashMap;
-use std::convert::Infallible;
+use arroyo_operator::connector::Connection;
 
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
@@ -10,11 +9,11 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::OperatorConfig;
 
 use crate::filesystem::{
-    file_system_sink_from_options, CommitStyle, FileSystemTable, FormatSettings, TableType,
+    CommitStyle, file_system_sink_from_options, FileSystemTable, FormatSettings, TableType,
 };
-use crate::{Connection, EmptyConfig};
+use crate::EmptyConfig;
 
-use super::Connector;
+use arroyo_operator::connector::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/filesystem/table.json");
 
@@ -52,7 +51,7 @@ impl Connector for DeltaLakeConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -60,7 +59,7 @@ impl Connector for DeltaLakeConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
+            tx.send(message)
                 .await
                 .unwrap();
         });
@@ -77,7 +76,7 @@ impl Connector for DeltaLakeConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
+    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let TableType::Sink {
             write_path,
             file_settings,

@@ -1,9 +1,11 @@
+mod connector;
+
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arroyo_rpc::{var_str::VarStr, OperatorConfig};
+use arroyo_rpc::{OperatorConfig, var_str::VarStr};
 use arroyo_types::string_to_map;
 use axum::response::sse::Event;
 use eventsource_client::Client;
@@ -15,15 +17,18 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use serde::{Deserialize, Serialize};
+use arroyo_operator::connector::Connection;
+use arroyo_operator::operator::OperatorNode;
 
-use crate::{pull_opt, Connection, EmptyConfig};
+use crate::{EmptyConfig, pull_opt};
+use crate::sse::connector::SSESourceFunc;
 
-use super::Connector;
+use arroyo_operator::connector::Connector;
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/sse/table.json");
+const TABLE_SCHEMA: &str = include_str!("./table.json");
 
-import_types!(schema = "../connector-schemas/sse/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
-const ICON: &str = include_str!("../resources/sse.svg");
+import_types!(schema = "src/sse/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
+const ICON: &str = include_str!("./sse.svg");
 
 pub struct SSEConnector {}
 
@@ -59,7 +64,7 @@ impl Connector for SSEConnector {
         _: Self::ProfileT,
         table: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: Sender<Result<Event, Infallible>>,
+        tx: Sender<TestSourceMessage>,
     ) {
         SseTester { config: table, tx }.start();
     }
@@ -75,7 +80,7 @@ impl Connector for SSEConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
+    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let description = format!("SSESource<{}>", table.endpoint);
 
         if let Some(headers) = &table.headers {
@@ -140,19 +145,22 @@ impl Connector for SSEConnector {
             schema,
         )
     }
+
+    fn make_operator(&self, _: Self::ProfileT, table: Self::TableT, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+        SSESourceFunc::new(table, config)
+    }
 }
 
 struct SseTester {
     config: SseTable,
-    tx: Sender<Result<Event, Infallible>>,
+    tx: Sender<TestSourceMessage>,
 }
 
 impl SseTester {
     pub fn start(self) {
         tokio::task::spawn(async move {
             self.tx
-                .send(Ok(Event::default()
-                    .json_data(match self.test_internal().await {
+                .send(match self.test_internal().await {
                         Ok(_) => TestSourceMessage {
                             error: false,
                             done: true,
@@ -164,7 +172,6 @@ impl SseTester {
                             message: e.to_string(),
                         },
                     })
-                    .unwrap()))
                 .await
                 .unwrap();
         });
@@ -201,7 +208,7 @@ impl SseTester {
             message: "Constructed SSE client".to_string(),
         };
         self.tx
-            .send(Ok(Event::default().json_data(message).unwrap()))
+            .send(message)
             .await
             .unwrap();
 
@@ -215,7 +222,7 @@ impl SseTester {
                             done: false,
                             message: "Received message from SSE server".to_string()
                         };
-                        self.tx.send(Ok(Event::default().json_data(message).unwrap())).await.unwrap();
+                        self.tx.send(message).await.unwrap();
                     }
                     Some(Err(e)) => {
                         bail!("Received error from server: {:?}", e);

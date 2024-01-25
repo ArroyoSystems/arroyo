@@ -10,7 +10,6 @@ arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-metrics = { path = "../arroyo-metrics" }
 arroyo-storage = { path = "../arroyo-storage" }
-arroyo-df = { path = "../arroyo-df" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 
 datafusion = "34.0"

@@ -11,10 +11,11 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
+use arroyo_operator::connector::Connection;
 
-use crate::{pull_opt, pull_option_to_i64, Connection, EmptyConfig};
+use crate::{EmptyConfig, pull_opt, pull_option_to_i64};
 
-use super::Connector;
+use arroyo_operator::connector::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/filesystem/table.json");
 const ICON: &str = include_str!("../resources/filesystem.svg");
@@ -55,7 +56,7 @@ impl Connector for FileSystemConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -63,7 +64,7 @@ impl Connector for FileSystemConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
+            tx.send(message)
                 .await
                 .unwrap();
         });
@@ -83,7 +84,7 @@ impl Connector for FileSystemConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
+    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let (description, operator, connection_type) = match table.table_type {
             TableType::Source { .. } => (
                 "FileSystem".to_string(),

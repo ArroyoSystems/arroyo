@@ -143,10 +143,11 @@ impl PeriodicWatermarkGenerator {
     }
 }
 
-impl OperatorConstructor for PeriodicWatermarkGenerator {
+pub struct PeriodicWatermarkGeneratorConstructor;
+impl OperatorConstructor for PeriodicWatermarkGeneratorConstructor {
     type ConfigT = api::PeriodicWatermark;
     fn with_config(&self, config: PeriodicWatermark) -> anyhow::Result<OperatorNode> {
-        Ok(OperatorNode::from_operator(Box::new(Self::fixed_lateness(
+        Ok(OperatorNode::from_operator(Box::new(PeriodicWatermarkGenerator::fixed_lateness(
             Duration::from_micros(config.period_micros),
             config.idle_time_micros.map(Duration::from_micros),
             Duration::from_micros(config.max_lateness_micros),

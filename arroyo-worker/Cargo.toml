@@ -19,6 +19,7 @@ arroyo-formats = { path = "../arroyo-formats" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-df = { path = "../arroyo-df" }
 arroyo-operator = { path = "../arroyo-operator" }
+arroyo-connectors = { path = "../arroyo-connectors" }
 
 ahash = "0.8"
 rand = "0.8"

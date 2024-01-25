@@ -22,6 +22,7 @@ pub mod inq_reader;
 pub mod operator;
 pub mod context;
 pub mod metrics;
+pub mod connector;
 
 pub trait TimerT: Data + PartialEq + Eq + 'static {}
 
