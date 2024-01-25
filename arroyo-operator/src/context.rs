@@ -1,22 +1,25 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{Instant, SystemTime};
-use arrow::array::{ArrayBuilder, make_builder, PrimitiveArray, RecordBatch};
+use crate::{server_for_hash_array, RateLimiter};
+use arrow::array::{make_builder, ArrayBuilder, PrimitiveArray, RecordBatch};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow::datatypes::{SchemaRef, UInt64Type};
-use datafusion::common::hash_utils;
-use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::warn;
 use arroyo_formats::ArrowDeserializer;
-use arroyo_metrics::{QueueGauges, register_queue_gauges, TaskCounters};
-use arroyo_rpc::{ArroyoSchema, CompactionResult, ControlMessage, ControlResp, get_hasher};
+use arroyo_metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_state::{BackingStore, StateBackend};
+use arroyo_rpc::{get_hasher, ArroyoSchema, CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
-use arroyo_types::{ArrowMessage, CheckpointBarrier, from_micros, QUEUE_SIZE, should_flush, SourceError, TaskInfo, UserError, Watermark};
-use crate::{RateLimiter, server_for_hash_array};
+use arroyo_state::{BackingStore, StateBackend};
+use arroyo_types::{
+    from_micros, should_flush, ArrowMessage, CheckpointBarrier, SourceError, TaskInfo, UserError,
+    Watermark, QUEUE_SIZE,
+};
+use datafusion::common::hash_utils;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Instant, SystemTime};
+use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::warn;
 
 pub type QueueItem = ArrowMessage;
 
@@ -113,7 +116,7 @@ impl ContextBuffer {
             self.schema,
             self.buffer.into_iter().map(|mut a| a.finish()).collect(),
         )
-            .unwrap()
+        .unwrap()
     }
 }
 
@@ -295,9 +298,9 @@ impl ArrowContext {
                     &task_info.operator_id,
                     metadata.epoch,
                 )
-                    .await
-                    .expect("lookup should succeed")
-                    .expect("require metadata");
+                .await
+                .expect("lookup should succeed")
+                .expect("require metadata");
                 (metadata.min_watermark.map(from_micros), metadata)
             };
 
@@ -426,10 +429,10 @@ impl ArrowContext {
             .map(|b| b.should_flush())
             .unwrap_or(false)
             || self
-            .deserializer
-            .as_ref()
-            .map(|d| d.should_flush())
-            .unwrap_or(false)
+                .deserializer
+                .as_ref()
+                .map(|d| d.should_flush())
+                .unwrap_or(false)
     }
 
     pub fn buffer(&mut self) -> &mut Vec<Box<dyn ArrayBuilder>> {
@@ -589,10 +592,10 @@ impl ArrowContext {
 mod tests {
     use arrow::array::{ArrayRef, TimestampNanosecondArray, UInt64Array};
     use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+    use arroyo_metrics::register_queue_gauges;
     use arroyo_types::to_nanos;
     use std::time::Duration;
     use tokio::sync::mpsc::channel;
-    use arroyo_metrics::register_queue_gauges;
 
     use super::*;
 

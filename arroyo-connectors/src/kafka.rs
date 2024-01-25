@@ -1,14 +1,15 @@
 use anyhow::{anyhow, bail};
 use arroyo_formats::ArrowDeserializer;
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::formats::{BadData, Format, JsonFormat};
 use arroyo_rpc::schema_resolver::ConfluentSchemaRegistryClient;
-use arroyo_rpc::{ArroyoSchema, OperatorConfig, schema_resolver, var_str::VarStr};
+use arroyo_rpc::{schema_resolver, var_str::VarStr, ArroyoSchema, OperatorConfig};
 use axum::response::sse::Event;
 use futures::TryFutureExt;
 use rdkafka::{
-    ClientConfig,
-    consumer::{BaseConsumer, Consumer}, Message, Offset, TopicPartitionList,
+    consumer::{BaseConsumer, Consumer},
+    ClientConfig, Message, Offset, TopicPartitionList,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,9 +23,8 @@ use tokio::sync::oneshot::Receiver;
 use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
-use arroyo_operator::connector::Connection;
 
-use crate::{ConnectionType, pull_opt, send};
+use crate::{pull_opt, send, ConnectionType};
 
 use arroyo_operator::connector::Connector;
 

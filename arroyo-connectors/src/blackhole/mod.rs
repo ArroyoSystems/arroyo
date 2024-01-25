@@ -1,16 +1,20 @@
+use crate::blackhole::operator::BlackholeSinkFunc;
 use anyhow::anyhow;
+use arroyo_operator::connector::{Connection, Connector};
+use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
 use std::collections::HashMap;
-use arroyo_operator::connector::{Connection, Connector};
 
 use crate::EmptyConfig;
 
+mod operator;
+
 pub struct BlackholeConnector {}
 
-const ICON: &str = include_str!("../resources/blackhole.svg");
+const ICON: &str = include_str!("./blackhole.svg");
 
 impl Connector for BlackholeConnector {
     type ProfileT = EmptyConfig;
@@ -64,9 +68,7 @@ impl Connector for BlackholeConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(message)
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 
@@ -110,5 +112,16 @@ impl Connector for BlackholeConnector {
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
+    }
+
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        _: Self::TableT,
+        _: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        Ok(OperatorNode::from_operator(Box::new(
+            BlackholeSinkFunc::new(),
+        )))
     }
 }

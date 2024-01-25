@@ -6,11 +6,14 @@ use std::{fmt::Debug, path::PathBuf};
 use std::marker::PhantomData;
 use std::ops::Add;
 
-use crate::engine::{StreamNode};
+use crate::engine::StreamNode;
 use crate::old::{Collector, Context};
 use arrow::compute::kernels;
 use arrow_array::RecordBatch;
 use arroyo_macro::process_fn;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::get_timestamp_col;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use arroyo_rpc::grpc::api::PeriodicWatermark;
 use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_state::global_table_config;
@@ -26,9 +29,6 @@ use wasmtime::{
     Caller, Engine, InstanceAllocationStrategy, Linker, Module, PoolingAllocationConfig, Store,
     TypedFunc,
 };
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::get_timestamp_col;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 
 pub mod aggregating_window;
 pub mod async_map;
@@ -147,11 +147,13 @@ pub struct PeriodicWatermarkGeneratorConstructor;
 impl OperatorConstructor for PeriodicWatermarkGeneratorConstructor {
     type ConfigT = api::PeriodicWatermark;
     fn with_config(&self, config: PeriodicWatermark) -> anyhow::Result<OperatorNode> {
-        Ok(OperatorNode::from_operator(Box::new(PeriodicWatermarkGenerator::fixed_lateness(
-            Duration::from_micros(config.period_micros),
-            config.idle_time_micros.map(Duration::from_micros),
-            Duration::from_micros(config.max_lateness_micros),
-        ))))
+        Ok(OperatorNode::from_operator(Box::new(
+            PeriodicWatermarkGenerator::fixed_lateness(
+                Duration::from_micros(config.period_micros),
+                config.idle_time_micros.map(Duration::from_micros),
+                Duration::from_micros(config.max_lateness_micros),
+            ),
+        )))
     }
 }
 

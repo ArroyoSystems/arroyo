@@ -30,9 +30,9 @@ use arroyo_types::{
 };
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 
+use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor};
 use arroyo_operator::{context::ArrowContext, operator::OperatorNode};
-use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -701,7 +701,10 @@ pub struct SessionAggregatingWindowConstructor;
 
 impl OperatorConstructor for SessionAggregatingWindowConstructor {
     type ConfigT = api::SessionWindowAggregateOperator;
-    fn with_config(&self, config: api::SessionWindowAggregateOperator) -> anyhow::Result<OperatorNode> {
+    fn with_config(
+        &self,
+        config: api::SessionWindowAggregateOperator,
+    ) -> anyhow::Result<OperatorNode> {
         let window_field = Arc::new(Field::new(
             config.window_field_name,
             window_arrow_struct(),
@@ -751,13 +754,15 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
             receiver,
         };
 
-        Ok(OperatorNode::from_operator(Box::new(SessionAggregatingWindowFunc {
-            config: Arc::new(config),
-            keys_by_next_watermark_action: BTreeMap::new(),
-            keys_by_start_time: BTreeMap::new(),
-            key_computations: HashMap::new(),
-            row_converter,
-        })))
+        Ok(OperatorNode::from_operator(Box::new(
+            SessionAggregatingWindowFunc {
+                config: Arc::new(config),
+                keys_by_next_watermark_action: BTreeMap::new(),
+                keys_by_start_time: BTreeMap::new(),
+                key_computations: HashMap::new(),
+                row_converter,
+            },
+        )))
     }
 }
 

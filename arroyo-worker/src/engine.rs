@@ -2,39 +2,37 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::{mem, thread};
 
-use std::time::{SystemTime};
+use std::time::SystemTime;
 
 use arroyo_rpc::ArroyoSchema;
 use bincode::{Decode, Encode};
 use tracing::{debug, info, warn};
 
-use crate::arrow::session_aggregating_window::{SessionAggregatingWindowConstructor};
-use crate::arrow::sliding_aggregating_window::{SlidingAggregatingWindowConstructor};
-use crate::arrow::tumbling_aggregating_window::{TumblingAggregateWindowConstructor};
+use crate::arrow::session_aggregating_window::SessionAggregatingWindowConstructor;
+use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructor;
+use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operators::{PeriodicWatermarkGeneratorConstructor};
+use crate::operators::PeriodicWatermarkGeneratorConstructor;
 use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
 pub use arroyo_macro::StreamNode;
-use arroyo_rpc::grpc::{
-    api, CheckpointMetadata, TaskAssignment,
-};
+use arroyo_rpc::grpc::{api, CheckpointMetadata, TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
-use arroyo_types::{ArrowMessage, Key, QUEUE_SIZE, range_for_server, TaskInfo, WorkerId};
+use arroyo_types::{range_for_server, ArrowMessage, Key, TaskInfo, WorkerId, QUEUE_SIZE};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
 
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 use arroyo_connectors::connectors;
 use arroyo_operator::context::{ArrowContext, QueueItem};
-use arroyo_operator::ErasedConstructor;
 use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::ErasedConstructor;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
 pub struct TimerValue<K: Key, T: Decode + Encode + Clone + PartialEq + Eq> {
@@ -773,9 +771,13 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNo
             return connectors()
                 .get(op.connector.as_str())
                 .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
-                .make_operator(serde_json::from_str(&op.config)
-                   .unwrap_or_else(|e| panic!("invalid operator config: {:?}", e)))
-                .unwrap_or_else(|e| panic!("Failed to construct connector {}: {:?}", op.connector, e));
+                .make_operator(
+                    serde_json::from_str(&op.config)
+                        .unwrap_or_else(|e| panic!("invalid operator config: {:?}", e)),
+                )
+                .unwrap_or_else(|e| {
+                    panic!("Failed to construct connector {}: {:?}", op.connector, e)
+                });
         }
     };
 

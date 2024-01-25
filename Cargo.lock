@@ -739,6 +739,7 @@ name = "arroyo-connectors"
 version = "0.10.0-dev"
 dependencies = [
  "anyhow",
+ "arrow 49.0.0",
  "arroyo-datastream",
  "arroyo-formats",
  "arroyo-operator",
@@ -750,7 +751,9 @@ dependencies = [
  "axum",
  "base64 0.13.1",
  "bincode 2.0.0-rc.3",
+ "bytes",
  "chrono",
+ "datafusion",
  "eventsource-client",
  "futures",
  "rand",
@@ -766,6 +769,7 @@ dependencies = [
  "tonic",
  "tracing",
  "typify",
+ "url",
 ]
 
 [[package]]

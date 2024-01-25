@@ -1,13 +1,15 @@
-use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage};
-use serde_json::value::Value;
-use tokio::sync::oneshot;
-use std::collections::HashMap;
-use tokio::sync::mpsc::Sender;
+use crate::operator::OperatorNode;
 use anyhow::anyhow;
+use arroyo_rpc::api_types::connections::{
+    ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
+};
 use arroyo_rpc::OperatorConfig;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
-use crate::operator::OperatorNode;
+use serde_json::value::Value;
+use std::collections::HashMap;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
 
 #[derive(Debug, Clone)]
 pub struct Connection {
@@ -170,10 +172,7 @@ pub trait ErasedConnector: Send {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection>;
 
-    fn make_operator(
-        &self,
-        config: OperatorConfig,
-    ) -> anyhow::Result<OperatorNode>;
+    fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<OperatorNode>;
 }
 
 impl<C: Connector> ErasedConnector for C {
@@ -279,10 +278,16 @@ impl<C: Connector> ErasedConnector for C {
 
     fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
         self.make_operator(
-            self.parse_config(&config.connection)
-                .map_err(|e| anyhow!("invalid profile config for operator {}: {:?}", self.name(), e))?,
-            self.parse_table(&config.table)
-                .map_err(|e| anyhow!("invalid table config for operator {}: {:?}", self.name(), e))?,
+            self.parse_config(&config.connection).map_err(|e| {
+                anyhow!(
+                    "invalid profile config for operator {}: {:?}",
+                    self.name(),
+                    e
+                )
+            })?,
+            self.parse_table(&config.table).map_err(|e| {
+                anyhow!("invalid table config for operator {}: {:?}", self.name(), e)
+            })?,
             config,
         )
     }

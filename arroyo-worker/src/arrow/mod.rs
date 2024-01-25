@@ -6,6 +6,8 @@ use arrow_json::writer::record_batches_to_json_rows;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
 use arroyo_df::physical::EmptyRegistry;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::{api, SinkDataReq};
@@ -28,8 +30,6 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::SystemTime;
 use tonic::transport::Channel;
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 
 pub mod session_aggregating_window;
 pub mod sliding_aggregating_window;
@@ -61,11 +61,13 @@ impl OperatorConstructor for ValueExecutionConstructor {
             &codec,
         )?;
 
-        Ok(OperatorNode::from_operator(Box::new(ValueExecutionOperator {
-            name: config.name,
-            locked_batch,
-            execution_plan,
-        })))
+        Ok(OperatorNode::from_operator(Box::new(
+            ValueExecutionOperator {
+                name: config.name,
+                locked_batch,
+                execution_plan,
+            },
+        )))
     }
 }
 
@@ -185,16 +187,18 @@ impl OperatorConstructor for KeyExecutionConstructor {
             &codec,
         )?;
 
-        Ok(OperatorNode::from_operator(Box::new(KeyExecutionOperator {
-            name: config.name,
-            locked_batch,
-            execution_plan,
-            key_fields: config
-                .key_fields
-                .into_iter()
-                .map(|field| field as usize)
-                .collect(),
-        })))
+        Ok(OperatorNode::from_operator(Box::new(
+            KeyExecutionOperator {
+                name: config.name,
+                locked_batch,
+                execution_plan,
+                key_fields: config
+                    .key_fields
+                    .into_iter()
+                    .map(|field| field as usize)
+                    .collect(),
+            },
+        )))
     }
 }
 

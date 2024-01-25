@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
+use arroyo_operator::connector::Connection;
 use arroyo_storage::BackendConfig;
 use std::collections::HashMap;
-use arroyo_operator::connector::Connection;
 
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
@@ -9,7 +9,7 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::OperatorConfig;
 
 use crate::filesystem::{
-    CommitStyle, file_system_sink_from_options, FileSystemTable, FormatSettings, TableType,
+    file_system_sink_from_options, CommitStyle, FileSystemTable, FormatSettings, TableType,
 };
 use crate::EmptyConfig;
 
@@ -59,9 +59,7 @@ impl Connector for DeltaLakeConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(message)
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 

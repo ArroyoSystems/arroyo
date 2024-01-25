@@ -1,5 +1,8 @@
 use anyhow::{anyhow, bail, Context};
-use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage};
+use arroyo_operator::connector::ErasedConnector;
+use arroyo_rpc::api_types::connections::{
+    ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage,
+};
 use arroyo_rpc::primitive_to_sql;
 use arroyo_types::string_to_map;
 use blackhole::BlackholeConnector;
@@ -14,7 +17,6 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tracing::warn;
-use arroyo_operator::connector::ErasedConnector;
 use websocket::WebsocketConnector;
 
 use self::kafka::KafkaConnector;
@@ -63,11 +65,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
 pub struct EmptyConfig {}
 
 pub(crate) async fn send(tx: &mut Sender<TestSourceMessage>, msg: TestSourceMessage) {
-    if tx
-        .send(msg)
-        .await
-        .is_err()
-    {
+    if tx.send(msg).await.is_err() {
         warn!("Test API rx closed while sending message");
     }
 }

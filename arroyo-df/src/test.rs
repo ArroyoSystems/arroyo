@@ -1,12 +1,12 @@
 use arrow_schema::DataType;
 use arroyo_connectors::{
-    EmptyConfig,
     nexmark::{NexmarkConnector, NexmarkTable},
+    EmptyConfig,
 };
 use arroyo_operator::connector::Connector;
 
 use crate::types::NullableType;
-use crate::{ArroyoSchemaProvider, parse_and_get_arrow_program, parse_and_get_program, SqlConfig};
+use crate::{parse_and_get_arrow_program, parse_and_get_program, ArroyoSchemaProvider, SqlConfig};
 
 #[ignore]
 #[tokio::test]

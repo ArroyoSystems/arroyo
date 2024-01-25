@@ -1,43 +1,45 @@
-use crate::connectors::redis::{RedisClient, RedisConfig, RedisTable, TableType, Target};
-use crate::engine::{ErrorReporter, StreamNode};
-use crate::old::Context;
-
-use arroyo_formats::old::DataSerializer;
-use arroyo_formats::SchemaData;
-use arroyo_macro::process_fn;
-use arroyo_rpc::OperatorConfig;
-use arroyo_types::{CheckpointBarrier, Key, Record};
+use crate::redis::{ListOperation, RedisClient, RedisTable, TableType, Target};
+use arrow::array::{ArrayAccessor, AsArray, RecordBatch};
+use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_operator::context::{ArrowContext, ErrorReporter};
+use arroyo_operator::operator::ArrowOperator;
+use arroyo_types::CheckpointBarrier;
+use async_trait::async_trait;
 use redis::aio::{ConnectionLike, ConnectionManager};
 use redis::cluster_async::ClusterConnection;
 use redis::{Cmd, Pipeline, RedisFuture};
-use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashSet;
-use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::info;
 
-use super::ListOperation;
-
 const FLUSH_TIMEOUT: Duration = Duration::from_millis(100);
 const FLUSH_BYTES: usize = 10 * 1024 * 1024;
 
-#[derive(StreamNode)]
-pub struct RedisSinkFunc<K, T>
-where
-    K: Key,
-    T: Serialize + SchemaData,
-{
-    serializer: DataSerializer<T>,
-    table: RedisTable,
-    client: RedisClient,
-    cmd_q: Option<(Sender<u32>, Receiver<RedisCmd>)>,
+pub struct RedisSinkFunc {
+    pub serializer: ArrowSerializer,
+    pub table: RedisTable,
+    pub client: RedisClient,
+    pub cmd_q: Option<(Sender<u32>, Receiver<RedisCmd>)>,
 
-    rx: Receiver<u32>,
-    tx: Sender<RedisCmd>,
-    _t: PhantomData<K>,
+    pub rx: Receiver<u32>,
+    pub tx: Sender<RedisCmd>,
+
+    pub key_index: Option<usize>,
+    pub hash_index: Option<usize>,
+}
+
+impl RedisSinkFunc {
+    fn make_key(&self, prefix: &String, batch: &RecordBatch, idx: usize) -> String {
+        let mut key = prefix.to_string();
+
+        if let Some(key_index) = self.key_index {
+            key.push_str(&batch.column(key_index).as_string::<i32>().value(idx));
+        };
+
+        key
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -47,7 +49,7 @@ enum RedisBehavior {
     Hash,
 }
 
-enum RedisCmd {
+pub enum RedisCmd {
     Data {
         key: String,
         value: Vec<u8>,
@@ -228,41 +230,52 @@ impl RedisWriter {
     }
 }
 
-#[process_fn(in_k = K, in_t = T)]
-impl<K, T> RedisSinkFunc<K, T>
-where
-    K: Key,
-    T: Serialize + SchemaData,
-{
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for RedisSink");
-        let profile: RedisConfig = serde_json::from_value(config.connection)
-            .expect("Invalid connection profile for RedisSink");
-        let table: RedisTable =
-            serde_json::from_value(config.table).expect("Invalid table config for Redis");
-
-        let client = RedisClient::new(&profile).expect("Unable to construct redis client");
-
-        let (tx, cmd_rx) = tokio::sync::mpsc::channel(128);
-        let (cmd_tx, rx) = tokio::sync::mpsc::channel(128);
-
-        Self {
-            serializer: DataSerializer::new(config.format.expect("redis table must have a format")),
-            table,
-            client,
-            cmd_q: Some((cmd_tx, cmd_rx)),
-            tx,
-            rx,
-            _t: PhantomData,
-        }
-    }
-
+#[async_trait]
+impl ArrowOperator for RedisSinkFunc {
     fn name(&self) -> String {
         "RedisSink".to_string()
     }
 
-    async fn on_start(&mut self, ctx: &mut Context<(), ()>) {
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        match &self.table.connector_type {
+            TableType::Target(Target::ListTable {
+                list_key_column: Some(key),
+                ..
+            })
+            | TableType::Target(Target::StringTable {
+                key_column: Some(key),
+                ..
+            })
+            | TableType::Target(Target::HashTable {
+                hash_key_column: Some(key),
+                ..
+            }) => {
+                self.key_index = Some(
+                    ctx.in_schemas
+                        .get(0)
+                        .expect("no in-schema for redis sink!")
+                        .schema
+                        .index_of(key)
+                        .unwrap_or_else(|_| {
+                            panic!(
+                                "key column ({key}) does not exist in input schema for redis sink"
+                            )
+                        }),
+                );
+            }
+            _ => {}
+        }
+
+        if let TableType::Target(Target::HashTable {
+            hash_field_column, ..
+        }) = &self.table.connector_type
+        {
+            self.hash_index = Some(ctx.in_schemas.get(0).expect("no in-schema for redis sink!")
+                .schema
+                .index_of(hash_field_column)
+                .unwrap_or_else(|_| panic!("hash field column ({hash_field_column}) does not exist in input schema for redis sink")));
+        }
+
         let mut attempts = 0;
         while attempts < 20 {
             match self.client.get_connection().await {
@@ -316,80 +329,46 @@ where
         panic!("Failed to establish connection to redis after 20 retries");
     }
 
-    fn make_key(prefix: &String, column: &Option<String>, v: &Value) -> String {
-        let mut key = prefix.to_string();
+    async fn process_batch(&mut self, batch: RecordBatch, _: &mut ArrowContext) {
+        for (i, value) in self.serializer.serialize(&batch).enumerate() {
+            match &self.table.connector_type {
+                TableType::Target(target) => match &target {
+                    Target::StringTable { key_prefix, .. } => {
+                        let key = self.make_key(key_prefix, &batch, i);
+                        self.tx
+                            .send(RedisCmd::Data { key, value })
+                            .await
+                            .expect("Redis writer panicked");
+                    }
+                    Target::ListTable { list_prefix, .. } => {
+                        let key = self.make_key(list_prefix, &batch, i);
 
-        if let Some(key_field) = &column {
-            key.push_str(
-                &v.get(key_field)
-                    .expect("key field not found in data")
-                    .as_str()
-                    .expect("key field is not a string"),
-            );
-        };
+                        self.tx
+                            .send(RedisCmd::Data { key, value })
+                            .await
+                            .expect("Redis writer panicked");
+                    }
+                    Target::HashTable {
+                        hash_key_prefix, ..
+                    } => {
+                        let key = self.make_key(hash_key_prefix, &batch, i);
+                        let field = batch
+                            .column(self.hash_index.expect("no hash index"))
+                            .as_string::<i32>()
+                            .value(i)
+                            .to_string();
 
-        key
+                        self.tx
+                            .send(RedisCmd::HData { key, field, value })
+                            .await
+                            .expect("Redis writer panicked");
+                    }
+                },
+            };
+        }
     }
 
-    async fn process_element(&mut self, record: &Record<K, T>, _ctx: &mut Context<(), ()>) {
-        let value = serde_json::to_value(&record.value).unwrap();
-        let data = self.serializer.to_vec(&record.value).unwrap();
-        match &self.table.connector_type {
-            TableType::Target(target) => match &target {
-                Target::StringTable {
-                    key_column,
-                    key_prefix,
-                    ..
-                } => {
-                    let key = Self::make_key(key_prefix, key_column, &value);
-                    self.tx
-                        .send(RedisCmd::Data { key, value: data })
-                        .await
-                        .expect("Redis writer panicked");
-                }
-                Target::ListTable {
-                    list_key_column,
-                    list_prefix,
-                    ..
-                } => {
-                    let key = Self::make_key(list_prefix, list_key_column, &value);
-
-                    self.tx
-                        .send(RedisCmd::Data { key, value: data })
-                        .await
-                        .expect("Redis writer panicked");
-                }
-                Target::HashTable {
-                    hash_field_column,
-                    hash_key_column,
-                    hash_key_prefix,
-                } => {
-                    let key = Self::make_key(hash_key_prefix, hash_key_column, &value);
-                    let field = value
-                        .get(hash_field_column)
-                        .expect("hash field column not found in data")
-                        .as_str()
-                        .expect("hash field is not a string")
-                        .to_string();
-
-                    self.tx
-                        .send(RedisCmd::HData {
-                            key,
-                            field,
-                            value: data,
-                        })
-                        .await
-                        .expect("Redis writer panicked");
-                }
-            },
-        };
-    }
-
-    async fn handle_checkpoint(
-        &mut self,
-        checkpoint: &CheckpointBarrier,
-        _ctx: &mut Context<(), ()>,
-    ) {
+    async fn handle_checkpoint(&mut self, checkpoint: CheckpointBarrier, _ctx: &mut ArrowContext) {
         self.tx
             .send(RedisCmd::Flush(checkpoint.epoch))
             .await

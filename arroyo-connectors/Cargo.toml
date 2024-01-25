@@ -16,6 +16,8 @@ arroyo-formats = { path = "../arroyo-formats" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-state = { path = "../arroyo-state" }
 
+arrow = { workspace = true }
+datafusion = "34.0"
 async-trait = "0.1"
 bincode = "2.0.0-rc.3"
 chrono = "0.4"
@@ -42,3 +44,5 @@ reqwest = "0.11.20"
 rand = "0.8.5"
 base64 = "0.13.1"
 redis = { version = "0.23.3", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
+bytes = "1.5.0"
+url = "2.5.0"

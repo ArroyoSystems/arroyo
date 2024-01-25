@@ -4,14 +4,14 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
 
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
 use serde::{Deserialize, Serialize};
-use arroyo_operator::connector::Connection;
 
-use crate::{EmptyConfig, pull_opt};
+use crate::{pull_opt, EmptyConfig};
 
 use arroyo_operator::connector::Connector;
 
@@ -61,9 +61,7 @@ impl Connector for SingleFileConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(message)
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 

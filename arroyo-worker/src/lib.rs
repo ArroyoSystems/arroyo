@@ -17,8 +17,8 @@ use arroyo_rpc::grpc::{
 };
 use arroyo_server_common::start_admin_server;
 use arroyo_types::{
-    from_millis, grpc_port, ports, string_to_map, to_micros, CheckpointBarrier, NodeId,
-    WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    from_millis, grpc_port, ports, string_to_map, to_micros, CheckpointBarrier, NodeId, WorkerId,
+    JOB_ID_ENV, RUN_ID_ENV,
 };
 use lazy_static::lazy_static;
 use local_ip_address::local_ip;
@@ -63,7 +63,6 @@ lazy_static! {
 }
 
 pub static TIMER_TABLE: char = '[';
-
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum LogicalEdge {

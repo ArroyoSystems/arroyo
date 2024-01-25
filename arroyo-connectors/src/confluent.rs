@@ -3,6 +3,7 @@ use crate::kafka::{
 };
 use crate::{kafka, pull_opt};
 use anyhow::anyhow;
+use arroyo_operator::connector::{Connection, Connector};
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
@@ -12,7 +13,6 @@ use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
-use arroyo_operator::connector::{Connection, Connector};
 
 const CLIENT_ID: &str = "cwc|0014U00003Df8ZvQAJ";
 

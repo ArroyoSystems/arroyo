@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail};
+use arroyo_operator::connector::{Connection, Connector};
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
 use axum::response::sse::Event;
@@ -6,9 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
-use arroyo_operator::connector::{Connection, Connector};
 
-use crate::{ConnectionType, EmptyConfig, pull_opt};
+use crate::{pull_opt, ConnectionType, EmptyConfig};
 
 pub struct FluvioConnector {}
 
@@ -72,9 +72,7 @@ impl Connector for FluvioConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(message)
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 

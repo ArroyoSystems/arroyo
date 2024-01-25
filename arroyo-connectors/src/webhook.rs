@@ -4,6 +4,7 @@ use std::convert::Infallible;
 use anyhow::anyhow;
 use arroyo_rpc::OperatorConfig;
 
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
@@ -14,9 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
-use arroyo_operator::connector::Connection;
 
-use crate::{construct_http_client, EmptyConfig, pull_opt};
+use crate::{construct_http_client, pull_opt, EmptyConfig};
 
 use arroyo_operator::connector::Connector;
 
@@ -44,10 +44,7 @@ impl WebhookConnector {
         Ok(req)
     }
 
-    async fn test_int(
-        config: &WebhookTable,
-        tx: Sender<TestSourceMessage>,
-    ) -> anyhow::Result<()> {
+    async fn test_int(config: &WebhookTable, tx: Sender<TestSourceMessage>) -> anyhow::Result<()> {
         let headers = config
             .headers
             .as_ref()
@@ -58,12 +55,12 @@ impl WebhookConnector {
         let req = Self::construct_test_request(&client, config)?;
 
         tx.send(TestSourceMessage {
-                error: false,
-                done: false,
-                message: "Sending websink message".to_string(),
-            })
-            .await
-            .unwrap();
+            error: false,
+            done: false,
+            message: "Sending websink message".to_string(),
+        })
+        .await
+        .unwrap();
 
         client
             .execute(req)
@@ -122,9 +119,7 @@ impl Connector for WebhookConnector {
                 },
             };
 
-            tx.send(message)
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 

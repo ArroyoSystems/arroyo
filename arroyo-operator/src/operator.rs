@@ -1,21 +1,21 @@
-use arroyo_rpc::{ControlMessage, ControlResp};
-use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
-use arroyo_metrics::TaskCounters;
-use tracing::{debug, error, info, Instrument, warn};
-use std::collections::{HashMap, HashSet};
-use std::time::{Duration, SystemTime};
-use arrow::array::RecordBatch;
-use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
-use std::pin::Pin;
-use std::future::Future;
-use std::any::Any;
-use tokio::sync::mpsc::Receiver;
-use futures::future::OptionFuture;
-use async_trait::async_trait;
-use tokio_stream::StreamExt;
-use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
 use crate::context::ArrowContext;
 use crate::inq_reader::InQReader;
+use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
+use arrow::array::RecordBatch;
+use arroyo_metrics::TaskCounters;
+use arroyo_rpc::grpc::{TableConfig, TaskCheckpointEventType};
+use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_types::{ArrowMessage, CheckpointBarrier, SignalMessage, Watermark};
+use async_trait::async_trait;
+use futures::future::OptionFuture;
+use std::any::Any;
+use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::pin::Pin;
+use std::time::{Duration, SystemTime};
+use tokio::sync::mpsc::Receiver;
+use tokio_stream::StreamExt;
+use tracing::{debug, error, info, warn, Instrument};
 
 pub trait OperatorConstructor: Send {
     type ConfigT: prost::Message + Default;

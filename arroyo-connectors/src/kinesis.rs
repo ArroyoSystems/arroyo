@@ -4,14 +4,12 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use typify::import_types;
 
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, TestSourceMessage};
 use arroyo_rpc::{api_types, OperatorConfig};
 use serde::{Deserialize, Serialize};
-use arroyo_operator::connector::Connection;
 
-use crate::{
-    ConnectionSchema, ConnectionType, EmptyConfig, pull_opt, pull_option_to_i64,
-};
+use crate::{pull_opt, pull_option_to_i64, ConnectionSchema, ConnectionType, EmptyConfig};
 
 use arroyo_operator::connector::Connector;
 
@@ -62,9 +60,7 @@ impl Connector for KinesisConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(message)
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 

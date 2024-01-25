@@ -1,3 +1,7 @@
+use crate::sse::SseTable;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{OperatorNode, SourceOperator};
+use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{StopMode, TableConfig};
 use arroyo_rpc::{ControlMessage, ControlResp, OperatorConfig};
@@ -12,11 +16,6 @@ use std::time::{Duration, SystemTime};
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, info};
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{OperatorNode, SourceOperator};
-use arroyo_operator::SourceFinishType;
-use crate::sse::SseTable;
-
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
 pub struct SSESourceState {
@@ -55,7 +54,6 @@ impl SSESourceFunc {
             bad_data: config.bad_data,
             state: SSESourceState::default(),
         })))
-        
     }
 }
 
@@ -217,7 +215,7 @@ impl SSESourceFunc {
             ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
                 Watermark::Idle,
             )))
-                .await;
+            .await;
 
             loop {
                 let msg = ctx.control_rx.recv().await;

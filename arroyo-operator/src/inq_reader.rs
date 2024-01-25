@@ -1,7 +1,7 @@
-use futures::{ready, Stream, StreamExt};
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
-use std::fmt::Debug;
+use futures::{ready, Stream, StreamExt};
 use std::fmt;
+use std::fmt::Debug;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 

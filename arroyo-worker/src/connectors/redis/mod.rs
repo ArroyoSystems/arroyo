@@ -7,9 +7,8 @@ use redis::{Client, ConnectionInfo, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-pub mod sink;
 
-import_types!(schema = "../connector-schemas/redis/connection.json",
+import_types!(schema = "../connector-schemas/redis/profile.json",
     convert = {
         {type = "string", format = "var-str"} = VarStr
     }

@@ -1,31 +1,36 @@
+mod connector;
+
 use std::collections::HashMap;
-use std::convert::Infallible;
+use std::str::FromStr;
+use std::time::Duration;
 
 use anyhow::anyhow;
-use arroyo_rpc::{OperatorConfig, var_str::VarStr};
+use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use arroyo_types::string_to_map;
-use axum::response::sse::Event;
 use reqwest::{Client, Request};
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use serde::{Deserialize, Serialize};
-use arroyo_operator::connector::Connection;
 
-use crate::{construct_http_client, EmptyConfig, pull_opt, pull_option_to_i64};
+use crate::{construct_http_client, pull_opt, pull_option_to_i64, EmptyConfig};
 
+use crate::polling_http::connector::{PollingHttpSourceFunc, PollingHttpSourceState};
 use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/polling_http/table.json");
+const TABLE_SCHEMA: &str = include_str!("./table.json");
+const DEFAULT_POLLING_INTERVAL: Duration = Duration::from_secs(1);
 
 import_types!(
-    schema = "../connector-schemas/polling_http/table.json",
+    schema = "src/polling_http/table.json",
     convert = { {type = "string", format = "var-str"} = VarStr }
 );
-const ICON: &str = include_str!("../resources/http.svg");
+const ICON: &str = include_str!("./http.svg");
 
 pub struct PollingHTTPConnector {}
 
@@ -69,12 +74,12 @@ impl PollingHTTPConnector {
         let req = Self::construct_test_request(&client, config)?;
 
         tx.send(TestSourceMessage {
-                error: false,
-                done: false,
-                message: "Requesting data".to_string(),
-            })
-            .await
-            .unwrap();
+            error: false,
+            done: false,
+            message: "Requesting data".to_string(),
+        })
+        .await
+        .unwrap();
 
         client
             .execute(req)
@@ -137,9 +142,7 @@ impl Connector for PollingHTTPConnector {
                 },
             };
 
-            tx.send(message)
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 
@@ -230,5 +233,58 @@ impl Connector for PollingHTTPConnector {
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
+    }
+
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        let headers = string_to_map(
+            &table
+                .headers
+                .as_ref()
+                .map(|t| t.sub_env_vars().expect("Failed to substitute env vars"))
+                .unwrap_or("".to_string()),
+        )
+        .expect("Invalid header map")
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                (&k).try_into()
+                    .expect(&format!("invalid header name {}", k)),
+                (&v).try_into()
+                    .expect(&format!("invalid header value {}", v)),
+            )
+        })
+        .collect();
+
+        Ok(OperatorNode::from_source(Box::new(PollingHttpSourceFunc {
+            state: PollingHttpSourceState::default(),
+            client: reqwest::ClientBuilder::new()
+                .default_headers(headers)
+                .timeout(Duration::from_secs(5))
+                .build()
+                .expect("could not construct http client"),
+            endpoint: url::Url::from_str(&table.endpoint).expect("invalid endpoint"),
+            method: match table.method {
+                None | Some(Method::Get) => reqwest::Method::GET,
+                Some(Method::Post) => reqwest::Method::POST,
+                Some(Method::Put) => reqwest::Method::PUT,
+                Some(Method::Patch) => reqwest::Method::PATCH,
+            },
+            body: table.body.map(|b| b.into()),
+            polling_interval: table
+                .poll_interval_ms
+                .map(|d| Duration::from_millis(d as u64))
+                .unwrap_or(DEFAULT_POLLING_INTERVAL),
+            emit_behavior: table.emit_behavior.unwrap_or(EmitBehavior::All),
+            format: config
+                .format
+                .expect("PollingHTTP source must have a format"),
+            framing: config.framing,
+            bad_data: config.bad_data,
+        })))
     }
 }

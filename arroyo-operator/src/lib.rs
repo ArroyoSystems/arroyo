@@ -1,28 +1,25 @@
 use std::fmt::Debug;
-use std::{collections::HashSet, time::SystemTime};
 use std::future::Future;
 use std::ops::Sub;
 use std::time::{Duration, Instant};
+use std::{collections::HashSet, time::SystemTime};
 
 use crate::inq_reader::InQReader;
-use arrow::compute::kernels::numeric::{div, rem};
 use arrow::array::types::{TimestampNanosecondType, UInt64Type};
 use arrow::array::{Array, PrimitiveArray, RecordBatch, UInt64Array};
-use arroyo_types::{
-    ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfoRef
-    ,
-};
+use arrow::compute::kernels::numeric::{div, rem};
+use arroyo_types::{ArrowMessage, CheckpointBarrier, Data, SignalMessage, TaskInfoRef};
 use bincode::{Decode, Encode};
 
-use tokio_stream::Stream;
-use operator::{OperatorConstructor, OperatorNode};
 use crate::context::ArrowContext;
+use operator::{OperatorConstructor, OperatorNode};
+use tokio_stream::Stream;
 
-pub mod inq_reader;
-pub mod operator;
-pub mod context;
-pub mod metrics;
 pub mod connector;
+pub mod context;
+pub mod inq_reader;
+pub mod metrics;
+pub mod operator;
 
 pub trait TimerT: Data + PartialEq + Eq + 'static {}
 
@@ -66,7 +63,6 @@ pub enum ControlOutcome {
     StopAndSendStop,
     Finish,
 }
-
 
 #[derive(Debug)]
 pub struct CheckpointCounter {
@@ -113,7 +109,6 @@ impl CheckpointCounter {
     }
 }
 
-
 #[allow(unused)]
 pub struct RunContext<St: Stream<Item = (usize, ArrowMessage)> + Send + Sync> {
     pub task_info: TaskInfoRef,
@@ -138,7 +133,7 @@ pub trait ErasedConstructor: Send {
     fn with_config(&self, config: Vec<u8>) -> anyhow::Result<OperatorNode>;
 }
 
-impl <T: OperatorConstructor> ErasedConstructor for T {
+impl<T: OperatorConstructor> ErasedConstructor for T {
     fn with_config(&self, config: Vec<u8>) -> anyhow::Result<OperatorNode> {
         self.with_config(prost::Message::decode(&mut config.as_slice()).unwrap())
     }
@@ -167,9 +162,9 @@ impl RateLimiter {
     }
 
     pub async fn rate_limit<F, Fut>(&mut self, f: F)
-        where
-            F: FnOnce() -> Fut,
-            Fut: Future<Output = ()> + Send,
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = ()> + Send,
     {
         if self.last.elapsed() > Duration::from_secs(5) {
             f().await;
@@ -177,4 +172,3 @@ impl RateLimiter {
         }
     }
 }
-

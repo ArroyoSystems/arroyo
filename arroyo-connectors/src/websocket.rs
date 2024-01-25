@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
@@ -19,9 +20,8 @@ use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::{connect_async, tungstenite};
 use tungstenite::http::Request;
 use typify::import_types;
-use arroyo_operator::connector::Connection;
 
-use crate::{EmptyConfig, pull_opt};
+use crate::{pull_opt, EmptyConfig};
 
 use arroyo_operator::connector::Connector;
 
@@ -75,9 +75,7 @@ impl Connector for WebsocketConnector {
                         done,
                         message,
                     };
-                    tx.send(msg)
-                        .await
-                        .unwrap();
+                    tx.send(msg).await.unwrap();
                 }
             };
 

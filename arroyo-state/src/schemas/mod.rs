@@ -9,7 +9,7 @@ use arrow_array::{
 };
 use arrow_ord::cmp::{gt_eq, lt_eq};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use arroyo_rpc::{ArroyoSchema, get_hasher};
+use arroyo_rpc::{get_hasher, ArroyoSchema};
 use arroyo_types::from_nanos;
 use bincode::config;
 use datafusion_common::{hash_utils::create_hashes, ScalarValue};

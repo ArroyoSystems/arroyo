@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 
-use prometheus::{
-    register_histogram, register_int_gauge, Histogram, HistogramOpts, IntGauge, Opts,
-    labels, register_int_counter_vec, IntCounter, IntCounterVec
-};
 use arroyo_types::{
     TaskInfo, BYTES_RECV, BYTES_SENT, DESERIALIZATION_ERRORS, MESSAGES_RECV, MESSAGES_SENT,
 };
 use lazy_static::lazy_static;
-
+use prometheus::{
+    labels, register_histogram, register_int_counter_vec, register_int_gauge, Histogram,
+    HistogramOpts, IntCounter, IntCounterVec, IntGauge, Opts,
+};
 
 pub fn gauge_for_task(
     task_info: &TaskInfo,

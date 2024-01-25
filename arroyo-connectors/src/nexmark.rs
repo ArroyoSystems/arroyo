@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail};
+use arroyo_operator::connector::{Connection, Connector};
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, SourceFieldType, StructType,
@@ -11,9 +12,8 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::str::FromStr;
 use typify::import_types;
-use arroyo_operator::connector::{Connection, Connector};
 
-use crate::{EmptyConfig, nullable_field, pull_opt, source_field};
+use crate::{nullable_field, pull_opt, source_field, EmptyConfig};
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/nexmark/table.json");
 const ICON: &str = include_str!("../resources/nexmark.svg");
@@ -146,9 +146,7 @@ impl Connector for NexmarkConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(message)
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 

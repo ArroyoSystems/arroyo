@@ -9,7 +9,7 @@ pub mod sink;
 pub mod source;
 
 import_types!(
-    schema = "../connector-schemas/kafka/connection.json",
+    schema = "../connector-schemas/kafka/profile.json",
     convert = {
         {type = "string", format = "var-str"} = VarStr
     }

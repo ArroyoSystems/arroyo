@@ -1,15 +1,18 @@
+mod operator;
+
 use std::collections::HashMap;
-use std::convert::Infallible;
 
 use anyhow::{anyhow, bail};
+use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_operator::connector::{Connection, Connector};
+use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::var_str::VarStr;
-use axum::response::sse::Event;
+use redis::aio::ConnectionManager;
 use redis::cluster::ClusterClient;
 use redis::{Client, ConnectionInfo, IntoConnectionInfo};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
-use arroyo_operator::connector::{Connection, Connector};
 
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, PrimitiveType,
@@ -17,21 +20,22 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::OperatorConfig;
 
+use crate::redis::operator::sink::{GeneralConnection, RedisSinkFunc};
 use crate::{pull_opt, pull_option_to_u64};
 
 pub struct RedisConnector {}
 
-const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/redis/connection.json");
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/redis/table.json");
-const ICON: &str = include_str!("../resources/redis.svg");
+const CONFIG_SCHEMA: &str = include_str!("./profile.json");
+const TABLE_SCHEMA: &str = include_str!("./table.json");
+const ICON: &str = include_str!("./redis.svg");
 
 import_types!(
-    schema = "../connector-schemas/redis/connection.json",
+    schema = "src/redis/profile.json",
     convert = {
         {type = "string", format = "var-str"} = VarStr
     }
 );
-import_types!(schema = "../connector-schemas/redis/table.json");
+import_types!(schema = "src/redis/table.json");
 
 enum RedisClient {
     Standard(Client),
@@ -63,6 +67,17 @@ impl RedisClient {
                         anyhow!("Failed to construct Redis Cluster client: {:?}", e)
                     })?,
                 )
+            }
+        })
+    }
+
+    async fn get_connection(&self) -> Result<GeneralConnection, redis::RedisError> {
+        Ok(match self {
+            RedisClient::Standard(c) => {
+                GeneralConnection::Standard(ConnectionManager::new(c.clone()).await?)
+            }
+            RedisClient::Clustered(c) => {
+                GeneralConnection::Clustered(c.get_async_connection().await?)
             }
         })
     }
@@ -101,9 +116,11 @@ async fn test_inner(
                 .get_async_connection()
                 .await
                 .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
-            tx.send(TestSourceMessage::info("Connected successfully, sending PING"))
-                .await
-                .unwrap();
+            tx.send(TestSourceMessage::info(
+                "Connected successfully, sending PING",
+            ))
+            .await
+            .unwrap();
 
             redis::cmd("PING")
                 .query_async(&mut connection)
@@ -116,10 +133,10 @@ async fn test_inner(
                 .await
                 .map_err(|e| anyhow!("Failed to connect to to Redis Cluster: {:?}", e))?;
             tx.send(TestSourceMessage::info(
-                    "Connected successfully, sending PING",
-                ))
-                .await
-                .unwrap();
+                "Connected successfully, sending PING",
+            ))
+            .await
+            .unwrap();
 
             redis::cmd("PING")
                 .query_async(&mut connection)
@@ -199,9 +216,7 @@ impl Connector for RedisConnector {
                 Err(e) => TestSourceMessage::fail(e.to_string()),
             };
 
-            tx.send(resp)
-                .await
-                .unwrap();
+            tx.send(resp).await.unwrap();
         });
     }
 
@@ -382,5 +397,30 @@ impl Connector for RedisConnector {
             config: serde_json::to_string(&config).unwrap(),
             description: "RedisSink".to_string(),
         })
+    }
+
+    fn make_operator(
+        &self,
+        profile: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        let client = RedisClient::new(&profile)?;
+
+        let (tx, cmd_rx) = tokio::sync::mpsc::channel(128);
+        let (cmd_tx, rx) = tokio::sync::mpsc::channel(128);
+
+        Ok(OperatorNode::from_operator(Box::new(RedisSinkFunc {
+            serializer: ArrowSerializer::new(
+                config.format.expect("redis table must have a format"),
+            ),
+            table,
+            client,
+            cmd_q: Some((cmd_tx, cmd_rx)),
+            tx,
+            rx,
+            key_index: None,
+            hash_index: None,
+        })))
     }
 }

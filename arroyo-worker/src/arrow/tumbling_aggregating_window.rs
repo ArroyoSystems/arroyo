@@ -24,6 +24,8 @@ use datafusion_common::ScalarValue;
 use futures::{stream::FuturesUnordered, StreamExt};
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -38,8 +40,6 @@ use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tracing::info;
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 
 use super::{sync::streams::KeyedCloneableStreamFuture, EmptyRegistry};
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
@@ -92,10 +92,9 @@ type PolledFutureT = <NextBatchFuture<SystemTime> as Future>::Output;
 
 impl TumblingAggregatingWindowFunc<SystemTime> {}
 
-pub struct TumblingAggregateWindowConstructor; 
+pub struct TumblingAggregateWindowConstructor;
 
-impl OperatorConstructor for TumblingAggregateWindowConstructor
-{
+impl OperatorConstructor for TumblingAggregateWindowConstructor {
     type ConfigT = api::TumblingWindowAggregateOperator;
     fn with_config(&self, config: api::TumblingWindowAggregateOperator) -> Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
@@ -149,19 +148,21 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor
             true,
         ));
 
-        Ok(OperatorNode::from_operator(Box::new(TumblingAggregatingWindowFunc {
-            width,
-            binning_function,
-            partial_aggregation_plan,
-            partial_schema,
-            finish_execution_plan,
-            receiver,
-            final_batches_passer,
-            futures: Arc::new(Mutex::new(FuturesUnordered::new())),
-            execs: BTreeMap::new(),
-            window_field,
-            window_index: config.window_index as usize,
-        })))
+        Ok(OperatorNode::from_operator(Box::new(
+            TumblingAggregatingWindowFunc {
+                width,
+                binning_function,
+                partial_aggregation_plan,
+                partial_schema,
+                finish_execution_plan,
+                receiver,
+                final_batches_passer,
+                futures: Arc::new(Mutex::new(FuturesUnordered::new())),
+                execs: BTreeMap::new(),
+                window_field,
+                window_index: config.window_index as usize,
+            },
+        )))
     }
 }
 

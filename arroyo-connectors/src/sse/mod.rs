@@ -1,27 +1,25 @@
-mod connector;
+mod operator;
 
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
-use arroyo_rpc::{OperatorConfig, var_str::VarStr};
+use arroyo_rpc::{var_str::VarStr, OperatorConfig};
 use arroyo_types::string_to_map;
-use axum::response::sse::Event;
 use eventsource_client::Client;
 use futures::StreamExt;
 use tokio::sync::mpsc::Sender;
 use typify::import_types;
 
+use arroyo_operator::connector::Connection;
+use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use serde::{Deserialize, Serialize};
-use arroyo_operator::connector::Connection;
-use arroyo_operator::operator::OperatorNode;
 
-use crate::{EmptyConfig, pull_opt};
-use crate::sse::connector::SSESourceFunc;
+use crate::sse::operator::SSESourceFunc;
+use crate::{pull_opt, EmptyConfig};
 
 use arroyo_operator::connector::Connector;
 
@@ -146,7 +144,12 @@ impl Connector for SSEConnector {
         )
     }
 
-    fn make_operator(&self, _: Self::ProfileT, table: Self::TableT, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
         SSESourceFunc::new(table, config)
     }
 }
@@ -161,17 +164,17 @@ impl SseTester {
         tokio::task::spawn(async move {
             self.tx
                 .send(match self.test_internal().await {
-                        Ok(_) => TestSourceMessage {
-                            error: false,
-                            done: true,
-                            message: "Successfully validated SSE connection".to_string(),
-                        },
-                        Err(e) => TestSourceMessage {
-                            error: true,
-                            done: true,
-                            message: e.to_string(),
-                        },
-                    })
+                    Ok(_) => TestSourceMessage {
+                        error: false,
+                        done: true,
+                        message: "Successfully validated SSE connection".to_string(),
+                    },
+                    Err(e) => TestSourceMessage {
+                        error: true,
+                        done: true,
+                        message: e.to_string(),
+                    },
+                })
                 .await
                 .unwrap();
         });
@@ -207,10 +210,7 @@ impl SseTester {
             done: false,
             message: "Constructed SSE client".to_string(),
         };
-        self.tx
-            .send(message)
-            .await
-            .unwrap();
+        self.tx.send(message).await.unwrap();
 
         tokio::select! {
             val = stream.next() => {

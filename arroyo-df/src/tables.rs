@@ -6,6 +6,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_connectors::connector_for_type;
 use arroyo_datastream::ConnectorOp;
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
@@ -26,13 +27,12 @@ use datafusion_expr::{
     WriteOp,
 };
 use tracing::info;
-use arroyo_operator::connector::Connection;
 
 use crate::types::convert_data_type;
 use crate::DEFAULT_IDLE_TIME;
 use crate::{
-    ArroyoSchemaProvider,
     external::{ProcessingMode, SqlSource},
+    ArroyoSchemaProvider,
 };
 
 #[derive(Debug, Clone)]

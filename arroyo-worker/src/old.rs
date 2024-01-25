@@ -1,8 +1,11 @@
-use crate::engine::{TimerValue};
-use crate::{TIMER_TABLE};
+use crate::engine::TimerValue;
+use crate::TIMER_TABLE;
 use anyhow::bail;
 
 use arroyo_datastream::Operator;
+use arroyo_metrics::{register_queue_gauges, QueueGauges, TaskCounters};
+use arroyo_operator::context::{ErrorReporter, WatermarkHolder};
+use arroyo_operator::RateLimiter;
 use arroyo_rpc::formats::BadData;
 use arroyo_rpc::grpc::{
     CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
@@ -10,7 +13,10 @@ use arroyo_rpc::grpc::{
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
-use arroyo_types::{from_micros, server_for_hash, Data, Key, Message, Record, SourceError, TaskInfo, UserError, Watermark, QUEUE_SIZE};
+use arroyo_types::{
+    from_micros, server_for_hash, Data, Key, Message, Record, SourceError, TaskInfo, UserError,
+    Watermark, QUEUE_SIZE,
+};
 use bincode::config;
 use rand::Rng;
 use std::any::Any;
@@ -20,9 +26,6 @@ use std::time::SystemTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
-use arroyo_metrics::{QueueGauges, register_queue_gauges, TaskCounters};
-use arroyo_operator::context::{ErrorReporter, WatermarkHolder};
-use arroyo_operator::RateLimiter;
 
 #[derive(Clone)]
 pub struct Collector<K: Key, T: Data> {

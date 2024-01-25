@@ -1,23 +1,26 @@
+mod operator;
+
 use anyhow::{anyhow, bail};
+use arroyo_operator::connector::{Connection, Connector};
+use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, PrimitiveType, TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
-use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::str::FromStr;
+use std::time::{Duration, SystemTime};
 use typify::import_types;
-use arroyo_operator::connector::{Connection, Connector};
 
-use crate::{ConnectionType, EmptyConfig, pull_opt, source_field};
+use crate::impulse::operator::{ImpulseSourceFunc, ImpulseSourceState, ImpulseSpec};
+use crate::{pull_opt, source_field, ConnectionType, EmptyConfig};
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/impulse/table.json");
+const TABLE_SCHEMA: &str = include_str!("./table.json");
 
-import_types!(schema = "../connector-schemas/impulse/table.json");
-const ICON: &str = include_str!("../resources/impulse.svg");
+import_types!(schema = "src/impulse/table.json");
+const ICON: &str = include_str!("./impulse.svg");
 
 pub fn impulse_schema() -> ConnectionSchema {
     ConnectionSchema {
@@ -88,9 +91,7 @@ impl Connector for ImpulseConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(message)
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 
@@ -176,5 +177,27 @@ impl Connector for ImpulseConnector {
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
+    }
+
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        Ok(OperatorNode::from_source(Box::new(ImpulseSourceFunc {
+            interval: table
+                .event_time_interval
+                .map(|i| Duration::from_micros(i as u64)),
+            spec: ImpulseSpec::EventsPerSecond(table.event_rate as f32),
+            limit: table
+                .message_count
+                .map(|n| n as usize)
+                .unwrap_or(usize::MAX),
+            state: ImpulseSourceState {
+                counter: 0,
+                start_time: SystemTime::now(),
+            },
+        })))
     }
 }
