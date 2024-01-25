@@ -170,10 +170,10 @@ impl Connector for ImpulseConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Source,
             schema: impulse_schema(),
-            operator: "connectors::impulse::ImpulseSourceFunc".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
@@ -183,7 +183,7 @@ impl Connector for ImpulseConnector {
         &self,
         _: Self::ProfileT,
         table: Self::TableT,
-        config: OperatorConfig,
+        _: OperatorConfig,
     ) -> anyhow::Result<OperatorNode> {
         Ok(OperatorNode::from_source(Box::new(ImpulseSourceFunc {
             interval: table

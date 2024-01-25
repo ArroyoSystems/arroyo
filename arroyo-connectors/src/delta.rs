@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail};
 use arroyo_operator::connector::Connection;
 use arroyo_storage::BackendConfig;
 use std::collections::HashMap;
@@ -100,15 +100,11 @@ impl Connector for DeltaLakeConnector {
             BackendConfig::Local { .. } => true,
             _ => false,
         };
-        let (description, operator) = match (&format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) => (
+        let description = match (&format_settings, is_local) {
+            (Some(FormatSettings::Parquet { .. }), true) =>
                 "LocalDeltaLake<Parquet>".to_string(),
-                "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
-            ),
-            (Some(FormatSettings::Parquet { .. }), false) => (
+            (Some(FormatSettings::Parquet { .. }), false) =>
                 "DeltaLake<Parquet>".to_string(),
-                "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
-            ),
             _ => bail!("Delta Lake sink only supports Parquet format"),
         };
 
@@ -133,10 +129,10 @@ impl Connector for DeltaLakeConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Sink,
             schema,
-            operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

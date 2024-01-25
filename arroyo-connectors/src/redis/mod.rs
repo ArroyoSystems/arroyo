@@ -390,10 +390,10 @@ impl Connector for RedisConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Sink,
             schema,
-            operator: "connectors::redis::sink::RedisSinkFunc::<#in_k, #in_t>".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description: "RedisSink".to_string(),
         })

@@ -111,10 +111,10 @@ impl Connector for SSEConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Source,
             schema,
-            operator: "connectors::sse::SSESourceFunc".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

@@ -14,10 +14,10 @@ use tokio::sync::oneshot;
 #[derive(Debug, Clone)]
 pub struct Connection {
     pub id: Option<i64>,
+    pub connector: &'static str,
     pub name: String,
     pub connection_type: ConnectionType,
     pub schema: ConnectionSchema,
-    pub operator: String,
     pub config: String,
     pub description: String,
 }
@@ -99,6 +99,7 @@ pub trait Connector: Send {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection>;
 
+    #[allow(unused)]
     fn make_operator(
         &self,
         profile: Self::ProfileT,

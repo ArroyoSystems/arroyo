@@ -1,8 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
-use axum::response::sse::Event;
 use std::collections::HashMap;
-use std::convert::Infallible;
 use typify::import_types;
 
 use arroyo_operator::connector::Connection;
@@ -83,10 +81,9 @@ impl Connector for FileSystemConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
-        let (description, operator, connection_type) = match table.table_type {
+        let (description, connection_type) = match table.table_type {
             TableType::Source { .. } => (
                 "FileSystem".to_string(),
-                "connectors::filesystem::source::FileSystemSourceFunc",
                 ConnectionType::Source,
             ),
             TableType::Sink {
@@ -109,26 +106,18 @@ impl Connector for FileSystemConnector {
                     BackendConfig::Local { .. } => true,
                     _ => false,
                 };
-                let (description, operator) = match (format_settings, is_local) {
-                    (Some(FormatSettings::Parquet { .. }), true) => (
+                let description = match (format_settings, is_local) {
+                    (Some(FormatSettings::Parquet { .. }), true) =>
                         "LocalFileSystem<Parquet>".to_string(),
-                        "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
-                    ),
-                    (Some(FormatSettings::Parquet { .. }), false) => (
+                    (Some(FormatSettings::Parquet { .. }), false) =>
                         "FileSystem<Parquet>".to_string(),
-                        "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
-                    ),
-                    (Some(FormatSettings::Json {  ..}), true) => (
+                    (Some(FormatSettings::Json {  ..}), true) =>
                         "LocalFileSystem<JSON>".to_string(),
-                        "connectors::filesystem::LocalJsonFileSystemSink::<#in_k, #in_t>"
-                    ),
-                    (Some(FormatSettings::Json {..  }), false) => (
+                    (Some(FormatSettings::Json {..  }), false) =>
                         "FileSystem<JSON>".to_string(),
-                        "connectors::filesystem::JsonFileSystemSink::<#in_k, #in_t>"
-                    ),
                     (None, _) => bail!("have to have some format settings"),
                 };
-                (description, operator, ConnectionType::Sink)
+                (description, ConnectionType::Sink)
             }
         };
 
@@ -153,10 +142,10 @@ impl Connector for FileSystemConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type,
             schema,
-            operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

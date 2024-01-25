@@ -1,12 +1,6 @@
-use crate::engine::ArrowContext;
-use crate::operator::{OperatorConstructor, OperatorNode, SourceOperator};
-use crate::SourceFinishType;
-
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::api::ConnectorOp;
-use arroyo_rpc::grpc::{api, TableConfig, TableDescriptor};
-use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, FailingSchemaResolver, SchemaResolver};
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::grpc::{TableConfig, TableDescriptor};
+use arroyo_rpc::schema_resolver::{SchemaResolver};
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 
 use arroyo_types::*;
@@ -22,23 +16,24 @@ use std::time::Duration;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
-
-use super::{client_configs, KafkaConfig, KafkaTable, ReadMode, SchemaRegistry, TableType};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
 
 #[cfg(test)]
 mod test;
 
 pub struct KafkaSourceFunc {
-    topic: String,
-    bootstrap_servers: String,
-    group_id: Option<String>,
-    offset_mode: super::SourceOffset,
-    format: Format,
-    framing: Option<Framing>,
-    bad_data: Option<BadData>,
-    schema_resolver: Arc<dyn SchemaResolver + Sync>,
-    client_configs: HashMap<String, String>,
-    messages_per_second: NonZeroU32,
+    pub topic: String,
+    pub bootstrap_servers: String,
+    pub group_id: Option<String>,
+    pub offset_mode: super::SourceOffset,
+    pub format: Format,
+    pub framing: Option<Framing>,
+    pub bad_data: Option<BadData>,
+    pub schema_resolver: Arc<dyn SchemaResolver + Sync>,
+    pub client_configs: HashMap<String, String>,
+    pub messages_per_second: NonZeroU32,
 }
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -47,40 +42,7 @@ pub struct KafkaState {
     offset: i64,
 }
 
-pub fn tables() -> Vec<TableDescriptor> {
-    vec![arroyo_state::global_table("k", "kafka source state")]
-}
-
 impl KafkaSourceFunc {
-    pub fn new(
-        servers: &str,
-        topic: &str,
-        group: Option<String>,
-        offset_mode: super::SourceOffset,
-        format: Format,
-        schema_resolver: Arc<dyn SchemaResolver + Sync>,
-        bad_data: Option<BadData>,
-        framing: Option<Framing>,
-        messages_per_second: u32,
-        client_configs: Vec<(&str, &str)>,
-    ) -> Self {
-        Self {
-            topic: topic.to_string(),
-            bootstrap_servers: servers.to_string(),
-            group_id: group,
-            offset_mode,
-            format,
-            framing,
-            schema_resolver,
-            bad_data,
-            client_configs: client_configs
-                .iter()
-                .map(|(key, value)| (key.to_string(), value.to_string()))
-                .collect(),
-            messages_per_second: NonZeroU32::new(messages_per_second).unwrap(),
-        }
-    }
-
     async fn get_consumer(&mut self, ctx: &mut ArrowContext) -> anyhow::Result<StreamConsumer> {
         info!("Creating kafka consumer for {}", self.bootstrap_servers);
         let mut client_config = ClientConfig::new();
@@ -103,12 +65,13 @@ impl KafkaSourceFunc {
             )
             .create()?;
 
-        let s: HashMap<i32, KafkaState> = ctx
+        let state: Vec<_> = ctx
             .table_manager
-            .get_global_keyed_state("k")
+            .get_global_keyed_state::<i32, KafkaState>("k")
             .await?
-            .get_all();
-        let state: Vec<&KafkaState> = s.values().collect();
+            .get_all()
+            .values()
+            .collect();
 
         // did we restore any partitions?
         let has_state = !state.is_empty();
@@ -264,68 +227,6 @@ impl KafkaSourceFunc {
                 }
             }
         }
-    }
-}
-
-impl OperatorConstructor<api::ConnectorOp> for KafkaSourceFunc {
-    fn from_config(config: ConnectorOp) -> anyhow::Result<OperatorNode> {
-        let config: OperatorConfig =
-            serde_json::from_str(&config.config).expect("Invalid config for KafkaSource");
-        let connection: KafkaConfig = serde_json::from_value(config.connection)
-            .expect("Invalid connection config for KafkaSource");
-        let table: KafkaTable =
-            serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let TableType::Source {
-            offset,
-            read_mode,
-            group_id,
-        } = &table.type_
-        else {
-            panic!("found non-source kafka config in source operator");
-        };
-        let mut client_configs = client_configs(&connection, &table);
-        if let Some(ReadMode::ReadCommitted) = read_mode {
-            client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
-        }
-
-        let schema_resolver: Arc<dyn SchemaResolver + Sync> =
-            if let Some(SchemaRegistry::ConfluentSchemaRegistry {
-                endpoint,
-                api_key,
-                api_secret,
-            }) = &connection.schema_registry_enum
-            {
-                Arc::new(
-                    ConfluentSchemaRegistry::new(
-                        &endpoint,
-                        &table.topic,
-                        api_key.clone(),
-                        api_secret.clone(),
-                    )
-                    .expect("failed to construct confluent schema resolver"),
-                )
-            } else {
-                Arc::new(FailingSchemaResolver::new())
-            };
-
-        Ok(OperatorNode::from_source(Box::new(Self {
-            topic: table.topic,
-            bootstrap_servers: connection.bootstrap_servers.to_string(),
-            group_id: group_id.clone(),
-            offset_mode: *offset,
-            format: config.format.expect("Format must be set for Kafka source"),
-            framing: config.framing,
-            schema_resolver,
-            bad_data: config.bad_data,
-            client_configs,
-            messages_per_second: NonZeroU32::new(
-                config
-                    .rate_limit
-                    .map(|l| l.messages_per_second)
-                    .unwrap_or(u32::MAX),
-            )
-            .unwrap(),
-        })))
     }
 }
 

@@ -226,10 +226,10 @@ impl Connector for PollingHTTPConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Source,
             schema,
-            operator: "connectors::polling_http::PollingHttpSourceFunc".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

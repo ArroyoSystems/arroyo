@@ -4,11 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::engine::ArrowContext;
-use crate::operator::ArrowOperator;
 use arrow::datatypes::Field;
-use arrow_array::{RecordBatch, UInt32Array};
-use arrow_schema::{DataType, Schema, SchemaRef};
+use arrow::array::{RecordBatch, UInt32Array};
+use arrow::datatypes::{DataType, Schema, SchemaRef};
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::ArroyoSchema;
 use arroyo_types::CheckpointBarrier;
@@ -20,8 +18,11 @@ use rdkafka::producer::Producer;
 use rdkafka::{ClientConfig, Message};
 use serde::Deserialize;
 use tokio::sync::mpsc::channel;
+use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::ArrowOperator;
 
-use super::KafkaSinkFunc;
+use super::{ConsistencyMode, KafkaSinkFunc};
 
 pub struct KafkaTopicTester {
     topic: String,
@@ -69,12 +70,16 @@ impl KafkaTopicTester {
     }
 
     async fn get_sink_with_writes(&self) -> KafkaSinkWithWrites {
-        let mut kafka = KafkaSinkFunc::new(
-            &self.server,
-            &self.topic,
-            Format::Json(JsonFormat::default()),
-            vec![],
-        );
+        let mut kafka = KafkaSinkFunc {
+            topic: self.topic.to_string(),
+            bootstrap_servers: self.server.to_string(),
+            producer: None,
+            consistency_mode: ConsistencyMode::AtLeastOnce,
+            write_futures: vec![],
+            client_config: HashMap::new(),
+            serializer: ArrowSerializer::new(Format::Json(JsonFormat::default())),
+        };
+
         let (_, control_rx) = channel(128);
         let (command_tx, _) = channel(128);
 

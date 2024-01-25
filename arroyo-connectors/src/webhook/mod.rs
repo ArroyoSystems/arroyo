@@ -1,5 +1,8 @@
+mod operator;
+
 use std::collections::HashMap;
-use std::convert::Infallible;
+use std::sync::Arc;
+use std::time::SystemTime;
 
 use anyhow::anyhow;
 use arroyo_rpc::OperatorConfig;
@@ -9,21 +12,26 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
-use axum::response::sse::Event;
 use reqwest::{Client, Request};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::{Mutex, Semaphore};
 use typify::import_types;
+use arroyo_formats::serialize::ArrowSerializer;
 
 use crate::{construct_http_client, pull_opt, EmptyConfig};
 
 use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
+use crate::webhook::operator::WebhookSinkFunc;
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/webhook/table.json");
+const TABLE_SCHEMA: &str = include_str!("./table.json");
 
-import_types!(schema = "../connector-schemas/webhook/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
-const ICON: &str = include_str!("../resources/webhook.svg");
+import_types!(schema = "src/webhook/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
+const ICON: &str = include_str!("./webhook.svg");
+
+const MAX_INFLIGHT: u32 = 50;
 
 pub struct WebhookConnector {}
 
@@ -158,10 +166,10 @@ impl Connector for WebhookConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Sink,
             schema,
-            operator: "connectors::webhook::WebhookSinkFunc::<#in_k, #in_t>".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
@@ -194,5 +202,20 @@ impl Connector for WebhookConnector {
         let _ = Self::construct_test_request(&client, &table)?;
 
         self.from_config(None, name, EmptyConfig {}, table, schema)
+    }
+
+    fn make_operator(&self, _: Self::ProfileT, table: Self::TableT, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+        let url = table.endpoint.sub_env_vars()?;
+        Ok(OperatorNode::from_operator(Box::new(WebhookSinkFunc {
+            url: Arc::new(url.clone()),
+            client: construct_http_client(&url, table.headers.as_ref().map(|s| s.sub_env_vars()).transpose()?)?,
+            semaphore: Arc::new(Semaphore::new(MAX_INFLIGHT as usize)),
+            serializer: ArrowSerializer::new(
+                config
+                    .format
+                    .expect("No format configured for webhook sink"),
+            ),
+            last_reported_error_at: Arc::new(Mutex::new(SystemTime::UNIX_EPOCH)),
+        })))
     }
 }

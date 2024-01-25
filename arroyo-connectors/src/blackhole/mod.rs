@@ -103,12 +103,12 @@ impl Connector for BlackholeConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Sink,
             schema: s
                 .cloned()
                 .ok_or_else(|| anyhow!("no schema for blackhole sink"))?,
-            operator: "connectors::blackhole::BlackholeSinkFunc::<#in_k, #in_t>".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

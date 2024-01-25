@@ -694,7 +694,7 @@ dependencies = [
  "quote",
  "rand",
  "rand_chacha",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",
@@ -754,17 +754,22 @@ dependencies = [
  "bytes",
  "chrono",
  "datafusion",
- "eventsource-client",
+ "eventsource-client 0.12.2",
+ "fluvio",
+ "fluvio-future",
  "futures",
+ "governor",
+ "itertools 0.11.0",
  "rand",
  "rdkafka",
- "redis",
- "regress",
+ "redis 0.24.0",
+ "regress 0.7.1",
  "reqwest",
  "schemars",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite",
  "tonic",
  "tracing",
@@ -1189,7 +1194,7 @@ dependencies = [
  "datafusion-physical-plan",
  "datafusion-proto",
  "deltalake",
- "eventsource-client",
+ "eventsource-client 0.11.0",
  "fluvio",
  "fluvio-future",
  "futures",
@@ -1210,9 +1215,9 @@ dependencies = [
  "rand",
  "rdkafka",
  "rdkafka-sys",
- "redis",
+ "redis 0.23.3",
  "regex",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "rusoto_core 0.48.0",
  "rusoto_s3",
@@ -3584,6 +3589,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "eventsource-client"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c80c6714d1a380314fcb11a22eeff022e1e1c9642f0bb54e15dc9cb29f37b29"
+dependencies = [
+ "futures",
+ "hyper",
+ "hyper-rustls 0.24.2",
+ "hyper-timeout",
+ "log",
+ "pin-project",
+ "rand",
+ "tokio",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4533,7 +4554,9 @@ dependencies = [
  "futures-util",
  "http",
  "hyper",
+ "log",
  "rustls 0.21.10",
+ "rustls-native-certs 0.6.3",
  "tokio",
  "tokio-rustls 0.24.1",
 ]
@@ -6833,6 +6856,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c580d9cbbe1d1b479e8d67cf9daf6a62c957e6846048408b80b43ac3f6af84cd"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "bytes",
+ "combine",
+ "crc16",
+ "futures",
+ "futures-util",
+ "itoa",
+ "log",
+ "percent-encoding",
+ "pin-project-lite",
+ "rand",
+ "rustls 0.21.10",
+ "rustls-native-certs 0.6.3",
+ "rustls-pemfile",
+ "rustls-webpki",
+ "ryu",
+ "sha1_smol",
+ "socket2 0.4.10",
+ "tokio",
+ "tokio-retry",
+ "tokio-rustls 0.24.1",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6980,6 +7035,16 @@ name = "regress"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82a9ecfa0cb04d0b04dddb99b8ccf4f66bc8dfd23df694b398570bd8ae3a50fb"
+dependencies = [
+ "hashbrown 0.13.2",
+ "memchr",
+]
+
+[[package]]
+name = "regress"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ed9969cad8051328011596bf549629f1b800cf1731e7964b1eef8dfc480d2c2"
 dependencies = [
  "hashbrown 0.13.2",
  "memchr",
@@ -8972,7 +9037,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress",
+ "regress 0.6.0",
  "schemars",
  "serde_json",
  "syn 2.0.48",

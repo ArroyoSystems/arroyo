@@ -8,20 +8,20 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
+use serde::{Deserialize, Serialize};
 
 const CLIENT_ID: &str = "cwc|0014U00003Df8ZvQAJ";
 
-const CONFIG_SCHEMA: &str = include_str!("../../connector-schemas/confluent/connection.json");
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/kafka/table.json");
-const ICON: &str = include_str!("../resources/confluent.svg");
+const CONFIG_SCHEMA: &str = include_str!("./profile.json");
+const TABLE_SCHEMA: &str = include_str!("../kafka/table.json");
+const ICON: &str = include_str!("./confluent.svg");
 
 import_types!(
-    schema = "../connector-schemas/confluent/connection.json",
+    schema = "src/confluent/profile.json",
     convert = {
         {type = "string", format = "var-str"} = VarStr
     }

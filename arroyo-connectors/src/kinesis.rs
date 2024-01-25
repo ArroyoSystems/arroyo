@@ -1,7 +1,5 @@
 use anyhow::{anyhow, bail, Result};
-use axum::response::sse::Event;
 use std::collections::HashMap;
-use std::convert::Infallible;
 use typify::import_types;
 
 use arroyo_operator::connector::Connection;
@@ -79,15 +77,13 @@ impl Connector for KinesisConnector {
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
-        let (connection_type, operator, description) = match table.type_ {
+        let (connection_type, description) = match table.type_ {
             TableType::Source { .. } => (
                 ConnectionType::Source,
-                "connectors::kinesis::source::KinesisSourceFunc",
                 format!("KinesisSource<{}>", table.stream_name),
             ),
             TableType::Sink { .. } => (
                 ConnectionType::Sink,
-                "connectors::kinesis::sink::KinesisSinkFunc::<#in_k, #in_t>",
                 format!("KinesisSink<{}>", table.stream_name),
             ),
         };
@@ -112,10 +108,10 @@ impl Connector for KinesisConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type,
             schema: schema,
-            operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

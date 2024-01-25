@@ -1,8 +1,7 @@
 use anyhow::Result;
 
-use arroyo_rpc::formats::Format;
-use arroyo_rpc::grpc::{api, TableConfig};
-use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp, OperatorConfig};
+use arroyo_rpc::grpc::{TableConfig};
+use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
 
@@ -13,33 +12,31 @@ use rdkafka::util::Timeout;
 
 use rdkafka::ClientConfig;
 
-use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
-use arrow_array::RecordBatch;
+use arrow::array::RecordBatch;
 use arroyo_formats::serialize::ArrowSerializer;
-use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
-use rdkafka::error::KafkaError;
-use rdkafka_sys::RDKafkaErrorCode;
+use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use std::time::{Duration, SystemTime};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::ArrowOperator;
 
-use super::{client_configs, KafkaConfig, KafkaTable, SinkCommitMode, TableType};
+use super::{SinkCommitMode};
 
 #[cfg(test)]
 mod test;
 
 pub struct KafkaSinkFunc {
-    topic: String,
-    bootstrap_servers: String,
-    consistency_mode: ConsistencyMode,
-    producer: Option<FutureProducer>,
-    write_futures: Vec<DeliveryFuture>,
-    client_config: HashMap<String, String>,
-    serializer: ArrowSerializer,
+    pub topic: String,
+    pub bootstrap_servers: String,
+    pub consistency_mode: ConsistencyMode,
+    pub producer: Option<FutureProducer>,
+    pub write_futures: Vec<DeliveryFuture>,
+    pub client_config: HashMap<String, String>,
+    pub serializer: ArrowSerializer,
 }
 
-enum ConsistencyMode {
+pub enum ConsistencyMode {
     AtLeastOnce,
     ExactlyOnce {
         next_transaction_index: usize,
@@ -59,53 +56,7 @@ impl From<SinkCommitMode> for ConsistencyMode {
     }
 }
 
-impl OperatorConstructor<api::ConnectorOp> for KafkaSinkFunc {
-    fn from_config(config: ConnectorOp) -> Result<OperatorNode> {
-        let config: OperatorConfig =
-            serde_json::from_str(&config.config).expect("Invalid config for KafkaSink");
-        let connection: KafkaConfig = serde_json::from_value(config.connection)
-            .expect("Invalid connection config for KafkaSink");
-        let table: KafkaTable =
-            serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let TableType::Sink { commit_mode } = table.type_ else {
-            panic!("found non-sink kafka config in sink operator");
-        };
-
-        Ok(OperatorNode::from_operator(Box::new(Self {
-            bootstrap_servers: connection.bootstrap_servers.to_string(),
-            producer: None,
-            consistency_mode: commit_mode.into(),
-            write_futures: vec![],
-            client_config: client_configs(&connection, &table),
-            topic: table.topic,
-            serializer: ArrowSerializer::new(
-                config.format.expect("Format must be defined for KafkaSink"),
-            ),
-        })))
-    }
-}
-
 impl KafkaSinkFunc {
-    pub fn new(
-        servers: &str,
-        topic: &str,
-        format: Format,
-        client_config: Vec<(&str, &str)>,
-    ) -> Self {
-        KafkaSinkFunc {
-            topic: topic.to_string(),
-            bootstrap_servers: servers.to_string(),
-            producer: None,
-            consistency_mode: ConsistencyMode::AtLeastOnce,
-            write_futures: vec![],
-            client_config: client_config
-                .iter()
-                .map(|(key, value)| (key.to_string(), value.to_string()))
-                .collect(),
-            serializer: ArrowSerializer::new(format),
-        }
-    }
-
     fn is_committing(&self) -> bool {
         matches!(self.consistency_mode, ConsistencyMode::ExactlyOnce { .. })
     }
@@ -204,17 +155,34 @@ impl ArrowOperator for KafkaSinkFunc {
         format!("kafka-producer-{}", self.topic)
     }
 
-    async fn on_start(&mut self, ctx: &mut ArrowContext) {
-        self.init_producer(&ctx.task_info)
-            .expect("Producer creation failed");
-    }
-
     fn tables(&self) -> HashMap<String, TableConfig> {
         if self.is_committing() {
             todo!("implement committing state")
         } else {
             HashMap::new()
         }
+    }
+
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        self.init_producer(&ctx.task_info)
+            .expect("Producer creation failed");
+    }
+
+    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
+        let values = self.serializer.serialize(&batch);
+
+        if !ctx.in_schemas[0].key_indices.is_empty() {
+            let k = batch.project(&ctx.in_schemas[0].key_indices).unwrap();
+
+            // TODO: we can probably batch this for better performance
+            for (k, v) in self.serializer.serialize(&k).zip(values) {
+                self.publish(Some(k), v, ctx).await;
+            }
+        } else {
+            for v in values {
+                self.publish(None, v, ctx).await;
+            }
+        };
     }
 
     async fn handle_checkpoint(&mut self, _: CheckpointBarrier, ctx: &mut ArrowContext) {
@@ -235,23 +203,6 @@ impl ArrowOperator for KafkaSinkFunc {
             self.init_producer(&ctx.task_info)
                 .expect("creating new producer during checkpointing");
         }
-    }
-
-    async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext) {
-        let values = self.serializer.serialize(&batch);
-
-        if !ctx.in_schemas[0].key_indices.is_empty() {
-            let k = batch.project(&ctx.in_schemas[0].key_indices).unwrap();
-
-            // TODO: we can probably batch this for better performance
-            for (k, v) in self.serializer.serialize(&k).zip(values) {
-                self.publish(Some(k), v, ctx).await;
-            }
-        } else {
-            for v in values {
-                self.publish(None, v, ctx).await;
-            }
-        };
     }
 
     async fn handle_commit(

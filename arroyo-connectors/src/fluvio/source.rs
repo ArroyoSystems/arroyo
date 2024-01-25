@@ -1,43 +1,33 @@
-use crate::engine::StreamNode;
-use crate::old::Context;
-use crate::{RateLimiter, SourceFinishType};
-use anyhow::anyhow;
-use arroyo_formats::old::DataDeserializer;
-use arroyo_formats::SchemaData;
-use arroyo_macro::source_fn;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::TableDescriptor;
-use arroyo_rpc::OperatorConfig;
+use arroyo_rpc::grpc::{TableConfig};
 use arroyo_rpc::{grpc::StopMode, ControlMessage};
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
+use arroyo_state::tables::global_keyed_map::{GlobalKeyedView};
 use arroyo_types::*;
 use bincode::{Decode, Encode};
 use fluvio::dataplane::link::ErrorCode;
 use fluvio::metadata::objects::Metadata;
 use fluvio::metadata::topic::TopicSpec;
 use fluvio::{consumer::Record as ConsumerRecord, Fluvio, FluvioConfig, Offset};
-use serde::de::DeserializeOwned;
 use std::collections::HashMap;
-use std::marker::PhantomData;
+use anyhow::anyhow;
+use async_trait::async_trait;
 use tokio::select;
 use tokio_stream::{Stream, StreamExt, StreamMap};
 use tracing::{debug, error, info, warn};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
+use arroyo_state::global_table_config;
 
-use super::{FluvioTable, SourceOffset, TableType};
+use super::{SourceOffset};
 
-#[derive(StreamNode)]
-pub struct FluvioSourceFunc<K, T>
-where
-    K: DeserializeOwned + Data,
-    T: SchemaData,
-{
-    topic: String,
-    endpoint: Option<String>,
-    offset_mode: SourceOffset,
-    deserializer: DataDeserializer<T>,
-    bad_data: Option<BadData>,
-    rate_limiter: RateLimiter,
-    _t: PhantomData<K>,
+pub struct FluvioSourceFunc {
+    pub topic: String,
+    pub endpoint: Option<String>,
+    pub offset_mode: SourceOffset,
+    pub format: Format,
+    pub framing: Option<Framing>,
+    pub bad_data: Option<BadData>,
 }
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
@@ -46,71 +36,38 @@ pub struct FluvioState {
     offset: i64,
 }
 
-pub fn tables() -> Vec<TableDescriptor> {
-    vec![arroyo_state::global_table("f", "Fluvio source state")]
-}
-
-#[source_fn(out_k = (), out_t = T)]
-impl<K, T> FluvioSourceFunc<K, T>
-where
-    K: DeserializeOwned + Data,
-    T: SchemaData,
-{
-    pub fn new(
-        endpoint: Option<&str>,
-        topic: &str,
-        offset_mode: SourceOffset,
-        format: Format,
-        bad_data: Option<BadData>,
-        framing: Option<Framing>,
-    ) -> Self {
-        Self {
-            topic: topic.to_string(),
-            endpoint: endpoint.map(|e| e.to_string()),
-            offset_mode,
-            deserializer: DataDeserializer::new(format, framing),
-            rate_limiter: RateLimiter::new(),
-            bad_data,
-            _t: PhantomData,
-        }
-    }
-
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for FluvioSource");
-        let table: FluvioTable =
-            serde_json::from_value(config.table).expect("Invalid table config for FluvioSource");
-        let TableType::Source { offset, .. } = &table.type_ else {
-            panic!("found non-source Fluvio config in source operator");
-        };
-
-        Self {
-            topic: table.topic,
-            endpoint: table.endpoint.clone(),
-            offset_mode: *offset,
-            deserializer: DataDeserializer::new(
-                config.format.expect("Format must be specified for fluvio"),
-                config.framing,
-            ),
-            bad_data: config.bad_data,
-            rate_limiter: RateLimiter::new(),
-            _t: PhantomData,
-        }
-    }
-
+#[async_trait]
+impl SourceOperator for FluvioSourceFunc {
     fn name(&self) -> String {
         format!("fluvio-{}", self.topic)
     }
 
-    fn tables(&self) -> Vec<TableDescriptor> {
-        tables()
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        global_table_config("f", "fluvio source state")
     }
 
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        ctx.initialize_deserializer(self.format.clone(), self.framing.clone(), self.bad_data.clone());
+    }
+
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+        match self.run_int(ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.report_error(e.name.clone(), e.details.clone()).await;
+
+                panic!("{}: {}", e.name, e.details);
+            }
+        }
+    }
+
+}
+
+impl FluvioSourceFunc {
     async fn get_consumer(
         &mut self,
-        ctx: &mut Context<(), T>,
+        ctx: &mut ArrowContext,
     ) -> anyhow::Result<StreamMap<u32, impl Stream<Item = Result<ConsumerRecord, ErrorCode>>>> {
-        // anyhow::Result<Vec<impl Stream<Item = >>> {
         info!("Creating Fluvio consumer for {:?}", self.endpoint);
 
         let config: Option<FluvioConfig> = self
@@ -140,14 +97,13 @@ where
         let partitions = metadata.spec.partitions() as usize;
         info!("Fetched metadata for topic {}", self.topic);
 
-        let mut s: GlobalKeyedState<u32, FluvioState, _> =
-            ctx.state.get_global_keyed_state('f').await;
-        let state: Vec<&FluvioState> = s.get_all();
+        let s: &mut GlobalKeyedView<u32, FluvioState> = ctx.table_manager.get_global_keyed_state("f")
+            .await
+            .expect("should be able to get fluvio state");
+        let state: HashMap<u32, FluvioState> = s.get_all().clone();
 
         // did we restore any partitions?
         let has_state = !state.is_empty();
-
-        let state: HashMap<u32, FluvioState> = state.iter().map(|s| (s.partition, **s)).collect();
 
         let parts: Vec<_> = (0..partitions)
             .filter(|i| *i % ctx.task_info.parallelism == ctx.task_info.task_index)
@@ -179,18 +135,7 @@ where
         Ok(streams)
     }
 
-    async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
-        match self.run_int(ctx).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
-    }
-
-    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
         let mut streams = self
             .get_consumer(ctx)
             .await
@@ -199,7 +144,9 @@ where
         if streams.is_empty() {
             warn!("Fluvio Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
                 ctx.task_info.operator_id, ctx.task_info.task_index);
-            ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
+            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+                Watermark::Idle,
+            ))).await;
         }
 
         let mut offsets = HashMap::new();
@@ -209,10 +156,12 @@ where
                     match message {
                         Some((_, Ok(msg))) => {
                             let timestamp = from_millis(msg.timestamp().max(0) as u64);
-                            let iter = self.deserializer.deserialize_slice(msg.value()).await;
-                            for value in iter {
-                                ctx.collect_source_record(timestamp, value, &self.bad_data, &mut self.rate_limiter).await?;
+                            ctx.deserialize_slice(msg.value(), timestamp).await?;
+
+                            if ctx.should_flush() {
+                                ctx.flush_buffer().await?;
                             }
+
                             offsets.insert(msg.partition(), msg.offset());
                         },
                         Some((p, Err(e))) => {
@@ -227,7 +176,9 @@ where
                     match control_message {
                         Some(ControlMessage::Checkpoint(c)) => {
                             debug!("starting checkpointing {}", ctx.task_info.task_index);
-                            let mut s = ctx.state.get_global_keyed_state('f').await;
+                            let s = ctx.table_manager.get_global_keyed_state("f")
+                               .await
+                               .expect("should be able to get fluvio state");
                             for (partition, offset) in &offsets {
                                 let partition2 = partition;
                                 s.insert(*partition, FluvioState {
@@ -236,7 +187,7 @@ where
                                 }).await;
                             }
 
-                            if self.checkpoint(c, ctx).await {
+                            if self.start_checkpoint(c, ctx).await {
                                 return Ok(SourceFinishType::Immediate);
                             }
                         },

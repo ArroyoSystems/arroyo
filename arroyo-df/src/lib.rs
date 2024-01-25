@@ -1099,14 +1099,14 @@ pub async fn parse_and_get_arrow_program(
                 LogicalPlanExtension::Sink {
                     name: sink_name,
                     connector_op: ConnectorOp {
-                        operator: connector_table.operator.clone(),
+                        connector: connector_table.connector.clone(),
                         config: connector_table.config.clone(),
                         description: connector_table.description.clone(),
                     },
                 }
             }
             None => LogicalPlanExtension::Sink {
-                name: "GrpcSink".to_string(),
+                name: "preview".to_string(),
                 connector_op: arroyo_datastream::ConnectorOp::web_sink(),
             },
         };

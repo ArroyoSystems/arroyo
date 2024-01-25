@@ -2,20 +2,26 @@ use anyhow::{anyhow, bail};
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
-use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::convert::Infallible;
+use fluvio::Offset;
 use typify::import_types;
+use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_operator::operator::OperatorNode;
 
 use crate::{pull_opt, ConnectionType, EmptyConfig};
+use crate::fluvio::sink::FluvioSinkFunc;
+use crate::fluvio::source::FluvioSourceFunc;
+
+mod source;
+mod sink;
 
 pub struct FluvioConnector {}
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/fluvio/table.json");
-const ICON: &str = include_str!("../resources/fluvio.svg");
+const TABLE_SCHEMA: &str = include_str!("./table.json");
+const ICON: &str = include_str!("./fluvio.svg");
 
-import_types!(schema = "../connector-schemas/fluvio/table.json");
+import_types!(schema = "src/fluvio/table.json");
 
 impl Connector for FluvioConnector {
     type ProfileT = EmptyConfig;
@@ -121,15 +127,13 @@ impl Connector for FluvioConnector {
         table: FluvioTable,
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
-        let (typ, operator, desc) = match table.type_ {
+        let (typ, desc) = match table.type_ {
             TableType::Source { .. } => (
                 ConnectionType::Source,
-                "connectors::fluvio::source::FluvioSourceFunc",
                 format!("FluvioSource<{}>", table.topic),
             ),
             TableType::Sink { .. } => (
                 ConnectionType::Sink,
-                "connectors::fluvio::sink::FluvioSinkFunc::<#in_k, #in_t>",
                 format!("FluvioSink<{}>", table.topic),
             ),
         };
@@ -155,12 +159,46 @@ impl Connector for FluvioConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: typ,
             schema,
-            operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description: desc,
         })
     }
+
+    fn make_operator(&self, _: Self::ProfileT, table: Self::TableT, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+        match table.type_ {
+            TableType::Source { offset } => {
+                Ok(OperatorNode::from_source(Box::new(FluvioSourceFunc {
+                    topic: table.topic,
+                    endpoint: table.endpoint.clone(),
+                    offset_mode: offset,
+                    format: config.format.ok_or_else(|| anyhow!("format required for fluvio source"))?,
+                    framing: config.framing,
+                    bad_data: config.bad_data,
+                })))
+            }
+            TableType::Sink { .. } => {
+                Ok(OperatorNode::from_operator(Box::new(FluvioSinkFunc {
+                    topic: table.topic,
+                    endpoint: table.endpoint,
+                    producer: None,
+                    serializer: ArrowSerializer::new(config.format.ok_or_else(|| anyhow!("format required for fluvio sink"))?)
+                }
+                )))
+            }
+        }
+    }
 }
+
+impl SourceOffset {
+    pub fn offset(&self) -> Offset {
+        match self {
+            SourceOffset::Earliest => Offset::beginning(),
+            SourceOffset::Latest => Offset::end(),
+        }
+    }
+}
+

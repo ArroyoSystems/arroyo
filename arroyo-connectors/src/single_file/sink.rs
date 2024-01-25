@@ -1,11 +1,9 @@
 use std::{collections::HashMap, path::Path};
 
-use anyhow::Result;
-use arrow_array::RecordBatch;
+use arrow::array::RecordBatch;
 
 use arroyo_rpc::{
-    grpc::{api::ConnectorOp, TableConfig},
-    OperatorConfig,
+    grpc::{TableConfig},
 };
 use arroyo_types::{CheckpointBarrier, SignalMessage};
 
@@ -16,38 +14,15 @@ use tokio::{
     io::AsyncWriteExt,
 };
 use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
+use arroyo_operator::operator::{ArrowOperator};
 
-use super::SingleFileTable;
-
-pub struct FileSink {
-    output_path: String,
-    file: Option<File>,
-}
-
-impl FileSink {
-    fn from_config(config_str: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config_str).expect("Invalid config for FileSinkFunc");
-        let table: SingleFileTable =
-            serde_json::from_value(config.table).expect("Invalid table config for FileSinkFunc");
-        Self {
-            output_path: table.path,
-            file: None,
-        }
-    }
-}
-
-impl OperatorConstructor<ConnectorOp> for FileSink {
-    fn from_config(connector_op: ConnectorOp) -> Result<OperatorNode> {
-        Ok(OperatorNode::from_operator(Box::new(Self::from_config(
-            &connector_op.config,
-        ))))
-    }
+pub struct SingleFileSink {
+    pub output_path: String,
+    pub file: Option<File>,
 }
 
 #[async_trait]
-impl ArrowOperator for FileSink {
+impl ArrowOperator for SingleFileSink {
     fn name(&self) -> String {
         "SingleFileSink".to_string()
     }
@@ -57,7 +32,7 @@ impl ArrowOperator for FileSink {
     }
 
     async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut ArrowContext) {
-        let json_rows: Vec<_> = arrow_json::writer::record_batches_to_json_rows(&[&batch])
+        let json_rows: Vec<_> = arrow::json::writer::record_batches_to_json_rows(&[&batch])
             .unwrap()
             .into_iter()
             .map(|mut r| {

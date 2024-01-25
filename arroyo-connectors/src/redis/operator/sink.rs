@@ -1,5 +1,5 @@
 use crate::redis::{ListOperation, RedisClient, RedisTable, TableType, Target};
-use arrow::array::{ArrayAccessor, AsArray, RecordBatch};
+use arrow::array::{AsArray, RecordBatch};
 use arroyo_formats::serialize::ArrowSerializer;
 use arroyo_operator::context::{ArrowContext, ErrorReporter};
 use arroyo_operator::operator::ArrowOperator;
@@ -136,7 +136,7 @@ impl RedisWriter {
                                     RedisBehavior::Set {ttl } => {
                                         // TODO: resolve duplicates before sending
                                         if let Some(ttl) = ttl {
-                                            self.pipeline.set_ex(key, value,  ttl);
+                                            self.pipeline.set_ex(key, value, ttl as u64);
                                         } else {
                                             self.pipeline.set(key, value);
                                         }

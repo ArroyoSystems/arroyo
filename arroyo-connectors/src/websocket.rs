@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -11,7 +10,6 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::OperatorConfig;
 use arroyo_types::string_to_map;
-use axum::response::sse::Event;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
@@ -251,10 +249,10 @@ impl Connector for WebsocketConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Source,
             schema,
-            operator: "connectors::websocket::WebsocketSourceFunc".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

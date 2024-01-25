@@ -1,7 +1,5 @@
 use anyhow::{anyhow, bail, Result};
-use axum::response::sse::Event;
 use std::collections::HashMap;
-use std::convert::Infallible;
 use typify::import_types;
 
 use arroyo_operator::connector::Connection;
@@ -14,10 +12,16 @@ use serde::{Deserialize, Serialize};
 use crate::{pull_opt, EmptyConfig};
 
 use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
+use crate::single_file::sink::SingleFileSink;
+use crate::single_file::source::SingleFileSourceFunc;
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/single_file/table.json");
+const TABLE_SCHEMA: &str = include_str!("./table.json");
 
-import_types!(schema = "../connector-schemas/single_file/table.json");
+import_types!(schema = "src/single_file/table.json");
+
+mod source;
+mod sink;
 
 pub struct SingleFileConnector {}
 
@@ -90,14 +94,6 @@ impl Connector for SingleFileConnector {
             .map(|t| t.to_owned())
             .ok_or_else(|| anyhow!("'format' must be set for Single File Source connection"))?;
         let connection_type = (&table.table_type).into();
-        let operator = match connection_type {
-            ConnectionType::Source => {
-                "connectors::filesystem::single_file::source::FileSourceFunc".to_string()
-            }
-            ConnectionType::Sink => {
-                "connectors::filesystem::single_file::sink::FileSink".to_string()
-            }
-        };
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -110,10 +106,10 @@ impl Connector for SingleFileConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type,
             schema,
-            operator,
             config: serde_json::to_string(&config).unwrap(),
             description: "Single File Source".to_string(),
         })
@@ -138,6 +134,23 @@ impl Connector for SingleFileConnector {
             SingleFileTable { path, table_type },
             schema,
         )
+    }
+
+    fn make_operator(&self, _: Self::ProfileT, table: Self::TableT, _: OperatorConfig) -> Result<OperatorNode> {
+        match table.table_type {
+            TableType::Source => {
+                Ok(OperatorNode::from_source(Box::new(SingleFileSourceFunc {
+                    input_file: table.path,
+                    lines_read: 0,
+                })))
+            }
+            TableType::Sink => {
+                Ok(OperatorNode::from_operator(Box::new(SingleFileSink {
+                    output_path: table.path,
+                    file: None,
+                })))
+            }
+        }
     }
 }
 

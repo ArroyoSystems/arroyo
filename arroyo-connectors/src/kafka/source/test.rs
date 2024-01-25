@@ -5,15 +5,13 @@ use arroyo_state::tables::ErasedTable;
 use arroyo_state::{BackingStore, StateBackend};
 use rand::random;
 
-use arrow_array::{Array, StringArray};
-use arrow_schema::TimeUnit;
-use std::collections::VecDeque;
+use arrow::array::{Array, StringArray};
+use arrow::datatypes::TimeUnit;
+use std::collections::{HashMap, VecDeque};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::connectors::kafka::source;
-use crate::engine::{ArrowContext, QueueItem};
-use crate::operator::SourceOperator;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
 use arroyo_rpc::schema_resolver::FailingSchemaResolver;
@@ -26,6 +24,9 @@ use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use arroyo_operator::context::{ArrowContext, QueueItem};
+use arroyo_operator::operator::SourceOperator;
+use crate::kafka::{SourceOffset};
 
 use super::KafkaSourceFunc;
 
@@ -74,18 +75,19 @@ impl KafkaTopicTester {
         task_info: TaskInfo,
         restore_from: Option<u32>,
     ) -> KafkaSourceWithReads {
-        let mut kafka = Box::new(KafkaSourceFunc::new(
-            &self.server,
-            &self.topic,
-            self.group_id.clone(),
-            crate::connectors::kafka::SourceOffset::Earliest,
-            Format::RawString(RawStringFormat {}),
-            Arc::new(FailingSchemaResolver::new()),
-            None,
-            None,
-            100,
-            vec![],
-        ));
+        let mut kafka = Box::new(KafkaSourceFunc {
+            bootstrap_servers: self.server.clone(),
+            topic: self.topic.clone(),
+            group_id: self.group_id.clone(),
+            offset_mode: SourceOffset::Earliest,
+            format: Format::RawString(RawStringFormat {}),
+            framing: None,
+            bad_data: None,
+            schema_resolver: Arc::new(FailingSchemaResolver::new()),
+            client_configs: HashMap::new(),
+            messages_per_second: NonZeroU32::new(100).unwrap()
+        });
+
         let (to_control_tx, control_rx) = channel(128);
         let (command_tx, from_control_rx) = channel(128);
         let (data_tx, recv) = channel(128);
@@ -291,7 +293,7 @@ async fn test_kafka() {
         min_watermark: Some(0),
         max_watermark: Some(0),
         has_state: true,
-        tables: source::tables(),
+        tables: vec![],
         backend_data: subtask_metadata.backend_data,
         bytes: subtask_metadata.bytes,
         commit_data: None,

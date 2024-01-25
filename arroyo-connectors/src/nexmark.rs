@@ -6,10 +6,8 @@ use arroyo_rpc::api_types::connections::{
     TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
-use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::str::FromStr;
 use typify::import_types;
 
@@ -213,10 +211,10 @@ impl Connector for NexmarkConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Source,
             schema: nexmark_schema(),
-            operator: "connectors::nexmark::NexmarkSourceFunc".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })

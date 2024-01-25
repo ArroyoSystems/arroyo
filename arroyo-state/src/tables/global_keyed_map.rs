@@ -345,8 +345,8 @@ impl<K: Key, V: Data> GlobalKeyedView<K, V> {
         self.data.insert(key, value);
     }
 
-    pub fn get_all(&self) -> HashMap<K, V> {
-        self.data.clone()
+    pub fn get_all(&self) -> &HashMap<K, V> {
+        &self.data
     }
 
     pub fn get(&self, key: &K) -> Option<&V> {

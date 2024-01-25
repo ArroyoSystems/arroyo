@@ -1,35 +1,30 @@
 use std::{collections::HashMap, io::Cursor, sync::Arc, time::SystemTime};
 
-use arrow_array::RecordBatch;
+use arrow::array::RecordBatch;
 use arroyo_rpc::{
-    grpc::{api, StopMode, TableConfig},
-    ControlMessage, OperatorConfig,
+    grpc::{StopMode, TableConfig},
+    ControlMessage,
 };
 use arroyo_types::to_nanos;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
-use datafusion_common::ScalarValue;
+use datafusion::common::ScalarValue;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
 };
 use tracing::info;
-
-use crate::SourceFinishType;
-use crate::{
-    engine::ArrowContext,
-    operator::{OperatorConstructor, OperatorNode, SourceOperator},
-};
-
-use super::SingleFileTable;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{SourceOperator};
+use arroyo_operator::SourceFinishType;
 
 #[derive(Encode, Decode, Debug, Clone, Eq, PartialEq)]
-pub struct FileSourceFunc {
-    input_file: String,
-    lines_read: usize,
+pub struct SingleFileSourceFunc {
+    pub input_file: String,
+    pub lines_read: usize,
 }
 
-impl FileSourceFunc {
+impl SingleFileSourceFunc {
     async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         if ctx.task_info.task_index != 0 {
             return SourceFinishType::Final;
@@ -54,7 +49,7 @@ impl FileSourceFunc {
 
             let cursor = Cursor::new(s);
             let reader = std::io::BufReader::new(cursor);
-            let builder = arrow_json::reader::ReaderBuilder::new(schema_ref.clone())
+            let builder = arrow::json::reader::ReaderBuilder::new(schema_ref.clone())
                 .with_batch_size(1)
                 .build(reader)
                 .unwrap();
@@ -110,19 +105,8 @@ impl FileSourceFunc {
     }
 }
 
-impl OperatorConstructor<api::ConnectorOp> for FileSourceFunc {
-    fn from_config(config: api::ConnectorOp) -> anyhow::Result<crate::operator::OperatorNode> {
-        let config: OperatorConfig = serde_json::from_str(&config.config)?;
-        let table: SingleFileTable = serde_json::from_value(config.table)?;
-        Ok(OperatorNode::from_source(Box::new(Self {
-            input_file: table.path,
-            lines_read: 0,
-        })))
-    }
-}
-
 #[async_trait]
-impl SourceOperator for FileSourceFunc {
+impl SourceOperator for SingleFileSourceFunc {
     fn name(&self) -> String {
         "SingleFileSource".to_string()
     }
