@@ -34,7 +34,6 @@ use crate::connectors::sse::SSESourceFunc;
 use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::operator::{server_for_hash_array, ArrowOperatorConstructor, OperatorNode};
-use crate::operators::PeriodicWatermarkGenerator;
 use crate::{RateLimiter, METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
@@ -57,6 +56,7 @@ use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
 
+use crate::operators::watermark_generator::WatermarkGenerator;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub const QUEUE_SIZE: usize = 4 * 1024;
@@ -1419,8 +1419,8 @@ impl Engine {
 pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNode {
     let mut buf = config.as_slice();
     match operator {
-        OperatorName::Watermark => {
-            PeriodicWatermarkGenerator::from_config(prost::Message::decode(&mut buf).unwrap())
+        OperatorName::ExpressionWatermark => {
+            WatermarkGenerator::from_config(prost::Message::decode(&mut buf).unwrap())
         }
         OperatorName::ArrowValue => {
             ValueExecutionOperator::from_config(prost::Message::decode(&mut buf).unwrap())

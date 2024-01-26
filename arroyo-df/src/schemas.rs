@@ -22,6 +22,10 @@ pub fn window_arrow_struct() -> DataType {
 }
 
 pub(crate) fn add_timestamp_field(schema: DFSchemaRef) -> DFResult<DFSchemaRef> {
+    if has_timestamp_field(schema.clone()) {
+        return Ok(schema);
+    }
+
     let timestamp_field = DFField::new_unqualified(
         "_timestamp",
         DataType::Timestamp(TimeUnit::Nanosecond, None),
