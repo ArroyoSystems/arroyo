@@ -1,17 +1,12 @@
-use crate::engine::ArrowContext;
 use anyhow::Result;
 use arrow::datatypes::SchemaRef;
 use arrow_array::RecordBatch;
-use arrow_array::TimestampNanosecondArray;
-use arrow_json::writer::record_batches_to_json_rows;
 use arroyo_df::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_df::physical::DecodingContext;
 use arroyo_df::physical::EmptyRegistry;
-use arroyo_rpc::grpc::api::ConnectorOp;
-use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::{api, SinkDataReq};
-use arroyo_types::to_micros;
-use arroyo_types::{from_nanos, SignalMessage};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
+use arroyo_rpc::grpc::api;
 use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::memory::MemoryStream;
 use datafusion::physical_plan::DisplayAs;
@@ -27,10 +22,6 @@ use futures::StreamExt;
 use prost::Message as ProstMessage;
 use std::sync::Arc;
 use std::sync::RwLock;
-use std::time::SystemTime;
-use tonic::transport::Channel;
-
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 
 pub mod join_with_expiration;
 pub mod session_aggregating_window;
@@ -44,8 +35,10 @@ pub struct ValueExecutionOperator {
     execution_plan: Arc<dyn ExecutionPlan>,
 }
 
-impl ArrowOperatorConstructor<api::ValuePlanOperator> for ValueExecutionOperator {
-    fn from_config(config: api::ValuePlanOperator) -> Result<OperatorNode> {
+pub struct ValueExecutionConstructor;
+impl OperatorConstructor for ValueExecutionConstructor {
+    type ConfigT = api::ValuePlanOperator;
+    fn with_config(&self, config: api::ValuePlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
         let registry = EmptyRegistry {};
 
@@ -60,11 +53,13 @@ impl ArrowOperatorConstructor<api::ValuePlanOperator> for ValueExecutionOperator
             &codec,
         )?;
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
-            name: config.name,
-            locked_batch,
-            execution_plan,
-        })))
+        Ok(OperatorNode::from_operator(Box::new(
+            ValueExecutionOperator {
+                name: config.name,
+                locked_batch,
+                execution_plan,
+            },
+        )))
     }
 }
 
@@ -163,8 +158,12 @@ pub struct KeyExecutionOperator {
     key_fields: Vec<usize>,
 }
 
-impl ArrowOperatorConstructor<api::KeyPlanOperator> for KeyExecutionOperator {
-    fn from_config(config: api::KeyPlanOperator) -> Result<OperatorNode> {
+pub struct KeyExecutionConstructor;
+
+impl OperatorConstructor for KeyExecutionConstructor {
+    type ConfigT = api::KeyPlanOperator;
+
+    fn with_config(&self, config: api::KeyPlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
         let registry = EmptyRegistry {};
 
@@ -179,16 +178,18 @@ impl ArrowOperatorConstructor<api::KeyPlanOperator> for KeyExecutionOperator {
             &codec,
         )?;
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
-            name: config.name,
-            locked_batch,
-            execution_plan,
-            key_fields: config
-                .key_fields
-                .into_iter()
-                .map(|field| field as usize)
-                .collect(),
-        })))
+        Ok(OperatorNode::from_operator(Box::new(
+            KeyExecutionOperator {
+                name: config.name,
+                locked_batch,
+                execution_plan,
+                key_fields: config
+                    .key_fields
+                    .into_iter()
+                    .map(|field| field as usize)
+                    .collect(),
+            },
+        )))
     }
 }
 
@@ -215,83 +216,5 @@ impl ArrowOperator for KeyExecutionOperator {
             //info!("batch {:?}", batch);
             ctx.collect(batch).await;
         }
-    }
-}
-
-#[derive(Default)]
-pub struct GrpcRecordBatchSink {
-    client: Option<ControllerGrpcClient<Channel>>,
-}
-
-impl ArrowOperatorConstructor<api::ConnectorOp> for GrpcRecordBatchSink {
-    fn from_config(_: ConnectorOp) -> Result<OperatorNode> {
-        Ok(OperatorNode::from_operator(Box::new(Self { client: None })))
-    }
-}
-
-#[async_trait::async_trait]
-impl ArrowOperator for GrpcRecordBatchSink {
-    fn name(&self) -> String {
-        "GRPC".to_string()
-    }
-
-    async fn on_start(&mut self, _: &mut ArrowContext) {
-        let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
-            .unwrap_or_else(|_| crate::LOCAL_CONTROLLER_ADDR.to_string());
-
-        self.client = Some(
-            ControllerGrpcClient::connect(controller_addr)
-                .await
-                .unwrap(),
-        );
-    }
-
-    async fn process_batch(&mut self, record_batch: RecordBatch, ctx: &mut ArrowContext) {
-        let timestamp_column = record_batch
-            .column(ctx.in_schemas[0].timestamp_index)
-            .as_any()
-            .downcast_ref::<TimestampNanosecondArray>()
-            .unwrap();
-
-        let json_rows = record_batches_to_json_rows(&[&record_batch]).unwrap();
-        for (mut map, timestamp) in json_rows.into_iter().zip(timestamp_column.iter()) {
-            map.remove("_timestamp");
-            let value = serde_json::to_string(&map).unwrap();
-
-            self.client
-                .as_mut()
-                .unwrap()
-                .send_sink_data(SinkDataReq {
-                    job_id: ctx.task_info.job_id.clone(),
-                    operator_id: ctx.task_info.operator_id.clone(),
-                    subtask_index: ctx.task_info.task_index as u32,
-                    timestamp: to_micros(
-                        timestamp
-                            .map(|nanos| from_nanos(nanos as u128))
-                            .unwrap_or_else(|| SystemTime::now()),
-                    ),
-                    key: value.clone(),
-                    value,
-                    done: false,
-                })
-                .await
-                .unwrap();
-        }
-    }
-    async fn on_close(&mut self, _: &Option<SignalMessage>, ctx: &mut ArrowContext) {
-        self.client
-            .as_mut()
-            .unwrap()
-            .send_sink_data(SinkDataReq {
-                job_id: ctx.task_info.job_id.clone(),
-                operator_id: ctx.task_info.operator_id.clone(),
-                subtask_index: ctx.task_info.task_index as u32,
-                timestamp: to_micros(SystemTime::now()),
-                key: "".to_string(),
-                value: "".to_string(),
-                done: true,
-            })
-            .await
-            .unwrap();
     }
 }

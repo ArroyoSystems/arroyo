@@ -4,8 +4,9 @@ use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
 use arrow_schema::{DataType, Field, FieldRef};
-use arroyo_connectors::{connector_for_type, Connection};
+use arroyo_connectors::connector_for_type;
 use arroyo_datastream::ConnectorOp;
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
@@ -37,10 +38,10 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct ConnectorTable {
     pub id: Option<i64>,
+    pub connector: String,
     pub name: String,
     pub connection_type: ConnectionType,
     pub fields: Vec<FieldSpec>,
-    pub operator: String,
     pub config: String,
     pub description: String,
     pub format: Option<Format>,
@@ -100,6 +101,7 @@ impl From<Connection> for ConnectorTable {
     fn from(value: Connection) -> Self {
         ConnectorTable {
             id: value.id,
+            connector: value.connector.to_string(),
             name: value.name.clone(),
             connection_type: value.connection_type,
             fields: value
@@ -108,7 +110,6 @@ impl From<Connection> for ConnectorTable {
                 .iter()
                 .map(|f| FieldSpec::StructField(f.clone().into()))
                 .collect(),
-            operator: value.operator,
             config: value.config,
             description: value.description,
             format: value.schema.format.clone(),
@@ -275,7 +276,7 @@ impl ConnectorTable {
 
     fn connector_op(&self) -> ConnectorOp {
         ConnectorOp {
-            operator: self.operator.clone(),
+            connector: self.connector.clone(),
             config: self.config.clone(),
             description: self.description.clone(),
         }

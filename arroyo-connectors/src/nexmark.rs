@@ -1,18 +1,18 @@
 use anyhow::{anyhow, bail};
+use arroyo_operator::connector::{Connection, Connector};
+use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, SourceFieldType, StructType,
     TestSourceMessage,
 };
 use arroyo_rpc::OperatorConfig;
-use axum::response::sse::Event;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::str::FromStr;
 use typify::import_types;
 
-use crate::{nullable_field, pull_opt, source_field, Connection, Connector, EmptyConfig};
+use crate::{nullable_field, pull_opt, source_field, EmptyConfig};
 
 const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/nexmark/table.json");
 const ICON: &str = include_str!("../resources/nexmark.svg");
@@ -137,7 +137,7 @@ impl Connector for NexmarkConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -145,9 +145,7 @@ impl Connector for NexmarkConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 
@@ -214,12 +212,21 @@ impl Connector for NexmarkConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Source,
             schema: nexmark_schema(),
-            operator: "connectors::nexmark::NexmarkSourceFunc".to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
+    }
+
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        _: Self::TableT,
+        _: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        todo!()
     }
 }

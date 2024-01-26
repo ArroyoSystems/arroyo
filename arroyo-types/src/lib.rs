@@ -1,3 +1,4 @@
+use crate::ports::CONTROLLER_GRPC;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
 use async_trait::async_trait;
@@ -166,6 +167,8 @@ pub fn duration_millis_config(var: &str, default: Duration) -> Duration {
         .unwrap_or(default)
 }
 
+pub const QUEUE_SIZE: usize = 4 * 1024;
+
 // These seeds were randomly generated; changing them will break existing state
 pub const HASH_SEEDS: [u64; 4] = [
     5093852630788334730,
@@ -227,6 +230,13 @@ pub fn service_port(service: &str, default: u16, env_var: &str) -> u16 {
         .or(env::var(env_var).ok())
         .map(|s| u16::from_str(&s).unwrap_or_else(|_| panic!("Invalid setting for {}", env_var)))
         .unwrap_or(default)
+}
+
+pub fn default_controller_addr() -> String {
+    format!(
+        "http://localhost:{}",
+        grpc_port("controller", CONTROLLER_GRPC)
+    )
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]

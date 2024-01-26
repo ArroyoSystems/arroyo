@@ -3,7 +3,6 @@ use anyhow::{anyhow, bail, Context, Result};
 use arrow::array::ArrayRef;
 use arrow::datatypes::{self, DataType, Field};
 use arrow_schema::{FieldRef, Schema, TimeUnit};
-use arroyo_connectors::Connection;
 use arroyo_datastream::{ConnectorOp, WindowType};
 
 use datafusion::datasource::DefaultTableSource;
@@ -57,6 +56,7 @@ use std::fmt::Debug;
 use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
 use crate::watermark_node::WatermarkNode;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::{ArroyoSchema, TIMESTAMP_FIELD};
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
@@ -1423,14 +1423,14 @@ pub async fn parse_and_get_arrow_program(
                 LogicalPlanExtension::Sink {
                     name: sink_name,
                     connector_op: ConnectorOp {
-                        operator: connector_table.operator.clone(),
+                        connector: connector_table.connector.clone(),
                         config: connector_table.config.clone(),
                         description: connector_table.description.clone(),
                     },
                 }
             }
             None => LogicalPlanExtension::Sink {
-                name: "GrpcSink".to_string(),
+                name: "preview".to_string(),
                 connector_op: arroyo_datastream::ConnectorOp::web_sink(),
             },
         };

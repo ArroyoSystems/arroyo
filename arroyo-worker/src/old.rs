@@ -1,10 +1,10 @@
-use crate::engine::{ErrorReporter, TimerValue, WatermarkHolder, QUEUE_SIZE};
-use crate::metrics::{register_queue_gauges, QueueGauges, TaskCounters};
-use crate::{RateLimiter, TIMER_TABLE};
+use crate::engine::TimerValue;
+use crate::TIMER_TABLE;
 use anyhow::bail;
 
 use arroyo_datastream::Operator;
-use arroyo_rpc::formats::BadData;
+use arroyo_metrics::{register_queue_gauges, QueueGauges, TaskCounters};
+use arroyo_operator::context::{ErrorReporter, WatermarkHolder};
 use arroyo_rpc::grpc::{
     CheckpointMetadata, TableDeleteBehavior, TableDescriptor, TableType, TableWriteBehavior,
 };
@@ -12,8 +12,7 @@ use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
 use arroyo_types::{
-    from_micros, server_for_hash, Data, Key, Message, Record, SourceError, TaskInfo, UserError,
-    Watermark,
+    from_micros, server_for_hash, Data, Key, Message, Record, TaskInfo, Watermark, QUEUE_SIZE,
 };
 use bincode::config;
 use rand::Rng;
@@ -23,7 +22,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
-use tracing::{debug, warn};
+use tracing::debug;
 
 #[derive(Clone)]
 pub struct Collector<K: Key, T: Data> {
@@ -213,10 +212,6 @@ impl<K: Key, T: Data> Context<K, T> {
         (ctx, data_rx)
     }
 
-    pub fn watermark(&self) -> Option<Watermark> {
-        self.watermarks.watermark()
-    }
-
     pub fn last_present_watermark(&self) -> Option<SystemTime> {
         self.watermarks.last_present_watermark()
     }
@@ -274,67 +269,8 @@ impl<K: Key, T: Data> Context<K, T> {
         self.collector.broadcast(message).await;
     }
 
-    pub async fn report_error(&mut self, message: impl Into<String>, details: impl Into<String>) {
-        self.error_reporter.report_error(message, details).await;
-    }
-
-    pub async fn report_user_error(&mut self, error: UserError) {
-        self.control_tx
-            .send(ControlResp::Error {
-                operator_id: self.task_info.operator_id.clone(),
-                task_index: self.task_info.task_index,
-                message: error.name,
-                details: error.details,
-            })
-            .await
-            .unwrap();
-    }
-
     pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         self.state.load_compacted(compaction).await;
-    }
-
-    /// Collects a source record, handling errors and rate limiting.
-    /// Considers the `bad_data` option to determine whether to drop or fail on bad data.
-    pub async fn collect_source_record(
-        &mut self,
-        timestamp: SystemTime,
-        value: anyhow::Result<T, SourceError>,
-        bad_data: &Option<BadData>,
-        rate_limiter: &mut RateLimiter,
-    ) -> anyhow::Result<(), UserError> {
-        match value {
-            Ok(value) => Ok(self
-                .collector
-                .collect(Record {
-                    timestamp,
-                    key: None,
-                    value,
-                })
-                .await),
-            Err(SourceError::BadData { details }) => match bad_data {
-                Some(BadData::Drop {}) => {
-                    rate_limiter
-                        .rate_limit(|| async {
-                            warn!("Dropping invalid data: {}", details.clone());
-                            self.report_user_error(UserError::new(
-                                "Dropping invalid data",
-                                details,
-                            ))
-                            .await;
-                        })
-                        .await;
-                    TaskCounters::DeserializationErrors
-                        .for_task(&self.task_info)
-                        .inc();
-                    return Ok(());
-                }
-                Some(BadData::Fail {}) | None => {
-                    Err(UserError::new("Deserialization error", details))
-                }
-            },
-            Err(SourceError::Other { name, details }) => Err(UserError::new(name, details)),
-        }
     }
 }
 

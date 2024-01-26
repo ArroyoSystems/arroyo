@@ -23,9 +23,11 @@ use datafusion_common::ScalarValue;
 
 use futures::stream::FuturesUnordered;
 
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor};
-use crate::{engine::ArrowContext, operator::OperatorNode};
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_operator::{
+    context::ArrowContext,
+    operator::{ArrowOperator, OperatorConstructor, OperatorNode},
+};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -446,10 +448,14 @@ impl<K: Copy> Default for BinComputingHolder<K> {
 
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
-impl ArrowOperatorConstructor<api::SlidingWindowAggregateOperator>
-    for SlidingAggregatingWindowFunc<SystemTime>
-{
-    fn from_config(config: api::SlidingWindowAggregateOperator) -> anyhow::Result<OperatorNode> {
+pub struct SlidingAggregatingWindowConstructor;
+
+impl OperatorConstructor for SlidingAggregatingWindowConstructor {
+    type ConfigT = api::SlidingWindowAggregateOperator;
+    fn with_config(
+        &self,
+        config: api::SlidingWindowAggregateOperator,
+    ) -> anyhow::Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
         let slide = Duration::from_micros(config.slide_micros);
         let input_schema: ArroyoSchema = config
@@ -496,24 +502,26 @@ impl ArrowOperatorConstructor<api::SlidingWindowAggregateOperator>
             true,
         ));
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
-            slide,
-            width,
-            binning_function,
-            partial_aggregation_plan,
-            partial_schema,
-            finish_execution_plan,
-            receiver,
-            final_batches_passer,
-            futures: FuturesUnordered::new(),
-            execs: BTreeMap::new(),
-            tiered_record_batches: TieredRecordBatchHolder::new(vec![Duration::from_micros(
-                config.slide_micros,
-            )])?,
-            window_field,
-            window_index: config.window_index as usize,
-            state: SlidingWindowState::NoData,
-        })))
+        Ok(OperatorNode::from_operator(Box::new(
+            SlidingAggregatingWindowFunc {
+                slide,
+                width,
+                binning_function,
+                partial_aggregation_plan,
+                partial_schema,
+                finish_execution_plan,
+                receiver,
+                final_batches_passer,
+                futures: FuturesUnordered::new(),
+                execs: BTreeMap::new(),
+                tiered_record_batches: TieredRecordBatchHolder::new(vec![Duration::from_micros(
+                    config.slide_micros,
+                )])?,
+                window_field,
+                window_index: config.window_index as usize,
+                state: SlidingWindowState::NoData,
+            },
+        )))
     }
 }
 

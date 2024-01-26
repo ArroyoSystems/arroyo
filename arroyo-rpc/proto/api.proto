@@ -64,7 +64,7 @@ message ProgramEdge {
 }
 
 message ConnectorOp {
-  string operator = 1;
+  string connector = 1;
   string config = 2;
   string description = 3;
 }

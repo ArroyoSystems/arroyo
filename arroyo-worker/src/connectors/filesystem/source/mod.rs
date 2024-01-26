@@ -28,7 +28,7 @@ use arroyo_types::{to_nanos, UserError};
 use typify::import_types;
 
 use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperatorConstructor, OperatorNode, SourceOperator};
+use crate::operator::{OperatorConstructor, OperatorNode, SourceOperator};
 use crate::{RateLimiter, SourceFinishType};
 
 import_types!(schema = "../connector-schemas/filesystem/table.json");
@@ -48,7 +48,7 @@ enum FileReadState {
     RecordsRead(usize),
 }
 
-impl ArrowOperatorConstructor<api::ConnectorOp> for FileSystemSourceFunc {
+impl OperatorConstructor<api::ConnectorOp> for FileSystemSourceFunc {
     fn from_config(config: api::ConnectorOp) -> Result<OperatorNode> {
         let config: OperatorConfig =
             serde_json::from_str(&config.config).expect("Invalid config for FileSystemSourceFunc");

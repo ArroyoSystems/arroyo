@@ -22,11 +22,11 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 
-use crate::engine::QueueItem;
+use arroyo_operator::context::QueueItem;
 use tokio::time::{interval, Interval};
 use tokio_stream::StreamExt;
 
-use crate::inq_reader::InQReader;
+use arroyo_operator::inq_reader::InQReader;
 
 #[derive(Clone)]
 struct NetworkSender {

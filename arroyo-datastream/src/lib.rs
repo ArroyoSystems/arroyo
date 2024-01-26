@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::grpc::api::operator::Operator as GrpcOperator;
 use arroyo_rpc::grpc::api::{self as GrpcApi, ExpressionAggregator, Flatten, ProgramEdge};
-use arroyo_types::{Data, GlobalKey, JoinType, Key, HASH_SEEDS};
+use arroyo_types::{Data, GlobalKey, JoinType, Key};
 use bincode::{Decode, Encode};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -35,7 +35,6 @@ use petgraph::{Direction, Graph};
 use rand::distributions::Alphanumeric;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use regex::Regex;
 
 pub fn parse_type(s: &str) -> Type {
     let s = s
@@ -283,8 +282,8 @@ pub enum ImpulseSpec {
 
 #[derive(Clone, Debug, Encode, Decode, Serialize, Deserialize, PartialEq)]
 pub struct ConnectorOp {
-    // path of the operator that this will compile into (like `crate::sources::kafka::KafkaSource`)
-    pub operator: String,
+    // name of the connector
+    pub connector: String,
     // json-encoded config for the operator
     pub config: String,
     // description to be rendered in the pipeline graph
@@ -294,9 +293,9 @@ pub struct ConnectorOp {
 impl ConnectorOp {
     pub fn web_sink() -> Self {
         ConnectorOp {
-            operator: "GrpcSink".to_string(),
+            connector: "preview".to_string(),
             config: "{\"connection\": {}, \"table\": {}}".to_string(),
-            description: "GrpcSink".to_string(),
+            description: "PreviewSink".to_string(),
         }
     }
 }
@@ -304,7 +303,7 @@ impl ConnectorOp {
 impl From<GrpcApi::ConnectorOp> for ConnectorOp {
     fn from(c: GrpcApi::ConnectorOp) -> Self {
         ConnectorOp {
-            operator: c.operator,
+            connector: c.connector,
             config: c.config,
             description: c.description,
         }
@@ -314,7 +313,7 @@ impl From<GrpcApi::ConnectorOp> for ConnectorOp {
 impl From<ConnectorOp> for GrpcApi::ConnectorOp {
     fn from(c: ConnectorOp) -> Self {
         GrpcApi::ConnectorOp {
-            operator: c.operator,
+            connector: c.connector,
             config: c.config,
             description: c.description,
         }
@@ -1131,13 +1130,11 @@ impl Program {
 
         for t in self.graph.node_weights() {
             match &t.operator {
-                Operator::ConnectorSource(c) | Operator::ConnectorSink(c) => {
-                    s.insert(
-                        Regex::new("::<.*>$")
-                            .unwrap()
-                            .replace(&c.operator, "")
-                            .to_string(),
-                    );
+                Operator::ConnectorSource(c) => {
+                    s.insert(format!("{} source", c.connector));
+                }
+                Operator::ConnectorSink(c) => {
+                    s.insert(format!("{} sink", c.connector));
                 }
                 Operator::Window { typ, .. } => {
                     s.insert(format!("{:?} window", typ));
@@ -1377,26 +1374,11 @@ impl Program {
             let input = self.graph.edges_directed(idx, Direction::Incoming).next();
             let output = self.graph.edges_directed(idx, Direction::Outgoing).next();
             let body = match &node.operator {
-                Operator::ConnectorSource(c) => {
-                    let out_k = parse_type(&output.unwrap().weight().key);
-                    let out_t = parse_type(&output.unwrap().weight().value);
-
-                    let strukt = parse_type(&c.operator);
-                    let config = &c.config;
-                    quote! {
-                        Box::new(#strukt::<#out_k, #out_t>::from_config(#config))
-                    }
+                Operator::ConnectorSource(_) => {
+                    unreachable!()
                 }
-                Operator::ConnectorSink(c) => {
-                    // In c.operator, replace #in_k and #in_t with the actual types
-                    let replaced_type = c.operator.replace("#in_k", &input.unwrap().weight().key);
-                    let replaced_type = replaced_type.replace("#in_t", &input.unwrap().weight().value);
-
-                    let strukt = parse_type(&replaced_type);
-                    let config = &c.config;
-                    quote! {
-                        Box::new(#strukt::from_config(#config))
-                    }
+                Operator::ConnectorSink(_) => {
+                    unreachable!()
                 }
                 Operator::FusedWasmUDFs { name, udfs: _ } => {
                     let in_k = parse_type(&input.unwrap().weight().key);
@@ -2689,8 +2671,4 @@ mod tests {
         let t = extract_container_type("Vec", &parse_str("HashMap<String, u8>").unwrap());
         assert!(t.is_none())
     }
-}
-
-pub fn get_hasher() -> ahash::RandomState {
-    ahash::RandomState::with_seeds(HASH_SEEDS[0], HASH_SEEDS[1], HASH_SEEDS[2], HASH_SEEDS[3])
 }

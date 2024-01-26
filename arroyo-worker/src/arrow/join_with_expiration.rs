@@ -8,6 +8,8 @@ use anyhow::Result;
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext, EmptyRegistry};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use arroyo_rpc::{
     grpc::{api, TableConfig},
     ArroyoSchema,
@@ -19,11 +21,6 @@ use datafusion_physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
 use prost::Message;
-
-use crate::{
-    engine::ArrowContext,
-    operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode},
-};
 
 pub struct JoinWithExpiration {
     left_expiration: Duration,
@@ -188,8 +185,10 @@ impl ArrowOperator for JoinWithExpiration {
     }
 }
 
-impl ArrowOperatorConstructor<api::JoinOperator> for JoinWithExpiration {
-    fn from_config(config: api::JoinOperator) -> anyhow::Result<crate::operator::OperatorNode> {
+pub struct JoinWithExpirationConstructor;
+impl OperatorConstructor for JoinWithExpirationConstructor {
+    type ConfigT = api::JoinOperator;
+    fn with_config(&self, config: api::JoinOperator) -> Result<OperatorNode> {
         let left_passer = Arc::new(RwLock::new(None));
         let right_passer = Arc::new(RwLock::new(None));
 
@@ -211,7 +210,7 @@ impl ArrowOperatorConstructor<api::JoinOperator> for JoinWithExpiration {
         let left_schema = left_input_schema.schema_without_keys()?;
         let right_schema = right_input_schema.schema_without_keys()?;
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
+        Ok(OperatorNode::from_operator(Box::new(JoinWithExpiration {
             left_expiration: Duration::from_secs(3600),
             right_expiration: Duration::from_secs(3600),
             left_input_schema,

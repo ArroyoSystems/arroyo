@@ -1,8 +1,9 @@
 use arrow_schema::DataType;
 use arroyo_connectors::{
     nexmark::{NexmarkConnector, NexmarkTable},
-    Connector, EmptyConfig,
+    EmptyConfig,
 };
+use arroyo_operator::connector::Connector;
 
 use crate::types::NullableType;
 use crate::{parse_and_get_arrow_program, parse_and_get_program, ArroyoSchemaProvider, SqlConfig};

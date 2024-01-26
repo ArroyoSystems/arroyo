@@ -1,8 +1,7 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail};
+use arroyo_operator::connector::Connection;
 use arroyo_storage::BackendConfig;
-use axum::response::sse::Event;
 use std::collections::HashMap;
-use std::convert::Infallible;
 
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
@@ -12,11 +11,12 @@ use arroyo_rpc::OperatorConfig;
 use crate::filesystem::{
     file_system_sink_from_options, CommitStyle, FileSystemTable, FormatSettings, TableType,
 };
-use crate::{Connection, EmptyConfig};
+use crate::EmptyConfig;
 
-use super::Connector;
+use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/filesystem/table.json");
+const TABLE_SCHEMA: &str = include_str!("../src/filesystem/table.json");
 
 pub struct DeltaLakeConnector {}
 
@@ -52,7 +52,7 @@ impl Connector for DeltaLakeConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<Result<Event, Infallible>>,
+        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -60,9 +60,7 @@ impl Connector for DeltaLakeConnector {
                 done: true,
                 message: "Successfully validated connection".to_string(),
             };
-            tx.send(Ok(Event::default().json_data(message).unwrap()))
-                .await
-                .unwrap();
+            tx.send(message).await.unwrap();
         });
     }
 
@@ -77,7 +75,7 @@ impl Connector for DeltaLakeConnector {
         config: Self::ProfileT,
         table: Self::TableT,
         schema: Option<&ConnectionSchema>,
-    ) -> anyhow::Result<crate::Connection> {
+    ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let TableType::Sink {
             write_path,
             file_settings,
@@ -103,15 +101,9 @@ impl Connector for DeltaLakeConnector {
             BackendConfig::Local { .. } => true,
             _ => false,
         };
-        let (description, operator) = match (&format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) => (
-                "LocalDeltaLake<Parquet>".to_string(),
-                "connectors::filesystem::LocalParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
-            ),
-            (Some(FormatSettings::Parquet { .. }), false) => (
-                "DeltaLake<Parquet>".to_string(),
-                "connectors::filesystem::ParquetFileSystemSink::<#in_k, #in_t, #in_tRecordBatchBuilder>"
-            ),
+        let description = match (&format_settings, is_local) {
+            (Some(FormatSettings::Parquet { .. }), true) => "LocalDeltaLake<Parquet>".to_string(),
+            (Some(FormatSettings::Parquet { .. }), false) => "DeltaLake<Parquet>".to_string(),
             _ => bail!("Delta Lake sink only supports Parquet format"),
         };
 
@@ -136,10 +128,10 @@ impl Connector for DeltaLakeConnector {
 
         Ok(Connection {
             id,
+            connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Sink,
             schema,
-            operator: operator.to_string(),
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
@@ -155,5 +147,14 @@ impl Connector for DeltaLakeConnector {
         let table = file_system_sink_from_options(options, schema, CommitStyle::DeltaLake)?;
 
         self.from_config(None, name, EmptyConfig {}, table, schema)
+    }
+
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        _: Self::TableT,
+        _: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        todo!()
     }
 }

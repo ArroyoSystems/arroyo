@@ -12,13 +12,15 @@ use serde_json::{json, Value};
 use std::convert::Infallible;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 use tracing::warn;
 
 use arroyo_connectors::confluent::ConfluentProfile;
+use arroyo_connectors::connector_for_type;
 use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
-use arroyo_connectors::{connector_for_type, ErasedConnector};
 use arroyo_formats::avro;
 use arroyo_formats::json_schema::to_arrow;
+use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionTable, ConnectionTablePost, ConnectionType,
     SchemaDefinition,
@@ -180,7 +182,11 @@ pub(crate) async fn test_connection_table(
         .test(&req.name, &profile, &req.config, schema.as_ref(), tx)
         .map_err(|e| bad_request(format!("Failed to parse config or schema: {:?}", e)))?;
 
-    Ok(Sse::new(ReceiverStream::new(rx)))
+    let stream = ReceiverStream::new(rx);
+
+    Ok(Sse::new(
+        stream.map(|msg| Ok(Event::default().json_data(msg).unwrap())),
+    ))
 }
 
 fn get_connection_profile(

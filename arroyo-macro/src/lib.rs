@@ -427,7 +427,7 @@ fn impl_stream_node_type(
                         *datum.downcast().expect(&format!("failed to downcast data in {}", self.name()))
                     }
                     crate::old::QueueItem::Bytes(bs) => {
-                        crate::metrics::TaskCounters::BytesReceived.for_task(&ctx.task_info).inc_by(bs.len() as u64);
+                        arroyo_metrics::TaskCounters::BytesReceived.for_task(&ctx.task_info).inc_by(bs.len() as u64);
 
                         bincode::decode_from_slice(&bs, config::standard())
                             .expect(#deserialize_error)
@@ -439,7 +439,7 @@ fn impl_stream_node_type(
                 tracing::debug!("[{}] Received message {}-{}, {:?} [{:?}]", ctx.task_info.operator_name, #i, local_idx, message, stacker::remaining_stack());
 
                 if let arroyo_types::Message::Record(record) = &message {
-                    crate::metrics::TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
+                    arroyo_metrics::TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
 
                     Self::#handle_fn(&mut (*self), record, &mut ctx)
                       .instrument(tracing::trace_span!("handle_fn",
@@ -447,18 +447,18 @@ fn impl_stream_node_type(
                       .await;
                 } else {
                     match Self::handle_control_message(&mut (*self), idx, &message, &mut counter, &mut closed, in_partitions, &mut ctx).await {
-                        crate::ControlOutcome::Continue => {
+                        arroyo_operator::ControlOutcome::Continue => {
                             // do nothing
                         }
-                        crate::ControlOutcome::Stop => {
+                        arroyo_operator::ControlOutcome::Stop => {
                             final_message = Some(arroyo_types::Message::Stop);
                             break;
                         }
-                        crate::ControlOutcome::Finish => {
+                        arroyo_operator::ControlOutcome::Finish => {
                             final_message = Some(arroyo_types::Message::EndOfData);
                             break;
                         }
-                        crate::ControlOutcome::StopAndSendStop => {
+                        arroyo_operator::ControlOutcome::StopAndSendStop => {
                             final_message = Some(arroyo_types::Message::Stop);
                             break;
                         }
@@ -486,13 +486,13 @@ fn impl_stream_node_type(
         quote! {
             let mut final_message = None;
             match self.run(&mut ctx).await {
-                crate::SourceFinishType::Graceful => {
+                arroyo_operator::SourceFinishType::Graceful => {
                     final_message = Some(arroyo_types::Message::Stop);
                 }
-                crate::SourceFinishType::Immediate => {
+                arroyo_operator::SourceFinishType::Immediate => {
                     // do nothing, allow shutdown to proceed
                 }
-                crate::SourceFinishType::Final => {
+                arroyo_operator::SourceFinishType::Final => {
                     final_message = Some(arroyo_types::Message::EndOfData);
                 }
             }
@@ -531,10 +531,10 @@ fn impl_stream_node_type(
         }
 
         quote! {
-            let mut counter = crate::engine::CheckpointCounter::new(in_qs.len());
+            let mut counter = arroyo_operator::CheckpointCounter::new(in_qs.len());
             let mut closed: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
-            let mut sel = crate::inq_reader::InQReader::new();
+            let mut sel = arroyo_operator::inq_reader::InQReader::new();
 
             let in_partitions = in_qs.len();
 
@@ -653,10 +653,10 @@ fn impl_stream_node_type(
     defs.push(quote! {
         async fn handle_control_message<CONTROL_K: arroyo_types::Key, CONTROL_T: arroyo_types::Data>(&mut self,
             idx: usize, message: &arroyo_types::Message<CONTROL_K, CONTROL_T>,
-            counter: &mut crate::engine::CheckpointCounter,
+            counter: &mut arroyo_operator::CheckpointCounter,
             closed: &mut std::collections::HashSet<usize>,
             in_partitions: usize,
-            ctx: &mut crate::old::Context<#out_k, #out_t>) -> crate::ControlOutcome {
+            ctx: &mut crate::old::Context<#out_k, #out_t>) -> arroyo_operator::ControlOutcome {
                 use arroyo_types::*;
                 use tracing::info;
                 use tracing::trace;
@@ -692,7 +692,7 @@ fn impl_stream_node_type(
                             );
 
                             if self.checkpoint(*t, ctx).await {
-                                return crate::ControlOutcome::Stop;
+                                return arroyo_operator::ControlOutcome::Stop;
                             }
                         }
                     }
@@ -713,17 +713,17 @@ fn impl_stream_node_type(
                     Message::Stop => {
                         closed.insert(idx);
                         if closed.len() == in_partitions {
-                            return crate::ControlOutcome::Stop;
+                            return arroyo_operator::ControlOutcome::Stop;
                         }
                     }
                     Message::EndOfData => {
                         closed.insert(idx);
                         if closed.len() == in_partitions {
-                            return crate::ControlOutcome::Finish;
+                            return arroyo_operator::ControlOutcome::Finish;
                         }
                     }
                 }
-                crate::ControlOutcome::Continue
+                arroyo_operator::ControlOutcome::Continue
             }
     });
 

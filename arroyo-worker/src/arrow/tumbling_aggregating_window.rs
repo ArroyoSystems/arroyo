@@ -23,10 +23,9 @@ use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPla
 use datafusion_common::ScalarValue;
 use futures::{stream::FuturesUnordered, StreamExt};
 
-use crate::engine::ArrowContext;
-use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
-
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -93,10 +92,11 @@ type PolledFutureT = <NextBatchFuture<SystemTime> as Future>::Output;
 
 impl TumblingAggregatingWindowFunc<SystemTime> {}
 
-impl ArrowOperatorConstructor<api::TumblingWindowAggregateOperator>
-    for TumblingAggregatingWindowFunc<SystemTime>
-{
-    fn from_config(config: api::TumblingWindowAggregateOperator) -> Result<OperatorNode> {
+pub struct TumblingAggregateWindowConstructor;
+
+impl OperatorConstructor for TumblingAggregateWindowConstructor {
+    type ConfigT = api::TumblingWindowAggregateOperator;
+    fn with_config(&self, config: api::TumblingWindowAggregateOperator) -> Result<OperatorNode> {
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config
             .input_schema
@@ -148,19 +148,21 @@ impl ArrowOperatorConstructor<api::TumblingWindowAggregateOperator>
             true,
         ));
 
-        Ok(OperatorNode::from_operator(Box::new(Self {
-            width,
-            binning_function,
-            partial_aggregation_plan,
-            partial_schema,
-            finish_execution_plan,
-            receiver,
-            final_batches_passer,
-            futures: Arc::new(Mutex::new(FuturesUnordered::new())),
-            execs: BTreeMap::new(),
-            window_field,
-            window_index: config.window_index as usize,
-        })))
+        Ok(OperatorNode::from_operator(Box::new(
+            TumblingAggregatingWindowFunc {
+                width,
+                binning_function,
+                partial_aggregation_plan,
+                partial_schema,
+                finish_execution_plan,
+                receiver,
+                final_batches_passer,
+                futures: Arc::new(Mutex::new(FuturesUnordered::new())),
+                execs: BTreeMap::new(),
+                window_field,
+                window_index: config.window_index as usize,
+            },
+        )))
     }
 }
 

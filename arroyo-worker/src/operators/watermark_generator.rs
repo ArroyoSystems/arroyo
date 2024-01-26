@@ -1,8 +1,9 @@
-use crate::engine::ArrowContext;
-use crate::operator::{get_timestamp_col, ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 use arrow::compute::kernels;
 use arrow_array::RecordBatch;
 use arroyo_df::physical::EmptyRegistry;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::get_timestamp_col;
+use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
 use arroyo_rpc::grpc::TableConfig;
 use arroyo_rpc::ArroyoSchema;
@@ -56,17 +57,22 @@ impl WatermarkGenerator {
     }
 }
 
-impl ArrowOperatorConstructor<ExpressionWatermarkConfig> for WatermarkGenerator {
-    fn from_config(config: ExpressionWatermarkConfig) -> anyhow::Result<OperatorNode> {
+pub struct WatermarkGeneratorConstructor;
+
+impl OperatorConstructor for WatermarkGeneratorConstructor {
+    type ConfigT = ExpressionWatermarkConfig;
+    fn with_config(&self, config: ExpressionWatermarkConfig) -> anyhow::Result<OperatorNode> {
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let expression = PhysicalExprNode::decode(&mut config.expression.as_slice())?;
         let expression = parse_physical_expr(&expression, &EmptyRegistry {}, &input_schema.schema)?;
 
-        Ok(OperatorNode::from_operator(Box::new(Self::expression(
-            Duration::from_micros(config.period_micros),
-            config.idle_time_micros.map(Duration::from_micros),
-            expression,
-        ))))
+        Ok(OperatorNode::from_operator(Box::new(
+            WatermarkGenerator::expression(
+                Duration::from_micros(config.period_micros),
+                config.idle_time_micros.map(Duration::from_micros),
+                expression,
+            ),
+        )))
     }
 }
 
