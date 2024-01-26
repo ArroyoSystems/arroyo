@@ -19,15 +19,13 @@ use tracing::info;
 use crate::{
     physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext, EmptyRegistry},
     schemas::add_timestamp_field_arrow,
-    AggregateCalculation, DataFusionEdge, QueryToGraphVisitor,
+    AggregateCalculation, QueryToGraphVisitor,
 };
 use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
 use anyhow::{anyhow, bail, Context, Result};
-use arroyo_datastream::logical::{
-    LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
-};
+use arroyo_datastream::logical::{LogicalGraph, LogicalNode, LogicalProgram, OperatorName};
 use arroyo_rpc::grpc::api::{
-    KeyPlanOperator, SessionWindowAggregateOperator, SlidingWindowAggregateOperator,
+    JoinOperator, KeyPlanOperator, SessionWindowAggregateOperator, SlidingWindowAggregateOperator,
     ValuePlanOperator,
 };
 use arroyo_rpc::{
@@ -112,33 +110,8 @@ impl Planner {
                         parallelism: 1,
                     });
 
-                    let watermark_index = program_graph.add_node(LogicalNode {
-                        operator_id: format!("watermark_{}", program_graph.node_count()),
-                        description: "watermark".to_string(),
-                        operator_name: OperatorName::Watermark,
-                        parallelism: 1,
-                        operator_config: api::PeriodicWatermark {
-                            period_micros: 1_000_000,
-                            max_lateness_micros: 0,
-                            idle_time_micros: None,
-                        }
-                        .encode_to_vec(),
-                    });
-
-                    let mut edge: LogicalEdge = (&DataFusionEdge::new(
-                        table_scan.projected_schema.clone(),
-                        LogicalEdgeType::Forward,
-                        vec![],
-                    )
-                    .unwrap())
-                        .into();
-
-                    edge.projection = table_scan.projection.clone();
-
-                    program_graph.add_edge(source_index, watermark_index, edge);
-
-                    node_mapping.insert(node_index, watermark_index);
-                    watermark_index
+                    node_mapping.insert(node_index, source_index);
+                    source_index
                 }
                 crate::LogicalPlanExtension::ValueCalculation(logical_plan) => {
                     let _inputs = logical_plan.inputs();
@@ -249,92 +222,6 @@ impl Planner {
                     let new_node_index = program_graph.add_node(logical_node);
                     node_mapping.insert(node_index, new_node_index);
                     new_node_index
-                    /*
-
-                    let physical_plan = self.planner
-                        .create_physical_plan(&logical_plan, &self.session_state)
-                        .await
-                        .context("couldn't create physical plan for aggregate")?;
-
-                    let physical_plan_node: PhysicalPlanNode =
-                        PhysicalPlanNode::try_from_physical_plan(
-                            physical_plan,
-                            &ArroyoPhysicalExtensionCodec::default(),
-                        )?;
-
-                    let slide = match &aggregate.window {
-                        WindowType::Tumbling { width } => Some(width),
-                        WindowType::Sliding { width: _, slide } => Some(slide),
-                        WindowType::Instant => bail!("instant window not yet implemented"),
-                        WindowType::Session { gap: _ } => None,
-                    };
-
-                    let date_bin = slide.map(|slide| {
-                        Expr::ScalarFunction(ScalarFunction {
-                            func_def: datafusion_expr::ScalarFunctionDefinition::BuiltIn(
-                                BuiltinScalarFunction::DateBin,
-                            ),
-                            args: vec![
-                                Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
-                                    IntervalMonthDayNanoType::make_value(
-                                        0,
-                                        0,
-                                        slide.as_nanos() as i64,
-                                    ),
-                                ))),
-                                Expr::Column(datafusion_common::Column {
-                                    relation: None,
-                                    name: "_timestamp".into(),
-                                }),
-                            ],
-                        })
-                    });
-                    let binning_function = date_bin
-                        .map(|date_bin| {
-                            self.planner.create_physical_expr(
-                                &date_bin,
-                                &aggregate.aggregate.input.schema().as_ref(),
-                                &aggregate.aggregate.input.schema().as_ref().into(),
-                                &self.session_state,
-                            )
-                        })
-                        .transpose()?;
-
-                    let binning_function_proto = binning_function
-                        .map(|binning_function| PhysicalExprNode::try_from(binning_function))
-                        .transpose()?
-                        .unwrap_or_default();
-                    let input_schema: Schema = aggregate.aggregate.input.schema().as_ref().into();
-
-                    let config = WindowAggregateOperator {
-                        name: format!("windo_aggregate<{:?}>", aggregate.window),
-                        physical_plan: physical_plan_node.encode_to_vec(),
-                        binning_function: binning_function_proto.encode_to_vec(),
-                        // unused now
-                        binning_schema: vec![],
-                        input_schema: serde_json::to_vec(&input_schema)?,
-                        window: Some(Window {
-                            window: Some(aggregate.window.clone().into()),
-                        }),
-                        window_field_name: aggregate.window_field.name().to_string(),
-                        window_index: aggregate.window_index as u64,
-                        key_fields: aggregate
-                            .key_fields
-                            .iter()
-                            .map(|field| (*field) as u64)
-                            .collect(),
-                    };
-
-                    let new_node_index = program_graph.add_node(LogicalNode {
-                        operator_id: format!("aggregate_{}", program_graph.node_count()),
-                        operator_name: OperatorName::ArrowAggregate,
-                        operator_config: config.encode_to_vec(),
-                        parallelism: 1,
-                        description: config.name.clone(),
-                    });
-
-                    node_mapping.insert(node_index, new_node_index);
-                    new_node_index*/
                 }
                 crate::LogicalPlanExtension::Sink {
                     name: _,
@@ -350,6 +237,67 @@ impl Planner {
                     });
                     node_mapping.insert(node_index, sink_index);
                     sink_index
+                }
+                crate::LogicalPlanExtension::WatermarkNode(watermark_node) => {
+                    let expression = self.planner.create_physical_expr(
+                        &watermark_node.watermark_expression.as_ref().unwrap(),
+                        &watermark_node.schema,
+                        &watermark_node.schema.as_ref().into(),
+                        &self.session_state,
+                    )?;
+
+                    let expression = PhysicalExprNode::try_from(expression)?;
+
+                    let watermark_index = program_graph.add_node(LogicalNode {
+                        operator_id: format!("watermark_{}", program_graph.node_count()),
+                        description: "watermark".to_string(),
+                        operator_name: OperatorName::ExpressionWatermark,
+                        parallelism: 1,
+                        operator_config: api::ExpressionWatermarkConfig {
+                            period_micros: 1_000_000,
+                            idle_time_micros: None,
+                            expression: expression.encode_to_vec(),
+                            input_schema: Some(watermark_node.arroyo_schema().try_into()?),
+                        }
+                        .encode_to_vec(),
+                    });
+
+                    node_mapping.insert(node_index, watermark_index);
+                    watermark_index
+                }
+                crate::LogicalPlanExtension::Join(join) => {
+                    let output_schema = ArroyoSchema::new(
+                        Arc::new(join.output_schema.as_ref().into()),
+                        join.output_schema.fields().len() - 1,
+                        vec![],
+                    );
+
+                    let join_plan = self
+                        .planner
+                        .create_physical_plan(&join.rewritten_join, &self.session_state)
+                        .await?;
+                    let physical_plan_node = PhysicalPlanNode::try_from_physical_plan(
+                        join_plan,
+                        &ArroyoPhysicalExtensionCodec::default(),
+                    )?;
+                    let join_plan = physical_plan_node.encode_to_vec();
+
+                    let join_operator = JoinOperator {
+                        name: format!("join_{}", program_graph.node_count()),
+                        left_schema: Some(join.left_input_schema.clone().try_into()?),
+                        right_schema: Some(join.right_input_schema.clone().try_into()?),
+                        output_schema: Some(output_schema.try_into()?),
+                        join_plan,
+                    };
+                    let join_index = program_graph.add_node(LogicalNode {
+                        operator_id: format!("join_{}", program_graph.node_count()),
+                        operator_name: OperatorName::Join,
+                        operator_config: join_operator.encode_to_vec(),
+                        parallelism: 1,
+                        description: "join".to_string(),
+                    });
+                    node_mapping.insert(node_index, join_index);
+                    join_index
                 }
             };
 

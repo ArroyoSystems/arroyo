@@ -8,17 +8,22 @@ use arroyo_rpc::ArroyoSchema;
 use bincode::{Decode, Encode};
 use tracing::{debug, info, warn};
 
+use crate::arrow::join_with_expiration::JoinWithExpirationConstructor;
 use crate::arrow::session_aggregating_window::SessionAggregatingWindowConstructor;
 use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowConstructor;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregateWindowConstructor;
 use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use crate::operators::PeriodicWatermarkGeneratorConstructor;
+use crate::operators::watermark_generator::WatermarkGeneratorConstructor;
 use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
+use arroyo_connectors::connectors;
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };
 pub use arroyo_macro::StreamNode;
+use arroyo_operator::context::{ArrowContext, QueueItem};
+use arroyo_operator::operator::OperatorNode;
+use arroyo_operator::ErasedConstructor;
 use arroyo_rpc::grpc::{api, CheckpointMetadata, TaskAssignment};
 use arroyo_rpc::{ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend};
@@ -27,11 +32,6 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use prometheus::labels;
-
-use arroyo_connectors::connectors;
-use arroyo_operator::context::{ArrowContext, QueueItem};
-use arroyo_operator::operator::OperatorNode;
-use arroyo_operator::ErasedConstructor;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq)]
@@ -756,7 +756,6 @@ impl Engine {
 
 pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNode {
     let ctor: Box<dyn ErasedConstructor> = match operator {
-        OperatorName::Watermark => Box::new(PeriodicWatermarkGeneratorConstructor),
         OperatorName::ArrowValue => Box::new(ValueExecutionConstructor),
         OperatorName::ArrowKey => Box::new(KeyExecutionConstructor),
         OperatorName::ArrowAggregate => {
@@ -766,6 +765,8 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNo
         OperatorName::TumblingWindowAggregate => Box::new(TumblingAggregateWindowConstructor),
         OperatorName::SlidingWindowAggregate => Box::new(SlidingAggregatingWindowConstructor),
         OperatorName::SessionWindowAggregate => Box::new(SessionAggregatingWindowConstructor),
+        OperatorName::ExpressionWatermark => Box::new(WatermarkGeneratorConstructor),
+        OperatorName::Join => Box::new(JoinWithExpirationConstructor),
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(&mut config.as_slice()).unwrap();
             return connectors()

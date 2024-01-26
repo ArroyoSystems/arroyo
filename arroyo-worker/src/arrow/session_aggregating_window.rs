@@ -10,17 +10,17 @@ use arrow::{
         concat_batches, filter_record_batch, kernels::cmp::gt_eq, lexsort_to_indices, partition,
         take, SortColumn,
     },
-    row::{OwnedRow, RowConverter, Rows, SortField},
+    row::{OwnedRow, RowConverter, SortField},
 };
 use arrow_array::{
-    types::TimestampNanosecondType, Array, ArrayRef, BooleanArray, PrimitiveArray, RecordBatch,
-    StructArray, TimestampNanosecondArray,
+    types::TimestampNanosecondType, Array, BooleanArray, PrimitiveArray, RecordBatch, StructArray,
+    TimestampNanosecondArray,
 };
 use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_df::schemas::window_arrow_struct;
 use arroyo_rpc::{
     grpc::{api, TableConfig},
-    ArroyoSchema, ArroyoSchemaRef,
+    ArroyoSchema, ArroyoSchemaRef, Converter,
 };
 use arroyo_state::{
     global_table_config, tables::global_keyed_map::GlobalKeyedView, timestamp_table_config,
@@ -54,30 +54,6 @@ pub struct SessionAggregatingWindowFunc {
     key_computations: HashMap<OwnedRow, KeyComputingHolder>,
     keys_by_start_time: BTreeMap<SystemTime, HashSet<OwnedRow>>,
     row_converter: Converter,
-}
-
-// need to handle the empty case as a row converter without sort fields emits empty Rows.
-enum Converter {
-    RowConverter(RowConverter),
-    Empty(RowConverter, Arc<dyn Array>),
-}
-
-impl Converter {
-    fn convert_columns(&self, columns: &[Arc<dyn Array>]) -> Result<Rows> {
-        match self {
-            Converter::RowConverter(row_converter) => Ok(row_converter.convert_columns(columns)?),
-            Converter::Empty(row_converter, array) => {
-                Ok(row_converter.convert_columns(&vec![array.clone()])?)
-            }
-        }
-    }
-
-    fn convert_rows(&self, rows: Vec<arrow::row::Row<'_>>) -> Result<Vec<ArrayRef>> {
-        match self {
-            Converter::RowConverter(row_converter) => Ok(row_converter.convert_rows(rows)?),
-            Converter::Empty(_row_converter, _array) => Ok(vec![]),
-        }
-    }
 }
 
 impl SessionAggregatingWindowFunc {
@@ -194,17 +170,16 @@ impl SessionAggregatingWindowFunc {
 
         for range in partition {
             let key_batch = sorted_batch.slice(range.start, range.end - range.start);
-            let first_row = self
+            let row = self
                 .row_converter
                 .convert_columns(
                     &key_batch.slice(0, 1).columns()
                         [0..(self.config.input_schema_ref.key_indices.len())],
                 )
                 .context("failed to convert rows")?;
-            let row = first_row.row(0);
             let key_computation =
                 self.key_computations
-                    .entry(row.owned())
+                    .entry(row.clone())
                     .or_insert_with(|| KeyComputingHolder {
                         session_window_config: self.config.clone(),
                         active_session: None,
@@ -225,41 +200,38 @@ impl SessionAggregatingWindowFunc {
             match initial_next_watermark_action {
                 Some(initial_next_watermark_action) => {
                     if initial_next_watermark_action != new_next_watermark_action {
-                        let owned_row = row.owned();
                         self.keys_by_next_watermark_action
                             .get_mut(&initial_next_watermark_action)
                             .expect("should have key")
-                            .remove(&owned_row);
+                            .remove(&row);
                         self.keys_by_next_watermark_action
                             .entry(new_next_watermark_action)
                             .or_default()
-                            .insert(owned_row);
+                            .insert(row.clone());
                     }
                     let initial_data_start =
                         initial_data_start.expect("should have initial data start");
                     if initial_data_start != new_initial_data_start {
-                        let owned_row = row.owned();
                         self.keys_by_start_time
                             .get_mut(&initial_data_start)
                             .expect("should have key")
-                            .remove(&owned_row);
+                            .remove(&row);
                         self.keys_by_start_time
                             .entry(new_initial_data_start)
                             .or_default()
-                            .insert(owned_row);
+                            .insert(row);
                     }
                 }
                 None => {
-                    let owned_row = row.owned();
                     self.keys_by_next_watermark_action
                         .entry(new_next_watermark_action)
                         .or_default()
-                        .insert(owned_row.clone());
+                        .insert(row.clone());
 
                     self.keys_by_start_time
                         .entry(new_initial_data_start)
                         .or_default()
-                        .insert(owned_row);
+                        .insert(row);
                 }
             }
         }

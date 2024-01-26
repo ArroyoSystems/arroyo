@@ -167,6 +167,14 @@ message SessionWindowAggregateOperator {
   bytes final_aggregation_plan = 8;
 }
 
+message JoinOperator {
+  string name = 1;
+  ArroyoSchema left_schema = 2;
+  ArroyoSchema right_schema = 3;
+  ArroyoSchema output_schema = 4;
+  bytes join_plan = 5;
+}
+
 enum OperatorName {
   STRUCT_TO_RECORD_BATCH = 0;
   RECORD_BATCH_TO_STRUCT = 1;
@@ -257,6 +265,13 @@ message ExpressionWatermark {
   uint64 period_micros = 1;
   string expression = 2;
   optional uint64 idle_time_micros = 3;
+}
+
+message ExpressionWatermarkConfig {
+  uint64 period_micros = 1;
+  optional uint64 idle_time_micros = 2;
+  ArroyoSchema input_schema = 3;
+  bytes expression = 4;
 }
 
 message ExpressionOperator {

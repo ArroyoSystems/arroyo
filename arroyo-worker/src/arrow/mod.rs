@@ -23,6 +23,7 @@ use prost::Message as ProstMessage;
 use std::sync::Arc;
 use std::sync::RwLock;
 
+pub mod join_with_expiration;
 pub mod session_aggregating_window;
 pub mod sliding_aggregating_window;
 pub(crate) mod sync;
@@ -42,7 +43,6 @@ impl OperatorConstructor for ValueExecutionConstructor {
         let registry = EmptyRegistry {};
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
-        //info!("physical plan is {:#?}", plan);
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::SingleLockedBatch(locked_batch.clone()),
         };
@@ -168,7 +168,6 @@ impl OperatorConstructor for KeyExecutionConstructor {
         let registry = EmptyRegistry {};
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
-        //info!("physical plan is {:#?}", plan);
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::SingleLockedBatch(locked_batch.clone()),
         };

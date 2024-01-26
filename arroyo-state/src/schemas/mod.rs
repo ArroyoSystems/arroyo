@@ -9,7 +9,7 @@ use arrow_array::{
 };
 use arrow_ord::cmp::{gt_eq, lt_eq};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use arroyo_rpc::{get_hasher, ArroyoSchema};
+use arroyo_rpc::{get_hasher, ArroyoSchemaRef};
 use arroyo_types::from_nanos;
 use bincode::config;
 use datafusion_common::{hash_utils::create_hashes, ScalarValue};
@@ -21,14 +21,14 @@ use crate::{parquet::ParquetStats, DataOperation};
 #[derive(Debug, Clone)]
 pub struct SchemaWithHashAndOperation {
     state_schema: SchemaRef,
-    memory_schema: ArroyoSchema,
+    memory_schema: ArroyoSchemaRef,
     hash_index: usize,
     operation_index: usize,
 }
 
 #[allow(unused)]
 impl SchemaWithHashAndOperation {
-    pub(crate) fn new(memory_schema: ArroyoSchema) -> Self {
+    pub(crate) fn new(memory_schema: ArroyoSchemaRef) -> Self {
         let mut fields = memory_schema.schema.fields().to_vec();
         //TODO: we could have the additional columns at the start, rather than the end
         fields.push(Arc::new(Field::new("_key_hash", DataType::UInt64, false)));
@@ -55,8 +55,8 @@ impl SchemaWithHashAndOperation {
         self.state_schema.clone()
     }
 
-    fn memory_schema(&self) -> SchemaRef {
-        self.memory_schema.schema.clone()
+    pub fn memory_schema(&self) -> ArroyoSchemaRef {
+        self.memory_schema.clone()
     }
 
     fn project_indices(&self) -> Vec<usize> {

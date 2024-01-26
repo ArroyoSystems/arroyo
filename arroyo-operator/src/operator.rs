@@ -197,7 +197,7 @@ async fn operator_run_behavior(
                         match message {
                             ArrowMessage::Data(record) => {
                                 TaskCounters::MessagesReceived.for_task(&ctx.task_info).inc();
-                                this.process_batch(record, ctx)
+                                this.process_batch_index(idx, in_partitions, record, ctx)
                                     .instrument(tracing::trace_span!("handle_fn",
                                         name,
                                         operator_id = task_info.operator_id,
@@ -400,6 +400,16 @@ pub trait ArrowOperator: Send + 'static {
 
     #[allow(unused_variables)]
     async fn on_start(&mut self, ctx: &mut ArrowContext) {}
+
+    async fn process_batch_index(
+        &mut self,
+        _index: usize,
+        _in_partitions: usize,
+        batch: RecordBatch,
+        ctx: &mut ArrowContext,
+    ) {
+        self.process_batch(batch, ctx).await
+    }
 
     async fn process_batch(&mut self, batch: RecordBatch, ctx: &mut ArrowContext);
 

@@ -12,6 +12,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_types::ArroyoExtensionType;
+use datafusion::sql::planner::PlannerContext;
 use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
     optimizer::{analyzer::Analyzer, optimizer::Optimizer, OptimizerContext},
@@ -23,8 +24,7 @@ use datafusion::{
 use datafusion_common::Column;
 use datafusion_common::{config::ConfigOptions, DFField, DFSchema};
 use datafusion_expr::{
-    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, LogicalPlan, Projection,
-    WriteOp,
+    CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, LogicalPlan, WriteOp,
 };
 use tracing::info;
 
@@ -65,7 +65,7 @@ impl FieldSpec {
             FieldSpec::VirtualField { .. } => true,
         }
     }
-    fn struct_field(&self) -> &Field {
+    pub fn field(&self) -> &Field {
         match self {
             FieldSpec::StructField(f) => f,
             FieldSpec::VirtualField { field, .. } => field,
@@ -159,7 +159,7 @@ impl ConnectorTable {
             .iter()
             .filter(|f| !f.is_virtual())
             .map(|f| {
-                let struct_field = f.struct_field();
+                let struct_field = f.field();
                 struct_field.clone().try_into().map_err(|_| {
                     anyhow!(
                         "field '{}' has a type '{:?}' that cannot be used in a connection table",
@@ -224,14 +224,6 @@ impl ConnectorTable {
             .unwrap_or(false)
     }
 
-    fn virtual_field_projection(&self) -> Result<Option<Projection>> {
-        if self.has_virtual_fields() {
-            bail!("virtual fields not supported in Arrow");
-        } else {
-            Ok(None)
-        }
-    }
-
     fn timestamp_override(&self) -> Result<Option<Expr>> {
         if let Some(field_name) = &self.event_time_field {
             if self.is_update() {
@@ -243,8 +235,8 @@ impl ConnectorTable {
                 .fields
                 .iter()
                 .find(|f| {
-                    f.struct_field().name() == field_name
-                        && matches!(f.struct_field().data_type(), DataType::Timestamp(..))
+                    f.field().name() == field_name
+                        && matches!(f.field().data_type(), DataType::Timestamp(..))
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -253,9 +245,7 @@ impl ConnectorTable {
                     )
                 })?;
 
-            Ok(Some(Expr::Column(Column::from_name(
-                field.struct_field().name(),
-            ))))
+            Ok(Some(Expr::Column(Column::from_name(field.field().name()))))
         } else {
             Ok(None)
         }
@@ -268,8 +258,8 @@ impl ConnectorTable {
                 .fields
                 .iter()
                 .find(|f| {
-                    f.struct_field().name() == field_name
-                        && matches!(f.struct_field().data_type(), DataType::Timestamp(..))
+                    f.field().name() == field_name
+                        && matches!(f.field().data_type(), DataType::Timestamp(..))
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -278,9 +268,7 @@ impl ConnectorTable {
                     )
                 })?;
 
-            Ok(Some(Expr::Column(Column::from_name(
-                field.struct_field().name(),
-            ))))
+            Ok(Some(Expr::Column(Column::from_name(field.field().name()))))
         } else {
             Ok(None)
         }
@@ -314,7 +302,6 @@ impl ConnectorTable {
             bail!("can't read from a source with virtual fields and update mode.")
         }
 
-        let _virtual_field_projection = self.virtual_field_projection()?;
         let timestamp_override = self.timestamp_override()?;
         let watermark_column = self.watermark_column()?;
 
@@ -488,7 +475,7 @@ impl Table {
             )
             .collect();
 
-        let _physical_schema = DFSchema::new_with_metadata(
+        let physical_schema = DFSchema::new_with_metadata(
             physical_fields
                 .iter()
                 .map(|f| {
@@ -502,24 +489,24 @@ impl Table {
             HashMap::new(),
         )?;
 
-        let _sql_to_rel = SqlToRel::new(schema_provider);
+        let sql_to_rel = SqlToRel::new(schema_provider);
         struct_field_pairs
             .into_iter()
             .map(|(struct_field, generating_expression)| {
-                if let Some(_generating_expression) = generating_expression {
+                if let Some(generating_expression) = generating_expression {
                     // TODO: Implement automatic type coercion here, as we have elsewhere.
                     // It is done by calling the Analyzer which inserts CAST operators where necessary.
-                    todo!("support generating expressions");
-                    /*let df_expr = sql_to_rel.sql_to_expr(
+
+                    let df_expr = sql_to_rel.sql_to_expr(
                         generating_expression,
                         &physical_schema,
                         &mut PlannerContext::default(),
                     )?;
-                    let expression = expression_context.compile_expr(&df_expr)?;
+
                     Ok(FieldSpec::VirtualField {
                         field: struct_field,
-                        expression,
-                    })*/
+                        expression: df_expr,
+                    })
                 } else {
                     Ok(FieldSpec::StructField(struct_field))
                 }
@@ -569,7 +556,7 @@ impl Table {
                         name,
                         fields: fields
                             .into_iter()
-                            .map(|f| Arc::new(f.struct_field().clone()))
+                            .map(|f| Arc::new(f.field().clone()))
                             .collect(),
                     }))
                 }
@@ -668,7 +655,7 @@ impl Table {
                 .unwrap_or_else(|| {
                     fields
                         .iter()
-                        .map(|field| field.struct_field().clone().into())
+                        .map(|field| field.field().clone().into())
                         .collect()
                 }),
             Table::TableFromQuery { logical_plan, .. } => logical_plan
