@@ -19,7 +19,7 @@ use tracing::info;
 use crate::{
     physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext, EmptyRegistry},
     schemas::add_timestamp_field_arrow,
-    AggregateCalculation, DataFusionEdge, QueryToGraphVisitor,
+    AggregateCalculation, QueryToGraphVisitor,
 };
 use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
 use anyhow::{anyhow, bail, Context, Result};
@@ -36,6 +36,8 @@ use arroyo_rpc::{
 };
 use datafusion_common::{DFSchema, DFSchemaRef, ScalarValue};
 use datafusion_expr::{expr::ScalarFunction, BuiltinScalarFunction, Expr, LogicalPlan};
+use datafusion_physical_expr::create_physical_expr;
+use datafusion_physical_expr::execution_props::ExecutionProps;
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{
@@ -112,33 +114,8 @@ impl Planner {
                         parallelism: 1,
                     });
 
-                    let watermark_index = program_graph.add_node(LogicalNode {
-                        operator_id: format!("watermark_{}", program_graph.node_count()),
-                        description: "watermark".to_string(),
-                        operator_name: OperatorName::Watermark,
-                        parallelism: 1,
-                        operator_config: api::PeriodicWatermark {
-                            period_micros: 1_000_000,
-                            max_lateness_micros: 0,
-                            idle_time_micros: None,
-                        }
-                        .encode_to_vec(),
-                    });
-
-                    let mut edge: LogicalEdge = (&DataFusionEdge::new(
-                        table_scan.projected_schema.clone(),
-                        LogicalEdgeType::Forward,
-                        vec![],
-                    )
-                    .unwrap())
-                        .into();
-
-                    edge.projection = table_scan.projection.clone();
-
-                    program_graph.add_edge(source_index, watermark_index, edge);
-
-                    node_mapping.insert(node_index, watermark_index);
-                    watermark_index
+                    node_mapping.insert(node_index, source_index);
+                    source_index
                 }
                 crate::LogicalPlanExtension::ValueCalculation(logical_plan) => {
                     let _inputs = logical_plan.inputs();
@@ -350,6 +327,73 @@ impl Planner {
                     });
                     node_mapping.insert(node_index, sink_index);
                     sink_index
+                }
+                crate::LogicalPlanExtension::WatermarkNode(w) => {
+                    let expression = create_physical_expr(
+                        &w.watermark_expression.as_ref().unwrap(),
+                        &w.schema,
+                        &w.schema.as_ref().into(),
+                        &ExecutionProps::new(),
+                    )?;
+
+                    let expression = PhysicalExprNode::try_from(expression)?;
+                    let schema = ArroyoSchema {
+                        schema: Arc::new(w.schema.as_ref().into()),
+                        timestamp_index: w.schema.fields().len() - 1, // TODO: is this correct?
+                        key_indices: vec![],
+                    };
+
+                    let projection_execution_plan = self
+                        .planner
+                        .create_physical_plan(&w.input.clone(), &self.session_state)
+                        .await
+                        .context("creating physical plan for watermark input value calculation")?;
+
+                    let projection_physical_plan_node = PhysicalPlanNode::try_from_physical_plan(
+                        projection_execution_plan,
+                        &ArroyoPhysicalExtensionCodec::default(),
+                    )?;
+
+                    let projection_node_config = ValuePlanOperator {
+                        name: "proj".into(),
+                        physical_plan: projection_physical_plan_node.encode_to_vec(),
+                    };
+
+                    let projection_node_index = program_graph.add_node(LogicalNode {
+                        operator_id: format!("value_{}", program_graph.node_count()),
+                        description: format!(
+                            "pre_watermark_projection<{}>",
+                            projection_node_config.name
+                        ),
+                        operator_name: OperatorName::ArrowValue,
+                        operator_config: projection_node_config.encode_to_vec(),
+                        parallelism: 1,
+                    });
+
+                    let watermark_index = program_graph.add_node(LogicalNode {
+                        operator_id: format!("watermark_{}", program_graph.node_count()),
+                        description: "watermark".to_string(),
+                        operator_name: OperatorName::ExpressionWatermark,
+                        parallelism: 1,
+                        operator_config: api::ExpressionWatermarkConfig {
+                            period_micros: 1_000_000,
+                            idle_time_micros: None,
+                            expression: expression.encode_to_vec(),
+                            input_schema: Some(schema.clone().try_into()?),
+                        }
+                        .encode_to_vec(),
+                    });
+
+                    let edge = LogicalEdge {
+                        edge_type: LogicalEdgeType::Forward,
+                        schema,
+                        projection: None,
+                    };
+
+                    program_graph.add_edge(projection_node_index, watermark_index, edge);
+
+                    node_mapping.insert(node_index, watermark_index);
+                    projection_node_index
                 }
             };
 
