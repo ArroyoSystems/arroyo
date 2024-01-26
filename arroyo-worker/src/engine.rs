@@ -20,6 +20,7 @@ use datafusion_common::hash_utils;
 
 use tracing::{debug, info, warn};
 
+use crate::arrow::join_with_expiration::JoinWithExpiration;
 use crate::arrow::session_aggregating_window::SessionAggregatingWindowFunc;
 use crate::arrow::sliding_aggregating_window::SlidingAggregatingWindowFunc;
 use crate::arrow::tumbling_aggregating_window::TumblingAggregatingWindowFunc;
@@ -1440,6 +1441,9 @@ pub fn construct_operator(operator: OperatorName, config: Vec<u8>) -> OperatorNo
         }
         OperatorName::SessionWindowAggregate => {
             SessionAggregatingWindowFunc::from_config(prost::Message::decode(&mut buf).unwrap())
+        }
+        OperatorName::Join => {
+            JoinWithExpiration::from_config(prost::Message::decode(&mut buf).unwrap())
         }
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(&mut buf).unwrap();

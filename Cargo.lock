@@ -964,7 +964,9 @@ version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro",
+ "arrow 49.0.0",
  "arrow-array 49.0.0",
+ "arrow-ord 49.0.0",
  "arrow-schema 49.0.0",
  "arroyo-types",
  "async-trait",

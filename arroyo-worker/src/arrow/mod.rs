@@ -32,6 +32,7 @@ use tonic::transport::Channel;
 
 use crate::operator::{ArrowOperator, ArrowOperatorConstructor, OperatorNode};
 
+pub mod join_with_expiration;
 pub mod session_aggregating_window;
 pub mod sliding_aggregating_window;
 pub(crate) mod sync;
@@ -49,7 +50,6 @@ impl ArrowOperatorConstructor<api::ValuePlanOperator> for ValueExecutionOperator
         let registry = EmptyRegistry {};
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
-        //info!("physical plan is {:#?}", plan);
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::SingleLockedBatch(locked_batch.clone()),
         };
@@ -169,7 +169,6 @@ impl ArrowOperatorConstructor<api::KeyPlanOperator> for KeyExecutionOperator {
         let registry = EmptyRegistry {};
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
-        //info!("physical plan is {:#?}", plan);
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::SingleLockedBatch(locked_batch.clone()),
         };

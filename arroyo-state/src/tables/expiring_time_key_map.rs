@@ -1,10 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use anyhow::{anyhow, bail, Ok, Result};
-use arrow::compute::kernels::aggregate;
+use arrow::{
+    compute::{concat_batches, kernels::aggregate},
+    row::{OwnedRow, Row},
+};
 use arrow_array::{cast::AsArray, types::TimestampNanosecondType, PrimitiveArray, RecordBatch};
 use arrow_ord::partition::partition;
 
@@ -13,7 +17,7 @@ use arroyo_rpc::{
         ExpiringKeyedTimeSubtaskCheckpointMetadata, ExpiringKeyedTimeTableCheckpointMetadata,
         ExpiringKeyedTimeTableConfig, ParquetTimeFile, TableEnum,
     },
-    ArroyoSchema,
+    ArroyoSchema, ArroyoSchemaRef, Converter,
 };
 use arroyo_storage::StorageProviderRef;
 use arroyo_types::{from_micros, from_nanos, print_time, to_micros, TaskInfoRef};
@@ -145,6 +149,82 @@ impl ExpiringTimeKeyTable {
             state_tx,
         })
     }
+
+    pub(crate) async fn get_key_time_view(
+        &self,
+        state_tx: Sender<StateMessage>,
+        watermark: Option<SystemTime>,
+    ) -> Result<KeyTimeView> {
+        let cutoff = watermark
+            .map(|watermark| (watermark - self.retention))
+            .unwrap_or_else(|| SystemTime::UNIX_EPOCH);
+        info!(
+            "watermark is {:?}, cutoff is {:?}",
+            watermark.map(print_time),
+            print_time(cutoff)
+        );
+        let files: Vec<_> = self
+            .checkpoint_files
+            .iter()
+            .filter_map(|file| {
+                // file must have some data greater than the cutoff and routing keys within the range.
+                if cutoff <= from_micros(file.max_timestamp_micros)
+                    && (file.max_routing_key >= *self.task_info.key_range.start()
+                        && *self.task_info.key_range.end() >= file.min_routing_key)
+                {
+                    let needs_hash_filtering = *self.task_info.key_range.end()
+                        < file.max_routing_key
+                        || *self.task_info.key_range.start() > file.min_routing_key;
+                    Some((file.file.clone(), needs_hash_filtering))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut view = KeyTimeView::new(self.clone(), state_tx)?;
+        for (file, needs_filtering) in files {
+            let object_meta = self
+                .storage_provider
+                .get_backing_store()
+                .head(&(file.into()))
+                .await?;
+            let object_reader =
+                ParquetObjectReader::new(self.storage_provider.get_backing_store(), object_meta);
+            let reader_builder = ParquetRecordBatchStreamBuilder::new(object_reader).await?;
+            let mut stream = reader_builder.build()?;
+            // projection to trim the metadata fields. Should probably be factored out.
+            let projection: Vec<_> = (0..(stream.schema().all_fields().len() - 2)).collect();
+            while let Some(batch_result) = stream.next().await {
+                let mut batch = batch_result?;
+                if needs_filtering {
+                    match self
+                        .schema
+                        .filter_by_hash_index(batch, &self.task_info.key_range)?
+                    {
+                        None => continue,
+                        Some(filtered_batch) => batch = filtered_batch,
+                    };
+                }
+                batch = batch.project(&projection)?;
+                let timestamp_array: &PrimitiveArray<TimestampNanosecondType> = batch
+                    .column(self.schema.timestamp_index())
+                    .as_primitive_opt()
+                    .ok_or_else(|| anyhow!("failed to find timestamp column"))?;
+                let max_timestamp = from_nanos(
+                    aggregate::max(timestamp_array)
+                        .ok_or_else(|| anyhow!("should have max timestamp"))?
+                        as u128,
+                );
+                if max_timestamp < cutoff {
+                    continue;
+                }
+                // TODO: more time filtering
+                view.insert_internal(batch)?;
+            }
+        }
+        Ok(view)
+    }
 }
 
 impl Table for ExpiringTimeKeyTable {
@@ -167,7 +247,7 @@ impl Table for ExpiringTimeKeyTable {
             .ok_or_else(|| anyhow!("should have schema"))?
             .try_into()?;
 
-        let schema = SchemaWithHashAndOperation::new(schema);
+        let schema = SchemaWithHashAndOperation::new(Arc::new(schema));
 
         let checkpoint_files = checkpoint_message
             .map(|checkpoint_message| checkpoint_message.files)
@@ -510,5 +590,112 @@ impl ExpiringTimeKeyView {
             (None, Some(time)) | (Some(time), None) => Some(*time),
             (Some(buffered_time), Some(flushed_time)) => Some(*buffered_time.min(flushed_time)),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct KeyTimeView {
+    key_converter: Converter,
+    parent: ExpiringTimeKeyTable,
+    keyed_data: HashMap<Vec<u8>, BatchData>,
+    schema: ArroyoSchemaRef,
+    value_schema: ArroyoSchemaRef,
+    state_tx: Sender<StateMessage>,
+}
+
+#[derive(Debug)]
+enum BatchData {
+    SingleBatch(RecordBatch),
+    BatchVec(Vec<RecordBatch>),
+}
+
+impl KeyTimeView {
+    pub fn get_batch(&mut self, row: Row) -> Result<Option<&RecordBatch>> {
+        if !self.keyed_data.contains_key(row.as_ref()) {
+            return Ok(None);
+        }
+        let Some(value) = self.keyed_data.get_mut(row.as_ref()) else {
+            unreachable!("just checked")
+        };
+        if let BatchData::BatchVec(batches) = value {
+            let coalesced_batches = concat_batches(&self.value_schema.schema, batches.iter())?;
+            *value = BatchData::SingleBatch(coalesced_batches);
+        }
+        let Some(BatchData::SingleBatch(single_batch)) = self.keyed_data.get(row.as_ref()) else {
+            unreachable!("just inserted")
+        };
+        Ok(Some(single_batch))
+    }
+
+    pub async fn write_batch_to_state(&mut self, batch: RecordBatch) -> Result<()> {
+        self.state_tx
+            .send(StateMessage::TableData {
+                table: self.parent.table_name.to_string(),
+                data: TableData::RecordBatch(batch.clone()),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn insert(&mut self, batch: RecordBatch) -> Result<Vec<OwnedRow>> {
+        self.state_tx
+            .send(StateMessage::TableData {
+                table: self.parent.table_name.to_string(),
+                data: TableData::RecordBatch(batch.clone()),
+            })
+            .await?;
+        self.insert_internal(batch)
+    }
+
+    fn insert_internal(&mut self, batch: RecordBatch) -> Result<Vec<OwnedRow>> {
+        let sorted_batch = self.schema.sort(batch, false)?;
+        let value_indices =
+            (self.schema.key_indices.len()..self.schema.schema.fields().len()).collect::<Vec<_>>();
+        let value_batch = sorted_batch.project(&value_indices)?;
+        let mut rows = vec![];
+        for range in self.schema.partition(&sorted_batch, false)? {
+            let value_batch = value_batch.slice(range.start, range.end - range.start);
+            let key_row = self.key_converter.convert_columns(
+                sorted_batch
+                    .slice(range.start, 1)
+                    .project(&self.schema.key_indices)?
+                    .columns(),
+            )?;
+            rows.push(key_row.clone());
+            let contents = self.keyed_data.get_mut(key_row.as_ref());
+            let batch = match contents {
+                Some(BatchData::BatchVec(vec)) => {
+                    vec.push(value_batch);
+                    continue;
+                }
+                None => {
+                    self.keyed_data.insert(
+                        key_row.as_ref().to_vec(),
+                        BatchData::SingleBatch(value_batch),
+                    );
+                    continue;
+                }
+                Some(BatchData::SingleBatch(single_batch)) => single_batch.clone(),
+            };
+            self.keyed_data.insert(
+                key_row.as_ref().to_vec(),
+                BatchData::BatchVec(vec![batch, value_batch]),
+            );
+        }
+        Ok(rows)
+    }
+
+    fn new(parent: ExpiringTimeKeyTable, state_tx: Sender<StateMessage>) -> Result<Self> {
+        let schema = parent.schema.memory_schema();
+        let key_converter = schema.converter(false)?;
+        let value_schema = Arc::new(schema.schema_without_keys()?);
+        Ok(Self {
+            key_converter,
+            parent,
+            keyed_data: HashMap::new(),
+            schema,
+            value_schema,
+            state_tx,
+        })
     }
 }

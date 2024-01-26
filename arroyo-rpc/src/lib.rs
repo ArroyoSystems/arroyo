@@ -5,13 +5,19 @@ pub mod schema_resolver;
 pub mod var_str;
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::{fs, time::SystemTime};
 
 use crate::api_types::connections::PrimitiveType;
 use crate::formats::{BadData, Format, Framing};
 use crate::grpc::{LoadCompactedDataReq, SubtaskCheckpointMetadata};
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
+use arrow::compute::take;
+use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::builder::{make_builder, ArrayBuilder};
+use arrow_array::{Array, ArrayRef, BooleanArray, RecordBatch};
+use arrow_ord::partition::partition;
+use arrow_ord::sort::{lexsort_to_indices, SortColumn};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use arroyo_types::CheckpointBarrier;
 use grpc::{api, StopMode, TaskCheckpointEventType};
@@ -327,7 +333,145 @@ impl ArroyoSchema {
             .map(|f| make_builder(f.data_type(), 8))
             .collect()
     }
+
+    pub fn sort_columns(&self, batch: &RecordBatch, with_timestamp: bool) -> Vec<SortColumn> {
+        let mut columns: Vec<_> = self
+            .key_indices
+            .iter()
+            .map(|index| SortColumn {
+                values: batch.column(*index).clone(),
+                options: None,
+            })
+            .collect();
+        if with_timestamp {
+            columns.push(SortColumn {
+                values: batch.column(self.timestamp_index).clone(),
+                options: None,
+            });
+        }
+        columns
+    }
+
+    pub fn sort_fields(&self, with_timestamp: bool) -> Vec<SortField> {
+        let mut sort_fields = vec![];
+        sort_fields.extend(
+            self.key_indices
+                .iter()
+                .map(|index| SortField::new(self.schema.field(*index).data_type().clone())),
+        );
+        if with_timestamp {
+            sort_fields.push(SortField::new(DataType::Timestamp(
+                TimeUnit::Nanosecond,
+                None,
+            )));
+        }
+        sort_fields
+    }
+
+    pub fn converter(&self, with_timestamp: bool) -> Result<Converter> {
+        Converter::new(self.sort_fields(with_timestamp))
+    }
+
+    pub fn sort(&self, batch: RecordBatch, with_timestamp: bool) -> Result<RecordBatch> {
+        if self.key_indices.is_empty() && !with_timestamp {
+            return Ok(batch);
+        }
+        let sort_columns = self.sort_columns(&batch, with_timestamp);
+        let sort_indices = lexsort_to_indices(&sort_columns, None).expect("should be able to sort");
+        let columns = batch
+            .columns()
+            .iter()
+            .map(|c| take(c, &sort_indices, None).unwrap())
+            .collect();
+
+        Ok(RecordBatch::try_new(batch.schema(), columns)?)
+    }
+
+    pub fn partition(
+        &self,
+        batch: &RecordBatch,
+        with_timestamp: bool,
+    ) -> Result<Vec<Range<usize>>> {
+        if self.key_indices.is_empty() && !with_timestamp {
+            return Ok(vec![0..batch.num_rows()]);
+        }
+        let mut partition_columns: Vec<_> = self
+            .key_indices
+            .iter()
+            .map(|index| batch.column(*index).clone())
+            .collect();
+        if with_timestamp {
+            partition_columns.push(batch.column(self.timestamp_index).clone());
+        }
+        Ok(partition(&partition_columns)?.ranges())
+    }
+
+    pub fn unkeyed_batch(&self, batch: &RecordBatch) -> Result<RecordBatch> {
+        let columns: Vec<_> = (0..batch.num_columns())
+            .filter(|index| !self.key_indices.contains(index))
+            .collect();
+        Ok(batch.project(&columns)?)
+    }
+
+    pub fn schema_without_keys(&self) -> Result<Self> {
+        let unkeyed_schema = Schema::new(
+            self.schema
+                .fields()
+                .iter()
+                .enumerate()
+                .filter(|(index, _field)| !self.key_indices.contains(index))
+                .map(|(_, field)| field.as_ref().clone())
+                .collect::<Vec<_>>(),
+        );
+        let timestamp_index = unkeyed_schema.index_of(TIMESTAMP_FIELD)?;
+        Ok(Self {
+            schema: Arc::new(unkeyed_schema),
+            timestamp_index: timestamp_index,
+            key_indices: vec![],
+        })
+    }
 }
+
+// need to handle the empty case as a row converter without sort fields emits empty Rows.
+#[derive(Debug)]
+pub enum Converter {
+    RowConverter(RowConverter),
+    Empty(RowConverter, Arc<dyn Array>),
+}
+
+impl Converter {
+    pub fn new(sort_fields: Vec<SortField>) -> Result<Self> {
+        if sort_fields.is_empty() {
+            let array = Arc::new(BooleanArray::from(vec![false]));
+            Ok(Self::Empty(
+                RowConverter::new(vec![SortField::new(DataType::Boolean)])?,
+                array,
+            ))
+        } else {
+            Ok(Self::RowConverter(RowConverter::new(sort_fields)?))
+        }
+    }
+
+    pub fn convert_columns(&self, columns: &[Arc<dyn Array>]) -> anyhow::Result<OwnedRow> {
+        match self {
+            Converter::RowConverter(row_converter) => {
+                Ok(row_converter.convert_columns(columns)?.row(0).owned())
+            }
+            Converter::Empty(row_converter, array) => Ok(row_converter
+                .convert_columns(&vec![array.clone()])?
+                .row(0)
+                .owned()),
+        }
+    }
+
+    pub fn convert_rows(&self, rows: Vec<arrow::row::Row<'_>>) -> anyhow::Result<Vec<ArrayRef>> {
+        match self {
+            Converter::RowConverter(row_converter) => Ok(row_converter.convert_rows(rows)?),
+            Converter::Empty(_row_converter, _array) => Ok(vec![]),
+        }
+    }
+}
+
 fn default_async_timeout_seconds() -> u64 {
     10
 }
