@@ -2,19 +2,17 @@ use std::{collections::HashMap, path::Path};
 
 use arrow::array::RecordBatch;
 
-use arroyo_rpc::{
-    grpc::{TableConfig},
-};
+use arroyo_rpc::grpc::TableConfig;
 use arroyo_types::{CheckpointBarrier, SignalMessage};
 
 use async_trait::async_trait;
 
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::ArrowOperator;
 use tokio::{
     fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
 };
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{ArrowOperator};
 
 pub struct SingleFileSink {
     pub output_path: String,

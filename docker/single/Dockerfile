@@ -66,6 +66,7 @@ COPY arroyo-api arroyo-api
 COPY arroyo-datastream arroyo-datastream
 COPY arroyo-node arroyo-node
 COPY arroyo-openapi arroyo-openapi
+COPY arroyo-operator arroyo-operator
 COPY arroyo-df arroyo-df
 COPY arroyo-sql-macro arroyo-sql-macro
 COPY arroyo-sql-testing arroyo-sql-testing

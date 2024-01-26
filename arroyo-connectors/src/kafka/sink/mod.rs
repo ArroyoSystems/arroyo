@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use arroyo_rpc::grpc::{TableConfig};
+use arroyo_rpc::grpc::TableConfig;
 use arroyo_rpc::{CheckpointEvent, ControlMessage, ControlResp};
 use arroyo_types::*;
 use std::collections::HashMap;
@@ -14,14 +14,14 @@ use rdkafka::ClientConfig;
 
 use arrow::array::RecordBatch;
 use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::ArrowOperator;
 use arroyo_types::CheckpointBarrier;
 use async_trait::async_trait;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use std::time::{Duration, SystemTime};
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::ArrowOperator;
 
-use super::{SinkCommitMode};
+use super::SinkCommitMode;
 
 #[cfg(test)]
 mod test;

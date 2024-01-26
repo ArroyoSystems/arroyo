@@ -1,9 +1,12 @@
 use anyhow::{anyhow, bail};
+use arroyo_formats::serialize::ArrowSerializer;
 use arroyo_formats::ArrowDeserializer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::formats::{BadData, Format, JsonFormat};
-use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaRegistryClient, FailingSchemaResolver, SchemaResolver};
+use arroyo_rpc::schema_resolver::{
+    ConfluentSchemaRegistry, ConfluentSchemaRegistryClient, FailingSchemaResolver, SchemaResolver,
+};
 use arroyo_rpc::{schema_resolver, var_str::VarStr, ArroyoSchema, OperatorConfig};
 use futures::TryFutureExt;
 use rdkafka::{
@@ -22,17 +25,16 @@ use tokio::sync::oneshot::Receiver;
 use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
-use arroyo_formats::serialize::ArrowSerializer;
 
 use crate::{pull_opt, send, ConnectionType};
 
-use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
 use crate::kafka::sink::KafkaSinkFunc;
 use crate::kafka::source::KafkaSourceFunc;
+use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
 
-mod source;
 mod sink;
+mod source;
 
 const CONFIG_SCHEMA: &str = include_str!("./profile.json");
 const TABLE_SCHEMA: &str = include_str!("./table.json");
@@ -171,10 +173,7 @@ impl Connector for KafkaConnector {
                 ConnectionType::Source,
                 format!("KafkaSource<{}>", table.topic),
             ),
-            TableType::Sink { .. } => (
-                ConnectionType::Sink,
-                format!("KafkaSink<{}>", table.topic),
-            ),
+            TableType::Sink { .. } => (ConnectionType::Sink, format!("KafkaSink<{}>", table.topic)),
         };
 
         let schema = schema
@@ -306,20 +305,30 @@ impl Connector for KafkaConnector {
         Self::from_config(&self, None, name, connection, table, schema)
     }
 
-    fn make_operator(&self, profile: Self::ProfileT, table: Self::TableT, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+    fn make_operator(
+        &self,
+        profile: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
         match &table.type_ {
-            TableType::Source { group_id, offset, read_mode } => {
+            TableType::Source {
+                group_id,
+                offset,
+                read_mode,
+            } => {
                 let mut client_configs = client_configs(&profile, &table);
                 if let Some(ReadMode::ReadCommitted) = read_mode {
-                    client_configs.insert("isolation.level".to_string(), "read_committed".to_string());
+                    client_configs
+                        .insert("isolation.level".to_string(), "read_committed".to_string());
                 }
 
                 let schema_resolver: Arc<dyn SchemaResolver + Sync> =
                     if let Some(SchemaRegistry::ConfluentSchemaRegistry {
-                                    endpoint,
-                                    api_key,
-                                    api_secret,
-                                }) = &profile.schema_registry_enum
+                        endpoint,
+                        api_key,
+                        api_secret,
+                    }) = &profile.schema_registry_enum
                     {
                         Arc::new(
                             ConfluentSchemaRegistry::new(
@@ -328,7 +337,7 @@ impl Connector for KafkaConnector {
                                 api_key.clone(),
                                 api_secret.clone(),
                             )
-                                .expect("failed to construct confluent schema resolver"),
+                            .expect("failed to construct confluent schema resolver"),
                         )
                     } else {
                         Arc::new(FailingSchemaResolver::new())
@@ -350,7 +359,7 @@ impl Connector for KafkaConnector {
                             .map(|l| l.messages_per_second)
                             .unwrap_or(u32::MAX),
                     )
-                        .unwrap(),
+                    .unwrap(),
                 })))
             }
             TableType::Sink { commit_mode } => {

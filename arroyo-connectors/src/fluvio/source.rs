@@ -1,25 +1,25 @@
+use anyhow::anyhow;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::{TableConfig};
+use arroyo_rpc::grpc::TableConfig;
 use arroyo_rpc::{grpc::StopMode, ControlMessage};
-use arroyo_state::tables::global_keyed_map::{GlobalKeyedView};
+use arroyo_state::global_table_config;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::*;
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use fluvio::dataplane::link::ErrorCode;
 use fluvio::metadata::objects::Metadata;
 use fluvio::metadata::topic::TopicSpec;
 use fluvio::{consumer::Record as ConsumerRecord, Fluvio, FluvioConfig, Offset};
 use std::collections::HashMap;
-use anyhow::anyhow;
-use async_trait::async_trait;
 use tokio::select;
 use tokio_stream::{Stream, StreamExt, StreamMap};
 use tracing::{debug, error, info, warn};
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
-use arroyo_state::global_table_config;
 
-use super::{SourceOffset};
+use super::SourceOffset;
 
 pub struct FluvioSourceFunc {
     pub topic: String,
@@ -47,7 +47,11 @@ impl SourceOperator for FluvioSourceFunc {
     }
 
     async fn on_start(&mut self, ctx: &mut ArrowContext) {
-        ctx.initialize_deserializer(self.format.clone(), self.framing.clone(), self.bad_data.clone());
+        ctx.initialize_deserializer(
+            self.format.clone(),
+            self.framing.clone(),
+            self.bad_data.clone(),
+        );
     }
 
     async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
@@ -60,7 +64,6 @@ impl SourceOperator for FluvioSourceFunc {
             }
         }
     }
-
 }
 
 impl FluvioSourceFunc {
@@ -97,7 +100,9 @@ impl FluvioSourceFunc {
         let partitions = metadata.spec.partitions() as usize;
         info!("Fetched metadata for topic {}", self.topic);
 
-        let s: &mut GlobalKeyedView<u32, FluvioState> = ctx.table_manager.get_global_keyed_state("f")
+        let s: &mut GlobalKeyedView<u32, FluvioState> = ctx
+            .table_manager
+            .get_global_keyed_state("f")
             .await
             .expect("should be able to get fluvio state");
         let state: HashMap<u32, FluvioState> = s.get_all().clone();
@@ -146,7 +151,8 @@ impl FluvioSourceFunc {
                 ctx.task_info.operator_id, ctx.task_info.task_index);
             ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
                 Watermark::Idle,
-            ))).await;
+            )))
+            .await;
         }
 
         let mut offsets = HashMap::new();

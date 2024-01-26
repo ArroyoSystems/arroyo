@@ -14,8 +14,9 @@ use crate::filesystem::{
 use crate::EmptyConfig;
 
 use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/filesystem/table.json");
+const TABLE_SCHEMA: &str = include_str!("../src/filesystem/table.json");
 
 pub struct DeltaLakeConnector {}
 
@@ -101,10 +102,8 @@ impl Connector for DeltaLakeConnector {
             _ => false,
         };
         let description = match (&format_settings, is_local) {
-            (Some(FormatSettings::Parquet { .. }), true) =>
-                "LocalDeltaLake<Parquet>".to_string(),
-            (Some(FormatSettings::Parquet { .. }), false) =>
-                "DeltaLake<Parquet>".to_string(),
+            (Some(FormatSettings::Parquet { .. }), true) => "LocalDeltaLake<Parquet>".to_string(),
+            (Some(FormatSettings::Parquet { .. }), false) => "DeltaLake<Parquet>".to_string(),
             _ => bail!("Delta Lake sink only supports Parquet format"),
         };
 
@@ -148,5 +147,14 @@ impl Connector for DeltaLakeConnector {
         let table = file_system_sink_from_options(options, schema, CommitStyle::DeltaLake)?;
 
         self.from_config(None, name, EmptyConfig {}, table, schema)
+    }
+
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        _: Self::TableT,
+        _: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        todo!()
     }
 }

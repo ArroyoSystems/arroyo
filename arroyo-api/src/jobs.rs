@@ -483,10 +483,10 @@ pub async fn get_job_output(
         .graph
         .nodes
         .iter()
-        .any(|n| n.operator.contains("GrpcSink"))
+        .any(|n| n.operator.contains("PreviewSink"))
     {
         // TODO: make this check more robust
-        return Err(bad_request("Job does not have a web sink".to_string()));
+        return Err(bad_request("Job does not have a preview sink".to_string()));
     }
     let (tx, rx) = tokio::sync::mpsc::channel(32);
 

@@ -16,13 +16,10 @@ use chrono::{DateTime, Utc};
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
-use serde::{Deserialize, Serialize};
+use serde::{Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::warn;
-use typify::import_types;
 use uuid::Uuid;
-
-import_types!(schema = "../connector-schemas/filesystem/table.json");
 
 use arroyo_types::*;
 pub mod arrow;
@@ -30,8 +27,7 @@ mod delta;
 pub mod json;
 pub mod local;
 pub mod parquet;
-pub mod single_file;
-pub mod source;
+mod two_phase_committer;
 
 use arroyo_formats::SchemaData;
 
@@ -41,7 +37,8 @@ use self::{
     parquet::{FixedSizeRecordBatchBuilder, ParquetLocalWriter, RecordBatchBufferingWriter},
 };
 
-use super::two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
+use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
+use crate::filesystem::{CommitStyle, FilenameStrategy, FileNaming, FileSettings, FileSystemTable, TableType};
 
 pub struct FileSystemSink<
     K: Key,

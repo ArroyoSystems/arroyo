@@ -12,8 +12,7 @@ use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::time_key_map::TimeKeyMap;
 use arroyo_state::{hash_key, BackingStore, StateBackend, StateStore};
 use arroyo_types::{
-    from_micros, server_for_hash, Data, Key, Message, Record, TaskInfo,
-    Watermark, QUEUE_SIZE,
+    from_micros, server_for_hash, Data, Key, Message, Record, TaskInfo, Watermark, QUEUE_SIZE,
 };
 use bincode::config;
 use rand::Rng;
@@ -23,7 +22,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
-use tracing::{debug};
+use tracing::debug;
 
 #[derive(Clone)]
 pub struct Collector<K: Key, T: Data> {

@@ -6,20 +6,20 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-use arrow_array::RecordBatch;
+use arrow::array::RecordBatch;
 use arroyo_types::RecordBatchBuilder;
 use parquet::{
     arrow::ArrowWriter,
     basic::{GzipLevel, ZstdLevel},
     file::properties::WriterProperties,
 };
+use crate::filesystem::{Compression, FormatSettings};
 
 use super::{
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
     BatchBufferingWriter, BatchBuilder, FileSettings, FileSystemTable, MultiPartWriterStats,
     TableType,
 };
-use super::{Compression, FormatSettings};
 
 fn writer_properties_from_table(table: &FileSystemTable) -> WriterProperties {
     let mut parquet_writer_options = WriterProperties::builder();

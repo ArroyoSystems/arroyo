@@ -1,3 +1,4 @@
+use crate::ports::CONTROLLER_GRPC;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
 use async_trait::async_trait;
@@ -229,6 +230,13 @@ pub fn service_port(service: &str, default: u16, env_var: &str) -> u16 {
         .or(env::var(env_var).ok())
         .map(|s| u16::from_str(&s).unwrap_or_else(|_| panic!("Invalid setting for {}", env_var)))
         .unwrap_or(default)
+}
+
+pub fn default_controller_addr() -> String {
+    format!(
+        "http://localhost:{}",
+        grpc_port("controller", CONTROLLER_GRPC)
+    )
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]

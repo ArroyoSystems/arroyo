@@ -1,136 +1,96 @@
+use async_trait::async_trait;
+use std::collections::HashMap;
 use std::str::FromStr;
-use std::{marker::PhantomData, time::SystemTime};
+use std::time::SystemTime;
 
-use crate::old::Context;
-use crate::{engine::StreamNode, header_map};
-use arroyo_formats::old::DataDeserializer;
-use arroyo_formats::SchemaData;
-use arroyo_macro::source_fn;
-use arroyo_rpc::formats::BadData;
-use arroyo_rpc::{
-    grpc::{StopMode, TableDescriptor},
-    var_str::VarStr,
-    ControlMessage, OperatorConfig,
-};
-use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{Data, Message, UserError, Watermark};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
+use arroyo_rpc::formats::{BadData, Format, Framing};
+use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::{grpc::StopMode, ControlMessage};
+use arroyo_state::global_table_config;
+use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
+use arroyo_types::{ArrowMessage, SignalMessage, UserError, Watermark};
 use bincode::{Decode, Encode};
 use futures::{SinkExt, StreamExt};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::{debug, info};
 use tungstenite::http::Request;
-use typify::import_types;
-use arroyo_operator::RateLimiter;
-
-import_types!(
-    schema = "../connector-schemas/websocket/table.json",
-    convert = { {type = "string", format = "var-str"} = VarStr });
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd, Default)]
 pub struct WebsocketSourceState {}
 
-#[derive(StreamNode)]
-pub struct WebsocketSourceFunc<K, T>
-where
-    K: DeserializeOwned + Data,
-    T: SchemaData,
-{
-    url: String,
-    headers: Vec<(String, String)>,
-    subscription_messages: Vec<String>,
-    deserializer: DataDeserializer<T>,
-    bad_data: Option<BadData>,
-    rate_limiter: RateLimiter,
-    state: WebsocketSourceState,
-    _t: PhantomData<K>,
+pub struct WebsocketSourceFunc {
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub subscription_messages: Vec<String>,
+    pub format: Format,
+    pub framing: Option<Framing>,
+    pub bad_data: Option<BadData>,
+    pub state: WebsocketSourceState,
 }
 
-#[source_fn(out_k = (), out_t = T)]
-impl<K, T> WebsocketSourceFunc<K, T>
-where
-    K: DeserializeOwned + Data,
-    T: SchemaData,
-{
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for WebsocketSource");
-        let table: WebsocketTable =
-            serde_json::from_value(config.table).expect("Invalid table config for WebsocketSource");
-
-        // Include subscription_message for backwards compatibility
-        let mut subscription_messages = vec![];
-        if let Some(message) = table.subscription_message {
-            subscription_messages.push(message.to_string());
-        };
-        subscription_messages.extend(
-            table
-                .subscription_messages
-                .into_iter()
-                .map(|m| m.to_string()),
-        );
-
-        let headers = header_map(table.headers)
-            .into_iter()
-            .map(|(k, v)| {
-                (
-                    (&k).try_into()
-                        .expect(&format!("invalid header name {}", k)),
-                    (&v).try_into()
-                        .expect(&format!("invalid header value {}", v)),
-                )
-            })
-            .collect();
-
-        Self {
-            url: table.endpoint,
-            headers,
-            subscription_messages,
-            deserializer: DataDeserializer::new(
-                config.format.expect("WebsocketSource requires a format"),
-                config.framing,
-            ),
-            bad_data: config.bad_data,
-            rate_limiter: RateLimiter::new(),
-            state: WebsocketSourceState::default(),
-            _t: PhantomData,
-        }
-    }
-
+#[async_trait]
+impl SourceOperator for WebsocketSourceFunc {
     fn name(&self) -> String {
         "WebsocketSource".to_string()
     }
 
-    fn tables(&self) -> Vec<TableDescriptor> {
-        vec![arroyo_state::global_table("e", "websocket source state")]
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        global_table_config("e", "websocket source state")
     }
 
-    async fn on_start(&mut self, ctx: &mut Context<(), T>) {
-        let s: GlobalKeyedState<(), WebsocketSourceState, _> =
-            ctx.state.get_global_keyed_state('e').await;
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
+        let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
+            .table_manager
+            .get_global_keyed_state("e")
+            .await
+            .expect("couldn't get state for websocket");
 
         if let Some(state) = s.get(&()) {
             self.state = state.clone();
         }
+
+        ctx.initialize_deserializer(
+            self.format.clone(),
+            self.framing.clone(),
+            self.bad_data.clone(),
+        );
     }
 
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
+        match self.run_int(ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                ctx.report_error(e.name.clone(), e.details.clone()).await;
+
+                panic!("{}: {}", e.name, e.details);
+            }
+        }
+    }
+}
+
+impl WebsocketSourceFunc {
     async fn our_handle_control_message(
         &mut self,
-        ctx: &mut Context<(), T>,
+        ctx: &mut ArrowContext,
         msg: Option<ControlMessage>,
     ) -> Option<SourceFinishType> {
         match msg? {
             ControlMessage::Checkpoint(c) => {
                 debug!("starting checkpointing {}", ctx.task_info.task_index);
-                let mut s: GlobalKeyedState<(), WebsocketSourceState, _> =
-                    ctx.state.get_global_keyed_state('e').await;
+                let s: &mut GlobalKeyedView<(), WebsocketSourceState> = ctx
+                    .table_manager
+                    .get_global_keyed_state("e")
+                    .await
+                    .expect("couldn't get state for websocket");
                 s.insert((), self.state.clone()).await;
 
-                if self.checkpoint(c, ctx).await {
+                if self.start_checkpoint(c, ctx).await {
                     return Some(SourceFinishType::Immediate);
                 }
             }
@@ -160,34 +120,18 @@ where
     async fn handle_message(
         &mut self,
         msg: &[u8],
-        ctx: &mut Context<(), T>,
+        ctx: &mut ArrowContext,
     ) -> Result<(), UserError> {
-        let iter = self.deserializer.deserialize_slice(msg).await;
-        for value in iter {
-            ctx.collect_source_record(
-                SystemTime::now(),
-                value,
-                &self.bad_data,
-                &mut self.rate_limiter,
-            )
-            .await?;
+        ctx.deserialize_slice(msg, SystemTime::now()).await?;
+
+        if ctx.should_flush() {
+            ctx.flush_buffer().await?;
         }
 
         Ok(())
     }
 
-    async fn run(&mut self, ctx: &mut Context<(), T>) -> SourceFinishType {
-        match self.run_int(ctx).await {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.report_error(e.name.clone(), e.details.clone()).await;
-
-                panic!("{}: {}", e.name, e.details);
-            }
-        }
-    }
-
-    async fn run_int(&mut self, ctx: &mut Context<(), T>) -> Result<SourceFinishType, UserError> {
+    async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
         let uri = match Uri::from_str(&self.url.to_string()) {
             Ok(uri) => uri,
             Err(e) => {
@@ -306,7 +250,10 @@ where
             }
         } else {
             // otherwise set idle and just process control messages
-            ctx.broadcast(Message::Watermark(Watermark::Idle)).await;
+            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(
+                Watermark::Idle,
+            )))
+            .await;
             loop {
                 let msg = ctx.control_rx.recv().await;
                 if let Some(r) = self.our_handle_control_message(ctx, msg).await {

@@ -12,6 +12,7 @@ members = [
     "arroyo-metrics",
     "arroyo-node",
     "arroyo-openapi",
+    "arroyo-operator",
     "arroyo-rpc",
     "arroyo-sql-testing",
     "arroyo-server-common",
@@ -20,7 +21,7 @@ members = [
     "arroyo-types",
     "arroyo-worker",
     "copy-artifacts",
-    "integ", "arroyo-operator",
+    "integ",
 ]
 
 resolver = "2"

@@ -11,17 +11,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::{pull_opt, EmptyConfig};
 
-use arroyo_operator::connector::Connector;
-use arroyo_operator::operator::OperatorNode;
 use crate::single_file::sink::SingleFileSink;
 use crate::single_file::source::SingleFileSourceFunc;
+use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
 import_types!(schema = "src/single_file/table.json");
 
-mod source;
 mod sink;
+mod source;
 
 pub struct SingleFileConnector {}
 
@@ -136,20 +136,21 @@ impl Connector for SingleFileConnector {
         )
     }
 
-    fn make_operator(&self, _: Self::ProfileT, table: Self::TableT, _: OperatorConfig) -> Result<OperatorNode> {
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        table: Self::TableT,
+        _: OperatorConfig,
+    ) -> Result<OperatorNode> {
         match table.table_type {
-            TableType::Source => {
-                Ok(OperatorNode::from_source(Box::new(SingleFileSourceFunc {
-                    input_file: table.path,
-                    lines_read: 0,
-                })))
-            }
-            TableType::Sink => {
-                Ok(OperatorNode::from_operator(Box::new(SingleFileSink {
-                    output_path: table.path,
-                    file: None,
-                })))
-            }
+            TableType::Source => Ok(OperatorNode::from_source(Box::new(SingleFileSourceFunc {
+                input_file: table.path,
+                lines_read: 0,
+            }))),
+            TableType::Sink => Ok(OperatorNode::from_operator(Box::new(SingleFileSink {
+                output_path: table.path,
+                file: None,
+            }))),
         }
     }
 }

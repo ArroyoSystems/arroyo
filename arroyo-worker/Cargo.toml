@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = []
-kafka-sasl = ["rdkafka/sasl", "rdkafka/ssl-vendored"]
+kafka-sal = ["arroyo-connectors/kafka-sasl"]
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
@@ -47,7 +47,6 @@ md-5 = "0.10"
 hex = "0.4"
 url = "2.4.0"
 ordered-float = "3"
-deltalake = {version = "=0.16.4", features = ["s3", "arrow"] }
 
 arrow = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
@@ -70,21 +69,13 @@ governor = "0.6"
 tracing = "0.1"
 
 # connectors
-rdkafka = { version = "0.33", features = ["cmake-build"] }
-rdkafka-sys = "4.5.0"
-eventsource-client = "0.11.0"
 regex = "1.8.1"
 anyhow = "1.0.71"
 typify = "0.0.13"
 regress = "0.6.0"
-tokio-tungstenite = { version = "0.20.1", features = ["native-tls"] }
-fluvio = {version = "=0.21", features = ["openssl"]}
-fluvio-future = "0.6.0"
 object_store = {workspace = true }
 reqwest = "0.11.20"
 memchr = "2.6.3"
-apache-avro = "0.16.0"
-redis = { version = "0.23.3", features = ["default", "tokio-rustls-comp", "cluster-async", "connection-manager"] }
 
 datafusion = "34.0"
 datafusion-proto = "34.0.0"

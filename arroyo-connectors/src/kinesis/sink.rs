@@ -1,66 +1,36 @@
-use std::{
-    marker::PhantomData,
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
-use arroyo_formats::old::DataSerializer;
-use arroyo_formats::SchemaData;
-use arroyo_macro::{process_fn, StreamNode};
-use arroyo_rpc::OperatorConfig;
-use arroyo_types::{CheckpointBarrier, Key, Record};
+use arrow::array::RecordBatch;
+use arroyo_formats::serialize::ArrowSerializer;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::ArrowOperator;
+use arroyo_types::CheckpointBarrier;
+use async_trait::async_trait;
 use aws_config::from_env;
 use aws_sdk_kinesis::{
     client::fluent_builders::PutRecords, model::PutRecordsRequestEntry, types::Blob,
     Client as KinesisClient, Region,
 };
-use serde::Serialize;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::old::Context;
-
-use super::{KinesisTable, TableType};
-
-#[derive(StreamNode)]
-pub struct KinesisSinkFunc<K: Key + Serialize, T: SchemaData> {
-    client: Option<KinesisClient>,
-    aws_region: Option<String>,
-    in_progress_batch: Option<BatchRecordPreparer>,
-    flush_config: FlushConfig,
-    serializer: DataSerializer<T>,
-    name: String,
-    _phantom: PhantomData<(K, T)>,
+pub struct KinesisSinkFunc {
+    pub client: Option<KinesisClient>,
+    pub aws_region: Option<String>,
+    pub in_progress_batch: Option<BatchRecordPreparer>,
+    pub flush_config: FlushConfig,
+    pub serializer: ArrowSerializer,
+    pub name: String,
 }
 
-#[process_fn(in_k = K, in_t = T, tick_ms=10)]
-impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for KafkaSink");
-        let table: KinesisTable =
-            serde_json::from_value(config.table).expect("Invalid table config for KafkaSource");
-        let flush_config = FlushConfig::new_from_table(&table);
-        Self {
-            client: None,
-            in_progress_batch: None,
-            aws_region: table.aws_region,
-            name: table.stream_name,
-            serializer: DataSerializer::new(
-                config
-                    .format
-                    .expect("Format must be defined for KinesisSink"),
-            ),
-            flush_config,
-            _phantom: PhantomData,
-        }
-    }
-
+#[async_trait]
+impl ArrowOperator for KinesisSinkFunc {
     fn name(&self) -> String {
         format!("kinesis-producer-{}", self.name)
     }
 
-    async fn on_start(&mut self, _ctx: &mut Context<(), ()>) {
+    async fn on_start(&mut self, _ctx: &mut ArrowContext) {
         let mut loader = from_env();
         if let Some(region) = &self.aws_region {
             loader = loader.region(Region::new(region.clone()));
@@ -68,26 +38,7 @@ impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
         self.client = Some(KinesisClient::new(&loader.load().await));
     }
 
-    async fn handle_checkpoint(&mut self, _: &CheckpointBarrier, _: &mut Context<(), ()>) {
-        if let Some(batch_preparer) = self.in_progress_batch.take() {
-            batch_preparer
-                .flush()
-                .await
-                .expect("failed to flush batch during checkpoint");
-        }
-    }
-
-    async fn process_element(&mut self, record: &Record<K, T>, _ctx: &mut Context<(), ()>) {
-        let k = record
-            .key
-            .as_ref()
-            .map(|k| serde_json::to_string(k).unwrap())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-        let Some(v) = self.serializer.to_vec(&record.value) else {
-            return;
-        };
-
+    async fn process_batch(&mut self, batch: RecordBatch, _ctx: &mut ArrowContext) {
         let mut batch_preparer = match self.in_progress_batch.take() {
             None => BatchRecordPreparer::new(
                 self.client
@@ -98,7 +49,11 @@ impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
             ),
             Some(batch_preparer) => batch_preparer,
         };
-        batch_preparer.add_record(k, v);
+
+        for v in self.serializer.serialize(&batch) {
+            batch_preparer.add_record(Uuid::new_v4().to_string(), v);
+        }
+
         if self.flush_config.should_flush(&batch_preparer) {
             self.flush_with_retries(batch_preparer)
                 .await
@@ -108,7 +63,16 @@ impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
         }
     }
 
-    async fn handle_tick(&mut self, _: u64, _ctx: &mut Context<(), ()>) {
+    async fn handle_checkpoint(&mut self, _: CheckpointBarrier, _: &mut ArrowContext) {
+        if let Some(batch_preparer) = self.in_progress_batch.take() {
+            batch_preparer
+                .flush()
+                .await
+                .expect("failed to flush batch during checkpoint");
+        }
+    }
+
+    async fn handle_tick(&mut self, _: u64, _ctx: &mut ArrowContext) {
         let Some(batch_preparer) = &self.in_progress_batch else {
             return;
         };
@@ -122,7 +86,9 @@ impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
             .await
             .expect("failed to flush batch during tick");
     }
+}
 
+impl KinesisSinkFunc {
     async fn flush_with_retries(
         &mut self,
         mut record_batch_preparer: BatchRecordPreparer,
@@ -159,7 +125,7 @@ impl<K: Key + Serialize, T: SchemaData> KinesisSinkFunc<K, T> {
     }
 }
 
-struct BatchRecordPreparer {
+pub struct BatchRecordPreparer {
     // TODO: figure out how to not need an option
     put_records_call: Option<PutRecords>,
     buffered_records: Vec<(String, Vec<u8>)>,
@@ -168,26 +134,22 @@ struct BatchRecordPreparer {
     creation_time: SystemTime,
 }
 
-struct FlushConfig {
+pub struct FlushConfig {
     max_record_count: usize,
     max_data_size: usize,
     max_age: Duration,
 }
 
 impl FlushConfig {
-    fn new_from_table(table: &KinesisTable) -> Self {
-        let TableType::Sink {
-            batch_flush_interval_millis,
-            batch_max_buffer_size,
-            records_per_batch,
-        } = &table.type_
-        else {
-            panic!("found non-sink kinesis config in sink operator");
-        };
+    pub fn new(
+        flush_interval_millis: Option<i64>,
+        max_buffer_size: Option<i64>,
+        records_per_batch: Option<i64>,
+    ) -> Self {
         Self {
             max_record_count: records_per_batch.unwrap_or(500) as usize,
-            max_data_size: batch_max_buffer_size.unwrap_or(4_500_000) as usize,
-            max_age: Duration::from_millis(batch_flush_interval_millis.unwrap_or(1000) as u64),
+            max_data_size: max_buffer_size.unwrap_or(4_500_000) as usize,
+            max_age: Duration::from_millis(flush_interval_millis.unwrap_or(1000) as u64),
         }
     }
 

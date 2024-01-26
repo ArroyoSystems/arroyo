@@ -1,57 +1,50 @@
-use crate::blackhole::operator::BlackholeSinkFunc;
-use anyhow::anyhow;
-use arroyo_operator::connector::{Connection, Connector};
-use arroyo_operator::operator::OperatorNode;
+mod operator;
+
+use std::collections::HashMap;
+
+use anyhow::{anyhow, bail};
+use arroyo_rpc::OperatorConfig;
+
+use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
-use arroyo_rpc::OperatorConfig;
-use std::collections::HashMap;
+use tokio::sync::mpsc::Sender;
 
 use crate::EmptyConfig;
 
-mod operator;
+use crate::preview::operator::PreviewSink;
+use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
 
-pub struct BlackholeConnector {}
+pub struct PreviewConnector {}
 
-const ICON: &str = include_str!("./blackhole.svg");
-
-impl Connector for BlackholeConnector {
+impl Connector for PreviewConnector {
     type ProfileT = EmptyConfig;
     type TableT = EmptyConfig;
-
     fn name(&self) -> &'static str {
-        "blackhole"
+        "preview"
     }
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector {
         arroyo_rpc::api_types::connections::Connector {
-            id: self.name().to_string(),
-            name: "Blackhole".to_string(),
-            icon: ICON.to_string(),
-            description: "No-op sink that swallows all data".to_string(),
+            id: "preview".to_string(),
+            name: "Preview".to_string(),
+            icon: "".to_string(),
+            description: "Preview outputs in the console".to_string(),
             enabled: true,
             source: false,
             sink: true,
             testing: false,
-            hidden: false,
-            custom_schemas: true,
+            hidden: true,
+            custom_schemas: false,
             connection_config: None,
-            table_config: "{\"type\": \"object\", \"title\": \"BlackholeTable\"}".to_string(),
+            table_config: "{}".to_string(),
         }
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
         return ConnectionType::Sink;
-    }
-
-    fn get_schema(
-        &self,
-        _: Self::ProfileT,
-        _: Self::TableT,
-        s: Option<&ConnectionSchema>,
-    ) -> Option<ConnectionSchema> {
-        s.cloned()
     }
 
     fn test(
@@ -60,7 +53,7 @@ impl Connector for BlackholeConnector {
         _: Self::ProfileT,
         _: Self::TableT,
         _: Option<&ConnectionSchema>,
-        tx: tokio::sync::mpsc::Sender<TestSourceMessage>,
+        tx: Sender<TestSourceMessage>,
     ) {
         tokio::task::spawn(async move {
             let message = TestSourceMessage {
@@ -74,12 +67,12 @@ impl Connector for BlackholeConnector {
 
     fn from_options(
         &self,
-        name: &str,
-        _options: &mut HashMap<String, String>,
-        schema: Option<&ConnectionSchema>,
+        _: &str,
+        _: &mut HashMap<String, String>,
+        _: Option<&ConnectionSchema>,
         _profile: Option<&ConnectionProfile>,
     ) -> anyhow::Result<Connection> {
-        self.from_config(None, name, EmptyConfig {}, EmptyConfig {}, schema)
+        bail!("Preview connector cannot be created in SQL");
     }
 
     fn from_config(
@@ -88,17 +81,21 @@ impl Connector for BlackholeConnector {
         name: &str,
         config: Self::ProfileT,
         table: Self::TableT,
-        s: Option<&ConnectionSchema>,
+        schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection> {
-        let description = "Blackhole".to_string();
+        let description = "PreviewSink".to_string();
+
+        let schema = schema
+            .map(|s| s.to_owned())
+            .ok_or_else(|| anyhow!("no schema defined for preview connection"))?;
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
             table: serde_json::to_value(table).unwrap(),
             rate_limit: None,
             format: None,
-            bad_data: None,
-            framing: None,
+            bad_data: schema.bad_data.clone(),
+            framing: schema.framing.clone(),
         };
 
         Ok(Connection {
@@ -106,9 +103,7 @@ impl Connector for BlackholeConnector {
             connector: self.name(),
             name: name.to_string(),
             connection_type: ConnectionType::Sink,
-            schema: s
-                .cloned()
-                .ok_or_else(|| anyhow!("no schema for blackhole sink"))?,
+            schema,
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
@@ -120,8 +115,8 @@ impl Connector for BlackholeConnector {
         _: Self::TableT,
         _: OperatorConfig,
     ) -> anyhow::Result<OperatorNode> {
-        Ok(OperatorNode::from_operator(Box::new(
-            BlackholeSinkFunc::new(),
-        )))
+        Ok(OperatorNode::from_operator(
+            Box::new(PreviewSink::default()),
+        ))
     }
 }

@@ -1,13 +1,13 @@
-use fluvio::{Fluvio, FluvioConfig, TopicProducer};
 use arrow::array::RecordBatch;
 use async_trait::async_trait;
+use fluvio::{Fluvio, FluvioConfig, TopicProducer};
 
-use tracing::info;
 use arroyo_formats::serialize::ArrowSerializer;
+use tracing::info;
 
-use arroyo_types::CheckpointBarrier;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_types::CheckpointBarrier;
 
 pub struct FluvioSinkFunc {
     pub topic: String,
@@ -54,7 +54,6 @@ impl ArrowOperator for FluvioSinkFunc {
         self.producer.as_mut().unwrap().flush().await.unwrap();
     }
 }
-
 
 impl FluvioSinkFunc {
     async fn get_producer(&mut self) -> anyhow::Result<TopicProducer> {

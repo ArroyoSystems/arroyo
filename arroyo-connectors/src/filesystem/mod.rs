@@ -1,3 +1,5 @@
+mod source;
+
 use anyhow::{anyhow, bail, Result};
 use arroyo_storage::BackendConfig;
 use std::collections::HashMap;
@@ -13,12 +15,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{pull_opt, pull_option_to_i64, EmptyConfig};
 
+use crate::filesystem::source::FileSystemSourceFunc;
 use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/filesystem/table.json");
-const ICON: &str = include_str!("../resources/filesystem.svg");
+const TABLE_SCHEMA: &str = include_str!("./table.json");
+const ICON: &str = include_str!("./filesystem.svg");
 
-import_types!(schema = "../connector-schemas/filesystem/table.json");
+import_types!(schema = "src/filesystem/table.json");
 
 pub struct FileSystemConnector {}
 
@@ -82,10 +86,7 @@ impl Connector for FileSystemConnector {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<arroyo_operator::connector::Connection> {
         let (description, connection_type) = match table.table_type {
-            TableType::Source { .. } => (
-                "FileSystem".to_string(),
-                ConnectionType::Source,
-            ),
+            TableType::Source { .. } => ("FileSystem".to_string(), ConnectionType::Source),
             TableType::Sink {
                 ref write_path,
                 ref format_settings,
@@ -107,14 +108,16 @@ impl Connector for FileSystemConnector {
                     _ => false,
                 };
                 let description = match (format_settings, is_local) {
-                    (Some(FormatSettings::Parquet { .. }), true) =>
-                        "LocalFileSystem<Parquet>".to_string(),
-                    (Some(FormatSettings::Parquet { .. }), false) =>
-                        "FileSystem<Parquet>".to_string(),
-                    (Some(FormatSettings::Json {  ..}), true) =>
-                        "LocalFileSystem<JSON>".to_string(),
-                    (Some(FormatSettings::Json {..  }), false) =>
-                        "FileSystem<JSON>".to_string(),
+                    (Some(FormatSettings::Parquet { .. }), true) => {
+                        "LocalFileSystem<Parquet>".to_string()
+                    }
+                    (Some(FormatSettings::Parquet { .. }), false) => {
+                        "FileSystem<Parquet>".to_string()
+                    }
+                    (Some(FormatSettings::Json { .. }), true) => {
+                        "LocalFileSystem<JSON>".to_string()
+                    }
+                    (Some(FormatSettings::Json { .. }), false) => "FileSystem<JSON>".to_string(),
                     (None, _) => bail!("have to have some format settings"),
                 };
                 (description, ConnectionType::Sink)
@@ -189,6 +192,29 @@ impl Connector for FileSystemConnector {
             }
             Some(t) => bail!("unknown type: {}", t),
             None => bail!("must have type set"),
+        }
+    }
+
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> Result<OperatorNode> {
+        match &table.table_type {
+            TableType::Source { .. } => {
+                Ok(OperatorNode::from_source(Box::new(FileSystemSourceFunc {
+                    table: table.table_type.clone(),
+                    format: config
+                        .format
+                        .ok_or_else(|| anyhow!("format required for FileSystem source"))?,
+                    bad_data: config.bad_data.clone(),
+                    file_states: HashMap::new(),
+                })))
+            }
+            TableType::Sink { .. } => {
+                todo!()
+            }
         }
     }
 }

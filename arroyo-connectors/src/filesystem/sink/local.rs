@@ -12,15 +12,11 @@ use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::connectors::{filesystem::FinishedFile, two_phase_committer::TwoPhaseCommitter};
-
 use anyhow::{bail, Result};
 use arroyo_formats::SchemaData;
+use crate::filesystem::sink::two_phase_committer::TwoPhaseCommitter;
 
-use super::{
-    add_suffix_prefix, delta, get_partitioner_from_file_settings, CommitState, CommitStyle,
-    FileNaming, FileSystemTable, FilenameStrategy, MultiPartWriterStats, RollingPolicy, TableType,
-};
+use super::{add_suffix_prefix, delta, get_partitioner_from_file_settings, CommitState, CommitStyle, FileNaming, FileSystemTable, FilenameStrategy, MultiPartWriterStats, RollingPolicy, TableType, FinishedFile};
 
 pub struct LocalFileSystemWriter<K: Key, D: Data + Sync, V: LocalWriter<D>> {
     // writer to a local tmp file

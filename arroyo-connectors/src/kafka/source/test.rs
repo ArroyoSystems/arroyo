@@ -12,6 +12,9 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use crate::kafka::SourceOffset;
+use arroyo_operator::context::{ArrowContext, QueueItem};
+use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
 use arroyo_rpc::schema_resolver::FailingSchemaResolver;
@@ -24,9 +27,6 @@ use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use arroyo_operator::context::{ArrowContext, QueueItem};
-use arroyo_operator::operator::SourceOperator;
-use crate::kafka::{SourceOffset};
 
 use super::KafkaSourceFunc;
 
@@ -85,7 +85,7 @@ impl KafkaTopicTester {
             bad_data: None,
             schema_resolver: Arc::new(FailingSchemaResolver::new()),
             client_configs: HashMap::new(),
-            messages_per_second: NonZeroU32::new(100).unwrap()
+            messages_per_second: NonZeroU32::new(100).unwrap(),
         });
 
         let (to_control_tx, control_rx) = channel(128);

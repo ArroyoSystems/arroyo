@@ -1,20 +1,20 @@
 use anyhow::{anyhow, bail};
+use arroyo_formats::serialize::ArrowSerializer;
 use arroyo_operator::connector::{Connection, Connector};
+use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
 use arroyo_rpc::OperatorConfig;
+use fluvio::Offset;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use fluvio::Offset;
 use typify::import_types;
-use arroyo_formats::serialize::ArrowSerializer;
-use arroyo_operator::operator::OperatorNode;
 
-use crate::{pull_opt, ConnectionType, EmptyConfig};
 use crate::fluvio::sink::FluvioSinkFunc;
 use crate::fluvio::source::FluvioSourceFunc;
+use crate::{pull_opt, ConnectionType, EmptyConfig};
 
-mod source;
 mod sink;
+mod source;
 
 pub struct FluvioConnector {}
 
@@ -132,10 +132,9 @@ impl Connector for FluvioConnector {
                 ConnectionType::Source,
                 format!("FluvioSource<{}>", table.topic),
             ),
-            TableType::Sink { .. } => (
-                ConnectionType::Sink,
-                format!("FluvioSink<{}>", table.topic),
-            ),
+            TableType::Sink { .. } => {
+                (ConnectionType::Sink, format!("FluvioSink<{}>", table.topic))
+            }
         };
 
         let schema = schema
@@ -168,27 +167,35 @@ impl Connector for FluvioConnector {
         })
     }
 
-    fn make_operator(&self, _: Self::ProfileT, table: Self::TableT, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
         match table.type_ {
             TableType::Source { offset } => {
                 Ok(OperatorNode::from_source(Box::new(FluvioSourceFunc {
                     topic: table.topic,
                     endpoint: table.endpoint.clone(),
                     offset_mode: offset,
-                    format: config.format.ok_or_else(|| anyhow!("format required for fluvio source"))?,
+                    format: config
+                        .format
+                        .ok_or_else(|| anyhow!("format required for fluvio source"))?,
                     framing: config.framing,
                     bad_data: config.bad_data,
                 })))
             }
-            TableType::Sink { .. } => {
-                Ok(OperatorNode::from_operator(Box::new(FluvioSinkFunc {
-                    topic: table.topic,
-                    endpoint: table.endpoint,
-                    producer: None,
-                    serializer: ArrowSerializer::new(config.format.ok_or_else(|| anyhow!("format required for fluvio sink"))?)
-                }
-                )))
-            }
+            TableType::Sink { .. } => Ok(OperatorNode::from_operator(Box::new(FluvioSinkFunc {
+                topic: table.topic,
+                endpoint: table.endpoint,
+                producer: None,
+                serializer: ArrowSerializer::new(
+                    config
+                        .format
+                        .ok_or_else(|| anyhow!("format required for fluvio sink"))?,
+                ),
+            }))),
         }
     }
 }
@@ -201,4 +208,3 @@ impl SourceOffset {
         }
     }
 }
-

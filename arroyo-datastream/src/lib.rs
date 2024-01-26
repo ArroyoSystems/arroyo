@@ -295,7 +295,7 @@ impl ConnectorOp {
         ConnectorOp {
             connector: "preview".to_string(),
             config: "{\"connection\": {}, \"table\": {}}".to_string(),
-            description: "GrpcSink".to_string(),
+            description: "PreviewSink".to_string(),
         }
     }
 }

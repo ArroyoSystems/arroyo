@@ -8,11 +8,11 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::var_str::VarStr;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
 use typify::import_types;
-use serde::{Deserialize, Serialize};
 
 const CLIENT_ID: &str = "cwc|0014U00003Df8ZvQAJ";
 

@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::{Connection, Connector};
+use arroyo_operator::operator::OperatorNode;
 use arroyo_rpc::api_types::connections::FieldType::Primitive;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, FieldType, SourceFieldType, StructType,
@@ -218,5 +219,14 @@ impl Connector for NexmarkConnector {
             config: serde_json::to_string(&config).unwrap(),
             description,
         })
+    }
+
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        _: Self::TableT,
+        _: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        todo!()
     }
 }

@@ -748,21 +748,27 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "async-trait",
+ "aws-config",
+ "aws-sdk-kinesis",
  "axum",
  "base64 0.13.1",
  "bincode 2.0.0-rc.3",
  "bytes",
  "chrono",
  "datafusion",
- "eventsource-client 0.12.2",
+ "deltalake",
+ "eventsource-client",
  "fluvio",
  "fluvio-future",
  "futures",
  "governor",
  "itertools 0.11.0",
+ "object_store 0.8.0",
+ "parquet 49.0.0",
  "rand",
  "rdkafka",
- "redis 0.24.0",
+ "redis",
+ "regex",
  "regress 0.7.1",
  "reqwest",
  "schemars",
@@ -775,6 +781,7 @@ dependencies = [
  "tracing",
  "typify",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1160,7 +1167,6 @@ version = "0.10.0-dev"
 dependencies = [
  "ahash 0.8.7",
  "anyhow",
- "apache-avro",
  "arrow 49.0.0",
  "arrow-array 49.0.0",
  "arrow-json 49.0.0",
@@ -1193,10 +1199,6 @@ dependencies = [
  "datafusion-physical-expr",
  "datafusion-physical-plan",
  "datafusion-proto",
- "deltalake",
- "eventsource-client 0.11.0",
- "fluvio",
- "fluvio-future",
  "futures",
  "governor",
  "hex",
@@ -1213,9 +1215,6 @@ dependencies = [
  "prometheus",
  "prost 0.12.3",
  "rand",
- "rdkafka",
- "rdkafka-sys",
- "redis 0.23.3",
  "regex",
  "regress 0.6.0",
  "reqwest",
@@ -1229,7 +1228,6 @@ dependencies = [
  "test-case",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite",
  "tonic",
  "tracing",
  "typify",
@@ -3570,22 +3568,6 @@ checksum = "958e4d70b6d5e81971bebec42271ec641e7ff4e170a6fa605f2b8a8b65cb97d3"
 dependencies = [
  "event-listener 4.0.3",
  "pin-project-lite",
-]
-
-[[package]]
-name = "eventsource-client"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b91e5ec5c794bbec5f639620f0bafe421b6d27dec66ac1ce3fdb6f009db3a6c"
-dependencies = [
- "futures",
- "hyper",
- "hyper-rustls 0.22.1",
- "hyper-timeout",
- "log",
- "pin-project",
- "rand",
- "tokio",
 ]
 
 [[package]]
@@ -6823,36 +6805,6 @@ dependencies = [
  "openssl-sys",
  "pkg-config",
  "sasl2-sys",
-]
-
-[[package]]
-name = "redis"
-version = "0.23.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f49cdc0bb3f412bf8e7d1bd90fe1d9eb10bc5c399ba90973c14662a27b3f8ba"
-dependencies = [
- "arc-swap",
- "async-trait",
- "bytes",
- "combine",
- "crc16",
- "futures",
- "futures-util",
- "itoa",
- "log",
- "percent-encoding",
- "pin-project-lite",
- "rand",
- "rustls 0.21.10",
- "rustls-native-certs 0.6.3",
- "ryu",
- "sha1_smol",
- "socket2 0.4.10",
- "tokio",
- "tokio-retry",
- "tokio-rustls 0.24.1",
- "tokio-util",
- "url",
 ]
 
 [[package]]

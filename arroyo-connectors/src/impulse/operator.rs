@@ -25,6 +25,7 @@ pub struct ImpulseSourceState {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ImpulseSpec {
+    #[allow(unused)]
     Delay(Duration),
     EventsPerSecond(f32),
 }
@@ -41,6 +42,7 @@ impl ImpulseSourceFunc {
     /* This method is mainly useful for testing,
       so you can always ensure it starts at the beginning of an interval.
     */
+    #[allow(unused)]
     pub fn new_aligned(
         interval: Duration,
         spec: ImpulseSpec,

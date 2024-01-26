@@ -7,6 +7,7 @@ use std::time::SystemTime;
 use anyhow::anyhow;
 use arroyo_rpc::OperatorConfig;
 
+use arroyo_formats::serialize::ArrowSerializer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
@@ -18,13 +19,12 @@ use serde_json::json;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Semaphore};
 use typify::import_types;
-use arroyo_formats::serialize::ArrowSerializer;
 
 use crate::{construct_http_client, pull_opt, EmptyConfig};
 
+use crate::webhook::operator::WebhookSinkFunc;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::OperatorNode;
-use crate::webhook::operator::WebhookSinkFunc;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
@@ -132,7 +132,7 @@ impl Connector for WebhookConnector {
     }
 
     fn table_type(&self, _: Self::ProfileT, _: Self::TableT) -> ConnectionType {
-        return ConnectionType::Source;
+        return ConnectionType::Sink;
     }
 
     fn from_config(
@@ -204,11 +204,23 @@ impl Connector for WebhookConnector {
         self.from_config(None, name, EmptyConfig {}, table, schema)
     }
 
-    fn make_operator(&self, _: Self::ProfileT, table: Self::TableT, config: OperatorConfig) -> anyhow::Result<OperatorNode> {
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
         let url = table.endpoint.sub_env_vars()?;
         Ok(OperatorNode::from_operator(Box::new(WebhookSinkFunc {
             url: Arc::new(url.clone()),
-            client: construct_http_client(&url, table.headers.as_ref().map(|s| s.sub_env_vars()).transpose()?)?,
+            client: construct_http_client(
+                &url,
+                table
+                    .headers
+                    .as_ref()
+                    .map(|s| s.sub_env_vars())
+                    .transpose()?,
+            )?,
             semaphore: Arc::new(Semaphore::new(MAX_INFLIGHT as usize)),
             serializer: ArrowSerializer::new(
                 config

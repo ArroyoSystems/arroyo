@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use arrow::datatypes::{DataType, TimeUnit};
-use arrow_array::{
+use arrow::array::{
     types::{
         ArrowPrimitiveType, TimestampMicrosecondType, TimestampMillisecondType,
         TimestampNanosecondType, TimestampSecondType,

@@ -19,14 +19,18 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tungstenite::http::Request;
 use typify::import_types;
 
-use crate::{pull_opt, EmptyConfig};
+use crate::{header_map, pull_opt, EmptyConfig};
 
+use crate::websocket::operator::{WebsocketSourceFunc, WebsocketSourceState};
 use arroyo_operator::connector::Connector;
+use arroyo_operator::operator::OperatorNode;
 
-const TABLE_SCHEMA: &str = include_str!("../../connector-schemas/websocket/table.json");
+mod operator;
 
-import_types!(schema = "../connector-schemas/websocket/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
-const ICON: &str = include_str!("../resources/websocket.svg");
+const TABLE_SCHEMA: &str = include_str!("./table.json");
+
+import_types!(schema = "src/websocket/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
+const ICON: &str = include_str!("./websocket.svg");
 
 pub struct WebsocketConnector {}
 
@@ -301,5 +305,48 @@ impl Connector for WebsocketConnector {
             },
             schema,
         )
+    }
+
+    fn make_operator(
+        &self,
+        _: Self::ProfileT,
+        table: Self::TableT,
+        config: OperatorConfig,
+    ) -> anyhow::Result<OperatorNode> {
+        // Include subscription_message for backwards compatibility
+        let mut subscription_messages = vec![];
+        if let Some(message) = table.subscription_message {
+            subscription_messages.push(message.to_string());
+        };
+        subscription_messages.extend(
+            table
+                .subscription_messages
+                .into_iter()
+                .map(|m| m.to_string()),
+        );
+
+        let headers = header_map(table.headers)
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    (&k).try_into()
+                        .expect(&format!("invalid header name {}", k)),
+                    (&v).try_into()
+                        .expect(&format!("invalid header value {}", v)),
+                )
+            })
+            .collect();
+
+        Ok(OperatorNode::from_source(Box::new(WebsocketSourceFunc {
+            url: table.endpoint,
+            headers,
+            subscription_messages,
+            format: config
+                .format
+                .ok_or_else(|| anyhow!("format required for websocket source"))?,
+            framing: config.framing,
+            bad_data: config.bad_data,
+            state: WebsocketSourceState::default(),
+        })))
     }
 }

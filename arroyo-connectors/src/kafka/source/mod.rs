@@ -1,8 +1,11 @@
 use arroyo_rpc::formats::{BadData, Format, Framing};
-use arroyo_rpc::grpc::{TableConfig, TableDescriptor};
-use arroyo_rpc::schema_resolver::{SchemaResolver};
+use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::schema_resolver::SchemaResolver;
 use arroyo_rpc::{grpc::StopMode, ControlMessage, ControlResp};
 
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
 use arroyo_types::*;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
@@ -16,9 +19,6 @@ use std::time::Duration;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::SourceOperator;
-use arroyo_operator::SourceFinishType;
 
 #[cfg(test)]
 mod test;

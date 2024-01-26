@@ -1,23 +1,23 @@
+use arrow::array::RecordBatch;
+use async_trait::async_trait;
+use std::collections::HashMap;
 use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
-use std::collections::HashMap;
-use arrow::array::RecordBatch;
-use async_trait::async_trait;
 
-use arroyo_types::{CheckpointBarrier};
+use arroyo_types::CheckpointBarrier;
 
 use tokio::sync::{Mutex, Semaphore};
 use tracing::warn;
 
+use crate::webhook::MAX_INFLIGHT;
 use arroyo_formats::serialize::ArrowSerializer;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::ArrowOperator;
-use arroyo_rpc::ControlResp;
 use arroyo_rpc::grpc::TableConfig;
+use arroyo_rpc::ControlResp;
 use arroyo_state::global_table_config;
-use crate::webhook::MAX_INFLIGHT;
 
 pub struct WebhookSinkFunc {
     pub url: Arc<String>,
@@ -72,12 +72,16 @@ impl ArrowOperator for WebhookSinkFunc {
                         Ok(_) => break,
                         Err(e) => {
                             if let Ok(mut last_reported) = error_lock.try_lock() {
-                                if last_reported.elapsed().unwrap_or_default() > Duration::from_secs(1)
+                                if last_reported.elapsed().unwrap_or_default()
+                                    > Duration::from_secs(1)
                                 {
                                     warn!("websink request failed: {:?}", e);
 
                                     let details = if let Some(status) = e.status() {
-                                        format!("server responded with error code: {}", status.as_u16())
+                                        format!(
+                                            "server responded with error code: {}",
+                                            status.as_u16()
+                                        )
                                     } else {
                                         e.to_string()
                                     };
@@ -98,13 +102,14 @@ impl ArrowOperator for WebhookSinkFunc {
 
                             retries += 1;
 
-                            tokio::time::sleep(Duration::from_millis((50 * (1 << retries)).min(5_000)))
-                                .await
+                            tokio::time::sleep(Duration::from_millis(
+                                (50 * (1 << retries)).min(5_000),
+                            ))
+                            .await
                         }
                     }
                 }
             });
-
         }
     }
 

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData, time::SystemTime};
 
-use crate::old::Context;
+use arrow::old::Context;
 use anyhow::Result;
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::{

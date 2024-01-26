@@ -1,9 +1,11 @@
+use crate::preview::PreviewConnector;
 use anyhow::{anyhow, bail, Context};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{
     ConnectionSchema, ConnectionType, FieldType, SourceField, SourceFieldType, TestSourceMessage,
 };
 use arroyo_rpc::primitive_to_sql;
+use arroyo_rpc::var_str::VarStr;
 use arroyo_types::string_to_map;
 use blackhole::BlackholeConnector;
 use fluvio::FluvioConnector;
@@ -31,6 +33,7 @@ pub mod kafka;
 pub mod kinesis;
 pub mod nexmark;
 pub mod polling_http;
+pub mod preview;
 pub mod redis;
 pub mod single_file;
 pub mod sse;
@@ -38,27 +41,26 @@ pub mod webhook;
 pub mod websocket;
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
-    let mut m: HashMap<&'static str, Box<dyn ErasedConnector>> = HashMap::new();
-    m.insert("blackhole", Box::new(BlackholeConnector {}));
-    m.insert("confluent", Box::new(confluent::ConfluentConnector {}));
-    m.insert("delta", Box::new(delta::DeltaLakeConnector {}));
-    m.insert("filesystem", Box::new(filesystem::FileSystemConnector {}));
-    m.insert("fluvio", Box::new(FluvioConnector {}));
-    m.insert("impulse", Box::new(ImpulseConnector {}));
-    m.insert("kafka", Box::new(KafkaConnector {}));
-    m.insert("kinesis", Box::new(kinesis::KinesisConnector {}));
-    m.insert("nexmark", Box::new(NexmarkConnector {}));
-    m.insert(
-        "polling_http",
+    let connectors: Vec<Box<dyn ErasedConnector>> = vec![
+        Box::new(BlackholeConnector {}),
+        Box::new(confluent::ConfluentConnector {}),
+        Box::new(delta::DeltaLakeConnector {}),
+        Box::new(filesystem::FileSystemConnector {}),
+        Box::new(FluvioConnector {}),
+        Box::new(ImpulseConnector {}),
+        Box::new(KafkaConnector {}),
+        Box::new(kinesis::KinesisConnector {}),
+        Box::new(NexmarkConnector {}),
         Box::new(polling_http::PollingHTTPConnector {}),
-    );
-    m.insert("redis", Box::new(redis::RedisConnector {}));
-    m.insert("single_file", Box::new(single_file::SingleFileConnector {}));
-    m.insert("sse", Box::new(SSEConnector {}));
-    m.insert("webhook", Box::new(webhook::WebhookConnector {}));
-    m.insert("websocket", Box::new(WebsocketConnector {}));
+        Box::new(PreviewConnector {}),
+        Box::new(redis::RedisConnector {}),
+        Box::new(single_file::SingleFileConnector {}),
+        Box::new(SSEConnector {}),
+        Box::new(webhook::WebhookConnector {}),
+        Box::new(WebsocketConnector {}),
+    ];
 
-    m
+    connectors.into_iter().map(|c| (c.name(), c)).collect()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -156,4 +158,13 @@ fn construct_http_client(endpoint: &str, headers: Option<String>) -> anyhow::Res
         .map_err(|e| anyhow!("could not construct HTTP client: {:?}", e))?;
 
     Ok(client)
+}
+
+pub fn header_map(headers: Option<VarStr>) -> HashMap<String, String> {
+    string_to_map(
+        &headers
+            .map(|t| t.sub_env_vars().expect("Failed to substitute env vars"))
+            .unwrap_or("".to_string()),
+    )
+    .expect("Invalid header map")
 }

@@ -1,6 +1,9 @@
 use std::{collections::HashMap, io::Cursor, sync::Arc, time::SystemTime};
 
 use arrow::array::RecordBatch;
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
 use arroyo_rpc::{
     grpc::{StopMode, TableConfig},
     ControlMessage,
@@ -14,9 +17,6 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
 };
 use tracing::info;
-use arroyo_operator::context::ArrowContext;
-use arroyo_operator::operator::{SourceOperator};
-use arroyo_operator::SourceFinishType;
 
 #[derive(Encode, Decode, Debug, Clone, Eq, PartialEq)]
 pub struct SingleFileSourceFunc {
