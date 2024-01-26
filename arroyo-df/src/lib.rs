@@ -14,6 +14,7 @@ pub mod logical;
 pub mod physical;
 mod plan_graph;
 pub mod schemas;
+mod source_rewriter;
 mod tables;
 pub mod types;
 
@@ -41,6 +42,7 @@ use schemas::{
     window_arrow_struct,
 };
 
+use source_rewriter::SourceRewriter;
 use tables::{Insert, Table};
 
 use arroyo_rpc::api_types::connections::ConnectionProfile;
@@ -369,6 +371,35 @@ impl ArroyoSchemaProvider {
         );
 
         Ok(name)
+    }
+
+    fn get_table_source_with_fields(
+        &self,
+        name: &str,
+        fields: Vec<Field>,
+    ) -> datafusion_common::Result<Arc<dyn TableSource>> {
+        let table = self
+            .get_table(name)
+            .ok_or_else(|| DataFusionError::Plan(format!("Table {} not found", name)))?;
+
+        let mut table_fields = vec![];
+        let fields_from_table = table.get_fields();
+        for field in fields {
+            let t_field = fields_from_table
+                .iter()
+                .find(|t_field| t_field.name() == field.name())
+                .ok_or_else(|| {
+                    return DataFusionError::Plan(format!(
+                        "Field {} not found in table {}",
+                        field.name(),
+                        name
+                    ));
+                })?;
+            table_fields.push(t_field.clone());
+        }
+
+        let schema = Arc::new(Schema::new_with_metadata(table_fields, HashMap::new()));
+        Ok(create_table(name.to_string(), schema))
     }
 }
 
@@ -917,39 +948,13 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                 }))
             }
             LogicalPlan::TableScan(table_scan) => {
-                if let Some(projection_indices) = table_scan.projection {
-                    let qualifier = table_scan.table_name.clone();
-                    let projected_schema = DFSchema::try_from_qualified_schema(
-                        qualifier.clone(),
-                        table_scan.source.schema().as_ref(),
-                    )?;
-                    let input_table_scan = LogicalPlan::TableScan(TableScan {
-                        table_name: table_scan.table_name.clone(),
-                        source: table_scan.source.clone(),
-                        projection: None,
-                        projected_schema: Arc::new(projected_schema),
-                        filters: table_scan.filters.clone(),
-                        fetch: table_scan.fetch,
-                    });
-                    let projection_expressions: Vec<_> = projection_indices
-                        .into_iter()
-                        .map(|index| {
-                            Expr::Column(Column {
-                                relation: Some(qualifier.clone()),
-                                name: table_scan.source.schema().fields()[index]
-                                    .name()
-                                    .to_string(),
-                            })
-                        })
-                        .collect();
-                    let projection = LogicalPlan::Projection(datafusion_expr::Projection::try_new(
-                        projection_expressions,
-                        Arc::new(input_table_scan),
-                    )?);
-                    let mut timestamp_rewriter = TimestampRewriter {};
-                    let projection = projection.rewrite(&mut timestamp_rewriter)?;
-                    return projection.rewrite(self);
+                if table_scan.projection.is_some() {
+                    return Err(DataFusionError::Internal(
+                        "Unexpected projection in table scan that should have been removed by SourceRewriter"
+                            .to_string(),
+                    ));
                 }
+
                 let node_index = match self.table_source_to_nodes.get(&table_scan.table_name) {
                     Some(node_index) => *node_index,
                     None => {
@@ -1056,8 +1061,12 @@ pub async fn parse_and_get_arrow_program(
             Insert::Anonymous { logical_plan } => (logical_plan, None),
         };
 
-        let plan_with_timestamp = plan.rewrite(&mut TimestampRewriter {})?;
-        let plan_rewrite = plan_with_timestamp.rewrite(&mut rewriter).unwrap();
+        let plan_rewrite = plan
+            .rewrite(&mut SourceRewriter {
+                schema_provider: schema_provider.clone(),
+            })?
+            .rewrite(&mut TimestampRewriter {})?
+            .rewrite(&mut rewriter)?;
 
         println!("REWRITE: {}", plan_rewrite.display_graphviz());
 
