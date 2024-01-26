@@ -3,7 +3,7 @@ use crate::tables::FieldSpec;
 use crate::tables::Table;
 use crate::watermark_node::WatermarkNode;
 use crate::ArroyoSchemaProvider;
-use arrow_schema::{Field, Schema};
+use arrow_schema::Schema;
 use datafusion_common::tree_node::TreeNodeRewriter;
 use datafusion_common::{
     Column, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult, ScalarValue,
@@ -158,24 +158,13 @@ impl TreeNodeRewriter for SourceRewriter {
         let Table::ConnectorTable(table) = table else {
             return Ok(node);
         };
-
-        let watermark_schema = DFSchema::try_from_qualified_schema(
-            table_scan.table_name.clone(),
-            &Schema::new(
-                table
-                    .fields
-                    .iter()
-                    .map(|field| field.field().clone())
-                    .collect::<Vec<_>>()
-                    .clone(),
-            ),
-        )?;
-
-        let watermark_node = WatermarkNode {
-            input: self.projection(&table_scan, table)?,
-            watermark_expression: Some(Self::watermark_expression(table)?),
-            schema: Arc::new(watermark_schema),
-        };
+        let watermark_node = WatermarkNode::new(
+            self.projection(&table_scan, table)?,
+            Some(Self::watermark_expression(table)?),
+        )
+        .map_err(|err| {
+            DataFusionError::Internal(format!("failed to create watermark expression: {}", err))
+        })?;
 
         return Ok(LogicalPlan::Extension(Extension {
             node: Arc::new(watermark_node),

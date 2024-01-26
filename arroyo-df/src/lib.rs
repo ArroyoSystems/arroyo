@@ -589,7 +589,7 @@ impl LogicalPlanExtension {
             } => Some(inner_plan),
             LogicalPlanExtension::AggregateCalculation(_) => None,
             LogicalPlanExtension::Sink { .. } => None,
-            LogicalPlanExtension::WatermarkNode(n) => Some(&n.input),
+            LogicalPlanExtension::WatermarkNode(n) => None,
         }
     }
 
@@ -999,6 +999,12 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                 let index = self
                     .local_logical_plan_graph
                     .add_node(LogicalPlanExtension::WatermarkNode(watermark_node.clone()));
+
+                let input = LogicalPlanExtension::ValueCalculation(watermark_node.input);
+                let edge = input.outgoing_edge();
+                let input_index = self.local_logical_plan_graph.add_node(input);
+                self.local_logical_plan_graph
+                    .add_edge(input_index, index, edge);
 
                 let table_name = format!("{}", index.index());
 
