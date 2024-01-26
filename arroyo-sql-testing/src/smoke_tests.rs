@@ -311,10 +311,11 @@ async fn check_output_files(output_location: String, golden_output_location: Str
 }
 
 pub async fn correctness_run_codegen(
-    test_name: String,
-    query: String,
+    test_name: impl Into<String>,
+    query: impl Into<String>,
     checkpoint_interval: i32,
 ) -> Result<()> {
+    let test_name = test_name.into();
     let parent_directory = std::env::current_dir()
         .unwrap()
         .to_string_lossy()
@@ -332,7 +333,7 @@ pub async fn correctness_run_codegen(
     // replace $input_file with the current directory and then inputs/query_name.json
     let physical_input_dir = format!("{}/arroyo-sql-testing/inputs/", parent_directory,);
 
-    let query_string = query.replace("$input_dir", &physical_input_dir);
+    let query_string = query.into().replace("$input_dir", &physical_input_dir);
     // replace $output_file with the current directory and then outputs/query_name.json
     let physical_output = format!(
         "{}/arroyo-sql-testing/outputs/{}.json",
@@ -346,7 +347,7 @@ pub async fn correctness_run_codegen(
     let logical_program = get_graph(query_string.clone()).await?;
     run_pipeline_and_assert_outputs(
         logical_program.graph,
-        test_name,
+        test_name.into(),
         checkpoint_interval,
         physical_output,
         golden_output_location,
@@ -405,7 +406,6 @@ async fn select_star() -> Result<()> {
     .await?;
     Ok(())
 }
-
 /*
 
 correctness_run_codegen! {"aggregates", 10,

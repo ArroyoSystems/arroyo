@@ -8,7 +8,9 @@ use arroyo_datastream::{ConnectorOp, WindowType};
 
 use datafusion::datasource::DefaultTableSource;
 use datafusion::physical_plan::functions::make_scalar_function;
-use datafusion_common::{Column, DFField, OwnedTableReference, Result as DFResult, ScalarValue};
+use datafusion_common::{
+    Column, DFField, JoinConstraint, JoinType, OwnedTableReference, Result as DFResult, ScalarValue,
+};
 pub mod external;
 pub mod logical;
 pub mod physical;
@@ -27,9 +29,9 @@ use datafusion::sql::{planner::ContextProvider, TableReference};
 use datafusion_common::tree_node::{RewriteRecursion, TreeNode, TreeNodeRewriter, TreeNodeVisitor};
 use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{
-    AccumulatorFactoryFunction, Aggregate, Expr, LogicalPlan, ReturnTypeFunction,
-    ScalarFunctionDefinition, ScalarUDF, Signature, StateTypeFunction, TableScan, Volatility,
-    WindowUDF,
+    AccumulatorFactoryFunction, Aggregate, BinaryExpr, Case, Expr, Join, LogicalPlan, Projection,
+    ReturnTypeFunction, ScalarFunctionDefinition, ScalarUDF, Signature, StateTypeFunction,
+    TableScan, Volatility, WindowUDF,
 };
 
 use datafusion_expr::{AggregateUDF, TableSource};
@@ -520,7 +522,19 @@ impl TreeNodeRewriter for TimestampRewriter {
                 }
             }
             LogicalPlan::Join(ref mut join) => {
-                join.schema = add_timestamp_field(join.schema.clone())?;
+                let mut fields: Vec<_> = join
+                    .schema
+                    .fields()
+                    .iter()
+                    .filter(|field| field.name() != "_timestamp")
+                    .map(|field| field.clone())
+                    .collect();
+                fields.push(DFField::new_unqualified(
+                    "_timestamp",
+                    DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    false,
+                ));
+                join.schema = Arc::new(DFSchema::new_with_metadata(fields, HashMap::new())?);
             }
             LogicalPlan::Union(ref mut union) => {
                 union.schema = add_timestamp_field(union.schema.clone())?;
@@ -575,6 +589,7 @@ enum LogicalPlanExtension {
         connector_op: ConnectorOp,
     },
     WatermarkNode(WatermarkNode),
+    Join(JoinCalculation),
 }
 
 impl LogicalPlanExtension {
@@ -589,7 +604,8 @@ impl LogicalPlanExtension {
             } => Some(inner_plan),
             LogicalPlanExtension::AggregateCalculation(_) => None,
             LogicalPlanExtension::Sink { .. } => None,
-            LogicalPlanExtension::WatermarkNode(n) => None,
+            LogicalPlanExtension::WatermarkNode(_) => None,
+            LogicalPlanExtension::Join(_) => None,
         }
     }
 
@@ -632,6 +648,10 @@ impl LogicalPlanExtension {
                 DataFusionEdge::new(n.schema.clone(), LogicalEdgeType::Forward, vec![]).unwrap()
             }
             LogicalPlanExtension::Sink { .. } => unreachable!(),
+            LogicalPlanExtension::Join(join) => {
+                DataFusionEdge::new(join.output_schema.clone(), LogicalEdgeType::Forward, vec![])
+                    .unwrap()
+            }
         }
     }
 }
@@ -650,6 +670,23 @@ impl Debug for AggregateCalculation {
         f.debug_struct("AggregateCalculation")
             .field("window", &self.window)
             .field("aggregate", &logical_plan)
+            .finish()
+    }
+}
+struct JoinCalculation {
+    join_type: JoinType,
+    left_input_schema: ArroyoSchema,
+    right_input_schema: ArroyoSchema,
+    output_schema: DFSchemaRef,
+    rewritten_join: LogicalPlan,
+}
+
+impl Debug for JoinCalculation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JoinCalculation")
+            .field("join_type", &self.join_type)
+            .field("left", &self.left_input_schema)
+            .field("right", &self.right_input_schema)
             .finish()
     }
 }
@@ -950,6 +987,201 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                     fetch: None,
                 }))
             }
+            LogicalPlan::Join(join) => {
+                let Join {
+                    left,
+                    right,
+                    on,
+                    filter,
+                    join_type,
+                    join_constraint: JoinConstraint::On,
+                    schema,
+                    null_equals_null: false,
+                } = join
+                else {
+                    return Err(DataFusionError::NotImplemented(
+                        "can't handle join constraint other than ON".into(),
+                    ));
+                };
+                let JoinType::Inner = join_type else {
+                    return Err(DataFusionError::NotImplemented(
+                        "can't handle join type other than inner".into(),
+                    ));
+                };
+                let key_count = on.len();
+                let (left_expressions, right_expressions): (Vec<_>, Vec<_>) =
+                    on.clone().into_iter().unzip();
+                let right_projection = projection_from_join_keys(right.clone(), right_expressions)?;
+                let left_projection = projection_from_join_keys(left.clone(), left_expressions)?;
+                let right_schema = right_projection.schema().clone();
+                let left_schema = left_projection.schema().clone();
+                let left_index =
+                    self.local_logical_plan_graph
+                        .add_node(LogicalPlanExtension::KeyCalculation {
+                            projection: left_projection,
+                            key_columns: (0..key_count).collect(),
+                        });
+                let right_index =
+                    self.local_logical_plan_graph
+                        .add_node(LogicalPlanExtension::KeyCalculation {
+                            projection: right_projection,
+                            key_columns: (0..key_count).collect(),
+                        });
+
+                let left_table_scan = LogicalPlan::TableScan(TableScan {
+                    table_name: OwnedTableReference::parse_str("left"),
+                    source: create_table(
+                        "left".to_string(),
+                        Arc::new(left.schema().as_ref().into()),
+                    ),
+                    projection: None,
+                    projected_schema: left.schema().clone(),
+                    filters: vec![],
+                    fetch: None,
+                });
+
+                let right_table_scan = LogicalPlan::TableScan(TableScan {
+                    table_name: OwnedTableReference::parse_str("right"),
+                    source: create_table(
+                        "right".to_string(),
+                        Arc::new(right.schema().as_ref().into()),
+                    ),
+                    projection: None,
+                    projected_schema: right.schema().clone(),
+                    filters: vec![],
+                    fetch: None,
+                });
+                let rewritten_join = LogicalPlan::Join(Join {
+                    left: Arc::new(left_table_scan.clone()),
+                    right: Arc::new(right_table_scan.clone()),
+                    on,
+                    join_type,
+                    join_constraint: JoinConstraint::On,
+                    schema: schema.clone(),
+                    null_equals_null: false,
+                    filter: filter.clone(),
+                });
+
+                let mut schema_with_timestamp = schema.fields().clone();
+                // remove fields named _timestamp
+                schema_with_timestamp.retain(|field| field.name() != "_timestamp");
+                let mut projection_expr = schema_with_timestamp
+                    .iter()
+                    .map(|field| {
+                        Expr::Column(Column {
+                            relation: field.qualifier().cloned(),
+                            name: field.name().to_string(),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                // add a _timestamp field to the schema
+                schema_with_timestamp.push(DFField::new_unqualified(
+                    "_timestamp",
+                    DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    false,
+                ));
+
+                let output_schema = Arc::new(DFSchema::new_with_metadata(
+                    schema_with_timestamp,
+                    schema.metadata().clone(),
+                )?);
+                // then take a max of the two timestamp columns
+                let left_field = left.schema().field_with_unqualified_name("_timestamp")?;
+                let left_column = Expr::Column(Column {
+                    relation: left_field.qualifier().cloned(),
+                    name: left_field.name().to_string(),
+                });
+                let right_field = right.schema().field_with_unqualified_name("_timestamp")?;
+                let right_column = Expr::Column(Column {
+                    relation: right_field.qualifier().cloned(),
+                    name: right_field.name().to_string(),
+                });
+                let max_timestamp = Expr::Case(Case {
+                    expr: Some(Box::new(Expr::BinaryExpr(BinaryExpr {
+                        left: Box::new(left_column.clone()),
+                        op: datafusion_expr::Operator::GtEq,
+                        right: Box::new(right_column.clone()),
+                    }))),
+                    when_then_expr: vec![
+                        (
+                            Box::new(Expr::Literal(ScalarValue::Boolean(Some(true)))),
+                            Box::new(left_column.clone()),
+                        ),
+                        (
+                            Box::new(Expr::Literal(ScalarValue::Boolean(Some(false)))),
+                            Box::new(right_column.clone()),
+                        ),
+                    ],
+                    else_expr: None,
+                });
+
+                projection_expr.push(max_timestamp);
+                let final_logical_plan = LogicalPlan::Projection(Projection::try_new_with_schema(
+                    projection_expr,
+                    Arc::new(rewritten_join),
+                    output_schema.clone(),
+                )?);
+                println!("left schema: {:?}", left_schema);
+                let left_arrow_schema = Arc::new(left_schema.as_ref().into());
+                println!("left arrow schema: {:?}", left_arrow_schema);
+
+                let join_calculation = JoinCalculation {
+                    join_type,
+                    left_input_schema: ArroyoSchema::new(
+                        left_arrow_schema,
+                        left_schema.fields().len() - 1,
+                        (0..key_count).collect(),
+                    ),
+                    right_input_schema: ArroyoSchema::new(
+                        Arc::new(right_schema.as_ref().into()),
+                        right_schema.fields().len() - 1,
+                        (0..key_count).collect(),
+                    ),
+                    output_schema: final_logical_plan.schema().clone(),
+                    rewritten_join: final_logical_plan,
+                };
+                let join_index = self
+                    .local_logical_plan_graph
+                    .add_node(LogicalPlanExtension::Join(join_calculation));
+                let table_name = format!("{}", join_index.index());
+                let left_edge = DataFusionEdge::new(
+                    left_schema.clone(),
+                    LogicalEdgeType::LeftJoin,
+                    (0..key_count).collect(),
+                )
+                .expect("should be able to create edge");
+                let right_edge = DataFusionEdge::new(
+                    right_schema.clone(),
+                    LogicalEdgeType::RightJoin,
+                    (0..key_count).collect(),
+                )
+                .expect("should be able to create edge");
+                self.local_logical_plan_graph
+                    .add_edge(left_index, join_index, left_edge);
+                self.local_logical_plan_graph
+                    .add_edge(right_index, join_index, right_edge);
+                Ok(LogicalPlan::TableScan(TableScan {
+                    table_name: OwnedTableReference::partial("arroyo-virtual", table_name.clone()),
+                    source: create_table_with_timestamp(
+                        OwnedTableReference::partial("arroyo-virtual", table_name).to_string(),
+                        output_schema
+                            .fields()
+                            .iter()
+                            .map(|field| {
+                                Arc::new(Field::new(
+                                    field.name(),
+                                    field.data_type().clone(),
+                                    field.is_nullable(),
+                                ))
+                            })
+                            .collect(),
+                    ),
+                    projection: None,
+                    projected_schema: output_schema,
+                    filters: vec![],
+                    fetch: None,
+                }))
+            }
             LogicalPlan::TableScan(table_scan) => {
                 if table_scan.projection.is_some() {
                     return Err(DataFusionError::Internal(
@@ -1036,6 +1268,46 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
     }
 }
 
+fn projection_from_join_keys(
+    input: Arc<LogicalPlan>,
+    mut join_expressions: Vec<Expr>,
+) -> DFResult<LogicalPlan> {
+    let key_count = join_expressions.len();
+    join_expressions.extend(
+        input
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| Expr::Column(Column::new(field.qualifier().cloned(), field.name()))),
+    );
+    // Calculate initial projection with default names
+    let mut projection = Projection::try_new(join_expressions, input)?;
+    let fields = projection
+        .schema
+        .fields()
+        .into_iter()
+        .enumerate()
+        .map(|(index, field)| {
+            // rename to avoid collisions
+            if index < key_count {
+                DFField::new(
+                    field.qualifier().cloned(),
+                    &format!("_key_{}", field.name()),
+                    field.data_type().clone(),
+                    field.is_nullable(),
+                )
+            } else {
+                field.clone()
+            }
+        });
+    let rewritten_schema = Arc::new(DFSchema::new_with_metadata(
+        fields.collect(),
+        projection.schema.metadata().clone(),
+    )?);
+    projection.schema = rewritten_schema;
+    Ok(LogicalPlan::Projection(projection))
+}
+
 #[derive(Default)]
 struct TableScanFinder {
     input_table_scan_ids: HashSet<usize>,
@@ -1111,10 +1383,7 @@ pub async fn parse_and_get_arrow_program(
                 schema_provider: schema_provider.clone(),
             })?
             .rewrite(&mut TimestampRewriter {})?
-            .rewrite(&mut rewriter)
-            .unwrap();
-
-        println!("REWRITE: {}", plan_rewrite.display_graphviz());
+            .rewrite(&mut rewriter)?;
 
         for (original_name, index) in &rewriter.table_source_to_nodes {
             let node = rewriter

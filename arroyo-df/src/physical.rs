@@ -72,6 +72,10 @@ pub enum DecodingContext {
     SingleLockedBatch(Arc<RwLock<Option<RecordBatch>>>),
     UnboundedBatchStream(Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>),
     LockedBatchVec(Arc<RwLock<Vec<RecordBatch>>>),
+    LockedJoinPair {
+        left: Arc<RwLock<Option<RecordBatch>>>,
+        right: Arc<RwLock<Option<RecordBatch>>>,
+    },
 }
 
 impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
@@ -107,6 +111,20 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             DecodingContext::None => Err(DataFusionError::Internal(
                 "Need an internal context to decode".into(),
             )),
+            DecodingContext::LockedJoinPair { left, right } => match mem_exec.table_name.as_str() {
+                "left" => Ok(Arc::new(RwLockRecordBatchReader {
+                    schema: mem_exec.schema.clone(),
+                    locked_batch: left.clone(),
+                })),
+                "right" => Ok(Arc::new(RwLockRecordBatchReader {
+                    schema: mem_exec.schema.clone(),
+                    locked_batch: right.clone(),
+                })),
+                _ => Err(DataFusionError::Internal(format!(
+                    "unknown table name {}",
+                    mem_exec.table_name
+                ))),
+            },
         }
     }
 

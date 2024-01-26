@@ -252,7 +252,7 @@ impl ArrowOperatorConstructor<api::ConnectorOp> for ImpulseSourceFunc {
         Ok(OperatorNode::from_source(Box::new(ImpulseSourceFunc {
             interval: table
                 .event_time_interval
-                .map(|i| Duration::from_micros(i as u64)),
+                .map(|i| Duration::from_nanos(i as u64)),
             spec: ImpulseSpec::EventsPerSecond(table.event_rate as f32),
             limit: table
                 .message_count
