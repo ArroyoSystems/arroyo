@@ -64,7 +64,7 @@ impl FieldSpec {
             FieldSpec::VirtualField { .. } => true,
         }
     }
-    fn struct_field(&self) -> &Field {
+    pub fn field(&self) -> &Field {
         match self {
             FieldSpec::StructField(f) => f,
             FieldSpec::VirtualField { field, .. } => field,
@@ -158,7 +158,7 @@ impl ConnectorTable {
             .iter()
             .filter(|f| !f.is_virtual())
             .map(|f| {
-                let struct_field = f.struct_field();
+                let struct_field = f.field();
                 struct_field.clone().try_into().map_err(|_| {
                     anyhow!(
                         "field '{}' has a type '{:?}' that cannot be used in a connection table",
@@ -234,8 +234,8 @@ impl ConnectorTable {
                 .fields
                 .iter()
                 .find(|f| {
-                    f.struct_field().name() == field_name
-                        && matches!(f.struct_field().data_type(), DataType::Timestamp(..))
+                    f.field().name() == field_name
+                        && matches!(f.field().data_type(), DataType::Timestamp(..))
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -244,9 +244,7 @@ impl ConnectorTable {
                     )
                 })?;
 
-            Ok(Some(Expr::Column(Column::from_name(
-                field.struct_field().name(),
-            ))))
+            Ok(Some(Expr::Column(Column::from_name(field.field().name()))))
         } else {
             Ok(None)
         }
@@ -259,8 +257,8 @@ impl ConnectorTable {
                 .fields
                 .iter()
                 .find(|f| {
-                    f.struct_field().name() == field_name
-                        && matches!(f.struct_field().data_type(), DataType::Timestamp(..))
+                    f.field().name() == field_name
+                        && matches!(f.field().data_type(), DataType::Timestamp(..))
                 })
                 .ok_or_else(|| {
                     anyhow!(
@@ -269,9 +267,7 @@ impl ConnectorTable {
                     )
                 })?;
 
-            Ok(Some(Expr::Column(Column::from_name(
-                field.struct_field().name(),
-            ))))
+            Ok(Some(Expr::Column(Column::from_name(field.field().name()))))
         } else {
             Ok(None)
         }
@@ -559,7 +555,7 @@ impl Table {
                         name,
                         fields: fields
                             .into_iter()
-                            .map(|f| Arc::new(f.struct_field().clone()))
+                            .map(|f| Arc::new(f.field().clone()))
                             .collect(),
                     }))
                 }
@@ -658,7 +654,7 @@ impl Table {
                 .unwrap_or_else(|| {
                     fields
                         .iter()
-                        .map(|field| field.struct_field().clone().into())
+                        .map(|field| field.field().clone().into())
                         .collect()
                 }),
             Table::TableFromQuery { logical_plan, .. } => logical_plan

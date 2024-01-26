@@ -16,7 +16,7 @@ use strum::{Display, EnumString};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, EnumString, Display)]
 pub enum OperatorName {
-    Watermark,
+    ExpressionWatermark,
     ArrowValue,
     ArrowKey,
     ArrowAggregate,

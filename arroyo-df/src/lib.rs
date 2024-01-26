@@ -53,6 +53,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 
 use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
+use crate::watermark_node::WatermarkNode;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use arroyo_rpc::{ArroyoSchema, TIMESTAMP_FIELD};
 use std::time::{Duration, SystemTime};
@@ -65,6 +66,7 @@ const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
 #[cfg(test)]
 mod test;
+mod watermark_node;
 
 #[allow(unused)]
 #[derive(Clone, Debug)]
@@ -382,23 +384,19 @@ impl ArroyoSchemaProvider {
             .get_table(name)
             .ok_or_else(|| DataFusionError::Plan(format!("Table {} not found", name)))?;
 
-        let mut table_fields = vec![];
-        let fields_from_table = table.get_fields();
-        for field in fields {
-            let t_field = fields_from_table
-                .iter()
-                .find(|t_field| t_field.name() == field.name())
-                .ok_or_else(|| {
-                    return DataFusionError::Plan(format!(
-                        "Field {} not found in table {}",
-                        field.name(),
-                        name
-                    ));
-                })?;
-            table_fields.push(t_field.clone());
-        }
+        let fields = table
+            .get_fields()
+            .iter()
+            .filter_map(|field| {
+                if fields.contains(field) {
+                    Some(field.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
-        let schema = Arc::new(Schema::new_with_metadata(table_fields, HashMap::new()));
+        let schema = Arc::new(Schema::new_with_metadata(fields, HashMap::new()));
         Ok(create_table(name.to_string(), schema))
     }
 }
@@ -576,6 +574,7 @@ enum LogicalPlanExtension {
         name: String,
         connector_op: ConnectorOp,
     },
+    WatermarkNode(WatermarkNode),
 }
 
 impl LogicalPlanExtension {
@@ -590,6 +589,7 @@ impl LogicalPlanExtension {
             } => Some(inner_plan),
             LogicalPlanExtension::AggregateCalculation(_) => None,
             LogicalPlanExtension::Sink { .. } => None,
+            LogicalPlanExtension::WatermarkNode(n) => None,
         }
     }
 
@@ -627,6 +627,9 @@ impl LogicalPlanExtension {
                 .unwrap();
 
                 DataFusionEdge::new(output_schema, LogicalEdgeType::Forward, vec![]).unwrap()
+            }
+            LogicalPlanExtension::WatermarkNode(n) => {
+                DataFusionEdge::new(n.schema.clone(), LogicalEdgeType::Forward, vec![]).unwrap()
             }
             LogicalPlanExtension::Sink { .. } => unreachable!(),
         }
@@ -950,8 +953,7 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
             LogicalPlan::TableScan(table_scan) => {
                 if table_scan.projection.is_some() {
                     return Err(DataFusionError::Internal(
-                        "Unexpected projection in table scan that should have been removed by SourceRewriter"
-                            .to_string(),
+                        "Unexpected projection in table scan".to_string(),
                     ));
                 }
 
@@ -985,6 +987,49 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                     return Err(DataFusionError::Internal("expect a value node".to_string()));
                 };
                 Ok(interred_plan.clone())
+            }
+            LogicalPlan::Extension(extension) => {
+                let watermark_node = extension
+                    .node
+                    .as_any()
+                    .downcast_ref::<WatermarkNode>()
+                    .unwrap()
+                    .clone();
+
+                let index = self
+                    .local_logical_plan_graph
+                    .add_node(LogicalPlanExtension::WatermarkNode(watermark_node.clone()));
+
+                let input = LogicalPlanExtension::ValueCalculation(watermark_node.input);
+                let edge = input.outgoing_edge();
+                let input_index = self.local_logical_plan_graph.add_node(input);
+                self.local_logical_plan_graph
+                    .add_edge(input_index, index, edge);
+
+                let table_name = format!("{}", index.index());
+
+                Ok(LogicalPlan::TableScan(TableScan {
+                    table_name: OwnedTableReference::partial("arroyo-virtual", table_name.clone()),
+                    source: create_table_with_timestamp(
+                        OwnedTableReference::partial("arroyo-virtual", table_name).to_string(),
+                        watermark_node
+                            .schema
+                            .fields()
+                            .iter()
+                            .map(|field| {
+                                Arc::new(Field::new(
+                                    field.name(),
+                                    field.data_type().clone(),
+                                    field.is_nullable(),
+                                ))
+                            })
+                            .collect(),
+                    ),
+                    projection: None,
+                    projected_schema: watermark_node.schema.clone(),
+                    filters: vec![],
+                    fetch: None,
+                }))
             }
             other => Ok(other),
         }
@@ -1066,7 +1111,8 @@ pub async fn parse_and_get_arrow_program(
                 schema_provider: schema_provider.clone(),
             })?
             .rewrite(&mut TimestampRewriter {})?
-            .rewrite(&mut rewriter)?;
+            .rewrite(&mut rewriter)
+            .unwrap();
 
         println!("REWRITE: {}", plan_rewrite.display_graphviz());
 

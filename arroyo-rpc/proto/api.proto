@@ -259,6 +259,13 @@ message ExpressionWatermark {
   optional uint64 idle_time_micros = 3;
 }
 
+message ExpressionWatermarkConfig {
+  uint64 period_micros = 1;
+  optional uint64 idle_time_micros = 2;
+  ArroyoSchema input_schema = 3;
+  bytes expression = 4;
+}
+
 message ExpressionOperator {
   string name = 1;
   string expression= 2;
