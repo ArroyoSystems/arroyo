@@ -384,23 +384,19 @@ impl ArroyoSchemaProvider {
             .get_table(name)
             .ok_or_else(|| DataFusionError::Plan(format!("Table {} not found", name)))?;
 
-        let mut table_fields = vec![];
-        let fields_from_table = table.get_fields();
-        for field in fields {
-            let t_field = fields_from_table
-                .iter()
-                .find(|t_field| t_field.name() == field.name())
-                .ok_or_else(|| {
-                    return DataFusionError::Plan(format!(
-                        "Field {} not found in table {}",
-                        field.name(),
-                        name
-                    ));
-                })?;
-            table_fields.push(t_field.clone());
-        }
+        let fields = table
+            .get_fields()
+            .iter()
+            .filter_map(|field| {
+                if fields.contains(field) {
+                    Some(field.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
-        let schema = Arc::new(Schema::new_with_metadata(table_fields, HashMap::new()));
+        let schema = Arc::new(Schema::new_with_metadata(fields, HashMap::new()));
         Ok(create_table(name.to_string(), schema))
     }
 }
@@ -593,7 +589,7 @@ impl LogicalPlanExtension {
             } => Some(inner_plan),
             LogicalPlanExtension::AggregateCalculation(_) => None,
             LogicalPlanExtension::Sink { .. } => None,
-            LogicalPlanExtension::WatermarkNode(n) => Some(&n.input),
+            LogicalPlanExtension::WatermarkNode(n) => None,
         }
     }
 
@@ -957,8 +953,7 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
             LogicalPlan::TableScan(table_scan) => {
                 if table_scan.projection.is_some() {
                     return Err(DataFusionError::Internal(
-                        "Unexpected projection in table scan that should have been removed by SourceRewriter"
-                            .to_string(),
+                        "Unexpected projection in table scan".to_string(),
                     ));
                 }
 
@@ -994,16 +989,22 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                 Ok(interred_plan.clone())
             }
             LogicalPlan::Extension(extension) => {
-                let Some(watermark_node) = extension.node.as_any().downcast_ref::<WatermarkNode>()
-                else {
-                    return Err(DataFusionError::Plan(
-                        "Logical plan extension must be a watermark node".into(),
-                    ));
-                };
+                let watermark_node = extension
+                    .node
+                    .as_any()
+                    .downcast_ref::<WatermarkNode>()
+                    .unwrap()
+                    .clone();
 
                 let index = self
                     .local_logical_plan_graph
                     .add_node(LogicalPlanExtension::WatermarkNode(watermark_node.clone()));
+
+                let input = LogicalPlanExtension::ValueCalculation(watermark_node.input);
+                let edge = input.outgoing_edge();
+                let input_index = self.local_logical_plan_graph.add_node(input);
+                self.local_logical_plan_graph
+                    .add_edge(input_index, index, edge);
 
                 let table_name = format!("{}", index.index());
 
@@ -1110,7 +1111,8 @@ pub async fn parse_and_get_arrow_program(
                 schema_provider: schema_provider.clone(),
             })?
             .rewrite(&mut TimestampRewriter {})?
-            .rewrite(&mut rewriter)?;
+            .rewrite(&mut rewriter)
+            .unwrap();
 
         println!("REWRITE: {}", plan_rewrite.display_graphviz());
 

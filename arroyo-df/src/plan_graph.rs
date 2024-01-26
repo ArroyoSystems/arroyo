@@ -23,9 +23,7 @@ use crate::{
 };
 use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
 use anyhow::{anyhow, bail, Context, Result};
-use arroyo_datastream::logical::{
-    LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, LogicalProgram, OperatorName,
-};
+use arroyo_datastream::logical::{LogicalGraph, LogicalNode, LogicalProgram, OperatorName};
 use arroyo_rpc::grpc::api::{
     KeyPlanOperator, SessionWindowAggregateOperator, SlidingWindowAggregateOperator,
     ValuePlanOperator,
@@ -36,8 +34,6 @@ use arroyo_rpc::{
 };
 use datafusion_common::{DFSchema, DFSchemaRef, ScalarValue};
 use datafusion_expr::{expr::ScalarFunction, BuiltinScalarFunction, Expr, LogicalPlan};
-use datafusion_physical_expr::create_physical_expr;
-use datafusion_physical_expr::execution_props::ExecutionProps;
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{
@@ -329,46 +325,14 @@ impl Planner {
                     sink_index
                 }
                 crate::LogicalPlanExtension::WatermarkNode(watermark_node) => {
-                    let expression = create_physical_expr(
+                    let expression = self.planner.create_physical_expr(
                         &watermark_node.watermark_expression.as_ref().unwrap(),
                         &watermark_node.schema,
                         &watermark_node.schema.as_ref().into(),
-                        &ExecutionProps::new(),
+                        &self.session_state,
                     )?;
 
                     let expression = PhysicalExprNode::try_from(expression)?;
-                    let schema = ArroyoSchema {
-                        schema: Arc::new(watermark_node.schema.as_ref().into()),
-                        timestamp_index: watermark_node.schema.fields().len() - 1, // TODO: is this correct?
-                        key_indices: vec![],
-                    };
-
-                    let projection_execution_plan = self
-                        .planner
-                        .create_physical_plan(&watermark_node.input.clone(), &self.session_state)
-                        .await
-                        .context("creating physical plan for watermark input value calculation")?;
-
-                    let projection_physical_plan_node = PhysicalPlanNode::try_from_physical_plan(
-                        projection_execution_plan,
-                        &ArroyoPhysicalExtensionCodec::default(),
-                    )?;
-
-                    let projection_node_config = ValuePlanOperator {
-                        name: "proj".into(),
-                        physical_plan: projection_physical_plan_node.encode_to_vec(),
-                    };
-
-                    let projection_node_index = program_graph.add_node(LogicalNode {
-                        operator_id: format!("value_{}", program_graph.node_count()),
-                        description: format!(
-                            "pre_watermark_projection<{}>",
-                            projection_node_config.name
-                        ),
-                        operator_name: OperatorName::ArrowValue,
-                        operator_config: projection_node_config.encode_to_vec(),
-                        parallelism: 1,
-                    });
 
                     let watermark_index = program_graph.add_node(LogicalNode {
                         operator_id: format!("watermark_{}", program_graph.node_count()),
@@ -379,21 +343,13 @@ impl Planner {
                             period_micros: 1_000_000,
                             idle_time_micros: None,
                             expression: expression.encode_to_vec(),
-                            input_schema: Some(schema.clone().try_into()?),
+                            input_schema: Some(watermark_node.arroyo_schema().try_into()?),
                         }
                         .encode_to_vec(),
                     });
 
-                    let edge = LogicalEdge {
-                        edge_type: LogicalEdgeType::Forward,
-                        schema,
-                        projection: None,
-                    };
-
-                    program_graph.add_edge(projection_node_index, watermark_index, edge);
-
                     node_mapping.insert(node_index, watermark_index);
-                    projection_node_index
+                    watermark_index
                 }
             };
 

@@ -40,19 +40,16 @@ impl SourceRewriter {
                 .ok_or_else(|| {
                     DataFusionError::Plan(format!("Watermark field {} not found", watermark_field))
                 })?,
-            None => {
-                // If no watermark field is present, calculate it as a fixed lateness duration of 1 second
-                Expr::BinaryExpr(BinaryExpr {
-                    left: Box::new(Expr::Column(Column {
-                        relation: None,
-                        name: "_timestamp".to_string(),
-                    })),
-                    op: datafusion_expr::Operator::Minus,
-                    right: Box::new(Expr::Literal(ScalarValue::DurationNanosecond(Some(
-                        Duration::from_secs(1).as_nanos() as i64,
-                    )))),
-                })
-            }
+            None => Expr::BinaryExpr(BinaryExpr {
+                left: Box::new(Expr::Column(Column {
+                    relation: None,
+                    name: "_timestamp".to_string(),
+                })),
+                op: datafusion_expr::Operator::Minus,
+                right: Box::new(Expr::Literal(ScalarValue::DurationNanosecond(Some(
+                    Duration::from_secs(1).as_nanos() as i64,
+                )))),
+            }),
         };
         Ok(expr)
     }
@@ -161,24 +158,13 @@ impl TreeNodeRewriter for SourceRewriter {
         let Table::ConnectorTable(table) = table else {
             return Ok(node);
         };
-
-        let watermark_schema = DFSchema::try_from_qualified_schema(
-            table_scan.table_name.clone(),
-            &Schema::new(
-                table
-                    .fields
-                    .iter()
-                    .map(|field| field.field().clone())
-                    .collect::<Vec<_>>()
-                    .clone(),
-            ),
-        )?;
-
-        let watermark_node = WatermarkNode {
-            input: self.projection(&table_scan, table)?,
-            watermark_expression: Some(Self::watermark_expression(table)?),
-            schema: Arc::new(watermark_schema),
-        };
+        let watermark_node = WatermarkNode::new(
+            self.projection(&table_scan, table)?,
+            Some(Self::watermark_expression(table)?),
+        )
+        .map_err(|err| {
+            DataFusionError::Internal(format!("failed to create watermark expression: {}", err))
+        })?;
 
         return Ok(LogicalPlan::Extension(Extension {
             node: Arc::new(watermark_node),
