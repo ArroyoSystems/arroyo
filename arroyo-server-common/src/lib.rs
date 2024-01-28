@@ -1,4 +1,7 @@
 #![allow(clippy::type_complexity)]
+
+pub mod shutdown;
+
 use arroyo_types::{admin_port, telemetry_enabled, POSTHOG_KEY};
 use axum::body::Bytes;
 use axum::extract::State;
@@ -18,8 +21,6 @@ use serde_json::{json, Value};
 use std::fs;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::select;
-use tokio::sync::broadcast::Receiver;
 use tonic::body::BoxBody;
 use tonic::transport::Server;
 use tower::layer::util::Stack;
@@ -174,7 +175,7 @@ async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     .unwrap()
 }
 
-pub fn start_admin_server(service: &str, default_port: u16, mut shutdown: Receiver<i32>) {
+pub async fn start_admin_server(service: &str, default_port: u16)  {
     let port = admin_port(service, default_port);
 
     info!("Starting {} admin server on 0.0.0.0:{}", service, port);
@@ -191,17 +192,9 @@ pub fn start_admin_server(service: &str, default_port: u16, mut shutdown: Receiv
 
     let addr = format!("0.0.0.0:{}", port).parse().unwrap();
 
-    tokio::spawn(async move {
-        select! {
-            result = axum::Server::bind(&addr)
-            .serve(app.into_make_service()) => {
-                result.unwrap();
-            }
-            _ = shutdown.recv() => {
-
-            }
-        }
-    });
+    axum::Server::bind(&addr).serve(app.into_make_service())
+        .await
+        .expect("admin server failed");
 }
 
 #[cfg(not(target_os = "freebsd"))]

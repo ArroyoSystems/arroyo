@@ -27,6 +27,7 @@ use tokio::time::{interval, Interval};
 use tokio_stream::StreamExt;
 
 use arroyo_operator::inq_reader::InQReader;
+use arroyo_server_common::shutdown::ShutdownGuard;
 
 #[derive(Clone)]
 struct NetworkSender {
@@ -292,7 +293,7 @@ impl NetworkManager {
         }
     }
 
-    pub async fn open_listener(&mut self) -> u16 {
+    pub async fn open_listener(&mut self, shutdown_guard: ShutdownGuard) -> u16 {
         let port = self.port;
         let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
             .await
@@ -300,7 +301,7 @@ impl NetworkManager {
         let port = listener.local_addr().unwrap().port();
 
         let streams = Arc::clone(&self.in_streams);
-        tokio::spawn(async move {
+        shutdown_guard.into_spawn_task(async move {
             loop {
                 let (stream, _) = listener.accept().await.unwrap();
 

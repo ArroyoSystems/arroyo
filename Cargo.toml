@@ -2,6 +2,7 @@
 members = [
     "arroyo",
     "arroyo-api",
+    "arroyo-bin",
     "arroyo-compiler-service",
     "arroyo-controller",
     "arroyo-connectors",
@@ -21,7 +22,7 @@ members = [
     "arroyo-types",
     "arroyo-worker",
     "copy-artifacts",
-    "integ",
+    "integ", "arroyo-bin",
 ]
 
 resolver = "2"

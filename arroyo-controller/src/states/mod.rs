@@ -21,6 +21,7 @@ use crate::types::public::StopMode;
 use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus};
 use arroyo_datastream::logical::LogicalProgram;
 use prost::Message;
+use arroyo_server_common::shutdown::ShutdownGuard;
 
 use self::checkpoint_stopping::CheckpointStopping;
 use self::compiling::Compiling;
@@ -591,6 +592,7 @@ impl StateMachine {
         status: JobStatus,
         pool: Pool,
         scheduler: Arc<dyn Scheduler>,
+        shutdown_guard: ShutdownGuard,
     ) -> Self {
         let mut this = Self {
             tx: None,
@@ -599,12 +601,12 @@ impl StateMachine {
             scheduler,
         };
 
-        this.start(status).await;
+        this.start(status, shutdown_guard).await;
 
         this
     }
 
-    async fn start(&mut self, mut status: JobStatus) {
+    async fn start(&mut self, mut status: JobStatus, shutdown_guard: ShutdownGuard) {
         if !self.done() {
             // we're already running, don't do anything
             return;
@@ -645,7 +647,7 @@ impl StateMachine {
                 let config = self.config.clone();
                 let pool = self.pool.clone();
                 let scheduler = self.scheduler.clone();
-                tokio::spawn(async move {
+                shutdown_guard.into_spawn_task(async move {
                     let id = { config.read().unwrap().id.clone() };
                     info!(message = "starting state machine", job_id = id);
                     run_to_completion(config, status, initial_state, pool, rx, scheduler).await;
@@ -657,7 +659,7 @@ impl StateMachine {
         }
     }
 
-    pub async fn update(&mut self, config: JobConfig, status: JobStatus) {
+    pub async fn update(&mut self, config: JobConfig, status: JobStatus, shutdown_guard: &ShutdownGuard) {
         if *self.config.read().unwrap() != config {
             let update = JobMessage::ConfigUpdate(config.clone());
             {
@@ -665,10 +667,10 @@ impl StateMachine {
                 *c = config;
             }
             if self.send(update).await.is_err() {
-                self.start(status).await;
+                self.start(status, shutdown_guard.clone_temporary()).await;
             }
         } else {
-            self.restart_if_needed(status).await;
+            self.restart_if_needed(status, shutdown_guard).await;
         }
     }
 
@@ -689,13 +691,13 @@ impl StateMachine {
     }
 
     // for states that should be running, check them and restart if needed
-    async fn restart_if_needed(&mut self, status: JobStatus) {
+    async fn restart_if_needed(&mut self, status: JobStatus, shutdown_guard: &ShutdownGuard) {
         match status.state.as_str() {
             "Running" | "Recovering" | "Rescaling" => {
                 // done() means there isn't a task running, but these states
                 // need to be advanced.
                 if self.done() {
-                    self.start(status).await;
+                    self.start(status, shutdown_guard.clone_temporary()).await;
                 }
             }
             _ => {}

@@ -23,13 +23,13 @@ use rand::Rng;
 use std::os::unix::fs::PermissionsExt;
 use std::process::exit;
 use tokio::sync::{
-    broadcast,
     mpsc::{channel, Sender},
 };
 use tokio::{fs::File, io::AsyncWriteExt, process::Command, select};
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info, warn};
+use arroyo_server_common::shutdown::Shutdown;
 
 const MAX_BIN_SIZE: usize = 300 * 1024 * 1024;
 
@@ -343,89 +343,78 @@ pub async fn main() {
         bind_addr, task_slots
     );
 
-    let (stop_tx, mut stop_rx) = broadcast::channel(1);
+    let shutdown = Shutdown::new("node");
 
-    tokio::spawn(async move {
-        if let Err(e) = arroyo_server_common::grpc_server()
-            .max_frame_size(Some((1 << 24) - 1)) // 16MB
-            .add_service(NodeGrpcServer::new(server))
-            .serve(bind_addr.parse().unwrap())
-            .await
-        {
-            eprintln!("Node server failed: {:?}...exiting", e);
-            stop_tx.send(1).unwrap();
-        }
-    });
+    shutdown.spawn_task(arroyo_server_common::start_admin_server("node", ports::NODE_ADMIN));
 
-    arroyo_server_common::start_admin_server("node", ports::NODE_ADMIN, stop_rx.resubscribe());
+    shutdown.spawn_task(arroyo_server_common::grpc_server()
+        .max_frame_size(Some((1 << 24) - 1)) // 16MB
+        .add_service(NodeGrpcServer::new(server))
+        .serve(bind_addr.parse().unwrap()));
 
     let req_addr = format!("{}:{}", local_ip_address::local_ip().unwrap(), grpc);
 
     // TODO: replace this with some sort of hook on server startup
     tokio::time::sleep(Duration::from_secs(1)).await;
 
-    if let Ok(code) = stop_rx.try_recv() {
+    if shutdown.is_canceled() {
         // don't register if the server failed to bind
-        exit(code);
+        exit(1);
     }
 
-    let mut attempts = 0;
-    loop {
-        match ControllerGrpcClient::connect(controller_addr.clone()).await {
-            Ok(mut controller) => {
-                controller
-                    .register_node(Request::new(RegisterNodeReq {
-                        node_id: node_id.0,
-                        task_slots: task_slots as u64,
-                        addr: req_addr.clone(),
-                    }))
-                    .await
-                    .unwrap();
+    shutdown.spawn_task(async move {
+        let mut attempts = 0;
+        loop {
+            match ControllerGrpcClient::connect(controller_addr.clone()).await {
+                Ok(mut controller) => {
+                    controller
+                        .register_node(Request::new(RegisterNodeReq {
+                            node_id: node_id.0,
+                            task_slots: task_slots as u64,
+                            addr: req_addr.clone(),
+                        }))
+                        .await
+                        .unwrap();
 
-                info!("Connected to controller");
-                loop {
-                    select! {
-                        _ = tokio::time::sleep(Duration::from_secs(5)) => {},
-                        msg = worker_finished_rx.recv() => {
-                            controller.worker_finished(Request::new(msg.unwrap())).await
-                            .unwrap_or_else(|err| {
-                                error!("shutting down: controller failed to report finished worker with {:?}", err);
-                                exit(1);
-                            });
+                    info!("Connected to controller");
+                    loop {
+                        select! {
+                            _ = tokio::time::sleep(Duration::from_secs(5)) => {},
+                            msg = worker_finished_rx.recv() => {
+                                controller.worker_finished(Request::new(msg.unwrap())).await
+                                .unwrap_or_else(|err| {
+                                    error!("shutting down: controller failed to report finished worker with {:?}", err);
+                                    exit(1);
+                                });
+                            }
                         }
-                        _ = stop_rx.recv() => {
+
+                        if let Err(e) = controller
+                            .heartbeat_node(Request::new(HeartbeatNodeReq {
+                                node_id: node_id.0,
+                                time: to_millis(SystemTime::now()),
+                            }))
+                            .await
+                        {
+                            error!("shutting down: controller failed heartbeat with {:?}", e);
                             return;
                         }
                     }
-
-                    if let Err(e) = controller
-                        .heartbeat_node(Request::new(HeartbeatNodeReq {
-                            node_id: node_id.0,
-                            time: to_millis(SystemTime::now()),
-                        }))
-                        .await
-                    {
-                        error!("shutting down: controller failed heartbeat with {:?}", e);
-                        return;
-                    }
                 }
-            }
-            Err(e) => {
-                if attempts % 50 == 0 {
-                    info!(
-                        "failed to connect to controller on {}..., {:?}",
-                        controller_addr, e
-                    );
-                }
-
-                attempts += 1;
-                select! {
-                    _ = tokio::time::sleep(Duration::from_millis(100)) => {},
-                    _ = stop_rx.recv() => {
-                        return;
+                Err(e) => {
+                    if attempts % 50 == 0 {
+                        info!(
+                            "failed to connect to controller on {}..., {:?}",
+                            controller_addr, e
+                        );
                     }
+
+                    attempts += 1;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
         }
-    }
+    });
+
+    let _ = shutdown.wait_for_shutdown(Duration::from_secs(30)).await;
 }

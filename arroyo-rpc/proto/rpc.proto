@@ -14,7 +14,6 @@ message RegisterWorkerReq {
   string rpc_address = 4;
   string data_address = 5;
   WorkerResources resources = 6;
-  string job_hash = 7;
   uint64 slots = 8;
 }
 

@@ -17,29 +17,22 @@ use arroyo_rpc::grpc::{
     WorkerErrorReq, WorkerErrorRes,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_server_common::log_event;
-use arroyo_types::{
-    from_micros, ports, DatabaseConfig, NodeId, WorkerId, REMOTE_COMPILER_ENDPOINT_ENV,
-};
-use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
+use arroyo_types::{from_micros, ports, NodeId, WorkerId, REMOTE_COMPILER_ENDPOINT_ENV, grpc_port};
+use deadpool_postgres::{Pool};
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
-use serde_json::json;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use time::OffsetDateTime;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender;
-use tokio_postgres::NoTls;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
-use uuid::Uuid;
+use arroyo_server_common::shutdown::ShutdownGuard;
 
 pub mod compiler;
 pub mod job_controller;
@@ -164,7 +157,6 @@ pub enum JobMessage {
         rpc_address: String,
         data_address: String,
         slots: usize,
-        job_hash: String,
     },
     TaskStarted {
         worker_id: WorkerId,
@@ -204,7 +196,6 @@ impl ControllerGrpc for ControllerServer {
                 rpc_address: req.rpc_address,
                 data_address: req.data_address,
                 slots: req.slots as usize,
-                job_hash: req.job_hash,
             },
         )
         .await?;
@@ -487,7 +478,7 @@ impl ControllerGrpc for ControllerServer {
 }
 
 impl ControllerServer {
-    pub async fn new() -> Self {
+    pub async fn new(pool: Pool) -> Self {
         let scheduler: Arc<dyn Scheduler> = match std::env::var("SCHEDULER").ok().as_deref() {
             Some("node") => {
                 info!("Using node scheduler");
@@ -507,56 +498,6 @@ impl ControllerServer {
                 Arc::new(ProcessScheduler::new())
             }
         };
-
-        let config = DatabaseConfig::load();
-        let mut cfg = deadpool_postgres::Config::new();
-        cfg.dbname = Some(config.name);
-        cfg.host = Some(config.host);
-        cfg.port = Some(config.port);
-        cfg.user = Some(config.user);
-        cfg.password = Some(config.password);
-        cfg.manager = Some(ManagerConfig {
-            recycling_method: RecyclingMethod::Fast,
-        });
-        let pool = cfg
-            .create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls)
-            .unwrap();
-
-        // test that the DB connection is valid
-        let _ = pool.get().await.unwrap_or_else(|e| {
-            panic!(
-                "Failed to connect to database {} at {}@{}:{} {:?}",
-                cfg.dbname.unwrap(),
-                cfg.user.unwrap(),
-                cfg.host.unwrap(),
-                cfg.port.unwrap(),
-                e
-            );
-        });
-
-        match pool
-            .get()
-            .await
-            .expect("Failed to connect to database")
-            .query_one("select id from cluster_info", &[])
-            .await
-        {
-            Ok(row) => {
-                let uuid: Uuid = row.get(0);
-                arroyo_server_common::set_cluster_id(&uuid.to_string());
-            }
-            Err(e) => {
-                debug!("Failed to get cluster info {:?}", e);
-            }
-        };
-
-        log_event(
-            "service_startup",
-            json!({
-                "service": "controller",
-                "scheduler": std::env::var("SCHEDULER").unwrap_or_else(|_| "process".to_string())
-            }),
-        );
 
         Self {
             scheduler,
@@ -587,13 +528,16 @@ impl ControllerServer {
         }
     }
 
-    fn start_updater(&self) {
+    fn start_updater(&self, guard: ShutdownGuard) {
         let db = self.db.clone();
         let jobs = Arc::clone(&self.job_state);
         let scheduler = Arc::clone(&self.scheduler);
 
-        tokio::spawn(async move {
-            loop {
+        let token = guard.token();
+
+        let our_guard = guard.clone();
+        our_guard.into_spawn_task(async move {
+            while !token.is_cancelled() {
                 let client = db.get().await.unwrap();
                 let res = queries::controller_queries::all_jobs()
                     .bind(&client)
@@ -639,46 +583,37 @@ impl ControllerServer {
                     };
 
                     if let Some(sm) = jobs.get_mut(&config.id) {
-                        sm.update(config, status).await;
+                        sm.update(config, status, &guard).await;
                     } else {
                         jobs.insert(
                             config.id.clone(),
-                            StateMachine::new(config, status, db.clone(), scheduler.clone()).await,
+                            StateMachine::new(config, status, db.clone(), scheduler.clone(), guard.clone_temporary()).await,
                         );
                     }
                 }
-
-                tokio::time::sleep(Duration::from_millis(500)).await;
             }
         });
     }
 
-    pub async fn start(self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn start(self, guard: ShutdownGuard) {
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(arroyo_rpc::grpc::API_FILE_DESCRIPTOR_SET)
-            .build()?;
+            .build()
+            .unwrap();
+
+        let addr = format!(
+            "0.0.0.0:{}",
+            grpc_port("controller", ports::CONTROLLER_GRPC)
+        ).parse().expect("Invalid port");
 
         info!("Starting arroyo-controller on {}", addr);
 
-        let (shutdown_tx, shutdown_rx) = broadcast::channel(16);
-
-        arroyo_server_common::start_admin_server(
-            "controller",
-            ports::CONTROLLER_ADMIN,
-            shutdown_rx,
-        );
-
-        self.start_updater();
-
-        arroyo_server_common::grpc_server()
-            .accept_http1(true)
-            .add_service(ControllerGrpcServer::new(self.clone()))
-            .add_service(reflection)
-            .serve(addr)
-            .await?;
-
-        shutdown_tx.send(0).unwrap();
-        Ok(())
+        self.start_updater(guard.clone());
+        guard.into_spawn_task(arroyo_server_common::grpc_server()
+                .accept_http1(true)
+                .add_service(ControllerGrpcServer::new(self.clone()))
+                .add_service(reflection)
+                .serve(addr));
     }
 }
 

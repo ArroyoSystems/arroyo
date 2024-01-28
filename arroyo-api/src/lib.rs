@@ -1,7 +1,11 @@
+use axum::Json;
+use axum::response::IntoResponse;
+use deadpool_postgres::{Pool};
+use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio_postgres::error::SqlState;
-use tracing::warn;
+use tracing::{info, warn};
 use utoipa::OpenApi;
 
 use crate::connection_profiles::{
@@ -30,6 +34,7 @@ use crate::rest_utils::{bad_request, log_and_map, ErrorResp};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::formats::*;
+use arroyo_types::{CONTROLLER_ADDR_ENV, HTTP_PORT_ENV, ports, service_port};
 
 mod cloud;
 mod connection_profiles;
@@ -123,6 +128,84 @@ fn handle_delete(name: &str, users: &str, err: tokio_postgres::Error) -> ErrorRe
 pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
     (dt.unix_timestamp_nanos() / 1_000) as u64
 }
+
+pub async fn start_server(pool: Pool) {
+    let controller_addr = std::env::var(CONTROLLER_ADDR_ENV)
+        .unwrap_or_else(|_| format!("http://localhost:{}", ports::CONTROLLER_GRPC));
+
+    let http_port = service_port("api", ports::API_HTTP, HTTP_PORT_ENV);
+    let addr = format!("0.0.0.0:{}", http_port).parse().unwrap();
+
+    let app = rest::create_rest_app(pool, &controller_addr);
+
+    info!("Starting API server on {:?}", addr);
+    axum::Server::bind(&addr).serve(app.into_make_service())
+        .await
+        .expect("HTTP server failed");
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionInfo {
+    email: String,
+    organization_id: String,
+    organization_name: String,
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub enum HttpErrorCode {
+    Unauthorized,
+    InvalidCredentials,
+    ServerError,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HttpError {
+    code: HttpErrorCode,
+    message: String,
+}
+
+impl HttpError {
+    pub fn new(code: HttpErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn login_error() -> Self {
+        Self::new(
+            HttpErrorCode::InvalidCredentials,
+            "The username or password was incorrect",
+        )
+    }
+
+    pub fn unauthorized_error() -> Self {
+        Self::new(
+            HttpErrorCode::Unauthorized,
+            "You are not authorized to access this endpoint",
+        )
+    }
+
+    pub fn server_error() -> Self {
+        Self::new(HttpErrorCode::ServerError, "Something went wrong")
+    }
+}
+
+impl IntoResponse for HttpError {
+    fn into_response(self) -> axum::response::Response {
+        let status = match self.code {
+            HttpErrorCode::InvalidCredentials | HttpErrorCode::Unauthorized => {
+                StatusCode::UNAUTHORIZED
+            }
+            HttpErrorCode::ServerError => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+
+        let mut resp = Json(self).into_response();
+        *resp.status_mut() = status;
+        resp
+    }
+}
+
 
 #[derive(OpenApi)]
 #[openapi(
