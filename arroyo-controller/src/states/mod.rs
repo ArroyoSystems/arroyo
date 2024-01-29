@@ -20,8 +20,8 @@ use crate::queries::controller_queries;
 use crate::types::public::StopMode;
 use crate::{schedulers::Scheduler, JobConfig, JobMessage, JobStatus};
 use arroyo_datastream::logical::LogicalProgram;
-use prost::Message;
 use arroyo_server_common::shutdown::ShutdownGuard;
+use prost::Message;
 
 use self::checkpoint_stopping::CheckpointStopping;
 use self::compiling::Compiling;
@@ -659,7 +659,12 @@ impl StateMachine {
         }
     }
 
-    pub async fn update(&mut self, config: JobConfig, status: JobStatus, shutdown_guard: &ShutdownGuard) {
+    pub async fn update(
+        &mut self,
+        config: JobConfig,
+        status: JobStatus,
+        shutdown_guard: &ShutdownGuard,
+    ) {
         if *self.config.read().unwrap() != config {
             let update = JobMessage::ConfigUpdate(config.clone());
             {

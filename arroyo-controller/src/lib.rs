@@ -17,8 +17,9 @@ use arroyo_rpc::grpc::{
     WorkerErrorReq, WorkerErrorRes,
 };
 use arroyo_rpc::public_ids::{generate_id, IdTypes};
-use arroyo_types::{from_micros, ports, NodeId, WorkerId, REMOTE_COMPILER_ENDPOINT_ENV, grpc_port};
-use deadpool_postgres::{Pool};
+use arroyo_server_common::shutdown::ShutdownGuard;
+use arroyo_types::{from_micros, grpc_port, ports, NodeId, WorkerId, REMOTE_COMPILER_ENDPOINT_ENV};
+use deadpool_postgres::Pool;
 use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use states::{Created, State, StateMachine};
@@ -32,7 +33,6 @@ use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
-use arroyo_server_common::shutdown::ShutdownGuard;
 
 pub mod compiler;
 pub mod job_controller;
@@ -535,7 +535,7 @@ impl ControllerServer {
 
         let token = guard.token();
 
-        let our_guard = guard.clone();
+        let our_guard = guard.child("update-thread");
         our_guard.into_spawn_task(async move {
             while !token.is_cancelled() {
                 let client = db.get().await.unwrap();
@@ -587,7 +587,14 @@ impl ControllerServer {
                     } else {
                         jobs.insert(
                             config.id.clone(),
-                            StateMachine::new(config, status, db.clone(), scheduler.clone(), guard.clone_temporary()).await,
+                            StateMachine::new(
+                                config,
+                                status,
+                                db.clone(),
+                                scheduler.clone(),
+                                guard.clone_temporary(),
+                            )
+                            .await,
                         );
                     }
                 }
@@ -604,16 +611,20 @@ impl ControllerServer {
         let addr = format!(
             "0.0.0.0:{}",
             grpc_port("controller", ports::CONTROLLER_GRPC)
-        ).parse().expect("Invalid port");
+        )
+        .parse()
+        .expect("Invalid port");
 
         info!("Starting arroyo-controller on {}", addr);
 
-        self.start_updater(guard.clone());
-        guard.into_spawn_task(arroyo_server_common::grpc_server()
+        self.start_updater(guard.child("updater"));
+        guard.into_spawn_task(
+            arroyo_server_common::grpc_server()
                 .accept_http1(true)
                 .add_service(ControllerGrpcServer::new(self.clone()))
                 .add_service(reflection)
-                .serve(addr));
+                .serve(addr),
+        );
     }
 }
 

@@ -127,25 +127,12 @@ pub async fn main() {
     let output_dir = std::env::var("OUTPUT_DIR").unwrap_or_else(|_| "/tmp/arroyo".to_string());
 
     info!("Starting services");
-    run_service(format!("target/{}/arroyo-api", profile), &[], vec![]).expect("Failed to run api");
     run_service(
-        format!("target/{}/arroyo-controller", profile),
-        &[],
-        vec![
-            ("CHECKPOINT_URL".to_string(), output_dir.clone()),
-            (
-                "REMOTE_COMPILER_ENDPOINT".to_string(),
-                "http://localhost:9000".to_string(),
-            ),
-        ],
+        format!("target/{}/arroyo-bin", profile),
+        &["cluster"],
+        vec![("CHECKPOINT_URL".to_string(), output_dir.clone())],
     )
-    .expect("Failed to run controller");
-    run_service(
-        format!("target/{}/arroyo-compiler-service", profile),
-        &["start"],
-        vec![("ARTIFACT_URL".to_string(), output_dir.clone())],
-    )
-    .expect("Failed to run compiler service");
+    .expect("Failed to run cluster");
 
     connect().await;
     let api_conf = Configuration {
@@ -167,7 +154,7 @@ pub async fn main() {
         ConnectionTablePost {
             config: Some(json!({"event_rate": 10})),
             connection_profile_id: None,
-            connector: "nexmark".to_string(),
+            connector: "impulse".to_string(),
             name: source_name.clone(),
             schema: None,
         },
@@ -189,7 +176,7 @@ pub async fn main() {
             parallelism: 1,
             preview: None,
             query: format!(
-                "select count(*) from {} where auction is not null group \
+                "select count(*) from {} where counter % 2 == 0 group \
                 by hop(interval '2 seconds', interval '10 seconds')",
                 source_name
             ),
@@ -210,13 +197,13 @@ pub async fn main() {
     let job = jobs.data.first().unwrap();
 
     // wait for a checkpoint
-    info!("Waiting for 10 successful checkpoints");
+    info!("Waiting for 3 successful checkpoints");
     loop {
         let checkpoints = get_job_checkpoints(&api_conf, &pipeline_id, &job.id)
             .await
             .unwrap();
 
-        if let Some(checkpoint) = checkpoints.data.iter().find(|c| c.epoch == 10) {
+        if let Some(checkpoint) = checkpoints.data.iter().find(|c| c.epoch == 3) {
             if checkpoint.finish_time.is_some() {
                 break;
             }

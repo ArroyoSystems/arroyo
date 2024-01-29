@@ -9,7 +9,8 @@ use arroyo_rpc::grpc::{
     CheckUdfsCompilerReq, CheckUdfsCompilerResp, CompileQueryReq, CompileQueryResp, UdfCrate,
 };
 
-use arroyo_server_common::{start_admin_server};
+use arroyo_server_common::shutdown::Shutdown;
+use arroyo_server_common::start_admin_server;
 use arroyo_storage::StorageProvider;
 use arroyo_types::{grpc_port, ports, ARTIFACT_URL_ENV, COMPILER_FEATURES_ENV};
 use prost::Message;
@@ -18,7 +19,6 @@ use tokio::{process::Command, sync::Mutex};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::error;
 use tracing::info;
-use arroyo_server_common::shutdown::Shutdown;
 
 pub fn to_millis(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -90,7 +90,10 @@ pub async fn main() {
 pub async fn start_service(service: CompileService) {
     let shutdown = Shutdown::new("compiler-service");
 
-    shutdown.spawn_task(start_admin_server("compiler", ports::COMPILER_ADMIN));
+    shutdown.spawn_task(
+        "admin",
+        start_admin_server("compiler", ports::COMPILER_ADMIN),
+    );
 
     let grpc = grpc_port("compiler", ports::COMPILER_GRPC);
 
@@ -122,10 +125,13 @@ pub async fn start_service(service: CompileService) {
         });
     }
 
-    shutdown.spawn_task(Server::builder()
-        .max_frame_size(Some((1 << 24) - 1)) // 16MB
-        .add_service(CompilerGrpcServer::new(service))
-        .serve(addr));
+    shutdown.spawn_task(
+        "grpc",
+        Server::builder()
+            .max_frame_size(Some((1 << 24) - 1)) // 16MB
+            .add_service(CompilerGrpcServer::new(service))
+            .serve(addr),
+    );
 
     let _ = shutdown.wait_for_shutdown(Duration::from_secs(30)).await;
 }

@@ -1,25 +1,20 @@
 use std::future::Future;
 use std::io;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 pub struct ShutdownGuard {
+    name: &'static str,
     tx: broadcast::Sender<()>,
     token: CancellationToken,
     ref_count: Arc<AtomicUsize>,
     temporary: bool,
-}
-
-impl Clone for ShutdownGuard {
-    fn clone(&self) -> Self {
-        Self::new(self.tx.clone(), self.token.clone(), self.ref_count.clone(), self.temporary)
-    }
 }
 
 impl Drop for ShutdownGuard {
@@ -28,7 +23,7 @@ impl Drop for ShutdownGuard {
             self.token.cancel();
         }
         let count = self.ref_count.fetch_sub(1, Ordering::SeqCst);
-        info!("Dropping guard (count={})", count);
+        debug!("[{}] Dropping guard (count={})", self.name, count);
         if count == 1 {
             let _ = self.tx.send(());
         }
@@ -36,10 +31,17 @@ impl Drop for ShutdownGuard {
 }
 
 impl ShutdownGuard {
-    fn new(tx: broadcast::Sender<()>, token: CancellationToken, ref_count: Arc<AtomicUsize>, temporary: bool) -> Self {
+    fn new(
+        name: &'static str,
+        tx: broadcast::Sender<()>,
+        token: CancellationToken,
+        ref_count: Arc<AtomicUsize>,
+        temporary: bool,
+    ) -> Self {
         ref_count.fetch_add(1, Ordering::SeqCst);
 
         Self {
+            name,
             tx,
             token,
             ref_count,
@@ -51,6 +53,16 @@ impl ShutdownGuard {
         self.token.cancel();
     }
 
+    pub fn child(&self, name: &'static str) -> Self {
+        Self::new(
+            name,
+            self.tx.clone(),
+            self.token.clone(),
+            self.ref_count.clone(),
+            self.temporary,
+        )
+    }
+
     pub fn token(&self) -> CancellationToken {
         self.token.clone()
     }
@@ -60,17 +72,29 @@ impl ShutdownGuard {
     }
 
     pub fn clone_temporary(&self) -> Self {
-        ShutdownGuard::new(self.tx.clone(), self.token.clone(), self.ref_count.clone(), true)
+        ShutdownGuard::new(
+            "temp",
+            self.tx.clone(),
+            self.token.clone(),
+            self.ref_count.clone(),
+            true,
+        )
     }
 
-    pub fn spawn_task<T>(&self, task: T) -> JoinHandle<Option<T::Output>>
-        where T: Future + Send + 'static, T::Output: Send + 'static {
-        let guard = self.clone();
+    pub fn spawn_task<T>(&self, name: &'static str, task: T) -> JoinHandle<Option<T::Output>>
+    where
+        T: Future + Send + 'static,
+        T::Output: Send + 'static,
+    {
+        let guard = self.child(name);
         guard.into_spawn_task(task)
     }
 
     pub fn into_spawn_task<T>(self, task: T) -> JoinHandle<Option<T::Output>>
-        where T: Future + Send + 'static, T::Output: Send + 'static {
+    where
+        T: Future + Send + 'static,
+        T::Output: Send + 'static,
+    {
         let token = self.token.clone();
         tokio::spawn(async move {
             let output = select! {
@@ -87,7 +111,10 @@ impl ShutdownGuard {
     }
 
     pub fn spawn_temporary<T>(&self, task: T) -> JoinHandle<Option<T::Output>>
-        where T: Future + Send + 'static, T::Output: Send + 'static {
+    where
+        T: Future + Send + 'static,
+        T::Output: Send + 'static,
+    {
         let guard = self.clone_temporary();
         guard.into_spawn_task(task)
     }
@@ -133,20 +160,22 @@ impl Shutdown {
 
         Self {
             name,
-            guard: ShutdownGuard::new(tx, token, Arc::new(AtomicUsize::new(0)), false),
+            guard: ShutdownGuard::new("root", tx, token, Arc::new(AtomicUsize::new(0)), false),
             rx,
             signal_rx,
         }
     }
 
-    pub fn spawn_task<T>(&self, task: T) -> JoinHandle<Option<T::Output>>
-    where T: Future + Send + 'static,
-          T::Output: Send + 'static {
-        self.guard.spawn_task(task)
+    pub fn spawn_task<T>(&self, name: &'static str, task: T) -> JoinHandle<Option<T::Output>>
+    where
+        T: Future + Send + 'static,
+        T::Output: Send + 'static,
+    {
+        self.guard.spawn_task(name, task)
     }
 
-    pub fn guard(&self) -> ShutdownGuard {
-        self.guard.clone()
+    pub fn guard(&self, name: &'static str) -> ShutdownGuard {
+        self.guard.child(name)
     }
 
     pub fn token(&self) -> CancellationToken {

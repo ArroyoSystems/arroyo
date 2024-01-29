@@ -1,6 +1,6 @@
-use axum::Json;
 use axum::response::IntoResponse;
-use deadpool_postgres::{Pool};
+use axum::Json;
+use deadpool_postgres::Pool;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -34,7 +34,7 @@ use crate::rest_utils::{bad_request, log_and_map, ErrorResp};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::formats::*;
-use arroyo_types::{CONTROLLER_ADDR_ENV, HTTP_PORT_ENV, ports, service_port};
+use arroyo_types::{ports, service_port, CONTROLLER_ADDR_ENV, HTTP_PORT_ENV};
 
 mod cloud;
 mod connection_profiles;
@@ -139,7 +139,8 @@ pub async fn start_server(pool: Pool) {
     let app = rest::create_rest_app(pool, &controller_addr);
 
     info!("Starting API server on {:?}", addr);
-    axum::Server::bind(&addr).serve(app.into_make_service())
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
         .await
         .expect("HTTP server failed");
 }
@@ -205,7 +206,6 @@ impl IntoResponse for HttpError {
         resp
     }
 }
-
 
 #[derive(OpenApi)]
 #[openapi(

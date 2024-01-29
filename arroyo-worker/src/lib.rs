@@ -8,11 +8,22 @@ use anyhow::Result;
 
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
-use arroyo_rpc::grpc::{api, CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq, JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes, RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp, TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq, TaskStartedReq, WorkerErrorReq, WorkerResources};
-use arroyo_types::{default_controller_addr, from_millis, grpc_port, to_micros, CheckpointBarrier, NodeId, WorkerId, JOB_ID_ENV, RUN_ID_ENV, ARROYO_PROGRAM_ENV};
+use arroyo_rpc::grpc::{
+    api, CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq,
+    JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes, RegisterWorkerReq,
+    StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp,
+    TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq,
+    TaskStartedReq, WorkerErrorReq, WorkerResources,
+};
+use arroyo_types::{
+    default_controller_addr, from_millis, grpc_port, to_micros, CheckpointBarrier, NodeId,
+    WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV,
+};
 use local_ip_address::local_ip;
-use rand::{random};
+use rand::random;
 
+use base64::engine::general_purpose;
+use base64::Engine as Base64Engine;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
@@ -20,8 +31,6 @@ use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use base64::{Engine as Base64Engine};
-use base64::engine::general_purpose;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -34,7 +43,7 @@ pub use ordered_float::OrderedFloat;
 use prost::Message;
 
 use arroyo_datastream::logical::{LogicalGraph, LogicalProgram};
-use arroyo_server_common::shutdown::{ShutdownGuard};
+use arroyo_server_common::shutdown::ShutdownGuard;
 
 pub mod arrow;
 
@@ -207,7 +216,9 @@ impl WorkerServer {
         let mut client = ControllerGrpcClient::connect(self.controller_addr.clone()).await?;
 
         let mut network = NetworkManager::new(0);
-        let data_port = network.open_listener(self.shutdown_guard.clone()).await;
+        let data_port = network
+            .open_listener(self.shutdown_guard.child("network-manager"))
+            .await;
 
         *self.network.lock().unwrap() = Some(network);
 
@@ -223,31 +234,29 @@ impl WorkerServer {
         let data_address = format!("{}:{}", local_ip, data_port);
         let job_id = self.job_id.clone();
 
-        let guard = self.shutdown_guard.clone();
-        guard.clone().into_spawn_task(arroyo_server_common::grpc_server()
-            .add_service(WorkerGrpcServer::new(self))
-            .serve_with_incoming(TcpListenerStream::new(listener)));
+        self.shutdown_guard.child("grpc").into_spawn_task(
+            arroyo_server_common::grpc_server()
+                .add_service(WorkerGrpcServer::new(self))
+                .serve_with_incoming(TcpListenerStream::new(listener)),
+        );
 
-        guard.into_spawn_task(async move {
-            // ideally, get a signal when the server is started...
-            tokio::time::sleep(Duration::from_millis(100)).await;
+        // ideally, get a signal when the server is started...
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
-            client
-                .register_worker(Request::new(RegisterWorkerReq {
-                    worker_id: id.0,
-                    node_id: node_id.0,
-                    job_id,
-                    rpc_address,
-                    data_address,
-                    resources: Some(WorkerResources {
-                        slots: std::thread::available_parallelism().unwrap().get() as u64,
-                    }),
-                    slots: slots as u64,
-                }))
-                .await
-                .unwrap();
-        });
-
+        client
+            .register_worker(Request::new(RegisterWorkerReq {
+                worker_id: id.0,
+                node_id: node_id.0,
+                job_id,
+                rpc_address,
+                data_address,
+                resources: Some(WorkerResources {
+                    slots: std::thread::available_parallelism().unwrap().get() as u64,
+                }),
+                slots: slots as u64,
+            }))
+            .await
+            .unwrap();
 
         Ok(())
     }
@@ -266,7 +275,8 @@ impl WorkerServer {
         let addr = self.controller_addr.clone();
 
         async move {
-            let mut controller = ControllerGrpcClient::connect(addr.clone()).await
+            let mut controller = ControllerGrpcClient::connect(addr.clone())
+                .await
                 .expect("Unable to connect to controller");
             let mut tick = tokio::time::interval(Duration::from_secs(5));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -412,8 +422,9 @@ impl WorkerGrpc for WorkerServer {
                 .await
         };
 
-        self.shutdown_guard.clone().into_spawn_task(
-            self.start_control_thread(control_rx, self.id, self.job_id.clone()));
+        self.shutdown_guard
+            .child("control-thread")
+            .into_spawn_task(self.start_control_thread(control_rx, self.id, self.job_id.clone()));
 
         let sources = engine.source_controls();
         let sinks = engine.sink_controls();
@@ -424,7 +435,7 @@ impl WorkerGrpc for WorkerServer {
             sources,
             sinks,
             operator_controls,
-            shutdown_guard: self.shutdown_guard.clone(),
+            shutdown_guard: self.shutdown_guard.child("engine-state"),
         });
 
         info!("[{:?}] Started execution", self.id);

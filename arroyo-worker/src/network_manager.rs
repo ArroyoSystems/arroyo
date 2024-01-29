@@ -469,6 +469,7 @@ mod test {
     use std::time::SystemTime;
     use std::{pin::Pin, time::Duration};
 
+    use arroyo_server_common::shutdown::Shutdown;
     use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage};
     use tokio::{sync::mpsc::channel, time::timeout};
 
@@ -532,8 +533,9 @@ mod test {
 
         senders.add(quad, schema.clone(), server_tx);
 
+        let shutdown = Shutdown::new("test");
         let mut nm = NetworkManager::new(0);
-        let port = nm.open_listener().await;
+        let port = nm.open_listener(shutdown.guard("test")).await;
 
         let (client_tx, client_rx) = channel(10);
         nm.connect(format!("localhost:{}", port), quad, client_rx)

@@ -150,8 +150,8 @@ impl Scheduler for ProcessScheduler {
             fs::write("/tmp/program", &program).unwrap();
 
             tokio::spawn(async move {
-                let mut command = Command::new(current_exe()
-                    .expect("Could not get path of worker binary"));
+                let mut command =
+                    Command::new(current_exe().expect("Could not get path of worker binary"));
 
                 for (env, value) in env_map {
                     command.env(env, value);
@@ -164,10 +164,7 @@ impl Scheduler for ProcessScheduler {
                     .env(JOB_ID_ENV, &job_id)
                     .env(NODE_ID_ENV, format!("{}", 1))
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
-                    .env(
-                        ARROYO_PROGRAM_ENV,
-                        program
-                    )
+                    .env(ARROYO_PROGRAM_ENV, program)
                     .kill_on_drop(true)
                     .spawn()
                     .unwrap();

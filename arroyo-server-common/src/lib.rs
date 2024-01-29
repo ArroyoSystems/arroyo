@@ -175,7 +175,7 @@ async fn details<'a>(State(state): State<Arc<AdminState>>) -> String {
     .unwrap()
 }
 
-pub async fn start_admin_server(service: &str, default_port: u16)  {
+pub async fn start_admin_server(service: &str, default_port: u16) {
     let port = admin_port(service, default_port);
 
     info!("Starting {} admin server on 0.0.0.0:{}", service, port);
@@ -192,7 +192,8 @@ pub async fn start_admin_server(service: &str, default_port: u16)  {
 
     let addr = format!("0.0.0.0:{}", port).parse().unwrap();
 
-    axum::Server::bind(&addr).serve(app.into_make_service())
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
         .await
         .expect("admin server failed");
 }

@@ -13,6 +13,7 @@ use arroyo_rpc::grpc::{
     HeartbeatNodeReq, RegisterNodeReq, StartWorkerReq, StartWorkerResp, StopWorkerReq,
     StopWorkerResp, StopWorkerStatus, WorkerFinishedReq,
 };
+use arroyo_server_common::shutdown::Shutdown;
 use arroyo_types::{
     grpc_port, ports, to_millis, NodeId, WorkerId, CONTROLLER_ADDR_ENV, JOB_ID_ENV, NODE_ID_ENV,
     RUN_ID_ENV, TASK_SLOTS_ENV, WORKER_ID_ENV,
@@ -22,14 +23,11 @@ use prometheus::{register_gauge, Gauge};
 use rand::Rng;
 use std::os::unix::fs::PermissionsExt;
 use std::process::exit;
-use tokio::sync::{
-    mpsc::{channel, Sender},
-};
+use tokio::sync::mpsc::{channel, Sender};
 use tokio::{fs::File, io::AsyncWriteExt, process::Command, select};
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info, warn};
-use arroyo_server_common::shutdown::Shutdown;
 
 const MAX_BIN_SIZE: usize = 300 * 1024 * 1024;
 
@@ -345,12 +343,18 @@ pub async fn main() {
 
     let shutdown = Shutdown::new("node");
 
-    shutdown.spawn_task(arroyo_server_common::start_admin_server("node", ports::NODE_ADMIN));
+    shutdown.spawn_task(
+        "admin",
+        arroyo_server_common::start_admin_server("node", ports::NODE_ADMIN),
+    );
 
-    shutdown.spawn_task(arroyo_server_common::grpc_server()
-        .max_frame_size(Some((1 << 24) - 1)) // 16MB
-        .add_service(NodeGrpcServer::new(server))
-        .serve(bind_addr.parse().unwrap()));
+    shutdown.spawn_task(
+        "grpc",
+        arroyo_server_common::grpc_server()
+            .max_frame_size(Some((1 << 24) - 1)) // 16MB
+            .add_service(NodeGrpcServer::new(server))
+            .serve(bind_addr.parse().unwrap()),
+    );
 
     let req_addr = format!("{}:{}", local_ip_address::local_ip().unwrap(), grpc);
 
@@ -362,7 +366,7 @@ pub async fn main() {
         exit(1);
     }
 
-    shutdown.spawn_task(async move {
+    shutdown.spawn_task("connect-thread", async move {
         let mut attempts = 0;
         loop {
             match ControllerGrpcClient::connect(controller_addr.clone()).await {
