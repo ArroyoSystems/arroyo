@@ -598,6 +598,8 @@ impl ControllerServer {
                         );
                     }
                 }
+
+                tokio::time::sleep(Duration::from_millis(500)).await;
             }
         });
     }
