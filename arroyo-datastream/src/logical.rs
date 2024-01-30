@@ -1,6 +1,6 @@
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::grpc::api::{ArrowProgram, EdgeType, JobEdge, JobGraph, JobNode};
-use arroyo_rpc::ArroyoSchema;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
 use petgraph::Direction;

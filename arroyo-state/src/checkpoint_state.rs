@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::grpc::{
     self,
     api::{self, OperatorCheckpointDetail},
-    CheckpointMetadata, OperatorCheckpointMetadata, SubtaskCheckpointMetadata,
+    CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata, SubtaskCheckpointMetadata,
     TableCheckpointMetadata, TableConfig, TableEnum, TableSubtaskCheckpointMetadata,
     TaskCheckpointCompletedReq, TaskCheckpointEventReq,
 };
@@ -253,7 +253,7 @@ impl CheckpointState {
                 };
             StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
                 job_id: self.job_id.to_string(),
-                operator_id: c.operator_id,
+                operator_id: c.operator_id.to_string(),
                 epoch: self.epoch,
                 start_time: to_micros(operator_state.start_time.unwrap()),
                 finish_time: to_micros(operator_state.finish_time.unwrap()),
@@ -266,6 +266,14 @@ impl CheckpointState {
                 commit_data: None,
                 table_checkpoint_metadata,
                 table_configs,
+                operator_metadata: Some(OperatorMetadata {
+                    job_id: self.job_id.to_string(),
+                    operator_id: c.operator_id,
+                    epoch: self.epoch,
+                    min_watermark,
+                    max_watermark,
+                    parallelism: operator_state.subtasks_checkpointed as u64,
+                }),
             })
             .await
             .expect("Should be able to write operator checkpoint metadata");

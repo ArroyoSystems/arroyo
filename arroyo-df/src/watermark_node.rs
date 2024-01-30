@@ -1,6 +1,6 @@
 use crate::schemas::add_timestamp_field;
 use anyhow::{anyhow, Result};
-use arroyo_rpc::ArroyoSchema;
+use arroyo_rpc::df::ArroyoSchema;
 use datafusion_common::DFSchemaRef;
 use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
 use std::{fmt::Formatter, sync::Arc};

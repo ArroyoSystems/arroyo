@@ -10,10 +10,11 @@ use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{types::TimestampNanosecondType, Array, PrimitiveArray, RecordBatch};
 use arrow_schema::{DataType, Field, FieldRef, Schema, TimeUnit};
 use arroyo_df::schemas::window_arrow_struct;
-use arroyo_rpc::{
-    grpc::{api, TableConfig},
-    ArroyoSchema,
+use arroyo_operator::{
+    context::ArrowContext,
+    operator::{ArrowOperator, OperatorConstructor, OperatorNode},
 };
+use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{
     from_nanos, print_time, to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
@@ -24,10 +25,7 @@ use datafusion_common::ScalarValue;
 use futures::stream::FuturesUnordered;
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::{
-    context::ArrowContext,
-    operator::{ArrowOperator, OperatorConstructor, OperatorNode},
-};
+use arroyo_rpc::df::ArroyoSchema;
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -131,7 +129,9 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
         if let Some(mut bin_exec) = self.execs.remove(&bin_start) {
             // If there are any active computations, finish them and write them to state.
             if let Some(mut active_exec) = bin_exec.active_exec.take() {
-                bin_exec.sender.take();
+                {
+                    bin_exec.sender.take();
+                }
                 let bucket_nanos = to_nanos(bin_start) as i64;
                 while let (_bin, Some((batch, new_exec))) = active_exec.await {
                     active_exec = new_exec;
@@ -154,8 +154,6 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
             }
         }
         partial_table.flush_timestamp(bin_end).await?;
-        self.tiered_record_batches
-            .delete_before(bin_start - self.width)?;
         partial_table.expire_timestamp(bin_end - self.width + self.slide);
         let interval_start = bin_end - self.width;
         let interval_end = bin_end;
@@ -169,6 +167,8 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
             .finish_execution_plan
             .execute(0, SessionContext::new().task_ctx())
             .unwrap();
+        self.tiered_record_batches
+            .delete_before(bin_end - self.width)?;
 
         self.state = if self.tiered_record_batches.is_empty() {
             match partial_table.get_min_time() {
@@ -674,7 +674,9 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
 
         // TODO: this was a separate map just to the active execs, which could, in corner cases, be much smaller.
         for (bin, exec) in self.execs.iter_mut() {
-            exec.sender.take();
+            {
+                exec.sender.take();
+            }
             let bucket_nanos: i64 = to_nanos(*bin) as i64;
             let Some(mut active_exec) = exec.active_exec.take() else {
                 continue;

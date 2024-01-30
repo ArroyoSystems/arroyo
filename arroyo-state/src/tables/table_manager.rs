@@ -3,6 +3,7 @@ use std::any::Any;
 use std::{collections::HashMap, env, sync::Arc, time::SystemTime};
 
 use anyhow::{anyhow, bail, Context, Result};
+use arroyo_rpc::CompactionResult;
 use arroyo_rpc::{
     grpc::{
         OperatorCheckpointMetadata, SubtaskCheckpointMetadata, TableConfig, TableEnum,
@@ -96,6 +97,7 @@ impl BackendFlusher {
                 .insert(table_name.clone(), epoch_checkpointer);
         }
         self.last_epoch_checkpoints.clear();
+        let mut compacted_tables = None;
 
         // accumulate writes in the RecordBatchBuilders until we get a checkpoint
         while checkpoint_epoch.is_none() {
@@ -104,6 +106,9 @@ impl BackendFlusher {
                     match op {
                         Some(StateMessage::Checkpoint(checkpoint)) => {
                             checkpoint_epoch = Some(checkpoint);
+                        }
+                        Some(StateMessage::Compaction(compacted_tables_message)) => {
+                            compacted_tables = Some(compacted_tables_message);
                         }
                         Some(StateMessage::TableData { table, data }) => {
                             self.table_checkpointers
@@ -128,6 +133,26 @@ impl BackendFlusher {
             }
         }
 
+        if let Some(compaction_metas) = compacted_tables {
+            for (table_name, compacted_metadata) in compaction_metas {
+                let table = self.tables.get(&table_name).unwrap();
+                let Some(compacted_metadata) =
+                    table.subtask_metadata_from_table(compacted_metadata)?
+                else {
+                    continue;
+                };
+                if let Some(current_metadata) = metadatas.get(&table_name) {
+                    let new_metadata = table.apply_compacted_checkpoint(
+                        self.current_epoch,
+                        compacted_metadata,
+                        current_metadata.clone(),
+                    )?;
+                    metadatas.insert(table_name, new_metadata);
+                } else {
+                    warn!("received compaction map for operator {} table {} but no metadata. no checkpoint emitted, as we trust the subtask. map is {:?}", self.task_info.operator_id, table_name, compacted_metadata);
+                }
+            }
+        }
         self.last_epoch_checkpoints = metadatas.clone();
         self.current_epoch += 1;
 
@@ -316,6 +341,17 @@ impl TableManager {
                 Err(err) => warn!("error waiting for stopping checkpoint {:?}", err),
             }
         }
+    }
+
+    pub async fn load_compacted(&mut self, compacted: CompactionResult) -> Result<()> {
+        if compacted.operator_id != self.task_info.operator_id {
+            bail!("shouldn't be loading compaction for other operator");
+        }
+        self.writer
+            .sender
+            .send(StateMessage::Compaction(compacted.compacted_tables))
+            .await?;
+        Ok(())
     }
 
     pub async fn get_global_keyed_state<K: Key, V: Data>(

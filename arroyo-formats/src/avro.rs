@@ -344,9 +344,9 @@ mod tests {
     use arrow_array::builder::{make_builder, ArrayBuilder};
     use arrow_array::RecordBatch;
     use arrow_schema::{DataType, Field, Schema, TimeUnit};
+    use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{AvroFormat, BadData, Format};
     use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-    use arroyo_rpc::ArroyoSchema;
     use serde_json::json;
     use std::sync::Arc;
     use std::time::SystemTime;
