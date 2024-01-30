@@ -64,7 +64,8 @@ impl OperatorConstructor for WatermarkGeneratorConstructor {
     fn with_config(&self, config: ExpressionWatermarkConfig) -> anyhow::Result<OperatorNode> {
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let expression = PhysicalExprNode::decode(&mut config.expression.as_slice())?;
-        let expression = parse_physical_expr(&expression, &EmptyRegistry {}, &input_schema.schema)?;
+        let expression =
+            parse_physical_expr(&expression, &EmptyRegistry::new(), &input_schema.schema)?;
 
         Ok(OperatorNode::from_operator(Box::new(
             WatermarkGenerator::expression(

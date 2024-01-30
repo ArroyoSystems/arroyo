@@ -11,15 +11,16 @@ use datafusion::{
     },
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
-use datafusion_execution::runtime_env::RuntimeConfig;
+use datafusion_execution::{runtime_env::RuntimeConfig, FunctionRegistry};
 use petgraph::{graph::DiGraph, visit::Topo};
 
 use tracing::info;
 
 use crate::{
+    create_table_with_timestamp,
     physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext, EmptyRegistry},
     schemas::add_timestamp_field_arrow,
-    AggregateCalculation, QueryToGraphVisitor,
+    AggregateCalculation, QueryToGraphVisitor, WindowBehavior,
 };
 use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
 use anyhow::{anyhow, bail, Context, Result};
@@ -30,8 +31,11 @@ use arroyo_rpc::grpc::api::{
     JoinOperator, KeyPlanOperator, SessionWindowAggregateOperator, SlidingWindowAggregateOperator,
     ValuePlanOperator,
 };
-use datafusion_common::{DFSchema, DFSchemaRef, ScalarValue};
-use datafusion_expr::{expr::ScalarFunction, BuiltinScalarFunction, Expr, LogicalPlan};
+use datafusion_common::{Column, DFField, DFSchema, DFSchemaRef, ScalarValue};
+use datafusion_expr::{
+    expr::ScalarFunction, BinaryExpr, BuiltinScalarFunction, Expr, LogicalPlan, Projection,
+    ScalarFunctionDefinition, TableScan,
+};
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{
@@ -186,28 +190,46 @@ impl Planner {
                     else {
                         bail!("expected logical plan")
                     };
-                    let logical_node = match &aggregate.window {
-                        WindowType::Tumbling { width: _ } => {
-                            let mut logical_node = self.tumbling_window_config(aggregate).await?;
-                            logical_node.operator_id = format!(
-                                "{}_{}",
-                                logical_node.operator_id,
-                                program_graph.node_count()
-                            );
-                            logical_node
-                        }
-                        WindowType::Sliding { width: _, slide: _ } => {
-                            let mut logical_node = self.sliding_window_config(aggregate).await?;
-                            logical_node.operator_id = format!(
-                                "{}_{}",
-                                logical_node.operator_id,
-                                program_graph.node_count()
-                            );
-                            logical_node
-                        }
-                        WindowType::Instant => bail!("instant windows not supported yet"),
-                        WindowType::Session { gap: _ } => {
-                            let mut logical_node = self.session_window_config(aggregate).await?;
+                    let logical_node = match &aggregate.window_behavior {
+                        WindowBehavior::FromOperator {
+                            window,
+                            window_field: _,
+                            window_index: _,
+                        } => match window {
+                            WindowType::Tumbling { width: _ } => {
+                                let mut logical_node =
+                                    self.tumbling_window_config(aggregate).await?;
+                                logical_node.operator_id = format!(
+                                    "{}_{}",
+                                    logical_node.operator_id,
+                                    program_graph.node_count()
+                                );
+                                logical_node
+                            }
+                            WindowType::Sliding { width: _, slide: _ } => {
+                                let mut logical_node =
+                                    self.sliding_window_config(aggregate).await?;
+                                logical_node.operator_id = format!(
+                                    "{}_{}",
+                                    logical_node.operator_id,
+                                    program_graph.node_count()
+                                );
+                                logical_node
+                            }
+                            WindowType::Instant => bail!("instant windows not supported yet"),
+                            WindowType::Session { gap: _ } => {
+                                let mut logical_node =
+                                    self.session_window_config(aggregate).await?;
+                                logical_node.operator_id = format!(
+                                    "{}_{}",
+                                    logical_node.operator_id,
+                                    program_graph.node_count()
+                                );
+                                logical_node
+                            }
+                        },
+                        WindowBehavior::InData => {
+                            let mut logical_node = self.instant_window_config(aggregate).await?;
                             logical_node.operator_id = format!(
                                 "{}_{}",
                                 logical_node.operator_id,
@@ -400,7 +422,7 @@ impl Planner {
 
         // need to convert to ExecutionPlan to get the partial schema.
         let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
-            &EmptyRegistry {},
+            &EmptyRegistry::new(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
@@ -434,15 +456,16 @@ impl Planner {
         })
     }
 
-    async fn tumbling_window_config(
-        &self,
-        aggregate: &crate::AggregateCalculation,
-    ) -> Result<LogicalNode> {
-        let WindowType::Tumbling { width } = aggregate.window else {
+    async fn instant_window_config(&self, aggregate: &AggregateCalculation) -> Result<LogicalNode> {
+        let WindowBehavior::InData = &aggregate.window_behavior else {
             bail!("expected tumbling window")
         };
-        let binning_function_proto =
-            self.binning_function_proto(width, aggregate.aggregate.input.schema().clone())?;
+        let binning_function = self.planner.create_physical_expr(
+            &Expr::Column(Column::new_unqualified("_timestamp".to_string())),
+            aggregate.aggregate.input.schema().as_ref(),
+            &self.session_state,
+        )?;
+        let binning_function_proto = PhysicalExprNode::try_from(binning_function)?;
 
         let input_schema = self.input_schema(aggregate);
         let SplitPlanOutput {
@@ -450,17 +473,131 @@ impl Planner {
             partial_schema,
             finish_plan,
         } = self.split_physical_plan(&aggregate).await?;
+
         let config = TumblingWindowAggregateOperator {
-            name: format!("TumblingWindow<{:?}>", width),
-            width_micros: width.as_micros() as u64,
+            name: "InstantWindow".to_string(),
+            width_micros: 0,
             binning_function: binning_function_proto.encode_to_vec(),
-            window_field_name: aggregate.window_field.name().to_string(),
-            window_index: aggregate.window_index as u64,
             input_schema: Some(input_schema.try_into()?),
             partial_schema: Some(partial_schema.try_into()?),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
             final_aggregation_plan: finish_plan.encode_to_vec(),
+            final_projection: None,
         };
+
+        Ok(LogicalNode {
+            operator_id: config.name.clone(),
+            description: "instant window".to_string(),
+            operator_name: OperatorName::TumblingWindowAggregate,
+            operator_config: config.encode_to_vec(),
+            parallelism: 1,
+        })
+    }
+
+    async fn tumbling_window_config(
+        &self,
+        aggregate: &crate::AggregateCalculation,
+    ) -> Result<LogicalNode> {
+        let WindowBehavior::FromOperator {
+            window: WindowType::Tumbling { width },
+            window_index,
+            window_field,
+        } = &aggregate.window_behavior
+        else {
+            bail!("expected tumbling window")
+        };
+        let binning_function_proto =
+            self.binning_function_proto(*width, aggregate.aggregate.input.schema().clone())?;
+
+        let input_schema = self.input_schema(aggregate);
+        let SplitPlanOutput {
+            partial_aggregation_plan,
+            partial_schema,
+            finish_plan,
+        } = self.split_physical_plan(&aggregate).await?;
+
+        let aggregate_plan = LogicalPlan::Aggregate(aggregate.aggregate.clone());
+        let mut aggregate_fields = aggregate_plan.schema().fields().to_vec();
+
+        // the timestamp will have been set as bin_start, need to calculate the bin from that, and also set _timestamp to bin_end - 1;
+        let registry = EmptyRegistry::new();
+        let window_expression = Expr::ScalarFunction(ScalarFunction {
+            func_def: ScalarFunctionDefinition::UDF(registry.udf("window")?),
+            args: vec![
+                // copy bin_start as first argument
+                Expr::Column(Column::new_unqualified("_timestamp".to_string())),
+                // add width interval to _timestamp for bin end
+                Expr::BinaryExpr(BinaryExpr {
+                    left: Box::new(Expr::Column(Column::new_unqualified(
+                        "_timestamp".to_string(),
+                    ))),
+                    op: datafusion_expr::Operator::Plus,
+                    right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+                        IntervalMonthDayNanoType::make_value(0, 0, width.as_nanos() as i64),
+                    )))),
+                }),
+            ],
+        });
+        let mut aggregate_expressions = aggregate_fields
+            .iter()
+            .map(|field| Expr::Column(Column::new_unqualified(field.name().to_string())))
+            .collect::<Vec<_>>();
+        let bin_end_calculation = Expr::BinaryExpr(BinaryExpr {
+            left: Box::new(Expr::Column(Column::new_unqualified(
+                "_timestamp".to_string(),
+            ))),
+            op: datafusion_expr::Operator::Plus,
+            right: Box::new(Expr::Literal(ScalarValue::IntervalMonthDayNano(Some(
+                IntervalMonthDayNanoType::make_value(0, 0, (width.as_nanos() - 1) as i64),
+            )))),
+        });
+        aggregate_fields.push(DFField::new_unqualified(
+            "_timestamp",
+            arrow::datatypes::DataType::Timestamp(arrow::datatypes::TimeUnit::Nanosecond, None),
+            false,
+        ));
+        aggregate_expressions.push(bin_end_calculation);
+        let arrow_input_schema: Schema =
+            DFSchema::new_with_metadata(aggregate_fields.clone(), HashMap::new())?.into();
+        let aggregate_output_table =
+            create_table_with_timestamp("tmp".to_string(), arrow_input_schema.fields().to_vec());
+        let table_scan_input = LogicalPlan::TableScan(TableScan::try_new(
+            "tmp",
+            aggregate_output_table,
+            None,
+            vec![],
+            None,
+        )?);
+        aggregate_fields.insert(*window_index, window_field.clone());
+        aggregate_expressions.insert(*window_index, window_expression);
+        let output_schema = DFSchema::new_with_metadata(aggregate_fields, HashMap::new())?;
+        let projection = Projection::try_new_with_schema(
+            aggregate_expressions,
+            Arc::new(table_scan_input),
+            Arc::new(output_schema),
+        )?;
+        let final_plan = LogicalPlan::Projection(projection);
+
+        let final_physical_plan = self
+            .planner
+            .create_physical_plan(&final_plan, &self.session_state)
+            .await?;
+        let final_physical_plan_node = PhysicalPlanNode::try_from_physical_plan(
+            final_physical_plan,
+            &ArroyoPhysicalExtensionCodec::default(),
+        )?;
+
+        let config = TumblingWindowAggregateOperator {
+            name: format!("TumblingWindow<{:?}>", width),
+            width_micros: width.as_micros() as u64,
+            binning_function: binning_function_proto.encode_to_vec(),
+            input_schema: Some(input_schema.try_into()?),
+            partial_schema: Some(partial_schema.try_into()?),
+            partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
+            final_aggregation_plan: finish_plan.encode_to_vec(),
+            final_projection: Some(final_physical_plan_node.encode_to_vec()),
+        };
+
         Ok(LogicalNode {
             operator_id: config.name.clone(),
             description: "tumbling window".to_string(),
@@ -474,11 +611,16 @@ impl Planner {
         &self,
         aggregate: &crate::AggregateCalculation,
     ) -> Result<LogicalNode> {
-        let WindowType::Sliding { width, slide } = aggregate.window else {
-            bail!("expected tumbling window")
+        let WindowBehavior::FromOperator {
+            window: WindowType::Sliding { width, slide },
+            window_index,
+            window_field,
+        } = &aggregate.window_behavior
+        else {
+            bail!("expected sliding window")
         };
         let binning_function_proto =
-            self.binning_function_proto(slide, aggregate.aggregate.input.schema().clone())?;
+            self.binning_function_proto(*slide, aggregate.aggregate.input.schema().clone())?;
 
         let input_schema = self.input_schema(aggregate);
         let SplitPlanOutput {
@@ -487,12 +629,12 @@ impl Planner {
             finish_plan,
         } = self.split_physical_plan(&aggregate).await?;
         let config = SlidingWindowAggregateOperator {
-            name: format!("TumblingWindow<{:?}>", width),
+            name: format!("SlidingWindow<{:?}>", width),
             width_micros: width.as_micros() as u64,
             slide_micros: slide.as_micros() as u64,
             binning_function: binning_function_proto.encode_to_vec(),
-            window_field_name: aggregate.window_field.name().to_string(),
-            window_index: aggregate.window_index as u64,
+            window_field_name: window_field.name().to_string(),
+            window_index: *window_index as u64,
             input_schema: Some(input_schema.try_into()?),
             partial_schema: Some(partial_schema.try_into()?),
             partial_aggregation_plan: partial_aggregation_plan.encode_to_vec(),
@@ -508,8 +650,13 @@ impl Planner {
     }
 
     async fn session_window_config(&self, aggregate: &AggregateCalculation) -> Result<LogicalNode> {
-        let WindowType::Session { gap } = aggregate.window else {
-            bail!("expected tumbling window")
+        let WindowBehavior::FromOperator {
+            window: WindowType::Session { gap },
+            window_index,
+            window_field,
+        } = &aggregate.window_behavior
+        else {
+            bail!("expected sliding window")
         };
         let input_schema = self.input_schema(aggregate);
         let key_count = input_schema.key_indices.len();
@@ -563,8 +710,8 @@ impl Planner {
         let config = SessionWindowAggregateOperator {
             name: "session_window".into(),
             gap_micros: gap.as_micros() as u64,
-            window_field_name: aggregate.window_field.name().to_string(),
-            window_index: aggregate.window_index as u64,
+            window_field_name: window_field.name().to_string(),
+            window_index: *window_index as u64,
             input_schema: Some(input_schema.try_into()?),
             unkeyed_aggregate_schema: Some(unkeyed_aggregate_schema.try_into()?),
             partial_aggregation_plan: vec![],
