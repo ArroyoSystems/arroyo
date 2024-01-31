@@ -57,7 +57,8 @@ use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, Nullable
 use crate::watermark_node::WatermarkNode;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
 use arroyo_operator::connector::Connection;
-use arroyo_rpc::{ArroyoSchema, TIMESTAMP_FIELD};
+use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::TIMESTAMP_FIELD;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};

@@ -11,8 +11,8 @@ use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext, EmptyRe
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use arroyo_rpc::{
+    df::ArroyoSchema,
     grpc::{api, TableConfig},
-    ArroyoSchema,
 };
 use arroyo_state::timestamp_table_config;
 use datafusion::execution::context::SessionContext;

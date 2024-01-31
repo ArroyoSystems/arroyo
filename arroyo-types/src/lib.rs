@@ -1028,12 +1028,19 @@ impl TryFrom<&str> for DateTruncPrecision {
 }
 
 pub fn server_for_hash(x: u64, n: usize) -> usize {
-    let range_size = u64::MAX / (n as u64);
-    (n - 1).min((x / range_size) as usize)
+    if n == 1 {
+        0
+    } else {
+        let range_size = (u64::MAX / (n as u64)) + 1;
+        (x / range_size) as usize
+    }
 }
 
 pub fn range_for_server(i: usize, n: usize) -> RangeInclusive<u64> {
-    let range_size = u64::MAX / (n as u64);
+    if n == 1 {
+        return 0..=u64::MAX;
+    }
+    let range_size = (u64::MAX / (n as u64)) + 1;
     let start = range_size * (i as u64);
     let end = if i + 1 == n {
         u64::MAX
@@ -1068,6 +1075,16 @@ mod tests {
             let range2 = range_for_server(i + 1, n);
 
             assert_eq!(*range1.end() + 1, *range2.start(), "Ranges not adjacent");
+            assert_eq!(
+                i,
+                server_for_hash(*range1.start(), n),
+                "start not assigned to range."
+            );
+            assert_eq!(
+                i,
+                server_for_hash(*range1.end(), n),
+                "end not assigned to range."
+            );
         }
 
         let last_range = range_for_server(n - 1, n);
@@ -1075,6 +1092,11 @@ mod tests {
             *last_range.end(),
             u64::MAX,
             "Last range does not contain u64::MAX"
+        );
+        assert_eq!(
+            n - 1,
+            server_for_hash(u64::MAX, n),
+            "u64::MAX not in last range"
         );
     }
 

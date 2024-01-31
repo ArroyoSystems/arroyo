@@ -4,7 +4,8 @@ use std::{mem, thread};
 
 use std::time::SystemTime;
 
-use arroyo_rpc::ArroyoSchema;
+use arroyo_connectors::connectors;
+use arroyo_rpc::df::ArroyoSchema;
 use bincode::{Decode, Encode};
 use tracing::{debug, info, warn};
 
@@ -16,7 +17,6 @@ use crate::arrow::{KeyExecutionConstructor, ValueExecutionConstructor};
 use crate::network_manager::{NetworkManager, Quad, Senders};
 use crate::operators::watermark_generator::WatermarkGeneratorConstructor;
 use crate::{METRICS_PUSH_INTERVAL, PROMETHEUS_PUSH_GATEWAY};
-use arroyo_connectors::connectors;
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorName,
 };

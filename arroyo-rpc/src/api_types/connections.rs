@@ -1,11 +1,12 @@
 use crate::formats::{BadData, Format, Framing};
-use crate::{primitive_to_sql, ArroyoSchema};
+use crate::primitive_to_sql;
 use anyhow::bail;
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
+use crate::df::ArroyoSchema;
 use utoipa::{IntoParams, ToSchema};
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

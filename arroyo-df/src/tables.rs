@@ -94,6 +94,7 @@ fn produce_optimized_plan(
     let analyzed_plan =
         analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
     let plan = optimizer.optimize(&analyzed_plan, &optimizer_config, |_plan, _rule| {})?;
+    info!("optimized plan: {:?}", plan);
     Ok(plan)
 }
 

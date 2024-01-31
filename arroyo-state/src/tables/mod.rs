@@ -1,14 +1,14 @@
 use crate::{CheckpointMessage, DataOperation, TableData};
 use anyhow::{bail, Result};
 use arroyo_rpc::grpc::{
-    TableCheckpointMetadata, TableConfig, TableEnum, TableSubtaskCheckpointMetadata, TableType,
+    OperatorMetadata, TableCheckpointMetadata, TableConfig, TableEnum,
+    TableSubtaskCheckpointMetadata,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{TaskInfo, TaskInfoRef};
+use arroyo_types::TaskInfoRef;
 use prost::Message;
 use std::any::Any;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Display;
+use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 use tracing::info;
 
@@ -25,16 +25,18 @@ pub enum Compactor {
 }
 
 pub(crate) fn table_checkpoint_path(
-    task_info: &TaskInfo,
-    table: impl Display,
+    job_id: &str,
+    operator_id: &str,
+    table: &str,
+    subtask_index: usize,
     epoch: u32,
     compacted: bool,
 ) -> String {
     format!(
         "{}/table-{}-{:0>3}{}",
-        operator_path(&task_info.job_id, epoch, &task_info.operator_id),
+        operator_path(job_id, epoch, operator_id),
         table,
-        task_info.task_index,
+        subtask_index,
         if compacted { "-compacted" } else { "" }
     )
 }
@@ -64,224 +66,7 @@ pub struct BlindDataTuple {
     pub operation: DataOperation,
 }
 
-impl Compactor {
-    pub(crate) fn for_table_type(table_type: TableType) -> Self {
-        match table_type {
-            TableType::Global | TableType::TimeKeyMap => Compactor::TimeKeyMap,
-            TableType::KeyTimeMultiMap => Compactor::KeyTimeMultiMap,
-        }
-    }
-
-    pub(crate) fn compact_tuples(&self, tuples: Vec<BlindDataTuple>) -> Vec<BlindDataTuple> {
-        match self {
-            Compactor::TimeKeyMap => {
-                // keep only the latest entry for each key
-                let mut reduced = BTreeMap::new();
-                for tuple in tuples.into_iter() {
-                    match tuple.operation {
-                        DataOperation::Insert | DataOperation::DeleteTimeKey(_) => {}
-                        DataOperation::DeleteKey(_)
-                        | DataOperation::DeleteValue(_)
-                        | DataOperation::DeleteTimeRange(_) => {
-                            panic!("Not supported")
-                        }
-                    }
-
-                    let memory_key = (tuple.timestamp, tuple.key.clone());
-                    reduced.insert(memory_key, tuple);
-                }
-
-                reduced.into_values().collect()
-            }
-            Compactor::KeyTimeMultiMap => {
-                // Build a values map similar to KeyTimeMultiMap,
-                // but with the values being the actual tuples.
-                // Then flatten the map to get the compacted inserts.
-                let mut values: HashMap<Vec<u8>, BTreeMap<SystemTime, Vec<BlindDataTuple>>> =
-                    HashMap::new();
-                let mut deletes = HashMap::new();
-                for tuple in tuples.into_iter() {
-                    let keep_deletes_key =
-                        (tuple.timestamp, tuple.key.clone(), tuple.value.clone());
-                    match tuple.operation.clone() {
-                        DataOperation::Insert => {
-                            values
-                                .entry(tuple.key.clone())
-                                .or_default()
-                                .entry(tuple.timestamp)
-                                .or_default()
-                                .push(tuple);
-                        }
-                        DataOperation::DeleteTimeKey(_) => panic!("Not supported"),
-                        DataOperation::DeleteKey(op) => {
-                            // Remove a key. Timestamp is not considered.
-                            values.remove(op.key.as_slice());
-                            deletes.insert(keep_deletes_key, tuple);
-                        }
-                        DataOperation::DeleteValue(op) => {
-                            // Remove a single value from a (key -> time -> values).
-                            values.entry(op.key.clone()).and_modify(|map| {
-                                map.entry(op.timestamp).and_modify(|values| {
-                                    let position = values.iter().position(|stored_tuple| {
-                                        stored_tuple.value == op.value.clone()
-                                    });
-                                    if let Some(position) = position {
-                                        values.remove(position);
-                                    }
-                                });
-                            });
-                            deletes.insert(keep_deletes_key, tuple);
-                        }
-                        DataOperation::DeleteTimeRange(op) => {
-                            // Remove range of times from a key.
-                            // Timestamp of tuple is not considered (the range is in the DataOperation).
-                            if let Some(key_map) = values.get_mut(op.key.as_slice()) {
-                                key_map.retain(|time, _values| !(op.start..op.end).contains(time))
-                            }
-                            deletes.insert(keep_deletes_key, tuple);
-                        }
-                    }
-                }
-
-                let mut reduced: Vec<BlindDataTuple> = vec![];
-
-                // first add the deletes
-                for (_, tuple) in deletes.into_iter() {
-                    reduced.push(tuple);
-                }
-
-                // then flatten values to get the compacted inserts
-                for (_, map) in values.into_iter() {
-                    for (_, tuples) in map.into_iter() {
-                        for tuple in tuples.into_iter() {
-                            reduced.push(tuple);
-                        }
-                    }
-                }
-
-                reduced
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::tables::{BlindDataTuple, Compactor};
-    use crate::{DataOperation, DeleteTimeKeyOperation, DeleteTimeRangeOperation};
-    use std::time::{Duration, SystemTime};
-
-    #[tokio::test]
-    async fn test_time_key_map_compaction() {
-        let t1 = SystemTime::now();
-        let t2 = t1 + Duration::from_secs(1);
-
-        let k1 = "k1".as_bytes().to_vec();
-        let k2 = "k2".as_bytes().to_vec();
-        let v1 = "v1".as_bytes().to_vec();
-
-        let insert_1 = BlindDataTuple {
-            key_hash: 123,
-            timestamp: t1,
-            key: k1.clone(),
-            value: v1.clone(),
-            operation: DataOperation::Insert,
-        };
-
-        let insert_2 = BlindDataTuple {
-            key_hash: 123,
-            timestamp: t2,
-            key: k2.clone(),
-            value: v1.clone(),
-            operation: DataOperation::Insert,
-        };
-
-        let delete = BlindDataTuple {
-            key_hash: 123,
-            timestamp: t1,
-            key: k1.clone(),
-            value: v1.clone(),
-            operation: DataOperation::DeleteTimeKey(DeleteTimeKeyOperation {
-                timestamp: t1,
-                key: k1.clone(),
-            }),
-        };
-
-        let tuples_in = vec![insert_1.clone(), insert_2.clone(), delete.clone()];
-
-        let tuples_out = Compactor::TimeKeyMap.compact_tuples(tuples_in);
-        assert_eq!(vec![delete, insert_2], tuples_out);
-
-        // test idempotence
-        assert_eq!(
-            tuples_out.clone(),
-            Compactor::TimeKeyMap.compact_tuples(tuples_out),
-        );
-    }
-
-    #[tokio::test]
-    async fn test_key_time_multi_map_compaction() {
-        let t1 = SystemTime::now();
-        let t2 = t1 + Duration::from_secs(1);
-        let t3 = t2 + Duration::from_secs(1);
-
-        let k1 = "k1".as_bytes().to_vec();
-        let v1 = "v1".as_bytes().to_vec();
-
-        let insert_1 = BlindDataTuple {
-            key_hash: 123,
-            timestamp: t1,
-            key: k1.clone(),
-            value: v1.clone(),
-            operation: DataOperation::Insert,
-        };
-
-        let insert_2 = BlindDataTuple {
-            key_hash: 123,
-            timestamp: t2,
-            key: k1.clone(),
-            value: v1.clone(),
-            operation: DataOperation::Insert,
-        };
-
-        let delete_all = BlindDataTuple {
-            key_hash: 123,
-            timestamp: t2,
-            key: k1.clone(),
-            value: v1.clone(),
-            operation: DataOperation::DeleteTimeRange(DeleteTimeRangeOperation {
-                key: k1.clone(),
-                start: t1,
-                end: t3,
-            }),
-        };
-
-        let insert_3 = BlindDataTuple {
-            key_hash: 123,
-            timestamp: t1,
-            key: k1.clone(),
-            value: v1.clone(),
-            operation: DataOperation::Insert,
-        };
-
-        let tuples_in = vec![
-            insert_1.clone(),
-            insert_2.clone(),
-            delete_all.clone(),
-            insert_3.clone(),
-        ];
-
-        let tuples_out = Compactor::KeyTimeMultiMap.compact_tuples(tuples_in);
-        assert_eq!(vec![delete_all, insert_3], tuples_out);
-
-        // test idempotence
-        assert_eq!(
-            tuples_out.clone(),
-            Compactor::KeyTimeMultiMap.compact_tuples(tuples_out),
-        );
-    }
-}
-
+#[async_trait::async_trait]
 pub(crate) trait Table: Send + Sync + 'static + Clone {
     // A stateful struct responsible for taking the checkpoint for a single epoch
     // contains an associated type that is a protobuf for the subtask checkpoint metadata.
@@ -331,6 +116,13 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
         table_metadata: Self::TableCheckpointMessage,
     ) -> Result<Option<Self::TableSubtaskCheckpointMetadata>>;
 
+    fn apply_compacted_checkpoint(
+        &self,
+        epoch: u32,
+        compacted_checkpoint: Self::TableSubtaskCheckpointMetadata,
+        subtask_metadata: Self::TableSubtaskCheckpointMetadata,
+    ) -> Result<Self::TableSubtaskCheckpointMetadata>;
+
     fn table_type() -> TableEnum;
 
     fn task_info(&self) -> TaskInfoRef;
@@ -339,6 +131,19 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
         config: Self::ConfigMessage,
         checkpoint: Self::TableCheckpointMessage,
     ) -> Result<HashSet<String>>;
+
+    async fn compact_data(
+        config: Self::ConfigMessage,
+        compaction_config: &CompactionConfig,
+        operator_metadata: &OperatorMetadata,
+        current_metadata: Self::TableCheckpointMessage,
+    ) -> Result<Option<Self::TableCheckpointMessage>>;
+}
+
+pub struct CompactionConfig {
+    pub storage_provider: StorageProviderRef,
+    pub compact_generations: HashSet<u64>,
+    pub min_compaction_epochs: usize,
 }
 
 pub trait ErasedTable: Send + Sync + 'static {
@@ -405,6 +210,23 @@ pub trait ErasedTable: Send + Sync + 'static {
         Self: Sized;
 
     fn as_any(&self) -> &dyn Any;
+
+    #[allow(async_fn_in_trait)]
+    async fn compact_data(
+        config: TableConfig,
+        compaction_config: &CompactionConfig,
+        operator_metadata: &OperatorMetadata,
+        current_metadata: TableCheckpointMetadata,
+    ) -> Result<Option<TableCheckpointMetadata>>
+    where
+        Self: Sized;
+
+    fn apply_compacted_checkpoint(
+        &self,
+        epoch: u32,
+        compacted_checkpoint: TableSubtaskCheckpointMetadata,
+        subtask_metadata: TableSubtaskCheckpointMetadata,
+    ) -> Result<TableSubtaskCheckpointMetadata>;
 }
 
 impl<T: Table + Sized + 'static> ErasedTable for T {
@@ -478,6 +300,27 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
         )
     }
 
+    fn apply_compacted_checkpoint(
+        &self,
+        epoch: u32,
+        compacted_checkpoint: TableSubtaskCheckpointMetadata,
+        subtask_metadata: TableSubtaskCheckpointMetadata,
+    ) -> Result<TableSubtaskCheckpointMetadata> {
+        let compacted_checkpoint = Self::checked_proto_decode(
+            compacted_checkpoint.table_type(),
+            compacted_checkpoint.data,
+        )?;
+        let subtask_metadata =
+            Self::checked_proto_decode(subtask_metadata.table_type(), subtask_metadata.data)?;
+        let result =
+            self.apply_compacted_checkpoint(epoch, compacted_checkpoint, subtask_metadata)?;
+        Ok(TableSubtaskCheckpointMetadata {
+            subtask_index: self.task_info().task_index as u32,
+            table_type: T::table_type().into(),
+            data: result.encode_to_vec(),
+        })
+    }
+
     fn table_type() -> TableEnum
     where
         Self: Sized,
@@ -500,6 +343,26 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
             Self::checked_proto_decode(T::table_type(), config.config)?,
             Self::checked_proto_decode(T::table_type(), checkpoint.data)?,
         )
+    }
+
+    async fn compact_data(
+        config: TableConfig,
+        compaction_config: &CompactionConfig,
+        operator_metadata: &OperatorMetadata,
+        current_metadata: TableCheckpointMetadata,
+    ) -> Result<Option<TableCheckpointMetadata>> {
+        let config = Self::checked_proto_decode(config.table_type(), config.config)?;
+        let result = T::compact_data(
+            config,
+            compaction_config,
+            operator_metadata,
+            Self::checked_proto_decode(current_metadata.table_type(), current_metadata.data)?,
+        )
+        .await?;
+        Ok(result.map(|result| TableCheckpointMetadata {
+            table_type: T::table_type().into(),
+            data: result.encode_to_vec(),
+        }))
     }
 }
 

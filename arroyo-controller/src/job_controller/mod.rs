@@ -371,25 +371,27 @@ impl RunningJobModel {
 
         let mut worker_clients: Vec<WorkerGrpcClient<Channel>> =
             self.workers.values().map(|w| w.connect.clone()).collect();
-        for (operator_id, parallelism) in self.operator_parallelism.clone() {
-            // compact the operator's state and notify the workers to load the new files
-            if let Ok(Some(compaction_result)) = ParquetBackend::compact_operator(
-                parallelism,
+        for operator_id in self.operator_parallelism.keys() {
+            let compacted_tables = ParquetBackend::compact_operator(
+                // compact the operator's state and notify the workers to load the new files
                 self.job_id.clone(),
                 operator_id.clone(),
                 self.epoch.clone(),
             )
-            .await
-            {
-                for worker_client in &mut worker_clients {
-                    worker_client
-                        .load_compacted_data(LoadCompactedDataReq {
-                            operator_id: compaction_result.operator_id.clone(),
-                            backend_data_to_drop: compaction_result.backend_data_to_drop.clone(),
-                            backend_data_to_load: compaction_result.backend_data_to_load.clone(),
-                        })
-                        .await?;
-                }
+            .await?;
+
+            if compacted_tables.is_empty() {
+                continue;
+            }
+
+            // TODO: these should be put on separate tokio tasks.
+            for worker_client in &mut worker_clients {
+                worker_client
+                    .load_compacted_data(LoadCompactedDataReq {
+                        operator_id: operator_id.clone(),
+                        compacted_metadata: compacted_tables.clone(),
+                    })
+                    .await?;
             }
         }
         Ok(())
@@ -584,11 +586,7 @@ impl JobController {
                         })
                     })
                     .collect(),
-                operator_parallelism: program
-                    .graph
-                    .node_weights()
-                    .map(|node| (node.operator_id.clone(), node.parallelism))
-                    .collect(),
+                operator_parallelism: program.tasks_per_operator(),
                 program,
             },
             config,

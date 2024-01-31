@@ -4,7 +4,8 @@ use anyhow::{anyhow, bail, Result};
 use arrow_array::{BinaryArray, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use arroyo_rpc::grpc::{
-    GlobalKeyedTableSubtaskCheckpointMetadata, GlobalKeyedTableTaskCheckpointMetadata, TableEnum,
+    GlobalKeyedTableSubtaskCheckpointMetadata, GlobalKeyedTableTaskCheckpointMetadata,
+    OperatorMetadata, TableEnum,
 };
 use arroyo_storage::StorageProviderRef;
 use arroyo_types::{to_micros, Data, Key, TaskInfoRef};
@@ -27,7 +28,7 @@ use std::{
 };
 use tokio::sync::mpsc::Sender;
 
-use super::{table_checkpoint_path, Table, TableEpochCheckpointer};
+use super::{table_checkpoint_path, CompactionConfig, Table, TableEpochCheckpointer};
 static GLOBAL_KEY_VALUE_SCHEMA: Lazy<Arc<Schema>> = Lazy::new(|| {
     let fields = vec![
         Field::new("key", DataType::Binary, false), // non-nullable BinaryArray for 'key'
@@ -165,6 +166,7 @@ impl GlobalKeyedTable {
     }
 }
 
+#[async_trait::async_trait]
 impl Table for GlobalKeyedTable {
     type Checkpointer = GlobalKeyedCheckpointer;
 
@@ -243,6 +245,24 @@ impl Table for GlobalKeyedTable {
     ) -> Result<std::collections::HashSet<String>> {
         Ok(checkpoint.files.into_iter().collect())
     }
+
+    async fn compact_data(
+        _config: Self::ConfigMessage,
+        _compaction_config: &CompactionConfig,
+        _operator_metadata: &OperatorMetadata,
+        _current_metadata: Self::TableCheckpointMessage,
+    ) -> Result<Option<Self::TableCheckpointMessage>> {
+        Ok(None)
+    }
+
+    fn apply_compacted_checkpoint(
+        &self,
+        _epoch: u32,
+        _compacted_checkpoint: Self::TableSubtaskCheckpointMetadata,
+        subtask_metadata: Self::TableSubtaskCheckpointMetadata,
+    ) -> Result<Self::TableSubtaskCheckpointMetadata> {
+        Ok(subtask_metadata)
+    }
 }
 
 pub struct GlobalKeyedCheckpointer {
@@ -299,7 +319,14 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         writer.flush()?;
         let parquet_bytes = writer.into_inner().unwrap();
         let _bytes = parquet_bytes.len() as u64;
-        let path = table_checkpoint_path(&self.task_info, &self.table_name, self.epoch, false);
+        let path = table_checkpoint_path(
+            &self.task_info.job_id,
+            &self.task_info.operator_id,
+            &self.table_name,
+            self.task_info.task_index,
+            self.epoch,
+            false,
+        );
         self.storage_provider.put(&path, parquet_bytes).await?;
         let _finish_time = to_micros(SystemTime::now());
         Ok(Some(GlobalKeyedTableSubtaskCheckpointMetadata {

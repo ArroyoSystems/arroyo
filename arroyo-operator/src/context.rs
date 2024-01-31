@@ -4,10 +4,11 @@ use arrow::compute::{partition, sort_to_indices, take};
 use arrow::datatypes::{SchemaRef, UInt64Type};
 use arroyo_formats::ArrowDeserializer;
 use arroyo_metrics::{register_queue_gauges, QueueGauges, TaskCounters};
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, Framing};
 use arroyo_rpc::grpc::{CheckpointMetadata, TableConfig, TaskCheckpointEventType};
 use arroyo_rpc::schema_resolver::SchemaResolver;
-use arroyo_rpc::{get_hasher, ArroyoSchema, CompactionResult, ControlMessage, ControlResp};
+use arroyo_rpc::{get_hasher, CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::tables::table_manager::TableManager;
 use arroyo_state::{BackingStore, StateBackend};
 use arroyo_types::{
@@ -484,9 +485,12 @@ impl ArrowContext {
             .unwrap();
     }
 
-    pub async fn load_compacted(&mut self, _compaction: CompactionResult) {
+    pub async fn load_compacted(&mut self, compaction: CompactionResult) {
         //TODO: support compaction in the table manager
-        // self.state.load_compacted(compaction).await;
+        self.table_manager
+            .load_compacted(compaction)
+            .await
+            .expect("should be able to load compacted");
     }
 
     pub fn initialize_deserializer(

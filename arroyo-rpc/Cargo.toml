@@ -10,8 +10,8 @@ arroyo-types = { path = "../arroyo-types" }
 
 arrow = { workspace = true }
 arrow-array = { workspace = true }
+arrow-ord = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
-arrow-ord = {workspace = true}
 tonic = { workspace = true }
 prost = "0.12"
 tokio = { version = "1", features = ["full"] }

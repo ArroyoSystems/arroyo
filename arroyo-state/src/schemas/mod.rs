@@ -1,15 +1,16 @@
 use std::{ops::RangeInclusive, sync::Arc};
 
-use anyhow::{anyhow, Result};
-use arrow::compute::{and, filter, kernels::aggregate, max, min, take};
+use anyhow::{anyhow, bail, Result};
+use arrow::compute::{and, filter, kernels::aggregate, max, min};
 use arrow_array::{
     cast::AsArray,
     types::{TimestampNanosecondType, UInt64Type},
-    PrimitiveArray, RecordBatch, UInt64Array,
+    PrimitiveArray, RecordBatch, TimestampNanosecondArray, UInt64Array,
 };
 use arrow_ord::cmp::{gt_eq, lt_eq};
-use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use arroyo_rpc::{get_hasher, ArroyoSchemaRef};
+use arrow_schema::{DataType, Field, Schema};
+use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
+use arroyo_rpc::get_hasher;
 use arroyo_types::from_nanos;
 use bincode::config;
 use datafusion_common::{hash_utils::create_hashes, ScalarValue};
@@ -20,7 +21,7 @@ use crate::{parquet::ParquetStats, DataOperation};
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct SchemaWithHashAndOperation {
-    state_schema: SchemaRef,
+    state_schema: ArroyoSchemaRef,
     memory_schema: ArroyoSchemaRef,
     hash_index: usize,
     operation_index: usize,
@@ -43,6 +44,11 @@ impl SchemaWithHashAndOperation {
         ));
         let hash_index = memory_schema.schema.fields().len();
         let operation_index = hash_index + 1;
+        let state_schema = Arc::new(ArroyoSchema::new(
+            state_schema,
+            memory_schema.timestamp_index.clone(),
+            memory_schema.key_indices.clone(),
+        ));
         Self {
             state_schema,
             memory_schema,
@@ -51,7 +57,7 @@ impl SchemaWithHashAndOperation {
         }
     }
 
-    pub(crate) fn state_schema(&self) -> SchemaRef {
+    pub(crate) fn state_schema(&self) -> ArroyoSchemaRef {
         self.state_schema.clone()
     }
 
@@ -91,22 +97,43 @@ impl SchemaWithHashAndOperation {
             return Ok(None);
         }
         // filter batch using arrow kernels
-        let filtered_indices = filter(
-            &hash_array,
-            &and(
-                &gt_eq(&hash_array, &UInt64Array::new_scalar(*range.start()))?,
-                &lt_eq(&hash_array, &UInt64Array::new_scalar(*range.end()))?,
-            )?,
+        let filtered_indices = and(
+            &gt_eq(&hash_array, &UInt64Array::new_scalar(*range.start()))?,
+            &lt_eq(&hash_array, &UInt64Array::new_scalar(*range.end()))?,
         )?;
         let columns = batch
             .columns()
             .iter()
-            .map(|column| Ok(take(column, &filtered_indices, None)?))
+            .map(|column| Ok(filter(column, &filtered_indices)?))
             .collect::<Result<Vec<_>>>()?;
         Ok(Some(RecordBatch::try_new(
-            self.state_schema.clone(),
+            self.state_schema.schema.clone(),
             columns,
         )?))
+    }
+
+    pub(crate) fn batch_stats_from_state_batch(&self, batch: &RecordBatch) -> Result<ParquetStats> {
+        if batch.num_rows() == 0 {
+            bail!("unexpected empty batch");
+        }
+        let hash_array = batch
+            .column(self.hash_index)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| anyhow!("should be able to convert hash array to UInt64Array"))?;
+        let hash_min = min(&hash_array).expect("should have min hash value");
+        let hash_max = min(&hash_array).expect("should have max hash value");
+        let timestamp_array = batch
+            .column(self.state_schema.timestamp_index)
+            .as_any()
+            .downcast_ref::<TimestampNanosecondArray>()
+            .ok_or_else(|| anyhow!("should be able to extract timestamp array"))?;
+        let max_timestamp_nanos = max(timestamp_array).expect("should have max timestamp");
+        Ok(ParquetStats {
+            max_timestamp: from_nanos(max_timestamp_nanos as u128),
+            min_routing_key: hash_min,
+            max_routing_key: hash_max,
+        })
     }
 
     pub(crate) fn annotate_record_batch(
@@ -147,7 +174,8 @@ impl SchemaWithHashAndOperation {
         let op_array = insert_op.to_array_of_size(record_batch.num_rows())?;
         columns.push(op_array);
 
-        let annotated_record_batch = RecordBatch::try_new(self.state_schema.clone(), columns)?;
+        let annotated_record_batch =
+            RecordBatch::try_new(self.state_schema.schema.clone(), columns)?;
 
         Ok((annotated_record_batch, batch_stats))
     }

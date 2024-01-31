@@ -5,24 +5,26 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Ok, Result};
-use arrow::{
-    compute::{concat_batches, kernels::aggregate},
-    row::{OwnedRow, Row},
+use arrow::compute::{concat_batches, kernels::aggregate, take};
+use arrow::row::{OwnedRow, Row};
+use arrow_array::{
+    cast::AsArray,
+    types::{TimestampNanosecondType, UInt64Type},
+    PrimitiveArray, RecordBatch,
 };
-use arrow_array::{cast::AsArray, types::TimestampNanosecondType, PrimitiveArray, RecordBatch};
-use arrow_ord::partition::partition;
-
+use arrow_ord::{partition::partition, sort::sort_to_indices};
 use arroyo_rpc::{
+    df::server_for_hash_array,
     grpc::{
         ExpiringKeyedTimeSubtaskCheckpointMetadata, ExpiringKeyedTimeTableCheckpointMetadata,
-        ExpiringKeyedTimeTableConfig, ParquetTimeFile, TableEnum,
+        ExpiringKeyedTimeTableConfig, OperatorMetadata, ParquetTimeFile, TableEnum,
     },
-    ArroyoSchema, ArroyoSchemaRef, Converter,
+    Converter,
 };
 use arroyo_storage::StorageProviderRef;
-use arroyo_types::{from_micros, from_nanos, print_time, to_micros, TaskInfoRef};
+use arroyo_types::{from_micros, from_nanos, print_time, server_for_hash, to_micros, TaskInfoRef};
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use parquet::arrow::{
     async_reader::ParquetObjectReader, AsyncArrowWriter, ParquetRecordBatchStreamBuilder,
 };
@@ -32,9 +34,10 @@ use crate::{
     parquet::ParquetStats, schemas::SchemaWithHashAndOperation, CheckpointMessage, StateMessage,
     TableData,
 };
+use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use tracing::{info, warn};
 
-use super::{table_checkpoint_path, Table, TableEpochCheckpointer};
+use super::{table_checkpoint_path, CompactionConfig, Table, TableEpochCheckpointer};
 
 #[derive(Debug, Clone)]
 pub struct ExpiringTimeKeyTable {
@@ -102,6 +105,9 @@ impl ExpiringTimeKeyTable {
                         None => continue,
                         Some(filtered_batch) => batch = filtered_batch,
                     };
+                }
+                if batch.num_rows() == 0 {
+                    continue;
                 }
                 batch = batch.project(&projection)?;
                 let timestamp_array: &PrimitiveArray<TimestampNanosecondType> = batch
@@ -227,6 +233,7 @@ impl ExpiringTimeKeyTable {
     }
 }
 
+#[async_trait::async_trait]
 impl Table for ExpiringTimeKeyTable {
     type Checkpointer = ExpiringTimeKeyTableCheckpointer;
 
@@ -345,6 +352,269 @@ impl Table for ExpiringTimeKeyTable {
             .map(|file: ParquetTimeFile| file.file)
             .collect())
     }
+    fn apply_compacted_checkpoint(
+        &self,
+        epoch: u32,
+        compacted_checkpoint: Self::TableSubtaskCheckpointMetadata,
+        subtask_metadata: Self::TableSubtaskCheckpointMetadata,
+    ) -> Result<Self::TableSubtaskCheckpointMetadata> {
+        let mut current_epoch_files: Vec<_> = subtask_metadata
+            .files
+            .into_iter()
+            .filter(|file| file.epoch == epoch)
+            .collect();
+        current_epoch_files.extend_from_slice(&compacted_checkpoint.files);
+
+        Ok(Self::TableSubtaskCheckpointMetadata {
+            subtask_index: subtask_metadata.subtask_index,
+            watermark: subtask_metadata.watermark,
+            files: current_epoch_files,
+        })
+    }
+
+    async fn compact_data(
+        config: Self::ConfigMessage,
+        compaction_config: &CompactionConfig,
+        operator_metadata: &OperatorMetadata,
+        current_metadata: Self::TableCheckpointMessage,
+    ) -> Result<Option<Self::TableCheckpointMessage>> {
+        let mut epochs_in_generation: HashMap<u64, HashSet<u32>> = HashMap::new();
+        let mut files_by_generation: BTreeMap<u64, HashMap<String, ParquetTimeFile>> =
+            BTreeMap::new();
+        for file in current_metadata.files {
+            if compaction_config
+                .compact_generations
+                .contains(&file.generation)
+            {
+                epochs_in_generation
+                    .entry(file.generation)
+                    .or_default()
+                    .insert(file.epoch);
+            }
+            files_by_generation
+                .entry(file.generation)
+                .or_default()
+                .insert(file.file.to_string(), file);
+        }
+        let schema: ArroyoSchema = config
+            .schema
+            .ok_or_else(|| anyhow!("expect schema"))?
+            .try_into()?;
+        let state_schema = SchemaWithHashAndOperation::new(Arc::new(schema));
+
+        for (generation, epochs) in epochs_in_generation {
+            if epochs.len() < compaction_config.min_compaction_epochs {
+                continue;
+            }
+            let mut files = TimeTableCompactor::compact_files(
+                config.table_name,
+                epochs.into_iter().max().unwrap(),
+                generation + 1,
+                compaction_config.storage_provider.clone(),
+                state_schema,
+                Duration::from_micros(config.retention_micros),
+                operator_metadata,
+                files_by_generation
+                    .remove(&generation)
+                    .expect("will have been populated"),
+            )
+            .await?;
+            files.extend(
+                files_by_generation
+                    .into_values()
+                    .flat_map(|files| files.into_values()),
+            );
+            return Ok(Some(ExpiringKeyedTimeTableCheckpointMetadata { files }));
+        }
+        Ok(None)
+    }
+}
+
+struct CompactedFileWriter {
+    file_name: String,
+    schema: SchemaWithHashAndOperation,
+    writer: Option<AsyncArrowWriter<Box<dyn AsyncWrite + Send + Unpin>>>,
+    parquet_stats: Option<ParquetStats>,
+}
+
+struct TimeTableCompactor {
+    storage_provider: StorageProviderRef,
+    schema: SchemaWithHashAndOperation,
+    operator_metadata: OperatorMetadata,
+    table: String,
+    writers: HashMap<usize, CompactedFileWriter>,
+}
+
+impl TimeTableCompactor {
+    async fn compact_files(
+        table: String,
+        epoch: u32,
+        generation: u64,
+        storage_provider: StorageProviderRef,
+        schema: SchemaWithHashAndOperation,
+        retention: Duration,
+        operator_metadata: &OperatorMetadata,
+        files: HashMap<String, ParquetTimeFile>,
+    ) -> Result<Vec<ParquetTimeFile>> {
+        let mut compactor = Self {
+            table,
+            storage_provider,
+            schema: schema.clone(),
+            operator_metadata: operator_metadata.clone(),
+            writers: HashMap::new(),
+        };
+        let cutoff = operator_metadata
+            .min_watermark
+            .map(|min_micros| from_micros(min_micros) - retention);
+        for (file_name, file) in files {
+            let max_file_timestamp = from_micros(file.max_timestamp_micros);
+            if cutoff
+                .map(|cutoff| max_file_timestamp < cutoff)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let reader = ParquetObjectReader::new(
+                compactor.storage_provider.get_backing_store(),
+                compactor
+                    .storage_provider
+                    .get_backing_store()
+                    .head(&(file_name.clone().into()))
+                    .await?,
+            );
+            let first_partition =
+                server_for_hash(file.min_routing_key, operator_metadata.parallelism as usize);
+            let last_partition =
+                server_for_hash(file.max_routing_key, operator_metadata.parallelism as usize);
+            let multiple_partitions = !(first_partition == last_partition);
+            let reader_builder = ParquetRecordBatchStreamBuilder::new(reader).await?;
+            let mut stream = reader_builder.build()?;
+            // projection to trim the metadata fields. Should probably be factored out.
+            while let Some(batch) = stream.try_next().await? {
+                // Filter by _timestamp field
+                let time_filtered = schema.state_schema().filter_by_time(batch, cutoff)?;
+                if time_filtered.num_rows() == 0 {
+                    continue;
+                }
+                if !multiple_partitions {
+                    compactor
+                        .write_batch(first_partition, time_filtered)
+                        .await?;
+                } else {
+                    // this record batch contains data belonging to multiple partitions.
+                    let partitions = server_for_hash_array(
+                        time_filtered
+                            .column(schema.hash_index())
+                            .as_any()
+                            .downcast_ref::<PrimitiveArray<UInt64Type>>()
+                            .unwrap(),
+                        operator_metadata.parallelism as usize,
+                    )?;
+                    let indices = sort_to_indices(&partitions, None, None).unwrap();
+                    let columns = time_filtered
+                        .columns()
+                        .iter()
+                        .map(|c| take(c, &indices, None).unwrap())
+                        .collect();
+                    let sorted =
+                        RecordBatch::try_new(schema.state_schema().schema.clone(), columns)?;
+                    let sorted_keys = take(&partitions, &indices, None)?;
+
+                    let partition = partition(vec![sorted_keys.clone()].as_slice())?;
+                    let typed_keys: &PrimitiveArray<UInt64Type> =
+                        sorted_keys.as_any().downcast_ref().unwrap();
+                    for range in partition.ranges() {
+                        let partition = typed_keys.value(range.start);
+                        compactor
+                            .write_batch(
+                                partition as usize,
+                                sorted.slice(range.start, range.end - range.start),
+                            )
+                            .await?
+                    }
+                }
+            }
+        }
+        compactor.finish(epoch, generation).await
+    }
+
+    async fn write_batch(&mut self, partition: usize, record_batch: RecordBatch) -> Result<()> {
+        if !self.writers.contains_key(&partition) {
+            let file_name = table_checkpoint_path(
+                &self.operator_metadata.job_id,
+                &self.operator_metadata.operator_id,
+                &self.table,
+                partition,
+                self.operator_metadata.epoch,
+                true,
+            );
+            let (_multipart_id, async_writer) = self
+                .storage_provider
+                .get_backing_store()
+                .put_multipart(&(file_name.clone().into()))
+                .await?;
+            let writer = Some(AsyncArrowWriter::try_new(
+                async_writer,
+                self.schema.state_schema().schema.clone(),
+                1_000_0000,
+                None,
+            )?);
+            self.writers.insert(
+                partition,
+                CompactedFileWriter {
+                    file_name,
+                    schema: self.schema.clone(),
+                    writer,
+                    parquet_stats: None,
+                },
+            );
+        }
+        let writer = self.writers.get_mut(&partition).unwrap();
+
+        writer.write_batch(record_batch).await?;
+
+        Ok(())
+    }
+
+    async fn finish(self, epoch: u32, generation: u64) -> Result<Vec<ParquetTimeFile>> {
+        let mut results = vec![];
+        for writer in self.writers.into_values() {
+            results.push(writer.finish(epoch, generation).await?);
+        }
+        Ok(results)
+    }
+}
+
+impl CompactedFileWriter {
+    async fn write_batch(&mut self, record_batch: RecordBatch) -> Result<()> {
+        let mut parquet_stats = self.schema.batch_stats_from_state_batch(&record_batch)?;
+        if let Some(other) = self.parquet_stats.take() {
+            parquet_stats.merge(other);
+        }
+        self.parquet_stats = Some(parquet_stats);
+        let Some(writer) = self.writer.as_mut() else {
+            bail!("should have writer");
+        };
+        writer.write(&record_batch).await?;
+        Ok(())
+    }
+
+    async fn finish(mut self, epoch: u32, generation: u64) -> Result<ParquetTimeFile> {
+        let writer = self
+            .writer
+            .take()
+            .ok_or_else(|| anyhow!("unset compacted file writer {}", self.file_name))?;
+        let _closed = writer.close().await?;
+        let stats = self.parquet_stats.take().expect("should have stats");
+        Ok(ParquetTimeFile {
+            epoch,
+            file: self.file_name,
+            min_routing_key: stats.min_routing_key,
+            max_routing_key: stats.max_routing_key,
+            max_timestamp_micros: to_micros(stats.max_timestamp),
+            generation,
+        })
+    }
 }
 
 pub struct ExpiringTimeKeyTableCheckpointer {
@@ -362,7 +632,14 @@ impl ExpiringTimeKeyTableCheckpointer {
         epoch: u32,
         prior_files: Vec<ParquetTimeFile>,
     ) -> Result<Self> {
-        let file_name = table_checkpoint_path(&parent.task_info, &parent.table_name, epoch, false);
+        let file_name = table_checkpoint_path(
+            &parent.task_info.job_id,
+            &parent.task_info.operator_id,
+            &parent.table_name,
+            parent.task_info.task_index,
+            epoch,
+            false,
+        );
         Ok(Self {
             file_name,
             parent,
@@ -381,7 +658,7 @@ impl ExpiringTimeKeyTableCheckpointer {
             .await?;
         self.writer = Some(AsyncArrowWriter::try_new(
             async_writer,
-            self.parent.schema.state_schema(),
+            self.parent.schema.state_schema().schema.clone(),
             1_000_0000,
             None,
         )?);
@@ -439,6 +716,7 @@ impl TableEpochCheckpointer for ExpiringTimeKeyTableCheckpointer {
                 min_routing_key: stats.min_routing_key,
                 max_routing_key: stats.max_routing_key,
                 max_timestamp_micros: to_micros(stats.max_timestamp),
+                generation: 0,
             };
             files.push(file)
         }

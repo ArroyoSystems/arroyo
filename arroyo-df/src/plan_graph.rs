@@ -24,13 +24,11 @@ use crate::{
 use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::logical::{LogicalGraph, LogicalNode, LogicalProgram, OperatorName};
+use arroyo_rpc::df::ArroyoSchema;
+use arroyo_rpc::grpc::api::{self, TumblingWindowAggregateOperator};
 use arroyo_rpc::grpc::api::{
     JoinOperator, KeyPlanOperator, SessionWindowAggregateOperator, SlidingWindowAggregateOperator,
     ValuePlanOperator,
-};
-use arroyo_rpc::{
-    grpc::api::{self, TumblingWindowAggregateOperator},
-    ArroyoSchema,
 };
 use datafusion_common::{DFSchema, DFSchemaRef, ScalarValue};
 use datafusion_expr::{expr::ScalarFunction, BuiltinScalarFunction, Expr, LogicalPlan};
@@ -480,7 +478,7 @@ impl Planner {
             bail!("expected tumbling window")
         };
         let binning_function_proto =
-            self.binning_function_proto(width, aggregate.aggregate.input.schema().clone())?;
+            self.binning_function_proto(slide, aggregate.aggregate.input.schema().clone())?;
 
         let input_schema = self.input_schema(aggregate);
         let SplitPlanOutput {
@@ -563,7 +561,7 @@ impl Planner {
         };
 
         let config = SessionWindowAggregateOperator {
-            name: format!("SessionWindow<{:?}>", gap),
+            name: "session_window".into(),
             gap_micros: gap.as_micros() as u64,
             window_field_name: aggregate.window_field.name().to_string(),
             window_index: aggregate.window_index as u64,
@@ -575,7 +573,7 @@ impl Planner {
 
         Ok(LogicalNode {
             operator_id: config.name.clone(),
-            description: "session window".to_string(),
+            description: format!("SessionWindow<{:?}>", gap),
             operator_name: OperatorName::SessionWindowAggregate,
             operator_config: config.encode_to_vec(),
             parallelism: 1,

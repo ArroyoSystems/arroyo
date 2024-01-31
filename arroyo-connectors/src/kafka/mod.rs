@@ -3,11 +3,12 @@ use arroyo_formats::serialize::ArrowSerializer;
 use arroyo_formats::ArrowDeserializer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{BadData, Format, JsonFormat};
 use arroyo_rpc::schema_resolver::{
     ConfluentSchemaRegistry, ConfluentSchemaRegistryClient, FailingSchemaResolver, SchemaResolver,
 };
-use arroyo_rpc::{schema_resolver, var_str::VarStr, ArroyoSchema, OperatorConfig};
+use arroyo_rpc::{schema_resolver, var_str::VarStr, OperatorConfig};
 use futures::TryFutureExt;
 use rdkafka::{
     consumer::{BaseConsumer, Consumer},

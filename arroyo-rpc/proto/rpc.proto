@@ -268,6 +268,7 @@ message ParquetTimeFile {
   uint64 min_routing_key = 3;
   uint64 max_routing_key = 4;
   uint64 max_timestamp_micros = 5;
+  uint64 generation = 6;
 }
 
 
@@ -294,6 +295,17 @@ message OperatorCheckpointMetadata {
   OperatorCommitData commit_data = 12;
   map<string, TableCheckpointMetadata> table_checkpoint_metadata = 13;
   map<string, TableConfig> table_configs = 14;
+  OperatorMetadata operator_metadata = 15;
+}
+
+
+message OperatorMetadata {
+  string job_id = 1;
+  string operator_id = 2;
+  uint32 epoch = 3;
+  optional uint64 min_watermark = 4;
+  optional uint64 max_watermark = 5;
+  uint64 parallelism = 6;
 }
 
 message TableConfig {
@@ -414,8 +426,7 @@ message TableCommitData {
 
 message LoadCompactedDataReq {
   string operator_id = 1;
-  repeated BackendData backend_data_to_drop = 2; // this data got compressed...
-  repeated BackendData backend_data_to_load = 3; // ...into this data
+  map<string, TableCheckpointMetadata> compacted_metadata = 2;
 }
 
 message LoadCompactedDataRes {

@@ -3,15 +3,16 @@ use anyhow::Result;
 use arrow_array::RecordBatch;
 use arroyo_rpc::grpc::{
     CheckpointMetadata, ExpiringKeyedTimeTableConfig, GlobalKeyedTableConfig,
-    OperatorCheckpointMetadata, TableConfig, TableDeleteBehavior, TableDescriptor, TableEnum,
-    TableType, TableWriteBehavior,
+    OperatorCheckpointMetadata, TableCheckpointMetadata, TableConfig, TableDeleteBehavior,
+    TableDescriptor, TableEnum, TableType, TableWriteBehavior,
 };
-use arroyo_rpc::{ArroyoSchema, CompactionResult, ControlResp};
+use arroyo_rpc::{CompactionResult, ControlResp};
 use arroyo_types::{single_item_hash_map, CheckpointBarrier, Data, Key, TaskInfo};
 use async_trait::async_trait;
 use bincode::config::Configuration;
 use bincode::{Decode, Encode};
 
+use arroyo_rpc::df::ArroyoSchema;
 use prost::Message;
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
@@ -40,6 +41,7 @@ pub const FULL_KEY_RANGE: RangeInclusive<u64> = 0..=u64::MAX;
 #[derive(Debug)]
 pub enum StateMessage {
     Checkpoint(CheckpointMessage),
+    Compaction(HashMap<String, TableCheckpointMetadata>),
     TableData { table: String, data: TableData },
 }
 #[derive(Debug)]

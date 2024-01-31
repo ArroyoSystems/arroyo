@@ -18,9 +18,13 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, FieldRef};
 use arroyo_df::schemas::window_arrow_struct;
+use arroyo_operator::{
+    context::ArrowContext,
+    operator::{ArrowOperator, OperatorConstructor, OperatorNode},
+};
 use arroyo_rpc::{
     grpc::{api, TableConfig},
-    ArroyoSchema, ArroyoSchemaRef, Converter,
+    Converter,
 };
 use arroyo_state::{
     global_table_config, tables::global_keyed_map::GlobalKeyedView, timestamp_table_config,
@@ -31,8 +35,7 @@ use arroyo_types::{
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
-use arroyo_operator::operator::{ArrowOperator, OperatorConstructor};
-use arroyo_operator::{context::ArrowContext, operator::OperatorNode};
+use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use datafusion_execution::{
     runtime_env::{RuntimeConfig, RuntimeEnv},
     SendableRecordBatchStream,
@@ -61,7 +64,7 @@ impl SessionAggregatingWindowFunc {
         let result = self
             .keys_by_next_watermark_action
             .first_key_value()
-            .map(|(next_watermark_action, _)| *next_watermark_action <= watermark)
+            .map(|(next_watermark_action, _)| *next_watermark_action < watermark)
             .unwrap_or(false);
         if result {
             debug!("should advance at watermark {:?}", watermark);
@@ -128,7 +131,7 @@ impl SessionAggregatingWindowFunc {
                     let next_watermark_action = key_computation.next_watermark_action().unwrap();
                     if next_watermark_action == _next_watermark_action {
                         bail!(" processed a watermark at {} and next watermark action stayed at {}. batches by start time {:?}, active_session date_end():{:?} ",
-                         print_time(watermark), print_time(next_watermark_action), key_computation.batches_by_start_time, key_computation.active_session.as_ref().map(|session| print_time(session.data_end)));
+                        print_time(watermark), print_time(next_watermark_action), key_computation.batches_by_start_time, key_computation.active_session.as_ref().map(|session| print_time(session.data_end)));
                     }
                     self.keys_by_next_watermark_action
                         .entry(next_watermark_action)

@@ -10,7 +10,7 @@ use std::{env, fmt::Debug, time::SystemTime};
 use tokio::sync::mpsc::Receiver;
 
 use arroyo_rpc::grpc::{StopMode, TaskCheckpointCompletedReq, TaskCheckpointEventReq};
-use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_types::{to_micros, CheckpointBarrier};
 use arroyo_worker::engine::{Engine, StreamConfig};
@@ -100,14 +100,16 @@ async fn compact(
 ) {
     let operator_controls = running_engine.operator_controls();
     for (operator, parallelism) in tasks_per_operator {
-        if let Ok(Some(compacted)) =
-            ParquetBackend::compact_operator(parallelism, job_id.clone(), operator.clone(), epoch)
-                .await
+        if let Ok(compacted) =
+            ParquetBackend::compact_operator(job_id.clone(), operator.clone(), epoch).await
         {
             let operator_controls = operator_controls.get(&operator).unwrap();
             for s in operator_controls {
                 s.send(ControlMessage::LoadCompacted {
-                    compacted: compacted.clone(),
+                    compacted: CompactionResult {
+                        operator_id: operator.to_string(),
+                        compacted_tables: compacted.clone(),
+                    },
                 })
                 .await
                 .unwrap();

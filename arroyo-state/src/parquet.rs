@@ -1,39 +1,37 @@
 use crate::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use crate::tables::global_keyed_map::GlobalKeyedTable;
-use crate::tables::{BlindDataTuple, Compactor, DataTuple, ErasedTable};
+use crate::tables::{CompactionConfig, DataTuple, ErasedTable};
 use crate::{
     hash_key, BackingStore, DataOperation, DeleteKeyOperation, DeleteTimeKeyOperation,
-    DeleteTimeRangeOperation, DeleteValueOperation, StateStore, BINCODE_CONFIG,
+    DeleteTimeRangeOperation, DeleteValueOperation, BINCODE_CONFIG,
 };
 use anyhow::{bail, Context, Result};
-use arrow_array::types::GenericBinaryType;
 use arrow_array::{Array, RecordBatch};
-use arroyo_rpc::grpc::backend_data::BackendData;
 use arroyo_rpc::grpc::{
-    backend_data, CheckpointMetadata, OperatorCheckpointMetadata, ParquetStoreData,
+    CheckpointMetadata, OperatorCheckpointMetadata, ParquetStoreData, TableCheckpointMetadata,
     TableDescriptor, TableType,
 };
-use arroyo_rpc::{grpc, ArroyoSchema, CompactionResult, ControlResp};
+use arroyo_rpc::{grpc, CompactionResult, ControlResp};
 use arroyo_storage::StorageProvider;
 use arroyo_types::{
-    from_nanos, range_for_server, to_nanos, CheckpointBarrier, Data, Key, TaskInfo,
-    CHECKPOINT_URL_ENV, S3_ENDPOINT_ENV, S3_REGION_ENV,
+    from_nanos, CheckpointBarrier, Data, Key, TaskInfo, CHECKPOINT_URL_ENV, S3_ENDPOINT_ENV,
+    S3_REGION_ENV,
 };
 use bincode::config;
 use bytes::Bytes;
 
+use arroyo_rpc::df::ArroyoSchema;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use parquet::arrow::ArrowWriter;
-use parquet::basic::ZstdLevel;
-use parquet::file::properties::{EnabledStatistics, WriterProperties};
+
 use prost::Message;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::ops::{Range, RangeInclusive};
+use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::sync::mpsc::{self, channel, Receiver, Sender};
+use tokio::sync::mpsc::{self, Sender};
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
@@ -78,21 +76,6 @@ fn operator_path(job_id: &str, epoch: u32, operator: &str) -> String {
     format!("{}/operator-{}", base_path(job_id, epoch), operator)
 }
 
-pub(crate) fn table_checkpoint_path(
-    task_info: &TaskInfo,
-    table: char,
-    epoch: u32,
-    compacted: bool,
-) -> String {
-    format!(
-        "{}/table-{}-{:0>3}{}",
-        operator_path(&task_info.job_id, epoch, &task_info.operator_id),
-        table,
-        task_info.task_index,
-        if compacted { "-compacted" } else { "" }
-    )
-}
-
 #[async_trait::async_trait]
 impl BackingStore for ParquetBackend {
     fn name() -> &'static str {
@@ -103,7 +86,6 @@ impl BackingStore for ParquetBackend {
         &self.task_info
     }
 
-    // TODO: should this be a Result, rather than an option?
     async fn load_checkpoint_metadata(job_id: &str, epoch: u32) -> Result<CheckpointMetadata> {
         let storage_client = get_storage_provider().await?;
         let data = storage_client
@@ -151,21 +133,14 @@ impl BackingStore for ParquetBackend {
     async fn new(
         task_info: &TaskInfo,
         tables: Vec<TableDescriptor>,
-        tx: Sender<ControlResp>,
+        _tx: Sender<ControlResp>,
     ) -> Self {
         let storage = get_storage_provider().await.unwrap();
         Self {
             epoch: 1,
             min_epoch: 1,
             current_files: HashMap::new(),
-            writer: ParquetWriter::new(
-                task_info.clone(),
-                tx,
-                tables.clone(),
-                storage.clone(),
-                HashMap::new(),
-                1,
-            ),
+            writer: ParquetWriter::new(),
             task_info: task_info.clone(),
             tables: tables
                 .into_iter()
@@ -176,67 +151,12 @@ impl BackingStore for ParquetBackend {
     }
 
     async fn from_checkpoint(
-        task_info: &TaskInfo,
-        metadata: CheckpointMetadata,
-        tables: Vec<TableDescriptor>,
-        control_tx: Sender<ControlResp>,
+        _task_info: &TaskInfo,
+        _metadata: CheckpointMetadata,
+        _tables: Vec<TableDescriptor>,
+        _control_tx: Sender<ControlResp>,
     ) -> Self {
-        let operator_metadata: OperatorCheckpointMetadata =
-            Self::load_operator_metadata(&task_info.job_id, &task_info.operator_id, metadata.epoch)
-                .await
-                // the lookup must succeed and be present.
-                .unwrap()
-                .unwrap();
-        let mut current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>> = HashMap::new();
-        let tables: HashMap<char, TableDescriptor> = tables
-            .into_iter()
-            .map(|table| (table.name.clone().chars().next().unwrap(), table))
-            .collect();
-        for backend_data in operator_metadata.backend_data {
-            let Some(backend_data::BackendData::ParquetStore(parquet_data)) =
-                backend_data.backend_data
-            else {
-                panic!("expect parquet data")
-            };
-            let table_descriptor = tables
-                .get(&parquet_data.table.chars().next().unwrap())
-                .unwrap();
-            if table_descriptor.table_type() != TableType::Global {
-                // check if the file has data in the task's key range.
-                if parquet_data.max_routing_key < *task_info.key_range.start()
-                    || *task_info.key_range.end() < parquet_data.min_routing_key
-                {
-                    continue;
-                }
-            }
-
-            let files = current_files
-                .entry(parquet_data.table.chars().next().unwrap())
-                .or_default()
-                .entry(parquet_data.epoch)
-                .or_default();
-            files.push(parquet_data);
-        }
-
-        let writer_current_files = current_files.clone();
-
-        let storage = get_storage_provider().await.unwrap();
-        Self {
-            epoch: metadata.epoch + 1,
-            min_epoch: metadata.min_epoch,
-            current_files,
-            writer: ParquetWriter::new(
-                task_info.clone(),
-                control_tx,
-                tables.values().cloned().collect(),
-                storage.clone(),
-                writer_current_files,
-                metadata.epoch,
-            ),
-            task_info: task_info.clone(),
-            tables,
-            storage,
-        }
+        unimplemented!()
     }
 
     async fn prepare_checkpoint_load(_metadata: &CheckpointMetadata) -> anyhow::Result<()> {
@@ -444,9 +364,13 @@ impl BackingStore for ParquetBackend {
             .await;
     }
 
-    async fn write_key_value<K: Key, V: Data>(&mut self, table: char, key: &mut K, value: &mut V) {
-        self.write_data_tuple(table, TableType::Global, SystemTime::UNIX_EPOCH, key, value)
-            .await
+    async fn write_key_value<K: Key, V: Data>(
+        &mut self,
+        _table: char,
+        _key: &mut K,
+        _value: &mut V,
+    ) {
+        unimplemented!()
     }
 
     async fn delete_key<K: Key>(&mut self, table: char, key: &mut K) {
@@ -570,175 +494,61 @@ impl ParquetBackend {
         )
     }
 
-    async fn compact_table_partition(
-        table_char: char,
-        task: TaskInfo,
-        generation: u32,
-        generation_files: Vec<ParquetStoreData>,
-        storage_client: StorageProvider,
-        new_min_epoch: u32,
-        table_descriptor: &TableDescriptor,
-    ) -> Option<ParquetStoreData> {
-        // accumulate this partition's tuples from all the table's files
-        // (spread across multiple epochs and files)
-        let mut tuples_in = vec![];
-        for file in generation_files {
-            let bytes = storage_client
-                .get(&file.file)
-                .await
-                .unwrap_or_else(|_| panic!("unable to find file {} in checkpoint", file.file));
-            let tuples =
-                ParquetBackend::blind_tuples_from_parquet_bytes(bytes.into(), &task.key_range);
-            tuples_in.extend(tuples);
-        }
-
-        // do the compaction
-        let compactor: Compactor = Compactor::for_table_type(table_descriptor.table_type());
-        let tuples_length = tuples_in.len();
-        let tuples_out = compactor.compact_tuples(tuples_in);
-
-        info!(
-            message = "Compaction summary for operator",
-            operator_id = task.operator_id,
-            table_char = table_char.to_string(),
-            table_type = table_descriptor.table_type().as_str_name(),
-            task_index = task.task_index,
-            tuples_in = tuples_length,
-            tuples_out = tuples_out.len(),
-            compacted = tuples_length - tuples_out.len()
-        );
-
-        let mut parquet_writer =
-            ParquetCompactFileWriter::new(table_char, new_min_epoch, task.clone(), generation + 1);
-
-        for tuple in tuples_out {
-            parquet_writer.write(
-                tuple.key_hash,
-                tuple.timestamp,
-                tuple.key,
-                tuple.value,
-                tuple.operation,
-            );
-        }
-
-        let p = parquet_writer
-            .flush(&storage_client)
-            .await
-            .expect("Failed to flush parquet writer");
-        p
-    }
-
     /// Called after a checkpoint is committed
     pub async fn compact_operator(
-        parallelism: usize,
         job_id: String,
         operator_id: String,
         epoch: u32,
-    ) -> Result<Option<CompactionResult>> {
+    ) -> Result<HashMap<String, TableCheckpointMetadata>> {
         let min_files_to_compact = env::var("MIN_FILES_TO_COMPACT")
             .unwrap_or_else(|_| "4".to_string())
-            .parse()
-            .unwrap();
-
-        let checkpoint_metadata = Self::load_checkpoint_metadata(&job_id, epoch).await?;
+            .parse()?;
 
         let operator_checkpoint_metadata =
             Self::load_operator_metadata(&job_id, &operator_id, epoch)
                 .await?
                 .expect("expect operator metadata to still be present");
+        let storage_provider = Arc::new(get_storage_provider().await?);
+        let compaction_config = CompactionConfig {
+            storage_provider,
+            compact_generations: vec![0].into_iter().collect(),
+            min_compaction_epochs: min_files_to_compact,
+        };
+        let operator_metadata = operator_checkpoint_metadata.operator_metadata.unwrap();
 
-        let mut backend_data_to_drop = HashMap::new();
-        let mut backend_data_to_load = vec![]; // one file per partition per table
+        let mut result = HashMap::new();
 
-        // we reduce the range of epochs to a set of compacted files
-        for index in 0..parallelism {
-            let key_range = range_for_server(index, parallelism);
-
-            // construct a theoretical TaskInfo for the purpose of partitioning the data
-            let task = TaskInfo {
-                job_id: job_id.clone(),
-                operator_name: "".to_string(), // TODO: this is not used
-                operator_id: operator_id.clone(),
-                task_index: index,
-                parallelism,
-                key_range: key_range.clone(),
-            };
-            let (tx, _) = channel(10);
-
-            // we must access the data through the state store because
-            // it keeps track of the table -> file relation
-            let mut state_store = StateStore::<ParquetBackend>::from_checkpoint(
-                &task,
-                checkpoint_metadata.clone(),
-                operator_checkpoint_metadata.tables.clone(),
-                tx.clone(),
-            )
-            .await;
-
-            // for each table this operator has, generate this partition's compacted file
-            for (table_char, epoch_files) in state_store.backend.current_files.drain() {
-                for generation in 0..GENERATIONS_TO_COMPACT {
-                    // get just the files for this table
-                    let generation_files: Vec<ParquetStoreData> = epoch_files
-                        .values()
-                        .flatten()
-                        .filter(|file| file.generation == generation)
-                        .cloned()
-                        .collect();
-
-                    if generation_files.len() < min_files_to_compact {
-                        continue;
-                    }
-
-                    info!(
-                        message = "Compacting table partition",
-                        job_id,
-                        operator_id,
-                        table = table_char.to_string(),
-                        epoch,
-                        index,
-                        files = generation_files.len(),
-                    );
-
-                    for file in &generation_files {
-                        backend_data_to_drop.insert(
-                            file.file.clone(),
-                            grpc::BackendData {
-                                backend_data: Some(BackendData::ParquetStore(file.clone())),
-                            },
-                        );
-                    }
-
-                    let compact_parquet_store_data = ParquetBackend::compact_table_partition(
-                        table_char,
-                        task.clone(),
-                        generation,
-                        generation_files,
-                        get_storage_provider().await?,
-                        epoch,
-                        state_store.table_descriptors.get(&table_char).unwrap(),
+        for (table, table_metadata) in operator_checkpoint_metadata.table_checkpoint_metadata {
+            let table_config = operator_checkpoint_metadata
+                .table_configs
+                .get(&table)
+                .unwrap()
+                .clone();
+            if let Some(compacted_metadata) = match table_metadata.table_type() {
+                grpc::TableEnum::MissingTableType => bail!("should have table type"),
+                grpc::TableEnum::GlobalKeyValue => {
+                    GlobalKeyedTable::compact_data(
+                        table_config,
+                        &compaction_config,
+                        &operator_metadata,
+                        table_metadata,
                     )
-                    .await;
-
-                    if let Some(p) = compact_parquet_store_data {
-                        backend_data_to_load.push(grpc::BackendData {
-                            backend_data: Some(BackendData::ParquetStore(p)),
-                        });
-                    }
+                    .await?
                 }
+                grpc::TableEnum::ExpiringKeyedTimeTable => {
+                    ExpiringTimeKeyTable::compact_data(
+                        table_config,
+                        &compaction_config,
+                        &operator_metadata,
+                        table_metadata,
+                    )
+                    .await?
+                }
+            } {
+                result.insert(table, compacted_metadata);
             }
         }
-
-        if !backend_data_to_drop.is_empty() {
-            // CompactionResult is only sent if there is data to drop
-            Ok(Some(CompactionResult {
-                operator_id,
-                backend_data_to_drop: backend_data_to_drop.values().cloned().collect(),
-                backend_data_to_load,
-            }))
-        } else {
-            Ok(None)
-        }
+        Ok(result)
     }
 
     /// Delete files no longer referenced by the new min epoch
@@ -792,7 +602,8 @@ impl ParquetBackend {
                     let table_config = operator_metadata
                         .table_configs
                         .get(table_name)
-                        .unwrap()
+                        .ok_or_else(|| anyhow::anyhow!("missing table config for operator {}, table {}, metadata is {:?}, operator_metadata is {:?}",
+                         operator_id, table_name, metadata, operator_metadata)).unwrap()
                         .clone();
                     let files = match table_config.table_type() {
                         grpc::TableEnum::MissingTableType => todo!("should handle error"),
@@ -892,193 +703,23 @@ impl ParquetBackend {
         }
         result
     }
-
-    /// Return rows from the given bytes that are in the given key range,
-    /// but without deserializing the key and value.
-    fn blind_tuples_from_parquet_bytes(
-        bytes: Vec<u8>,
-        range: &RangeInclusive<u64>,
-    ) -> Vec<BlindDataTuple> {
-        let reader = ParquetRecordBatchReaderBuilder::try_new(Bytes::copy_from_slice(&bytes))
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let mut result = vec![];
-
-        let batches: Vec<RecordBatch> = reader.collect::<Result<Vec<_>, _>>().unwrap();
-        for batch in batches {
-            let num_rows = batch.num_rows();
-            let key_hash_array = batch
-                .column(0)
-                .as_any()
-                .downcast_ref::<arrow_array::UInt64Array>()
-                .unwrap();
-            let time_array = batch
-                .column(1)
-                .as_any()
-                .downcast_ref::<arrow_array::TimestampNanosecondArray>()
-                .expect("Column 1 is not a TimestampNanosecondArray");
-            let key_array = batch
-                .column(2)
-                .as_any()
-                .downcast_ref::<arrow_array::BinaryArray>()
-                .unwrap();
-            let value_array = batch
-                .column(3)
-                .as_any()
-                .downcast_ref::<arrow_array::BinaryArray>()
-                .unwrap();
-            let operation_array = batch
-                .column(4)
-                .as_any()
-                .downcast_ref::<arrow_array::BinaryArray>()
-                .unwrap();
-            for index in 0..num_rows {
-                let key_hash = key_hash_array.value(index);
-                if !range.contains(&key_hash) {
-                    continue;
-                }
-
-                let timestamp = from_nanos(time_array.value(index) as u128);
-
-                let key = key_array.value(index).to_owned();
-                let value = value_array.value(index).to_owned();
-                let operation: DataOperation =
-                    bincode::decode_from_slice(operation_array.value(index), BINCODE_CONFIG)
-                        .unwrap()
-                        .0;
-
-                result.push(BlindDataTuple {
-                    key_hash,
-                    timestamp,
-                    key,
-                    value,
-                    operation,
-                });
-            }
-        }
-        result
-    }
-}
-
-pub struct ParquetCompactFileWriter {
-    table_char: char,
-    epoch: u32,
-    task_info: TaskInfo,
-    builder: RecordBatchBuilder,
-    new_generation: u32,
-}
-
-impl ParquetCompactFileWriter {
-    pub fn new(table_char: char, epoch: u32, task_info: TaskInfo, new_generation: u32) -> Self {
-        ParquetCompactFileWriter {
-            table_char,
-            epoch,
-            task_info,
-            builder: RecordBatchBuilder::default(),
-            new_generation,
-        }
-    }
-
-    pub(crate) fn write(
-        &mut self,
-        key_hash: u64,
-        timestamp: SystemTime,
-        key: Vec<u8>,
-        data: Vec<u8>,
-        operation: DataOperation,
-    ) {
-        self.builder
-            .insert(key_hash, timestamp, key, data, operation);
-    }
-
-    async fn upload_record_batch(
-        key: &str,
-        record_batch: arrow_array::RecordBatch,
-        storage: &StorageProvider,
-    ) -> Result<usize> {
-        let props = WriterProperties::builder()
-            .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::default()))
-            .set_statistics_enabled(EnabledStatistics::None)
-            .build();
-        let cursor = Vec::new();
-        let mut writer = ArrowWriter::try_new(cursor, record_batch.schema(), Some(props)).unwrap();
-        writer.write(&record_batch)?;
-        writer.flush().unwrap();
-        let parquet_bytes = writer.into_inner().unwrap();
-        let bytes = parquet_bytes.len();
-        storage.put(key, parquet_bytes).await?;
-        Ok(bytes)
-    }
-
-    pub async fn flush(self, storage: &StorageProvider) -> Result<Option<ParquetStoreData>> {
-        let s3_key = table_checkpoint_path(&self.task_info, self.table_char, self.epoch, true);
-
-        // write the file even if the builder is empty
-        // so that we can delete the old files
-        match self.builder.flush() {
-            Some((record_batch, stats)) => {
-                ParquetCompactFileWriter::upload_record_batch(&s3_key, record_batch, storage)
-                    .await?;
-                return Ok(Some(ParquetStoreData {
-                    epoch: self.epoch,
-                    file: s3_key,
-                    table: self.table_char.to_string(),
-                    min_routing_key: stats.min_routing_key,
-                    max_routing_key: stats.max_routing_key,
-                    max_timestamp_micros: arroyo_types::to_micros(stats.max_timestamp) + 1,
-                    min_required_timestamp_micros: None,
-                    generation: self.new_generation,
-                }));
-            }
-            None => Ok(None),
-        }
-    }
 }
 
 pub struct ParquetWriter {
     sender: Sender<ParquetQueueItem>,
     finish_rx: Option<oneshot::Receiver<()>>,
-    load_compacted_rx: Sender<CompactionResult>,
+    load_compacted_tx: Sender<CompactionResult>,
 }
 
 impl ParquetWriter {
-    fn new(
-        task_info: TaskInfo,
-        control_tx: Sender<ControlResp>,
-        tables: Vec<TableDescriptor>,
-        storage: StorageProvider,
-        current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>,
-        current_epoch: u32,
-    ) -> Self {
-        let (tx, rx) = mpsc::channel(1024 * 1024);
-        let (finish_tx, finish_rx) = oneshot::channel();
-        let (load_compacted_rx, load_compacted_tx) = mpsc::channel(1024 * 1024);
-
-        (ParquetFlusher {
-            queue: rx,
-            storage,
-            control_tx,
-            finish_tx: Some(finish_tx),
-            task_info,
-            table_descriptors: tables
-                .iter()
-                .map(|table| (table.name.chars().next().unwrap(), table.clone()))
-                .collect(),
-            builders: HashMap::new(),
-            commit_data: HashMap::new(),
-            current_files,
-            load_compacted_tx,
-            new_compacted: vec![],
-            current_epoch,
-        })
-        .start();
-
+    fn new() -> Self {
+        let (sender, _receiver) = mpsc::channel(100);
+        let (_finish_tx, finish_rx) = oneshot::channel();
+        let (load_compacted_tx, _load_compacted_rx) = mpsc::channel(100);
         ParquetWriter {
-            sender: tx,
+            sender,
             finish_rx: Some(finish_rx),
-            load_compacted_rx,
+            load_compacted_tx,
         }
     }
 
@@ -1105,7 +746,7 @@ impl ParquetWriter {
     }
 
     async fn load_compacted_data(&mut self, compaction: CompactionResult) {
-        self.load_compacted_rx.send(compaction).await.unwrap();
+        self.load_compacted_tx.send(compaction).await.unwrap();
     }
 
     async fn checkpoint(
@@ -1175,16 +816,6 @@ struct ParquetCheckpoint {
     then_stop: bool,
 }
 
-pub struct RecordBatchBuilder {
-    key_hash_builder: arrow_array::builder::PrimitiveBuilder<arrow_array::types::UInt64Type>,
-    start_time_array:
-        arrow_array::builder::PrimitiveBuilder<arrow_array::types::TimestampNanosecondType>,
-    key_bytes: arrow_array::builder::BinaryBuilder,
-    data_bytes: arrow_array::builder::BinaryBuilder,
-    parquet_stats: ParquetStats,
-    operation_array: arrow_array::builder::BinaryBuilder,
-}
-
 #[derive(Debug)]
 pub struct ParquetStats {
     pub max_timestamp: SystemTime,
@@ -1202,237 +833,11 @@ impl Default for ParquetStats {
     }
 }
 
-impl RecordBatchBuilder {
-    fn insert(
-        &mut self,
-        key_hash: u64,
-        timestamp: SystemTime,
-        key: Vec<u8>,
-        data: Vec<u8>,
-        operation: DataOperation,
-    ) {
-        self.parquet_stats.min_routing_key = self.parquet_stats.min_routing_key.min(key_hash);
-        self.parquet_stats.max_routing_key = self.parquet_stats.max_routing_key.max(key_hash);
-
-        self.key_hash_builder.append_value(key_hash);
-        self.start_time_array
-            .append_value(to_nanos(timestamp) as i64);
-        self.key_bytes.append_value(key);
-        self.data_bytes.append_value(data);
-
-        self.operation_array
-            .append_value(bincode::encode_to_vec(operation, config::standard()).unwrap());
-        self.parquet_stats.max_timestamp = self.parquet_stats.max_timestamp.max(timestamp);
-    }
-
-    fn flush(mut self) -> Option<(arrow_array::RecordBatch, ParquetStats)> {
-        let key_hash_array: arrow_array::PrimitiveArray<arrow_array::types::UInt64Type> =
-            self.key_hash_builder.finish();
-        if key_hash_array.is_empty() {
-            return None;
-        }
-        let start_time_array: arrow_array::PrimitiveArray<
-            arrow_array::types::TimestampNanosecondType,
-        > = self.start_time_array.finish();
-        let key_array: arrow_array::BinaryArray = self.key_bytes.finish();
-        let data_array: arrow_array::BinaryArray = self.data_bytes.finish();
-        let operations_array: arrow_array::GenericByteArray<
-            arrow_array::types::GenericBinaryType<i32>,
-        > = self.operation_array.finish();
-        Some((
-            arrow_array::RecordBatch::try_new(
-                Self::schema(),
-                vec![
-                    std::sync::Arc::new(key_hash_array),
-                    std::sync::Arc::new(start_time_array),
-                    std::sync::Arc::new(key_array),
-                    std::sync::Arc::new(data_array),
-                    std::sync::Arc::new(operations_array),
-                ],
-            )
-            .unwrap(),
-            self.parquet_stats,
-        ))
-    }
-
-    fn schema() -> std::sync::Arc<arrow_schema::Schema> {
-        std::sync::Arc::new(arrow::datatypes::Schema::new(vec![
-            arrow::datatypes::Field::new("key_hash", arrow::datatypes::DataType::UInt64, false),
-            arrow::datatypes::Field::new(
-                "start_time",
-                arrow::datatypes::DataType::Timestamp(arrow_schema::TimeUnit::Nanosecond, None),
-                false,
-            ),
-            arrow::datatypes::Field::new("key_bytes", arrow::datatypes::DataType::Binary, false),
-            arrow::datatypes::Field::new(
-                "aggregate_bytes",
-                arrow::datatypes::DataType::Binary,
-                false,
-            ),
-            arrow::datatypes::Field::new("operation", arrow::datatypes::DataType::Binary, false),
-        ]))
-    }
-
-    pub fn get_batch(
-        key_hash_array: arrow_array::PrimitiveArray<arrow_array::types::UInt64Type>,
-        start_time_array: arrow_array::PrimitiveArray<arrow_array::types::TimestampNanosecondType>,
-        key_array: arrow_array::BinaryArray,
-        data_array: arrow_array::BinaryArray,
-        operations_array: arrow_array::GenericByteArray<GenericBinaryType<i32>>,
-    ) -> RecordBatch {
-        info!(
-            "key hash:{},
-        start time:{}
-        key:{}
-        value:{}
-        operations:{}",
-            key_hash_array.len(),
-            start_time_array.len(),
-            key_array.len(),
-            data_array.len(),
-            operations_array.len()
-        );
-        RecordBatch::try_new(
-            Self::schema(),
-            vec![
-                std::sync::Arc::new(key_hash_array),
-                std::sync::Arc::new(start_time_array),
-                std::sync::Arc::new(key_array),
-                std::sync::Arc::new(data_array),
-                std::sync::Arc::new(operations_array),
-            ],
-        )
-        .unwrap()
-    }
-}
-
-impl Default for RecordBatchBuilder {
-    fn default() -> Self {
-        Self {
-            key_hash_builder: arrow_array::builder::PrimitiveBuilder::<
-                arrow_array::types::UInt64Type,
-            >::with_capacity(1024),
-            start_time_array: arrow_array::builder::PrimitiveBuilder::<
-                arrow_array::types::TimestampNanosecondType,
-            >::with_capacity(1024),
-            key_bytes: arrow_array::builder::BinaryBuilder::default(),
-            data_bytes: arrow_array::builder::BinaryBuilder::default(),
-            operation_array: arrow_array::builder::BinaryBuilder::default(),
-            parquet_stats: ParquetStats::default(),
-        }
-    }
-}
-
-#[allow(unused)]
-struct ParquetFlusher {
-    queue: Receiver<ParquetQueueItem>,
-    storage: StorageProvider,
-    control_tx: Sender<ControlResp>,
-    finish_tx: Option<oneshot::Sender<()>>,
-    task_info: TaskInfo,
-    table_descriptors: HashMap<char, TableDescriptor>,
-    builders: HashMap<char, RecordBatchBuilder>,
-    commit_data: HashMap<char, Vec<u8>>,
-    current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>, // table -> epoch -> file
-    load_compacted_tx: Receiver<CompactionResult>,
-    new_compacted: Vec<ParquetStoreData>,
-    current_epoch: u32,
-}
-
-#[allow(unused)]
-impl ParquetFlusher {
-    fn start(mut self) {
-        tokio::spawn(async move {
-            loop {
-                match self.flush_iteration().await {
-                    Ok(continue_flushing) => {
-                        if !continue_flushing {
-                            return;
-                        }
-                    }
-                    Err(err) => {
-                        self.control_tx
-                            .send(ControlResp::TaskFailed {
-                                operator_id: self.task_info.operator_id.clone(),
-                                task_index: self.task_info.task_index,
-                                error: err.to_string(),
-                            })
-                            .await
-                            .unwrap();
-                        return;
-                    }
-                }
-            }
-        });
-    }
-    async fn upload_record_batch(
-        &self,
-        key: &str,
-        record_batch: arrow_array::RecordBatch,
-    ) -> Result<usize> {
-        let props = WriterProperties::builder()
-            .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::default()))
-            .set_statistics_enabled(EnabledStatistics::None)
-            .build();
-        let cursor = Vec::new();
-        let mut writer = ArrowWriter::try_new(cursor, record_batch.schema(), Some(props)).unwrap();
-        writer.write(&record_batch)?;
-        writer.flush()?;
-        let parquet_bytes = writer.into_inner()?;
-        let bytes = parquet_bytes.len();
-        self.storage.put(key, parquet_bytes).await?;
-        Ok(bytes)
-    }
-
-    fn get_parquet_store_parts(backend_data: grpc::BackendData) -> (ParquetStoreData, char, u32) {
-        let Some(BackendData::ParquetStore(parquet_store)) = backend_data.backend_data else {
-            unreachable!("expect parquet backends")
-        };
-        let table_char = parquet_store.table.chars().next().unwrap();
-        let epoch = parquet_store.epoch;
-        (parquet_store, table_char, epoch)
-    }
-
-    async fn load_compacted(&mut self, compaction: &CompactionResult) {
-        info!(
-            "Loading compacted data for operator {}. Dropping {} files, loading {} files.",
-            compaction.operator_id,
-            compaction.backend_data_to_drop.len(),
-            compaction.backend_data_to_load.len(),
-        );
-
-        // add all the new files
-        for backend_data in compaction.backend_data_to_load.clone() {
-            let (parquet_store, table_char, epoch) = Self::get_parquet_store_parts(backend_data);
-
-            self.current_files
-                .entry(table_char)
-                .or_default()
-                .entry(epoch)
-                .or_default()
-                .push(parquet_store.clone());
-
-            // separately keep track of the new files so we can
-            // force them to be included in the next checkpoint
-            self.new_compacted.push(parquet_store);
-        }
-
-        // remove all the old files
-        for backend_data in compaction.backend_data_to_drop.clone() {
-            let (parquet_store, table_char, epoch) = Self::get_parquet_store_parts(backend_data);
-
-            if let Some(x) = self.current_files.get_mut(&table_char) {
-                if let Some(y) = x.get_mut(&epoch) {
-                    if let Some(index) = y.iter().position(|f| f.file == parquet_store.file) {
-                        y.remove(index);
-                    }
-                }
-            }
-        }
-    }
-
-    async fn flush_iteration(&mut self) -> Result<bool> {
-        bail!("we've moved off of this")
+impl ParquetStats {
+    pub fn merge(&mut self, other: ParquetStats) {
+        self.max_timestamp = self.max_timestamp.max(other.max_timestamp);
+        self.min_routing_key = self.min_routing_key.min(other.min_routing_key);
+        self.max_routing_key = self.max_routing_key.max(other.max_routing_key);
     }
 }
 

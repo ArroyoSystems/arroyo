@@ -309,7 +309,7 @@ pub trait ArrowOperator: Send + 'static {
     ) -> ControlOutcome {
         match message {
             SignalMessage::Barrier(t) => {
-                info!(
+                debug!(
                     "received barrier in {}-{}-{}-{}",
                     self.name(),
                     ctx.task_info.operator_id,
@@ -331,7 +331,7 @@ pub trait ArrowOperator: Send + 'static {
                 }
 
                 if counter.mark(idx, &t) {
-                    info!(
+                    debug!(
                         "Checkpointing {}-{}-{}",
                         self.name(),
                         ctx.task_info.operator_id,

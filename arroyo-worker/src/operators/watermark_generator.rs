@@ -4,9 +4,9 @@ use arroyo_df::physical::EmptyRegistry;
 use arroyo_operator::context::ArrowContext;
 use arroyo_operator::get_timestamp_col;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
 use arroyo_rpc::grpc::TableConfig;
-use arroyo_rpc::ArroyoSchema;
 use arroyo_state::global_table_config;
 use arroyo_types::{
     from_millis, from_nanos, to_millis, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,

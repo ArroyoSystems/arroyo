@@ -15,10 +15,11 @@ use std::time::{Duration, SystemTime};
 use crate::kafka::SourceOffset;
 use arroyo_operator::context::{ArrowContext, QueueItem};
 use arroyo_operator::operator::SourceOperator;
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, RawStringFormat};
-use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata};
+use arroyo_rpc::grpc::{CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata};
 use arroyo_rpc::schema_resolver::FailingSchemaResolver;
-use arroyo_rpc::{ArroyoSchema, CheckpointCompleted, ControlMessage, ControlResp};
+use arroyo_rpc::{CheckpointCompleted, ControlMessage, ControlResp};
 use arroyo_types::{
     single_item_hash_map, to_micros, ArrowMessage, CheckpointBarrier, SignalMessage, TaskInfo,
 };
@@ -299,6 +300,14 @@ async fn test_kafka() {
         commit_data: None,
         table_checkpoint_metadata: single_item_hash_map("k", table_metadata),
         table_configs: subtask_metadata.table_configs,
+        operator_metadata: Some(OperatorMetadata {
+            job_id: task_info.job_id.clone(),
+            operator_id: task_info.operator_id.clone(),
+            epoch: 1,
+            min_watermark: Some(0),
+            max_watermark: Some(0),
+            parallelism: 1,
+        }),
     })
     .await
     .unwrap();
