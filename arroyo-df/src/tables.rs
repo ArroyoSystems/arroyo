@@ -93,6 +93,8 @@ fn produce_optimized_plan(
     let optimizer = Optimizer::new();
     let analyzed_plan =
         analyzer.execute_and_check(&plan, &ConfigOptions::default(), |_plan, _rule| {})?;
+
+    println!("ANALYZED PLAN {}", analyzed_plan.display_indent_schema());
     let plan = optimizer.optimize(&analyzed_plan, &optimizer_config, |_plan, _rule| {})?;
     info!("optimized plan: {:?}", plan);
     Ok(plan)
