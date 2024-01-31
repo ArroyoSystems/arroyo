@@ -57,6 +57,7 @@ impl SourceRewriter {
     fn projection_expressions(
         table: &ConnectorTable,
         qualifier: &OwnedTableReference,
+        projection: &Option<Vec<usize>>,
     ) -> DFResult<Vec<Expr>> {
         let mut expressions = table
             .fields
@@ -71,6 +72,10 @@ impl SourceRewriter {
                 }
             })
             .collect::<Vec<_>>();
+
+        if let Some(projection) = projection {
+            expressions = projection.iter().map(|i| expressions[*i].clone()).collect();
+        }
 
         // Add event time field if present
         if let Some(event_time_field) = table.event_time_field.clone() {
@@ -134,7 +139,7 @@ impl SourceRewriter {
 
         Ok(LogicalPlan::Projection(
             datafusion_expr::Projection::try_new(
-                Self::projection_expressions(table, &qualifier)?,
+                Self::projection_expressions(table, &qualifier, &table_scan.projection)?,
                 Arc::new(input_table_scan),
             )?,
         ))
