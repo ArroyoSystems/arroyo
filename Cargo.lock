@@ -719,6 +719,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-bin"
+version = "0.10.0-dev"
+dependencies = [
+ "arroyo-api",
+ "arroyo-connectors",
+ "arroyo-controller",
+ "arroyo-server-common",
+ "arroyo-types",
+ "arroyo-worker",
+ "clap 4.4.18",
+ "deadpool-postgres",
+ "postgres-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "arroyo-compiler-service"
 version = "0.10.0-dev"
 dependencies = [
@@ -1052,6 +1073,7 @@ dependencies = [
  "reqwest",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tonic",
  "tower",
  "tower-http",

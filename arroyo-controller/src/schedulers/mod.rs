@@ -14,6 +14,8 @@ use lazy_static::lazy_static;
 use prometheus::{register_gauge, Gauge};
 use prost::Message;
 use std::collections::HashMap;
+use std::env::current_exe;
+use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -140,32 +142,29 @@ impl Scheduler for ProcessScheduler {
 
             slots_scheduled += slots_here;
             let job_id = start_pipeline_req.job_id.clone();
-            println!("Starting in path {:?}", path);
             let workers = self.workers.clone();
             let env_map = start_pipeline_req.env_vars.clone();
             let program = start_pipeline_req.program.clone();
+            let program = general_purpose::STANDARD_NO_PAD
+                .encode(api::ArrowProgram::from(program).encode_to_vec());
+            fs::write("/tmp/program", &program).unwrap();
+
             tokio::spawn(async move {
-                let mut command = if std::env::var("DEBUG").is_ok() {
-                    Command::new("target/debug/arroyo-worker")
-                } else {
-                    Command::new("target/release/arroyo-worker")
-                };
+                let mut command =
+                    Command::new(current_exe().expect("Could not get path of worker binary"));
 
                 for (env, value) in env_map {
                     command.env(env, value);
                 }
                 let mut child = command
+                    .arg("worker")
                     .env("RUST_LOG", "info")
                     .env(TASK_SLOTS_ENV, format!("{}", slots_here))
                     .env(WORKER_ID_ENV, format!("{}", worker_id)) // start at 100 to make same length
                     .env(JOB_ID_ENV, &job_id)
                     .env(NODE_ID_ENV, format!("{}", 1))
                     .env(RUN_ID_ENV, format!("{}", start_pipeline_req.run_id))
-                    .env(
-                        ARROYO_PROGRAM_ENV,
-                        general_purpose::STANDARD_NO_PAD
-                            .encode(api::ArrowProgram::from(program).encode_to_vec()),
-                    )
+                    .env(ARROYO_PROGRAM_ENV, program)
                     .kill_on_drop(true)
                     .spawn()
                     .unwrap();

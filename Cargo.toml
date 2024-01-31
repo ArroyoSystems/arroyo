@@ -2,6 +2,7 @@
 members = [
     "arroyo",
     "arroyo-api",
+    "arroyo-bin",
     "arroyo-compiler-service",
     "arroyo-controller",
     "arroyo-connectors",

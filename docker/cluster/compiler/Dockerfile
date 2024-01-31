@@ -46,6 +46,7 @@ COPY arroyo-console src/arroyo-console
 COPY arroyo-storage src/arroyo-storage
 COPY arroyo-formats src/arroyo-formats
 COPY connector-schemas src/connector-schemas
+COPY arroyo-bin src/arroyo-bin
 COPY arroyo src/arroyo
 
 COPY copy-artifacts src/copy-artifacts

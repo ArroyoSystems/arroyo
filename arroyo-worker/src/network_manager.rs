@@ -27,6 +27,7 @@ use tokio::time::{interval, Interval};
 use tokio_stream::StreamExt;
 
 use arroyo_operator::inq_reader::InQReader;
+use arroyo_server_common::shutdown::ShutdownGuard;
 
 #[derive(Clone)]
 struct NetworkSender {
@@ -292,7 +293,7 @@ impl NetworkManager {
         }
     }
 
-    pub async fn open_listener(&mut self) -> u16 {
+    pub async fn open_listener(&mut self, shutdown_guard: ShutdownGuard) -> u16 {
         let port = self.port;
         let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
             .await
@@ -300,7 +301,7 @@ impl NetworkManager {
         let port = listener.local_addr().unwrap().port();
 
         let streams = Arc::clone(&self.in_streams);
-        tokio::spawn(async move {
+        shutdown_guard.into_spawn_task(async move {
             loop {
                 let (stream, _) = listener.accept().await.unwrap();
 
@@ -468,6 +469,7 @@ mod test {
     use std::time::SystemTime;
     use std::{pin::Pin, time::Duration};
 
+    use arroyo_server_common::shutdown::Shutdown;
     use arroyo_types::{to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage};
     use tokio::{sync::mpsc::channel, time::timeout};
 
@@ -531,8 +533,9 @@ mod test {
 
         senders.add(quad, schema.clone(), server_tx);
 
+        let shutdown = Shutdown::new("test");
         let mut nm = NetworkManager::new(0);
-        let port = nm.open_listener().await;
+        let port = nm.open_listener(shutdown.guard("test")).await;
 
         let (client_tx, client_rx) = channel(10);
         nm.connect(format!("localhost:{}", port), quad, client_rx)

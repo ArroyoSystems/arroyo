@@ -9,29 +9,30 @@ use anyhow::Result;
 use arroyo_rpc::grpc::controller_grpc_client::ControllerGrpcClient;
 use arroyo_rpc::grpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::{
-    CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq,
+    api, CheckpointReq, CheckpointResp, CommitReq, CommitResp, HeartbeatReq, JobFinishedReq,
     JobFinishedResp, LoadCompactedDataReq, LoadCompactedDataRes, RegisterWorkerReq,
     StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp,
     TaskCheckpointCompletedReq, TaskCheckpointEventReq, TaskFailedReq, TaskFinishedReq,
     TaskStartedReq, WorkerErrorReq, WorkerResources,
 };
-use arroyo_server_common::start_admin_server;
 use arroyo_types::{
     default_controller_addr, from_millis, grpc_port, to_micros, CheckpointBarrier, NodeId,
-    WorkerId, JOB_ID_ENV, RUN_ID_ENV,
+    WorkerId, ARROYO_PROGRAM_ENV, JOB_ID_ENV, RUN_ID_ENV,
 };
 use local_ip_address::local_ip;
-use rand::Rng;
+use rand::random;
 
+use base64::engine::general_purpose;
+use base64::Engine as Base64Engine;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
+use std::future::Future;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
@@ -39,8 +40,10 @@ use tracing::{debug, error, info, warn};
 
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 pub use ordered_float::OrderedFloat;
+use prost::Message;
 
-use arroyo_datastream::logical::LogicalGraph;
+use arroyo_datastream::logical::{LogicalGraph, LogicalProgram};
+use arroyo_server_common::shutdown::ShutdownGuard;
 
 pub mod arrow;
 
@@ -96,7 +99,7 @@ struct EngineState {
     sources: Vec<Sender<ControlMessage>>,
     sinks: Vec<Sender<ControlMessage>>,
     operator_controls: HashMap<String, Vec<Sender<ControlMessage>>>, // operator_id -> vec of control tx
-    shutdown_tx: broadcast::Sender<bool>,
+    shutdown_guard: ShutdownGuard,
 }
 
 pub struct LocalRunner {
@@ -143,19 +146,33 @@ pub struct WorkerServer {
     job_id: String,
     run_id: String,
     name: &'static str,
-    hash: &'static str,
     controller_addr: String,
     logical: LogicalGraph,
     state: Arc<Mutex<Option<EngineState>>>,
     network: Arc<Mutex<Option<NetworkManager>>>,
+    shutdown_guard: ShutdownGuard,
 }
 
 impl WorkerServer {
-    pub fn new(name: &'static str, hash: &'static str, logical: LogicalGraph) -> Self {
+    pub fn from_env(shutdown_guard: ShutdownGuard) -> Self {
+        let graph = std::env::var(ARROYO_PROGRAM_ENV).expect("ARROYO_PROGRAM not set");
+        let graph = general_purpose::STANDARD_NO_PAD
+            .decode(&graph)
+            .expect("ARROYO_PROGRAM not valid base64");
+
+        let graph =
+            api::ArrowProgram::decode(&graph[..]).expect("ARROYO_PROGRAM is not a valid protobuf");
+
+        let logical = LogicalProgram::try_from(graph).expect("Failed to create LogicalProgram");
+
+        WorkerServer::new("program", logical.graph, shutdown_guard)
+    }
+
+    pub fn new(name: &'static str, logical: LogicalGraph, shutdown_guard: ShutdownGuard) -> Self {
         let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
             .unwrap_or_else(|_| default_controller_addr());
 
-        let id = WorkerId::from_env().unwrap_or_else(|| WorkerId(rand::thread_rng().gen()));
+        let id = WorkerId::from_env().unwrap_or_else(|| WorkerId(random()));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", JOB_ID_ENV));
 
@@ -167,18 +184,23 @@ impl WorkerServer {
             name,
             job_id,
             run_id,
-            hash,
             controller_addr,
             logical,
             state: Arc::new(Mutex::new(None)),
             network: Arc::new(Mutex::new(None)),
+            shutdown_guard,
         }
     }
 
-    pub async fn start_async(self) -> Result<(), Box<dyn std::error::Error>> {
-        let _guard =
-            arroyo_server_common::init_logging(&format!("worker-{}-{}", self.id.0, self.job_id));
+    pub fn id(&self) -> WorkerId {
+        self.id
+    }
 
+    pub fn job_id(&self) -> &str {
+        &self.job_id
+    }
+
+    pub async fn start_async(self) -> Result<(), Box<dyn std::error::Error>> {
         let slots = std::env::var(arroyo_types::TASK_SLOTS_ENV)
             .map(|s| usize::from_str(&s).unwrap())
             .unwrap_or(8);
@@ -194,9 +216,11 @@ impl WorkerServer {
         let mut client = ControllerGrpcClient::connect(self.controller_addr.clone()).await?;
 
         let mut network = NetworkManager::new(0);
-        let data_port = network.open_listener().await;
+        let data_port = network
+            .open_listener(self.shutdown_guard.child("network-manager"))
+            .await;
 
-        (*self.network.lock().unwrap()) = Some(network);
+        *self.network.lock().unwrap() = Some(network);
 
         info!(
             "Started worker data for {} on 0.0.0.0:{}",
@@ -208,40 +232,31 @@ impl WorkerServer {
 
         let rpc_address = format!("http://{}:{}", local_ip, local_addr.port());
         let data_address = format!("{}:{}", local_ip, data_port);
-        let hash = self.hash;
         let job_id = self.job_id.clone();
 
-        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+        self.shutdown_guard.child("grpc").into_spawn_task(
+            arroyo_server_common::grpc_server()
+                .add_service(WorkerGrpcServer::new(self))
+                .serve_with_incoming(TcpListenerStream::new(listener)),
+        );
 
-        start_admin_server("worker", 0, shutdown_rx);
+        // ideally, get a signal when the server is started...
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
-        tokio::spawn(async move {
-            // ideally, get a signal when the server is started...
-            tokio::time::sleep(Duration::from_secs(2)).await;
-
-            client
-                .register_worker(Request::new(RegisterWorkerReq {
-                    worker_id: id.0,
-                    node_id: node_id.0,
-                    job_id,
-                    rpc_address,
-                    data_address,
-                    resources: Some(WorkerResources {
-                        slots: std::thread::available_parallelism().unwrap().get() as u64,
-                    }),
-                    job_hash: hash.to_string(),
-                    slots: slots as u64,
-                }))
-                .await
-                .unwrap();
-        });
-
-        arroyo_server_common::grpc_server()
-            .add_service(WorkerGrpcServer::new(self))
-            .serve_with_incoming(TcpListenerStream::new(listener))
-            .await?;
-
-        shutdown_tx.send(0).unwrap();
+        client
+            .register_worker(Request::new(RegisterWorkerReq {
+                worker_id: id.0,
+                node_id: node_id.0,
+                job_id,
+                rpc_address,
+                data_address,
+                resources: Some(WorkerResources {
+                    slots: std::thread::available_parallelism().unwrap().get() as u64,
+                }),
+                slots: slots as u64,
+            }))
+            .await
+            .unwrap();
 
         Ok(())
     }
@@ -251,15 +266,18 @@ impl WorkerServer {
         self.start_async().await
     }
 
-    async fn spawn_control_thread(
+    fn start_control_thread(
         &self,
-        mut shutdown_rx: tokio::sync::broadcast::Receiver<bool>,
         mut control_rx: Receiver<ControlResp>,
         worker_id: WorkerId,
         job_id: String,
-    ) -> Result<()> {
-        let mut controller = ControllerGrpcClient::connect(self.controller_addr.clone()).await?;
-        tokio::spawn(async move {
+    ) -> impl Future<Output = ()> {
+        let addr = self.controller_addr.clone();
+
+        async move {
+            let mut controller = ControllerGrpcClient::connect(addr.clone())
+                .await
+                .expect("Unable to connect to controller");
             let mut tick = tokio::time::interval(Duration::from_secs(5));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
@@ -357,17 +375,12 @@ impl WorkerServer {
                         })).await;
                         if let Err(err) = result {
                             error!("heartbeat failed {:?}", err);
-                            exit(1);
+                            break;
                         }
-                    }
-                    _ = shutdown_rx.recv() => {
-                        info!("shutting down");
-                        break;
                     }
                 }
             }
-        });
-        Ok(())
+        }
     }
 }
 
@@ -408,10 +421,10 @@ impl WorkerGrpc for WorkerServer {
                 })
                 .await
         };
-        let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
-        self.spawn_control_thread(shutdown_rx, control_rx, self.id, self.job_id.clone())
-            .await
-            .unwrap();
+
+        self.shutdown_guard
+            .child("control-thread")
+            .into_spawn_task(self.start_control_thread(control_rx, self.id, self.job_id.clone()));
 
         let sources = engine.source_controls();
         let sinks = engine.sink_controls();
@@ -422,7 +435,7 @@ impl WorkerGrpc for WorkerServer {
             sources,
             sinks,
             operator_controls,
-            shutdown_tx,
+            shutdown_guard: self.shutdown_guard.child("engine-state"),
         });
 
         info!("[{:?}] Started execution", self.id);
@@ -584,7 +597,7 @@ impl WorkerGrpc for WorkerServer {
     ) -> Result<Response<JobFinishedResp>, Status> {
         let mut state = self.state.lock().unwrap();
         if let Some(engine) = state.as_mut() {
-            engine.shutdown_tx.send(true).unwrap();
+            engine.shutdown_guard.cancel();
         }
 
         tokio::task::spawn(async {
