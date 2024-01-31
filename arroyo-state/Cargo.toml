@@ -12,12 +12,12 @@ arroyo-metrics = { path = "../arroyo-metrics" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 
-datafusion = "34.0"
-datafusion-expr = "34.0"
-datafusion-common = "34.0"
-datafusion-proto = "34.0"
-datafusion-physical-expr = "34.0"
-datafusion-execution = "34.0"
+datafusion = "35.0"
+datafusion-expr = "35.0"
+datafusion-common = "35.0"
+datafusion-proto = "35.0"
+datafusion-physical-expr = "35.0"
+datafusion-execution = "35.0"
 
 ahash = "0.8"
 

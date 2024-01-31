@@ -152,6 +152,7 @@ impl ArroyoSchemaProvider {
                         )),
                     }
                 });
+                #[allow(deprecated)]
                 ScalarUDF::new(
                     "unnest",
                     &Signature::any(1, Volatility::Immutable),
@@ -334,6 +335,7 @@ impl ArroyoSchemaProvider {
             let return_type: ReturnTypeFunction = Arc::new(move |_| Ok(return_type.clone()));
             let accumulator: AccumulatorFactoryFunction = Arc::new(|_| unreachable!());
             let state_type: StateTypeFunction = Arc::new(|_| unreachable!());
+            #[allow(deprecated)]
             let udaf =
                 AggregateUDF::new(&name, &signature, &return_type, &accumulator, &state_type);
             self.aggregate_functions
