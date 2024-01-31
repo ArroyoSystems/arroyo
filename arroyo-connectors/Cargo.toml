@@ -17,7 +17,7 @@ arroyo-operator = { path = "../arroyo-operator" }
 arroyo-state = { path = "../arroyo-state" }
 
 arrow = { workspace = true }
-datafusion = "34.0"
+datafusion = "35.0"
 async-trait = "0.1"
 bincode = "2.0.0-rc.3"
 chrono = "0.4"

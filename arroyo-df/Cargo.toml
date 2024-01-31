@@ -12,12 +12,12 @@ arroyo-connectors = { path = "../arroyo-connectors" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-operator = { path = "../arroyo-operator" }
 
-datafusion = "34.0"
-datafusion-expr = "34.0"
-datafusion-common = "34.0"
-datafusion-proto = "34.0"
-datafusion-physical-expr = "34.0"
-datafusion-execution = "34.0"
+datafusion = "35.0"
+datafusion-expr = "35.0"
+datafusion-common = "35.0"
+datafusion-proto = "35.0"
+datafusion-physical-expr = "35.0"
+datafusion-execution = "35.0"
 
 prost = "0.12"
 arrow-schema = {workspace = true, features = ["serde"] }

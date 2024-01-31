@@ -242,7 +242,6 @@ impl Planner {
                     let expression = self.planner.create_physical_expr(
                         &watermark_node.watermark_expression.as_ref().unwrap(),
                         &watermark_node.schema,
-                        &watermark_node.schema.as_ref().into(),
                         &self.session_state,
                     )?;
 
@@ -344,12 +343,9 @@ impl Planner {
             ],
         });
 
-        let binning_function = self.planner.create_physical_expr(
-            &date_bin,
-            &input_schema,
-            &input_schema.as_ref().into(),
-            &self.session_state,
-        )?;
+        let binning_function =
+            self.planner
+                .create_physical_expr(&date_bin, &input_schema, &self.session_state)?;
         Ok(PhysicalExprNode::try_from(binning_function)?)
     }
 

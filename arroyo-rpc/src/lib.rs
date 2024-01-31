@@ -18,7 +18,7 @@ use arrow_array::builder::{make_builder, ArrayBuilder};
 use arrow_array::{Array, ArrayRef, BooleanArray, RecordBatch};
 use arrow_ord::partition::partition;
 use arrow_ord::sort::{lexsort_to_indices, SortColumn};
-use arrow_schema::{DataType, Field, Schema, TimeUnit};
+use arrow_schema::{DataType, Field, Schema, SchemaBuilder, TimeUnit};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS};
 use grpc::{api, StopMode, TaskCheckpointEventType};
 use serde::{Deserialize, Serialize};
@@ -321,9 +321,9 @@ impl ArroyoSchema {
     }
 
     pub fn schema_without_timestamp(&self) -> Schema {
-        let mut schema = (*self.schema).clone();
-        schema.remove(self.timestamp_index);
-        schema
+        let mut builder = SchemaBuilder::from(self.schema.fields());
+        builder.remove(self.timestamp_index);
+        builder.finish()
     }
 
     pub fn builders(&self) -> Vec<Box<dyn ArrayBuilder>> {
