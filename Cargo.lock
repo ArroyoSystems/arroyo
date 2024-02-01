@@ -768,6 +768,7 @@ dependencies = [
  "arroyo-state",
  "arroyo-storage",
  "arroyo-types",
+ "async-compression",
  "async-trait",
  "aws-config",
  "aws-sdk-kinesis",

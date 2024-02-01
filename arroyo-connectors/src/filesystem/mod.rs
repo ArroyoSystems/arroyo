@@ -208,6 +208,7 @@ impl Connector for FileSystemConnector {
                     format: config
                         .format
                         .ok_or_else(|| anyhow!("format required for FileSystem source"))?,
+                    framing: config.framing.clone(),
                     bad_data: config.bad_data.clone(),
                     file_states: HashMap::new(),
                 })))

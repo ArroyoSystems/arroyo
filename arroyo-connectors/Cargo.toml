@@ -73,3 +73,4 @@ uuid = { version = "1.7.0", features = ["v4"] }
 parquet = { workspace = true, features = ["async"]}
 object_store = { workspace = true }
 deltalake = {version = "=0.16.4", features = ["s3", "arrow"] }
+async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }

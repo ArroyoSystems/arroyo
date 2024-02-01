@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use futures::{stream::FuturesUnordered, Future};
 use futures::{stream::StreamExt, TryStreamExt};
 use object_store::{multipart::PartId, path::Path, MultipartId};
-use serde::{Serialize};
+use serde::Serialize;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::warn;
 use uuid::Uuid;
