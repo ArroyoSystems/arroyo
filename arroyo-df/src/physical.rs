@@ -1,12 +1,12 @@
 use std::{
     any::Any,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     mem,
     sync::{Arc, RwLock},
 };
 
-use arrow_array::RecordBatch;
-use arrow_schema::SchemaRef;
+use arrow_array::{RecordBatch, StructArray};
+use arrow_schema::{DataType, SchemaRef, TimeUnit};
 use datafusion::{
     execution::TaskContext,
     physical_plan::{
@@ -15,27 +15,149 @@ use datafusion::{
         DisplayAs, ExecutionPlan, Partitioning,
     },
 };
-use datafusion_common::{DataFusionError, Result as DFResult, Statistics};
+use datafusion_common::{DataFusionError, Result as DFResult, ScalarValue, Statistics};
 
 use datafusion_execution::FunctionRegistry;
-use datafusion_expr::{AggregateUDF, ScalarUDF, WindowUDF};
+use datafusion_expr::{
+    AggregateUDF, ColumnarValue, ScalarUDF, Signature, TypeSignature, WindowUDF,
+};
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 
-pub struct EmptyRegistry {}
+pub struct EmptyRegistry {
+    udfs: HashMap<String, Arc<ScalarUDF>>,
+}
+
+impl EmptyRegistry {
+    pub fn new() -> Self {
+        let window_udf = window_scalar_function();
+        let mut udfs = HashMap::new();
+        udfs.insert("window".to_string(), Arc::new(window_udf));
+        Self { udfs }
+    }
+}
+
+pub fn window_function(columns: &[ColumnarValue]) -> DFResult<ColumnarValue> {
+    if columns.len() != 2 {
+        return DFResult::Err(DataFusionError::Internal(format!(
+            "window function expected 2 argument, got {}",
+            columns.len()
+        )));
+    }
+    // check both columns are of the correct type
+    if columns[0].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
+        return DFResult::Err(DataFusionError::Internal(format!(
+            "window function expected first argument to be a timestamp, got {:?}",
+            columns[0].data_type()
+        )));
+    }
+    if columns[1].data_type() != DataType::Timestamp(TimeUnit::Nanosecond, None) {
+        return DFResult::Err(DataFusionError::Internal(format!(
+            "window function expected second argument to be a timestamp, got {:?}",
+            columns[1].data_type()
+        )));
+    }
+    let fields = vec![
+        Arc::new(arrow::datatypes::Field::new(
+            "start",
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        )),
+        Arc::new(arrow::datatypes::Field::new(
+            "end",
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        )),
+    ]
+    .into();
+
+    match (&columns[0], &columns[1]) {
+        (ColumnarValue::Array(start), ColumnarValue::Array(end)) => {
+            Ok(ColumnarValue::Array(Arc::new(StructArray::new(
+                fields,
+                vec![start.clone(), end.clone()],
+                None,
+            ))))
+        }
+        (ColumnarValue::Array(start), ColumnarValue::Scalar(end)) => {
+            let end = end.to_array_of_size(start.len())?;
+            Ok(ColumnarValue::Array(Arc::new(StructArray::new(
+                fields,
+                vec![start.clone(), end],
+                None,
+            ))))
+        }
+        (ColumnarValue::Scalar(start), ColumnarValue::Array(end)) => {
+            let start = start.to_array_of_size(end.len())?;
+            Ok(ColumnarValue::Array(Arc::new(StructArray::new(
+                fields,
+                vec![start, end.clone()],
+                None,
+            ))))
+        }
+        (ColumnarValue::Scalar(start), ColumnarValue::Scalar(end)) => Ok(ColumnarValue::Scalar(
+            ScalarValue::Struct(Some(vec![start.clone(), end.clone()]), fields),
+        )),
+    }
+}
+
+fn tumble_function_implementation(
+) -> Arc<dyn Fn(&[ColumnarValue]) -> DFResult<ColumnarValue> + Send + Sync> {
+    Arc::new(window_function)
+}
+
+fn tumble_signature() -> Signature {
+    Signature::new(
+        TypeSignature::Exact(vec![
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+        ]),
+        datafusion_expr::Volatility::Immutable,
+    )
+}
+
+fn window_return_type() -> Arc<dyn Fn(&[DataType]) -> DFResult<Arc<DataType>> + Send + Sync> {
+    Arc::new(|_| {
+        Ok(Arc::new(DataType::Struct(
+            vec![
+                Arc::new(arrow::datatypes::Field::new(
+                    "start",
+                    DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    false,
+                )),
+                Arc::new(arrow::datatypes::Field::new(
+                    "end",
+                    DataType::Timestamp(TimeUnit::Nanosecond, None),
+                    false,
+                )),
+            ]
+            .into(),
+        )))
+    })
+}
+
+pub fn window_scalar_function() -> ScalarUDF {
+    #[allow(deprecated)]
+    ScalarUDF::new(
+        "window",
+        &tumble_signature(),
+        &window_return_type(),
+        &tumble_function_implementation(),
+    )
+}
 
 impl FunctionRegistry for EmptyRegistry {
     fn udfs(&self) -> HashSet<String> {
-        HashSet::new()
+        self.udfs.keys().cloned().collect()
     }
 
     fn udf(&self, name: &str) -> datafusion_common::Result<Arc<ScalarUDF>> {
-        DFResult::Err(DataFusionError::NotImplemented(format!(
-            "udf {} not implemented",
-            name
-        )))
+        self.udfs
+            .get(name)
+            .cloned()
+            .ok_or_else(|| DataFusionError::NotImplemented(format!("udf {} not implemented", name)))
     }
 
     fn udaf(&self, name: &str) -> datafusion_common::Result<Arc<AggregateUDF>> {

@@ -693,7 +693,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
         };
         let final_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
         let final_execution_plan = final_plan.try_into_physical_plan(
-            &EmptyRegistry {},
+            &EmptyRegistry::new(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;

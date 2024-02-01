@@ -463,8 +463,11 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
             .ok_or_else(|| anyhow!("missing input schema"))?
             .try_into()?;
         let binning_function = PhysicalExprNode::decode(&mut config.binning_function.as_slice())?;
-        let binning_function =
-            parse_physical_expr(&binning_function, &EmptyRegistry {}, &input_schema.schema)?;
+        let binning_function = parse_physical_expr(
+            &binning_function,
+            &EmptyRegistry::new(),
+            &input_schema.schema,
+        )?;
 
         let receiver = Arc::new(RwLock::new(None));
         let final_batches_passer = Arc::new(RwLock::new(Vec::new()));
@@ -476,7 +479,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
             PhysicalPlanNode::decode(&mut config.partial_aggregation_plan.as_slice())?;
 
         let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
-            &EmptyRegistry {},
+            &EmptyRegistry::new(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &codec,
         )?;
@@ -491,7 +494,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
             context: DecodingContext::LockedBatchVec(final_batches_passer.clone()),
         };
         let finish_execution_plan = finish_plan.try_into_physical_plan(
-            &EmptyRegistry {},
+            &EmptyRegistry::new(),
             &RuntimeEnv::new(RuntimeConfig::new()).unwrap(),
             &final_codec,
         )?;

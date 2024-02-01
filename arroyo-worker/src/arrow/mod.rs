@@ -40,7 +40,7 @@ impl OperatorConstructor for ValueExecutionConstructor {
     type ConfigT = api::ValuePlanOperator;
     fn with_config(&self, config: api::ValuePlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
-        let registry = EmptyRegistry {};
+        let registry = EmptyRegistry::new();
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
         let codec = ArroyoPhysicalExtensionCodec {
@@ -165,7 +165,7 @@ impl OperatorConstructor for KeyExecutionConstructor {
 
     fn with_config(&self, config: api::KeyPlanOperator) -> Result<OperatorNode> {
         let locked_batch = Arc::new(RwLock::default());
-        let registry = EmptyRegistry {};
+        let registry = EmptyRegistry::new();
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
         let codec = ArroyoPhysicalExtensionCodec {

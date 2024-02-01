@@ -25,7 +25,9 @@ use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
 use datafusion::sql::{planner::ContextProvider, TableReference};
 
-use datafusion_common::tree_node::{RewriteRecursion, TreeNode, TreeNodeRewriter, TreeNodeVisitor};
+use datafusion_common::tree_node::{
+    RewriteRecursion, TreeNode, TreeNodeRewriter, TreeNodeVisitor, VisitRecursion,
+};
 use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{
     AccumulatorFactoryFunction, Aggregate, BinaryExpr, Case, Expr, Join, LogicalPlan, Projection,
@@ -62,7 +64,7 @@ use arroyo_rpc::TIMESTAMP_FIELD;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
-use tracing::warn;
+use tracing::{info, warn};
 use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
@@ -504,6 +506,7 @@ pub async fn parse_and_get_program(
 pub(crate) struct QueryToGraphVisitor {
     local_logical_plan_graph: DiGraph<LogicalPlanExtension, DataFusionEdge>,
     table_source_to_nodes: HashMap<OwnedTableReference, NodeIndex>,
+    tables_with_windows: HashSet<OwnedTableReference>,
 }
 
 #[derive(Default)]
@@ -634,10 +637,14 @@ impl LogicalPlanExtension {
                 let aggregate_schema = aggregate_calculation.aggregate.schema.clone();
                 let mut fields = aggregate_schema.fields().clone();
 
-                fields.insert(
-                    aggregate_calculation.window_index,
-                    aggregate_calculation.window_field.clone(),
-                );
+                if let WindowBehavior::FromOperator {
+                    window: _,
+                    window_field,
+                    window_index,
+                } = &aggregate_calculation.window_behavior
+                {
+                    fields.insert(*window_index, window_field.clone());
+                }
 
                 let output_schema = add_timestamp_field(Arc::new(
                     DFSchema::new_with_metadata(fields, aggregate_schema.metadata().clone())
@@ -660,18 +667,25 @@ impl LogicalPlanExtension {
 }
 
 struct AggregateCalculation {
-    window: WindowType,
-    window_field: DFField,
-    window_index: usize,
+    window_behavior: WindowBehavior,
     aggregate: Aggregate,
     key_fields: Vec<usize>,
+}
+#[derive(Debug)]
+enum WindowBehavior {
+    FromOperator {
+        window: WindowType,
+        window_field: DFField,
+        window_index: usize,
+    },
+    InData,
 }
 
 impl Debug for AggregateCalculation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let logical_plan = LogicalPlan::Aggregate(self.aggregate.clone());
         f.debug_struct("AggregateCalculation")
-            .field("window", &self.window)
+            .field("window", &self.window_behavior)
             .field("aggregate", &logical_plan)
             .finish()
     }
@@ -791,6 +805,73 @@ fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
     }
 }
 
+struct WindowDetectingVisitor {
+    table_scans_with_windows: HashSet<OwnedTableReference>,
+    has_window: bool,
+}
+
+impl WindowDetectingVisitor {
+    fn has_window(
+        logical_plan: &LogicalPlan,
+        table_scans_with_windows: HashSet<OwnedTableReference>,
+    ) -> DFResult<bool> {
+        info!("checking {:?} for window", logical_plan);
+        let mut visitor = WindowDetectingVisitor {
+            has_window: false,
+            table_scans_with_windows,
+        };
+        logical_plan.visit(&mut visitor)?;
+        Ok(visitor.has_window)
+    }
+}
+
+impl TreeNodeVisitor for WindowDetectingVisitor {
+    type N = LogicalPlan;
+
+    fn pre_visit(&mut self, node: &Self::N) -> DFResult<VisitRecursion> {
+        match node {
+            LogicalPlan::Aggregate(Aggregate {
+                input: _,
+                group_expr,
+                aggr_expr: _,
+                schema: _,
+                ..
+            }) => {
+                info!("group_expr: {:?}", group_expr);
+                let window_group_expr: Vec<_> = group_expr
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, expr)| {
+                        find_window(expr)
+                            .map(|option| option.map(|inner| (i, inner)))
+                            .transpose()
+                    })
+                    .collect::<Result<Vec<_>>>()
+                    .map_err(|err| DataFusionError::Plan(err.to_string()))?;
+                if !window_group_expr.is_empty() {
+                    self.has_window = true;
+                    return Ok(VisitRecursion::Stop);
+                }
+            }
+            LogicalPlan::TableScan(TableScan {
+                table_name,
+                source: _,
+                projection: _,
+                projected_schema: _,
+                filters: _,
+                fetch: _,
+            }) => {
+                if self.table_scans_with_windows.contains(table_name) {
+                    self.has_window = true;
+                    return Ok(VisitRecursion::Stop);
+                }
+            }
+            _ => {}
+        }
+        Ok(VisitRecursion::Continue)
+    }
+}
+
 impl TreeNodeRewriter for QueryToGraphVisitor {
     type N = LogicalPlan;
 
@@ -825,13 +906,12 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                     .collect::<Result<Vec<_>>>()
                     .map_err(|err| DataFusionError::Plan(err.to_string()))?;
 
-                if window_group_expr.len() != 1 {
-                    return Err(datafusion_common::DataFusionError::NotImplemented(
-                        "require exactly 1 window in group by".to_string(),
-                    ));
+                if window_group_expr.len() > 1 {
+                    return Err(datafusion_common::DataFusionError::NotImplemented(format!(
+                        "do not support {} window expressions in group by",
+                        window_group_expr.len()
+                    )));
                 }
-
-                let (window_index, window_type) = window_group_expr.pop().unwrap();
                 let mut key_fields: Vec<DFField> = schema
                     .fields()
                     .iter()
@@ -846,10 +926,34 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                         )
                     })
                     .collect::<Vec<_>>();
+                let input_has_window =
+                    WindowDetectingVisitor::has_window(&input, self.tables_with_windows.clone())?;
+                let window_behavior = match (input_has_window, !window_group_expr.is_empty()) {
+                    (true, true) => {
+                        return Err(DataFusionError::NotImplemented(
+                            "query has both a window in group by and input is windowed."
+                                .to_string(),
+                        ))
+                    }
+                    (true, false) => WindowBehavior::InData,
+                    (false, true) => {
+                        // strip out window from group by, will be handled by operator.
+                        let (window_index, window_type) = window_group_expr.pop().unwrap();
+                        group_expr.remove(window_index);
+                        let window_field = key_fields.remove(window_index);
+                        WindowBehavior::FromOperator {
+                            window: window_type,
+                            window_field,
+                            window_index,
+                        }
+                    }
+                    (false, false) => {
+                        return Err(DataFusionError::NotImplemented(
+                            "must have window in aggregate".to_string(),
+                        ))
+                    }
+                };
 
-                group_expr.remove(window_index);
-
-                let window_field = key_fields.remove(window_index);
                 let key_count = key_fields.len();
                 key_fields.extend(input.schema().fields().clone());
 
@@ -878,7 +982,9 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                         });
 
                 let mut aggregate_input_fields = schema.fields().clone();
-                aggregate_input_fields.remove(window_index);
+                if let WindowBehavior::FromOperator { window_index, .. } = &window_behavior {
+                    aggregate_input_fields.remove(*window_index);
+                }
                 // TODO: incorporate the window field in the schema and adjust datafusion.
                 //aggregate_input_schema.push(window_field);
 
@@ -920,9 +1026,7 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                 });
 
                 let aggregate_calculation = AggregateCalculation {
-                    window: window_type,
-                    window_field,
-                    window_index,
+                    window_behavior,
                     aggregate: Aggregate::try_new_with_schema(
                         Arc::new(input_table_scan),
                         group_expr,
@@ -940,10 +1044,7 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                 );
 
                 let table_name = format!("{}", aggregate_index.index());
-                let keys_without_window = (0..key_count)
-                    .into_iter()
-                    .filter(|i| *i == window_index)
-                    .collect();
+                let keys_without_window = (0..key_count).into_iter().collect();
                 self.local_logical_plan_graph.add_edge(
                     key_index,
                     aggregate_index,
@@ -965,10 +1066,12 @@ impl TreeNodeRewriter for QueryToGraphVisitor {
                         false,
                     ));
                 }
+                let table_name = OwnedTableReference::partial("arroyo-virtual", table_name.clone());
+                self.tables_with_windows.insert(table_name.clone());
                 Ok(LogicalPlan::TableScan(TableScan {
-                    table_name: OwnedTableReference::partial("arroyo-virtual", table_name.clone()),
+                    table_name: table_name.clone(),
                     source: create_table_with_timestamp(
-                        OwnedTableReference::partial("arroyo-virtual", table_name).to_string(),
+                        table_name.to_string(),
                         schema
                             .fields()
                             .iter()
