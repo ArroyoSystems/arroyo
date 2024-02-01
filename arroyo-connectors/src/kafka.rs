@@ -4,6 +4,7 @@ use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, Te
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistryClient, FailingSchemaResolver};
 use arroyo_rpc::{schema_resolver, var_str::VarStr, OperatorConfig};
+use arroyo_types::string_to_map;
 use axum::response::sse::Event;
 use futures::TryFutureExt;
 use rdkafka::{
@@ -117,7 +118,15 @@ impl KafkaConnector {
         Ok(KafkaTable {
             topic: pull_opt("topic", options)?,
             type_: table_type,
-            client_configs: HashMap::new(),
+            client_configs: options
+                .remove("client_configs")
+                .map(|c| {
+                    string_to_map(&c, '=').ok_or_else(|| {
+                        anyhow!("invalid client_config: expected comma and equals-separated pairs")
+                    })
+                })
+                .transpose()?
+                .unwrap_or_else(|| HashMap::new()),
         })
     }
 }
