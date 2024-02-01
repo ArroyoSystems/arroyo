@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
 use arrow_array::{RecordBatch, StructArray};
 use arrow_schema::{DataType, SchemaRef, TimeUnit};
 use datafusion::{
@@ -15,6 +16,7 @@ use datafusion::{
         DisplayAs, ExecutionPlan, Partitioning,
     },
 };
+use datafusion::physical_plan::unnest::UnnestExec;
 use datafusion_common::{DataFusionError, Result as DFResult, ScalarValue, Statistics};
 
 use datafusion_execution::FunctionRegistry;
@@ -22,9 +24,11 @@ use datafusion_expr::{
     AggregateUDF, ColumnarValue, ScalarUDF, Signature, TypeSignature, WindowUDF,
 };
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
+use arroyo_rpc::grpc::api;
 
 pub struct EmptyRegistry {
     udfs: HashMap<String, Arc<ScalarUDF>>,
@@ -255,20 +259,49 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
         node: Arc<dyn datafusion::physical_plan::ExecutionPlan>,
         buf: &mut Vec<u8>,
     ) -> datafusion_common::Result<()> {
+        let mut proto = None;
+
         let mem_table: Option<&ArroyoMemExec> = node.as_any().downcast_ref();
         if let Some(table) = mem_table {
-            serde_json::to_writer(buf, table).map_err(|err| {
+            proto = Some(ArroyoExecNode {
+                node: Some(arroyo_exec_node::Node::MemExec(MemExecNode {
+                    table_name: table.table_name.clone(),
+                    schema: serde_json::to_string(&table.schema).unwrap(),
+                })),
+            });
+        }
+
+        let unnest: Option<&UnnestExec> = node.as_any().downcast_ref();
+        if let Some(unnest) = unnest {
+            // proto = Some(ArroyoExecNode {
+            //     node: Some(arroyo_exec_node::Node::UnnestExec(UnnestExecNode {
+            //         schema: serde_json::to_string(&unnest.schema()).unwrap(),
+            //         column: api::Column {
+            //             name: unnest,
+            //             index: 0,
+            //         },
+            //         preserve_nulls: false,
+            //     }))
+            // })
+
+            println!("UNNEST: {:?}", unnest);
+        }
+
+
+        if let Some(node) = proto {
+            node.encode(buf).map_err(|err| {
                 DataFusionError::Internal(format!(
-                    "couldn't serialize empty partition stream {}",
+                    "couldn't serialize exec node {}",
                     err
                 ))
             })?;
-            return Ok(());
+            Ok(())
+        } else {
+            Err(DataFusionError::Internal(format!(
+                "cannot serialize {:?}",
+                node
+            )))
         }
-        Err(DataFusionError::Internal(format!(
-            "cannot serialize {:?}",
-            node
-        )))
     }
 }
 
@@ -473,7 +506,6 @@ pub struct ArroyoMemExec {
     pub table_name: String,
     pub schema: SchemaRef,
 }
-
 impl DisplayAs for ArroyoMemExec {
     fn fmt_as(
         &self,

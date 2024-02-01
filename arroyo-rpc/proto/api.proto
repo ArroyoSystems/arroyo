@@ -393,6 +393,34 @@ enum EdgeType {
   RIGHT_JOIN = 4;
 }
 
+// Physical extension nodes
+message MemExecNode {
+  string table_name = 1;
+  // json-encoded
+  string schema = 2;
+}
+
+message Column {
+  string name = 1;
+  uint64 index = 2;
+}
+
+message UnnestExecNode {
+  // json-encoded
+  string schema = 1;
+  Column column = 2;
+  bool preserve_nulls = 3;
+}
+
+message ArroyoExecNode {
+  oneof node {
+    MemExecNode mem_exec = 1;
+    UnnestExecNode unnest_exec = 2;
+  }
+}
+
+
+
 // job status
 
 message JobStatus {

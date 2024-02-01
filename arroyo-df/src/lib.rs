@@ -1424,9 +1424,11 @@ pub async fn parse_and_get_arrow_program(
                 schema_provider: schema_provider.clone(),
             })?
             .rewrite(&mut UnnestRewriter {})?
-            .rewrite(&mut TimestampRewriter {})?;
+            .rewrite(&mut TimestampRewriter {})?
+            .rewrite(&mut rewriter)?;
 
-        println!("Rewritten: {}", plan_rewrite.display_graphviz());
+        println!("Rewritten {}", plan_rewrite.display_graphviz());
+
 
         for (original_name, index) in &rewriter.table_source_to_nodes {
             let node = rewriter

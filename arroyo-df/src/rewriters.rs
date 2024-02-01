@@ -22,6 +22,7 @@ impl TreeNodeRewriter for TimestampRewriter {
     type N = LogicalPlan;
 
     fn mutate(&mut self, mut node: Self::N) -> DFResult<Self::N> {
+        println!("mutating {:?}", node);
         match node {
             LogicalPlan::Projection(ref mut projection) => {
                 if !has_timestamp_field(projection.schema.clone()) {
@@ -69,6 +70,7 @@ impl TreeNodeRewriter for TimestampRewriter {
             }
             LogicalPlan::SubqueryAlias(ref mut subquery_alias) => {
                 if !has_timestamp_field(subquery_alias.schema.clone()) {
+                    #[allow(deprecated)]
                     let timestamp_field = DFField::new(
                         Some(subquery_alias.alias.clone()),
                         "_timestamp",
@@ -354,6 +356,7 @@ impl TreeNodeRewriter for UnnestRewriter {
                     exprs.iter().cloned().map(|(e, is_unnest)|
                         if is_unnest {
                             unnest_inner.clone()
+                                .alias(UNNESTED_COL)
                         } else {
                             e
                         }
