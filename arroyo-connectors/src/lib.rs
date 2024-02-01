@@ -399,7 +399,7 @@ fn construct_http_client(endpoint: &str, headers: Option<String>) -> anyhow::Res
     };
 
     let headers: anyhow::Result<HeaderMap> =
-        string_to_map(headers.as_ref().map(|t| t.as_str()).unwrap_or(""))
+        string_to_map(headers.as_ref().map(|t| t.as_str()).unwrap_or(""), ':')
             .expect("Invalid header map")
             .into_iter()
             .map(|(k, v)| {

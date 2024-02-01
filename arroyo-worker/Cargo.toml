@@ -61,7 +61,7 @@ governor = "0.6"
 tracing = "0.1"
 
 # connectors
-rdkafka = { version = "0.33", features = ["cmake-build"] }
+rdkafka = { version = "0.33", features = ["cmake-build", "tracing"] }
 rdkafka-sys = "4.5.0"
 eventsource-client = "0.11.0"
 regex = "1.8.1"

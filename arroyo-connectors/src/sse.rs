@@ -79,7 +79,7 @@ impl Connector for SSEConnector {
         let description = format!("SSESource<{}>", table.endpoint);
 
         if let Some(headers) = &table.headers {
-            string_to_map(&headers.sub_env_vars()?).ok_or_else(|| {
+            string_to_map(&headers.sub_env_vars()?, ':').ok_or_else(|| {
                 anyhow!(
                     "Invalid format for headers; should be a \
                     comma-separated list of colon-separated key value pairs"
@@ -182,6 +182,7 @@ impl SseTester {
                 .map(|s| s.sub_env_vars())
                 .transpose()?
                 .unwrap_or("".to_string()),
+            ':',
         )
         .ok_or_else(|| anyhow!("Headers are invalid; should be comma-separated pairs"))?;
 

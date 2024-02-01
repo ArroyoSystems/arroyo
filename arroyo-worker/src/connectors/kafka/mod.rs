@@ -51,15 +51,15 @@ pub fn client_configs(connection: &KafkaConfig, table: &KafkaTable) -> HashMap<S
                     .sub_env_vars()
                     .expect("Missing env-vars for Kafka password"),
             );
-
-            client_configs.extend(
-                table
-                    .client_configs
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string())),
-            );
         }
     };
+
+    client_configs.extend(
+        table
+            .client_configs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string())),
+    );
 
     client_configs
 }

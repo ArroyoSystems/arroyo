@@ -67,6 +67,10 @@ spec:
         {{- if .Values.api.resources }}
         resources: {{- toYaml .Values.api.resources | nindent 12 }}
         {{- end }}
+        volumeMounts:
+        {{- if .Values.volumeMounts }}
+        {{- include "tplvalues.render" (dict "value" .Values.volumeMounts "context" $) | nindent 10 }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -79,6 +83,11 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      volumes:
+      {{- if .Values.volumes }}
+      {{- include "tplvalues.render" (dict "value" .Values.volumes "context" $) | nindent 10 }}
+      {{- end }}
+
 ---
 apiVersion: v1
 kind: Service
