@@ -334,7 +334,7 @@ impl TreeNodeRewriter for UnnestRewriter {
                 let typ = if let Some(e) = opt {
                     if let Some(prev) = unnest.replace((e, i)) {
                         if &prev != unnest.as_ref().unwrap() {
-                            return Err(DataFusionError::Plan("Project contains multiple unnests, which is not currently supported".to_string()));
+                            return Err(DataFusionError::Plan("Projection contains multiple unnests, which is not currently supported".to_string()));
                         }
                     }
                     true

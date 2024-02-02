@@ -156,6 +156,7 @@ impl ArroyoSchemaProvider {
                 #[allow(deprecated)]
                 ScalarUDF::new(
                     "unnest",
+                    // This is marked volatile so that DF doesn't try to optimize constants
                     &Signature::any(1, Volatility::Volatile),
                     &return_type,
                     &make_scalar_function(fn_impl),
