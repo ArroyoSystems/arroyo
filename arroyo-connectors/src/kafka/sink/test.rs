@@ -120,20 +120,14 @@ impl KafkaTopicTester {
     }
 }
 
-async fn get_data(consumer: &mut StreamConsumer) -> Record<String, String> {
+async fn get_data(consumer: &mut StreamConsumer) -> String {
     let owned_message = consumer
         .recv()
         .await
         .expect("shouldn't have errored")
         .detach();
     let payload = owned_message.payload().unwrap();
-    Record {
-        timestamp: from_millis(owned_message.timestamp().to_millis().unwrap() as u64),
-        key: owned_message
-            .key()
-            .map(|k| String::from_utf8(k.to_vec()).unwrap()),
-        value: String::from_utf8(payload.to_vec()).unwrap(),
-    }
+    String::from_utf8(payload.to_vec()).unwrap()
 }
 
 struct KafkaSinkWithWrites {
@@ -173,7 +167,7 @@ async fn test_kafka_checkpoint_flushes() {
         .await;
 
     for message in 1u32..200 {
-        let record = get_data(&mut consumer).await.value;
+        let record = get_data(&mut consumer).await;
         let result: TestData = serde_json::from_str(&record).unwrap();
         assert_eq!(message, result.value, "{} {:?}", message, record);
     }
@@ -206,7 +200,7 @@ async fn test_kafka() {
             .flush(Duration::from_secs(3))
             .unwrap();
 
-        let result: TestData = serde_json::from_str(&get_data(&mut consumer).await.value).unwrap();
+        let result: TestData = serde_json::from_str(&get_data(&mut consumer).await).unwrap();
         assert_eq!(message, result.value);
     }
 }

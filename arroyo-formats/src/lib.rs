@@ -21,7 +21,7 @@ use tokio::sync::Mutex;
 pub mod avro;
 pub mod json;
 pub mod json_schema;
-pub mod old;
+
 pub mod serialize;
 
 pub trait SchemaData: Data + Serialize + DeserializeOwned {

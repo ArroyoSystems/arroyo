@@ -302,7 +302,15 @@ impl ArrowContext {
                 .await
                 .expect("lookup should succeed")
                 .expect("require metadata");
-                (metadata.min_watermark.map(from_micros), metadata)
+                (
+                    metadata
+                        .operator_metadata
+                        .as_ref()
+                        .unwrap()
+                        .min_watermark
+                        .map(from_micros),
+                    metadata,
+                )
             };
 
             (watermark, Some(operator_metadata))

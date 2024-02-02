@@ -40,72 +40,10 @@ message PipelineProgramUdf {
   string dependencies = 3;
 }
 
-message PipelineProgram {
-  repeated string types = 1;
-  repeated string other_defs = 2;
-  repeated PipelineProgramUdf udfs = 5;
-  repeated ProgramNode nodes = 3;
-  repeated ProgramEdge edges = 4;
-}
-
-message ProgramNode {
-  int32 node_index = 1;
-  string node_id = 2;
-  int32 parallelism = 3;
-  Operator operator = 4;
-}
-
-message ProgramEdge {
-  int32 upstream_node = 1;
-  int32 downstream_node = 2;
-  string key_type = 3;
-  string value_type = 4;
-  EdgeType edge_type = 5;
-}
-
 message ConnectorOp {
   string connector = 1;
   string config = 2;
   string description = 3;
-}
-
-message Operator {
-  oneof operator {
-    ConnectorOp connector_source = 3;
-    ConnectorOp connector_sink = 22;
-    WasmUdfs wasm_udfs = 4;
-    WindowOperator window = 5;
-    Aggregator aggregator = 6;
-    PeriodicWatermark periodic_watermark = 7;
-    Window window_join = 10;
-    ExpressionOperator expression_operator = 13;
-    Flatten flatten = 14;
-    FlattenExpressionOperator flatten_expression_operator = 15;
-    FlatMapOperator flat_map_operator = 27;
-    SlidingWindowAggregator sliding_window_aggregator = 17;
-    TumblingWindowAggregator tumbling_window_aggregator = 18;
-    TumblingTopN tumbling_top_n = 19;
-    SlidingAggregatingTopN sliding_aggregating_top_n = 20;
-    JoinWithExpiration join_with_expiration = 21;
-    ExpressionWatermark expression_watermark = 23;
-    UpdatingOperator updating_operator = 24;
-    NonWindowAggregator non_window_aggregator = 25;
-    UpdatingKeyOperator updating_key_operator = 26;
-    AsyncMapOperator async_map_operator = 28;
-  }
-}
-
-message NamedOperator {
-  string name = 1;
-  OperatorName operator = 2;
-  optional bytes config = 3;
-}
-
-message ProjectionOperator {
-  string name = 1;
-  repeated bytes expressions = 2;
-  bytes input_schema = 4;
-  bytes output_schema = 5;
 }
 
 message ValuePlanOperator {
@@ -174,16 +112,6 @@ message JoinOperator {
   bytes join_plan = 5;
 }
 
-enum OperatorName {
-  STRUCT_TO_RECORD_BATCH = 0;
-  RECORD_BATCH_TO_STRUCT = 1;
-  ARROW_VALUE_PLAN = 3;
-  ARROW_KEY_PLAN = 4;
-  RECORD_BATCH_GRPC = 5;
-  ARROW_AGGREGATE = 6;
-  ARROW_WATERMARK = 7;
-}
-
 message WasmUdfs {
   string name = 1;
   repeated WasmFunction wasm_functions = 2;
@@ -199,9 +127,6 @@ message WasmFunction{
   string return_type = 7;
   string body = 8;
 }
-message MemTableScan {
-  string alias = 1;
-}
 
 enum WasmBehavior {
   MAP = 0;
@@ -209,13 +134,6 @@ enum WasmBehavior {
   FILTER = 2;
   TIMESTAMP = 3;
   KEY_BY = 4;
-}
-
-message WindowOperator {
-  optional Aggregator aggregator = 1;
-  optional ExpressionAggregator expression_aggregator = 3;
-  bool flatten = 4;
-  Window window = 2;
 }
 
 message Window {
@@ -241,136 +159,11 @@ message SessionWindow {
   uint64 gap_micros = 1;
 }
 
-enum Aggregator {
-  NONE = 0;
-  COUNT_AGGREGATE = 1;
-  MAX_AGGREGATE = 2;
-  MIN_AGGREGATE = 3;
-  SUM_AGGREGATE = 4;
-}
-
-message ExpressionAggregator {
-  string name = 1;
-  string expression = 2;
-}
-
-message PeriodicWatermark {
-  uint64 period_micros = 1;
-  uint64 max_lateness_micros = 2;
-  optional uint64 idle_time_micros = 3;
-}
-
-message ExpressionWatermark {
-  uint64 period_micros = 1;
-  string expression = 2;
-  optional uint64 idle_time_micros = 3;
-}
-
 message ExpressionWatermarkConfig {
   uint64 period_micros = 1;
   optional uint64 idle_time_micros = 2;
   ArroyoSchema input_schema = 3;
   bytes expression = 4;
-}
-
-message ExpressionOperator {
-  string name = 1;
-  string expression= 2;
-  ExpressionReturnType return_type = 3;
-}
-
-message Flatten {
-  string name = 1;
-}
-
-message FlattenExpressionOperator {
-  string name = 1;
-  string expression= 2;
-  ExpressionReturnType return_type = 3;
-}
-
-message FlatMapOperator {
-  string name = 1;
-  string expression = 2;
-}
-
-message AsyncMapOperator {
-  string name = 1;
-  bool ordered = 2;
-  string function_def = 3;
-  uint64 max_concurrency = 4;
-  bool has_context = 5;
-}
-
-message SlidingWindowAggregator {
-  uint64 width_micros = 1;
-  uint64 slide_micros = 2;
-  string aggregator = 3;
-  string bin_merger = 4;
-  string in_memory_add = 5;
-  string in_memory_remove = 6;
-  string bin_type = 7;
-  string mem_type = 8;
-}
-
-message TumblingWindowAggregator {
-  uint64 width_micros = 1;
-  string aggregator = 3;
-  string bin_merger = 4;
-  string bin_type = 7;
-}
-
-message TumblingTopN {
-  uint64 width_micros = 1;
-  uint64 max_elements = 2;
-  string extractor = 3;
-  string partition_key_type = 4;
-  string converter = 5;
-}
-
-message SlidingAggregatingTopN {
-  uint64 width_micros = 1;
-  uint64 slide_micros = 2;
-  string bin_merger = 3;
-  string in_memory_add = 4;
-  string in_memory_remove = 5;
-  string partitioning_func = 6;
-  string extractor = 7;
-  string aggregator = 8;
-  string bin_type = 9;
-  string mem_type = 10;
-  string sort_key_type = 11;
-  uint64 max_elements = 12;
-}
-
-message JoinWithExpiration {
-  uint64 left_expiration_micros = 1;
-  uint64 right_expiration_micros = 2;
-  JoinType join_type = 3;
-}
-
-message UpdatingOperator {
-  string name = 1;
-  string expression = 2;
-}
-
-message NonWindowAggregator {
-  uint64 expiration_micros = 1;
-  string aggregator = 2;
-  string bin_merger = 3;
-  string bin_type = 4;
-}
-
-message UpdatingKeyOperator {
-  string name = 1;
-  string expression = 2;
-}
-
-enum ExpressionReturnType {
-  UNUSED_ERT = 0;
-  PREDICATE = 1;
-  RECORD = 2;
-  OPTIONAL_RECORD = 3;
 }
 
 enum JoinType {

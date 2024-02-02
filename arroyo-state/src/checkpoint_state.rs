@@ -252,18 +252,8 @@ impl CheckpointState {
                     )
                 };
             StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
-                job_id: self.job_id.to_string(),
-                operator_id: c.operator_id.to_string(),
-                epoch: self.epoch,
                 start_time: to_micros(operator_state.start_time.unwrap()),
                 finish_time: to_micros(operator_state.finish_time.unwrap()),
-                min_watermark,
-                max_watermark,
-                has_state: false,
-                tables: vec![],
-                backend_data: vec![],
-                bytes: 0,
-                commit_data: None,
                 table_checkpoint_metadata,
                 table_configs,
                 operator_metadata: Some(OperatorMetadata {

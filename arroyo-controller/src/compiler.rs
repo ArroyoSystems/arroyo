@@ -1,7 +1,7 @@
 use crate::cargo_toml;
 use crate::states::fatal;
 use anyhow::{anyhow, Result};
-use arroyo_datastream::{parse_type, Operator, Program, WasmBehavior};
+use arroyo_datastream::{parse_type, WasmBehavior};
 use arroyo_rpc::grpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::grpc::{CompileQueryReq, UdfCrate};
 use arroyo_types::REMOTE_COMPILER_ENDPOINT_ENV;
@@ -24,7 +24,6 @@ pub struct CompiledProgram {
 pub struct ProgramCompiler {
     name: String,
     job_id: String,
-    program: Program,
 }
 
 impl ProgramCompiler {

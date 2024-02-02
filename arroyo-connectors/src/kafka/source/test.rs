@@ -286,18 +286,8 @@ async fn test_kafka() {
     .unwrap();
 
     StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
-        job_id: task_info.job_id.clone(),
-        operator_id: task_info.operator_id.clone(),
-        epoch: 1,
         start_time: 0,
         finish_time: 0,
-        min_watermark: Some(0),
-        max_watermark: Some(0),
-        has_state: true,
-        tables: vec![],
-        backend_data: subtask_metadata.backend_data,
-        bytes: subtask_metadata.bytes,
-        commit_data: None,
         table_checkpoint_metadata: single_item_hash_map("k", table_metadata),
         table_configs: subtask_metadata.table_configs,
         operator_metadata: Some(OperatorMetadata {

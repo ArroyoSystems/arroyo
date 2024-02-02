@@ -14,10 +14,7 @@ use tracing::info;
 
 pub mod expiring_time_key_map;
 pub mod global_keyed_map;
-pub mod key_time_multi_map;
-pub mod keyed_map;
 pub mod table_manager;
-pub mod time_key_map;
 
 pub enum Compactor {
     TimeKeyMap,
