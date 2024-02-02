@@ -1,4 +1,7 @@
-use std::{collections::HashMap, time::SystemTime};
+use std::{
+    collections::{HashMap, HashSet},
+    time::SystemTime,
+};
 
 use anyhow::{anyhow, bail, Result};
 use arroyo_rpc::grpc::{
@@ -12,6 +15,7 @@ use arroyo_types::{from_micros, to_micros};
 use tracing::debug;
 
 use crate::{
+    committing_state::CommittingState,
     tables::{
         expiring_time_key_map::ExpiringTimeKeyTable, global_keyed_map::GlobalKeyedTable,
         ErasedTable,
@@ -29,6 +33,9 @@ pub struct CheckpointState {
     operators: usize,
     operators_checkpointed: usize,
     operator_state: HashMap<String, OperatorState>,
+    subtasks_to_commit: HashSet<(String, u32)>,
+    // map of operator_id -> table_name -> subtask_index -> Data
+    commit_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>>,
 
     // Used for the web ui -- eventually should be replaced with some other way of tracking / reporting
     // this data
@@ -155,6 +162,8 @@ impl CheckpointState {
                 .into_iter()
                 .map(|(operator_id, subtasks)| (operator_id, OperatorState::new(subtasks)))
                 .collect(),
+            subtasks_to_commit: HashSet::new(),
+            commit_data: HashMap::new(),
             operator_details: HashMap::new(),
         }
     }
@@ -251,6 +260,29 @@ impl CheckpointState {
                             .max(),
                     )
                 };
+            for (table, checkpoint_metadata) in table_checkpoint_metadata.iter() {
+                let config = table_configs
+                    .get(table)
+                    .expect("should have a config for the table");
+                if let Some(committing_data) = match config.table_type() {
+                    TableEnum::MissingTableType => bail!("missing table type"),
+                    TableEnum::GlobalKeyValue => {
+                        GlobalKeyedTable::committing_data(config.clone(), checkpoint_metadata)
+                    }
+                    TableEnum::ExpiringKeyedTimeTable => {
+                        ExpiringTimeKeyTable::committing_data(config.clone(), checkpoint_metadata)
+                    }
+                } {
+                    for i in 0..operator_state.subtasks_checkpointed {
+                        self.subtasks_to_commit
+                            .insert((c.operator_id.clone(), i as u32));
+                    }
+                    self.commit_data
+                        .entry(c.operator_id.clone())
+                        .or_default()
+                        .insert(table.clone(), committing_data);
+                }
+            }
             StateBackend::write_operator_checkpoint_metadata(OperatorCheckpointMetadata {
                 start_time: to_micros(operator_state.start_time.unwrap()),
                 finish_time: to_micros(operator_state.finish_time.unwrap()),
@@ -273,6 +305,14 @@ impl CheckpointState {
 
     pub fn done(&self) -> bool {
         self.operators == self.operators_checkpointed
+    }
+
+    pub fn committing_state(&self) -> CommittingState {
+        CommittingState::new(
+            self.checkpoint_id,
+            self.subtasks_to_commit.clone(),
+            self.commit_data.clone(),
+        )
     }
 
     pub async fn save_state(&self) -> Result<()> {

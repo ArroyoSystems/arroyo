@@ -12,7 +12,12 @@ use tracing::{error, info, warn};
 
 use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_state::{parquet::get_storage_env_vars, BackingStore, StateBackend};
+use arroyo_state::{
+    committing_state::CommittingState,
+    parquet::get_storage_env_vars,
+    tables::{global_keyed_map::GlobalKeyedTable, ErasedTable},
+    BackingStore, StateBackend,
+};
 
 use crate::{
     job_controller::JobController,
@@ -304,7 +309,7 @@ impl State for Scheduling {
         struct CheckpointInfo {
             epoch: u32,
             min_epoch: u32,
-            _id: i64,
+            id: i64,
             needs_commits: bool,
         }
 
@@ -324,7 +329,7 @@ impl State for Scheduling {
                 CheckpointInfo {
                     epoch: r.epoch as u32,
                     min_epoch: r.min_epoch as u32,
-                    _id: r.id,
+                    id: r.id,
                     needs_commits: r.needs_commits,
                 }
             });
@@ -343,13 +348,13 @@ impl State for Scheduling {
                 .unwrap();
         }
 
-        // let mut committing_state = None;
+        let mut committing_state = None;
 
         // clear all of the epochs after the one we're loading so that we don't read in-progress data
         if let Some(CheckpointInfo {
             epoch,
             min_epoch,
-            _id,
+            id,
             needs_commits,
         }) = checkpoint_info.clone()
         {
@@ -367,11 +372,9 @@ impl State for Scheduling {
             }
             metadata.min_epoch = min_epoch;
             if needs_commits {
-                // TODO: implement committing tables
-                unimplemented!("need to implement two phase commits");
-                /*
                 let mut commit_subtasks = HashSet::new();
-                let mut committing_data = HashMap::new();
+                let mut committing_data: HashMap<String, HashMap<String, HashMap<u32, Vec<u8>>>> =
+                    HashMap::new();
                 for operator_id in &metadata.operator_ids {
                     let operator_metadata =
                         StateBackend::load_operator_metadata(&ctx.config.id, operator_id, epoch)
@@ -395,38 +398,50 @@ impl State for Scheduling {
                             ),
                         ));
                     };
-                    if let Some(commit_data) = operator_metadata.commit_data {
-                        committing_data.insert(
-                            operator_id.clone(),
-                            commit_data
-                                .committing_data
-                                .into_iter()
-                                .map(|(table, commit_data_map)| {
-                                    (table, commit_data_map.commit_data_by_subtask)
-                                })
-                                .collect(),
-                        );
-                    }
-                    if operator_metadata.has_state
-                        && operator_metadata
-                            .tables
-                            .iter()
-                            .any(|table| TableWriteBehavior::CommitWrites == table.write_behavior())
+                    for (table_name, table_metadata) in &operator_metadata.table_checkpoint_metadata
                     {
-                        // find the node with matching operator id
-                        let program_node = ctx
-                            .program
-                            .graph
-                            .node_weights()
-                            .find(|node| node.operator_id == *operator_id)
-                            .unwrap();
-                        for subtask_index in 0..program_node.parallelism {
-                            commit_subtasks.insert((operator_id.clone(), subtask_index as u32));
+                        let config =
+                            operator_metadata
+                                .table_configs
+                                .get(table_name)
+                                .ok_or_else(|| {
+                                    fatal(
+                                        format!(
+                                            "Failed to restore job; table config for {} not found.",
+                                            table_name
+                                        ),
+                                        anyhow!("table config for {} not found", table_name),
+                                    )
+                                })?;
+                        if let Some(commit_data) = match config.table_type() {
+                            arroyo_rpc::grpc::TableEnum::MissingTableType => {
+                                return Err(fatal(
+                                    "Missing table type",
+                                    anyhow!("table type not found"),
+                                ));
+                            }
+                            arroyo_rpc::grpc::TableEnum::GlobalKeyValue => {
+                                GlobalKeyedTable::committing_data(config.clone(), table_metadata)
+                            }
+                            arroyo_rpc::grpc::TableEnum::ExpiringKeyedTimeTable => todo!(),
+                        } {
+                            committing_data
+                                .entry(operator_id.clone())
+                                .or_default()
+                                .insert(table_name.to_string(), commit_data);
+                            let program_node = ctx
+                                .program
+                                .graph
+                                .node_weights()
+                                .find(|node| node.operator_id == *operator_id)
+                                .unwrap();
+                            for subtask_index in 0..program_node.parallelism {
+                                commit_subtasks.insert((operator_id.clone(), subtask_index as u32));
+                            }
                         }
                     }
                 }
                 committing_state = Some(CommittingState::new(id, commit_subtasks, committing_data));
-                */
             }
             StateBackend::write_checkpoint_metadata(metadata)
                 .await
@@ -519,7 +534,7 @@ impl State for Scheduling {
 
         ctx.status.tasks = Some(ctx.program.task_count() as i32);
 
-        let needs_commit = false; // committing_state.is_some();
+        let needs_commit = committing_state.is_some();
 
         let mut controller = JobController::new(
             ctx.pool.clone(),
@@ -531,8 +546,7 @@ impl State for Scheduling {
                 .map(|info| info.min_epoch)
                 .unwrap_or(0),
             worker_connects,
-            None,
-            //committing_state.map(|tuple| tuple.into()),
+            committing_state,
         );
         if needs_commit {
             info!("restored checkpoint was in committing phase, sending commits");

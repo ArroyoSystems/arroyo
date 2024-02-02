@@ -17,6 +17,7 @@ use parquet::{
     basic::ZstdLevel,
     file::properties::{EnabledStatistics, WriterProperties},
 };
+use tracing::info;
 
 use std::iter::Zip;
 
@@ -117,6 +118,7 @@ impl Table for GlobalKeyedTable {
             epoch,
             task_info: self.task_info.clone(),
             storage_provider: self.storage_provider.clone(),
+            commit_data: None,
             latest_values: BTreeMap::new(),
         })
     }
@@ -138,18 +140,34 @@ impl Table for GlobalKeyedTable {
     }
 
     fn merge_checkpoint_metadata(
-        _config: Self::ConfigMessage,
+        config: Self::ConfigMessage,
         subtask_metadata: HashMap<u32, Self::TableSubtaskCheckpointMetadata>,
     ) -> Result<Option<Self::TableCheckpointMessage>> {
         if subtask_metadata.is_empty() {
             // TODO: maybe this should fail? These tables should emit on every epoch, and there should always be at least one value.
             Ok(None)
+        } else if config.uses_two_phase_commit {
+            let mut files = Vec::new();
+            let mut commit_data_by_subtask = HashMap::new();
+            for (subtask_index, subtask_meta) in subtask_metadata {
+                if let Some(file) = subtask_meta.file {
+                    files.push(file);
+                }
+                if let Some(commit_data) = subtask_meta.commit_data {
+                    commit_data_by_subtask.insert(subtask_index, commit_data);
+                }
+            }
+            Ok(Some(GlobalKeyedTableTaskCheckpointMetadata {
+                files,
+                commit_data_by_subtask,
+            }))
         } else {
             Ok(Some(GlobalKeyedTableTaskCheckpointMetadata {
                 files: subtask_metadata
                     .into_values()
                     .filter_map(|subtask_meta| subtask_meta.file)
                     .collect(),
+                commit_data_by_subtask: HashMap::new(),
             }))
         }
     }
@@ -175,6 +193,16 @@ impl Table for GlobalKeyedTable {
         checkpoint: Self::TableCheckpointMessage,
     ) -> Result<std::collections::HashSet<String>> {
         Ok(checkpoint.files.into_iter().collect())
+    }
+    fn committing_data(
+        config: Self::ConfigMessage,
+        table_metadata: Self::TableCheckpointMessage,
+    ) -> Option<HashMap<u32, Vec<u8>>> {
+        if config.uses_two_phase_commit {
+            Some(table_metadata.commit_data_by_subtask.clone())
+        } else {
+            None
+        }
     }
 
     async fn compact_data(
@@ -202,6 +230,7 @@ pub struct GlobalKeyedCheckpointer {
     task_info: TaskInfoRef,
     storage_provider: StorageProviderRef,
     latest_values: BTreeMap<Vec<u8>, Vec<u8>>,
+    commit_data: Option<Vec<u8>>,
 }
 
 #[async_trait::async_trait]
@@ -213,8 +242,13 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
             TableData::RecordBatch(_) => {
                 bail!("global keyed data expects KeyedData, not record batches")
             }
-            TableData::CommitData { data: _ } => {
-                bail!("global keyed data expects keyed data, not commit data")
+            TableData::CommitData { data } => {
+                info!("received commit data");
+                // set commit data, failing if it was already set
+                if self.commit_data.is_some() {
+                    bail!("commit data already set for this epoch")
+                }
+                self.commit_data = Some(data);
             }
             TableData::KeyedData { key, value } => {
                 self.latest_values.insert(key, value);
@@ -262,6 +296,7 @@ impl TableEpochCheckpointer for GlobalKeyedCheckpointer {
         let _finish_time = to_micros(SystemTime::now());
         Ok(Some(GlobalKeyedTableSubtaskCheckpointMetadata {
             subtask_index: self.task_info.task_index as u32,
+            commit_data: self.commit_data,
             file: Some(path),
         }))
     }

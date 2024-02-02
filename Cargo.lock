@@ -789,6 +789,7 @@ dependencies = [
  "itertools 0.11.0",
  "object_store 0.9.0",
  "parquet 50.0.0",
+ "prost 0.12.3",
  "rand",
  "rdkafka",
  "redis",

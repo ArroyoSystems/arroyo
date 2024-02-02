@@ -790,7 +790,7 @@ pub fn construct_operator(
                 .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
                 .make_operator(
                     serde_json::from_str(&op.config)
-                        .unwrap_or_else(|e| panic!("invalid operator config: {:?}", e)),
+                        .unwrap_or_else(|e| panic!("invalid operator config: {:?}, {:?}", op, e)),
                 )
                 .unwrap_or_else(|e| {
                     panic!("Failed to construct connector {}: {:?}", op.connector, e)

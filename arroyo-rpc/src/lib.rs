@@ -47,7 +47,7 @@ pub enum ControlMessage {
     },
     Commit {
         epoch: u32,
-        commit_data: HashMap<char, HashMap<u32, Vec<u8>>>,
+        commit_data: HashMap<String, HashMap<u32, Vec<u8>>>,
     },
     LoadCompacted {
         compacted: CompactionResult,

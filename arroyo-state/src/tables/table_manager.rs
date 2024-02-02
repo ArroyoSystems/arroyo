@@ -20,8 +20,8 @@ use tokio::sync::{
 
 use tracing::{debug, info, warn};
 
-use crate::CheckpointMessage;
 use crate::{tables::global_keyed_map::GlobalKeyedTable, StateMessage};
+use crate::{CheckpointMessage, TableData};
 
 use super::expiring_time_key_map::{ExpiringTimeKeyTable, ExpiringTimeKeyView, KeyTimeView};
 use super::global_keyed_map::GlobalKeyedView;
@@ -348,6 +348,17 @@ impl TableManager {
         self.writer
             .sender
             .send(StateMessage::Compaction(compacted.compacted_tables))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn insert_committing_data(&mut self, table: &str, data: Vec<u8>) -> Result<()> {
+        self.writer
+            .sender
+            .send(StateMessage::TableData {
+                table: table.to_string(),
+                data: TableData::CommitData { data },
+            })
             .await?;
         Ok(())
     }

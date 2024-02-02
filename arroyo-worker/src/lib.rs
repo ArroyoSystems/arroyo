@@ -531,6 +531,7 @@ impl WorkerGrpc for WorkerServer {
 
     async fn commit(&self, request: Request<CommitReq>) -> Result<Response<CommitResp>, Status> {
         let req = request.into_inner();
+        info!("received commit request {:?}", req);
         let sender_commit_map_pairs = {
             let state_mutex = self.state.lock().unwrap();
             let Some(state) = state_mutex.as_ref() else {
@@ -544,12 +545,7 @@ impl WorkerGrpc for WorkerServer {
                 let commit_map: HashMap<_, _> = commit_operator
                     .committing_data
                     .into_iter()
-                    .map(|(table, backend_data)| {
-                        (
-                            table.chars().next().unwrap(),
-                            backend_data.commit_data_by_subtask,
-                        )
-                    })
+                    .map(|(table, backend_data)| (table, backend_data.commit_data_by_subtask))
                     .collect();
                 sender_commit_map_pairs.push((nodes, commit_map));
             }

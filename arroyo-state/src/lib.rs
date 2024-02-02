@@ -62,6 +62,7 @@ pub fn global_table_config(
             config: GlobalKeyedTableConfig {
                 table_name: name,
                 description: description.into(),
+                uses_two_phase_commit: false,
             }
             .encode_to_vec(),
         },

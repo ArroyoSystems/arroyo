@@ -1,24 +1,28 @@
 use std::{
     fs::File,
     io::Write,
-    marker::PhantomData,
     sync::Arc,
     time::{Instant, SystemTime},
 };
 
-use arrow::array::RecordBatch;
-use arroyo_types::RecordBatchBuilder;
+use crate::filesystem::{Compression, FormatSettings};
+use anyhow::Result;
+use arrow::{
+    array::{Array, RecordBatch, StringArray, TimestampNanosecondArray},
+    compute::{sort_to_indices, take},
+};
+use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format};
+use arroyo_types::from_nanos;
+use datafusion::physical_plan::PhysicalExpr;
 use parquet::{
     arrow::ArrowWriter,
     basic::{GzipLevel, ZstdLevel},
     file::properties::WriterProperties,
 };
-use crate::filesystem::{Compression, FormatSettings};
 
 use super::{
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
-    BatchBufferingWriter, BatchBuilder, FileSettings, FileSystemTable, MultiPartWriterStats,
-    TableType,
+    BatchBufferingWriter, FileSettings, FileSystemTable, MultiPartWriterStats, TableType,
 };
 
 fn writer_properties_from_table(table: &FileSystemTable) -> WriterProperties {
@@ -82,70 +86,15 @@ impl Write for SharedBuffer {
     }
 }
 
-pub struct FixedSizeRecordBatchBuilder<B: RecordBatchBuilder> {
-    builder: B,
-    batch_size: usize,
-    buffered_elements: Vec<B::Data>,
-}
-
-impl<B: RecordBatchBuilder> BatchBuilder for FixedSizeRecordBatchBuilder<B> {
-    type InputType = B::Data;
-
-    type BatchData = RecordBatch;
-    fn new(config: &FileSystemTable) -> Self {
-        let batch_size = if let TableType::Sink {
-            format_settings:
-                Some(FormatSettings::Parquet {
-                    compression: _,
-                    row_batch_size: Some(batch_size),
-                    row_group_size: _,
-                }),
-            ..
-        } = config.table_type
-        {
-            batch_size as usize
-        } else {
-            10_000
-        };
-        Self {
-            builder: B::default(),
-            batch_size,
-            buffered_elements: Vec::new(),
-        }
-    }
-
-    fn insert(&mut self, value: Self::InputType) -> Option<Self::BatchData> {
-        self.builder.add_data(Some(value.clone()));
-        self.buffered_elements.push(value);
-        if self.buffered_elements.len() == self.batch_size {
-            self.buffered_elements.clear();
-            Some(self.builder.flush())
-        } else {
-            None
-        }
-    }
-
-    fn buffered_inputs(&self) -> Vec<Self::InputType> {
-        self.buffered_elements.clone()
-    }
-
-    fn flush_buffer(&mut self) -> Self::BatchData {
-        self.buffered_elements.clear();
-        self.builder.flush()
-    }
-}
-
-pub struct RecordBatchBufferingWriter<R: RecordBatchBuilder> {
+pub struct RecordBatchBufferingWriter {
     writer: Option<ArrowWriter<SharedBuffer>>,
     shared_buffer: SharedBuffer,
     target_part_size: usize,
-    phantom: PhantomData<R>,
+    schema: ArroyoSchemaRef,
 }
 
-impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<R> {
-    type BatchData = RecordBatch;
-
-    fn new(config: &FileSystemTable) -> Self {
+impl BatchBufferingWriter for RecordBatchBufferingWriter {
+    fn new(config: &FileSystemTable, _format: Option<Format>, schema: ArroyoSchemaRef) -> Self {
         let target_part_size = if let TableType::Sink {
             file_settings:
                 Some(FileSettings {
@@ -163,7 +112,7 @@ impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<
         let writer_properties = writer_properties_from_table(config);
         let writer = ArrowWriter::try_new(
             shared_buffer.clone(),
-            R::default().schema(),
+            Arc::new(schema.schema_without_timestamp()),
             Some(writer_properties),
         )
         .unwrap();
@@ -172,7 +121,7 @@ impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<
             writer: Some(writer),
             shared_buffer,
             target_part_size,
-            phantom: PhantomData,
+            schema,
         }
     }
 
@@ -180,10 +129,11 @@ impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<
         "parquet".to_string()
     }
 
-    fn add_batch_data(&mut self, data: Self::BatchData) -> Option<Vec<u8>> {
+    fn add_batch_data(&mut self, mut data: RecordBatch) -> Option<Vec<u8>> {
         let writer = self.writer.as_mut().unwrap();
+        // remove timestamp column
+        self.schema.remove_timestamp_column(&mut data);
         writer.write(&data).unwrap();
-        writer.flush().unwrap();
         if self.buffer_length() > self.target_part_size {
             Some(self.evict_current_buffer())
         } else {
@@ -216,7 +166,7 @@ impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<
         Some(copied_bytes)
     }
 
-    fn close(&mut self, final_batch: Option<Self::BatchData>) -> Option<Vec<u8>> {
+    fn close(&mut self, final_batch: Option<RecordBatch>) -> Option<Vec<u8>> {
         let mut writer = self.writer.take().unwrap();
         if let Some(batch) = final_batch {
             writer.write(&batch).unwrap();
@@ -227,36 +177,41 @@ impl<R: RecordBatchBuilder> BatchBufferingWriter for RecordBatchBufferingWriter<
     }
 }
 
-pub struct ParquetLocalWriter<V: RecordBatchBuilder> {
-    builder: V,
+pub struct ParquetLocalWriter {
     writer: Option<ArrowWriter<SharedBuffer>>,
     tmp_path: String,
     file: File,
     destination_path: String,
     shared_buffer: SharedBuffer,
     stats: Option<MultiPartWriterStats>,
+    schema: ArroyoSchemaRef,
 }
 
-impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWriter<V> {
-    fn new(tmp_path: String, final_path: String, table_properties: &FileSystemTable) -> Self {
+impl LocalWriter for ParquetLocalWriter {
+    fn new(
+        tmp_path: String,
+        final_path: String,
+        table_properties: &FileSystemTable,
+        _format: Option<Format>,
+        schema: ArroyoSchemaRef,
+    ) -> Self {
         let shared_buffer = SharedBuffer::new(0);
         let writer_properties = writer_properties_from_table(table_properties);
-        let builder = V::default();
         let writer = ArrowWriter::try_new(
             shared_buffer.clone(),
-            V::default().schema(),
+            Arc::new(schema.schema_without_timestamp()),
             Some(writer_properties),
         )
         .unwrap();
         let file = File::create(tmp_path.clone()).unwrap();
         Self {
-            builder,
             writer: Some(writer),
             tmp_path,
             file,
             destination_path: final_path,
             shared_buffer,
             stats: None,
+            schema,
         }
     }
 
@@ -264,19 +219,22 @@ impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWrite
         "parquet"
     }
 
-    fn write(&mut self, value: V::Data, timestamp: SystemTime) -> anyhow::Result<()> {
+    fn write_batch(&mut self, mut batch: RecordBatch) -> anyhow::Result<()> {
         if self.stats.is_none() {
             self.stats = Some(MultiPartWriterStats {
                 bytes_written: 0,
                 parts_written: 0,
                 first_write_at: Instant::now(),
                 last_write_at: Instant::now(),
-                representative_timestamp: timestamp,
+                representative_timestamp: representitive_timestamp(
+                    batch.column(self.schema.timestamp_index),
+                )?,
             });
         } else {
             self.stats.as_mut().unwrap().last_write_at = Instant::now();
         }
-        self.builder.add_data(Some(value));
+        self.schema.remove_timestamp_column(&mut batch);
+        self.writer.as_mut().unwrap().write(&batch)?;
         Ok(())
     }
 
@@ -293,10 +251,8 @@ impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWrite
     }
 
     fn close(&mut self) -> anyhow::Result<FilePreCommit> {
-        let batch = self.builder.flush();
         let writer = self.writer.take();
-        let mut writer = writer.unwrap();
-        writer.write(&batch)?;
+        let writer = writer.unwrap();
         writer.close()?;
         self.sync()?;
         Ok(FilePreCommit {
@@ -307,8 +263,6 @@ impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWrite
 
     fn checkpoint(&mut self) -> anyhow::Result<Option<CurrentFileRecovery>> {
         let writer = self.writer.as_mut().unwrap();
-        let batch = self.builder.flush();
-        writer.write(&batch)?;
         writer.flush()?;
         let bytes_written = self.sync()?;
         let trailing_bytes = self
@@ -331,4 +285,43 @@ impl<V: RecordBatchBuilder + 'static> LocalWriter<V::Data> for ParquetLocalWrite
     fn stats(&self) -> MultiPartWriterStats {
         self.stats.as_ref().unwrap().clone()
     }
+}
+
+pub(crate) fn batches_by_partition(
+    batch: RecordBatch,
+    partitioner: Arc<dyn PhysicalExpr>,
+) -> Result<Vec<(RecordBatch, Option<String>)>> {
+    let partition = partitioner.evaluate(&batch)?.into_array(batch.num_rows())?;
+    // sort the partition, and then the batch, then compute partitions
+    let sort_indices = sort_to_indices(&partition, None, None)?;
+    let sorted_partition = take(&*partition, &sort_indices, None).unwrap();
+    let sorted_batch = RecordBatch::try_new(
+        batch.schema(),
+        batch
+            .columns()
+            .iter()
+            .map(|col| take(col, &sort_indices, None).unwrap())
+            .collect(),
+    )?;
+    let partition = arrow::compute::partition(&vec![sorted_partition.clone()])?;
+    let typed_partition = sorted_partition
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let mut result = Vec::with_capacity(partition.len());
+    for partition in partition.ranges() {
+        let partition_string = typed_partition.value(partition.start);
+        let batch = sorted_batch.slice(partition.start, partition.end - partition.start);
+        result.push((batch, Some(partition_string.to_string())));
+    }
+    Ok(result)
+}
+
+pub(crate) fn representitive_timestamp(timestamp_column: &Arc<dyn Array>) -> Result<SystemTime> {
+    let time = timestamp_column
+        .as_any()
+        .downcast_ref::<TimestampNanosecondArray>()
+        .ok_or_else(|| anyhow::anyhow!("timestamp column is not nanosecond"))?
+        .value(0);
+    Ok(from_nanos(time as u128))
 }
