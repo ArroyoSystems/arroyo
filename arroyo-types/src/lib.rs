@@ -1120,4 +1120,3 @@ pub trait UdfContext: Sync {
     async fn init(&self) {}
     async fn close(&self) {}
 }
-

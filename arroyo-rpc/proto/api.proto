@@ -400,16 +400,9 @@ message MemExecNode {
   string schema = 2;
 }
 
-message Column {
-  string name = 1;
-  uint64 index = 2;
-}
-
 message UnnestExecNode {
   // json-encoded
   string schema = 1;
-  Column column = 2;
-  bool preserve_nulls = 3;
 }
 
 message ArroyoExecNode {

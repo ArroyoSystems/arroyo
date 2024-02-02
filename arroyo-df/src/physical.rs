@@ -5,9 +5,10 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
 use arrow_array::{RecordBatch, StructArray};
-use arrow_schema::{DataType, SchemaRef, TimeUnit};
+use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
+use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
+use datafusion::physical_plan::unnest::UnnestExec;
 use datafusion::{
     execution::TaskContext,
     physical_plan::{
@@ -16,19 +17,22 @@ use datafusion::{
         DisplayAs, ExecutionPlan, Partitioning,
     },
 };
-use datafusion::physical_plan::unnest::UnnestExec;
-use datafusion_common::{DataFusionError, Result as DFResult, ScalarValue, Statistics};
+use datafusion_common::{
+    DataFusionError, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
+};
 
+use crate::rewriters::UNNESTED_COL;
+use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
 use datafusion_execution::FunctionRegistry;
 use datafusion_expr::{
     AggregateUDF, ColumnarValue, ScalarUDF, Signature, TypeSignature, WindowUDF,
 };
+use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
-use arroyo_rpc::grpc::api;
 
 pub struct EmptyRegistry {
     udfs: HashMap<String, Arc<ScalarUDF>>,
@@ -208,49 +212,91 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
     fn try_decode(
         &self,
         buf: &[u8],
-        _inputs: &[Arc<dyn datafusion::physical_plan::ExecutionPlan>],
+        inputs: &[Arc<dyn datafusion::physical_plan::ExecutionPlan>],
         _registry: &dyn datafusion::execution::FunctionRegistry,
     ) -> datafusion_common::Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
-        let mem_exec: ArroyoMemExec = serde_json::from_slice(buf)
+        let exec: ArroyoExecNode = Message::decode(buf)
             .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {}", err)))?;
-        match &self.context {
-            DecodingContext::SingleLockedBatch(single_batch) => {
-                Ok(Arc::new(RwLockRecordBatchReader {
-                    schema: mem_exec.schema.clone(),
-                    locked_batch: single_batch.clone(),
-                }))
+
+        match exec
+            .node
+            .ok_or_else(|| DataFusionError::Internal("exec node is empty".to_string()))?
+        {
+            Node::MemExec(mem_exec) => {
+                let schema: Schema = serde_json::from_str(&mem_exec.schema).map_err(|e| {
+                    DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e))
+                })?;
+                let schema = Arc::new(schema);
+                match &self.context {
+                    DecodingContext::SingleLockedBatch(single_batch) => {
+                        Ok(Arc::new(RwLockRecordBatchReader {
+                            schema,
+                            locked_batch: single_batch.clone(),
+                        }))
+                    }
+                    DecodingContext::UnboundedBatchStream(unbounded_stream) => {
+                        Ok(Arc::new(UnboundedRecordBatchReader {
+                            schema,
+                            receiver: unbounded_stream.clone(),
+                        }))
+                    }
+                    DecodingContext::LockedBatchVec(locked_batches) => {
+                        Ok(Arc::new(RecordBatchVecReader {
+                            schema,
+                            receiver: locked_batches.clone(),
+                        }))
+                    }
+                    DecodingContext::Planning => Ok(Arc::new(ArroyoMemExec {
+                        table_name: mem_exec.table_name,
+                        schema,
+                    })),
+                    DecodingContext::None => Err(DataFusionError::Internal(
+                        "Need an internal context to decode".into(),
+                    )),
+                    DecodingContext::LockedJoinPair { left, right } => {
+                        match mem_exec.table_name.as_str() {
+                            "left" => Ok(Arc::new(RwLockRecordBatchReader {
+                                schema,
+                                locked_batch: left.clone(),
+                            })),
+                            "right" => Ok(Arc::new(RwLockRecordBatchReader {
+                                schema,
+                                locked_batch: right.clone(),
+                            })),
+                            _ => Err(DataFusionError::Internal(format!(
+                                "unknown table name {}",
+                                mem_exec.table_name
+                            ))),
+                        }
+                    }
+                }
             }
-            DecodingContext::UnboundedBatchStream(unbounded_stream) => {
-                Ok(Arc::new(UnboundedRecordBatchReader {
-                    schema: mem_exec.schema.clone(),
-                    receiver: unbounded_stream.clone(),
-                }))
+            Node::UnnestExec(unnest) => {
+                let schema: Schema = serde_json::from_str(&unnest.schema).map_err(|e| {
+                    DataFusionError::Internal(format!("invalid schema in exec codec: {:?}", e))
+                })?;
+                let column = Column::new(
+                    UNNESTED_COL,
+                    schema.index_of(UNNESTED_COL).map_err(|_| {
+                        DataFusionError::Internal(format!(
+                            "unnest node schema does not contain {} col",
+                            UNNESTED_COL
+                        ))
+                    })?,
+                );
+
+                Ok(Arc::new(UnnestExec::new(
+                    inputs
+                        .get(0)
+                        .ok_or_else(|| {
+                            DataFusionError::Internal("no input for unnest node".to_string())
+                        })?
+                        .clone(),
+                    column,
+                    Arc::new(schema),
+                    UnnestOptions::default(),
+                )))
             }
-            DecodingContext::LockedBatchVec(locked_batches) => Ok(Arc::new(RecordBatchVecReader {
-                schema: mem_exec.schema(),
-                receiver: locked_batches.clone(),
-            })),
-            DecodingContext::Planning => Ok(Arc::new(ArroyoMemExec {
-                table_name: mem_exec.table_name,
-                schema: mem_exec.schema.clone(),
-            })),
-            DecodingContext::None => Err(DataFusionError::Internal(
-                "Need an internal context to decode".into(),
-            )),
-            DecodingContext::LockedJoinPair { left, right } => match mem_exec.table_name.as_str() {
-                "left" => Ok(Arc::new(RwLockRecordBatchReader {
-                    schema: mem_exec.schema.clone(),
-                    locked_batch: left.clone(),
-                })),
-                "right" => Ok(Arc::new(RwLockRecordBatchReader {
-                    schema: mem_exec.schema.clone(),
-                    locked_batch: right.clone(),
-                })),
-                _ => Err(DataFusionError::Internal(format!(
-                    "unknown table name {}",
-                    mem_exec.table_name
-                ))),
-            },
         }
     }
 
@@ -273,27 +319,16 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
 
         let unnest: Option<&UnnestExec> = node.as_any().downcast_ref();
         if let Some(unnest) = unnest {
-            // proto = Some(ArroyoExecNode {
-            //     node: Some(arroyo_exec_node::Node::UnnestExec(UnnestExecNode {
-            //         schema: serde_json::to_string(&unnest.schema()).unwrap(),
-            //         column: api::Column {
-            //             name: unnest,
-            //             index: 0,
-            //         },
-            //         preserve_nulls: false,
-            //     }))
-            // })
-
-            println!("UNNEST: {:?}", unnest);
+            proto = Some(ArroyoExecNode {
+                node: Some(arroyo_exec_node::Node::UnnestExec(UnnestExecNode {
+                    schema: serde_json::to_string(&unnest.schema()).unwrap(),
+                })),
+            });
         }
-
 
         if let Some(node) = proto {
             node.encode(buf).map_err(|err| {
-                DataFusionError::Internal(format!(
-                    "couldn't serialize exec node {}",
-                    err
-                ))
+                DataFusionError::Internal(format!("couldn't serialize exec node {}", err))
             })?;
             Ok(())
         } else {

@@ -1,19 +1,23 @@
-use std::collections::HashMap;
+use crate::schemas::{add_timestamp_field, has_timestamp_field};
 use crate::tables::ConnectorTable;
 use crate::tables::FieldSpec;
 use crate::tables::Table;
 use crate::watermark_node::WatermarkNode;
-use crate::{ArroyoSchemaProvider, create_table_with_timestamp};
+use crate::{create_table_with_timestamp, ArroyoSchemaProvider};
 use arrow_schema::{DataType, Schema, TimeUnit};
 use datafusion_common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
-use datafusion_common::{Column, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult, ScalarValue, DFField};
-use datafusion_expr::{BinaryExpr, Expr, Extension, LogicalPlan, Projection, ReturnTypeFunction, ScalarFunctionDefinition, ScalarUDF, Signature, TableScan, Unnest, Volatility};
+use datafusion_common::{
+    Column, DFField, DFSchema, DataFusionError, OwnedTableReference, Result as DFResult,
+    ScalarValue,
+};
+use datafusion_expr::expr::ScalarFunction;
+use datafusion_expr::{
+    BinaryExpr, Expr, Extension, LogicalPlan, Projection, ScalarFunctionDefinition, TableScan,
+    Unnest,
+};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use arrow_array::ArrayRef;
-use datafusion_expr::expr::ScalarFunction;
-use datafusion_physical_expr::functions::make_scalar_function;
-use crate::schemas::{add_timestamp_field, has_timestamp_field};
 
 #[derive(Default)]
 pub struct TimestampRewriter {}
@@ -22,7 +26,6 @@ impl TreeNodeRewriter for TimestampRewriter {
     type N = LogicalPlan;
 
     fn mutate(&mut self, mut node: Self::N) -> DFResult<Self::N> {
-        println!("mutating {:?}", node);
         match node {
             LogicalPlan::Projection(ref mut projection) => {
                 if !has_timestamp_field(projection.schema.clone()) {
@@ -36,8 +39,7 @@ impl TreeNodeRewriter for TimestampRewriter {
             }
             LogicalPlan::Unnest(ref mut unnest) => {
                 if !has_timestamp_field(unnest.schema.clone()) {
-                    unnest.schema =
-                        add_timestamp_field(unnest.schema.clone()).unwrap();
+                    unnest.schema = add_timestamp_field(unnest.schema.clone()).unwrap();
                 }
             }
             LogicalPlan::Join(ref mut join) => {
@@ -93,7 +95,6 @@ impl TreeNodeRewriter for TimestampRewriter {
         Ok(node)
     }
 }
-
 
 /// Rewrites a logical plan to move projections out of table scans
 /// and into a separate projection node which may include virtual fields,
@@ -260,51 +261,39 @@ impl TreeNodeRewriter for SourceRewriter {
     }
 }
 
-const UNNESTED_COL: &str = "__unnested";
+pub const UNNESTED_COL: &str = "__unnested";
 
-pub struct UnnestRewriter {
-}
+pub struct UnnestRewriter {}
 
 impl UnnestRewriter {
-    fn unnest_outer() -> Arc<ScalarUDF> {
-        let fn_impl = |args: &[ArrayRef]| Ok(Arc::new(args[0].clone()) as ArrayRef);
-        Arc::new({
-            let return_type: ReturnTypeFunction = Arc::new(move |args| {
-                Ok(Arc::new(args.get(0).ok_or_else(|| {
-                    DataFusionError::Plan("unnest_outer takes one argument".to_string())
-                })?.clone()))
-            });
-            ScalarUDF::new(
-                "__unnest_outer",
-                &Signature::any(1, Volatility::Volatile),
-                &return_type,
-                &make_scalar_function(fn_impl),
-            )
-        })
-    }
-
     fn split_unnest(expr: Expr) -> DFResult<(Expr, Option<Expr>)> {
         let mut c: Option<Expr> = None;
 
         let expr = expr.transform_up_mut(&mut |e| {
             match &e {
-                Expr::ScalarFunction(ScalarFunction { func_def: ScalarFunctionDefinition::UDF(udf), args }) => {
+                Expr::ScalarFunction(ScalarFunction {
+                    func_def: ScalarFunctionDefinition::UDF(udf),
+                    args,
+                }) => {
                     if udf.name() == "unnest" {
                         match args.len() {
                             1 => {
                                 if c.replace(args[0].clone()).is_some() {
-                                    return Err(DataFusionError::Plan("Multiple unnests in expression, which is not allowed".to_string()))
+                                    return Err(DataFusionError::Plan(
+                                        "Multiple unnests in expression, which is not allowed"
+                                            .to_string(),
+                                    ));
                                 };
 
-                                return Ok(Transformed::Yes(Expr::ScalarFunction(ScalarFunction {
-                                    func_def: ScalarFunctionDefinition::UDF(Self::unnest_outer()),
-                                    args: vec![
-                                        Expr::Column(Column::new_unqualified(UNNESTED_COL))
-                                    ]
-                                })));
+                                return Ok(Transformed::Yes(Expr::Column(
+                                    Column::new_unqualified(UNNESTED_COL),
+                                )));
                             }
                             n => {
-                                panic!("Unnest has wrong number of arguments (expected 1, found {})", n);
+                                panic!(
+                                    "Unnest has wrong number of arguments (expected 1, found {})",
+                                    n
+                                );
                             }
                         }
                     }
@@ -323,6 +312,14 @@ impl TreeNodeRewriter for UnnestRewriter {
 
     fn mutate(&mut self, node: Self::N) -> DFResult<Self::N> {
         let LogicalPlan::Projection(projection) = &node else {
+            if node.expressions().iter().any(|e| {
+                let e = Self::split_unnest(e.clone());
+                e.is_err() || e.unwrap().1.is_some()
+            }) {
+                return Err(DataFusionError::Plan(
+                    "unnest is only supported in SELECT statements".to_string(),
+                ));
+            }
             return Ok(node);
         };
 
@@ -337,7 +334,7 @@ impl TreeNodeRewriter for UnnestRewriter {
                 let typ = if let Some(e) = opt {
                     if let Some(prev) = unnest.replace((e, i)) {
                         if &prev != unnest.as_ref().unwrap() {
-                            DataFusionError::Plan("Project contains multiple unnests, which is not currently supported".to_string());
+                            return Err(DataFusionError::Plan("Project contains multiple unnests, which is not currently supported".to_string()));
                         }
                     }
                     true
@@ -349,31 +346,44 @@ impl TreeNodeRewriter for UnnestRewriter {
             })
             .collect::<DFResult<Vec<_>>>()?;
 
-
         if let Some((unnest_inner, unnest_idx)) = unnest {
             let produce_list = Arc::new(LogicalPlan::Projection(
                 Projection::try_new(
-                    exprs.iter().cloned().map(|(e, is_unnest)|
-                        if is_unnest {
-                            unnest_inner.clone()
-                                .alias(UNNESTED_COL)
-                        } else {
-                            e
-                        }
-                    ).collect(),
+                    exprs
+                        .iter()
+                        .cloned()
+                        .map(|(e, is_unnest)| {
+                            if is_unnest {
+                                unnest_inner.clone().alias(UNNESTED_COL)
+                            } else {
+                                e
+                            }
+                        })
+                        .collect(),
                     projection.input.clone(),
-                ).unwrap()));
+                )
+                .unwrap(),
+            ));
 
-            let unnest_fields = produce_list.schema().fields()
+            let unnest_fields = produce_list
+                .schema()
+                .fields()
                 .iter()
                 .enumerate()
                 .map(|(i, f)| {
                     if i == unnest_idx {
-                       let DataType::List(inner) = f.data_type() else {
-                           return Err(DataFusionError::Plan(format!("Argument '{}' to unnest is not a List", f.qualified_name())));
-                       };
+                        let DataType::List(inner) = f.data_type() else {
+                            return Err(DataFusionError::Plan(format!(
+                                "Argument '{}' to unnest is not a List",
+                                f.qualified_name()
+                            )));
+                        };
 
-                        Ok(DFField::new_unqualified(UNNESTED_COL, inner.data_type().clone(), inner.is_nullable()))
+                        Ok(DFField::new_unqualified(
+                            UNNESTED_COL,
+                            inner.data_type().clone(),
+                            inner.is_nullable(),
+                        ))
                     } else {
                         Ok((*f).clone())
                     }
@@ -383,12 +393,15 @@ impl TreeNodeRewriter for UnnestRewriter {
             let unnest_node = LogicalPlan::Unnest(Unnest {
                 column: produce_list.schema().fields()[unnest_idx].qualified_column(),
                 input: produce_list,
-                schema: Arc::new(DFSchema::new_with_metadata(unnest_fields, HashMap::new()).unwrap()),
+                schema: Arc::new(
+                    DFSchema::new_with_metadata(unnest_fields, HashMap::new()).unwrap(),
+                ),
                 options: Default::default(),
             });
 
             let output_node = LogicalPlan::Projection(Projection::try_new(
-                exprs.iter()
+                exprs
+                    .iter()
                     .enumerate()
                     .map(|(i, (expr, has_unnest))| {
                         if *has_unnest {
@@ -398,16 +411,12 @@ impl TreeNodeRewriter for UnnestRewriter {
                         }
                     })
                     .collect(),
-                Arc::new(unnest_node))?);
+                Arc::new(unnest_node),
+            )?);
 
             Ok(output_node)
         } else {
             Ok(LogicalPlan::Projection(projection.clone()))
         }
-
     }
 }
-
-
-
-

@@ -14,12 +14,11 @@ pub mod external;
 pub mod logical;
 pub mod physical;
 mod plan_graph;
+mod rewriters;
 pub mod schemas;
 mod tables;
 pub mod types;
 mod watermark_node;
-mod rewriters;
-
 
 use datafusion::prelude::create_udf;
 
@@ -42,10 +41,7 @@ use logical::LogicalBatchInput;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::IntoNodeReferences;
 use plan_graph::Planner;
-use schemas::{
-    add_timestamp_field, add_timestamp_field_if_missing_arrow, has_timestamp_field,
-    window_arrow_struct,
-};
+use schemas::{add_timestamp_field, add_timestamp_field_if_missing_arrow, window_arrow_struct};
 
 use rewriters::SourceRewriter;
 use tables::{Insert, Table};
@@ -57,6 +53,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
+use crate::rewriters::{TimestampRewriter, UnnestRewriter};
 use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
 use crate::watermark_node::WatermarkNode;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
@@ -68,7 +65,6 @@ use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
 use tracing::{info, warn};
 use unicase::UniCase;
-use crate::rewriters::{TimestampRewriter, UnnestRewriter};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
@@ -513,7 +509,6 @@ pub(crate) struct QueryToGraphVisitor {
     table_source_to_nodes: HashMap<OwnedTableReference, NodeIndex>,
     tables_with_windows: HashSet<OwnedTableReference>,
 }
-
 
 #[derive(Debug)]
 enum LogicalPlanExtension {
@@ -1426,9 +1421,6 @@ pub async fn parse_and_get_arrow_program(
             .rewrite(&mut UnnestRewriter {})?
             .rewrite(&mut TimestampRewriter {})?
             .rewrite(&mut rewriter)?;
-
-        println!("Rewritten {}", plan_rewrite.display_graphviz());
-
 
         for (original_name, index) in &rewriter.table_source_to_nodes {
             let node = rewriter
