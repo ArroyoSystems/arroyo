@@ -14,10 +14,11 @@ pub mod external;
 pub mod logical;
 pub mod physical;
 mod plan_graph;
+mod rewriters;
 pub mod schemas;
-mod source_rewriter;
 mod tables;
 pub mod types;
+mod watermark_node;
 
 use datafusion::prelude::create_udf;
 
@@ -40,12 +41,9 @@ use logical::LogicalBatchInput;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::IntoNodeReferences;
 use plan_graph::Planner;
-use schemas::{
-    add_timestamp_field, add_timestamp_field_if_missing_arrow, has_timestamp_field,
-    window_arrow_struct,
-};
+use schemas::{add_timestamp_field, add_timestamp_field_if_missing_arrow, window_arrow_struct};
 
-use source_rewriter::SourceRewriter;
+use rewriters::SourceRewriter;
 use tables::{Insert, Table};
 
 use arroyo_rpc::api_types::connections::ConnectionProfile;
@@ -55,6 +53,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
+use crate::rewriters::{TimestampRewriter, UnnestRewriter};
 use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
 use crate::watermark_node::WatermarkNode;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalProgram};
@@ -71,7 +70,6 @@ const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
 #[cfg(test)]
 mod test;
-mod watermark_node;
 
 #[allow(unused)]
 #[derive(Clone, Debug)]
@@ -158,12 +156,15 @@ impl ArroyoSchemaProvider {
                 #[allow(deprecated)]
                 ScalarUDF::new(
                     "unnest",
-                    &Signature::any(1, Volatility::Immutable),
+                    // This is marked volatile so that DF doesn't try to optimize constants
+                    &Signature::any(1, Volatility::Volatile),
                     &return_type,
                     &make_scalar_function(fn_impl),
                 )
             }),
         );
+
+        /*
         functions.insert(
             "get_first_json_object".to_string(),
             Arc::new(create_udf(
@@ -214,6 +215,7 @@ impl ArroyoSchemaProvider {
                 make_scalar_function(fn_impl),
             )),
         );
+                 */
 
         Self {
             tables,
@@ -507,77 +509,6 @@ pub(crate) struct QueryToGraphVisitor {
     local_logical_plan_graph: DiGraph<LogicalPlanExtension, DataFusionEdge>,
     table_source_to_nodes: HashMap<OwnedTableReference, NodeIndex>,
     tables_with_windows: HashSet<OwnedTableReference>,
-}
-
-#[derive(Default)]
-struct TimestampRewriter {}
-
-impl TreeNodeRewriter for TimestampRewriter {
-    type N = LogicalPlan;
-
-    fn mutate(&mut self, mut node: Self::N) -> DFResult<Self::N> {
-        match node {
-            LogicalPlan::Projection(ref mut projection) => {
-                if !has_timestamp_field(projection.schema.clone()) {
-                    projection.schema =
-                        add_timestamp_field(projection.schema.clone()).expect("in projection");
-                    projection.expr.push(Expr::Column(Column {
-                        relation: None,
-                        name: "_timestamp".to_string(),
-                    }));
-                }
-            }
-            LogicalPlan::Join(ref mut join) => {
-                let mut fields: Vec<_> = join
-                    .schema
-                    .fields()
-                    .iter()
-                    .filter(|field| field.name() != "_timestamp")
-                    .map(|field| field.clone())
-                    .collect();
-                fields.push(DFField::new_unqualified(
-                    "_timestamp",
-                    DataType::Timestamp(TimeUnit::Nanosecond, None),
-                    false,
-                ));
-                join.schema = Arc::new(DFSchema::new_with_metadata(fields, HashMap::new())?);
-            }
-            LogicalPlan::Union(ref mut union) => {
-                union.schema = add_timestamp_field(union.schema.clone())?;
-            }
-            LogicalPlan::TableScan(ref mut table_scan) => {
-                if !has_timestamp_field(table_scan.projected_schema.clone()) {
-                    table_scan.projected_schema =
-                        add_timestamp_field(table_scan.projected_schema.clone())?;
-                    table_scan.source = create_table_with_timestamp(
-                        table_scan.table_name.to_string(),
-                        table_scan.source.schema().fields().to_vec(),
-                    );
-                }
-            }
-            LogicalPlan::SubqueryAlias(ref mut subquery_alias) => {
-                if !has_timestamp_field(subquery_alias.schema.clone()) {
-                    let timestamp_field = DFField::new(
-                        Some(subquery_alias.alias.clone()),
-                        "_timestamp",
-                        DataType::Timestamp(TimeUnit::Nanosecond, None),
-                        false,
-                    );
-                    subquery_alias.schema = Arc::new(
-                        subquery_alias
-                            .schema
-                            .join(&DFSchema::new_with_metadata(
-                                vec![timestamp_field],
-                                HashMap::new(),
-                            )?)
-                            .expect("subquery"),
-                    );
-                }
-            }
-            _ => {}
-        }
-        Ok(node)
-    }
 }
 
 #[derive(Debug)]
@@ -1488,6 +1419,7 @@ pub async fn parse_and_get_arrow_program(
             .rewrite(&mut SourceRewriter {
                 schema_provider: schema_provider.clone(),
             })?
+            .rewrite(&mut UnnestRewriter {})?
             .rewrite(&mut TimestampRewriter {})?
             .rewrite(&mut rewriter)?;
 
