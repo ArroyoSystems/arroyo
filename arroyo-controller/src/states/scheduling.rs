@@ -4,9 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use arroyo_rpc::grpc::{
-    worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TableWriteBehavior, TaskAssignment,
-};
+use arroyo_rpc::grpc::{worker_grpc_client::WorkerGrpcClient, StartExecutionReq, TaskAssignment};
 use arroyo_types::WorkerId;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tonic::{transport::Channel, Request};
@@ -14,9 +12,7 @@ use tracing::{error, info, warn};
 
 use anyhow::anyhow;
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_state::{
-    committing_state::CommittingState, parquet::get_storage_env_vars, BackingStore, StateBackend,
-};
+use arroyo_state::{parquet::get_storage_env_vars, BackingStore, StateBackend};
 
 use crate::{
     job_controller::JobController,
@@ -308,7 +304,7 @@ impl State for Scheduling {
         struct CheckpointInfo {
             epoch: u32,
             min_epoch: u32,
-            id: i64,
+            _id: i64,
             needs_commits: bool,
         }
 
@@ -328,7 +324,7 @@ impl State for Scheduling {
                 CheckpointInfo {
                     epoch: r.epoch as u32,
                     min_epoch: r.min_epoch as u32,
-                    id: r.id,
+                    _id: r.id,
                     needs_commits: r.needs_commits,
                 }
             });
@@ -347,13 +343,13 @@ impl State for Scheduling {
                 .unwrap();
         }
 
-        let mut committing_state = None;
+        // let mut committing_state = None;
 
         // clear all of the epochs after the one we're loading so that we don't read in-progress data
         if let Some(CheckpointInfo {
             epoch,
             min_epoch,
-            id,
+            _id,
             needs_commits,
         }) = checkpoint_info.clone()
         {
@@ -371,6 +367,9 @@ impl State for Scheduling {
             }
             metadata.min_epoch = min_epoch;
             if needs_commits {
+                // TODO: implement committing tables
+                unimplemented!("need to implement two phase commits");
+                /*
                 let mut commit_subtasks = HashSet::new();
                 let mut committing_data = HashMap::new();
                 for operator_id in &metadata.operator_ids {
@@ -427,6 +426,7 @@ impl State for Scheduling {
                     }
                 }
                 committing_state = Some(CommittingState::new(id, commit_subtasks, committing_data));
+                */
             }
             StateBackend::write_checkpoint_metadata(metadata)
                 .await
@@ -519,7 +519,7 @@ impl State for Scheduling {
 
         ctx.status.tasks = Some(ctx.program.task_count() as i32);
 
-        let needs_commit = committing_state.is_some();
+        let needs_commit = false; // committing_state.is_some();
 
         let mut controller = JobController::new(
             ctx.pool.clone(),
@@ -531,7 +531,8 @@ impl State for Scheduling {
                 .map(|info| info.min_epoch)
                 .unwrap_or(0),
             worker_connects,
-            committing_state.map(|tuple| tuple.into()),
+            None,
+            //committing_state.map(|tuple| tuple.into()),
         );
         if needs_commit {
             info!("restored checkpoint was in committing phase, sending commits");

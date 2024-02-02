@@ -161,12 +161,7 @@ impl BackendFlusher {
             subtask_index: self.task_info.task_index as u32,
             start_time: to_micros(cp.time),
             finish_time: to_micros(SystemTime::now()),
-            has_state: !metadatas.is_empty(),
-            tables: vec![],
             watermark: cp.watermark.map(to_micros),
-            backend_data: vec![],
-            bytes: 1,
-            committing_data: HashMap::new(),
             table_metadata: metadatas,
             table_configs: self.table_configs.clone(),
         };
@@ -284,8 +279,11 @@ impl TableManager {
         match checkpoint_metadata {
             Some(metadata) => {
                 // TODO: validate this logic.
-                epoch = metadata.epoch + 1;
-                min_epoch = metadata.epoch;
+                let Some(operator_metadata) = metadata.operator_metadata else {
+                    bail!("missing operator metadata");
+                };
+                epoch = operator_metadata.epoch + 1;
+                min_epoch = operator_metadata.epoch;
                 for (table, table_metadata) in metadata.table_checkpoint_metadata.clone() {
                     let table_implementation = tables
                         .get(&table)

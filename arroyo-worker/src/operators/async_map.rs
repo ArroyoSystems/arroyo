@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tokio::time::error::Elapsed;
 use tracing::{debug, info, warn};
 
+// TODO: port to record batches.
 pub enum FuturesEnum<T>
 where
     T: Future + Send + 'static,

@@ -2,7 +2,7 @@ use crate::ports::CONTROLLER_GRPC;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow_array::RecordBatch;
 use async_trait::async_trait;
-use bincode::{config, BorrowDecode, Decode, Encode};
+use bincode::{Decode, Encode};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -79,8 +79,6 @@ impl Serialize for Window {
 
 pub const DEFAULT_LINGER: Duration = Duration::from_millis(50);
 pub const DEFAULT_BATCH_SIZE: usize = 128;
-
-static BINCODE_CONF: config::Configuration = config::standard();
 
 pub const TASK_SLOTS_ENV: &str = "TASK_SLOTS";
 pub const CONTROLLER_ADDR_ENV: &str = "CONTROLLER_ADDR";
@@ -333,57 +331,6 @@ impl<T: Debug + Clone + Encode + Decode + Send + PartialEq + 'static> Data for T
 pub enum Watermark {
     EventTime(SystemTime),
     Idle,
-}
-
-#[derive(Debug, Clone, Encode, Decode)]
-pub enum Message<K: Key, T: Data> {
-    Record(Record<K, T>),
-    Barrier(CheckpointBarrier),
-    Watermark(Watermark),
-    Stop,
-    EndOfData,
-}
-#[derive(Debug, Clone)]
-pub struct RecordBatchData(pub RecordBatch);
-
-impl<'de> BorrowDecode<'de> for RecordBatchData {
-    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
-        _decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        Err(bincode::error::DecodeError::Other(
-            "borrow decode unsupported",
-        ))
-    }
-}
-
-impl Encode for RecordBatchData {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        _encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        Err(bincode::error::EncodeError::Other("encoding unsupported"))
-    }
-}
-
-impl Decode for RecordBatchData {
-    fn decode<D: bincode::de::Decoder>(
-        _decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        Err(bincode::error::DecodeError::Other("decoding unsupported"))
-    }
-}
-
-impl<K: Key, T: Data> Message<K, T> {
-    pub fn is_end(&self) -> bool {
-        matches!(self, Message::Stop | Message::EndOfData)
-    }
-}
-
-#[derive(Debug, Clone, Encode, Decode, PartialEq, Eq)]
-pub struct Record<K: Key, T: Data> {
-    pub timestamp: SystemTime,
-    pub key: Option<K>,
-    pub value: T,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -694,35 +641,6 @@ pub trait RecordBatchBuilder: Default + Debug + Sync + Send + 'static {
     fn flush(&mut self) -> RecordBatch;
     fn as_struct_array(&mut self) -> arrow::array::StructArray;
     fn schema(&self) -> SchemaRef;
-}
-
-unsafe impl<K: Key, T: Data> Sync for Record<K, T> {}
-
-impl<K: Key, T: Data> Record<K, T> {
-    pub fn from_value(timestamp: SystemTime, value: T) -> Option<Record<(), T>> {
-        Some(Record {
-            timestamp,
-            key: None,
-            value,
-        })
-    }
-
-    pub fn from_bytes(bs: &[u8]) -> Result<Record<K, T>, bincode::error::DecodeError> {
-        let (record, len) = bincode::decode_from_slice(bs, BINCODE_CONF)?;
-
-        if len != bs.len() {
-            return Err(bincode::error::DecodeError::ArrayLengthMismatch {
-                required: bs.len(),
-                found: len,
-            });
-        }
-
-        Ok(record)
-    }
-
-    pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::error::EncodeError> {
-        bincode::encode_to_vec(self, BINCODE_CONF)
-    }
 }
 
 /// A reference-counted reference to a [TaskInfo].
