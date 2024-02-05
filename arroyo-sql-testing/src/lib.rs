@@ -1331,4 +1331,31 @@ mod tests {
         },
         PI
     );
+
+    single_test_codegen!(
+        "iszero",
+        "iszero(0)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        true
+    );
+
+    single_test_codegen!(
+        "isnan",
+        "isnan(cast('NaN' as double))",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        true
+    );
+
+    single_test_codegen!(
+        "nanvl",
+        "nanvl(cast('NaN' as double),1)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        1f64
+    );
 }
