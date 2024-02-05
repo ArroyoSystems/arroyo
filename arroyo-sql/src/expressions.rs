@@ -41,7 +41,7 @@ pub enum Expression {
     StructField(StructFieldExpression),
     Aggregation(AggregationExpression),
     Cast(CastExpression),
-    Numeric(NumericExpression),
+    Numeric(NumericFunction),
     Date(DateTimeFunction),
     String(StringFunction),
     Hash(HashExpression),
@@ -486,8 +486,8 @@ impl Expression {
                 (&mut *e.input).traverse_mut(context, f);
             }
             Expression::Numeric(e) => {
-                for x in &mut *e.inputs {
-                    x.traverse_mut(context, f);
+                for e in e.expressions() {
+                    e.traverse_mut(context, f);
                 }
             }
             Expression::Date(e) => match e {
@@ -782,10 +782,9 @@ impl<'a> ExpressionContext<'a> {
                     | BuiltinScalarFunction::Isnan
                     | BuiltinScalarFunction::Iszero
                     | BuiltinScalarFunction::Nanvl
-                    | BuiltinScalarFunction::Cot => Ok(NumericExpression::new(
-                        fun.clone(),
-                        Box::new(arg_expressions),
-                    )?),
+                    | BuiltinScalarFunction::Cot => {
+                        Ok(Expression::Numeric((fun, arg_expressions).try_into()?))
+                    }
                     BuiltinScalarFunction::Power | BuiltinScalarFunction::Atan2 => bail!(
                         "multiple argument numeric function {:?} not implemented",
                         fun
@@ -1991,152 +1990,320 @@ impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for CastExpression {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
-enum NumericFunction {
-    Abs,
-    Acos,
-    Acosh,
-    Asin,
-    Asinh,
-    Atan,
-    Atanh,
-    Cos,
-    Cosh,
-    Ln,
-    Log,
-    Log10,
-    Sin,
-    Sinh,
-    Sqrt,
-    Tan,
-    Tanh,
-    Ceil,
-    Floor,
-    Round,
-    Signum,
-    Trunc,
-    Log2,
-    Exp,
-    Cot,
-    Iszero,
-    Nanvl,
-    Isnan,
+pub enum NumericFunction {
+    Abs(Box<Expression>),
+    Acos(Box<Expression>),
+    Acosh(Box<Expression>),
+    Asin(Box<Expression>),
+    Asinh(Box<Expression>),
+    Atan(Box<Expression>),
+    Atanh(Box<Expression>),
+    Cos(Box<Expression>),
+    Cosh(Box<Expression>),
+    Ln(Box<Expression>),
+    Log(Box<Expression>),
+    Log10(Box<Expression>),
+    Sin(Box<Expression>),
+    Sinh(Box<Expression>),
+    Sqrt(Box<Expression>),
+    Tan(Box<Expression>),
+    Tanh(Box<Expression>),
+    Ceil(Box<Expression>),
+    Floor(Box<Expression>),
+    Round(Box<Expression>),
+    Signum(Box<Expression>),
+    Trunc(Box<Expression>),
+    Log2(Box<Expression>),
+    Exp(Box<Expression>),
+    Cot(Box<Expression>),
+    Iszero(Box<Expression>),
+    Nanvl(Box<Expression>, Box<Expression>),
+    Isnan(Box<Expression>),
 }
 
 impl NumericFunction {
     fn function_name(&self) -> Ident {
         let name = match self {
-            NumericFunction::Abs => "abs",
-            NumericFunction::Acos => "acos",
-            NumericFunction::Acosh => "acosh",
-            NumericFunction::Asin => "asin",
-            NumericFunction::Asinh => "asinh",
-            NumericFunction::Atan => "atan",
-            NumericFunction::Atanh => "atanh",
-            NumericFunction::Cos => "cos",
-            NumericFunction::Cosh => "cosh",
-            NumericFunction::Ln => "ln",
-            NumericFunction::Log => "log",
-            NumericFunction::Log10 => "log10",
-            NumericFunction::Sin => "sin",
-            NumericFunction::Sinh => "sinh",
-            NumericFunction::Sqrt => "sqrt",
-            NumericFunction::Tan => "tan",
-            NumericFunction::Tanh => "tanh",
-            NumericFunction::Log2 => "log2",
-            NumericFunction::Exp => "exp",
-            NumericFunction::Ceil => "ceil",
-            NumericFunction::Floor => "floor",
-            NumericFunction::Round => "round",
-            NumericFunction::Trunc => "trunc",
-            NumericFunction::Signum => "signum",
-            NumericFunction::Cot => "cot",
-            NumericFunction::Iszero => "iszero",
-            NumericFunction::Nanvl => "nanvl",
-            NumericFunction::Isnan => "isnan",
+            NumericFunction::Abs(..) => "abs",
+            NumericFunction::Acos(..) => "acos",
+            NumericFunction::Acosh(..) => "acosh",
+            NumericFunction::Asin(..) => "asin",
+            NumericFunction::Asinh(..) => "asinh",
+            NumericFunction::Atan(..) => "atan",
+            NumericFunction::Atanh(..) => "atanh",
+            NumericFunction::Cos(..) => "cos",
+            NumericFunction::Cosh(..) => "cosh",
+            NumericFunction::Ln(..) => "ln",
+            NumericFunction::Log(..) => "log",
+            NumericFunction::Log10(..) => "log10",
+            NumericFunction::Sin(..) => "sin",
+            NumericFunction::Sinh(..) => "sinh",
+            NumericFunction::Sqrt(..) => "sqrt",
+            NumericFunction::Tan(..) => "tan",
+            NumericFunction::Tanh(..) => "tanh",
+            NumericFunction::Log2(..) => "log2",
+            NumericFunction::Exp(..) => "exp",
+            NumericFunction::Ceil(..) => "ceil",
+            NumericFunction::Floor(..) => "floor",
+            NumericFunction::Round(..) => "round",
+            NumericFunction::Trunc(..) => "trunc",
+            NumericFunction::Signum(..) => "signum",
+            NumericFunction::Cot(..) => "cot",
+            NumericFunction::Iszero(..) => "iszero",
+            NumericFunction::Nanvl(..) => "nanvl",
+            NumericFunction::Isnan(..) => "isnan",
         };
         format_ident!("{}", name)
     }
 }
 
-impl TryFrom<BuiltinScalarFunction> for NumericFunction {
+impl TryFrom<(&BuiltinScalarFunction, Vec<Expression>)> for NumericFunction {
     type Error = anyhow::Error;
 
-    fn try_from(fun: BuiltinScalarFunction) -> Result<Self> {
-        match fun {
-            BuiltinScalarFunction::Abs => Ok(Self::Abs),
-            BuiltinScalarFunction::Acos => Ok(Self::Acos),
-            BuiltinScalarFunction::Acosh => Ok(Self::Acosh),
-            BuiltinScalarFunction::Asin => Ok(Self::Asin),
-            BuiltinScalarFunction::Asinh => Ok(Self::Asinh),
-            BuiltinScalarFunction::Atan => Ok(Self::Atan),
-            BuiltinScalarFunction::Atanh => Ok(Self::Atanh),
-            BuiltinScalarFunction::Cos => Ok(Self::Cos),
-            BuiltinScalarFunction::Cosh => Ok(Self::Cosh),
-            BuiltinScalarFunction::Ln => Ok(Self::Ln),
-            BuiltinScalarFunction::Log => Ok(Self::Log),
-            BuiltinScalarFunction::Log10 => Ok(Self::Log10),
-            BuiltinScalarFunction::Sin => Ok(Self::Sin),
-            BuiltinScalarFunction::Sinh => Ok(Self::Sinh),
-            BuiltinScalarFunction::Sqrt => Ok(Self::Sqrt),
-            BuiltinScalarFunction::Tan => Ok(Self::Tan),
-            BuiltinScalarFunction::Tanh => Ok(Self::Tanh),
-            BuiltinScalarFunction::Ceil => Ok(Self::Ceil),
-            BuiltinScalarFunction::Floor => Ok(Self::Floor),
-            BuiltinScalarFunction::Round => Ok(Self::Round),
-            BuiltinScalarFunction::Signum => Ok(Self::Signum),
-            BuiltinScalarFunction::Trunc => Ok(Self::Trunc),
-            BuiltinScalarFunction::Log2 => Ok(Self::Log2),
-            BuiltinScalarFunction::Exp => Ok(Self::Exp),
-            BuiltinScalarFunction::Cot => Ok(Self::Cot),
-            BuiltinScalarFunction::Isnan => Ok(Self::Isnan),
-            BuiltinScalarFunction::Iszero => Ok(Self::Iszero),
-            BuiltinScalarFunction::Nanvl => Ok(Self::Nanvl),
-            _ => bail!("{:?} is not a single argument numeric function", fun),
+    fn try_from(value: (&BuiltinScalarFunction, Vec<Expression>)) -> Result<Self, Self::Error> {
+        let func = value.0;
+        let mut args = value.1;
+        match (func, args.len()) {
+            (BuiltinScalarFunction::Abs, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Abs(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Acos, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Acos(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Acosh, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Acosh(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Asin, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Asin(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Asinh, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Asinh(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Atan, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Atan(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Atanh, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Atanh(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Cos, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Cos(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Cosh, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Cosh(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Ln, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Ln(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Log, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Log(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Log10, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Log10(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Sin, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Sin(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Sinh, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Sinh(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Sqrt, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Sqrt(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Tan, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Tan(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Tanh, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Tanh(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Log2, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Log2(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Exp, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Exp(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Ceil, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Ceil(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Floor, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Floor(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Round, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Round(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Trunc, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Trunc(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Signum, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Signum(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Cot, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Cot(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Iszero, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Iszero(Box::new(arg)).into())
+            }
+            (BuiltinScalarFunction::Nanvl, 2) => {
+                let arg1 = args.remove(0);
+                let arg2 = args.remove(0);
+                Ok(NumericFunction::Nanvl(Box::new(arg1), Box::new(arg2)).into())
+            }
+            (BuiltinScalarFunction::Isnan, 1) => {
+                let arg = args.remove(0);
+                Ok(NumericFunction::Isnan(Box::new(arg)).into())
+            }
+            _ => {
+                bail!("function {} with args {:?} not supported", func, args)
+            }
         }
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd)]
-pub struct NumericExpression {
-    function: NumericFunction,
-    inputs: Box<Vec<Expression>>,
-}
-
-impl NumericExpression {
-    fn new(function: BuiltinScalarFunction, inputs: Box<Vec<Expression>>) -> Result<Expression> {
-        let function = function.try_into()?;
-        Ok(Expression::Numeric(NumericExpression { function, inputs }))
+impl NumericFunction {
+    fn expressions(&mut self) -> Vec<&mut Expression> {
+        match self {
+            NumericFunction::Abs(arg)
+            | NumericFunction::Acos(arg)
+            | NumericFunction::Acosh(arg)
+            | NumericFunction::Asin(arg)
+            | NumericFunction::Asinh(arg)
+            | NumericFunction::Atan(arg)
+            | NumericFunction::Atanh(arg)
+            | NumericFunction::Cos(arg)
+            | NumericFunction::Cosh(arg)
+            | NumericFunction::Ln(arg)
+            | NumericFunction::Log(arg)
+            | NumericFunction::Log10(arg)
+            | NumericFunction::Sin(arg)
+            | NumericFunction::Sinh(arg)
+            | NumericFunction::Sqrt(arg)
+            | NumericFunction::Tan(arg)
+            | NumericFunction::Tanh(arg)
+            | NumericFunction::Ceil(arg)
+            | NumericFunction::Floor(arg)
+            | NumericFunction::Round(arg)
+            | NumericFunction::Signum(arg)
+            | NumericFunction::Trunc(arg)
+            | NumericFunction::Log2(arg)
+            | NumericFunction::Exp(arg)
+            | NumericFunction::Cot(arg)
+            | NumericFunction::Iszero(arg)
+            | NumericFunction::Isnan(arg) => vec![&mut *arg],
+            NumericFunction::Nanvl(arg1, arg2) => vec![&mut *arg1, &mut *arg2],
+        }
     }
 }
 
-impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for NumericExpression {
+impl CodeGenerator<ValuePointerContext, TypeDef, syn::Expr> for NumericFunction {
     fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
-        let function_name = self.function.function_name();
-        match (self.inputs.len(), &self.function) {
-            (1, _) => {
-                let argument_expression = self.inputs[0].generate(input_context);
-                if self.inputs[0].expression_type(input_context).is_optional() {
+        match self {
+            NumericFunction::Abs(arg)
+            | NumericFunction::Acos(arg)
+            | NumericFunction::Acosh(arg)
+            | NumericFunction::Asin(arg)
+            | NumericFunction::Asinh(arg)
+            | NumericFunction::Atan(arg)
+            | NumericFunction::Atanh(arg)
+            | NumericFunction::Cos(arg)
+            | NumericFunction::Cosh(arg)
+            | NumericFunction::Ln(arg)
+            | NumericFunction::Log(arg)
+            | NumericFunction::Log10(arg)
+            | NumericFunction::Sin(arg)
+            | NumericFunction::Sinh(arg)
+            | NumericFunction::Sqrt(arg)
+            | NumericFunction::Tan(arg)
+            | NumericFunction::Tanh(arg)
+            | NumericFunction::Ceil(arg)
+            | NumericFunction::Floor(arg)
+            | NumericFunction::Round(arg)
+            | NumericFunction::Signum(arg)
+            | NumericFunction::Trunc(arg)
+            | NumericFunction::Log2(arg)
+            | NumericFunction::Exp(arg)
+            | NumericFunction::Cot(arg)
+            | NumericFunction::Iszero(arg)
+            | NumericFunction::Isnan(arg) => {
+                let function_name = self.function_name();
+                let argument_expression = arg.generate(input_context);
+                if arg.expression_type(input_context).is_optional() {
                     parse_quote!(#argument_expression.map(|val| (val as f64).#function_name()))
                 } else {
                     parse_quote!((#argument_expression as f64).#function_name())
                 }
             }
-            (2, NumericFunction::Nanvl) => {
-                let expr1 = self.inputs[0].generate(input_context);
-                let expr2 = self.inputs[1].generate(input_context);
+            NumericFunction::Nanvl(arg1, arg2) => {
+                let expr1 = arg1.generate(input_context);
+                let expr2 = arg2.generate(input_context);
                 parse_quote!(arroyo_worker::operators::functions::numeric::nanvl(#expr1,#expr2))
             }
         }
     }
 
     fn expression_type(&self, input_context: &ValuePointerContext) -> TypeDef {
-        for x in self.inputs.iter() {
-            if x.expression_type(input_context).is_optional() {
-                return TypeDef::DataType(DataType::Float64, true);
-            }
-        }
+        match self {
+            NumericFunction::Abs(arg)
+            | NumericFunction::Acos(arg)
+            | NumericFunction::Acosh(arg)
+            | NumericFunction::Asin(arg)
+            | NumericFunction::Asinh(arg)
+            | NumericFunction::Atan(arg)
+            | NumericFunction::Atanh(arg)
+            | NumericFunction::Cos(arg)
+            | NumericFunction::Cosh(arg)
+            | NumericFunction::Ln(arg)
+            | NumericFunction::Log(arg)
+            | NumericFunction::Log10(arg)
+            | NumericFunction::Sin(arg)
+            | NumericFunction::Sinh(arg)
+            | NumericFunction::Sqrt(arg)
+            | NumericFunction::Tan(arg)
+            | NumericFunction::Tanh(arg)
+            | NumericFunction::Ceil(arg)
+            | NumericFunction::Floor(arg)
+            | NumericFunction::Round(arg)
+            | NumericFunction::Signum(arg)
+            | NumericFunction::Trunc(arg)
+            | NumericFunction::Log2(arg)
+            | NumericFunction::Exp(arg)
+            | NumericFunction::Cot(arg)
+            | NumericFunction::Iszero(arg)
+            | NumericFunction::Isnan(arg) => TypeDef::DataType(
+                DataType::Float64,
+                arg.expression_type(input_context).is_optional(),
+            ),
 
-        TypeDef::DataType(DataType::Float64, false)
+            NumericFunction::Nanvl(expr1, expr2) => TypeDef::DataType(
+                DataType::Float64,
+                expr1.expression_type(input_context).is_optional()
+                    || expr2.expression_type(input_context).is_optional(),
+            ),
+        }
     }
 }
 
