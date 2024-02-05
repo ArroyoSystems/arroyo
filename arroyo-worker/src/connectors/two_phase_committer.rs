@@ -8,7 +8,7 @@ use arroyo_rpc::{
     CheckpointEvent, ControlMessage,
 };
 use arroyo_state::tables::global_keyed_map::GlobalKeyedState;
-use arroyo_types::{Data, Key, Record, TaskInfo, Watermark};
+use arroyo_types::{Data, Key, Message, Record, TaskInfo, Watermark};
 use async_trait::async_trait;
 use bincode::config;
 use tracing::warn;
@@ -140,7 +140,11 @@ impl<K: Key, T: Data + Sync, TPC: TwoPhaseCommitter<K, T>> TwoPhaseCommitterOper
             .expect("record inserted");
     }
 
-    async fn on_close(&mut self, ctx: &mut crate::engine::Context<(), ()>) {
+    async fn on_close(
+        &mut self,
+        ctx: &mut crate::engine::Context<(), ()>,
+        _final_message: &Option<Message<(), ()>>,
+    ) {
         if let Some(ControlMessage::Commit { epoch, commit_data }) = ctx.control_rx.recv().await {
             self.handle_commit(epoch, commit_data, ctx).await;
         } else {

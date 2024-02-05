@@ -3,7 +3,7 @@ use std::{marker::PhantomData, path::Path};
 use arroyo_formats::{DataSerializer, SchemaData};
 use arroyo_macro::{process_fn, StreamNode};
 use arroyo_rpc::OperatorConfig;
-use arroyo_types::{Key, Record};
+use arroyo_types::{Key, Message, Record};
 use serde::Serialize;
 use tokio::{
     fs::{self, File, OpenOptions},
@@ -97,7 +97,13 @@ impl<K: Key, T: SchemaData + Serialize> FileSink<K, T> {
             .await;
     }
 
-    async fn on_close(&mut self, _ctx: &mut Context<(), ()>) {
-        self.file.as_mut().unwrap().flush().await.unwrap();
+    async fn on_close(
+        &mut self,
+        _ctx: &mut Context<(), ()>,
+        final_message: &Option<Message<(), ()>>,
+    ) {
+        if let Some(Message::EndOfData) = final_message {
+            self.file.as_mut().unwrap().flush().await.unwrap();
+        }
     }
 }

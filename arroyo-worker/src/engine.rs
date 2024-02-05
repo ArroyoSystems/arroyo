@@ -286,6 +286,7 @@ impl<K: Key, T: Data> Context<K, T> {
                 )
                 .await;
                 metadata
+                    .expect("lookup should succeed")
                     .expect("require metadata")
                     .min_watermark
                     .map(from_micros)
@@ -943,9 +944,10 @@ impl Engine {
             Some(
                 StateBackend::load_checkpoint_metadata(&self.job_id, epoch)
                     .await
-                    .unwrap_or_else(|| {
-                        panic!("failed to load checkpoint metadata for epoch {}", epoch)
-                    }),
+                    .expect(&format!(
+                        "failed to load checkpoint metadata for epoch {}",
+                        epoch
+                    )),
             )
         } else {
             None

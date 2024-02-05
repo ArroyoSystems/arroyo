@@ -631,6 +631,7 @@ pub fn header_map(headers: Option<VarStr>) -> HashMap<String, String> {
         &headers
             .map(|t| t.sub_env_vars().expect("Failed to substitute env vars"))
             .unwrap_or("".to_string()),
+        ':',
     )
     .expect("Invalid header map")
 }

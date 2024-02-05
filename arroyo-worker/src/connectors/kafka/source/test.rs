@@ -262,7 +262,8 @@ async fn test_kafka() {
         bytes: checkpoint_completed.subtask_metadata.bytes,
         commit_data: None,
     })
-    .await;
+    .await
+    .unwrap();
 
     StateBackend::write_checkpoint_metadata(CheckpointMetadata {
         job_id: task_info.job_id.clone(),
@@ -272,7 +273,8 @@ async fn test_kafka() {
         finish_time: 0,
         operator_ids: vec![task_info.operator_id.clone()],
     })
-    .await;
+    .await
+    .unwrap();
 
     reader.assert_next_message_record_value(20).await;
 

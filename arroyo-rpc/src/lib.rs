@@ -190,3 +190,22 @@ pub fn error_chain(e: anyhow::Error) -> String {
         .collect::<Vec<_>>()
         .join(": ")
 }
+
+fn default_async_timeout_seconds() -> u64 {
+    10
+}
+
+fn default_async_max_concurrency() -> u64 {
+    100
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct UdfOpts {
+    #[serde(default = "bool::default")]
+    pub async_results_ordered: bool,
+    #[serde(default = "default_async_timeout_seconds")]
+    pub async_timeout_seconds: u64,
+    #[serde(default = "default_async_max_concurrency")]
+    pub async_max_concurrency: u64,
+}

@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use crate::expressions::RustUdfExpression;
 use crate::{
     code_gen::{
         BinAggregatingContext, BinType, CodeGenerator, CombiningContext, MemoryAddingContext,
@@ -11,10 +14,11 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use arrow_schema::DataType;
+use arroyo_datastream::duration_to_syn_expr;
 use arroyo_rpc::formats::Format;
 use datafusion_expr::type_coercion::aggregates::{avg_return_type, sum_return_type};
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{parse_quote, parse_str};
 
 #[derive(Debug, Clone)]
@@ -156,6 +160,115 @@ impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for UnnestProjecti
             .collect();
 
         StructDef::new(None, true, fields, self.format.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AsyncUdfProjection {
+    pub input_struct: StructDef,
+    pub async_udf: RustUdfExpression,
+    pub projection: Projection,
+}
+
+impl AsyncUdfProjection {
+    pub fn output_struct(&self) -> StructDef {
+        self.expression_type(&ValuePointerContext::new())
+    }
+}
+
+impl CodeGenerator<ValuePointerContext, StructDef, syn::Expr> for AsyncUdfProjection {
+    fn generate(&self, input_context: &ValuePointerContext) -> syn::Expr {
+        let input_struct = self.input_struct.get_type();
+        let output_type = self.expression_type(input_context).get_type();
+        let output_struct = self.projection.generate(input_context);
+        let input_name = input_context.variable_ident();
+        let mut may_not_invoke = false;
+        // definitions and identifiers for async udf invocation
+        let (initial_assignment, match_term_ids): (Vec<_>, Vec<_>) = self
+            .async_udf
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, (def, expr))| {
+                let t = expr.generate(&input_context);
+                let id = format_ident!("__{}", i);
+                let (initial_assigment, match_term, id) = match (
+                    expr.expression_type(&input_context).is_optional(),
+                    def.is_optional(),
+                ) {
+                    (true, true) => (quote!(let #id = #t), quote!(#id), id),
+                    (true, false) => {
+                        may_not_invoke = true;
+                        (quote!(let #id = #t), quote!(Some(#id)), id)
+                    }
+                    (false, true) => (quote!(let #id = Some(#t)), quote!(#id), id),
+                    (false, false) => (quote!(let #id = #t), quote!(#id), id),
+                };
+                (initial_assigment, (match_term, id))
+            })
+            .unzip();
+        let (match_terms, ids): (Vec<_>, Vec<_>) = match_term_ids.into_iter().unzip();
+
+        let function_name = format_ident!("{}", self.async_udf.name);
+        let timeout = duration_to_syn_expr(Duration::from_secs(
+            self.async_udf.opts.async_timeout_seconds,
+        ));
+
+        let mut context_t = quote! { EmptyContext };
+        let mut context_arg = quote!();
+
+        if self.async_udf.has_context {
+            context_t = quote! { udfs::Context };
+            context_arg = quote! {context.clone(), };
+        }
+
+        let args_pattern = quote!((#(#ids),*));
+        let args = quote!((#context_arg #(#ids),*));
+
+        let invocation = if may_not_invoke {
+            // turn ids into a tuple
+            let match_terms = quote!((#(#match_terms),*));
+            let suffix = if self.async_udf.ret_type.is_optional() {
+                None
+            } else {
+                Some(quote!(.map(|result| Some(result))))
+            };
+            quote!(
+                match #args_pattern {
+                    #match_terms => {
+                        timeout(#timeout, udfs:: #function_name #args).await #suffix
+                    }
+                    _ => {
+                        Ok(None)
+                    }
+                }
+            )
+        } else {
+            quote!(timeout(#timeout, udfs:: #function_name #args).await)
+        };
+        parse_quote! {{
+            use tokio::time::error::Elapsed;
+            use tokio::time::{timeout, Duration};
+            use std::sync::Arc;
+            async fn wrapper(
+                index: usize,
+                #input_name: #input_struct,
+                context: Arc<#context_t>
+            ) -> (
+                usize,
+                Result<#output_type, Elapsed>,
+            ) {
+                #(#initial_assignment;)*
+                let udf_result = #invocation;
+                (index, udf_result.map(|async_result| #output_struct))
+            };
+            wrapper
+        }
+        }
+    }
+
+    fn expression_type(&self, input_context: &ValuePointerContext) -> StructDef {
+        self.projection.expression_type(input_context)
     }
 }
 

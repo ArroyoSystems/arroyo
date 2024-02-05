@@ -686,6 +686,8 @@ impl ControllerServer {
 }
 
 fn cargo_toml(name: &str, dependencies: &str) -> String {
+    let types_dep = "types = { path = \"../../types\" }";
+
     format!(
         r#"
 [package]
@@ -694,8 +696,9 @@ version = "1.0.0"
 edition = "2021"
 
 {}
+{}
         "#,
-        name, dependencies
+        name, dependencies, types_dep
     )
 }
 

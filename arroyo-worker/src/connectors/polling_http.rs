@@ -77,6 +77,7 @@ where
                 .as_ref()
                 .map(|t| t.sub_env_vars().expect("Failed to substitute env vars"))
                 .unwrap_or("".to_string()),
+            ':',
         )
         .expect("Invalid header map")
         .into_iter()

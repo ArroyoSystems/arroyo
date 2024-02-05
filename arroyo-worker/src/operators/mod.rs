@@ -20,6 +20,7 @@ use wasmtime::{
     TypedFunc,
 };
 pub mod aggregating_window;
+pub mod async_map;
 pub mod functions;
 pub mod join_with_expiration;
 pub mod joiners;
@@ -177,13 +178,15 @@ impl<K: Key, D: Data> PeriodicWatermarkGenerator<K, D> {
         self.state_cache = state;
     }
 
-    async fn on_close(&mut self, ctx: &mut Context<K, D>) {
-        // send final watermark on close
-        ctx.collector
-            .broadcast(Message::Watermark(Watermark::EventTime(from_millis(
-                u64::MAX,
-            ))))
-            .await;
+    async fn on_close(&mut self, ctx: &mut Context<K, D>, final_message: &Option<Message<K, D>>) {
+        if let Some(Message::EndOfData) = final_message {
+            // send final watermark on end of data
+            ctx.collector
+                .broadcast(Message::Watermark(Watermark::EventTime(from_millis(
+                    u64::MAX,
+                ))))
+                .await;
+        }
     }
 
     async fn process_element(&mut self, record: &Record<K, D>, ctx: &mut Context<K, D>) {
