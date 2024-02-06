@@ -7,7 +7,6 @@ mod tests {
     use arroyo_sql_macro::single_test_codegen;
     use arroyo_types;
     use std::f64::consts::PI;
-    use std::i32;
 
     // Casts
     single_test_codegen!(
@@ -1333,8 +1332,9 @@ mod tests {
         PI
     );
 
+    // iszero
     single_test_codegen!(
-        "iszero",
+        "yes_iszero",
         "iszero(0)",
         arroyo_sql::TestStruct {
             ..Default::default()
@@ -1343,7 +1343,27 @@ mod tests {
     );
 
     single_test_codegen!(
-        "isnan",
+        "no_iszero",
+        "iszero(1)",
+        arroyo_sql::TestStruct {
+            ..Default::default()
+        },
+        false
+    );
+
+    single_test_codegen!(
+        "nan_iszero",
+        "iszero(non_nullable_f64)",
+        arroyo_sql::TestStruct {
+            non_nullable_f64: f64::NAN,
+            ..Default::default()
+        },
+        false
+    );
+
+    // isnan
+    single_test_codegen!(
+        "yes_isnan",
         "isnan(non_nullable_f64)",
         arroyo_sql::TestStruct {
             non_nullable_f64: f64::NAN,
@@ -1353,12 +1373,33 @@ mod tests {
     );
 
     single_test_codegen!(
-        "nanvl",
+        "no_isnan",
+        "isnan(non_nullable_f64)",
+        arroyo_sql::TestStruct {
+            non_nullable_f64: 1f64,
+            ..Default::default()
+        },
+        false
+    );
+
+    // nanvl
+    single_test_codegen!(
+        "nan_nanvl",
         "nanvl(non_nullable_f64,1)",
         arroyo_sql::TestStruct {
             non_nullable_f64: f64::NAN,
             ..Default::default()
         },
         1f64
+    );
+
+    single_test_codegen!(
+        "no_nan_nanvl",
+        "nanvl(non_nullable_f64,1)",
+        arroyo_sql::TestStruct {
+            non_nullable_f64: 2f64,
+            ..Default::default()
+        },
+        2f64
     );
 }
