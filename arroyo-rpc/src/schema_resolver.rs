@@ -350,10 +350,10 @@ impl ConfluentSchemaRegistry {
             .join(&format!("/schemas/ids/{}", id))
             .unwrap();
 
-        self.client
-            .get_schema_for_url(url)
-            .await
-            .context(format!("failed to fetch schema for subject '{}'", self.subject))
+        self.client.get_schema_for_url(url).await.context(format!(
+            "failed to fetch schema for subject '{}'",
+            self.subject
+        ))
     }
 
     pub async fn get_schema_for_version(

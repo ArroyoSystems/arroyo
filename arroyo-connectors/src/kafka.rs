@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use anyhow::{anyhow, bail};
 use arroyo_formats::avro::deserialize_slice_avro;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
@@ -14,6 +13,7 @@ use rdkafka::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;

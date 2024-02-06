@@ -26,7 +26,6 @@ impl KafkaTable {
     }
 }
 
-
 impl SourceOffset {
     fn get_offset(&self) -> Offset {
         match self {
