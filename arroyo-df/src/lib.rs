@@ -65,11 +65,13 @@ use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
 use tracing::{info, warn};
 use unicase::UniCase;
+use crate::json::{extract_json_string, extract_json, get_first_json_object};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
 #[cfg(test)]
 mod test;
+mod json;
 
 #[allow(unused)]
 #[derive(Clone, Debug)]
@@ -164,7 +166,6 @@ impl ArroyoSchemaProvider {
             }),
         );
 
-        /*
         functions.insert(
             "get_first_json_object".to_string(),
             Arc::new(create_udf(
@@ -172,24 +173,10 @@ impl ArroyoSchemaProvider {
                 vec![DataType::Utf8, DataType::Utf8],
                 Arc::new(DataType::Utf8),
                 Volatility::Volatile,
-                make_scalar_function(fn_impl),
+                Arc::new(get_first_json_object),
             )),
         );
 
-        functions.insert(
-            "get_json_objects".to_string(),
-            Arc::new(create_udf(
-                "get_json_objects",
-                vec![DataType::Utf8, DataType::Utf8],
-                Arc::new(DataType::List(Arc::new(Field::new(
-                    "item",
-                    DataType::Utf8,
-                    false,
-                )))),
-                Volatility::Volatile,
-                make_scalar_function(fn_impl),
-            )),
-        );
         functions.insert(
             "extract_json".to_string(),
             Arc::new(create_udf(
@@ -201,7 +188,7 @@ impl ArroyoSchemaProvider {
                     false,
                 )))),
                 Volatility::Volatile,
-                make_scalar_function(fn_impl),
+                Arc::new(extract_json),
             )),
         );
 
@@ -212,10 +199,9 @@ impl ArroyoSchemaProvider {
                 vec![DataType::Utf8, DataType::Utf8],
                 Arc::new(DataType::Utf8),
                 Volatility::Volatile,
-                make_scalar_function(fn_impl),
+                Arc::new(extract_json_string),
             )),
         );
-                 */
 
         Self {
             tables,
