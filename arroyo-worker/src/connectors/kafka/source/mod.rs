@@ -120,7 +120,7 @@ where
                 Arc::new(
                     ConfluentSchemaRegistry::new(
                         &endpoint,
-                        &table.topic,
+                        &table.subject(),
                         api_key.clone(),
                         api_secret.clone(),
                     )

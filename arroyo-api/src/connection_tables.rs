@@ -628,7 +628,7 @@ async fn get_schema(
     };
 
     let resolver =
-        ConfluentSchemaRegistry::new(&endpoint, &table.topic, api_key.clone(), api_secret.clone())
+        ConfluentSchemaRegistry::new(&endpoint, &table.subject(), api_key.clone(), api_secret.clone())
             .map_err(|e| {
                 bad_request(format!(
                     "failed to fetch schemas from schema repository: {}",

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use anyhow::{anyhow, bail};
 use arroyo_formats::avro::deserialize_slice_avro;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema, TestSourceMessage};
@@ -39,6 +40,15 @@ import_types!(
     }
 );
 import_types!(schema = "../connector-schemas/kafka/table.json");
+
+impl KafkaTable {
+    pub fn subject(&self) -> Cow<str> {
+        match &self.value_subject {
+            None => Cow::Owned(format!("{}_value", self.topic)),
+            Some(s) => Cow::Borrowed(s),
+        }
+    }
+}
 
 pub struct KafkaConnector {}
 
@@ -127,6 +137,7 @@ impl KafkaConnector {
                 })
                 .transpose()?
                 .unwrap_or_else(|| HashMap::new()),
+            value_subject: options.remove("value.subject"),
         })
     }
 }
@@ -486,7 +497,7 @@ impl KafkaTester {
                             api_secret,
                         }) => schema_resolver::ConfluentSchemaRegistry::new(
                             endpoint,
-                            &table.topic,
+                            &table.subject(),
                             api_key.clone(),
                             api_secret.clone(),
                         ),

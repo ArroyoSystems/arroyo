@@ -232,7 +232,7 @@ impl ConfluentSchemaRegistryClient {
             match status {
                 StatusCode::CONFLICT => {
                     bail!(
-                        "there is already an existing schema for this topic which is \
+                        "there is already an existing schema for this subject which is \
                     incompatible with the new schema being registered:\n\n{}",
                         body
                     )
@@ -244,7 +244,7 @@ impl ConfluentSchemaRegistryClient {
                     bail!("invalid credentials for schema registry");
                 }
                 StatusCode::NOT_FOUND => {
-                    bail!("schema not found; make sure that the topic exists")
+                    bail!("schema not found; make sure that the subject exists")
                 }
                 code => {
                     bail!("schema registry returned error {}: {}", code.as_u16(), body);
@@ -306,26 +306,26 @@ impl ConfluentSchemaRegistryClient {
 
 pub struct ConfluentSchemaRegistry {
     client: ConfluentSchemaRegistryClient,
-    topic: String,
+    subject: String,
 }
 
 impl ConfluentSchemaRegistry {
     pub fn new(
         endpoint: &str,
-        topic: &str,
+        subject: &str,
         api_key: Option<VarStr>,
         api_secret: Option<VarStr>,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             client: ConfluentSchemaRegistryClient::new(endpoint, api_key, api_secret)?,
-            topic: topic.to_string(),
+            subject: subject.to_string(),
         })
     }
 
-    fn topic_endpoint(&self) -> Url {
+    fn subject_endpoint(&self) -> Url {
         self.client
             .endpoint
-            .join(&format!("subjects/{}-value/versions/", self.topic))
+            .join(&format!("subjects/{}/versions/", self.subject))
             .unwrap()
     }
 
@@ -335,9 +335,9 @@ impl ConfluentSchemaRegistry {
         schema_type: ConfluentSchemaType,
     ) -> anyhow::Result<i32> {
         self.client
-            .write_schema(self.topic_endpoint(), schema, schema_type)
+            .write_schema(self.subject_endpoint(), schema, schema_type)
             .await
-            .context(format!("topic '{}'", self.topic))
+            .context(format!("subject '{}'", self.subject))
     }
 
     pub async fn get_schema_for_id(
@@ -353,7 +353,7 @@ impl ConfluentSchemaRegistry {
         self.client
             .get_schema_for_url(url)
             .await
-            .context(format!("failed to fetch schema for topic '{}'", self.topic))
+            .context(format!("failed to fetch schema for subject '{}'", self.subject))
     }
 
     pub async fn get_schema_for_version(
@@ -364,11 +364,11 @@ impl ConfluentSchemaRegistry {
             .map(|v| format!("{}", v))
             .unwrap_or_else(|| "latest".to_string());
 
-        let url = self.topic_endpoint().join(&version).unwrap();
+        let url = self.subject_endpoint().join(&version).unwrap();
 
         self.client.get_schema_for_url(url).await.context(format!(
-            "failed to fetch schema for topic '{}' with version {}",
-            self.topic, version
+            "failed to fetch schema for subject '{}' with version {}",
+            self.subject, version
         ))
     }
 }
