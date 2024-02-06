@@ -7,6 +7,7 @@ mod tests {
     use arroyo_sql_macro::single_test_codegen;
     use arroyo_types;
     use std::f64::consts::PI;
+    use std::i32;
 
     // Casts
     single_test_codegen!(
@@ -1343,8 +1344,9 @@ mod tests {
 
     single_test_codegen!(
         "isnan",
-        "isnan(cast('NaN' as double))",
+        "isnan(non_nullable_f64)",
         arroyo_sql::TestStruct {
+            non_nullable_f64: f64::NAN,
             ..Default::default()
         },
         true
@@ -1352,8 +1354,9 @@ mod tests {
 
     single_test_codegen!(
         "nanvl",
-        "nanvl(cast('NaN' as double),1)",
+        "nanvl(non_nullable_f64,1)",
         arroyo_sql::TestStruct {
+            non_nullable_f64: f64::NAN,
             ..Default::default()
         },
         1f64
