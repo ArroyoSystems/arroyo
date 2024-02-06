@@ -2049,9 +2049,9 @@ impl NumericFunction {
             NumericFunction::Trunc(..) => "trunc",
             NumericFunction::Signum(..) => "signum",
             NumericFunction::Cot(..) => "cot",
-            NumericFunction::Iszero(..) => "iszero",
+            NumericFunction::Iszero(..) => "is_zero",
             NumericFunction::Nanvl(..) => "nanvl",
-            NumericFunction::Isnan(..) => "isnan",
+            NumericFunction::Isnan(..) => "is_nan",
         };
         format_ident!("{}", name)
     }
