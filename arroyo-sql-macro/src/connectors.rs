@@ -102,6 +102,7 @@ pub fn get_json_schema_source() -> Result<Connection> {
             read_mode: Some(ReadMode::ReadUncommitted),
         },
         client_configs: HashMap::new(),
+        value_subject: None,
     };
     KafkaConnector {}.from_config(
         Some(2),
@@ -209,6 +210,7 @@ pub fn get_avro_source() -> Result<Connection> {
             read_mode: Some(ReadMode::ReadUncommitted),
         },
         client_configs: HashMap::new(),
+        value_subject: None,
     };
     KafkaConnector {}.from_config(
         Some(3),
