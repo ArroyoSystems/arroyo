@@ -53,7 +53,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
-use crate::json::{extract_json, extract_json_string, get_first_json_object, get_json_functions};
+use crate::json::get_json_functions;
 use crate::rewriters::{TimestampRewriter, UnnestRewriter};
 use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
 use crate::watermark_node::WatermarkNode;

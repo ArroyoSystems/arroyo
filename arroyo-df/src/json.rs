@@ -183,3 +183,131 @@ pub fn extract_json_string(args: &[ColumnarValue]) -> Result<ColumnarValue> {
         args,
     )
 }
+
+#[cfg(test)]
+mod test {
+    use arrow_array::builder::{ListBuilder, StringBuilder};
+    use arrow_array::StringArray;
+    use datafusion_common::ScalarValue;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_extract_json() {
+        let input = Arc::new(StringArray::from(vec![
+            r#"{"a": 1, "b": 2, "c": { "d": "hello" }}"#,
+            r#"{"a": 3, "b": 4}"#,
+            r#"{"a": 5, "b": 6}"#,
+        ]));
+
+        let path = "$.c.d";
+
+        let result = super::extract_json(&[
+            super::ColumnarValue::Array(input),
+            super::ColumnarValue::Scalar(path.into()),
+        ])
+        .unwrap();
+
+        let mut expected = ListBuilder::new(StringBuilder::new());
+        expected.append_value(vec![Some("\"hello\"".to_string())]);
+        expected.append_value(Vec::<Option<String>>::new());
+        expected.append_value(Vec::<Option<String>>::new());
+        if let super::ColumnarValue::Array(result) = result {
+            assert_eq!(*result, expected.finish());
+        } else {
+            panic!("Expected array, got scalar");
+        }
+
+        let result = super::extract_json(&[
+            super::ColumnarValue::Scalar(r#"{"a": 1, "b": 2, "c": { "d": "hello" }}"#.into()),
+            super::ColumnarValue::Scalar(path.into()),
+        ])
+        .unwrap();
+
+        let mut expected = ListBuilder::with_capacity(StringBuilder::new(), 1);
+        expected.append_value(vec![Some("\"hello\"".to_string())]);
+
+        if let super::ColumnarValue::Scalar(ScalarValue::List(result)) = result {
+            assert_eq!(*result, expected.finish());
+        } else {
+            panic!("Expected scalar list");
+        }
+    }
+
+    #[test]
+    fn test_get_first_json_object() {
+        let input = Arc::new(StringArray::from(vec![
+            r#"{"a": 1, "b": 2}"#,
+            r#"{"a": 3}"#,
+            r#"{"a": 5, "b": 6}"#,
+        ]));
+
+        let path = "$.b";
+
+        let result = super::get_first_json_object(&[
+            super::ColumnarValue::Array(input),
+            super::ColumnarValue::Scalar(path.into()),
+        ])
+        .unwrap();
+
+        let expected = StringArray::from(vec![Some("2"), None, Some("6")]);
+
+        if let super::ColumnarValue::Array(result) = result {
+            assert_eq!(*result, expected);
+        } else {
+            panic!("Expected array, got scalar");
+        }
+
+        let result = super::get_first_json_object(&[
+            super::ColumnarValue::Scalar(r#"{"a": 1, "b": 2, "c": { "d": "hello" }}"#.into()),
+            super::ColumnarValue::Scalar("$.c.d".into()),
+        ])
+        .unwrap();
+
+        let expected = ScalarValue::Utf8(Some("\"hello\"".to_string()));
+
+        if let super::ColumnarValue::Scalar(result) = result {
+            assert_eq!(result, expected);
+        } else {
+            panic!("Expected scalar");
+        }
+    }
+
+    #[test]
+    fn test_extract_json_string() {
+        let input = Arc::new(StringArray::from(vec![
+            r#"{"a": 1, "b": 2, "c": { "d": "hello" }}"#,
+            r#"{"a": 3, "b": 4}"#,
+            r#"{"a": 5, "b": 6}"#,
+        ]));
+
+        let path = "$.c.d";
+
+        let result = super::extract_json_string(&[
+            super::ColumnarValue::Array(input),
+            super::ColumnarValue::Scalar(path.into()),
+        ])
+        .unwrap();
+
+        let expected = StringArray::from(vec![Some("hello"), None, None]);
+
+        if let super::ColumnarValue::Array(result) = result {
+            assert_eq!(*result, expected);
+        } else {
+            panic!("Expected array, got scalar");
+        }
+
+        let result = super::extract_json_string(&[
+            super::ColumnarValue::Scalar(r#"{"a": 1, "b": 2, "c": { "d": "hello" }}"#.into()),
+            super::ColumnarValue::Scalar(path.into()),
+        ])
+        .unwrap();
+
+        let expected = ScalarValue::Utf8(Some("hello".to_string()));
+
+        if let super::ColumnarValue::Scalar(result) = result {
+            assert_eq!(result, expected);
+        } else {
+            panic!("Expected scalar");
+        }
+    }
+}

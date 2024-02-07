@@ -6,7 +6,7 @@ use std::{
 };
 
 use arrow_array::{RecordBatch, StructArray};
-use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
+use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
 use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
 use datafusion::physical_plan::unnest::UnnestExec;
 use datafusion::{
