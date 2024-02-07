@@ -6,7 +6,7 @@ use std::{
 };
 
 use arrow_array::{RecordBatch, StructArray};
-use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
+use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use arroyo_rpc::grpc::api::{arroyo_exec_node, ArroyoExecNode, MemExecNode, UnnestExecNode};
 use datafusion::physical_plan::unnest::UnnestExec;
 use datafusion::{
@@ -24,15 +24,14 @@ use datafusion_common::{
 use crate::rewriters::UNNESTED_COL;
 use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
 use datafusion_execution::FunctionRegistry;
-use datafusion_expr::{
-    AggregateUDF, ColumnarValue, ScalarUDF, Signature, TypeSignature, WindowUDF,
-};
+use datafusion_expr::{AggregateUDF, ColumnarValue, ScalarUDF, Signature, TypeSignature, WindowUDF};
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
+use crate::json::get_json_functions;
 
 pub struct EmptyRegistry {
     udfs: HashMap<String, Arc<ScalarUDF>>,
@@ -43,6 +42,9 @@ impl EmptyRegistry {
         let window_udf = window_scalar_function();
         let mut udfs = HashMap::new();
         udfs.insert("window".to_string(), Arc::new(window_udf));
+
+        udfs.extend(get_json_functions());
+
         Self { udfs }
     }
 }

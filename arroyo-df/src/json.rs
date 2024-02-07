@@ -1,12 +1,57 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use arrow_array::cast::as_string_array;
 use arrow_array::{Array, ArrayRef, StringArray};
 use arrow_array::builder::{ListBuilder, StringBuilder};
-use datafusion_expr::ColumnarValue;
+use arrow_schema::{DataType, Field};
+use datafusion_expr::{ColumnarValue, create_udf, ScalarUDF, Volatility};
 use serde_json_path::JsonPath;
 use datafusion::common::Result;
 use datafusion_common::{DataFusionError, ScalarValue};
 
+
+pub fn get_json_functions() -> HashMap<String, Arc<ScalarUDF>> {
+    let mut udfs = HashMap::new();
+
+    udfs.insert(
+        "get_first_json_object".to_string(),
+        Arc::new(create_udf(
+            "get_first_json_object",
+            vec![DataType::Utf8, DataType::Utf8],
+            Arc::new(DataType::Utf8),
+            Volatility::Immutable,
+            Arc::new(get_first_json_object),
+        )),
+    );
+
+    udfs.insert(
+        "extract_json".to_string(),
+        Arc::new(create_udf(
+            "extract_json",
+            vec![DataType::Utf8, DataType::Utf8],
+            Arc::new(DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::Utf8,
+                false,
+            )))),
+            Volatility::Immutable,
+            Arc::new(extract_json),
+        )),
+    );
+
+    udfs.insert(
+        "extract_json_string".to_string(),
+        Arc::new(create_udf(
+            "extract_json_string",
+            vec![DataType::Utf8, DataType::Utf8],
+            Arc::new(DataType::Utf8),
+            Volatility::Immutable,
+            Arc::new(extract_json_string),
+        )),
+    );
+
+    udfs
+}
 
 fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
     let path = match path {

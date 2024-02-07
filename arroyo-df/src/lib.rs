@@ -65,7 +65,7 @@ use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
 use tracing::{info, warn};
 use unicase::UniCase;
-use crate::json::{extract_json_string, extract_json, get_first_json_object};
+use crate::json::{extract_json_string, extract_json, get_first_json_object, get_json_functions};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
@@ -166,42 +166,7 @@ impl ArroyoSchemaProvider {
             }),
         );
 
-        functions.insert(
-            "get_first_json_object".to_string(),
-            Arc::new(create_udf(
-                "get_first_json_object",
-                vec![DataType::Utf8, DataType::Utf8],
-                Arc::new(DataType::Utf8),
-                Volatility::Volatile,
-                Arc::new(get_first_json_object),
-            )),
-        );
-
-        functions.insert(
-            "extract_json".to_string(),
-            Arc::new(create_udf(
-                "extract_json",
-                vec![DataType::Utf8, DataType::Utf8],
-                Arc::new(DataType::List(Arc::new(Field::new(
-                    "item",
-                    DataType::Utf8,
-                    false,
-                )))),
-                Volatility::Volatile,
-                Arc::new(extract_json),
-            )),
-        );
-
-        functions.insert(
-            "extract_json_string".to_string(),
-            Arc::new(create_udf(
-                "extract_json_string",
-                vec![DataType::Utf8, DataType::Utf8],
-                Arc::new(DataType::Utf8),
-                Volatility::Volatile,
-                Arc::new(extract_json_string),
-            )),
-        );
+        functions.extend(get_json_functions());
 
         Self {
             tables,
