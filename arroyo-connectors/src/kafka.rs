@@ -44,7 +44,7 @@ import_types!(schema = "../connector-schemas/kafka/table.json");
 impl KafkaTable {
     pub fn subject(&self) -> Cow<str> {
         match &self.value_subject {
-            None => Cow::Owned(format!("{}_value", self.topic)),
+            None => Cow::Owned(format!("{}-value", self.topic)),
             Some(s) => Cow::Borrowed(s),
         }
     }
