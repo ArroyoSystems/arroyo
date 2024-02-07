@@ -21,17 +21,19 @@ use datafusion_common::{
     DataFusionError, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
 };
 
+use crate::json::get_json_functions;
 use crate::rewriters::UNNESTED_COL;
 use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
 use datafusion_execution::FunctionRegistry;
-use datafusion_expr::{AggregateUDF, ColumnarValue, ScalarUDF, Signature, TypeSignature, WindowUDF};
+use datafusion_expr::{
+    AggregateUDF, ColumnarValue, ScalarUDF, Signature, TypeSignature, WindowUDF,
+};
 use datafusion_physical_expr::expressions::Column;
 use datafusion_proto::physical_plan::PhysicalExtensionCodec;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
-use crate::json::get_json_functions;
 
 pub struct EmptyRegistry {
     udfs: HashMap<String, Arc<ScalarUDF>>,

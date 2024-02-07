@@ -53,6 +53,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
+use crate::json::{extract_json, extract_json_string, get_first_json_object, get_json_functions};
 use crate::rewriters::{TimestampRewriter, UnnestRewriter};
 use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
 use crate::watermark_node::WatermarkNode;
@@ -65,13 +66,12 @@ use std::{collections::HashMap, sync::Arc};
 use syn::{parse_file, FnArg, Item, ReturnType, Visibility};
 use tracing::{info, warn};
 use unicase::UniCase;
-use crate::json::{extract_json_string, extract_json, get_first_json_object, get_json_functions};
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
+mod json;
 #[cfg(test)]
 mod test;
-mod json;
 
 #[allow(unused)]
 #[derive(Clone, Debug)]
