@@ -48,7 +48,8 @@ parquet = { version = "50.0.0" }
 debug = 1
 
 [profile.dev]
-incremental = false
+split-debuginfo = "unpacked"
+
 
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
