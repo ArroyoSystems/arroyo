@@ -84,27 +84,27 @@ where
 {
     assert_eq!(args.len(), 2);
     Ok(match (&args[0], &args[1]) {
-        (ColumnarValue::Array(vs), ColumnarValue::Scalar(path)) => {
+        (ColumnarValue::Array(values), ColumnarValue::Scalar(path)) => {
             let path = parse_path(name, path)?;
-            let vs = as_string_array(vs);
+            let vs = as_string_array(values);
             ColumnarValue::Array(Arc::new(
                 vs.iter()
                     .map(|s| s.and_then(|s| f(serde_json::from_str(&s).ok()?, &(*path))))
                     .collect::<ArrayT>(),
             ) as ArrayRef)
         }
-        (ColumnarValue::Scalar(v), ColumnarValue::Scalar(path)) => {
+        (ColumnarValue::Scalar(value), ColumnarValue::Scalar(path)) => {
             let path = parse_path(name, path)?;
-            let ScalarValue::Utf8(ref v) = v else {
+            let ScalarValue::Utf8(ref value) = value else {
                 return Err(DataFusionError::Execution(format!(
                     "The value argument to {name} must be of type TEXT"
                 )));
             };
 
-            let r = v
+            let result = value
                 .as_ref()
                 .and_then(|v| f(serde_json::from_str(v).ok()?, &(*path)));
-            ColumnarValue::Scalar(to_scalar(r))
+            ColumnarValue::Scalar(to_scalar(result))
         }
         _ => {
             return Err(DataFusionError::Execution(
@@ -127,13 +127,13 @@ pub fn extract_json(args: &[ColumnarValue]) -> Result<ColumnarValue> {
     };
 
     Ok(match (&args[0], &args[1]) {
-        (ColumnarValue::Array(vs), ColumnarValue::Scalar(path)) => {
+        (ColumnarValue::Array(values), ColumnarValue::Scalar(path)) => {
             let path = parse_path("extract_json", path)?;
-            let vs = as_string_array(vs);
+            let values = as_string_array(values);
 
-            let mut builder = ListBuilder::with_capacity(StringBuilder::new(), vs.len());
+            let mut builder = ListBuilder::with_capacity(StringBuilder::new(), values.len());
 
-            let queried = vs.iter().map(|s| s.and_then(|s| inner(s, &*path)));
+            let queried = values.iter().map(|s| s.and_then(|s| inner(s, &*path)));
 
             for v in queried {
                 builder.append_option(v);
@@ -141,17 +141,17 @@ pub fn extract_json(args: &[ColumnarValue]) -> Result<ColumnarValue> {
 
             ColumnarValue::Array(Arc::new(builder.finish()))
         }
-        (ColumnarValue::Scalar(v), ColumnarValue::Scalar(path)) => {
+        (ColumnarValue::Scalar(value), ColumnarValue::Scalar(path)) => {
             let path = parse_path("extract_json", path)?;
-            let ScalarValue::Utf8(ref v) = v else {
+            let ScalarValue::Utf8(ref v) = value else {
                 return Err(DataFusionError::Execution(
                     "The value argument to extract_json must be of type TEXT".to_string(),
                 ));
             };
 
             let mut builder = ListBuilder::with_capacity(StringBuilder::new(), 1);
-            let r = v.as_ref().and_then(|s| inner(s, &*path));
-            builder.append_option(r);
+            let result = v.as_ref().and_then(|s| inner(s, &*path));
+            builder.append_option(result);
 
             ColumnarValue::Scalar(ScalarValue::List(Arc::new(builder.finish())))
         }
