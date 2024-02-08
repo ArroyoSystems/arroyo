@@ -1423,6 +1423,8 @@ pub async fn parse_and_get_arrow_program(
             .rewrite(&mut TimestampRewriter {})?
             .rewrite(&mut rewriter)?;
 
+        println!("Logical plan: {}", plan_rewrite.display_graphviz());
+
         for (original_name, index) in &rewriter.table_source_to_nodes {
             let node = rewriter
                 .local_logical_plan_graph

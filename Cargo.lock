@@ -819,6 +819,7 @@ dependencies = [
  "arroyo-state",
  "arroyo-storage",
  "arroyo-types",
+ "arroyo-worker",
  "async-stream",
  "async-trait",
  "base64 0.21.7",

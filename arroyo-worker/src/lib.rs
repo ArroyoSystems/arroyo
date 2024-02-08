@@ -27,7 +27,6 @@ use base64::Engine as Base64Engine;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
-use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -163,13 +162,6 @@ impl WorkerServer {
 
         let logical = LogicalProgram::try_from(graph).expect("Failed to create LogicalProgram");
 
-        WorkerServer::new("program", logical.graph, shutdown_guard)
-    }
-
-    pub fn new(name: &'static str, logical: LogicalGraph, shutdown_guard: ShutdownGuard) -> Self {
-        let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
-            .unwrap_or_else(|_| default_controller_addr());
-
         let id = WorkerId::from_env().unwrap_or_else(|| WorkerId(random()));
         let job_id =
             std::env::var(JOB_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", JOB_ID_ENV));
@@ -177,8 +169,31 @@ impl WorkerServer {
         let run_id =
             std::env::var(RUN_ID_ENV).unwrap_or_else(|_| panic!("{} is not set", RUN_ID_ENV));
 
-        Self {
+        let controller_addr = std::env::var(arroyo_types::CONTROLLER_ADDR_ENV)
+            .unwrap_or_else(|_| default_controller_addr());
+
+        WorkerServer::new(
+            "program",
             id,
+            job_id,
+            run_id,
+            controller_addr,
+            logical.graph,
+            shutdown_guard,
+        )
+    }
+
+    pub fn new(
+        name: &'static str,
+        worker_id: WorkerId,
+        job_id: String,
+        run_id: String,
+        controller_addr: String,
+        logical: LogicalGraph,
+        shutdown_guard: ShutdownGuard,
+    ) -> Self {
+        Self {
+            id: worker_id,
             name,
             job_id,
             run_id,
@@ -244,7 +259,7 @@ impl WorkerServer {
         client
             .register_worker(Request::new(RegisterWorkerReq {
                 worker_id: id.0,
-                node_id: node_id.0,
+                node_id: node_id.map(|n| n.0).unwrap_or(1),
                 job_id,
                 rpc_address,
                 data_address,
@@ -271,6 +286,8 @@ impl WorkerServer {
         job_id: String,
     ) -> impl Future<Output = ()> {
         let addr = self.controller_addr.clone();
+
+        let cancel_token = self.shutdown_guard.token();
 
         async move {
             let mut controller = ControllerGrpcClient::connect(addr.clone())
@@ -362,7 +379,7 @@ impl WorkerServer {
                         };
                         if let Some(err) = err {
                             error!("encountered control message failure {}", err);
-                            exit(1);
+                            cancel_token.cancel();
                         }
                     }
                     _ = tick.tick() => {
@@ -598,9 +615,10 @@ impl WorkerGrpc for WorkerServer {
             engine.shutdown_guard.cancel();
         }
 
-        tokio::task::spawn(async {
+        let token = self.shutdown_guard.token();
+        tokio::task::spawn(async move {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            exit(0);
+            token.cancel();
         });
 
         Ok(Response::new(JobFinishedResp {}))
