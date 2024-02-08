@@ -16,6 +16,7 @@ arroyo-state = { path = "../arroyo-state" }
 arroyo-storage = { path = "../arroyo-storage" }
 arroyo-df = { path = "../arroyo-df" }
 arroyo-server-common = { path = "../arroyo-server-common" }
+arroyo-worker = { path = "../arroyo-worker" }
 
 tonic = {workspace = true}
 tonic-reflection = {workspace = true}

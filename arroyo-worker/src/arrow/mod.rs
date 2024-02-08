@@ -43,6 +43,7 @@ impl OperatorConstructor for ValueExecutionConstructor {
         let registry = EmptyRegistry::new();
 
         let plan = PhysicalPlanNode::decode(&mut config.physical_plan.as_slice()).unwrap();
+
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::SingleLockedBatch(locked_batch.clone()),
         };
@@ -75,6 +76,7 @@ impl ArrowOperator for ValueExecutionOperator {
             let mut writer = self.locked_batch.write().unwrap();
             *writer = Some(record_batch);
         }
+
         let session_context = SessionContext::new();
         let mut records = self
             .execution_plan

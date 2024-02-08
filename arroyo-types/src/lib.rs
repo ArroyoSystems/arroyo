@@ -253,12 +253,10 @@ impl WorkerId {
 pub struct NodeId(pub u64);
 
 impl NodeId {
-    pub fn from_env() -> NodeId {
-        NodeId(
-            std::env::var(NODE_ID_ENV)
-                .map(|s| u64::from_str(&s).unwrap())
-                .unwrap_or_else(|_| panic!("{} not set", NODE_ID_ENV)),
-        )
+    pub fn from_env() -> Option<NodeId> {
+        std::env::var(NODE_ID_ENV)
+            .map(|s| NodeId(u64::from_str(&s).unwrap()))
+            .ok()
     }
 }
 

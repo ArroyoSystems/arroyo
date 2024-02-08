@@ -26,6 +26,7 @@ use tokio::sync::{oneshot, Mutex};
 use tonic::{Request, Status};
 use tracing::{info, warn};
 
+pub mod embedded;
 #[cfg(feature = "k8s")]
 pub mod kubernetes;
 
