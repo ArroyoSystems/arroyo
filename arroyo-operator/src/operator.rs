@@ -273,7 +273,10 @@ pub trait ArrowOperator: Send + 'static {
             // }
         }
 
-        self.handle_watermark(watermark, ctx).await;
+        if let Some(watermark) = self.handle_watermark(watermark, ctx).await {
+            ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
+                .await;
+        }
     }
 
     async fn handle_controller_message(
@@ -425,9 +428,12 @@ pub trait ArrowOperator: Send + 'static {
     #[allow(unused_variables)]
     async fn handle_timer(&mut self, key: Vec<u8>, value: Vec<u8>, ctx: &mut ArrowContext) {}
 
-    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
-        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
-            .await;
+    async fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+        _ctx: &mut ArrowContext,
+    ) -> Option<Watermark> {
+        Some(watermark)
     }
 
     #[allow(unused_variables)]

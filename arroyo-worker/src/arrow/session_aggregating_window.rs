@@ -29,9 +29,7 @@ use arroyo_rpc::{
 use arroyo_state::{
     global_table_config, tables::global_keyed_map::GlobalKeyedView, timestamp_table_config,
 };
-use arroyo_types::{
-    from_nanos, print_time, to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
-};
+use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 
 use arroyo_df::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
@@ -844,11 +842,14 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             .expect("should be able to add batch");
     }
 
-    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
+    async fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+        ctx: &mut ArrowContext,
+    ) -> Option<Watermark> {
         self.advance(ctx).await.unwrap();
 
-        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
-            .await;
+        Some(watermark)
     }
 
     async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {

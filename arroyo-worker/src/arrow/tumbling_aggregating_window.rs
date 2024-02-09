@@ -16,9 +16,7 @@ use arroyo_operator::context::ArrowContext;
 use arroyo_operator::operator::{ArrowOperator, OperatorConstructor, OperatorNode};
 use arroyo_rpc::grpc::{api, TableConfig};
 use arroyo_state::timestamp_table_config;
-use arroyo_types::{
-    from_nanos, print_time, to_nanos, ArrowMessage, CheckpointBarrier, SignalMessage, Watermark,
-};
+use arroyo_types::{from_nanos, print_time, to_nanos, CheckpointBarrier, Watermark};
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use datafusion_common::ScalarValue;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -271,7 +269,11 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
         }
     }
 
-    async fn handle_watermark(&mut self, watermark: Watermark, ctx: &mut ArrowContext) {
+    async fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+        ctx: &mut ArrowContext,
+    ) -> Option<Watermark> {
         if let Some(watermark) = ctx.last_present_watermark() {
             let bin = self.bin_start(watermark);
             while !self.execs.is_empty() {
@@ -335,8 +337,7 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                 }
             }
         }
-        ctx.broadcast(ArrowMessage::Signal(SignalMessage::Watermark(watermark)))
-            .await;
+        Some(watermark)
     }
 
     fn future_to_poll(
