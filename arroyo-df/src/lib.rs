@@ -53,6 +53,7 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt::Debug;
 
+use crate::json::get_json_functions;
 use crate::rewriters::{TimestampRewriter, UnnestRewriter};
 use crate::types::{interval_month_day_nanos_to_duration, rust_to_arrow, NullableType};
 use crate::watermark_node::WatermarkNode;
@@ -68,6 +69,7 @@ use unicase::UniCase;
 
 const DEFAULT_IDLE_TIME: Option<Duration> = Some(Duration::from_secs(5 * 60));
 
+mod json;
 #[cfg(test)]
 mod test;
 
@@ -164,58 +166,7 @@ impl ArroyoSchemaProvider {
             }),
         );
 
-        /*
-        functions.insert(
-            "get_first_json_object".to_string(),
-            Arc::new(create_udf(
-                "get_first_json_object",
-                vec![DataType::Utf8, DataType::Utf8],
-                Arc::new(DataType::Utf8),
-                Volatility::Volatile,
-                make_scalar_function(fn_impl),
-            )),
-        );
-
-        functions.insert(
-            "get_json_objects".to_string(),
-            Arc::new(create_udf(
-                "get_json_objects",
-                vec![DataType::Utf8, DataType::Utf8],
-                Arc::new(DataType::List(Arc::new(Field::new(
-                    "item",
-                    DataType::Utf8,
-                    false,
-                )))),
-                Volatility::Volatile,
-                make_scalar_function(fn_impl),
-            )),
-        );
-        functions.insert(
-            "extract_json".to_string(),
-            Arc::new(create_udf(
-                "extract_json",
-                vec![DataType::Utf8, DataType::Utf8],
-                Arc::new(DataType::List(Arc::new(Field::new(
-                    "item",
-                    DataType::Utf8,
-                    false,
-                )))),
-                Volatility::Volatile,
-                make_scalar_function(fn_impl),
-            )),
-        );
-
-        functions.insert(
-            "extract_json_string".to_string(),
-            Arc::new(create_udf(
-                "extract_json_string",
-                vec![DataType::Utf8, DataType::Utf8],
-                Arc::new(DataType::Utf8),
-                Volatility::Volatile,
-                make_scalar_function(fn_impl),
-            )),
-        );
-                 */
+        functions.extend(get_json_functions());
 
         Self {
             tables,

@@ -21,6 +21,7 @@ use datafusion_common::{
     DataFusionError, Result as DFResult, ScalarValue, Statistics, UnnestOptions,
 };
 
+use crate::json::get_json_functions;
 use crate::rewriters::UNNESTED_COL;
 use arroyo_rpc::grpc::api::arroyo_exec_node::Node;
 use datafusion_execution::FunctionRegistry;
@@ -43,6 +44,9 @@ impl EmptyRegistry {
         let window_udf = window_scalar_function();
         let mut udfs = HashMap::new();
         udfs.insert("window".to_string(), Arc::new(window_udf));
+
+        udfs.extend(get_json_functions());
+
         Self { udfs }
     }
 }
