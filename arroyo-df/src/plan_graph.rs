@@ -11,18 +11,18 @@ use datafusion::{
     },
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
-use datafusion_execution::{runtime_env::RuntimeConfig, FunctionRegistry};
+use datafusion_execution::{FunctionRegistry, runtime_env::RuntimeConfig};
 use petgraph::{graph::DiGraph, visit::Topo};
 
 use tracing::info;
 
 use crate::{
+    AggregateCalculation,
     create_table_with_timestamp,
     physical::{ArroyoMemExec, ArroyoPhysicalExtensionCodec, DecodingContext, EmptyRegistry},
-    schemas::add_timestamp_field_arrow,
-    AggregateCalculation, QueryToGraphVisitor, WindowBehavior,
+    schemas::add_timestamp_field_arrow, WindowBehavior,
 };
-use crate::{tables::Table, ArroyoSchemaProvider, CompiledSql};
+use crate::{ArroyoSchemaProvider, CompiledSql, tables::Table};
 use anyhow::{anyhow, bail, Context, Result};
 use arroyo_datastream::logical::{LogicalGraph, LogicalNode, LogicalProgram, OperatorName};
 use arroyo_rpc::df::ArroyoSchema;
@@ -33,18 +33,19 @@ use arroyo_rpc::grpc::api::{
 };
 use datafusion_common::{Column, DFField, DFSchema, DFSchemaRef, ScalarValue};
 use datafusion_expr::{
-    expr::ScalarFunction, BinaryExpr, BuiltinScalarFunction, Expr, LogicalPlan, Projection,
+    BinaryExpr, BuiltinScalarFunction, Expr, expr::ScalarFunction, LogicalPlan, Projection,
     ScalarFunctionDefinition, TableScan,
 };
 use datafusion_proto::{
     physical_plan::AsExecutionPlan,
     protobuf::{
-        physical_plan_node::PhysicalPlanType, AggregateMode, PhysicalExprNode, PhysicalPlanNode,
+        AggregateMode, physical_plan_node::PhysicalPlanType, PhysicalExprNode, PhysicalPlanNode,
     },
 };
 use petgraph::prelude::EdgeRef;
 use petgraph::Direction;
 use prost::Message;
+use crate::graph_rewriter::QueryToGraphVisitor;
 
 pub(crate) struct Planner {
     schema_provider: ArroyoSchemaProvider,
@@ -120,10 +121,10 @@ impl Planner {
                     let physical_plan = self
                         .planner
                         .create_physical_plan(logical_plan, &self.session_state)
-                        .await;
+                        .await
+                        .context("creating physical plan for value calculation")?;
 
-                    let physical_plan =
-                        physical_plan.context("creating physical plan for value calculation")?;
+                    println!("Physical plan: {:#?}", physical_plan);
 
                     let physical_plan_node: PhysicalPlanNode =
                         PhysicalPlanNode::try_from_physical_plan(
