@@ -540,6 +540,10 @@ impl LogicalPlanExtension {
                 DataFusionEdge::new(join.output_schema.clone(), LogicalEdgeType::Forward, vec![])
                     .unwrap()
             }
+            LogicalPlanExtension::SqlWindow(w) => {
+                DataFusionEdge::new(w.schema().clone(), LogicalEdgeType::Forward, vec![])
+                    .unwrap()
+            }
         }
     }
 }

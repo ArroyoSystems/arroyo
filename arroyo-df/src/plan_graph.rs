@@ -244,6 +244,9 @@ impl Planner {
                     node_mapping.insert(node_index, new_node_index);
                     new_node_index
                 }
+                crate::LogicalPlanExtension::SqlWindow(window) => {
+                    todo!()
+                }
                 crate::LogicalPlanExtension::Sink {
                     name: _,
                     connector_op,
