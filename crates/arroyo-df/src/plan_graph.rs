@@ -162,8 +162,6 @@ impl Planner {
                         .await;
 
                     let physical_plan = physical_plan.context("creating physical plan")?;
-
-                    println!("physical plan {:#?}", physical_plan);
                     let physical_plan_node: PhysicalPlanNode =
                         PhysicalPlanNode::try_from_physical_plan(
                             physical_plan,

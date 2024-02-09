@@ -41,7 +41,6 @@ impl ArrowOperator for SingleFileSink {
         let file = self.file.as_mut().unwrap();
         for map in json_rows {
             let value = serde_json::to_string(&map).unwrap();
-            //info!("sending map {:?}", value);
             file.write_all(value.as_bytes()).await.unwrap();
             file.write_all(b"\n").await.unwrap();
         }
@@ -80,6 +79,7 @@ impl ArrowOperator for SingleFileSink {
     }
 
     async fn handle_checkpoint(&mut self, _b: CheckpointBarrier, ctx: &mut ArrowContext) {
+        self.file.as_mut().unwrap().flush().await.unwrap();
         let state = ctx.table_manager.get_global_keyed_state("f").await.unwrap();
         state
             .insert(

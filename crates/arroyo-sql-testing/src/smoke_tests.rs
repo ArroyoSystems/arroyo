@@ -1,9 +1,13 @@
 #![allow(warnings)]
 use anyhow::Result;
-use arroyo_datastream::logical::{LogicalEdge, LogicalNode, LogicalProgram, ProgramConfig};
+use arroyo_datastream::logical::{
+    LogicalEdge, LogicalEdgeType, LogicalNode, LogicalProgram, OperatorName, ProgramConfig,
+};
 use arroyo_df::{parse_and_get_arrow_program, ArroyoSchemaProvider, SqlConfig};
 use arroyo_state::parquet::ParquetBackend;
-use std::collections::{BTreeMap, HashMap};
+use petgraph::algo::has_path_connecting;
+use petgraph::visit::EdgeRef;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::time::Duration;
 use std::{env, fmt::Debug, time::SystemTime};
@@ -15,7 +19,7 @@ use arroyo_state::checkpoint_state::CheckpointState;
 use arroyo_types::{to_micros, CheckpointBarrier};
 use arroyo_worker::engine::{Engine, StreamConfig};
 use arroyo_worker::engine::{Program, RunningEngine};
-use petgraph::Graph;
+use petgraph::{Direction, Graph};
 use serde_json::{ser, Value};
 use test_log::test;
 use tokio::fs::read_to_string;
@@ -133,34 +137,105 @@ async fn run_until_finished(engine: &RunningEngine, control_rx: &mut Receiver<Co
             .try_recv()
             .is_err_and(|e| e == TryRecvError::Empty)
     {
-        advance(engine, 100).await;
+        advance(engine, 10).await;
+    }
+}
+
+fn set_internal_parallelism(graph: &mut Graph<LogicalNode, LogicalEdge>, parallelism: usize) {
+    let watermark_nodes: HashSet<_> = graph
+        .node_indices()
+        .filter(
+            |index| match graph.node_weight(*index).unwrap().operator_name {
+                OperatorName::ExpressionWatermark => true,
+                _ => false,
+            },
+        )
+        .collect();
+    let indices: Vec<_> = graph
+        .node_indices()
+        .filter(
+            |index| match graph.node_weight(*index).unwrap().operator_name {
+                OperatorName::ExpressionWatermark
+                | OperatorName::ConnectorSource
+                | OperatorName::ConnectorSink => false,
+                _ => {
+                    for watermark_node in watermark_nodes.iter() {
+                        if has_path_connecting(&graph.clone(), *watermark_node, *index, None) {
+                            return true;
+                        }
+                    }
+                    false
+                }
+            },
+        )
+        .collect();
+    for node in indices {
+        graph.node_weight_mut(node).unwrap().parallelism = parallelism;
+    }
+    if parallelism > 1 {
+        let mut edges_to_make_shuffle = vec![];
+        for node in graph.externals(Direction::Outgoing) {
+            for edge in graph.edges_directed(node, Direction::Incoming) {
+                edges_to_make_shuffle.push(edge.id());
+            }
+        }
+        for node in graph.node_indices() {
+            if graph.node_weight(node).unwrap().operator_name == OperatorName::ExpressionWatermark {
+                for edge in graph.edges_directed(node, Direction::Outgoing) {
+                    edges_to_make_shuffle.push(edge.id());
+                }
+            }
+        }
+        for edge in edges_to_make_shuffle {
+            graph.edge_weight_mut(edge).unwrap().edge_type = LogicalEdgeType::Shuffle;
+        }
     }
 }
 
 async fn test_checkpoints_and_compaction(
     job_id: String,
-    running_engine: &RunningEngine,
+    _running_engine: &RunningEngine,
     checkpoint_interval: i32,
     mut control_rx: &mut Receiver<ControlResp>,
     tasks_per_operator: HashMap<String, usize>,
-    graph: Graph<LogicalNode, LogicalEdge>,
+    mut graph: Graph<LogicalNode, LogicalEdge>,
 ) {
+    set_internal_parallelism(&mut graph, 2);
+
+    run_and_checkpoint(job_id.clone(), &graph, checkpoint_interval).await;
+    set_internal_parallelism(&mut graph, 3);
+    finish_from_checkpoint(job_id, &graph, Some(3)).await;
+}
+
+async fn run_and_checkpoint(
+    job_id: String,
+    graph: &Graph<LogicalNode, LogicalEdge>,
+    checkpoint_interval: i32,
+) {
+    let program = Program::local_from_logical(job_id.clone(), graph);
+    let tasks_per_operator = program.tasks_per_operator();
+    let engine = Engine::for_local(program, job_id.clone());
+    let (running_engine, mut control_rx) = engine
+        .start(StreamConfig {
+            restore_epoch: None,
+        })
+        .await;
     info!("Smoke test checkpointing enabled");
     env::set_var("MIN_FILES_TO_COMPACT", "2");
 
     let ctx = &mut SmokeTestContext {
         job_id: job_id.clone(),
-        engine: running_engine,
+        engine: &running_engine,
         control_rx: &mut control_rx,
         tasks_per_operator: tasks_per_operator.clone(),
     };
 
     // trigger a couple checkpoints
-    advance(running_engine, checkpoint_interval).await;
+    advance(&running_engine, checkpoint_interval).await;
     checkpoint(ctx, 1).await;
-    advance(running_engine, checkpoint_interval).await;
+    advance(&running_engine, checkpoint_interval).await;
     checkpoint(ctx, 2).await;
-    advance(running_engine, checkpoint_interval).await;
+    advance(&running_engine, checkpoint_interval).await;
 
     // compact checkpoint 2
     // TODO: compaction
@@ -173,9 +248,8 @@ async fn test_checkpoints_and_compaction(
     // .await;
 
     // trigger checkpoint 3, which will include the compacted files
-    advance(running_engine, checkpoint_interval).await;
+    advance(&running_engine, checkpoint_interval).await;
     checkpoint(ctx, 3).await;
-
     // shut down the engine
     for source in running_engine.source_controls() {
         source
@@ -185,9 +259,14 @@ async fn test_checkpoints_and_compaction(
             .await
             .unwrap();
     }
-    run_until_finished(running_engine, &mut control_rx).await;
+    run_until_finished(&running_engine, &mut control_rx).await;
+}
 
-    // create a new engine, restore from the last checkpoint
+async fn finish_from_checkpoint(
+    job_id: String,
+    graph: &Graph<LogicalNode, LogicalEdge>,
+    restore_epoch: Option<u32>,
+) {
     let program = Program::local_from_logical(job_id.clone(), &graph);
     let engine = Engine::for_local(program, job_id.clone());
     let (running_engine, mut control_rx) = engine
@@ -213,7 +292,6 @@ async fn run_pipeline_and_assert_outputs(
     }
 
     let program = Program::local_from_logical(job_id.clone(), &graph);
-
     run_completely(
         Program::local_from_logical(job_id.clone(), &graph),
         job_id.clone(),
@@ -221,6 +299,7 @@ async fn run_pipeline_and_assert_outputs(
         golden_output_location.clone(),
     )
     .await;
+    let program = Program::local_from_logical(job_id.clone(), &graph);
     let tasks_per_operator = program.tasks_per_operator();
     let engine = Engine::for_local(program, job_id.clone());
     let (running_engine, mut control_rx) = engine
@@ -295,7 +374,10 @@ async fn check_output_files(output_location: String, golden_output_location: Str
         .map(|s| serde_json::from_str(s).unwrap())
         .collect();
     if output_lines.len() != golden_output_lines.len() {
-        panic!("output and golden output have different number of lines");
+        panic!(
+            "output {} and golden output {} have different number of lines",
+            output_location, golden_output_location
+        );
     }
 
     output_lines.sort_by_cached_key(roundtrip);
@@ -435,35 +517,13 @@ CREATE TABLE aggregates (
   type = 'sink'
 );
 INSERT INTO aggregates SELECT min(counter), max(counter), sum(counter), count(*), avg(counter)  FROM impulse_source"}
+*/
 
-correctness_run_codegen! {"select_star", 200,
-"CREATE TABLE cars (
-  timestamp TIMESTAMP,
-  driver_id BIGINT,
-  event_type TEXT,
-  location TEXT
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/cars.json',
-  format = 'json',
-  type = 'source'
-);
-
-CREATE TABLE cars_output (
-  timestamp TIMESTAMP,
-  driver_id BIGINT,
-  event_type TEXT,
-  location TEXT
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'json',
-  type = 'sink'
-);
-INSERT INTO cars_output SELECT * FROM cars"}
-
-correctness_run_codegen! {"hourly_by_event_type", 200,
-"CREATE TABLE cars(
+#[tokio::test]
+async fn hourly_by_event_type() -> Result<()> {
+    correctness_run_codegen(
+        "hourly_by_event_type",
+        "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
   event_type TEXT,
@@ -491,42 +551,59 @@ FROM (
 SELECT event_type, TUMBLE(INTERVAL '1' HOUR) as window, COUNT(*) as count
 FROM cars
 GROUP BY 1,2);
-"}
+",
+        200,
+    )
+    .await?;
+    Ok(())
+}
 
-correctness_run_codegen! {"month_loose_watermark", 200,
-"CREATE TABLE cars(
-  timestamp TIMESTAMP,
-  driver_id BIGINT,
-  event_type TEXT,
-  location TEXT,
-  watermark TIMESTAMP GENERATED ALWAYS AS (timestamp - INTERVAL '1 minute')
-) WITH (
-  connector = 'single_file',
-  path = '$input_dir/cars.json',
-  format = 'json',
-  type = 'source',
-  event_time_field = 'timestamp',
-  watermark_field = 'watermark'
-);
-CREATE TABLE group_by_aggregate (
-  month TIMESTAMP,
-  count BIGINT
-) WITH (
-  connector = 'single_file',
-  path = '$output_path',
-  format = 'json',
-  type = 'sink'
-);
-INSERT INTO group_by_aggregate
-SELECT window.start as month, count
-FROM (
-SELECT TUMBLE(INTERVAL '1' month) as window, COUNT(*) as count
-FROM cars
-GROUP BY 1);
-"}
+/*
+#[tokio::test]
+async fn month_loose_watermark() -> Result<()> {
+    correctness_run_codegen(
+        "month_loose_watermark",
+        "CREATE TABLE cars(
+          timestamp TIMESTAMP,
+          driver_id BIGINT,
+          event_type TEXT,
+          location TEXT,
+          watermark TIMESTAMP GENERATED ALWAYS AS (timestamp - INTERVAL '1 minute') STORED
+        ) WITH (
+          connector = 'single_file',
+          path = '$input_dir/cars.json',
+          format = 'json',
+          type = 'source',
+          event_time_field = 'timestamp',
+          watermark_field = 'watermark'
+        );
+        CREATE TABLE group_by_aggregate (
+          month TIMESTAMP,
+          count BIGINT
+        ) WITH (
+          connector = 'single_file',
+          path = '$output_path',
+          format = 'json',
+          type = 'sink'
+        );
+        INSERT INTO group_by_aggregate
+        SELECT window.start as month, count
+        FROM (
+        SELECT TUMBLE(INTERVAL '1' month) as window, COUNT(*) as count
+        FROM cars
+        GROUP BY 1);
+        ",
+        200,
+    )
+    .await?;
+    Ok(())
+}
 
-correctness_run_codegen! {"tight_watermark", 200,
-"CREATE TABLE cars(
+#[tokio::test]
+async fn tight_watermark() -> Result<()> {
+    correctness_run_codegen(
+        "tight_watermark",
+        "CREATE TABLE cars(
   timestamp TIMESTAMP,
   driver_id BIGINT,
   event_type TEXT,
@@ -554,7 +631,12 @@ FROM (
 SELECT TUMBLE(INTERVAL '1' second) as window, COUNT(*) as count
 FROM cars
 GROUP BY 1);
-"}
+",
+        20,
+    )
+    .await?;
+    Ok(())
+}
 
 correctness_run_codegen! {"suspicious_drivers", 200,
 "CREATE TABLE cars(

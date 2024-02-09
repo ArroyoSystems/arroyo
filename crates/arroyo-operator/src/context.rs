@@ -16,11 +16,12 @@ use arroyo_types::{
     Watermark, QUEUE_SIZE,
 };
 use datafusion::common::hash_utils;
+use rand::Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::warn;
+use tracing::{info, warn};
 
 pub type QueueItem = ArrowMessage;
 
@@ -205,15 +206,20 @@ fn repartition<'a>(
             .collect();
         result.into_iter()
     } else {
+        //println!("record: {:?}", record);
         let range_size = record.num_rows() / qs + 1;
+        let rotation = rand::thread_rng().gen_range(0..qs);
         let result: Vec<_> = (0..qs)
             .into_iter()
-            .map(|i| {
+            .filter_map(|i| {
                 let start = i * range_size;
                 let end = (i + 1) * range_size;
-                let server_batch = record.slice(start, end.min(record.num_rows()) - start);
-                let server_id = i;
-                (server_id, server_batch)
+                if start >= record.num_rows() {
+                    None
+                } else {
+                    let server_batch = record.slice(start, end.min(record.num_rows()) - start);
+                    Some(((i + rotation) % qs, server_batch))
+                }
             })
             .collect();
         result.into_iter()
