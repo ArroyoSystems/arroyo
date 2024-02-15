@@ -1,4 +1,4 @@
-use super::{GeneratorConfig, NexmarkGenerator};
+use crate::nexmark::operator::{GeneratorConfig, NexmarkConfig, NexmarkGenerator};
 use rand::{rngs::SmallRng, SeedableRng};
 use std::{borrow::BorrowMut, time::SystemTime};
 
@@ -24,7 +24,7 @@ fn test_auction_generation() {
 fn test_exit() {
     let mut random = SmallRng::seed_from_u64(1);
     let config = GeneratorConfig::new(
-        super::NexmarkConfig::new(10000.0, Some(100), 1),
+        NexmarkConfig::new(10000.0, Some(100), 1),
         SystemTime::now(),
         1,
         Some(100),
