@@ -5,6 +5,7 @@ use arroyo_connectors::{
 };
 use arroyo_operator::connector::Connector;
 use arroyo_types::NullableType;
+use syn::parse;
 
 use crate::{parse_and_get_arrow_program, parse_and_get_program, ArroyoSchemaProvider, SqlConfig};
 
@@ -203,6 +204,27 @@ SELECT bidder, COUNT( distinct auction) as distinct_auctions
 FROM bids B1
 GROUP BY bidder, HOP(INTERVAL '3 second', INTERVAL '10' minute)) WHERE distinct_auctions > 2";
     let _ = parse_and_get_program(sql, schema_provider, SqlConfig::default())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_source_rewriter_join() {
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(tracing::Level::INFO)
+        .try_init();
+    let schema_provider = get_test_schema_provider();
+    let sql = "CREATE TABLE impulse WITH(
+    connector = 'impulse',
+    event_rate = '10000'
+  ); 
+    
+  
+  SELECT evens.even_counter FROM 
+  (SELECT counter as even_counter FROM impulse where counter % 2 = 0) evens
+  JOIN impulse on evens.even_counter = impulse.counter;";
+    parse_and_get_arrow_program(sql.to_string(), schema_provider, SqlConfig::default())
         .await
         .unwrap();
 }

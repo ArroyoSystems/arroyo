@@ -1,6 +1,6 @@
 use arrow::datatypes::{DataType, TimeUnit};
 use arrow_schema::{Field, Schema, SchemaRef};
-use datafusion_common::{DFField, DFSchema, DFSchemaRef, Result as DFResult};
+use datafusion_common::{DFField, DFSchema, DFSchemaRef, OwnedTableReference, Result as DFResult};
 use std::{collections::HashMap, sync::Arc};
 
 pub fn window_arrow_struct() -> DataType {
@@ -21,12 +21,16 @@ pub fn window_arrow_struct() -> DataType {
     )
 }
 
-pub(crate) fn add_timestamp_field(schema: DFSchemaRef) -> DFResult<DFSchemaRef> {
+pub(crate) fn add_timestamp_field(
+    schema: DFSchemaRef,
+    qualifier: Option<OwnedTableReference>,
+) -> DFResult<DFSchemaRef> {
     if has_timestamp_field(schema.clone()) {
         return Ok(schema);
     }
 
-    let timestamp_field = DFField::new_unqualified(
+    let timestamp_field = DFField::new(
+        qualifier,
         "_timestamp",
         DataType::Timestamp(TimeUnit::Nanosecond, None),
         false,

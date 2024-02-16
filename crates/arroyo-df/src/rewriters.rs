@@ -18,6 +18,7 @@ use datafusion_expr::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::info;
 
 #[derive(Default)]
 pub struct TimestampRewriter {}
@@ -29,8 +30,8 @@ impl TreeNodeRewriter for TimestampRewriter {
         match node {
             LogicalPlan::Projection(ref mut projection) => {
                 if !has_timestamp_field(projection.schema.clone()) {
-                    projection.schema =
-                        add_timestamp_field(projection.schema.clone()).expect("in projection");
+                    projection.schema = add_timestamp_field(projection.schema.clone(), None)
+                        .expect("in projection");
                     projection.expr.push(Expr::Column(Column {
                         relation: None,
                         name: "_timestamp".to_string(),
@@ -39,7 +40,7 @@ impl TreeNodeRewriter for TimestampRewriter {
             }
             LogicalPlan::Unnest(ref mut unnest) => {
                 if !has_timestamp_field(unnest.schema.clone()) {
-                    unnest.schema = add_timestamp_field(unnest.schema.clone()).unwrap();
+                    unnest.schema = add_timestamp_field(unnest.schema.clone(), None).unwrap();
                 }
             }
             LogicalPlan::Join(ref mut join) => {
@@ -58,12 +59,14 @@ impl TreeNodeRewriter for TimestampRewriter {
                 join.schema = Arc::new(DFSchema::new_with_metadata(fields, HashMap::new())?);
             }
             LogicalPlan::Union(ref mut union) => {
-                union.schema = add_timestamp_field(union.schema.clone())?;
+                union.schema = add_timestamp_field(union.schema.clone(), None)?;
             }
             LogicalPlan::TableScan(ref mut table_scan) => {
                 if !has_timestamp_field(table_scan.projected_schema.clone()) {
-                    table_scan.projected_schema =
-                        add_timestamp_field(table_scan.projected_schema.clone())?;
+                    table_scan.projected_schema = add_timestamp_field(
+                        table_scan.projected_schema.clone(),
+                        Some(table_scan.table_name.to_owned()),
+                    )?;
                     table_scan.source = create_table_with_timestamp(
                         table_scan.table_name.to_string(),
                         table_scan.source.schema().fields().to_vec(),
@@ -72,22 +75,10 @@ impl TreeNodeRewriter for TimestampRewriter {
             }
             LogicalPlan::SubqueryAlias(ref mut subquery_alias) => {
                 if !has_timestamp_field(subquery_alias.schema.clone()) {
-                    #[allow(deprecated)]
-                    let timestamp_field = DFField::new(
-                        Some(subquery_alias.alias.clone()),
-                        "_timestamp",
-                        DataType::Timestamp(TimeUnit::Nanosecond, None),
-                        false,
-                    );
-                    subquery_alias.schema = Arc::new(
-                        subquery_alias
-                            .schema
-                            .join(&DFSchema::new_with_metadata(
-                                vec![timestamp_field],
-                                HashMap::new(),
-                            )?)
-                            .expect("subquery"),
-                    );
+                    subquery_alias.schema = add_timestamp_field(
+                        subquery_alias.schema.clone(),
+                        Some(subquery_alias.alias.to_owned()),
+                    )?;
                 }
             }
             _ => {}
@@ -185,7 +176,8 @@ impl SourceRewriter {
                     ))
                 })?;
 
-            let event_time_field = event_time_field.alias("_timestamp".to_string());
+            let event_time_field =
+                event_time_field.alias_qualified(Some(qualifier.clone()), "_timestamp".to_string());
             expressions.push(event_time_field);
         };
         Ok(expressions)
@@ -249,6 +241,7 @@ impl TreeNodeRewriter for SourceRewriter {
         };
         let watermark_node = WatermarkNode::new(
             self.projection(&table_scan, table)?,
+            table_scan.table_name.clone(),
             Some(Self::watermark_expression(table)?),
         )
         .map_err(|err| {
