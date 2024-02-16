@@ -723,6 +723,7 @@ dependencies = [
 name = "arroyo-bin"
 version = "0.10.0-dev"
 dependencies = [
+ "anyhow",
  "arroyo-api",
  "arroyo-compiler-service",
  "arroyo-connectors",
@@ -733,6 +734,7 @@ dependencies = [
  "clap 4.4.18",
  "deadpool-postgres",
  "postgres-types",
+ "refinery",
  "serde",
  "serde_json",
  "tokio",
@@ -1088,6 +1090,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-appender",
+ "tracing-log",
  "tracing-logfmt",
  "tracing-subscriber",
  "vergen",
@@ -6946,9 +6949,9 @@ dependencies = [
 
 [[package]]
 name = "refinery"
-version = "0.8.11"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "529664dbccc0a296947615c997a857912d72d1c44be1fafb7bae54ecfa7a8c24"
+checksum = "431fd1854421586de5e83614052cb0d2d82025647829db6d9499b27385e58a6b"
 dependencies = [
  "refinery-core",
  "refinery-macros",

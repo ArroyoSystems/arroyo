@@ -4,24 +4,6 @@ nameOverride: ""
 fullnameOverride: ""
 imagePullSecrets: []
 
-# service-specific configuration
-api:
-  replicas: 1
-  resources:
-    limits: {}
-    requests:
-      memory: 256Mi
-      cpu: 200m
-  image:
-    repository: ghcr.io/arroyosystems/arroyo-services
-    pullPolicy: IfNotPresent
-    tag: "tip"
-  service:
-    type: ClusterIP
-    httpPort: 80
-    adminPort: 8001
-
-
 controller:
   resources:
     limits: {}
@@ -29,27 +11,13 @@ controller:
       memory: 256Mi
       cpu: 500m
   image:
-    repository: ghcr.io/arroyosystems/arroyo-services
+    repository: ghcr.io/arroyosystems/arroyo
     pullPolicy: IfNotPresent
-    tag: "tip"
+    tag: "dev"
   service:
     grpcPort: 9190
-    adminPort: 9191
-
-compiler:
-  replicas: 1
-  resources:
-    limits: {}
-    requests:
-      memory: 2048Mi
-      cpu: 1000m
-  image:
-    repository: ghcr.io/arroyosystems/arroyo-compiler
-    pullPolicy: IfNotPresent
-    tag: "tip"
-  service:
-    grpcPort: 9000
-    adminPort: 9001
+    adminPort: 8001
+    httpPort: 80
 
 worker:
   resources:
@@ -59,9 +27,9 @@ worker:
       cpu: 400m
   slots: 4
   image:
-    repository: ghcr.io/arroyosystems/arroyo-worker
+    repository: ghcr.io/arroyosystems/arroyo
     pullPolicy: IfNotPresent
-    tag: "tip"
+    tag: "dev"
 
 postgresql:
   # set to true to deploy a postgres instance in-cluster
@@ -151,9 +119,7 @@ securityContext: {}
 
 
 
-apiResources: {}
 controllerResources: {}
-compilerResources: {}
 
 nodeSelector: {}
 
