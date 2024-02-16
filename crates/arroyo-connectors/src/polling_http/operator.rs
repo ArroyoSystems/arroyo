@@ -201,6 +201,12 @@ impl PollingHttpSourceFunc {
     }
 
     async fn run_int(&mut self, ctx: &mut ArrowContext) -> Result<SourceFinishType, UserError> {
+        ctx.initialize_deserializer(
+            self.format.clone(),
+            self.framing.clone(),
+            self.bad_data.clone(),
+        );
+
         // since there's no way to partition across an http source, only read on the first task
         let mut timer = tokio::time::interval(self.polling_interval);
         timer.set_missed_tick_behavior(MissedTickBehavior::Delay);

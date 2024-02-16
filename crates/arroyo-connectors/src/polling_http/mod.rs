@@ -1,4 +1,4 @@
-mod connector;
+mod operator;
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{construct_http_client, pull_opt, pull_option_to_i64, EmptyConfig};
 
-use crate::polling_http::connector::{PollingHttpSourceFunc, PollingHttpSourceState};
+use crate::polling_http::operator::{PollingHttpSourceFunc, PollingHttpSourceState};
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::OperatorNode;
 

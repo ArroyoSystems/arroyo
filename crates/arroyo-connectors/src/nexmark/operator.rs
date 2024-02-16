@@ -1,29 +1,25 @@
-use crate::engine::StreamNode;
-use crate::old::Context;
-use crate::SourceFinishType;
-use arroyo_macro::source_fn;
-use arroyo_rpc::grpc::{StopMode, TableDescriptor};
-use arroyo_rpc::{ControlMessage, OperatorConfig};
-use arroyo_types::nexmark::*;
-use arroyo_types::*;
+use crate::nexmark::{auction_fields, bid_fields, person_fields, NexmarkTable};
+use arrow::array::{
+    Int64Builder, RecordBatch, StringBuilder, StructBuilder, TimestampNanosecondBuilder,
+};
+use arroyo_operator::context::ArrowContext;
+use arroyo_operator::operator::SourceOperator;
+use arroyo_operator::SourceFinishType;
+use arroyo_rpc::grpc::{StopMode, TableConfig};
+use arroyo_rpc::ControlMessage;
+use arroyo_types::{should_flush, to_millis, to_nanos};
+use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use rand::{
     distributions::Alphanumeric, distributions::DistString, rngs::SmallRng, seq::SliceRandom, Rng,
     SeedableRng,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::{sync::mpsc::error::TryRecvError, time::sleep};
 use tracing::debug;
 use tracing::{info, log::warn};
-use typify::import_types;
-
-import_types!(schema = "../connector-schemas/nexmark/table.json");
-
-#[cfg(test)]
-mod test;
 
 const HOT_AUCTION_RATIO: u64 = 100;
 const HOT_BIDDER_RATIO: u64 = 100;
@@ -67,14 +63,113 @@ const HOT_URLS: [&str; 4] = [
     "https://www.nexmark.com/abo/micah/cidro/item.htm?query=1",
 ];
 
-//static PRODUCER_LAG: &str = "arroyo_worker_producer_lag";
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Person {
+    pub id: i64,
+    pub name: String,
+    pub email_address: String,
+    pub credit_card: String,
+    pub city: String,
+    pub state: String,
+    pub datetime: SystemTime,
+    pub extra: String,
+}
 
-#[derive(StreamNode, Clone)]
-pub struct NexmarkSourceFunc<K: Data, T: Data> {
+trait ArrowWriter {
+    fn write_into(self, b: &mut StructBuilder);
+}
+
+fn write_i64(builder: &mut StructBuilder, idx: usize, v: Option<i64>) {
+    builder
+        .field_builder::<Int64Builder>(idx)
+        .unwrap()
+        .append_option(v);
+}
+fn write_string(builder: &mut StructBuilder, idx: usize, v: Option<&str>) {
+    builder
+        .field_builder::<StringBuilder>(idx)
+        .unwrap()
+        .append_option(v);
+}
+fn write_timestamp(builder: &mut StructBuilder, idx: usize, v: Option<SystemTime>) {
+    builder
+        .field_builder::<TimestampNanosecondBuilder>(idx)
+        .unwrap()
+        .append_option(v.map(|t| to_nanos(t) as i64));
+}
+
+impl ArrowWriter for Option<&Person> {
+    fn write_into(self, b: &mut StructBuilder) {
+        write_i64(b, 0, self.map(|p| p.id));
+        write_string(b, 1, self.map(|p| p.name.as_str()));
+        write_string(b, 2, self.map(|p| p.email_address.as_str()));
+        write_string(b, 3, self.map(|p| p.credit_card.as_str()));
+        write_string(b, 4, self.map(|p| p.city.as_str()));
+        write_string(b, 5, self.map(|p| p.state.as_str()));
+        write_timestamp(b, 6, self.map(|p| p.datetime));
+        write_string(b, 7, self.map(|p| p.extra.as_str()));
+        b.append(self.is_some());
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Auction {
+    pub id: i64,
+    pub item_name: String,
+    pub description: String,
+    pub initial_bid: i64,
+    pub reserve: i64,
+    pub datetime: SystemTime,
+    pub expires: SystemTime,
+    pub seller: i64,
+    pub category: i64,
+    pub extra: String,
+}
+
+impl ArrowWriter for Option<&Auction> {
+    fn write_into(self, b: &mut StructBuilder) {
+        write_i64(b, 0, self.map(|p| p.id));
+        write_string(b, 1, self.map(|p| p.description.as_str()));
+        write_string(b, 2, self.map(|p| p.item_name.as_str()));
+        write_i64(b, 3, self.map(|p| p.initial_bid));
+        write_i64(b, 4, self.map(|p| p.reserve));
+        write_timestamp(b, 5, self.map(|p| p.datetime));
+        write_timestamp(b, 6, self.map(|p| p.expires));
+        write_i64(b, 7, self.map(|p| p.seller));
+        write_i64(b, 8, self.map(|p| p.category));
+        write_string(b, 9, self.map(|p| p.extra.as_str()));
+        b.append(self.is_some());
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Bid {
+    pub auction: i64,
+    pub bidder: i64,
+    pub price: i64,
+    pub channel: String,
+    pub url: String,
+    pub datetime: SystemTime,
+    pub extra: String,
+}
+
+impl ArrowWriter for Option<&Bid> {
+    fn write_into(self, b: &mut StructBuilder) {
+        write_i64(b, 0, self.map(|p| p.auction));
+        write_i64(b, 1, self.map(|p| p.bidder));
+        write_i64(b, 2, self.map(|p| p.price));
+        write_string(b, 3, self.map(|p| p.channel.as_str()));
+        write_string(b, 4, self.map(|p| p.url.as_str()));
+        write_timestamp(b, 5, self.map(|p| p.datetime));
+        write_string(b, 6, self.map(|p| p.extra.as_str()));
+        b.append(self.is_some());
+    }
+}
+
+pub struct NexmarkSourceFunc {
     first_event_rate: f64,
     num_events: Option<u64>,
     state: Option<NexmarkSourceState>,
-    _t: PhantomData<(K, T)>,
 }
 
 #[derive(Debug, Encode, Decode, Clone, PartialEq)]
@@ -83,48 +178,45 @@ struct NexmarkSourceState {
     event_count: usize,
 }
 
-#[source_fn(out_t = Event)]
-impl<K: Data, T: Data> NexmarkSourceFunc<K, T> {
-    fn name(&self) -> String {
-        "nexmark".to_string()
-    }
-
+impl NexmarkSourceFunc {
+    #[allow(unused)]
     pub fn new(first_event_rate: u64, num_events: Option<u64>) -> Self {
         Self {
             first_event_rate: first_event_rate as f64,
             num_events,
             state: None,
-            _t: PhantomData,
         }
     }
 
-    pub fn from_config(config: &str) -> Self {
-        let config: OperatorConfig =
-            serde_json::from_str(config).expect("Invalid config for NexmarkSource");
-        let table: NexmarkTable =
-            serde_json::from_value(config.table).expect("Invalid table config for NexmarkSource");
-
+    pub fn from_config(table: &NexmarkTable) -> Self {
         Self {
             first_event_rate: table.event_rate,
             num_events: table
                 .runtime
                 .map(|time| (table.event_rate * time).floor() as u64),
             state: None,
-            _t: PhantomData,
         }
     }
+}
 
-    fn tables(&self) -> Vec<TableDescriptor> {
-        vec![arroyo_state::global_table("s", "nexmark source state")]
+#[async_trait]
+impl SourceOperator for NexmarkSourceFunc {
+    fn name(&self) -> String {
+        "nexmark".to_string()
     }
 
-    async fn on_start(&mut self, ctx: &mut Context<(), Event>) {
+    fn tables(&self) -> HashMap<String, TableConfig> {
+        arroyo_state::global_table_config("s", "nexmark source state")
+    }
+
+    async fn on_start(&mut self, ctx: &mut ArrowContext) {
         // load state
         self.state = Some({
-            let mut ss = ctx
-                .state
-                .get_global_keyed_state::<usize, NexmarkSourceState>('s')
-                .await;
+            let ss = ctx
+                .table_manager
+                .get_global_keyed_state::<usize, NexmarkSourceState>("s")
+                .await
+                .expect("should be able to read state");
             let saved_states = ss.get_all().len();
             if saved_states != ctx.task_info.parallelism {
                 let config = GeneratorConfig::new(
@@ -149,32 +241,61 @@ impl<K: Data, T: Data> NexmarkSourceFunc<K, T> {
         });
     }
 
-    async fn run(&mut self, ctx: &mut Context<(), Event>) -> SourceFinishType {
+    async fn run(&mut self, ctx: &mut ArrowContext) -> SourceFinishType {
         let state = self.state.as_ref().unwrap().clone();
 
         let mut generator = NexmarkGenerator::from_config(&state.config, state.event_count as u64);
 
         let mut random = SmallRng::seed_from_u64(ctx.task_info.task_index as u64);
         let mut last_check = Instant::now();
+
+        let mut records = 0;
+        let mut flush_time = Instant::now();
+        let mut person_builder = StructBuilder::from_fields(person_fields(), 128);
+        let mut auction_builder = StructBuilder::from_fields(auction_fields(), 128);
+        let mut bid_builder = StructBuilder::from_fields(bid_fields(), 128);
+        let mut timestamp_builder = TimestampNanosecondBuilder::with_capacity(128);
+
         while generator.has_next() {
             let now = SystemTime::now();
             let next_event = generator.next_event(&mut random);
             if next_event.wallclock_timestamp > now {
                 sleep(next_event.wallclock_timestamp.duration_since(now).unwrap()).await;
             }
-            ctx.collect(
-                Record::<(), Event>::from_value(next_event.event_timetamp, next_event.event)
+
+            records += 1;
+            next_event.person.as_ref().write_into(&mut person_builder);
+            next_event.auction.as_ref().write_into(&mut auction_builder);
+            next_event.bid.as_ref().write_into(&mut bid_builder);
+            timestamp_builder.append_value(to_nanos(next_event.event_timetamp) as i64);
+
+            if should_flush(records, flush_time) {
+                ctx.collect(
+                    RecordBatch::try_new(
+                        ctx.out_schema.as_ref().unwrap().schema.clone(),
+                        vec![
+                            Arc::new(person_builder.finish()),
+                            Arc::new(auction_builder.finish()),
+                            Arc::new(bid_builder.finish()),
+                            Arc::new(timestamp_builder.finish()),
+                        ],
+                    )
                     .unwrap(),
-            )
-            .await;
+                )
+                .await;
+                records = 0;
+                flush_time = Instant::now();
+            }
+
             // TODO: rewrite this as a select with the sleep
             if last_check.elapsed() > Duration::from_millis(10) {
                 match ctx.control_rx.try_recv() {
                     Ok(ControlMessage::Checkpoint(c)) => {
                         // checkpoint our state
-                        ctx.state
-                            .get_global_keyed_state::<usize, NexmarkSourceState>('s')
+                        ctx.table_manager
+                            .get_global_keyed_state::<usize, NexmarkSourceState>("s")
                             .await
+                            .expect("should be able to get nexmark state")
                             .insert(
                                 ctx.task_info.task_index,
                                 NexmarkSourceState {
@@ -184,7 +305,7 @@ impl<K: Data, T: Data> NexmarkSourceFunc<K, T> {
                             )
                             .await;
                         debug!("starting checkpointing {}", ctx.task_info.task_index);
-                        if self.checkpoint(c, ctx).await {
+                        if self.start_checkpoint(c, ctx).await {
                             return SourceFinishType::Immediate;
                         }
                     }
@@ -543,7 +664,7 @@ impl GeneratorConfig {
     }
 
     fn next_person(
-        &self,
+        &mut self,
         next_event_id: u64,
         random: &mut SmallRng,
         timestamp: SystemTime,
@@ -576,6 +697,7 @@ impl GeneratorConfig {
             current_size,
             self.configuration.avg_person_byte_size as usize,
         );
+
         Person {
             id: id as i64,
             name,
@@ -670,13 +792,14 @@ impl ChannelCache {
 }
 
 pub struct NexmarkGenerator {
-    generator_config: GeneratorConfig,
+    pub(crate) generator_config: GeneratorConfig,
     channel_cache: ChannelCache,
     events_count_so_far: u64,
     wallclock_base_time: SystemTime,
 }
 
 impl NexmarkGenerator {
+    #[allow(unused)]
     pub fn new(first_event_rate: f64, num_events: Option<u64>) -> NexmarkGenerator {
         let time = SystemTime::now();
         NexmarkGenerator::from_config(
@@ -716,7 +839,7 @@ impl NexmarkGenerator {
         self.events_count_so_far < self.generator_config.max_events
     }
 
-    pub fn next_event(&mut self, random: &mut SmallRng) -> WatermarkedEvent {
+    pub fn next_event(&mut self, random: &mut SmallRng) -> TimedEvent {
         let event_timestamp = self.generator_config.timestamp_for_event(
             self.generator_config
                 .next_event_number(self.events_count_so_far),
@@ -739,9 +862,18 @@ impl NexmarkGenerator {
                 .generator_config
                 .next_adjusted_event_number(self.events_count_so_far);
         let rem = new_event_id % self.generator_config.total_proportion;
-        let event;
+
+        let mut event = TimedEvent {
+            person: None,
+            auction: None,
+            bid: None,
+            wallclock_timestamp,
+            event_timetamp: adjusted_event_timestamp,
+            watermark,
+        };
+
         if rem < self.generator_config.person_proportion {
-            event = Event::person(self.generator_config.next_person(
+            event.person = Some(self.generator_config.next_person(
                 new_event_id,
                 random,
                 adjusted_event_timestamp,
@@ -749,49 +881,32 @@ impl NexmarkGenerator {
         } else if rem
             < self.generator_config.person_proportion + self.generator_config.auction_proportion
         {
-            event = Event::auction(self.generator_config.next_auction(
+            event.auction = Some(self.generator_config.next_auction(
                 self.events_count_so_far,
                 new_event_id,
                 random,
                 adjusted_event_timestamp,
             ));
         } else {
-            event = Event::bid(self.generator_config.next_bid(
+            event.bid = Some(self.generator_config.next_bid(
                 new_event_id,
                 random,
                 adjusted_event_timestamp,
                 &mut self.channel_cache,
-            ))
+            ));
         }
         self.events_count_so_far += 1;
-        WatermarkedEvent::new(
-            event,
-            wallclock_timestamp,
-            adjusted_event_timestamp,
-            watermark,
-        )
+
+        event
     }
 }
 #[derive(Debug)]
-pub struct WatermarkedEvent {
-    pub event: Event,
-    pub wallclock_timestamp: SystemTime,
-    pub event_timetamp: SystemTime,
-    pub watermark: SystemTime,
-}
-
-impl WatermarkedEvent {
-    fn new(
-        event: Event,
-        wallclock_timestamp: SystemTime,
-        event_timetamp: SystemTime,
-        watermark: SystemTime,
-    ) -> WatermarkedEvent {
-        WatermarkedEvent {
-            event,
-            wallclock_timestamp,
-            event_timetamp,
-            watermark,
-        }
-    }
+pub struct TimedEvent {
+    person: Option<Person>,
+    auction: Option<Auction>,
+    bid: Option<Bid>,
+    wallclock_timestamp: SystemTime,
+    event_timetamp: SystemTime,
+    #[allow(unused)]
+    watermark: SystemTime,
 }
