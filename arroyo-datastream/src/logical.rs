@@ -266,7 +266,12 @@ impl TryFrom<ArrowProgram> for LogicalProgram {
             );
         }
 
-        let program_config = value.program_config.unwrap().into();
+        let program_config = value
+            .program_config
+            .unwrap_or_else(|| ArrowProgramConfig {
+                udf_dylibs: HashMap::new(),
+            })
+            .into();
 
         Ok(LogicalProgram {
             graph,
